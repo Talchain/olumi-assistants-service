@@ -1841,6 +1841,8 @@ export async function runTurnExecutor(
           // can never carry forward and reappear as a zombie.
           priorPendingActions: context.most_recent_pending_actions ?? [],
           ...commitMeta,
+          // Revision is bound to this turn's server snapshot, never a commit-time reread.
+          ...(context.persistedRevision !== undefined ? { expectedRevision: context.persistedRevision } : {}),
           // ⭐⭐ GATE 1 — deliberately AFTER `...commitMeta`, unlike the two
           // injections above it. Those are DEFAULTS a call site may override;
           // this is a GUARANTEE. All ~36 executor commit sites funnel through

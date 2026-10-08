@@ -110,9 +110,30 @@ export function goalChanceNeedsGraphLabels(result: unknown): boolean {
 
 /** Scoped withholds remove only their own options; PLoT #416/#422 always withhold the whole Run. */
 export function goalChanceOptionWithheldForAgent(result: unknown, optionId: string): boolean {
-  return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+  return goalChanceWithholdWarningsForOption(result, optionId).length > 0;
+}
+
+function goalChanceWithholdWarningsForOption(result: unknown, optionId: string): Rec[] {
+  return warningsOf(result).filter((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
     && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
       || !ids(w.option_ids) || w.option_ids.includes(optionId)));
+}
+
+export interface RecordedGoalChanceWithholdReason {
+  readonly code: string;
+  /** Stored producer wording only; null when the Run recorded no wording. */
+  readonly message: string | null;
+}
+
+/** The point predicate's SAME scoped warnings, exposed without reconstructing their cause. */
+export function goalChanceWithheldReasonsForAgent(result: unknown, optionId: string): RecordedGoalChanceWithholdReason[] {
+  const reasons = goalChanceWithholdWarningsForOption(result, optionId).map(w => ({
+    code: w.code as string, message: typeof w.message === 'string' ? w.message : null,
+  }));
+  // Some retained licences attest withholding without a cause. Preserve that
+  // distinction from "none"; this marker explicitly claims no recorded cause.
+  return reasons.length > 0 ? reasons : goalChanceLicenceForAgent(result)?.withheld_option_ids?.includes(optionId)
+    ? [{ code: 'reason_not_recorded', message: null }] : [];
 }
 
 /**
@@ -123,10 +144,7 @@ export function goalChanceOptionWithheldForAgent(result: unknown, optionId: stri
  */
 const RANGE_COMPATIBLE_WITHHOLDS: ReadonlySet<string> = new Set([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_SHARE_APPROXIMATION]);
 export function goalChanceRangeBarredForAgent(result: unknown, optionId: string): boolean {
-  return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
-    && !RANGE_COMPATIBLE_WITHHOLDS.has(w.code)
-    && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
-      || !ids(w.option_ids) || w.option_ids.includes(optionId)));
+  return goalChanceWithholdWarningsForOption(result, optionId).some(w => !RANGE_COMPATIBLE_WITHHOLDS.has(w.code as string));
 }
 
 /** The licensed point chances actually shown; ranges and scoped withholds keep their existing entitlement. */

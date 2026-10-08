@@ -342,6 +342,8 @@ export interface EnrichedTurnContext extends TurnContext {
    * scenarioBriefText behaviour).
    */
   readonly persistedGraph: unknown | null;
+  /** Same turn-start scenario read as persistedGraph; absent on legacy/degraded reads. */
+  readonly persistedRevision?: number;
   /**
    * F2 (Codex deep-review) — the discriminated result of the canonical
    * `scenarios.graph` read that produced {@link persistedGraph}. Consumed by
@@ -1226,6 +1228,7 @@ export async function buildTurnContext(
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
     persistedGraphRead: canonicalGraphRead,
+    ...(scenarioState.revision !== undefined ? { persistedRevision: scenarioState.revision } : {}),
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
     coaching_state: coachingState,
@@ -1867,6 +1870,7 @@ async function fetchPersistedScenarioState(
 ): Promise<{
   readonly graph: unknown | null;
   readonly briefText: string | null;
+  readonly revision?: number;
   readonly read: CanonicalGraphReadState;
 }> {
   // No store here means the store factory/configuration failed upstream. It is
@@ -1889,7 +1893,10 @@ async function fetchPersistedScenarioState(
       result.graph != null
         ? { status: 'ok_present', graph: result.graph }
         : { status: 'ok_absent' };
-    return { graph: result.graph, briefText: result.briefText, read };
+    return {
+      graph: result.graph, briefText: result.briefText, read,
+      ...(result.revision !== undefined ? { revision: result.revision } : {}),
+    };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
@@ -2653,7 +2660,7 @@ export async function loadPersistedScenarioState(
   scenarioId: string,
   requestId: string,
   sessionStore?: SessionStore,
-): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null; readonly revision?: number }> {
   try {
     const store = sessionStore ?? getSessionStore();
     return await store.loadGraphAndBriefText(scenarioId);
@@ -2855,7 +2862,7 @@ export async function loadPersistedGraphStrict(
 export async function loadPersistedScenarioStateStrict(
   scenarioId: string,
   sessionStore?: SessionStore,
-): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null; readonly revision?: number }> {
   const store = sessionStore ?? getSessionStore();
   return await store.loadGraphAndBriefText(scenarioId);
 }

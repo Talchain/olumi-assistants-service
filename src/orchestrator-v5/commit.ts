@@ -244,6 +244,8 @@ export interface CommitMetadata {
    * absent/unparseable. See graph-cas-conflict.ts.
    */
   readonly expectedGraphIdentityHash?: string | null;
+  /** Verbatim scenario revision captured with the turn-start server graph read. */
+  readonly expectedRevision?: number;
   /**
    * A3 graph CAS observe-mode: expected-base analysis-affecting hash (16-hex)
    * from the same server read as `expectedGraphIdentityHash`. Threaded
@@ -1654,6 +1656,7 @@ export async function commitDirectAnswer(
       // expected-base hashes (undefined when the path is not instrumented).
       expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
       expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
+      ...(metadata.expectedRevision !== undefined ? { expectedRevision: metadata.expectedRevision } : {}),
       ...(atomicVersionPlan.kind === 'plan'
         ? { modelVersion: atomicVersionPlan.write }
         : {}),
