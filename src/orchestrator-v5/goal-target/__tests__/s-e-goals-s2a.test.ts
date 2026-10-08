@@ -28,6 +28,7 @@ import { GOAL_CHANCE_RANGE, withShareByDateChanceGate } from '../goal-chance-ran
 import { goalChanceRangeDisplayForAgent, goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
 import { goalChanceSideOf } from '../goal-chance-sides.js';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 
 type Rec = Record<string, any>;
 const DEADLINE = '2027-04-07';
@@ -267,13 +268,12 @@ describe('recognition and persisted carrier survival', () => {
       sum + g.nodes.find((n: Rec) => n.id === e.from).observed_state.value * e.strength.mean, 0))
       .toBeCloseTo(0.766, 3);
   });
-  it('new regex: whitespace 5k then 20k, less than 8x growth', () => {
-    for (const n of [5000, 20000]) for (let i = 0; i < 10000; i++) SHARE_BY_DATE_UNIT.test(' '.repeat(n));
-    const elapsed = (n: number): number => { const input = ' '.repeat(n), start = performance.now();
-      for (let i = 0; i < 100000; i++) SHARE_BY_DATE_UNIT.test(input); return performance.now() - start; };
-    const small = elapsed(5000), large = elapsed(20000);
-    process.stdout.write(`SHARE_BY_DATE_UNIT whitespace ms ${JSON.stringify({ small, large, growth: large / small })}\n`);
-    expect(large / small).toBeLessThan(8);
+  it('new regex: whitespace 20k then 160k, less than 22x growth', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
+    const small = ' '.repeat(20000), large = ' '.repeat(160000);
+    const m = scalingRatio(() => { SHARE_BY_DATE_UNIT.lastIndex = 0; return SHARE_BY_DATE_UNIT.test(small); },
+      () => { SHARE_BY_DATE_UNIT.lastIndex = 0; return SHARE_BY_DATE_UNIT.test(large); });
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
 

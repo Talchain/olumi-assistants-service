@@ -41,6 +41,7 @@ import { commitDirectAnswer } from '../../commit.js';
 import { composeDirectAnswerResponse } from '../../compose.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -254,13 +255,11 @@ describe('S2b team-time door', () => {
     expect((await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: r.proposal_id } as never, { proposal_id: r.proposal_id }) as Rec).ok).toBe(true);
     expect(w.graph()).toEqual(dated());
   });
-  it('TEAM_TIME whitespace 5k -> 20k timing row <8x', () => {
-    const elapsed = (n: number) => { const input = ' '.repeat(n), start = performance.now();
-      for (let i = 0; i < 10000; i++) { TEAM_TIME.lastIndex = 0; TEAM_TIME.test(input); } return performance.now() - start; };
-    elapsed(5000); elapsed(20000);
-    const small = elapsed(5000), large = elapsed(20000);
-    process.stdout.write(`TEAM_TIME whitespace ms ${JSON.stringify({ small, large, growth: large / small })}\n`);
-    expect(large / small).toBeLessThan(8);
+  it('TEAM_TIME whitespace 20k -> 160k timing row <22x', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
+    const run = (input: string) => () => { TEAM_TIME.lastIndex = 0; return TEAM_TIME.test(input); };
+    const m = scalingRatio(run(' '.repeat(20000)), run(' '.repeat(160000)));
+    expect(m.ratio, m.detail).toBeLessThan(22);
     expect(readTeamTime(' '.repeat(20000))).toBeNull();
   });
 });
@@ -280,14 +279,12 @@ describe('R2 identity-bound regression rows', () => {
     expect(() => admitCandidateModel(c, {}, brief)).toThrow('event_goal_needs_redraft');
     expect(admitCandidateModel(control, {}, brief).nodes).toBeDefined();
   });
-  it('P1-1 admission regex near-miss 5k -> 20k timing rows <8x', () => {
+  it('P1-1 admission regex near-miss 20k -> 160k timing rows <22x', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     for (const regex of [EVENT_WORDS, EVENT_DEADLINE]) {
-      const elapsed = (n: number) => { const input = '9 '.repeat(n), start = performance.now();
-        for (let i = 0; i < 1000; i++) regex.test(input); return performance.now() - start; };
-      elapsed(5000); elapsed(20000);
-      const small = elapsed(5000), large = elapsed(20000);
-      process.stdout.write(`admission regex ${regex.source} ms ${JSON.stringify({ small, large, growth: large / small })}\n`);
-      expect(large / small).toBeLessThan(8);
+      const small = '9 '.repeat(20000), large = '9 '.repeat(160000);
+      const m = scalingRatio(() => { regex.lastIndex = 0; return regex.test(small); }, () => { regex.lastIndex = 0; return regex.test(large); });
+      expect(m.ratio, `${regex.source} ${m.detail}`).toBeLessThan(22);
     }
   });
   it.each(['£150k MRR by March', 'increase productivity', 'Launch by March; goal: £150k MRR by March', 'Reach 500 customers by March'])('P1-1 flagged quantity/non-event uses normal admission: %s', brief => {
@@ -579,17 +576,13 @@ describe('R3 carrier ownership and licence recovery controls', () => {
   });
 });
 
-it('R3 event-span tokenisation 5k -> 20k timing row <8x', () => {
+it('R3 event-span tokenisation 20k -> 160k timing row <22x', () => {
   const c = candidate(); c.goal.metric = 'the app'; c.goal.deliverable = 'the app';
-  const elapsed = (n: number) => {
-    const prefix = 'ship the app on time ', input = prefix + 'x'.repeat(n - prefix.length), start = performance.now();
-    for (let i = 0; i < 1000; i++) briefAttestsEventByDate(input, c.goal);
-    return performance.now() - start;
-  };
-  elapsed(5000); elapsed(20000);
-  const small = elapsed(5000), large = elapsed(20000);
-  process.stdout.write(`event-span tokenisation ms ${JSON.stringify({ small, large, growth: large / small })}\n`);
-  expect(large / small).toBeLessThan(8);
+  const prefix = 'ship the app on time ', input = (n: number) => prefix + 'x'.repeat(n - prefix.length);
+  const small = input(20000), large = input(160000);
+  // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
+  const m = scalingRatio(() => briefAttestsEventByDate(small, c.goal), () => briefAttestsEventByDate(large, c.goal));
+  expect(m.ratio, m.detail).toBeLessThan(22);
 });
 
 

@@ -4,6 +4,7 @@ import type { CandidateModel } from '../../agent-lane/admit-model.js';
 import { buildModelFromBrief } from '../../agent-lane/runtime/build-model.js';
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { deliverableIsALaunch, shareGoalChanceWords } from '../share-goal-chance-words.js';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 
 const DEADLINE = '2027-04-07';
 
@@ -146,17 +147,11 @@ describe('r6 L1-LAUNCHING-WORDS closed grammar', () => {
     expectChanceWords(registeredDeliverable!, isLaunch);
   });
 
-  it('L1-LAUNCHING-WORDS whitespace scaling: 5k to 20k remains below 8x', () => {
-    const inputs = [5000, 20000].map(n => `the${' '.repeat(n)}launch checklist`);
+  it('L1-LAUNCHING-WORDS whitespace scaling: 20k to 160k remains below 22x', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
+    const inputs = [20000, 160000].map(n => `the${' '.repeat(n)}launch checklist`);
     for (const input of inputs) expect(deliverableIsALaunch(input)).toBe(false);
-    for (const input of inputs) for (let i = 0; i < 1000; i++) shareGoalChanceWords(input, DEADLINE);
-    const elapsed = inputs.map(input => {
-      const start = performance.now();
-      for (let i = 0; i < 10000; i++) shareGoalChanceWords(input, DEADLINE);
-      return performance.now() - start;
-    });
-    const growth = elapsed[1]! / elapsed[0]!;
-    process.stdout.write(`r4 launch words whitespace scaling ${JSON.stringify({ small: elapsed[0], large: elapsed[1], growth })}\n`);
-    expect(growth).toBeLessThan(8);
+    const m = scalingRatio(() => shareGoalChanceWords(inputs[0]!, DEADLINE), () => shareGoalChanceWords(inputs[1]!, DEADLINE));
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
