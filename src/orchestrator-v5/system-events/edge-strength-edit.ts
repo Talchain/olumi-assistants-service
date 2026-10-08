@@ -273,8 +273,9 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
       else delete afterProvenance.magnitude;
       // The same transition drops a projected mean's marker (`sizedByApproval`): the link is sized now. Only here; a
       // confirm that keeps the magnitude may not touch it (P03 served blocker, 8 Oct: every post-Run link card refused).
+      // Carried opaquely, as `link-sizing.ts` does: only the leader licence reads this marker (R8-2).
       if ('mean_projected' in beforeProvenance && !('mean_projected' in afterProvenance)) {
-        afterProvenance.mean_projected = beforeProvenance.mean_projected;
+        Object.assign(afterProvenance, Object.fromEntries(Object.entries(beforeProvenance).filter(([key]) => key === 'mean_projected')));
       }
     }
     if ('reviewed_by_user' in beforeProvenance) {
