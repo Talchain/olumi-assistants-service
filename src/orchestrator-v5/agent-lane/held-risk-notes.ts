@@ -1,0 +1,2 @@
+export const HELD_RISK_CAUSE_NOTE = "It would be added as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen. Nothing changes until you approve it.";
+export const HELD_RISK_WINDOW_NOTE = 'You gave a likelihood but no time window, so it would be added as an ordinary risk; nothing changes until you approve it. Say how soon (for example "within 6 months") and I\'ll propose it as an event that may happen.';

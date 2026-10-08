@@ -74,6 +74,7 @@ import {
 } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readEdgeParams } from '../../cee/unified-pipeline/utils/edge-format.js';
 import { isLegalStructuralEdge } from '../../cee/utils/structural-edge-classifier.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 /**
  * The longest suffix this module can emit, for the caller's length budget.
@@ -288,6 +289,9 @@ export function deriveOlumiLinkStrengths(graph: unknown): OlumiAuthoredValue[] {
     if (fromKind === undefined || toKind === undefined) continue;
     if (isLegalStructuralEdge(fromKind, toKind)) continue;
     if (readEdgeParams(edge).mean === undefined) continue;
+    // Science 393023 LICENCE ruling 3: a strength the ONE predicate reads as the user's (e.g. magnitude user_stated on an
+    // Olumi-proposed link) is never counted as Olumi's. Placeholders stay counted: the analysis runs on their defaults.
+    if (linkSizing(edge) === 'user') continue;
     const author = classifyValueSource(asRecord(edge.provenance)?.source);
     const ours = OLUMI_AUTHORED[author] || (author === 'unattributed' && edge.defaulted === true);
     if (!ours) continue;

@@ -83,7 +83,10 @@ export function targetFixtureBytes(): string {
   return JSON.stringify(results);
 }
 export function verifyTargetBytes(): void {
-  assert.equal(targetFixtureBytes(), readFileSync(new URL('./fixtures/target-testability-before-r3.json', import.meta.url), 'utf8').trim(), 'existing target-testability fixture results stay byte-identical');
+  const expected = JSON.parse(readFileSync(new URL('./fixtures/target-testability-before-r3.json', import.meta.url), 'utf8'));
+  // Science 393023 LICENCE (a)/(b), 7 Oct: Paul and N1's goal_path_unsized → goal_path_placeholder; every other corpus field stays pinned.
+  for (const key of ['paul', 'n1']) for (const verdict of expected[key]) verdict.failures.find((f: Rec) => f.code === 'goal_path_unsized').code = 'goal_path_placeholder';
+  assert.equal(targetFixtureBytes(), JSON.stringify(expected), 'existing target-testability fixture results stay byte-identical apart from the named licence reclassification');
 }
 export function verifyNamedGraphs(): void {
   for (const name of ['read-after-run1-1791348363696.json', 'read-end-1791348570452.json', 'd1w-1-read.json']) {
