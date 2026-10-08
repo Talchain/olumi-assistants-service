@@ -1,0 +1,119 @@
+/**
+ * ⭐ OLUMI'S CONVENTION FRAME (Science §(s) + §(u), goals rulings 8 Oct 2026; DL GO). A frame is a scale convention: it
+ * rescales the normalised β, never the natural-unit size (−24 subscribers per point stays −24). The drafter's own
+ * `plausible_max` is Olumi's guess, and a guess of 0–100 points for a monthly churn of 3% pushed an ordinary effect past
+ * |β| = 1, so admission set a sound size aside (P44 mechanism arm: 0 of 9 drafts chance-ready). This is the disciplined
+ * version of that guess.
+ *
+ * Precedence (DL, approving P44's reading): a ceiling the USER wrote > this convention > the drafter's plausible_max.
+ *  · a BOUNDED RATE in [0, 100] (churn, conversion, share, utilisation…): ceiling = min(100, max(2 × level, level + 10));
+ *  · a NON-NEGATIVE LEVEL (a price, a count, money per period, headcount): ceiling = 2 × level;
+ *  · NEVER BINDS: when an option setting or a user constraint reaches ≥ 80% of the ceiling it is widened (a rate to
+ *    min(100, 2 × that value), a level to 2 × that value). Nothing is ever clipped.
+ *  · EXCLUDED, the drafter's range stays (fail closed: anything not positively recognised): a signed rate or level (a
+ *    change, growth, margin, profit, cash flow, balance…), a rate that can exceed 100% (NRR, an index, % of baseline), a
+ *    level of 0 or no level the model knows, any unit outside the percent / currency / count families. The GOAL is not a
+ *    factor and never reaches this function.
+ * Pure.
+ */
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { sayFigure } from './say-figure.js';
+
+/** Words that make a quantity signed or able to exceed its range: never framed by the convention (Science §(s)(2), §(u)). */
+const SIGNED_OR_UNBOUNDED = /\b(change|changes|growth|grow|increase|decrease|uplift|delta|difference|margin|inflation|index|indexed|baseline|yoy|year[- ]on[- ]year|net|nrr|ndr|profit|profits|cash ?flow|balance|surplus|deficit|gain|gains|loss|losses|temperature|return|roi)\b/i;
+
+/** A share or probability bounded in [0, 100] by what it is (Science §(s): churn, conversion, market share, utilisation…). */
+const BOUNDED_RATE = /\b(churn|conversion|share|utili[sz]ation|attendance|occupancy|uptake|adoption|win rate|retention|abandonment|cancellation|completion rate|response rate|open rate|click[- ]through|renewal rate|attrition|turnover rate|default rate)\b/i;
+
+/** Count units (Science §(u): counts and headcount). The unit's head noun, singular or plural, optionally "per <period>". */
+const COUNT_HEADS = new Set(['subscriber', 'customer', 'user', 'account', 'client', 'member', 'seat', 'licence', 'license',
+  'engineer', 'developer', 'person', 'people', 'staff', 'employee', 'headcount', 'hire', 'fte', 'deal', 'order', 'unit', 'sale',
+  'lead', 'trial', 'signup', 'sign-up', 'visitor', 'ticket', 'store', 'site', 'pod', 'pitch', 'contract', 'project', 'booking',
+  'patient', 'student', 'shipment', 'installation']);
+
+const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+function isCountUnit(unit: string): boolean {
+  const head = unit.trim().toLowerCase().split(/[\s/]+/)[0] ?? '';
+  return COUNT_HEADS.has(head) || (head.endsWith('s') && COUNT_HEADS.has(head.slice(0, -1)));
+}
+
+export type ConventionClass = 'bounded_rate' | 'non_negative_level';
+
+/** Which convention applies to this factor, or `undefined` (excluded: the drafter's range stays). */
+export function conventionClassOf(label: string, unit: string | null | undefined, level: number | null | undefined): ConventionClass | undefined {
+  if (typeof unit !== 'string' || unit.trim() === '' || !finite(level) || !(level > 0)) return undefined;
+  if (SIGNED_OR_UNBOUNDED.test(label) || SIGNED_OR_UNBOUNDED.test(unit)) return undefined;
+  const cls = classifyUnitScaleClass(unit);
+  if (cls === 'percent') return level <= 100 && BOUNDED_RATE.test(label) ? 'bounded_rate' : undefined;
+  if (cls !== 'unknown') return undefined; // percentage points, basis points, … : a change, never a level here
+  if (readCurrencyUnitWithQualifiers(unit).kind === 'currency' || isCountUnit(unit)) return 'non_negative_level';
+  return undefined;
+}
+
+export interface ConventionFrame {
+  readonly cls: ConventionClass;
+  readonly frame: number;
+  /** The setting that widened the ceiling (≥ 80% of it), when one did. */
+  readonly widened_by?: number;
+}
+
+/**
+ * The convention's ceiling for a factor at `level`, widened over `settings` (option settings and user constraints on
+ * it, in its own unit) so that none reaches 80% of it. `undefined` when the factor is excluded.
+ */
+export function conventionFrameFor(args: {
+  readonly label: string; readonly unit: string | null | undefined; readonly level: number | null | undefined;
+  readonly settings: readonly number[];
+}): ConventionFrame | undefined {
+  const cls = conventionClassOf(args.label, args.unit, args.level);
+  if (cls === undefined) return undefined;
+  const level = args.level as number;
+  let frame = cls === 'bounded_rate' ? Math.min(100, Math.max(2 * level, level + 10)) : 2 * level;
+  const top = Math.max(level, ...args.settings.filter(finite).map(Math.abs));
+  let widened_by: number | undefined;
+  if (top >= 0.8 * frame) {
+    widened_by = top;
+    frame = cls === 'bounded_rate' ? Math.min(100, 2 * top) : 2 * top;
+  }
+  if (cls === 'bounded_rate' && top > 100) return undefined; // not a [0, 100] share after all: excluded, never clipped
+  return { cls, frame: Number(frame.toPrecision(12)), ...(widened_by !== undefined ? { widened_by } : {}) };
+}
+
+/** Whether the brief WRITES this figure (a user's ceiling wins over the convention). Exact match on the stated amounts. */
+export function briefWritesFigure(brief: string | undefined, value: number): boolean {
+  if (typeof brief !== 'string' || !finite(value)) return false;
+  return findStatedAmounts(brief).some((a) => Math.abs(a.magnitude - value) < 1e-9);
+}
+
+/** "Olumi treats ‘Pro plan price’ as between £0 and £98 a month" (Science §(u)'s words), in the factor's own unit. */
+export function conventionFrameWords(label: string, unit: string, frame: number): string {
+  // A per-period unit reads as speech here ("£98 a month"), as Science's sentence says it.
+  const spoken = (s: string): string => s.replace(/\s*\/\s*(month|year|week|day|quarter)$/, ' a $1');
+  const hi = spoken(sayFigure(frame, unit));
+  const lo = spoken(sayFigure(0, unit));
+  // One unit phrase, said once: "£0 a month … £98 a month" → "£0 and £98 a month"; "0% … 13%" keeps both signs.
+  let k = 0;
+  while (k < lo.length && k < hi.length && lo[lo.length - 1 - k] === hi[hi.length - 1 - k]) k++;
+  const shared = lo.slice(lo.length - k);
+  const cut = shared.indexOf(' ');
+  const loWords = cut >= 0 ? lo.slice(0, lo.length - (shared.length - cut)) : lo;
+  return `Olumi treats ‘${label}’ as between ${loWords} and ${hi}`;
+}
+
+/**
+ * ⭐ SCIENCE §(u)(b): an OLUMI-drafted size takes its sign from the drawn direction (|amount| per |change|). A user's size,
+ * an undirected link, a missing or zero size is returned exactly as written, `resolved: false`.
+ */
+export function olumiSignedSize(
+  link: { readonly direction: string; readonly effect_amount?: number | null; readonly effect_per_source_change?: number | null },
+  userStated: boolean,
+): { amount: number | null | undefined; per: number | null | undefined; resolved: boolean } {
+  const amount = link.effect_amount; const per = link.effect_per_source_change;
+  const keep = { amount, per, resolved: false };
+  if (userStated || !finite(amount) || !finite(per) || amount === 0 || per === 0) return keep;
+  const sign = link.direction === 'positive' ? 1 : link.direction === 'negative' ? -1 : 0;
+  if (sign === 0 || Math.sign(amount / per) === sign) return keep;
+  return { amount: sign * Math.abs(amount), per: Math.abs(per), resolved: true };
+}

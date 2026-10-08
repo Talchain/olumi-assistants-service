@@ -57,6 +57,8 @@ import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, 
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { briefWritesFigure, conventionFrameFor, conventionFrameWords, olumiSignedSize } from './convention-frame.js';
+import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
@@ -3224,6 +3226,27 @@ function admitOnce(
     for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
   }
   /**
+   * ⭐ OLUMI'S CONVENTION FRAME (Science §(s) + §(u); `convention-frame.ts`). A ceiling the USER wrote wins; otherwise a
+   * bounded rate or a non-negative level the model knows today is framed by the convention instead of the drafter's own
+   * guess, widened over every option setting and user constraint on it, and said once (below, with `defaultedFrames`).
+   */
+  const conventionFrames: { label: string; unit: string; frame: number; drafted: number | null; widened_by?: number }[] = [];
+  for (const f of model.factors) {
+    if (!f.baseline_known || typeof f.baseline_value !== 'number') continue;
+    if (typeof f.plausible_max === 'number' && briefWritesFigure(brief, f.plausible_max)) continue;
+    const level = f.baseline_value;
+    const settings = [
+      ...model.options.flatMap((o) => (o.interventions ?? []).filter((iv) => iv.factor_label === f.label)
+        .map((iv) => ((iv as { value_kind?: unknown }).value_kind === 'additional' ? level + iv.value : iv.value))),
+      ...model.constraints.filter((c) => c.metric.trim().toLowerCase() === f.label.trim().toLowerCase()).map((c) => c.value),
+    ];
+    const c = conventionFrameFor({ label: f.label, unit: f.unit, level, settings });
+    if (c === undefined) continue;
+    capByLabel.set(f.label, c.frame);
+    conventionFrames.push({ label: f.label, unit: f.unit as string, frame: c.frame, drafted: f.plausible_max ?? null,
+      ...(c.widened_by !== undefined ? { widened_by: c.widened_by } : {}) });
+  }
+  /**
    * ⛔ A LEVEL ABOVE THE STATED RANGE WIDENS THE RANGE; IT IS NEVER KEPT RAW BESIDE NORMALISED
    * SIBLINGS. It used to be written as stated (`150`) while every other level on the factor was
    * divided by the range (`0.05`): two value spaces on one factor, which `run_analysis` refuses
@@ -3718,6 +3741,18 @@ function admitOnce(
     } as RepairEntry);
   }
 
+  for (const c of conventionFrames) {
+    loss.push({
+      field_path: `nodes[${ids.get(c.label) ?? c.label}].observed_state.cap`,
+      before: c.drafted,
+      after: c.frame,
+      reason: `${conventionFrameWords(c.label, c.unit, c.frame)}. That is Olumi's scale for reading sizes on it`
+        + (c.widened_by !== undefined ? `, widened to cover ${sayFigure(c.widened_by, c.unit)},` : ',')
+        + ' not a forecast or a limit; every figure for it is stored unchanged.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
   for (const w of widenedFrames) {
     loss.push({
       field_path: `nodes[${ids.get(w.label) ?? w.label}].observed_state.frame_widened`,
@@ -4134,10 +4169,28 @@ function admitOnce(
         others: quantityLabels.filter((q) => q !== source.label),
       })
       : null;
+    // ⭐ SCIENCE §(u)(b): for an OLUMI-drafted size the drawn direction is the one source of sign, and the size is
+    // |amount| per |change| (P44 arm: +3, +2.5 and +10,368 were written on links drawn as negative, and all were set aside
+    // as `sign_conflict`). Never a user's size: their sign wins and a conflict there is asked, exactly as before.
+    // ⚠ Science's guard "a basis that states the opposite direction is set aside, not resolved" has no carrier yet: the
+    // drafter link has no basis text (rowed as a tripwire in convention-frame-and-sign.test.ts).
+    const userClaimed = user_stated || signRefusedLinks.has(l) || l.provenance_source === 'user_specified'
+      || (l.effect_provenance ?? l.provenance) === 'explicit';
+    const signed = olumiSignedSize(l, userClaimed);
+    if (signed.resolved) {
+      loss.push({
+        field_path: `edges[${l.from}::${l.to}].effect_amount`,
+        before: { effect_amount: l.effect_amount ?? null, effect_per_source_change: l.effect_per_source_change ?? null },
+        after: { effect_amount: signed.amount, effect_per_source_change: signed.per },
+        reason: `Olumi's drafted size for this link was written with a sign against the link's own direction (${l.direction}); `
+          + 'the direction is the sign, so the size is read as the same amount in that direction.',
+        severity: 'info',
+      } as RepairEntry);
+    }
     const statement = {
       direction: l.direction,
-      effect_amount: l.effect_amount,
-      effect_per_source_change: l.effect_per_source_change,
+      effect_amount: signed.amount,
+      effect_per_source_change: signed.per,
       user_stated,
       ...(range !== null ? { stated_range: range } : {}),
     };
