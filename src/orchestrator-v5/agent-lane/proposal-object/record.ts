@@ -393,55 +393,78 @@ export interface ProposalIssuingRow {
   readonly pending_actions?: readonly unknown[];
 }
 
+/** PostgreSQL and ISO instants, padded to UTC microseconds. Date only shifts whole seconds; it never orders fractions. */
+function proposalRowTimestamp(value: string | undefined, shiftSeconds = 0): string | undefined {
+  const parts = value?.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/);
+  if (parts === undefined || parts === null) return undefined;
+  const localTime = `${parts[1]}T${parts[2]}`;
+  const localSeconds = Date.parse(`${localTime}Z`);
+  if (!Number.isFinite(localSeconds) || new Date(localSeconds).toISOString().slice(0, 19) !== localTime) return undefined;
+  const zone = parts[4]!.length === 3 ? `${parts[4]}:00` : parts[4]!;
+  const wholeSeconds = Date.parse(`${localTime}${zone}`);
+  if (!Number.isFinite(wholeSeconds)) return undefined;
+  return `${new Date(wholeSeconds + shiftSeconds * 1000).toISOString().slice(0, 19)}.${(parts[3] ?? '').padEnd(6, '0')}Z`;
+}
+
 /**
  * P53: use only the loaded window. The earliest public answer at/after emission (allowing 2 s app/DB clock skew)
- * is the ONE candidate for a revision. Verify its carrier inline or with one exact-row read, never scan onward.
- * A hold predating this window, an unverifiable candidate or a failed read remains unknown. Claim markers and
- * conversation the user did not see never issue cards. Neither graph nor stored conversation changes.
+ * is the ONE candidate for a revision. It must carry that revision and its chronological predecessor must not:
+ * at most two exact-row reads, never scan onward. Without a predecessor, only a complete raw window proves issuance.
+ * Tied timestamps, a hold predating this window and unverifiable rows stay unknown. Claim markers and conversation
+ * the user did not see never issue cards. Neither graph nor stored conversation changes.
  */
 export async function issuedTurnIdsForProposalRecords(
   records: readonly ProposalRecord[],
   rows: readonly ProposalIssuingRow[],
+  windowSize: number,
   readCommittedTurn?: (turnId: string) => Promise<{ readonly pending_actions?: readonly unknown[] } | null>,
 ): Promise<ReadonlyMap<string, string>> {
   const issued = new Map<string, string>();
   if (records.length === 0) return issued;
   const datedRows = rows.flatMap(row => {
-    const at = typeof row.created_at === 'string' ? Date.parse(row.created_at) : NaN;
-    return Number.isFinite(at) ? [at] : [];
+    const at = proposalRowTimestamp(row.created_at);
+    return at === undefined ? [] : [at];
   });
   if (datedRows.length === 0) return issued;
-  const windowStart = Math.min(...datedRows);
+  const windowStart = datedRows.sort()[0]!;
+  const earliestEmission = proposalRowTimestamp(windowStart, -2)!;
   const chronological = [...conversationAsSeen(rows)].reverse()
     .filter(row => !row.turn_id.endsWith(':claim')
       && (typeof row.user_message === 'string' || typeof row.assistant_message === 'string'))
-    .sort((a, b) => {
-      const at = typeof a.created_at === 'string' ? Date.parse(a.created_at) : NaN;
-      const bt = typeof b.created_at === 'string' ? Date.parse(b.created_at) : NaN;
-      if (Number.isFinite(at) && Number.isFinite(bt)) return at - bt || a.turn_id.localeCompare(b.turn_id);
-      // Keep undated legacy rows after the dated durable rows, preserving their supplied order.
-      if (Number.isFinite(at)) return -1;
-      if (Number.isFinite(bt)) return 1;
-      return 0;
-    });
-  for (const record of records) {
-    const emittedAt = Date.parse(record.emitted_at_iso);
-    if (!Number.isFinite(emittedAt) || emittedAt < windowStart - 2000) continue;
-    const row = chronological.find(candidate => typeof candidate.created_at === 'string'
-      && Date.parse(candidate.created_at) >= emittedAt - 2000);
-    if (row === undefined) continue;
+    .map(row => ({ row, at: proposalRowTimestamp(row.created_at) }));
+  // An undated public row makes its place in the carry run unverifiable.
+  if (chronological.some(row => row.at === undefined)) return issued;
+  chronological.sort((a, b) => {
+    const at = a.at!; const bt = b.at!;
+    return (at < bt ? -1 : at > bt ? 1 : 0) || a.row.turn_id.localeCompare(b.row.turn_id);
+  });
+  const timestampCounts = new Map<string, number>();
+  for (const { at } of chronological) {
+    if (at !== undefined) timestampCounts.set(at, (timestampCounts.get(at) ?? 0) + 1);
+  }
+  const carriesRevision = async (row: ProposalIssuingRow, revision: string): Promise<boolean | undefined> => {
     let pendingActions = row.pending_actions;
     if (pendingActions === undefined) {
       try { pendingActions = (await readCommittedTurn?.(row.turn_id))?.pending_actions; }
-      catch { continue; }
+      catch { return undefined; }
     }
-    for (const raw of pendingActions ?? []) {
-      const pending = parsePendingAction(raw);
-      if (pending !== null && pending.id === record.revision) {
-        issued.set(pending.id, row.turn_id);
-        break;
-      }
-    }
+    if (pendingActions === undefined) return undefined;
+    return pendingActions.some(raw => parsePendingAction(raw)?.id === revision);
+  };
+  for (const record of records) {
+    const emittedAt = proposalRowTimestamp(record.emitted_at_iso);
+    if (emittedAt === undefined || emittedAt < earliestEmission) continue;
+    const cutoff = proposalRowTimestamp(emittedAt, -2)!;
+    const index = chronological.findIndex(candidate => candidate.at !== undefined && candidate.at >= cutoff);
+    const candidate = chronological[index];
+    if (candidate === undefined || timestampCounts.get(candidate.at!) !== 1) continue;
+    const predecessor = chronological[index - 1];
+    if (predecessor !== undefined && timestampCounts.get(predecessor.at!) !== 1) continue;
+    if (await carriesRevision(candidate.row, record.revision) !== true) continue;
+    if (predecessor === undefined) {
+      if (!(rows.length < windowSize)) continue;
+    } else if (await carriesRevision(predecessor.row, record.revision) !== false) continue;
+    issued.set(record.revision, candidate.row.turn_id);
   }
   return issued;
 }

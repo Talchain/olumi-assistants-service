@@ -2042,7 +2042,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (records.length === 0) return new Map();
       try {
         const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
-        return await issuedTurnIdsForProposalRecords(records, rows, typeof store.readCommittedTurn === 'function'
+        return await issuedTurnIdsForProposalRecords(records, rows, CONVERSATION_ROWS_READ, typeof store.readCommittedTurn === 'function'
           ? id => store.readCommittedTurn!(scenarioId, id) : undefined);
       }
       catch (err) {

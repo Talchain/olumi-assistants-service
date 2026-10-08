@@ -768,8 +768,8 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
         [firstCard.proposal_id, firstTurn], [secondCard.proposal_id, secondTurn],
       ]);
       const committedReads = store.readCommittedTurn.mock.calls.slice(committedReadsBefore);
-      expect(committedReads.length).toBeLessThanOrEqual(2);
-      expect(committedReads.map(([, turnId]) => turnId)).toEqual([firstTurn, secondTurn]);
+      expect(committedReads.length, 'at most one candidate and one predecessor read per hold').toBeLessThanOrEqual(4);
+      expect(committedReads.map(([, turnId]) => turnId)).toEqual([firstTurn, secondTurn, firstTurn]);
     } finally { store.readRecent.mockImplementation(originalRecent); }
     // Live carry-forward agrees with reload and never moves an older hold to the newest reply.
     expect(shownOf(second, firstCard.proposal_id).issued_turn_id).toBe(firstTurn);
@@ -821,6 +821,95 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
       delete (store as typeof store & { countTurns?: typeof countTurns }).countTurns;
       store.readRecent.mockImplementation(originalRecent);
     }
+  }, 120_000);
+
+  it('P53-gmh-4c RED: issuer outside a full loaded window cannot bind to the oldest carry-forward row within +1 s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const first = await proposeRisk();
+    const issuer = latestRow()!;
+    const card = fieldsOf(first)!.proposals[0]!;
+    // All 200 retained answers still carry the revision. Their oldest row is only one second after emission:
+    // proximity is not proof of issuance when the preceding answer has fallen outside the loaded window.
+    for (let index = 0; index < 200; index += 1) {
+      const turnId = randomUUID();
+      const key = `${SCENARIO}:${turnId}`;
+      rows.set(key, { ...issuer, id: `near-carried-${index}`, turn_id: turnId,
+        created_at: new Date(Date.parse(issuer.created_at) + 1000 + index * 10).toISOString(),
+        user_message: `Continue the shared reasoning ${index}.`, assistant_message: 'That change is still waiting.',
+        pending_actions: structuredClone(issuer.pending_actions) });
+      order.push(key);
+    }
+    const ownRows = () => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === SCENARIO && !row.turn_id.endsWith(':claim'));
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => ownRows()
+      .filter(row => row.scenario_id === sid).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    const recentReadsBefore = store.readRecent.mock.calls.length;
+    const before = bytes();
+    try {
+      const restored = await reload();
+      expect(store.readRecent.mock.calls.slice(recentReadsBefore)).toContainEqual([SCENARIO, 200]);
+      expect(restored.conversation_turns).toHaveLength(50);
+      expect(restored.conversation_turns.map(row => row.turn_id)).not.toContain(issuer.turn_id);
+      expect(restored.proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: null }),
+      ]);
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore).length).toBeLessThanOrEqual(2);
+      expect(bytes()).toBe(before);
+    } finally { store.readRecent.mockImplementation(originalRecent); }
+  }, 120_000);
+
+  it('P53-gmh-4d CONTROL: complete history binds the issuer as the first conversation row', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const offered = await proposeRisk();
+    const issuer = latestRow()!;
+    const card = fieldsOf(offered)!.proposals[0]!;
+    expect(card.issued_turn_id).toBe(issuer.turn_id);
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === sid && !row.turn_id.endsWith(':claim')).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    try {
+      const restored = await reload();
+      expect(restored.conversation_turns.map(row => row.turn_id)).toEqual([issuer.turn_id]);
+      expect(restored.proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: issuer.turn_id }),
+      ]);
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore)).toEqual([[SCENARIO, issuer.turn_id]]);
+    } finally { store.readRecent.mockImplementation(originalRecent); }
+  }, 120_000);
+
+  it('P53-gmh-4e RED: a loaded chronological predecessor carrying the revision prevents a later row from issuing it', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const offered = await proposeRisk();
+    const predecessor = latestRow()!;
+    const card = fieldsOf(offered)!.proposals[0]!;
+    const emittedAt = Date.parse(predecessor.created_at);
+    // App/DB skew leaves the earlier carrier before the candidate threshold. The later answer cannot take
+    // ownership merely because it is the first answer inside that threshold: its predecessor already carries it.
+    predecessor.created_at = new Date(emittedAt - 3000).toISOString();
+    const turnId = randomUUID();
+    const key = `${SCENARIO}:${turnId}`;
+    rows.set(key, { ...predecessor, id: 'near-carried-predecessor', turn_id: turnId,
+      created_at: new Date(emittedAt + 1000).toISOString(),
+      user_message: 'Continue the reasoning.', assistant_message: 'That change is still waiting.',
+      pending_actions: structuredClone(predecessor.pending_actions) });
+    order.push(key);
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => [...order].reverse().map(rowKey => rows.get(rowKey)!)
+      .filter(row => row.scenario_id === sid && !row.turn_id.endsWith(':claim')).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    try {
+      const restored = await reload();
+      expect(restored.proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: null }),
+      ]);
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore)).toEqual([[SCENARIO, turnId], [SCENARIO, predecessor.turn_id]]);
+    } finally { store.readRecent.mockImplementation(originalRecent); }
   }, 120_000);
 
   it('P53-gmh-5 RED: assigning a different issuing reply leaves the displayed proposal digest unchanged', async () => {

@@ -434,9 +434,8 @@ describe('S-D slice 2 Agent proposals', () => {
       expect(fallback.statusCode, fallback.body).toBe(200);
       expect(fallback.json().proposal_fields.proposals).toEqual(expected.map(p => expect.objectContaining(p)));
       const newReads = store.readCommittedTurn.mock.calls.slice(committedReads);
-      expect(newReads.length).toBeLessThanOrEqual(2);
-      expect(newReads).toContainEqual([SCENARIO, firstTurn]);
-      expect(newReads).toContainEqual([SCENARIO, secondTurn]);
+      expect(newReads.length, 'at most one candidate and one predecessor read per hold').toBeLessThanOrEqual(4);
+      expect(newReads).toEqual([[SCENARIO, firstTurn], [SCENARIO, secondTurn], [SCENARIO, firstTurn]]);
     } finally { store.readRecent.mockImplementation(fullRowRead); await reload.close(); }
   }, 120_000);
   it('P53 prop unmatched issuing row RED: graph read labels a legacy hold with issued_turn_id null', async () => {
@@ -458,6 +457,64 @@ describe('S-D slice 2 Agent proposals', () => {
       ]);
       expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
     } finally { await reload.close(); }
+  }, 120_000);
+  it('P53 prop full-window RED: issuer outside a full loaded window cannot bind to the oldest carry-forward row within +1 s', async () => {
+    seed(); const offered = await assumptions(); const card = shown(offered);
+    const issuer = latestRow()!;
+    for (let index = 0; index < 200; index += 1) {
+      const turnId = randomUUID();
+      const key = `${SCENARIO}:${turnId}`;
+      rows.set(key, { ...issuer, id: `near-carried-${index}`, turn_id: turnId,
+        created_at: new Date(Date.parse(issuer.created_at) + 1000 + index * 10).toISOString(),
+        user_message: `Continue the shared reasoning ${index}.`, assistant_message: 'That estimate is still waiting.',
+        pending_actions: structuredClone(issuer.pending_actions) });
+      order.push(key);
+    }
+    const { default: scenarioGraphRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    const reload = Fastify({ logger: false }); await reload.register(scenarioGraphRoute); await reload.ready();
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === sid && !row.turn_id.endsWith(':claim')).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    const recentReadsBefore = store.readRecent.mock.calls.length;
+    const before = bytes();
+    try {
+      const read = await reload.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+      expect(read.statusCode, read.body).toBe(200);
+      expect(store.readRecent.mock.calls.slice(recentReadsBefore)).toContainEqual([SCENARIO, 200]);
+      expect(read.json().conversation_turns).toHaveLength(50);
+      expect(read.json().conversation_turns.map((row: { turn_id: string }) => row.turn_id)).not.toContain(issuer.turn_id);
+      expect(read.json().proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: null }),
+      ]);
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore).length).toBeLessThanOrEqual(2);
+      expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+    } finally { store.readRecent.mockImplementation(originalRecent); await reload.close(); }
+  }, 120_000);
+  it('P53 prop complete-history CONTROL: first conversation issuer remains bound on live reply, replay and reload', async () => {
+    seed(); const offered = await assumptions(); const card = shown(offered);
+    const issuer = latestRow()!;
+    expect(card.issued_turn_id).toBe(issuer.turn_id);
+    const replay = await turn({ turn_id: issuer.turn_id, message: issuer.user_message });
+    expect(shown(replay)).toMatchObject({ revision: card.revision, digest: card.digest, issued_turn_id: issuer.turn_id });
+    const { default: scenarioGraphRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    const reload = Fastify({ logger: false }); await reload.register(scenarioGraphRoute); await reload.ready();
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === sid && !row.turn_id.endsWith(':claim')).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    try {
+      const read = await reload.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+      expect(read.statusCode, read.body).toBe(200);
+      expect(read.json().conversation_turns.map((row: { turn_id: string }) => row.turn_id)).toEqual([issuer.turn_id]);
+      expect(read.json().proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: issuer.turn_id }),
+      ]);
+      // One existing approval-offer authority read and one issuing-row verification; no predecessor exists.
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore)).toEqual([[SCENARIO, issuer.turn_id], [SCENARIO, issuer.turn_id]]);
+    } finally { store.readRecent.mockImplementation(originalRecent); await reload.close(); }
   }, 120_000);
   it('P53 prop digest CONTROL: the same held record has the same digest under different issuing rows', async () => {
     seed(); const offered = await assumptions(); const p = shown(offered);

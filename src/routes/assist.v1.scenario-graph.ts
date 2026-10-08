@@ -760,7 +760,7 @@ export default async function route(app: FastifyInstance) {
       const heldProposalRecords = conversationRequested && graphPresent
         ? latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }) : [];
       const proposalRows = conversationRead?.proposalRows ?? [];
-      const issuedTurnIds = await issuedTurnIdsForProposalRecords(heldProposalRecords, proposalRows,
+      const issuedTurnIds = await issuedTurnIdsForProposalRecords(heldProposalRecords, proposalRows, CONVERSATION_ROWS_READ,
         typeof store.readCommittedTurn === 'function' ? turnId => store.readCommittedTurn!(scenarioId, turnId) : undefined);
       const proposalFields = conversationRequested && graphPresent
         ? proposalFieldsWire(heldProposalRecords, computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined, issuedTurnIds)
