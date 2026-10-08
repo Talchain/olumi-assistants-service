@@ -46,6 +46,9 @@ export interface DraftDiagnosis {
 }
 
 export const DRAFT_WIDENING_PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
+/** True for Olumi's draft-time widening requests (both passes open with the preamble); lets callers tell them from drafting. */
+export const isDraftWideningRequest = (req: { readonly instructions?: unknown }): boolean =>
+  typeof req.instructions === 'string' && req.instructions.startsWith(DRAFT_WIDENING_PREAMBLE);
 /** Options-pass only (DL, #87 6063002299): the shared directive asks why an option might do better; Science §(w)(2) never says better. */
 export const DRAFT_WIDENING_OPTIONS_PREAMBLE = 'Where the text asks why an option might do better, write instead how it would move the goal through a different mechanism; never use better, best, recommend, winner, or improve.';
 

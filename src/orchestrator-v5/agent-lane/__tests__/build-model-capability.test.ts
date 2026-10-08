@@ -17,7 +17,7 @@ import { ProposalStore } from '../proposal.js';
 import { budgetFor } from '../model-budgets.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
-import { DRAFT_WIDENING_PREAMBLE } from '../runtime/widen-draft.js';
+import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-1' };
@@ -182,7 +182,7 @@ describe('the construction budget is the measured one', () => {
     // the direction a wrong role would move it.
     const all: { max?: number; model?: string; effort?: string; widening: boolean }[] = [];
     const capture: CallStructuredModel = async (r) => {
-      all.push({ max: r.max_output_tokens, model: r.model, effort: r.reasoning_effort, widening: r.instructions.startsWith(DRAFT_WIDENING_PREAMBLE) });
+      all.push({ max: r.max_output_tokens, model: r.model, effort: r.reasoning_effort, widening: isDraftWideningRequest(r) });
       return { text: JSON.stringify(CANDIDATE) };
     };
     const { d } = dispatcher({ before: [], after: [{ id: 'a' }] });
