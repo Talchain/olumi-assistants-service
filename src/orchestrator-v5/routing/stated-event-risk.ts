@@ -9,7 +9,10 @@ const SPACE = String.raw`[ \t]{0,8}`;
 const GAP = String.raw`[ \t]{1,8}`;
 const NUMBER = String.raw`[+-]?\d{1,6}(?:\.\d{1,6})?`;
 const PERCENT = String.raw`(?:%|percent\b)`;
-const ONE_IN = String.raw`(?:1|one)${GAP}in${GAP}${NUMBER}`;
+// "1 in N" is a likelihood only with its cue: "a 1 in 5 chance" / "1 in 5 odds", or "probability (of) 1 in 5" closing
+// the clause. Without a cue, "version 1 in 5 days" or "1 in 2 trillion" are not occurrence statements (Codex r2).
+const ODDS = String.raw`(?:1|one)${GAP}in${GAP}\d{1,12}(?!\d|[.,]\d)`;
+const ONE_IN = String.raw`${ODDS}${GAP}(?:chance|odds)\b|(?:chance|odds|probability|likelihood)${GAP}(?:(?:of|is)${GAP})?(?:about${GAP})?${ODDS}(?=${SPACE}(?:[.,;:!?)]|$|(?:within|in|over|during|and)\b(?!${SPACE}\d)))`;
 const PROBABILITY = new RegExp(
   String.raw`(?<![\w.,+\-])(?:${ONE_IN}|between${GAP}${NUMBER}${SPACE}(?:${PERCENT}${SPACE})?and${GAP}${NUMBER}${SPACE}${PERCENT}|${NUMBER}${SPACE}(?:${PERCENT}${SPACE})?(?:[-–]|${GAP}to${GAP})${SPACE}${NUMBER}${SPACE}${PERCENT}|(?:about${GAP})?${NUMBER}${SPACE}${PERCENT})`, 'gi',
 );
@@ -17,33 +20,53 @@ const HORIZON = new RegExp(
   String.raw`\b(?:within|in|over|during)${GAP}(?:(?:the${GAP})?(?:next|coming|following)${GAP})?(\d{1,6}(?:\.\d{1,6})?|a|an|one)?${SPACE}(months?|years?|weeks?)\b`, 'gi',
 );
 
-/** Count syntax only: a likelihood without a stated time window remains an ordinary risk. */
+const LIKELIHOOD_CUE = /\b(?:chances?|likely|likelihood|probabl[ey]|probability|odds|maybe|perhaps|possibly)\b/i;
+
+/** A likelihood (one probability, a likelihood word, not an impact "by 20%") stated without a time window. */
 export function readStatedLikelihoodWithoutWindow(userText: string): boolean {
   if (typeof userText !== 'string') return false;
-  return [...userText.matchAll(PROBABILITY)].length === 1 && [...userText.matchAll(HORIZON)].length === 0;
+  const probabilities = [...userText.matchAll(PROBABILITY)];
+  if (probabilities.length !== 1 || [...userText.matchAll(HORIZON)].length !== 0 || !LIKELIHOOD_CUE.test(userText)) return false;
+  return !/\bby[ \t]{1,8}$/i.test(userText.slice(Math.max(0, probabilities[0]!.index! - 12), probabilities[0]!.index!));
 }
 
+type LabelTrie = { children: Map<string, LabelTrie>; word?: string };
 const WORD_RUN = /[\p{L}\p{N}_]+/gu;
 
 /**
  * Did the user's own words name this factor? Label and user text are split into the SAME word runs (letters, digits,
  * underscore). Every label word of 3+ characters must start a user word ("price" names "prices"); a label made only of
- * shorter words ("AI") needs each as a whole user word. One pass over the user text, then set lookups.
+ * shorter words ("AI") needs each as a whole user word. Each user word walks one trie of label words: linear in the text.
  */
 export function isFactorNamedByUser(label: string, userText: string): boolean {
   if (typeof label !== 'string' || typeof userText !== 'string') return false;
   const labelWords = [...new Set(label.toLowerCase().match(WORD_RUN) ?? [])];
   const long = labelWords.filter((w) => w.length >= 3);
-  const wanted = long.length > 0 ? long : labelWords;
-  if (wanted.length === 0) return false;
+  const missing = new Set(long.length > 0 ? long : labelWords);
+  if (missing.size === 0) return false;
   const exact = long.length === 0;
-  const lengths = new Set(wanted.map((w) => w.length));
-  const seen = new Set<string>();
-  for (const [word] of userText.toLowerCase().matchAll(WORD_RUN)) {
-    if (exact) { seen.add(word); continue; }
-    for (const n of lengths) if (word.length >= n) seen.add(word.slice(0, n));
+  const root: LabelTrie = { children: new Map() };
+  for (const word of missing) {
+    let node = root;
+    for (const ch of word) {
+      let child = node.children.get(ch);
+      if (child === undefined) { child = { children: new Map() }; node.children.set(ch, child); }
+      node = child;
+    }
+    node.word = word;
   }
-  return wanted.every((w) => seen.has(w));
+  for (const [word] of userText.toLowerCase().matchAll(WORD_RUN)) {
+    let node: LabelTrie | undefined = root;
+    let i = 0;
+    for (const ch of word) {
+      node = node.children.get(ch);
+      i += ch.length;
+      if (node === undefined) break;
+      if (node.word !== undefined && (!exact || i === word.length)) missing.delete(node.word);
+    }
+    if (missing.size === 0) return true;
+  }
+  return false;
 }
 
 export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1T; quote: string } | undefined {
@@ -57,16 +80,11 @@ export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1
   if (probability.index! < horizon.index! + horizon[0].length && horizon.index! < probability.index! + probability[0].length) return undefined;
   let pLow: number;
   let pHigh: number;
-  if (/^(?:1|one)[ \t]{1,8}in[ \t]{1,8}/i.test(probability[0])) {
-    // Invalid odds still count above, so another probability cannot silently win. Validate only a
-    // bounded token and suffix; the NUMBER cap must not turn a long/decimal denominator into odds.
-    const odds = /^(?:1|one)[ \t]{1,8}in[ \t]{1,8}(\d{1,4})$/i.exec(probability[0]);
-    const end = probability.index! + probability[0].length;
-    const suffix = userText.slice(end, end + 16);
+  if (!/%|percent\b/i.test(probability[0])) {
+    // Odds: the cue is in the match; refuse an amount ("£1 in 5") and any denominator outside 2..1000.
+    const odds = /(?:1|one)[ \t]{1,8}in[ \t]{1,8}(\d{1,12})/i.exec(probability[0]);
     const before = userText.slice(Math.max(0, probability.index! - 1), probability.index!);
-    // Refuse a denominator that continues ("1 in 2 million", "1 in 5–10", "1 in 5 to 10") or odds read off an amount ("£1 in 5").
-    if (odds === null || /^[\p{L}\p{N}_%]|^[.,]\p{N}|^[ \t]{0,8}(?:[-–]|(?:to|or|and|million|thousand|billion|hundred|k|m|mn|bn)\b)/iu.test(suffix)
-      || /\p{Sc}/u.test(before)) return undefined;
+    if (odds === null || /\p{Sc}/u.test(before)) return undefined;
     const denominator = Number(odds[1]);
     if (denominator < 2 || denominator > 1000) return undefined;
     pLow = pHigh = Math.round(10000 / denominator) / 10000;

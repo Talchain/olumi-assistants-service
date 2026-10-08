@@ -338,7 +338,7 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it('said-door-no-window: an ordinary risk asks for the missing time window', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const message = 'Competitive response could lower revenue, about 20%, add it.';
+    const message = 'Competitive response could lower revenue, maybe about 20%, add it.';
     const note = 'You gave a likelihood but no time window, so I\'ve added it as an ordinary risk. Say how soon (for example "within 6 months") and I\'ll add it as an event that may happen.';
     const { result, approve } = await offer(message);
     expect((result.risk as Record<string, unknown>).likelihood).toBeUndefined();
