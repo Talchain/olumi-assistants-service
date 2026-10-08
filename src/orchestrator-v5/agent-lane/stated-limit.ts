@@ -1,13 +1,13 @@
-/** S-E S4: read a ceiling on an existing money quantity, from THIS message only.
+/** S-E S4: read a budget or loss-threshold ceiling, from THIS message only.
  * Budget/spend/available-money wording names the model's total cost; it never
  * picks a salary, price, risk or goal merely because it also holds pounds.
  * Token sequences are scanned linearly; no new regular expressions.
  */
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { figureTheUserWroteFor, ownUnitsOf, sentenceNamesOtherQuantity } from './stated-by-user.js';
+import { factorTheUserNamed, figureTheUserWroteFor, ownUnitsOf, sameWord, sentenceNamesOtherQuantity } from './stated-by-user.js';
 import { factorUnitOf } from './unit-conflict.js';
-import { readUnitParts, statedTailParts } from './same-unit.js';
-import { periodAdverb } from '../../utils/unit-alphabet.js';
+import { isRelativeChangePercentUnit, readUnitParts, statedTailParts } from './same-unit.js';
+import { isPeriodConnector, periodAdverb, periodNoun, shareKind } from '../../utils/unit-alphabet.js';
 
 export interface NewLimitValue {
   node_id: string;
@@ -38,8 +38,45 @@ const budgetSubjects = ['our', 'we', 'i', 'my', 'us', 'the', 'a', 'an', 'total',
 /** A reserve the user takes back in the same breath ("keep back £20k — actually no"). */
 const reserveRejections = ['no', 'forget', 'ignore', 'scratch'];
 const notLimits = ['competitor', 'rival', 'their', 'his', 'her', 'its', 'unless', 'provided', 'when', 'last year', 'if', 'suppose', 'imagine', 'would', 'could', 'used to', 'previously', 'spent', 'not', 'never', 'isn t', 'was', 'had', 'don t', 'doesn t'];
-/** Display the currency magnitude and the period the writer carries unchanged. */
+/** Closed loss vocabulary: no synonyms inferred by the Agent. Hyphens are token separators. */
+export const LOSS_THRESHOLD_CONSEQUENCES = ['lose money', 'losing money', 'start to lose money', 'unprofitable', 'in the red', 'loss-making'] as const;
+const lossConsequences = LOSS_THRESHOLD_CONSEQUENCES.map(limitWords);
+const crossingCues = ['above', 'over', 'more than', 'past', 'tops', 'exceeds', 'goes above', 'anything over'].map(limitWords);
+// Only this grammar admits "if": a crossing into the stated loss region names its inclusive complement.
+const notLossLimits = notLimits.filter(p => p !== 'if');
+const consequenceGlue = ['and', 'we', 're', 'are', 'will', 'll', 'start', 'starts', 'to', 'do', 'it', 's', 'is', 'become', 'becomes', 'be', 'then'];
+const crossingSubjects = ['our', 'current', 'we', 'i', 'my', 'us', 'the', 'a', 'an', 'if', 'it', 'goes', 'anything', 'and', 'is', 're'];
+/** Bound blanks before the shared amount scan, with an index back to the user's untouched words. */
+function compactLimitText(text: string): { text: string; originalAt: number[] } {
+  const originalAt: number[] = [];
+  let compact = ''; let blank = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i]!;
+    if (c.trim() === '') {
+      if (c === '\n' && compact.at(-1) !== '\n') { compact += '\n'; originalAt.push(i); }
+      else if (!blank) { compact += ' '; originalAt.push(i); }
+      blank = true;
+    } else { compact += c; originalAt.push(i); blank = false; }
+  }
+  return { text: compact, originalAt };
+}
+/** The same crossing cues, without granting a limit: the existing change door must not fall back
+ * to a generic figure match when a percentage crossing fails the closed loss grammar. */
+export function hasPercentageCrossing(text: string): boolean {
+  text = compactLimitText(text).text;
+  return findStatedAmounts(text).some(a => {
+    if (a.kind === 'currency') return false;
+    if (a.kind !== 'percent') {
+      const tail = limitWords(text.slice(a.index + a.matchedText.length, a.index + a.matchedText.length + 32));
+      if (![1, 2, 3].some(k => shareKind(tail.slice(0, k).join(' ')) === 'percent')) return false;
+    }
+    const left = limitWords(text.slice(Math.max(0, a.index - 32), a.index));
+    return crossingCues.some(p => left.length >= p.length && p.every((w, j) => left[left.length - p.length + j] === w));
+  });
+}
+/** Display the magnitude and the period the writer carries unchanged. */
 export function limitFigure(value: number, unit: string): string {
+  if (readUnitParts(unit)?.kind === 'percent') return `${value.toLocaleString('en-GB', { maximumFractionDigits: 10 })}%`;
   const reading = readCurrencyUnitWithQualifiers(unit);
   const period = readUnitParts(unit)?.period;
   return `${reading.currencyDisplay ?? reading.currencyCode ?? unit}${(value * reading.multiplier).toLocaleString('en-GB', { maximumFractionDigits: 10 })}${period ? ` ${period === 'hour' ? 'an' : 'a'} ${period}` : ''}`;
@@ -79,26 +116,137 @@ export function hasLimitQuantity(raw: Record<string, unknown>, askedLabel: strin
   return nodes.some(n => ['factor', 'outcome'].includes(String(n.kind)) && typeof n.label === 'string'
     && (limitWords(n.label).join(' ') === limitWords(askedLabel).join(' ')
       || ['total cost', 'total costs', 'overall cost', 'overall costs'].includes(limitWords(n.label).join(' ')))
-    && readCurrencyUnitWithQualifiers(limitQuantityUnit(raw, n)).kind === 'currency');
+    && (readCurrencyUnitWithQualifiers(limitQuantityUnit(raw, n)).kind === 'currency'
+      || readUnitParts(limitQuantityUnit(raw, n))?.kind === 'percent'));
+}
+
+/** One bounded token grammar: cue immediately before X; a closed consequence within the same sentence.
+ * Sentences and amounts advance once, with at most 16 tokens between X and its consequence. Repeated
+ * near-miss cues/figures cannot trigger repeated scans of a long sentence. No regex is added here.
+ */
+function readLossThreshold(raw: Record<string, unknown>, text: string, value: number, askedLabel: string | undefined,
+  original: string, originalAt: readonly number[], amounts: ReturnType<typeof findStatedAmounts>): NewLimitValue | null {
+  if (value > 100) return null;
+  const nodes = Array.isArray(raw.nodes) ? raw.nodes as Record<string, unknown>[] : [];
+  const percentages = nodes.flatMap(node => {
+    if (!['factor', 'outcome'].includes(String(node.kind)) || typeof node.label !== 'string' || typeof node.id !== 'string') return [];
+    const unit = limitQuantityUnit(raw, node);
+    const parts = readUnitParts(unit);
+    if (typeof unit !== 'string' || parts?.kind !== 'percent') return [];
+    const level = (node.quantity_frame === undefined || node.quantity_frame === 'level')
+      && !(parts.qualifiers !== null && (isRelativeChangePercentUnit(unit, 1) || isRelativeChangePercentUnit(unit, -1)));
+    return [{ node, id: node.id, label: node.label, unit, parts, level }];
+  });
+  const eligible = percentages.filter(n => n.level);
+  // Naming a change quantity never licences substituting the model's one different level quantity.
+  const named = percentages.filter(n => factorTheUserNamed(n.label, text, {
+    options: nodes.filter(o => o.kind === 'option' && typeof o.label === 'string').map(o => String(o.label)),
+    others: nodes.filter(o => o !== n.node && typeof o.label === 'string').map(o => String(o.label)),
+  }));
+  const candidates = named.length === 0 ? eligible : named;
+  if (candidates.length !== 1) return null;
+  const n = candidates[0]!;
+  if (!n.level) return null;
+  if (askedLabel !== undefined && limitWords(askedLabel).join(' ') !== limitWords(n.label).join(' ')) return null;
+  const ownPeriods = [...new Set((n.parts.qualifiers ?? []).flatMap(w => periodAdverb(w) ?? periodNoun(w) ?? []))];
+  if (ownPeriods.length > 1) return null;
+  const quantityWords = limitWords(n.label);
+  const namesQuantity = (w: string): boolean => quantityWords.some(q => sameWord(q, w));
+  const matchesAt = (ws: readonly string[], at: number, phrase: readonly string[]): boolean => phrase.every((w, j) => ws[at + j] === w);
+  let amountAt = 0; let sentenceStart = 0;
+  const digit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
+  for (let end = 0; end <= text.length; end += 1) {
+    const c = text[end];
+    if (end < text.length && !(['.', ';', '!', '?', '\n'].includes(c!)
+      && !(c === '.' && digit(text[end - 1]) && digit(text[end + 1])))) continue;
+    const sentence = text.slice(sentenceStart, end);
+    const tokens: { word: string; start: number; end: number; clauseStart: number }[] = [];
+    let word = ''; let start = 0; let clauseStart = 0;
+    for (let i = sentenceStart; i <= end; i += 1) {
+      const letter = text[i]?.toLowerCase();
+      if (i < end && letter !== undefined && ((letter >= 'a' && letter <= 'z') || digit(letter))) {
+        if (word === '') start = i;
+        word += letter;
+      } else {
+        if (word !== '') { tokens.push({ word, start, end: i, clauseStart }); word = ''; }
+        if (text[i] === ',') clauseStart = tokens.length;
+      }
+    }
+    const ws = tokens.map(t => t.word);
+    const rejected = notLossLimits.some(p => has(ws, p)) || foreignPossessive(sentence);
+    let tokenAt = 0;
+    while (amountAt < amounts.length && amounts[amountAt]!.index < end) {
+      const a = amounts[amountAt++]!;
+      if (rejected || a.index < sentenceStart || a.kind === 'currency' || a.magnitude !== value) continue;
+      while (tokenAt < tokens.length && tokens[tokenAt]!.end <= a.index) tokenAt += 1;
+      const cue = crossingCues.find(p => tokenAt >= p.length && matchesAt(ws, tokenAt - p.length, p));
+      if (cue === undefined || text.slice(tokens[tokenAt - 1]!.end, a.index).trim() !== '') continue;
+      let after = tokenAt;
+      const amountEnd = a.index + a.matchedText.length;
+      while (after < tokens.length && tokens[after]!.start < amountEnd) after += 1;
+      if (a.kind !== 'percent') {
+        let unitWords = 0;
+        for (let k = Math.min(3, ws.length - after); k > 0; k -= 1) {
+          if (shareKind(ws.slice(after, after + k).join(' ')) === 'percent') { unitWords = k; break; }
+        }
+        if (unitWords === 0) continue;
+        after += unitWords;
+      }
+      if (ws[after] === 'point' || ws[after] === 'points') continue;
+      let statedPeriod = periodAdverb(ws[after] ?? '');
+      if (statedPeriod !== null) after += 1;
+      else if (isPeriodConnector(ws[after] ?? '') && periodNoun(ws[after + 1] ?? '') !== null) {
+        statedPeriod = periodNoun(ws[after + 1]!); after += 2;
+      }
+      if (statedPeriod !== null && statedPeriod !== ownPeriods[0]) continue;
+      const cueAt = tokenAt - cue.length;
+      const prefixStart = tokens[cueAt]!.clauseStart;
+      if (cueAt - prefixStart > 16) continue;
+      let consequence = false;
+      let beforeLoss: number | undefined;
+      // After X: only the quantity's own words and first-party/consequence glue may bridge to the loss.
+      for (let at = after; at < Math.min(ws.length, after + 16); at += 1) {
+        if (lossConsequences.some(p => matchesAt(ws, at, p))) { consequence = true; break; }
+        if (!consequenceGlue.includes(ws[at]!) && !namesQuantity(ws[at]!)) break;
+      }
+      // Before X: "we lose money once churn tops X"; unrelated losses elsewhere in the sentence do not bind X.
+      if (!consequence) for (let at = Math.max(0, cueAt - 16); at < cueAt; at += 1) {
+        const loss = lossConsequences.find(p => matchesAt(ws, at, p));
+        if (loss === undefined || ws[at + loss.length] !== 'once') continue;
+        if (ws.slice(at + loss.length + 1, cueAt).every(w => namesQuantity(w) || ['it', 'goes'].includes(w))) {
+          consequence = true; beforeLoss = at; break;
+        }
+      }
+      if (!consequence) continue;
+      // A named third party or another quantity before the cue cannot become this model's quantity.
+      // Read only this bounded comma clause (or the subject of the loss-before form), not earlier context.
+      const prefix = ws.slice(prefixStart, beforeLoss ?? cueAt);
+      const leftPeriods = [...new Set(prefix.flatMap(w => namesQuantity(w) ? [] : periodAdverb(w) ?? periodNoun(w) ?? []))];
+      if (leftPeriods.length > 1 || (leftPeriods.length === 1 && leftPeriods[0] !== ownPeriods[0])) continue;
+      if (!prefix.every(w => crossingSubjects.includes(w) || namesQuantity(w) || periodAdverb(w) !== null
+        || periodNoun(w) !== null || isPeriodConnector(w) || [...w].every(digit))) continue;
+      const boundStart = originalAt[a.index]!;
+      const boundEnd = originalAt[amountEnd - 1]! + 1;
+      if (boundEnd - boundStart > 200) return null;
+      const quoteStart = Math.max(0, boundStart - Math.floor((200 - (boundEnd - boundStart)) / 2));
+      return { node_id: n.id, operator: '<=', raw_value: value, unit: n.unit, value_frame: 'level',
+        source_quote: original.slice(quoteStart, quoteStart + 200) };
+    }
+    sentenceStart = end + 1;
+  }
+  return null;
 }
 export function readNewLimit(raw: Record<string, unknown>, text: string, value: number, askedLabel?: string): NewLimitValue | null {
   const original = text;
-  const originalAt: number[] = [];
   // Bound whitespace before invoking the shared scanners, retaining the original quote.
   // Those scanners allow leading whitespace and can revisit a long blank run.
-  let compact = ''; let blank = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i]!;
-    if (c.trim() === '') {
-      // A newline remains a sentence boundary even after spaces in the same blank run.
-      if (c === '\n' && compact.at(-1) !== '\n') { compact += '\n'; originalAt.push(i); }
-      else if (!blank) { compact += ' '; originalAt.push(i); }
-      blank = true;
-    } else { compact += c; originalAt.push(i); blank = false; }
-  }
-  text = compact;
+  const compact = compactLimitText(text);
+  const originalAt = compact.originalAt;
+  text = compact.text;
   if (!Number.isFinite(value) || value < 0 || text.includes('?')) return null;
   const amounts = findStatedAmounts(text);
+  const lossThreshold = readLossThreshold(raw, text, value, askedLabel, original, originalAt, amounts);
+  if (lossThreshold !== null) return lossThreshold;
   const nodes = Array.isArray(raw.nodes) ? raw.nodes as Record<string, unknown>[] : [];
   // Rivals include EVERY money quantity, even kinds that cannot receive this limit.
   const money = nodes.flatMap(n => {

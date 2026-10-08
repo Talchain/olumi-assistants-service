@@ -1,7 +1,8 @@
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
-import { readNewLimit, limitFigure, hasLimitQuantity, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
+import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
+import { readUnitParts } from '../same-unit.js';
 /**
  * Agent lane — the capabilities, each delegating to an existing Olumi path.
  *
@@ -6011,7 +6012,7 @@ export function createAgentCapabilities(
         const op = ops[0]!;
         const v = op.value as { operator: '<=' | '>='; raw_value: number; unit: string | null; constraint_id: string; before: number;
           /** A2 follow-up: the comparator the user stated when proposing it, if they stated one (`proposeLimitChange`). */
-          stated_operator?: '<' | '<=' | '>' | '>=' };
+          stated_operator?: '<' | '<=' | '>' | '>='; source_quote?: string };
         const pid = decision.proposal.proposal_id;
         if (opts.commitLimitEdit === undefined) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
@@ -6022,6 +6023,7 @@ export function createAgentCapabilities(
           scenario_id: ctx.scenario_id, turn_id: operationId, base_graph_hash: decision.proposal.base_graph_identity_hash,
           node_id: op.path, operator: v.operator, raw_value: v.raw_value,
           ...(v.stated_operator !== undefined ? { stated_operator: v.stated_operator } : {}),
+          ...(v.source_quote !== undefined ? { source_quote: v.source_quote } : {}),
         });
         const label = String(before.nodes.find((x) => x.id === op.path)?.label ?? 'that limit');
         const figure = (x: number): string => (v.unit !== null ? targetFigure(x, v.unit) : String(x));
@@ -6044,7 +6046,9 @@ export function createAgentCapabilities(
         const heldRows = (Array.isArray(after?.raw.goal_constraints) ? after!.raw.goal_constraints as Record<string, unknown>[] : [])
           .filter((c) => c !== null && typeof c === 'object' && c['node_id'] === op.path && c['operator'] === v.operator);
         const landed = heldRows.length === 1 && heldRows[0]!['constraint_id'] === v.constraint_id && heldRows[0]!['value'] === v.raw_value
-          && (heldRows[0]!['unit'] ?? null) === v.unit;
+          && (heldRows[0]!['unit'] ?? null) === v.unit
+          && (v.source_quote === undefined || heldRows[0]!['source_quote'] === v.source_quote)
+          && (v.stated_operator === undefined || statedOperatorOf(heldRows[0]!) === v.stated_operator);
         if (!landed) {
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
             detail: 'The limit was written, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
@@ -8645,7 +8649,7 @@ export function createAgentCapabilities(
       if (opts.commitLimitAdd === undefined) return { ok: false, mutated: false, refusal: 'unavailable',
         detail: 'A limit cannot be recorded here yet. Nothing was prepared.' };
       const label = String(g.nodes.find(n => n.id === value.node_id)!.label).toLowerCase();
-      const card = `Keep ${label} within ${limitFigure(value.raw_value, value.unit)}?`;
+      const card = `Keep ${label} ${readUnitParts(value.unit)?.kind === 'percent' ? LIMIT_OPERATOR_WORDS[value.operator] : 'within'} ${limitFigure(value.raw_value, value.unit)}?`;
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash, operations: [{ op: 'add_limit', path: value.node_id, value }],
         provenance: { authored_by: 'user_stated', basis: args.rationale }, validation: { admitted: true, loss_count: 0, refusals: [] },
@@ -8672,13 +8676,20 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'unreadable_limit',
           detail: 'A limit change needs the limit as the model lists it, its operator, and the new figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      // S4's crossing cue names the BAD region. Re-derive its complement here too, so the existing
+      // change door keeps one row but never keeps an old strict stamp or treats "above" as a floor.
+      const bound = readNewLimit(g.raw, ctx.user_turn_text ?? '', value, asked);
+      const lossBound = bound !== null && readUnitParts(bound.unit)?.kind === 'percent' ? bound : null;
       // ⭐ A2 follow-up (DL verdict on #2180): the comparator the user STATED in this message, typed, when they stated one.
       // It must be in the limit's own direction (the held `operator` names the row); absent, the limit keeps its own.
       // ⛔ ONLY WHEN THE USER'S OWN WORDS SAY ONE (served 593362a, journey C run 3): for "we have £30,000 to spend" the
       // model sent ">=" against the at-most budget, and the change was refused twice — two turns for a figure given plainly.
       // With no comparator in THIS turn's typed words (`comparatorTheUserWrote`, the goal-target writer's own reader), the
       // model's is not the user's: the limit keeps its own. One the user wrote against the limit's direction still refuses.
-      const statedArg: unknown = comparatorTheUserWrote(ctx.user_turn_text) === null ? undefined : args?.stated_operator;
+      const statedArg: unknown = lossBound !== null ? lossBound.operator
+        : comparatorTheUserWrote(ctx.user_turn_text) === null ? undefined : args?.stated_operator;
       const stated = statedArg === '<' || statedArg === '<=' || statedArg === '>' || statedArg === '>=' ? statedArg : undefined;
       if (statedArg !== undefined && statedArg !== null
         && (stated === undefined || (stated === '<' || stated === '<=' ? '<=' : '>=') !== operator)) {
@@ -8686,8 +8697,6 @@ export function createAgentCapabilities(
           detail: `The comparator given is not one this ${operator === '<=' ? 'upper' : 'lower'} limit can take, so nothing was prepared. `
             + 'Ask the user whether the limit is at most / less than (an upper limit) or at least / more than (a lower one).' };
       }
-      const g = await readGraph(ctx.scenario_id);
-      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const rows = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
         .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object' && c['operator'] === operator);
       const res = resolveNamed(g, asked, (n) => n.kind !== 'option' && n.kind !== 'decision');
@@ -8732,6 +8741,15 @@ export function createAgentCapabilities(
             + 'Tell the user plainly that it can be changed on the canvas, and never offer to change it here.' };
       }
       const figureOf = (x: number): string => (unit !== null ? targetFigure(x, unit) : String(x));
+      if (operator === '<=' && readUnitParts(unit)?.kind === 'percent' && lossBound === null
+        && hasPercentageCrossing(ctx.user_turn_text ?? '')) {
+        return { ok: false, mutated: false, refusal: 'limit_not_bound',
+          detail: 'No inclusive ceiling was read from that percentage crossing. Nothing was prepared; if the loss threshold refers to more than one quantity, ask which one.' };
+      }
+      if (lossBound !== null && JSON.stringify(readUnitParts(lossBound.unit)) !== JSON.stringify(readUnitParts(unit))) {
+        return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
+          detail: 'The loss threshold and the held limit are in different units. Nothing was prepared; ask for the limit in its own units.' };
+      }
       // ⛔ A figure in another kind of unit is never this limit's (the lane's one family check).
       if (typeof args?.unit === 'string' && args.unit.trim() !== '' && unitsConflict(args.unit.trim(), unit ?? undefined) !== null) {
         return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
@@ -8739,7 +8757,8 @@ export function createAgentCapabilities(
       }
       // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
       // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (!figureTheUserWrote(value, unit, ctx.user_text) || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label))) {
+      if (lossBound?.node_id !== node.id && (!figureTheUserWrote(value, unit, ctx.user_text)
+        || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label)))) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };
@@ -8760,7 +8779,8 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_limit', path: node.id, value: { operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before,
-          ...(stated !== undefined ? { stated_operator: stated } : {}) } }],
+          ...(stated !== undefined ? { stated_operator: stated } : {}),
+          ...(lossBound !== null ? { source_quote: lossBound.source_quote } : {}) } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Change the limit on "${node.label}" from ${now} to ${becomes}`,

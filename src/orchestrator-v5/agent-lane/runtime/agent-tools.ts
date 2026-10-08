@@ -15,6 +15,7 @@ import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import type { ProposalEditsRequest } from '../proposal-object/amend.js';
 import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
+import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
 
 /**
  * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
@@ -588,8 +589,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_new_limit',
-    description: 'Prepare ONE budget ceiling the user stated in THIS message, on an existing money quantity. '
+    description: 'Prepare ONE budget ceiling on an existing money quantity, or ONE percentage-level loss threshold, stated in THIS message. '
       + 'Call in the same turn as “we only have £200,000”, “our budget is £200k” or “we cannot spend more than £200,000”. '
+      + 'Also call for “if it goes above 6%, we start to lose money”: above/over/more than/past/tops/exceeds with '
+      + `${LOSS_THRESHOLD_CONSEQUENCES.join('/')} names the bad region, so propose at most 6%, inclusively. `
+      + 'Use the percentage quantity named anywhere in THIS message, else the model’s only percentage-level quantity; if ambiguous, ask which. '
+      + 'Questions, third-party or past losses, percentage changes, and positive consequences never state this ceiling. '
       + 'Use the quantity’s exact label and the user’s figure in its own units. No level or option cost is written. '
       + 'An existing limit routes to propose_limit_change. No matching quantity means no card: say the returned line, with no invented chip. '
       + 'Show the returned card exactly; a held-back reserve is offered as an alternative, never silently deducted. '

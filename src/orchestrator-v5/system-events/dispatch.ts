@@ -3729,6 +3729,8 @@ export type CommitLimitEditInput = {
   readonly raw_value: number;
   /** A2 follow-up: the comparator the user STATED on this edit (typed), when they stated one (`LimitEditRequest`). */
   readonly stated_operator?: LimitEditRequest['stated_operator'];
+  /** S-E S4: the user's approved re-statement, kept through the existing limit writer. */
+  readonly source_quote?: LimitEditRequest['source_quote'];
 };
 export type CommitLimitEditResult =
   | {
@@ -3740,7 +3742,7 @@ export type CommitLimitEditResult =
        */
       readonly model_version_receipt: unknown;
       /** The row exactly as the committed model holds it. */
-      readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string };
+      readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string; readonly source_quote?: string };
     }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string }
@@ -3751,7 +3753,8 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
   const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'agent_limit_edit', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
-    ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) }))
+    ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}),
+    ...(input.source_quote !== undefined ? { source_quote: input.source_quote } : {}) }))
     .digest('hex').slice(0, 32)}`;
   const r = await dispatchAddConstraintEdit(
     {
@@ -3765,7 +3768,8 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
       apply: (persistedGraph, priorFacts) => applyLimitEdit({
         payload: turn,
         request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
-          ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) },
+          ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}),
+          ...(input.source_quote !== undefined ? { source_quote: input.source_quote } : {}) },
         requestId,
         persistedGraph,
         priorFacts,
@@ -3785,6 +3789,7 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
     .filter((c) => c['node_id'] === input.node_id && c['operator'] === input.operator);
   const row = held.length === 1 ? held[0]! : undefined;
   if (row === undefined || typeof row['constraint_id'] !== 'string' || typeof row['value'] !== 'number') return { status: 'unconfirmed' };
+  if (input.source_quote !== undefined && row['source_quote'] !== input.source_quote) return { status: 'unconfirmed' };
   return {
     status: 'committed',
     graph_hash: graphHash,
@@ -3795,6 +3800,7 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
       ...(typeof row['unit'] === 'string' ? { unit: row['unit'] } : {}),
       ...(typeof row['value_frame'] === 'string' ? { value_frame: row['value_frame'] } : {}),
       ...(typeof row['provenance'] === 'string' ? { provenance: row['provenance'] } : {}),
+      ...(typeof row['source_quote'] === 'string' ? { source_quote: row['source_quote'] } : {}),
     },
   };
 }
