@@ -138,7 +138,7 @@ describe('Q6 limit checks use the Run’s recorded sent option set', () => {
 
   it('the row’s own sentence is unchanged when every guessed option was left out', () => {
     const rows: StoredLimitVerdicts = { per_limit: [{ constraint_id: LIMIT, state: 'unscored', reason: OLUMI_GUESS_LIMIT_REASON }],
-      joint: { state: 'unscored' } };
+      joint: { state: 'withheld' } };
     expect(first(graph, rows, new Set([RAISE, TEST])).say).toBe('‘Monthly churn rate’ isn’t shown for any option.');
     expect(first(graph, rows, new Set([RAISE, TEST]))).not.toHaveProperty('ask');
   });

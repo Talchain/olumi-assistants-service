@@ -146,7 +146,7 @@ function unitsOf(text: string, names: readonly Span[] = []): TextUnit[] {
         if (text[at] === '.' && '0123456789'.includes(text[at - 1] ?? '') && text[at - 1] !== undefined
           && '0123456789'.includes(text[at + 1] ?? '') && text[at + 1] !== undefined) continue;
         let end = at + 1;
-        while (end < lineEnd && '”’\"\')*_]'.includes(text[end]!)) end += 1;
+        while (end < lineEnd && '”’"\')*_]'.includes(text[end]!)) end += 1;
         if (end < lineEnd && text[end] !== ' ' && text[end] !== '\t' && text[end] !== '\r') continue;
         while (end < lineEnd && (text[end] === ' ' || text[end] === '\t' || text[end] === '\r')) end += 1;
         out.push({ start, end, text: text.slice(start, end) });

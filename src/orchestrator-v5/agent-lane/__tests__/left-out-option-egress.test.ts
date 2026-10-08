@@ -119,8 +119,7 @@ describe('Q6 narrator inclusion about an option the Run left out', () => {
     expect(edit(text, [], [...SENT, TEST]).text, '£54-sent twin').toBe(text);
   });
 
-  it.each([';', ':', ', and', ', but', ', while', ', whereas', ', although', ', though', ', yet', ' but', ' whereas'])
-    ('P1-2 clause boundary %j keeps another clause’s negation local', boundary => {
+  it.each([';', ':', ', and', ', but', ', while', ', whereas', ', although', ', though', ', yet', ' but', ' whereas'])('P1-2 clause boundary %j keeps another clause’s negation local', boundary => {
       const text = `The £54 test was assessed${boundary} £49 was not changed.`;
       expect(edit(text).text).toBe(LINE);
       expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
@@ -270,16 +269,14 @@ describe('Q6 narrator inclusion about an option the Run left out', () => {
     expect(edit(negative, [option]).text).toBe(negative);
   });
 
-  it.each(['Plan: Expand', 'Expand, and retain customers', 'Expand but preserve jobs'])
-    ('exact labels retain their referent across clause words inside the label: %s', label => {
+  it.each(['Plan: Expand', 'Expand, and retain customers', 'Expand but preserve jobs'])('exact labels retain their referent across clause words inside the label: %s', label => {
       const option = { option_id: 'clause_label', label, reason: 'removed' };
       const text = `‘${label}’ was analysed.`;
       expect(edit(text, [option]).text).toBe(leftOutOptionSentence(option));
       expect(edit(text, [], [...SENT, option]).text).toBe(text);
     });
 
-  it.each(['Plan: not analysed', 'Expand, and never compare', 'Test assessed alternatives'])
-    ('a referent’s own negation/inclusion words are masked before assertion testing: %s', label => {
+  it.each(['Plan: not analysed', 'Expand, and never compare', 'Test assessed alternatives'])('a referent’s own negation/inclusion words are masked before assertion testing: %s', label => {
       const option = { option_id: 'assertion_label', label, reason: 'removed' };
       const included = `‘${label}’ was assessed.`;
       const neutral = `‘${label}’ remains a suggestion.`;
@@ -388,8 +385,7 @@ describe('Q6 recorded-set reader and final egress carriers', () => {
     expect(withoutLeftOutOptionInclusionClaimsAtEgress(body, { ...opts, optionParticipation: [] })).toBe(body);
   });
 
-  it.each(['heading', 'view', 'reasoning', 'confirm_step', 'because'] as const)
-    ('P1-6 RED-before: every displayed provisional-view string is edited, including %s', field => {
+  it.each(['heading', 'view', 'reasoning', 'confirm_step', 'because'] as const)('P1-6 RED-before: every displayed provisional-view string is edited, including %s', field => {
       // provisional-view.ts:161-169 and its sidecar reader enumerate all five displayed strings.
       const text = 'The £54 test is in this run too, so test the churn assumption.';
       const provisional = {
@@ -431,7 +427,7 @@ describe('Q6 regex timings (bounded repetitions)', () => {
     it.each([' '.repeat(20_000), '£54 '.repeat(20_000)])(`${name}: 20k whitespace / figure repeats < 50 ms`, text => {
       regex.lastIndex = 0;
       const start = performance.now();
-      if (regex.global) [...text.matchAll(regex)];
+      if (regex.global) void [...text.matchAll(regex)];
       else regex.test(text);
       const elapsed = performance.now() - start;
       regex.lastIndex = 0;
