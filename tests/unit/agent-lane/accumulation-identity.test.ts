@@ -128,8 +128,15 @@ describe('admitAccumulationIdentities', () => {
       ? { ...n, observed_state: { ...n.observed_state, value: 0 } } : n), edges, [decl()]], /its range could not be worked out/],
     ['a computed frame overflows', [nodes.map((n) => n.id === 'subs'
       ? { ...n, observed_state: { value: Number.MAX_VALUE, unit: 'subscribers' } } : n), edges, [decl()]], /its range could not be worked out/],
+    // ISL #231 R-P2-1: a causal link into S₀ would rank as a driver while moving nothing.
+    ['a causal link into the count today', [nodes, [...edges, { from: 'churn', to: 'subs' }], [decl()]], /the count today, "Pro subscribers", is changed by "Monthly churn" in the model/],
     ['an outcome already carrying a product', [nodes.map((n) => (n.id === 'subs12' ? { ...n, nonlinear_identity: { operation: 'product', factor_ids: ['a', 'b'], stated_in_brief: false } } : n)), edges, [decl()]], /already worked out/],
   ];
+  it('CONTRAST: an OPTION setting the count today is not a causal mover; the carrier is written', () => {
+    const grow = { id: 'grow', kind: 'option', label: 'Grow', interventions: { subs: { value: 0.3, raw_value: 300 } } };
+    expect(admitAccumulationIdentities([...nodes, grow] as never, [...edges, { from: 'grow', to: 'subs' }], [decl()]).carriers.size).toBe(1);
+  });
+
   it.each(refusals)('refuses %s, says why, writes nothing', (_why, args, words) => {
     const r = admitAccumulationIdentities(...args);
     expect(r.carriers.size).toBe(0);

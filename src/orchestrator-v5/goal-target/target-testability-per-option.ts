@@ -105,6 +105,9 @@ export function optionPathsOf(
   });
   const baselineOperands = goalBaselineFromIdentityInputs(nodes, selectedGoal, identityEvaluations)
     ? [...exactIdentityOperandLinks(nodes, edges, identityEvaluations)].filter(e => e.to === selectedGoal).map(e => e.from) : [];
+  // Accumulation is the typed horizon-varying ancestor; its reach includes the carrier itself.
+  const accumulationReach = new Set(nodes.flatMap(n => typeof n.id === 'string'
+    && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation' ? [...reachFrom(n.id)] : []));
   const kindOf = new Map(nodes.map(n => [n.id, n.kind]));
   return new Map(paths.map(p => {
     const ownReach = reachedGoalPaths(analysed, [p.option_id], seeds, identityEvaluations, selectedGoal).reached;
@@ -112,7 +115,8 @@ export function optionPathsOf(
       if (typeof e.from !== 'string' || typeof e.to !== 'string' || kindOf.get(e.from) === 'option'
         || kindOf.get(e.from) === 'decision' || kindOf.get(e.to) === 'option' || kindOf.get(e.to) === 'decision') return false;
       const feed = reachFrom(e.to);
-      return baselineOperands.some(id => feed.has(id)) || identities.some(c => c.factor_ids.some(a => feed.has(a)
+      return (baselineOperands.some(id => feed.has(id)) && (ownReach.has(e.from) || accumulationReach.has(e.from)))
+        || identities.some(c => c.factor_ids.some(a => feed.has(a)
         && c.factor_ids.some(b => b !== a && ownReach.has(b))));
     });
     const links = [...p.links, ...dependencies].flatMap(l =>

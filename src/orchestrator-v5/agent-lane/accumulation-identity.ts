@@ -70,7 +70,7 @@ function otherPeriodIn(unit: string): UnitPeriod | null {
 const OF_TODAY = /of today/i;
 
 /** Today's level in the user's own unit: the raw figure when the state is framed, else its value. */
-function levelOf(n: NodeLike): number | undefined {
+export function levelOf(n: NodeLike): number | undefined {
   const s = n.observed_state;
   const v = typeof s?.raw_value === 'number' ? s.raw_value : s?.value;
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
@@ -148,6 +148,13 @@ export function admitAccumulationIdentities(
     const feeds = parents(outcome.id);
     const unlinked = [stock, rate, inflow].find((n) => !feeds.has(n.id));
     if (unlinked !== undefined) { refuse(`"${String(unlinked.label)}" does not feed directly into "${d.outcome}" in the model`); continue; }
+    // ⛔ ISL #231 R-P2-1 (7f, 8 Oct): S₀ is today's count, held exact in every draw. A causal link INTO it would be ranked as
+    // a driver while moving nothing (every probe gives the same month-N figure). Only an option may set it.
+    const moverOfToday = [...parents(stock.id)].map((id) => nodes.find((n) => n.id === id))
+      .find((n) => n !== undefined && n.kind !== 'option' && n.kind !== 'decision');
+    if (moverOfToday !== undefined) {
+      refuse(`the count today, "${String(stock.label)}", is changed by "${String(moverOfToday.label)}" in the model`); continue;
+    }
     if (typeof horizon !== 'number' || !Number.isInteger(horizon) || horizon < 1 || horizon > 120) {
       refuse('the brief states no deadline to work it out to'); continue;
     }
