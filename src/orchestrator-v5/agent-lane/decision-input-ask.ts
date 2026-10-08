@@ -197,10 +197,14 @@ export const GOAL_HORIZON_NOT_TESTED = 'GOAL_HORIZON_NOT_TESTED';
  * from "the deadline is untested", and until now the second existed only as chat text, so no surface beside the chat
  * could say it without re-deriving A7. Appends ONE `info` warning to the envelope's `inference_warnings` (the carrier
  * every withheld-figure reader already keys on by code) when `untestedHorizonLine` holds: A7's sentence verbatim, and the
- * goal's id. It withholds nothing and moves no figure. An envelope already carrying the code is returned as is. Pure.
+ * goal's id. A withdrawn accumulation always carries the same sentence, even with no deadline or a duration limit.
+ * It withholds nothing and moves no figure. An envelope already carrying the code is returned as is. Pure.
  */
-export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown): E {
-  const line = untestedHorizonLine(graph);
+export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown, accumulationWithdrawn = false): E {
+  // A withdrawn time calculation leaves the horizon untested even when a duration limit or no deadline remains.
+  const goal = goalOf(graph);
+  const line = untestedHorizonLine(graph) ?? (accumulationWithdrawn && goal !== undefined
+    ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   if (line === null || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const env = envelope as Rec;
   const existing: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];

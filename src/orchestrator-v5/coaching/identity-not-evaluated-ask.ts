@@ -23,6 +23,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayLevel } from './bound-graph.js';
 import { sayFigure as sayLaneFigure } from '../agent-lane/say-figure.js';
 import { CREATION_VERB, reachesAlong } from '../agent-lane/option-creates.js';
+import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 
 export const IDENTITY_NOT_EVALUATED_CODE = 'IDENTITY_NOT_EVALUATED';
 
@@ -31,6 +32,8 @@ export const IDENTITY_WITHHELD_REASONS = [
   'identity_operand_missing',
   'identity_zero_level',
   'identity_frame_missing',
+  'identity_rate_out_of_range',
+  'identity_non_finite',
 ] as const;
 export type IdentityWithheldReason = (typeof IDENTITY_WITHHELD_REASONS)[number];
 /** `unstated`: the critique carried no typed reason, so the ask names the identity and nothing more. */
@@ -234,6 +237,17 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
   });
 
   switch (w.reason) {
+    case 'identity_rate_out_of_range': {
+      // Accumulation operands are positional: stock, monthly churn, inflow. Critique order is not rate authority.
+      const churn = declared?.operation === 'accumulation' ? declaredOperands[1] : undefined;
+      const C = churn === undefined ? null : labelOf(churn);
+      if (C === null) return unstated();
+      const question = `‘${C}’ has to be below 100% a month for ‘${T}’ to be worked out: what is it today?`;
+      return { reason: w.reason, node_id: w.nodeId, assistant_text: question,
+        chip_label: 'Give its value', chip_message: question };
+    }
+    case 'identity_non_finite':
+      return unstated();
     case 'identity_inconsistent': {
       if (w.reconstructed === null || w.stated === null || formula === null) return unstated();
       const unit = rec(target.observed_state)?.unit;
@@ -311,12 +325,17 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       };
     }
     case 'identity_frame_missing': {
+      const accumulationUnitOf = declared?.operation === 'accumulation' ? nodeUnitOf(nodes) : null;
       const hasUnit = (id: string): boolean => {
+        // Accumulation parts can keep their unit on the node or in the user's stated reading, as P5 reads it.
+        if (accumulationUnitOf !== null) return accumulationUnitOf(id) !== undefined;
         const n = byId.get(id);
         const u = rec(n?.observed_state)?.unit ?? (id === w.nodeId ? n?.goal_threshold_unit : undefined);
         return typeof u === 'string' && u.trim() !== '';
       };
       const unitless = w.participants.filter((p) => !hasUnit(p));
+      // An accumulation's derived node needs a frame, not today's figure. Its parts' known units are never reasked.
+      if (declared?.operation === 'accumulation' && unitless.length === 0) return unstated();
       // ISL's rule 1 frames the identity NODE as well as its operands (R3 #72 5884883932, DL 5884896233). Every
       // operand in its unit and the target in none → ask for the TARGET's, never again for units the user gave.
       if (unitless.length === 0 && !hasUnit(w.nodeId)) {
@@ -369,7 +388,8 @@ export function composeIdentityAskForNode(nodeId: string, graph: unknown): Ident
   if (!Array.isArray(nodes)) return null;
   const byId = new Map<string, Rec>();
   for (const n of nodes.map(rec)) if (n !== null && typeof n.id === 'string') byId.set(n.id, n);
-  const operands = ids(rec(byId.get(nodeId)?.nonlinear_identity)?.factor_ids);
+  const declared = rec(byId.get(nodeId)?.nonlinear_identity);
+  const operands = ids(declared?.factor_ids);
   if (operands === null) return null;
   const os = (id: string): Rec | null => rec(byId.get(id)?.observed_state);
   const level = (id: string): number | null => finite(os(id)?.raw_value) ?? finite(os(id)?.value);
@@ -386,7 +406,8 @@ export function composeIdentityAskForNode(nodeId: string, graph: unknown): Ident
   // level — construction's created part, below). So a zero is inferred only against a stated target.
   const statedTarget = level(nodeId) !== null;
   const reason: IdentityWithheldReason | null = operands.some((id) => level(id) === null) ? 'identity_operand_missing'
-    : statedTarget && operands.some((id) => level(id) === 0) ? 'identity_zero_level'
+    // Zero churn is a valid accumulation rate; its stock and inflow may be zero too, unlike product reconciliation.
+    : declared?.operation !== 'accumulation' && statedTarget && operands.some((id) => level(id) === 0) ? 'identity_zero_level'
       : operands.some(lacksFrame) || targetUnitless ? 'identity_frame_missing' : null;
   return reason === null ? null
     : composeIdentityNotEvaluatedAsk([{ code: IDENTITY_NOT_EVALUATED_CODE, identity: { node_id: nodeId, participants: operands, withheld_reason: reason } }], graph);

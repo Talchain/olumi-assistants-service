@@ -1,29 +1,29 @@
+import { runPreflightThroughOwnership } from '../../utils/run-preflight-through-ownership.js';
 /**
- * runPreFlight × flag-gated Supabase-JWT verification (CEE_REQUIRE_USER_JWT,
- * login 3.4 CEE-half, ships dark).
+ * Payload preflight after the always-on ownership/JWT admission hook.
+ * CEE_REQUIRE_USER_JWT still controls the existing legacy telemetry.
  *
  * Pins the behaviour claims at the shared pre-flight chokepoint that every
  * /orchestrate/v2/turn dispatch branch runs through:
  *
- *   1. Flag OFF  → byte-identical legacy behaviour: client-supplied body
- *      `user_id` reaches the scenario pre-flight untouched; no verification
- *      runs even when a garbage Authorization header is present.
+ *   1. Opaque service-key Authorization stays inert for user-JWT verification.
+ *      JWT-shaped garbage is now refused even with the flag OFF (hook rows).
+ *      Only verified HMAC callers may name a body user_id.
  *   2. Flag ON + valid JWT → identity DERIVED from the token's `sub`; the
  *      client-supplied `user_id` is IGNORED (mismatch emits telemetry only).
  *   3. Flag ON + invalid/expired JWT → typed recoverable 401
  *      sign_in_required BoundaryError; the session store is never touched.
  *      (The MISSING-token refusal for browser traffic lives at the proxy
  *      front door — see proxy-v5-turn.test.ts.)
- *   4. Flag ON + no JWT → legacy client-supplied identity still accepted
- *      (key-authed service-caller carve-out; service auth is enforced by
+ *   4. Flag ON + no JWT → only verified HMAC may supply client identity
+ *      (the existing direct-turn carve-out; service auth is enforced by
  *      the auth plugin before the route, and the browser proxy refuses
  *      JWT-less turns before forwarding).
  *
- * All JWTs are forged locally with a test-only secret.
+ * All JWTs are signed locally with test-only ES256 keys.
  *
- * Companion dormancy pin: tests/unit/orchestrator/route-v2-preflight.test.ts
- * runs against the REAL config (flag default false) and is unchanged by this
- * feature — its passing is the flag-off wire-contract pin.
+ * Companion tests/unit/orchestrator/route-v2-preflight.test.ts preserves the
+ * scenario-preflight envelopes with the hook registered.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -31,7 +31,7 @@ import {
   FIXTURE_SUB as JWT_SUB,
   forgeUserToken,
   makeEs256Key,
-  startJwksFixture,
+  // JWKS transport is local; ES256/audience/expiry verification stays real.
   type JwksFixture,
 } from '../../../src/utils/__tests__/helpers/supabase-jwks-fixture.js';
 import { attachCallerContext } from '../../../src/context/index.js';
@@ -59,6 +59,9 @@ vi.mock('../../../src/utils/telemetry.js', () => ({
 }));
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
+    scenarioExists: async () => false,
+    scenarioHasAdmittedTurn: async () => false,
+    getScenarioOwner: async () => null,
     ensureScenarioExists: ensureScenarioExistsSpy,
     append: async () => ({ id: 'unused' }),
     readRecent: async () => [],
@@ -76,15 +79,20 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   SessionReadError: class SessionReadError extends Error {},
 }));
 
-const { runPreFlight } = await import('../../../src/orchestrator/route-v2-preflight.js');
+const { runPreFlight: validatePreflight } = await import('../../../src/orchestrator/route-v2-preflight.js');
 const { resetSupabaseJwksCacheForTests } = await import(
   '../../../src/utils/supabase-user-jwt.js'
 );
 
+async function runPreFlight(req: { body: unknown; headers: Record<string, string> }) {
+  return runPreflightThroughOwnership(req, validatePreflight);
+}
+
 /** The project's real signing key, and an attacker's key of the same shape. */
 let projectKey: Awaited<ReturnType<typeof makeEs256Key>>;
 let attackerKey: Awaited<ReturnType<typeof makeEs256Key>>;
-let jwks: JwksFixture;
+type LocalJwksFixture = Pick<JwksFixture, 'base' | 'issuer' | 'close'>;
+let jwks: LocalJwksFixture;
 
 async function forgeJwt(opts?: {
   expired?: boolean;
@@ -161,12 +169,12 @@ describe('runPreFlight — flag OFF (dormancy pin)', () => {
   // only for a caller entitled to send one — the untouched-claim half was the
   // staging IDOR (an anonymous browser reached this route through an edge that
   // injected the shared assist key and named a victim). The dormancy half of
-  // the pin — that a garbage Authorization header is INERT when the flag is
-  // off — is orthogonal to admissibility and is kept in both halves.
-  it('a SHARED-KEY caller: client-supplied user_id is DISCARDED; garbage Authorization is inert', async () => {
+  // the pin now applies to opaque service keys. JWT-shaped garbage is always
+  // verified/refused by the ownership hook, including when the flag is off.
+  it('a SHARED-KEY caller: client-supplied user_id is DISCARDED; opaque service-key Authorization is inert', async () => {
     mockConfig.auth.requireUserJwt = false;
     const req = makeReq(makeBody(BODY_USER_ID), {
-      authorization: 'Bearer garbage.garbage.garbage',
+      authorization: 'Bearer opaque-service-key',
     });
 
     const result = await runPreFlight(req as never);
@@ -180,10 +188,10 @@ describe('runPreFlight — flag OFF (dormancy pin)', () => {
     expect(emitSpy.mock.calls.map((c) => c[0])).not.toContain('UserJwtRefused');
   });
 
-  it('an HMAC caller: client-supplied user_id reaches the store untouched; garbage Authorization is inert', async () => {
+  it('an HMAC caller: client-supplied user_id reaches the store untouched; opaque service-key Authorization is inert', async () => {
     mockConfig.auth.requireUserJwt = false;
     const req = makeHmacReq(makeBody(BODY_USER_ID), {
-      authorization: 'Bearer garbage.garbage.garbage',
+      authorization: 'Bearer opaque-service-key',
     });
 
     const result = await runPreFlight(req as never);
@@ -379,3 +387,13 @@ describe('runPreFlight — flag ON', () => {
     expect(result.status).toBe(401);
   });
 });
+
+const fixtureKeys = vi.hoisted(() => ({ keys: [] as import('jose').JWK[] }));
+vi.mock('jose', async load => {
+  const actual = await load<typeof import('jose')>();
+  return { ...actual, createRemoteJWKSet: () => actual.createLocalJWKSet({ keys: fixtureKeys.keys }) };
+});
+async function startJwksFixture(keys: import('jose').JWK[]): Promise<LocalJwksFixture> {
+  fixtureKeys.keys = keys;
+  return { base: 'https://owniso.invalid', issuer: 'https://owniso.invalid/auth/v1', close: async () => {} };
+}

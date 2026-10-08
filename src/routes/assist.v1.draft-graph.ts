@@ -112,7 +112,7 @@ export default async function route(app: FastifyInstance) {
     return Boolean((adminKey && safeEqual(providedKey, adminKey)) || (adminKeyRead && safeEqual(providedKey, adminKeyRead)));
   }
 
-  app.post("/assist/v1/draft-graph", async (req, reply) => {
+  app.post("/assist/v1/draft-graph", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

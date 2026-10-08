@@ -911,12 +911,9 @@ describe("POST /proxy/v5/turn", () => {
       mockConfig.auth.requireUserJwt = false;
     });
 
-    it("DISCRIMINATION: the JWT-verification line appears only when the gate is OFF", async () => {
-      // The warning above is unconditional, so on its own it carries no
-      // information about the deployment. This is the line that still does:
-      // with the gate off, a presented Bearer is never parsed and every
-      // SIGNED-IN user is refused on their own scenario. Without this pair a
-      // route that warned unconditionally about everything would pass.
+    it("DISCRIMINATION: JWT verification is always disclosed while the legacy flag remains observable", async () => {
+      // The hook always verifies presented JWTs. The legacy flag is still
+      // observable, but must never be described as disabling ownership identity.
       const { log } = await import("../../utils/telemetry.js");
 
       vi.mocked(log.warn).mockClear();
@@ -925,10 +922,11 @@ describe("POST /proxy/v5/turn", () => {
       await app.ready();
       await app.close();
       const whenOff = (await postureWarnings()).filter((c) =>
-        c[1].includes("user JWTs are NOT verified"),
+        c[1].includes("user JWTs are verified"),
       );
       expect(whenOff).toHaveLength(1);
-      expect(whenOff[0][1]).toContain("refused on their OWN scenario");
+      expect(whenOff[0][1]).toContain("independently of CEE_REQUIRE_USER_JWT");
+      expect(whenOff[0][0]).toMatchObject({ require_user_jwt: false, user_jwt_verification: "always" });
 
       vi.mocked(log.warn).mockClear();
       mockConfig.auth.requireUserJwt = true;
@@ -936,9 +934,11 @@ describe("POST /proxy/v5/turn", () => {
       await app.ready();
       mockConfig.auth.requireUserJwt = false;
       const whenOn = (await postureWarnings()).filter((c) =>
-        c[1].includes("user JWTs are NOT verified"),
+        c[1].includes("user JWTs are verified"),
       );
-      expect(whenOn).toHaveLength(0);
+      expect(whenOn).toHaveLength(1);
+      expect(whenOn[0][0]).toMatchObject({ require_user_jwt: true, user_jwt_verification: "always" });
+      expect((await postureWarnings()).filter(c => c[1].includes("user JWTs are NOT verified"))).toHaveLength(0);
     });
   });
 });

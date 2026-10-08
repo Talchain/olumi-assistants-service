@@ -28,7 +28,7 @@ const CEE_VERSION = "v12.4";
 type AttachmentPayload = string | { data: string; encoding?: string };
 
 export default async function route(app: FastifyInstance) {
-  app.post("/assist/critique-graph", async (req, reply) => {
+  app.post("/assist/critique-graph", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const parsed = CritiqueGraphInput.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);

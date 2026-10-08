@@ -1,141 +1,13 @@
+/** Register a scenario graph through the existing CAS/atomic-write boundary.
+ * Central ownership admission uses the declared path id and verified caller.
+ * Only valid initial imports may create a scenario; deleted-scenario fencing remains.
+ * Payload, CAS, stored-fact carry and write-error contracts remain in this handler. */
+
 import { assertShareByDatePreserved, ShareByDateOwnershipError } from '../orchestrator-v5/goal-target/share-by-date-carrier.js';
 import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
 import { isDeepStrictEqual } from 'node:util';
 import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, scopeIssuesAfterWrite, scopeOf } from '../orchestrator-v5/agent-lane/goal-scope.js';
-/**
- * ROADMAP 2.467 — `register_graph`: THE DETERMINISTIC WHOLE-GRAPH WRITE SEAM.
- *
- * ── WHY THIS ROUTE EXISTS AT ALL ───────────────────────────────────────────
- * Canvas import performs ZERO server-side persistence, and run turns carry no
- * graph. The analyse path is UI → CEE → PLoT → ISL with **CEE reloading its OWN
- * persisted graph**, so after an import the results describe the pre-import
- * server graph while the imported one is on screen. That was witnessed on a real
- * browser on 4 Aug (analysis naming the OLD graph's nodes ×44, the sentinel ×0,
- * old rows re-bound BY NODE ID to the imported labels under an affirmative
- * "Analysis reflects the current model."). An interim UI mitigation (#592,
- * witnessed prevented 5 Aug) stopped the product ASSERTING that the mismatch was
- * fine. It did not make the import work. This route is what makes it work: it
- * puts the imported graph where CEE will actually read it.
- *
- * ── WHY IT IS NOT THE LLM EDIT TOOL (design review amendment A8, BINDING) ──
- * `propose_structural_edit` is architecturally incapable of this job, for three
- * independent byte-level reasons:
- *   · CAPS — referee `PROPOSAL_CAP = 8` envelopes and pipeline
- *     `MAX_PATCH_OPERATIONS = 15`, against imports that run to
- *     `GRAPH_MAX_NODES`/`GRAPH_MAX_EDGES` (50/100). A multi-batch train breaks
- *     the atomicity a registration requires.
- *   · BASE-HASH CURRENCY — every edit envelope must prove currency against the
- *     SERVER graph. An import wants to REPLACE that graph regardless of its hash.
- *   · FABRICATION — expressing a whole-graph replace as op diffs means the LLM
- *     computes the diff, which is precisely the 2.461 class the edit tool exists
- *     to kill.
- * So: no LLM in the loop, no ops, no referee. One graph in, one graph stored.
- *
- * ── THE ORDER OF THE CHECKS IS THE DESIGN ──────────────────────────────────
- *   0. identity     — headers only, before any state read (the read route's
- *                     rule: a refusal must not become an existence oracle).
- *   1. UUID syntax  — `scenarios.id` is a UUID column.
- *   2. PAYLOAD      — shape, caps, kind/type normalisation, ingress parse. All
- *                     of it BEFORE any database work, so a malformed body costs
- *                     no round trip and cannot be used to probe scenarios.
- *   3. ownership    — the SAME shared pre-flight the turn route runs.
- *                     ⚠ Ownership here is the VERIFIED TOKEN SUBJECT alone
- *                     (`CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE` at the call
- *                     site), which makes CEE_REQUIRE_USER_JWT load-bearing
- *                     rather than a rollback lever: with it OFF — its DEFAULT,
- *                     and unguarded in that direction — no caller is ever
- *                     identified and every OWNED scenario is refused to its
- *                     OWN owner across all six /assist/v1/scenarios/*
- *                     endpoints. Disclosed at boot
- *                     (`config.scenario_ownership_posture`, server.ts) and
- *                     pinned in the suite as a KNOWN MISCONFIGURATION.
- *   4. the base read— the trusted CAS base, from the SERVER's own bytes.
- *   5. the write    — projected, hashed, atomic.
- *
- * ⚠ (2) BEFORE (3) IS DELIBERATE AND IS THE INVERSE OF THE READ ROUTE'S ORDER,
- *   for the opposite reason. The read route gates on EXISTENCE first because
- *   `authorizeScenarioOwnership` upserts, and a read must never create the row
- *   it reads. A WRITE legitimately creates: a freshly-imported scenario has no
- *   row yet, and refusing it would make import-into-a-new-scenario impossible —
- *   which is the second import route (`ScenarioSwitcher → importScenarioFromFile`
- *   mints a NEW scenario id). Validating first means a hostile caller cannot
- *   grow `scenarios` with junk payloads; the rate limiter bounds the rest, and
- *   the turn route already carries this exact property.
- *
- * ── WHAT MAKES IT ATOMIC, AND WHY NOT `store_draft_graph` ──────────────────
- * `scenarios.graph` and `scenarios.graph_identity_hash` MUST move in one
- * statement. `append_turn_atomic_v3`/`_v4` (reached through `store.append`) do
- * exactly that under a `SELECT … FOR UPDATE` row lock, stamping
- * `p_incoming_graph_identity_hash` from the single normaliser authority. The
- * lighter `store_draft_graph` RPC does NOT write the identity hash, so using it
- * would leave the column describing a graph we no longer store — silently
- * poisoning every later CAS compare, which reads that column as its base.
- *
- * ⚠ UPDATED (C3 closure) — this used to end "there is exactly one correct
- * writer here and it is `store.append`". The atomicity argument above is
- * unchanged and still the reason, but the call is now
- * `appendCheckedGraphWrite` (`orchestrator-v5/persist-graph-write.ts`), which
- * enforces the terminal structural invariants and then performs that same
- * `store.append`. The correction matters rather than being cosmetic: while this
- * route called `store.append` directly it was the ONLY `scenarios.graph` writer
- * that skipped those invariants, so a registration could persist a violation
- * the turn path refuses fail-closed.
- *
- * The write is expressed as a `direct_answer` turn with `handler_id: null` —
- * the DL-7 precedent the system-event dispatcher already uses for
- * server-initiated, non-conversational commits (`system-events/dispatch.ts`).
- * That is not incidental: a graph replacement IS a state transition worth a row
- * in the turn log, and piggy-backing on the sanctioned writer is what buys the
- * atomicity above.
- *
- * ── FRESHNESS AND ANALYSIS STATE CLEAR THEMSELVES, BY CONSTRUCTION ─────────
- * Nothing here has to "clear the analysis". CEE stores no analysis snapshot and
- * no `last_result_hash` on `scenarios`; `deriveAnalysisFreshness` DERIVES the
- * verdict by comparing the newest `run_analysis` fact's `graph_hash_at_run`
- * against `computeAnalysisAffectingGraphHash(currentGraph)` at read time. The
- * moment this route replaces the graph, that comparison diverges and the verdict
- * flips to `graph_hash_diverged` on its own. Pending actions self-invalidate the
- * same way (`pending-action.ts`, reason `graph_hash_changed`) — but ONLY if the
- * bytes we hash are the bytes we store, which is why `projectGraphForPersistence`
- * runs BEFORE the hash and before the write, never after.
- *
- * ⚠ THE CAS BASE IS READ FROM THE SERVER, NEVER FROM THE REQUEST. The trusted
- *   base rule (`SessionTurnWrite.expectedGraphIdentityHash`) exists because a
- *   CAS that validates a write against the very graph being written always
- *   "matches". Under a `shadow` RPC posture this is telemetry; under `enforce`
- *   it becomes a real guard, and this route is written so that promotion needs
- *   no change here.
- *
- *   ⭐ THE POSTURE IS NOW OBSERVABLE — DERIVE IT, DO NOT READ IT HERE.
- *   This sentence used to assert "the deployed `CEE_V5_GRAPH_CAS_RPC=shadow`
- *   posture" while `resolveGraphCasCapability` in `config/index.ts` asserted
- *   staging runs `MODE=observe` + `RPC=enforce`. One was stale, neither was
- *   evidence, and the deployed value — living only in the Render dashboard —
- *   was unobservable from any client. Both sites were left pointing at each
- *   other so no reader picked one at random.
- *
- *   Since 18 Sep 2026 `/healthz` publishes the resolved capability:
- *
- *       curl -s https://cee-staging.onrender.com/healthz | jq .graph_cas
- *
- *   ⛔ Do not restore a posture claim to this header. Behaviour here must
- *   still be correct under BOTH postures — that requirement never depended on
- *   knowing which one is deployed, which is exactly why the two prose claims
- *   were able to disagree for a month without anything failing.
- *
- * ── WHAT THIS ROUTE DOES NOT DO ────────────────────────────────────────────
- * · It does not run an LLM, compose a response, or touch the referee.
- * · It does not merge. A registration is a REPLACE — the client's graph is the
- *   graph. Merging would re-introduce the "two models, one screen" ambiguity.
- * · It does not accept layout. `scenarios.graph` holds no positions; a caller
- *   that sends them will simply have them hashed and stored, so the client is
- *   responsible for projecting canvas → wire before calling. (The read route's
- *   `layout_present` reports on that, measured rather than promised.)
- * · It does not mint an identity scheme: `graph_identity_hash` is
- *   `computeGraphIdentityHash`, identity.v1, the single normaliser authority,
- *   and it is an OPAQUE CEE-issued token — consumers store and compare it
- *   CEE-to-CEE gated on `projection_version`, and never recompute it locally.
- */
+
 
 import type { FastifyInstance } from "fastify";
 
@@ -147,11 +19,6 @@ import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-exte
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
 import { eventRiskIngressIssues } from "../schemas/event-risk.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
-import {
-  authorizeScenarioOwnership,
-  CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
-  resolveVerifiedIdentityOrRefuse,
-} from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
@@ -559,7 +426,7 @@ export default async function route(app: FastifyInstance) {
       // reason as the sibling read route: through the `/bff/cee/*` edge every
       // visitor arrives carrying the SAME injected assist key, so a key-derived
       // bucket would be one product-wide shared-fate throttle.
-      config: {
+      config: { scenarioId: { from: 'params', key: 'scenario_id' },
         rateLimit: {
           max: RATE_LIMIT_MAX,
           timeWindow: "1 minute",
@@ -622,12 +489,6 @@ export default async function route(app: FastifyInstance) {
               requestId,
             ),
           );
-
-      // ── 0. Identity, from headers only, before ANY read of server state ──
-      const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
-      if (!resolved.ok) {
-        return reply.code(resolved.status).send(resolved.error);
-      }
 
       // ── 1. Syntax ───────────────────────────────────────────────────────
       if (!UUID_PATTERN.test(scenarioId)) {
@@ -843,45 +704,7 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
-      // ── 3. Ownership — the SAME pre-flight the turn route runs ──────────
-      let owned: Awaited<ReturnType<typeof authorizeScenarioOwnership>>;
-      try {
-        owned = await authorizeScenarioOwnership(
-          scenarioId,
-          // Ownership on this surface is derived from the verified token
-          // subject. A request-supplied identifier is not an input to that
-          // decision, so the sentinel is passed rather than the parsed
-          // extension. See the constant for why this is expressed here and not
-          // in the shared function.
-          CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
-          resolved.identity,
-          requestId,
-        );
-      } catch (err) {
-        log.warn(
-          {
-            event: "v5.scenario_graph_register.ownership_read_failed",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            err: err instanceof Error ? err.message : String(err),
-          },
-          "Graph registration — ownership pre-flight threw; failing closed",
-        );
-        return unavailable();
-      }
-      if (!owned.ok) {
-        log.warn(
-          {
-            event: "v5.scenario_graph_register.refused_not_owner",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            reason: owned.reason,
-          },
-          "Graph registration — caller is not authorized for this scenario",
-        );
-        return refuse();
-      }
-
+      if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
       const store = getSessionStore();
 
       // ── 4. The trusted CAS base — the SERVER's bytes, never the request's ─

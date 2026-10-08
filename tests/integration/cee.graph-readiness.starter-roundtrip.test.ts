@@ -38,7 +38,10 @@ vi.stubEnv("LLM_PROVIDER", "fixtures");
  * module-scoped holder is the whole store this file needs. `importOriginal` spread
  * rather than a hand-listed replacement (trap 12).
  */
-const persistedGraphHolder: { graph: unknown } = { graph: null };
+const starterScenarioIds: Record<string, string> = Object.fromEntries(
+  ['build-vs-buy', 'headcount-allocation', 'market-entry', 'pricing-model', 'vendor-selection'].map((id, i) => [id, `11111111-1111-4111-8111-${String(i + 1).padStart(12, '0')}`]),
+);
+const persistedGraphHolder: { graph: unknown; scenarioId: string | null } = { graph: null, scenarioId: null };
 
 vi.mock("../../src/orchestrator-v5/session/index.js", async (importOriginal) => {
   const original =
@@ -48,8 +51,10 @@ vi.mock("../../src/orchestrator-v5/session/index.js", async (importOriginal) => 
     ...original,
     getSessionStore: () =>
       createMockSessionStore({
-        loadGraphAndBriefText: async () => ({
-          graph: persistedGraphHolder.graph,
+        readExistingScenario: async id => id === persistedGraphHolder.scenarioId
+          ? { userId: null, graph: persistedGraphHolder.graph, briefText: null, analysisInvalidatedAt: null } : null,
+        loadGraphAndBriefText: async id => ({
+          graph: id === persistedGraphHolder.scenarioId ? persistedGraphHolder.graph : null,
           briefText: null,
         }),
       }),
@@ -126,12 +131,13 @@ describe("POST /assist/v1/graph-readiness — register→persist→readiness rou
     "%s: the persisted bytes are readable back — 200, assessed from persisted",
     async (id) => {
       persistedGraphHolder.graph = persistedFormOf(id);
+      persistedGraphHolder.scenarioId = starterScenarioIds[id];
 
       const res = await app.inject({
         method: "POST",
         url: "/assist/v1/graph-readiness",
         headers,
-        payload: { graph: readStarter(id), scenario_id: `scn-${id}` },
+        payload: { graph: readStarter(id), scenario_id: starterScenarioIds[id] },
       });
 
       // Report the body on failure: a bare status assertion on a 400 whose
@@ -148,11 +154,12 @@ describe("POST /assist/v1/graph-readiness — register→persist→readiness rou
     expect(starter.edges).toHaveLength(39);
 
     persistedGraphHolder.graph = persistedFormOf("vendor-selection");
+    persistedGraphHolder.scenarioId = starterScenarioIds["vendor-selection"];
     const res = await app.inject({
       method: "POST",
       url: "/assist/v1/graph-readiness",
       headers,
-      payload: { graph: starter, scenario_id: "scn-vendor-selection" },
+      payload: { graph: starter, scenario_id: starterScenarioIds["vendor-selection"] },
     });
 
     expect(res.statusCode, res.body.slice(0, 800)).toBe(200);
@@ -171,6 +178,7 @@ describe("POST /assist/v1/graph-readiness — register→persist→readiness rou
     const requestGraph = readStarter("headcount-allocation");
     const persistedGraph = readStarter("market-entry");
     persistedGraphHolder.graph = persistedFormOf("market-entry");
+    persistedGraphHolder.scenarioId = starterScenarioIds["market-entry"];
 
     const factorsIn = (g: Record<string, unknown>) =>
       (g.nodes as { kind: string }[]).filter((n) => n.kind === "factor").length;
@@ -189,7 +197,7 @@ describe("POST /assist/v1/graph-readiness — register→persist→readiness rou
       method: "POST",
       url: "/assist/v1/graph-readiness",
       headers,
-      payload: { graph: requestGraph, scenario_id: "scn-market-entry" },
+      payload: { graph: requestGraph, scenario_id: starterScenarioIds["market-entry"] },
     });
     expect(res.statusCode, res.body.slice(0, 800)).toBe(200);
     const body = JSON.parse(res.body);
@@ -215,6 +223,7 @@ describe("POST /assist/v1/graph-readiness — register→persist→readiness rou
    */
   it("with no scenario named, both stamps read request_graph", async () => {
     persistedGraphHolder.graph = null;
+    persistedGraphHolder.scenarioId = null;
 
     const res = await app.inject({
       method: "POST",

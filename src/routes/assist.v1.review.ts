@@ -133,7 +133,7 @@ export default async function route(app: FastifyInstance) {
   const FEATURE_VERSION = config.cee.reviewFeatureVersion || "review-v1.0.0";
   const MAX_BLOCKS = 10;
 
-  app.post("/assist/v1/review", async (req, reply) => {
+  app.post("/assist/v1/review", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
 
     // Resolve request ID (authoritative)

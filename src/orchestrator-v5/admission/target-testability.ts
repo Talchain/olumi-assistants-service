@@ -27,6 +27,8 @@ import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-targ
 import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
 import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.js';
 import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
+import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -109,13 +111,28 @@ export function scoredGoalIdOf(graph: unknown, scoredGoalId?: unknown): string |
  * Yes: `stated_in_brief: true`) and both factors carry today's level, the goal's level today is DERIVED from them — PLoT
  * measures from it (GOAL_LEVEL_FROM_IDENTITY_INPUTS, labelled by whose figures they are) — so it is not missing (P1).
  * An unconfirmed (Olumi-read) identity never counts: confirming it is the user's step (build 1).
+ * A product's derived accumulation part needs all three input levels at the goal's current horizon. Its stock unit is
+ * preserved by the recurrence; ISL works out the value, so no invented observed_state is needed on that derived node.
  */
 function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolean {
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   if (identity?.operation !== 'product' || identity.stated_in_brief !== true || !Array.isArray(identity.factor_ids)
     || identity.factor_ids.length !== 2) return false;
+  const byId = new Map(nodes.filter(isRec).map(n => [n.id, n]));
   const levels = identity.factor_ids.map((id) => {
-    const n = nodes.find((x) => isRec(x) && x.id === id) as Rec | undefined;
+    const n = byId.get(id);
+    const carrier = isRec(n?.nonlinear_identity) ? n.nonlinear_identity : undefined;
+    if (carrier?.operation === 'accumulation') {
+      // Only one accumulation hop, on a derived node, at this deadline. The Run drops a stale carrier from its wire copy.
+      if (n?.kind === 'goal' || NodeV3.shape.nonlinear_identity.safeParse(carrier).data === undefined
+        || carrier.horizon_months !== goal.goal_horizon_months) return undefined;
+      const parts = (carrier.factor_ids as string[]).map(partId => {
+        const part = byId.get(partId);
+        const os = isRec(part?.observed_state) ? part.observed_state : undefined;
+        return part !== undefined && accumulationInputLevelOf({ id: partId, observed_state: os }) !== undefined ? os : undefined;
+      });
+      return parts.every(part => part !== undefined) ? { unit: parts[0]!.unit, label: String(id) } : undefined;
+    }
     const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
     return os !== undefined && finite(os.raw_value) ? { unit: os.unit, label: String(id) } : undefined;
   });

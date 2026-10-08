@@ -89,7 +89,7 @@ export default async function route(app: FastifyInstance) {
   const RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_EDGE_FUNCTION_RATE_LIMIT_RPM");
   const FEATURE_VERSION = "edge-function-suggestions-1.0.0";
 
-  app.post("/assist/v1/suggest-edge-function", async (req, reply) => {
+  app.post("/assist/v1/suggest-edge-function", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

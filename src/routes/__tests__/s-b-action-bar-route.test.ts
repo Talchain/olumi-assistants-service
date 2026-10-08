@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ⭐ S-B THROUGH THE REAL ROUTES (lane ACTION-BAR-CEE; github-a2 contract amendments 1–11 + v1.1; ACTION-SYSTEM-DRAFT §E).
  * The real Agent turn route and the real scenario-graph (reload) route, the real session store over a fake database
@@ -165,6 +166,7 @@ beforeEach(async () => {
     return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
   }));
   app = Fastify({ logger: false });
+  await installOwnershipHarness(app, () => ({ mode: 'verified', userId: identity.userId }));
   await scenarioGraphRoute(app); await app.register(agentV1TurnRoute); await app.ready();
 });
 afterEach(async () => {
@@ -578,3 +580,5 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     expect(offersOf(b.action_bar!).some(o => o.action_id === 'bias_anchoring' || o.action_id === 'check_estimates')).toBe(false);
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({ looksLikeJwt: () => true, verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity }));

@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ROADMAP 2.467 — `POST /assist/v1/scenarios/:scenario_id/graph/register`.
  *
@@ -126,6 +127,7 @@ const SERVER_PRE_IMPORT: WireGraph = {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await registerRoute(app);
   await app.ready();
   return app;
@@ -160,6 +162,7 @@ beforeEach(() => {
   resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   // Default posture: guest (unowned) scenario, holding the PRE-import graph.
   ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
   getScenarioOwner.mockResolvedValue(null);
   scenarioExists.mockResolvedValue(true);
   loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
@@ -207,6 +210,7 @@ describe("register — optional initial brief", () => {
   it("cannot use a brief to write another user's scenario", async () => {
     getScenarioOwner.mockResolvedValue(OTHER_USER);
     ensureScenarioExists.mockResolvedValue({ user_id: OTHER_USER });
+    getScenarioOwner.mockResolvedValue(OTHER_USER);
     const app = await buildApp();
     expect((await post(app, SCENARIO, { graph: IMPORTED, brief_text: brief })).statusCode).toBe(404);
     expect(append).not.toHaveBeenCalled();
@@ -566,6 +570,7 @@ describe("register — payload refusals, all before any database work", () => {
 
     getScenarioOwner.mockResolvedValue(OWNER);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     const notMine = await post(app, SCENARIO, { graph: IMPORTED, user_id: OTHER_USER });
     expect(notMine.statusCode).toBe(404);
@@ -591,6 +596,7 @@ describe("register — the owner path", () => {
   it("lets the owner register their own scenario", async () => {
     getScenarioOwner.mockResolvedValue(OWNER);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const app = await buildApp();
     const res = await post(app, SCENARIO, { graph: IMPORTED, user_id: OWNER });
     expect(res.statusCode).toBe(200);
@@ -1780,3 +1786,8 @@ describe("register — the stored bytes are readable by every strict reader (ser
     await app.close();
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));
