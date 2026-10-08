@@ -17,7 +17,8 @@
  * Pure. One predicate and one set of words for every door: the canvas adapter (`edge-strength-edit.ts`), the Agent's
  * `propose_link_strength` / `propose_link_strengths`, and the writer itself (`adjust-edge-strength.ts`).
  */
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../orchestrator-v5/format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../../orchestrator-v5/format/edge-strength-words.js';
+import { linkSizing } from './link-sizing.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -125,8 +126,11 @@ export function userFigureMovedRefusal(before: unknown, after: unknown): string 
   const mean = (e: unknown): unknown => (isRec(e) && isRec(e.strength) ? e.strength.mean : undefined);
   const direction = (e: unknown): unknown => (isRec(e) ? e.effect_direction : undefined);
   if (mean(before) === mean(after) && direction(before) === direction(after)) return null;
+  if (linkSizing(after) === 'placeholder') {
+    return `This link holds your figure: ‘${held.quote}’. The proposed link is ${edgeStrengthWords(after)}. Change the figure or supply a size for its replacement.`;
+  }
   const m = mean(after);
-  const bandWord = typeof m === 'number' && Number.isFinite(m) ? CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(m))] : 'another strength';
+  const bandWord = typeof m === 'number' && Number.isFinite(m) ? edgeStrengthWords(after) : 'another strength';
   return userFigureHeldRefusalText(held, bandWord);
 }
 

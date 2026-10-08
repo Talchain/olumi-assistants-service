@@ -45,8 +45,10 @@ const HOST_SHA = 'a9c847ef37063cd1e5e25c6b8810cbe9b6f16aef83f188dce728923d5ea46a
 // #2783 (B15): + 193 bytes = exactly " " + MODEL_RELATIVE_NAMING_INSTRUCTION's new last sentence ("When the result gives
 // options' chances of meeting the goal, lead with those chances …; never open with the share."), nothing else.
 // Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
-const RENDERED_SHA = '915133bab1213750f377f06c8db09e70d750dac20e633c55711cee65d7dfda7e';
-const RENDERED_BYTES = 35_177;
+// + S-E GOALS S4 propose_new_limit clause in the proposing-tool instruction: staging 35,177 + 241 = 35,418 bytes.
+//   Removing exactly that clause from the SENT body reproduces staging's 915133ba… sha and 35,177 bytes.
+const RENDERED_SHA = 'a8a9845b846a3739da5e2ec4d0f5c084b7034548de36e2fbc85b9348db99b45e';
+const RENDERED_BYTES = 35_418;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';

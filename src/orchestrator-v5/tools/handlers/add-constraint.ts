@@ -890,6 +890,9 @@ export function createAddConstraintHandler(): HandlerFn {
         value: params.value, // user units, no normalisation
         label: constraintLabel,
         provenance: 'explicit',
+        ...(invocation.confirmedConstraintSourceQuote !== undefined
+          ? { source_quote: invocation.confirmedConstraintSourceQuote }
+          : existing?.source_quote !== undefined ? { source_quote: existing.source_quote } : {}),
         // BY-PRESENCE, never defaulted: an absent frame must stay absent on the
         // row, because `undefined` and "unattested" are the same fact here and
         // the contract forbids manufacturing the difference. This turn's own
