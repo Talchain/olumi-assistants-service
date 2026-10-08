@@ -20,6 +20,7 @@
  *
  * PURE and TOTAL: no I/O, no model call, never throws.
  */
+import { midSentence } from '../guidance/render.js';
 import type { SuggestedAction } from '../../compose/types.js';
 import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { widenVariantOf } from '../guidance/index.js';
@@ -1163,18 +1164,18 @@ export interface SettledRisksTurn {
 export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): SettledRisksTurn {
   const gate = riskGate(turn, readRiskCandidates(draft));
   // A shared precondition is SAID, never silence (DL 8 Oct): it can't be added yet, so it carries no Add press.
-  const sharedLines = gate.shared_preconditions.map((p) => `- Every option relies on ${p.relies_on}. Risk: ${quote(p.label)} `
+  const sharedLines = gate.shared_preconditions.map((p) => `- Every option relies on ${midSentence(p.relies_on)}. Risk: ${quote(p.label)} `
     + `(${CATEGORY_WORDS[p.category]}). This model can't yet hold a precondition that every option shares, so I haven't offered to add it.`);
   if (gate.kept.length === 0 && sharedLines.length === 0) {
     return { reply: risksFallbackReply(turn), offered: 0, actions: [TALK_IT_THROUGH_CHIP], gate };
   }
   // Preconditions stay in the model but outside the Run; only drivers name a causal through factor.
   const lines = gate.kept.map((r) => r.mechanism === 'relies_on'
-    ? `- ${quote(r.label)}: ${quote(r.hits.label)} relies on ${r.relies_on}. `
+    ? `- ${quote(r.label)}: ${quote(r.hits.label)} relies on ${midSentence(r.relies_on)}. `
       + "This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet."
     : r.shared
-    ? `- Every option relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}; it affects every option alike. Watch for: ${r.watch_for}.`
-    : `- ${quote(r.hits.label)} relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}. Watch for: ${r.watch_for}.`);
+    ? `- Every option relies on ${midSentence(r.relies_on)}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}; it affects every option alike. Watch for: ${r.watch_for}.`
+    : `- ${quote(r.hits.label)} relies on ${midSentence(r.relies_on)}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}. Watch for: ${r.watch_for}.`);
   const count = gate.kept.length + sharedLines.length;
   const reply = [
     `${COUNT_WORDS[count]} you haven’t mapped yet.`,

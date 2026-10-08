@@ -384,6 +384,14 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
   }, 120_000);
 
+  it('step-12 receipt (DL 58e392, Paul try-guide 8 Oct): a precondition risk with no links is "Added … as a risk.", never "affecting ;"', async () => {
+    seed();
+    const { approve } = await offer(preconditionArgs());
+    const receipt = (await approveOffer(approve)).assistant_text;
+    expect(receipt, receipt).toContain(`Added "${RISK_LABEL}" as a risk.`);
+    expect(receipt, receipt).not.toMatch(/affecting\s*[;.,]|affecting\s*$|driven by\s*[;.,]/m);
+  }, 120_000);
+
   it('chat-precondition-deterministic-mixed-links: whole request says in the assistant reply why both model links are dropped, without narration', async () => {
     seed();
     const { response, approve } = await offer({ ...preconditionArgs(), whole_request: true,
