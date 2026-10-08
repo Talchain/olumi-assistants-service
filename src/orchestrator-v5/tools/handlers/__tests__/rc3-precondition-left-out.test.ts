@@ -143,9 +143,14 @@ describe('RC3 a′ identity-keyed readiness and Run exclusion', () => {
 
   it('rc3-disclosure: the host names the affected option and model limitation, never asks for a goal direction', () => {
     const g = withRisk();
-    const at = { restingText: 'Your results are ready.', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
+    // #2884: the chance clause is said only beside that option's SHOWN chance (a figure/range cell of the read).
+    const shown = [{ option_id: OPTION_ID, kind: 'figure' as const, display: 'about 40%' }];
+    const at = { restingText: 'Your results are ready.', questionsToggle: false, awaitingApproval: false, builtOrRan: true, chanceCells: shown };
     const lines = decisionInputLines(g, at).filter((line) => line.includes(RISK_LABEL));
     expect(lines).toEqual([disclosure]);
+    const withoutChance = disclosure.replace(", and that option's chance doesn't include it yet.", '.');
+    expect(decisionInputLines(g, { ...at, chanceCells: [] }).filter((line) => line.includes(RISK_LABEL)), 'no shown chance → no chance clause')
+      .toEqual([withoutChance]);
     expect(lines.join(' ')).not.toMatch(/driven by|affects every option alike|whether it raises or lowers/);
     expect(decisionInputLines(g, { ...at, builtOrRan: false }).filter((line) => line.includes(RISK_LABEL))).toEqual([]);
   });
