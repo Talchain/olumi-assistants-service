@@ -21,6 +21,7 @@ const STORED = [{ option_id: 'raise_price_to_54', state: 'excluded_olumi_propose
 const SCENARIO = '7c1f8e3b-4d5a-4f6b-8c9d-0e1f2a3b4c5d';
 
 let readPayload: Record<string, unknown> = {};
+let narratorText = 'Here is what the model holds.';
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number }>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -56,7 +57,7 @@ describe('52f8cd: the Agent turn carries the run\'s STORED option participation 
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
-      const output = [{ type: 'message', content: [{ type: 'output_text', text: 'Here is what the model holds.' }] }];
+      const output = [{ type: 'message', content: [{ type: 'output_text', text: narratorText }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
     vi.resetModules();
@@ -71,6 +72,7 @@ describe('52f8cd: the Agent turn carries the run\'s STORED option participation 
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     readPayload = { graph: SERVED.graph, graph_hash: SERVED.graph_hash };
+    narratorText = 'Here is what the model holds.';
     rows.clear();
     store.append.mockClear();
   });
@@ -99,6 +101,40 @@ describe('52f8cd: the Agent turn carries the run\'s STORED option participation 
     const body = (await turn()).json() as Record<string, unknown>;
     expect(body).toHaveProperty('option_participation');
     expect(body.option_participation).toEqual([]);
+  });
+
+  it('Q6 RED: the served inclusion bullet never reaches assistant_text for the Run\'s left-out £54 option; the same option sent is unchanged', async () => {
+    const bullet = '- £49 is held as today; £59 and an Olumi-suggested £54 test are included for comparison.';
+    const line = '‘Test £54 Pro price’ is Olumi’s suggestion, so it was left out of this comparison until you add it.';
+    const graph = structuredClone(SERVED.graph) as { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+    graph.nodes = graph.nodes.map(node => node.id === 'increase_price_to_54'
+      ? { ...node, id: 'test_54_pro_price', label: 'Test £54 Pro price' } : node);
+    graph.edges = graph.edges.map(edge => ({ ...edge,
+      ...(edge.from === 'increase_price_to_54' ? { from: 'test_54_pro_price' } : {}),
+      ...(edge.to === 'increase_price_to_54' ? { to: 'test_54_pro_price' } : {}),
+    }));
+    narratorText = bullet;
+    const participation = [{ option_id: 'test_54_pro_price', state: 'excluded_olumi_proposed' }];
+    readPayload = { ...readPayload, graph, analysis_option_participation: participation };
+
+    const excludedResponse = await turn();
+    expect(excludedResponse.statusCode).toBe(200);
+    const excluded = excludedResponse.json() as { assistant_text: string; option_participation: unknown; _agent: { replayed?: boolean } };
+    expect(excluded._agent.replayed, 'control: this exercises the live final egress').not.toBe(true);
+    expect(excluded.option_participation, 'control: the Run\'s recorded exclusion was read').toEqual(participation);
+    expect(excluded.assistant_text).not.toContain(bullet);
+    expect(excluded.assistant_text).not.toContain('£54 test are included for comparison');
+    expect(excluded.assistant_text.split(line).length - 1).toBe(1);
+    expect(excluded.assistant_text.split('\n').some(part => ['-', '*'].includes(part.trim()))).toBe(false);
+
+    // Recorded empty means sent here: the same graph and narrator words must pass byte for byte.
+    rows.clear();
+    readPayload = { ...readPayload, analysis_option_participation: [] };
+    const sentResponse = await turn();
+    expect(sentResponse.statusCode).toBe(200);
+    const sent = sentResponse.json() as { assistant_text: string; option_participation: unknown };
+    expect(sent.option_participation).toEqual([]);
+    expect(sent.assistant_text).toBe(bullet);
   });
 
   it.each([

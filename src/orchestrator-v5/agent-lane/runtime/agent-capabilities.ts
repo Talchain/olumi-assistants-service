@@ -24,7 +24,7 @@ import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
+import { optionsLeftOutOfRun, readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { reframedNodeIds } from '../refit-frames.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
@@ -8722,7 +8722,8 @@ export function createAgentCapabilities(
           postRunRead = read;
           graphForProduct = read?.raw;
           evaluatedForProduct = read?.identity_evaluated;
-          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts, read?.identity_evaluated);
+          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts, read?.identity_evaluated,
+            new Set(optionsLeftOutOfRun(read?.analysis_result, read?.option_participation, read?.raw).map(o => o.option_id)));
         } catch { postRunRead = null; graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
       }
       // ⛔ GOAL CERTAINTY (DL 5887593253; MG's producer #2270, stored per Run by #2280): an option at P(goal) exactly 0 or 1 is

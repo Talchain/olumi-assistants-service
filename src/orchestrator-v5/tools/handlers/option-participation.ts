@@ -9,7 +9,7 @@
  * fact, under the SAME gates, as `analysis_result`, read through THIS one reader (the `goal_certainty` pattern).
  */
 import type { z } from 'zod';
-import { RunAnalysisResultSchema, type OptionParticipationEntrySchema } from '@talchain/schemas/orchestrator';
+import { RunAnalysisResultSchema, RunInputSnapshotSchema, type OptionParticipationEntrySchema } from '@talchain/schemas/orchestrator';
 
 export type OptionParticipationEntry = z.infer<typeof OptionParticipationEntrySchema>;
 
@@ -26,4 +26,60 @@ export function readStoredOptionParticipation(raw: unknown): StoredOptionPartici
   if (raw === undefined || raw === null) return undefined;
   const parsed = StoredOptionParticipationSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
+}
+
+export interface RecordedRunOption {
+  readonly option_id: string;
+  readonly label?: string;
+}
+export interface LeftOutRunOption extends RecordedRunOption {
+  readonly reason: string;
+}
+
+/**
+ * Q6: ONE projection of the Run's recorded sent/left-out set, for limit words and final reply egress. The snapshot's
+ * contract reader owns its complete sent roster; otherwise the existing participation reader owns the exclusion.
+ * Graph labels only name recorded ids: today's authorship/status never decides whether the Run left an option out.
+ * Unknown/refused records mean no exclusions. A recorded empty snapshot/participation stays empty.
+ */
+export function runOptionSetForCopy(analysisResult: unknown, participation: unknown, graph: unknown): {
+  readonly leftOut: readonly LeftOutRunOption[];
+  readonly sent: readonly RecordedRunOption[];
+} {
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const options: RecordedRunOption[] = Array.isArray(nodes) ? nodes.flatMap((value) => {
+    const n = value as { id?: unknown; kind?: unknown; label?: unknown } | null;
+    return n?.kind === 'option' && typeof n.id === 'string'
+      ? [{ option_id: n.id, ...(typeof n.label === 'string' && n.label.trim() !== '' ? { label: n.label.trim() } : {}) }]
+      : [];
+  }) : [];
+  const labels = new Map(options.map((o) => [o.option_id, o.label]));
+  const named = (o: RecordedRunOption): RecordedRunOption => {
+    const label = typeof o.label === 'string' && o.label.trim() !== '' ? o.label.trim() : labels.get(o.option_id);
+    return { option_id: o.option_id, ...(label !== undefined ? { label } : {}) };
+  };
+  const snapshot = RunInputSnapshotSchema.safeParse((analysisResult as { input_snapshot?: unknown } | null | undefined)?.input_snapshot);
+  if (snapshot.success) {
+    return {
+      leftOut: snapshot.data.options_not_sent.map((o) => ({ ...named(o), reason: o.reason })),
+      sent: snapshot.data.options.map(named),
+    };
+  }
+  const stored = readStoredOptionParticipation(participation);
+  const leftOut = (stored ?? []).flatMap((o): LeftOutRunOption[] => {
+    switch (o.state) {
+      case 'excluded_olumi_proposed': return [{ ...named(o), reason: 'olumi_proposed' }];
+      case 'excluded_infeasible': return [{ ...named(o), reason: 'infeasible' }];
+      case 'excluded_removed': return [{ ...named(o), reason: 'removed' }];
+      default: return [];
+    }
+  });
+  const excludedIds = new Set(leftOut.map((o) => o.option_id));
+  // Without a snapshot, retain every other graph label as a conservative figure-alias collision control.
+  return { leftOut, sent: options.filter((o) => !excludedIds.has(o.option_id)) };
+}
+
+/** The same projection's ids/reasons; limit copy consumes no separate exclusion predicate. */
+export function optionsLeftOutOfRun(analysisResult: unknown, participation: unknown, graph: unknown): readonly LeftOutRunOption[] {
+  return runOptionSetForCopy(analysisResult, participation, graph).leftOut;
 }
