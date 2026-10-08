@@ -19,6 +19,7 @@
  */
 
 import type { ContextPackAnalysis, ContextPackGraph } from './context-pack-assembler.js';
+import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import { isRenderableValidationEdge } from '../coaching/validation-priority.js';
 import {
   AMBIGUOUS_LABEL,
@@ -76,6 +77,8 @@ export interface StructureLink {
   readonly edge_type: 'directed' | 'bidirected';
   /** Omitted whenever strict canonical relationship detail is unavailable. */
   readonly strength?: number;
+  /** Carried from the compact edge; a prior never becomes an authored strength. */
+  readonly sizing?: LinkSizing;
   readonly plain_interpretation?: string;
 }
 
@@ -122,6 +125,7 @@ interface MinimalEdge {
   readonly from: string;
   readonly to: string;
   readonly strength: number;
+  readonly sizing?: LinkSizing;
   readonly edge_type?: 'bidirected';
   readonly plain_interpretation?: string;
 }
@@ -150,7 +154,10 @@ function isMinimalEdge(v: unknown): v is MinimalEdge {
  * function keeps the two lists from drifting apart again.
  */
 function compareStructureLinks(a: StructureLink, b: StructureLink): number {
-  if (a.strength !== undefined && b.strength !== undefined) {
+  if ((a.sizing === 'placeholder') !== (b.sizing === 'placeholder')) {
+    return a.sizing === 'placeholder' ? 1 : -1;
+  }
+  if (a.sizing !== 'placeholder' && b.sizing !== 'placeholder' && a.strength !== undefined && b.strength !== undefined) {
     const byMagnitude = Math.abs(b.strength) - Math.abs(a.strength);
     if (byMagnitude !== 0) return byMagnitude;
   }
@@ -203,6 +210,7 @@ export function buildStructureProjectionSummary(
     }
     if (
       !Object.is(prior.strength, edge.strength) ||
+      prior.sizing !== edge.sizing ||
       prior.plain_interpretation !== edge.plain_interpretation
     ) {
       conflictingEdgeIdentity = true;
@@ -233,6 +241,7 @@ export function buildStructureProjectionSummary(
       label_to: labelTo,
       edge_type: edge.edge_type === 'bidirected' ? 'bidirected' : 'directed',
       ...(strictDetails ? { strength: edge.strength } : {}),
+      ...(edge.sizing !== undefined ? { sizing: edge.sizing } : {}),
       ...(strictDetails && edge.plain_interpretation !== undefined
         ? { plain_interpretation: edge.plain_interpretation }
         : {}),
@@ -298,6 +307,7 @@ export function buildStructureProjectionSummary(
             label_to: labelTo,
             edge_type: e.edge_type === 'bidirected' ? 'bidirected' : 'directed',
             ...(strictDetails ? { strength: e.strength } : {}),
+            ...(e.sizing !== undefined ? { sizing: e.sizing } : {}),
             ...(strictDetails && e.plain_interpretation !== undefined
               ? { plain_interpretation: e.plain_interpretation }
               : {}),

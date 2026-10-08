@@ -243,6 +243,8 @@ const sizerUnitsOf = (nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, st
  * natural effect speaks only while the edge's mean is the β it was written for (magnitude contract, R&C 5845818897).
  */
 function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefined>): boolean {
+  // Science 393023 LICENCE ruling 3 (P53x): a contradictory natural effect cannot size a projected mean.
+  if (linkSizing(edge) === 'placeholder') return false;
   const p = isRec(edge.provenance) ? edge.provenance : undefined;
   if (p === undefined || !SIZED_MAGNITUDES.has(p.magnitude)) return false;
   const effect = isRec(p.natural_effect) ? p.natural_effect : undefined;

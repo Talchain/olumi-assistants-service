@@ -985,6 +985,7 @@ export const POLICY = {
       "honest_limit": {
         "when": "No current grounded tipping_point, and: The user explicitly asks (menu, chip or user.explicit_request) AND run.decision_sensitivity.status in [none_measurable, not_measured]. The row is never OFFERED in this state; this is how the method answers when asked.",
         "text": "Olumi can't yet measure what would change this choice in this model. The most useful thing to check meanwhile is {item_label}: it is Olumi's estimate and it sits on the path to your goal.",
+        "placeholder_text": "Olumi can't yet measure what would change this choice in this model. The most useful thing to check meanwhile is {item_label}: this link is {sizing_words} and it sits on the path to your goal.",
         "item": "The RC-STRENGTHEN-ITEM pick (S1, then S3L, then S3V). With no Olumi estimate on a goal path, drop the second sentence.",
         "action": {
           "label": "Give your estimate",

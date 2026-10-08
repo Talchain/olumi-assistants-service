@@ -26,6 +26,7 @@ import { log } from '../../utils/telemetry.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import {
   compactGraph,
   type GraphV3Compact,
@@ -100,9 +101,21 @@ export function compactGraphForContextPack(
 
   try {
     const fallback = toStructuralGraphV3(graphState);
+    const compact = withoutBaselineIdentity(compactGraph(fallback));
+    // Structural coercion replaces coefficients with inert zeros. Read sizing from the original
+    // edge before that replacement; stable sorting preserves duplicate endpoint rows' index identity.
+    const originalEdges = graphState.edges.map((raw, index) => ({ raw, fallback: fallback.edges[index]! }))
+      .sort((a, b) => a.fallback.from.localeCompare(b.fallback.from) || a.fallback.to.localeCompare(b.fallback.to));
+    compact.edges = compact.edges.map((edge, index) => {
+      const original = originalEdges[index];
+      if (original === undefined || original.raw.from !== edge.from || original.raw.to !== edge.to
+        || original.fallback.from !== edge.from || original.fallback.to !== edge.to) return edge;
+      const sizing = linkSizing(original.raw);
+      return sizing === 'unmarked' ? edge : { ...edge, sizing };
+    });
     return {
       kind: 'compacted',
-      compact: withoutBaselineIdentity(compactGraph(fallback)),
+      compact,
       via: 'structural_fallback',
     };
   } catch (err) {

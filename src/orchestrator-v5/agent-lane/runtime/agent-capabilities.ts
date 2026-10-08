@@ -179,6 +179,7 @@ import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandStd, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
@@ -1369,7 +1370,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
       // Science 393023 LICENCE ruling 3: a placeholder has no current band, so none is projected for the Agent to name.
-      ...(linkSizing(e) !== 'placeholder' && st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
+      ...(linkSizing(e) !== 'placeholder' && st !== undefined && num(st.mean) ? { band: edgeStrengthWords(e) } : {}),
       ...(countedOnce ? { exists_probability: 1, counted_once: true }
         : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
@@ -3606,15 +3607,15 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: linkBandWord(currentBand) }), direction: current },
+        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: edgeStrengthWords(edge) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
-          ? (keptIsTheirs
+          ? (linkSizing(edge) === 'placeholder'
+            ? `Nothing has changed yet. The link's numbers are kept exactly as they are; nobody has sized this link. Approving records review, never the user\u2019s authorship. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
+            : keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
-              ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
-              : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
@@ -3976,7 +3977,7 @@ export function createAgentCapabilities(
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
       type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean;
-        was: InfluenceBand; sizedBefore: LinkSizing; sizedAfterApproval: LinkSizing };
+        wasEdge: unknown; sizedBefore: LinkSizing; sizedAfterApproval: LinkSizing };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -4068,7 +4069,7 @@ export function createAgentCapabilities(
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand,
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, wasEdge: edge,
             sizedBefore: linkSizing(edge), sizedAfterApproval });
           continue;
         }
@@ -4076,7 +4077,7 @@ export function createAgentCapabilities(
         const usersOwn = linkSizing(edge) === 'user';
         if (usersOwn) {
           if (currentBand === band) { already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`); continue; }
-          return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${linkBandWord(currentBand)}), and an estimate never replaces it. `
+          return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${edgeStrengthWords(edge)}), and an estimate never replaces it. `
             + 'NEXT CALL: the same links without this one \u2014 unless the user names its band in their own words.');
         }
         // ⛔ R3 DEFECT 1 (5936673643, served dcd72dc3; DL GO 1 Oct): approving the band a link ALREADY SITS IN keeps its
@@ -4091,7 +4092,7 @@ export function createAgentCapabilities(
         ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
           expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed',
           sizing_after_approval: sizedAfterApproval } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand,
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, wasEdge: edge,
           sizedBefore: linkSizing(edge), sizedAfterApproval });
       }
       if (ops.length === 0) {
@@ -4156,7 +4157,7 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { ...(x.sizedBefore === 'placeholder' ? {} : { band: linkBandWord(x.was) }), sizing: x.sizedBefore },
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { ...(x.sizedBefore === 'placeholder' ? {} : { band: edgeStrengthWords(x.wasEdge) }), sizing: x.sizedBefore },
           becomes: remainsPlaceholder(x) ? { sizing: 'placeholder' } : { band: linkBandWord(x.band) },
           whose: whoseFigure(x), keeps_current_strength: x.keeps,
           ...(x.keeps || !x.yours ? { sizing_after_approval: x.sizedAfterApproval } : {}) })),
