@@ -27,6 +27,7 @@ import { compactWordLabel } from './reply/labels.js';
  */
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
+import { identityCanCarryExactLinks } from '../admission/identity-evaluations.js';
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { userSizedLevelLessLinks } from './mediator-reading.js';
@@ -134,6 +135,7 @@ export function goalCertaintyDecisions(
   if (goal === undefined || typeof goal.id !== 'string') return [];
   const evaluations = new Map((identityEvaluations ?? []).filter(isRec)
     .filter((e) => e.evaluated === true && typeof e.node_id === 'string')
+    .filter((e) => identityCanCarryExactLinks(nodes, byId.get(e.node_id)?.nonlinear_identity))
     .map((e) => [e.node_id as string, e] as const));
   const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
   const declared = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
@@ -176,6 +178,11 @@ export function goalCertaintyDecisions(
     // is an interior result and gets no decision.
     const certainty: 0 | 1 | undefined = p === 1 ? 1 : p === 0 ? 0 : undefined;
     if (certainty === undefined) continue;
+    // ⛔ ZERO SPREAD IS NOT A CHANCE (Science §(ab)(2); DL hold on #2858): every draw gave the same result, so the 0 or 1
+    // says only what happens if today's figures hold. B1's Keep £49 read exactly 100% at month 12 with the user's rates
+    // held fixed, and was "earned" here because Keep moves nothing. No decision ⇒ unearned everywhere (the licence
+    // withholds its %, the transport strips the exact figure, the Agent says it cannot be confirmed).
+    if (zeroSpread(r)) continue;
     const option = byId.get(optionId);
     const iv = option !== undefined ? mergeInterventionSourceObjects(option) : {};
     // The goal would move AWAY from its target (P = 1) or TOWARDS it (P = 0) to reverse the certainty.
@@ -295,6 +302,24 @@ function sayMismatch(
       + `‘${label(goal.id)}’, so it can’t follow what ‘${label(found.from)}’ does through it.`
     : `${head}the model links ‘${label(found.through)}’ into ‘${label(goal.id)}’ beside the parts it is worked out from, so it `
       + `can’t check what ‘${label(found.from)}’ does to it.`;
+}
+
+/**
+ * Every valid draw gave this option the same goal value. Served Runs since 6 Oct carry the zero as floating-point noise
+ * (std 1.1e-16 … 3.3e-10 with p10 === p90; census over 17,927 stored Runs, 8 Oct), so identical deciles decide first and
+ * a std counts as zero within a relative tolerance far below any real spread (the smallest real one in that census:
+ * B1 £59, std 0.0045 on a 0–1 frame).
+ */
+const ZERO_SPREAD_RELATIVE = 1e-9;
+export function zeroSpread(r: Rec): boolean {
+  const o = isRec(r.outcome) ? r.outcome : undefined;
+  if (o === undefined) return false;
+  const p10 = num(o.p10);
+  const p90 = num(o.p90);
+  if (p10 !== undefined && p90 !== undefined && p10 === p90) return true;
+  const std = num(o.std);
+  const scale = Math.max(Math.abs(num(o.p50) ?? num(o.mean) ?? 0), 1);
+  return std !== undefined && std >= 0 && std <= ZERO_SPREAD_RELATIVE * scale;
 }
 
 /**
@@ -447,7 +472,8 @@ export function placeholderGoalPaths(
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
   const evaluated = new Set((identityEvaluations ?? []).filter(isRec)
-    .filter((e) => e.evaluated === true && typeof e.node_id === 'string').map((e) => e.node_id as string));
+    .filter((e) => e.evaluated === true && typeof e.node_id === 'string'
+      && identityCanCarryExactLinks(nodes, byId.get(e.node_id)?.nonlinear_identity)).map((e) => e.node_id as string));
   // ⛔ THE CARD IS THE ONE ROUTE (AIQ 5902606752): a goal that declares an INFERRED product this run did not evaluate is
   // Olumi's unconfirmed reading of how the goal is made. PLoT never forwards it (variant (d), `translator-v3.ts`) and
   // withholds every goal figure itself (#416, which (S) defers to), and C46 names the leader's cause. (S) stands down, so

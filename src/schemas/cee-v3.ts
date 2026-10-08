@@ -184,6 +184,25 @@ export type ObservedStateV3T = z.infer<typeof ObservedStateV3>;
 export const FactorCategoryV3 = z.enum(["controllable", "observable", "external"]);
 export type FactorCategoryV3T = z.infer<typeof FactorCategoryV3>;
 
+/** Server-authored draft widening receipt; the drafter cannot author this metadata. */
+export const DraftOptionWidening = z.object({
+  provenance: z.literal('ai_suggested_widen'),
+}).strict();
+export type DraftOptionWideningT = z.infer<typeof DraftOptionWidening>;
+
+export const DraftRiskWidening = z.object({
+  provenance: z.literal('ai_suggested_widen'),
+  hits: z.object({ id: z.string().regex(CANONICAL_ID_REGEX), label: z.string(), kind: z.enum(['option', 'factor']) }).strict(),
+  through: z.object({ id: z.string().regex(CANONICAL_ID_REGEX), label: z.string(), direction: z.enum(['positive', 'negative']) }).strict(),
+  affects: z.object({ id: z.string().regex(CANONICAL_ID_REGEX), label: z.string(), direction: z.enum(['positive', 'negative']) }).strict(),
+  mechanism: z.enum(['drives', 'relies_on']),
+  relies_on: z.string().min(1),
+  watch_for: z.string().min(1),
+}).strict();
+export type DraftRiskWideningT = z.infer<typeof DraftRiskWidening>;
+export const DraftWidening = z.union([DraftRiskWidening, DraftOptionWidening]);
+export type DraftWideningT = z.infer<typeof DraftWidening>;
+
 /**
  * V3 node schema.
  */
@@ -511,6 +530,8 @@ export const NodeV3 = z.object({
    *  reconciliation (typed extras), never re-derived from the brief. Declared here because `NodeV3` strips undeclared
    *  keys: without it the mark would be lost on the register write. Adopting the option removes it. */
   proposed_by: z.literal('olumi').optional(),
+  /** Draft-time suggestions retain their origin and risk attachment without creating a causal link. */
+  draft_widening: DraftWidening.optional(),
   /** UI display vocabulary for the node's origin. Set by the V3 transform from
    *  `extractionType`: `explicit`/`observed` → `from_brief`,
    *  `inferred`/`range` → `ai_inferred`, absent/unknown → `ai_inferred`.
@@ -642,6 +663,20 @@ export const NodeV3 = z.object({
         operation: z.literal('sum'),
         factor_ids: z.array(z.string().min(1)).min(2),
         stated_in_brief: z.literal(false),
+      }).strict(),
+      // ⭐ `accumulation` (Science goals §(v); contract: programme-docs design/ACCUMULATION-CARRIER-CONTRACT-20261008.md):
+      // a STOCK at the goal's horizon, worked out without time-stepping, S_T = S₀(1−c)^T + inflow·(1−(1−c)^T)/c, on a
+      // DERIVED node (never the goal). `factor_ids` is POSITIONAL: [stock today, churn rate per month, inflow per month],
+      // three distinct parents. `rate_scale` turns the churn factor's user-unit value into a fraction (0.01 for "%").
+      // Read-tolerant FIRST (CEE #3): before this member, `.catch(undefined)` erased the carrier on every read.
+      z.object({
+        operation: z.literal('accumulation'),
+        factor_ids: z.tuple([z.string().min(1), z.string().min(1), z.string().min(1)])
+          .refine((ids) => new Set(ids).size === 3, 'three distinct ids'),
+        horizon_months: z.number().int().min(1).max(120),
+        rate_scale: z.number().gt(0).lte(1),
+        rate_sigma_log: z.tuple([z.number().finite().min(0), z.number().finite().min(0)]).optional(),
+        stated_in_brief: z.boolean(),
       }).strict(),
     ])
     .optional()
@@ -887,6 +922,9 @@ export const InterventionV3 = z.object({
   value_confidence: z.enum(["high", "medium", "low"]).optional(),
   /** Explanation for transparency */
   reasoning: z.string().optional(),
+  /** Olumi's draft-widening level, with a basis the user can check; never user-authored. */
+  estimate: z.boolean().optional(),
+  basis: z.string().optional(),
   // --- Raw+Encoded pattern fields (additive, optional) ---
   /** Original value before encoding (for categorical/boolean interventions) */
   raw_value: RawInterventionValue.optional(),

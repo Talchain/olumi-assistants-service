@@ -637,10 +637,12 @@ export default async function route(app: FastifyInstance) {
       // ── 4. The read ─────────────────────────────────────────────────────
       let graph: unknown;
       let briefText: string | null;
+      let revision: number | undefined;
       try {
         const loaded = snapshot ?? await store.loadGraphAndBriefText(scenarioId);
         graph = loaded.graph;
         briefText = loaded.briefText;
+        revision = loaded.revision;
       } catch (err) {
         log.warn(
           {
@@ -692,6 +694,7 @@ export default async function route(app: FastifyInstance) {
         graph: graphPresent ? graph : null,
         requestId,
         goalScopeClaimInput: scopeInput,
+        revision,
         ...(snapshot !== undefined && snapshot !== null ? { analysisInvalidatedAt: snapshot.analysisInvalidatedAt } : {}),
       });
       // The selected block already has one public carrier, `analysis_result`.
@@ -874,6 +877,7 @@ export default async function route(app: FastifyInstance) {
           goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
         } : {}),
         analysis_result: analysis.analysis_result,
+        canonical_analysis_view: analysis.canonical_analysis_view,
         ...(analysis.run_recording === undefined ? {} : { run_recording: analysis.run_recording }),
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the

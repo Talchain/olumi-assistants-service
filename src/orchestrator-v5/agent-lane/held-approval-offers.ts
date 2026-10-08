@@ -15,8 +15,9 @@ import type { StructuredProposal } from './proposal.js';
  * while `identityCardOfferable` holds on it. Without a graph nothing changes (the hash check stands alone, as before).
  */
 export function identityProposalOfferable(proposal: StructuredProposal | undefined, graph: unknown): boolean {
-  if (graph === undefined || proposal === undefined || identityReadingOf(proposal) === undefined) return true;
-  return identityCardOfferable(graph);
+  const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
+  if (graph === undefined || reading === undefined) return true;
+  return identityCardOfferable(graph, reading.part_levels);
 }
 
 /** The SAME process store the turn route authorises and settles. */

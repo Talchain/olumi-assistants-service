@@ -1,0 +1,37 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 15ms
+     × a linkless P5 failure preserves the existing no-goal-path withhold for everyone 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a linkless P5 failure preserves the existing no-goal-path withhold for everyone
+AssertionError: expected [ 'raise', 'starter', 'keep' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "raise",
++   "starter",
++   "keep",
++ ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:157:26
+    155|     expect(failures(g).failures).toMatchObject([{ case: 'c', links: []…
+    156|     const out = withholdGoalFiguresForUntestableTarget(envelope(), g, …
+    157|     expect(chances(out)).toEqual([]);
+       |                          ^
+    158|     expect(warning(out)?.option_ids).toEqual(ids);
+    159|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:45:33
+   Duration  4.44s (transform 3.16s, setup 112ms, import 4.18s, tests 15ms, environment 0ms)
+

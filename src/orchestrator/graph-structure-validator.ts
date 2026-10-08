@@ -81,6 +81,7 @@
 
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
 import { inertRiskBranch, preconditionRiskIds } from '../graph/inert-risk.js';
+import { draftedTeamPartOf } from '../orchestrator-v5/goal-target/event-by-date-model.js';
 import { NodeV3, type GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
@@ -389,6 +390,16 @@ export function validateGraphStructure(
   const leftOut = opts.leaveOutInertRisks === true
     ? inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph))
     : preconditionRiskIds(graph.nodes, graph.edges, limitIdsOf(graph));
+  // A canonical event forecast keeps its reasoning sketch beside the option-level capacity sum. Only context
+  // explicitly excluded by admission is left out of readiness; active settings and limits remain structural blockers.
+  if (opts.leaveOutInertRisks === true && draftedTeamPartOf(graph) !== null) {
+    const targets = new Set(graph.nodes.filter(n => n.kind === 'option').flatMap(n => Object.keys(n.interventions ?? {})));
+    const limits = limitIdsOf(graph);
+    for (const node of graph.nodes) {
+      if (node.id.startsWith('event_context_') && ['factor', 'risk', 'outcome'].includes(node.kind)
+        && node.analysis_participation === 'retained_excluded' && !targets.has(node.id) && !limits.has(node.id)) leftOut.add(node.id);
+    }
+  }
 
   checkRequiredNodeKinds(graph, violations);
   violations.push(...preconditionRiskLinkViolations(graph));
@@ -397,7 +408,7 @@ export function validateGraphStructure(
   checkOrphanNodes(graph, violations, leftOut);
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);
-  checkPathToGoal(graph, violations, leftOut);
+  optionsWithoutGoalPath(graph, leftOut, violations);
   checkCycles(graph, violations);
 
   return {
@@ -490,13 +501,13 @@ function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[], le
 }
 
 /** The nodes a limit names (`goal_constraints`): never left out as an inert risk, and the limit-sink branch's roots. */
-function limitIdsOf(graph: GraphV3T): Set<string> {
+function limitIdsOf(graph: Pick<GoalPathGraph, 'goal_constraints'>): Set<string> {
   return new Set(
     (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
   );
 }
 
-function isDirected(edge: GraphV3T['edges'][number]): boolean {
+function isDirected(edge: { readonly edge_type?: unknown }): boolean {
   // Treat absent edge_type as 'directed' (backward compat, matches schemas/graph.ts)
   return (edge as Record<string, unknown>).edge_type !== 'bidirected';
 }
@@ -566,9 +577,52 @@ function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolati
   }
 }
 
-function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[], leftOut: ReadonlySet<string>): void {
+/** Directed reachability shared by construction and structural validation; bidirected edges are not paths. */
+export function reachableNodeIds(
+  edges: readonly { readonly from: string; readonly to: string; readonly edge_type?: string }[],
+  roots: readonly string[],
+  reverse = false,
+): Set<string> {
+  const adjacency = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (edge.edge_type === 'bidirected') continue;
+    const from = reverse ? edge.to : edge.from;
+    const to = reverse ? edge.from : edge.to;
+    if (!adjacency.has(from)) adjacency.set(from, new Set());
+    adjacency.get(from)!.add(to);
+  }
+  const reachable = new Set(roots);
+  const queue = [...reachable];
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of adjacency.get(queue[i]!) ?? []) {
+      if (!reachable.has(next)) {
+        reachable.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return reachable;
+}
+
+/** The admitted data needed by the existing path referee; no schema projection or guessed constraints. */
+export interface GoalPathGraph {
+  readonly nodes: readonly { readonly id: string; readonly kind: string; readonly label: string; readonly category?: unknown; readonly relies_on?: unknown }[];
+  readonly edges: readonly { readonly from: string; readonly to: string; readonly edge_type?: string }[];
+  readonly goal_constraints?: readonly { readonly node_id?: string }[];
+}
+
+/**
+ * The validator's option-path refusals, with its limit sinks, left-out set and specific-violation suppression.
+ * The validator also collects its unchanged decision/other-node violations here. Construction reads only option ids.
+ */
+export function optionsWithoutGoalPath(
+  graph: GoalPathGraph,
+  leftOut: ReadonlySet<string> = inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph)),
+  violations: StructuralViolation[] = [],
+): Set<string> {
+  const refusedOptions = new Set<string>();
   const goalNodes = graph.nodes.filter((n) => n.kind === 'goal');
-  if (goalNodes.length === 0) return; // Already caught by NO_GOAL check
+  if (goalNodes.length === 0) return refusedOptions; // Already caught by NO_GOAL check
 
   const decisionNodes = graph.nodes.filter((n) => n.kind === 'decision');
 
@@ -579,7 +633,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[], lef
     decisionCount: decisionNodes.length,
     optionCount: graph.nodes.filter((n) => n.kind === 'option').length,
   });
-  if (decisionNodes.length === 0 && !decisionFree) return;
+  if (decisionNodes.length === 0 && !decisionFree) return refusedOptions;
 
   // ⭐⭐ THE SPLIT, mirroring `graph-validator.ts`'s `validateReachability`.
   //
@@ -593,35 +647,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[], lef
   // Loop 2 (every edged node can REACH the goal) is a reverse BFS from the goal
   // and needs none, so it must keep running.
   if (decisionNodes.length > 0) {
-    // Build forward adjacency list — skip bidirected edges (unmeasured confounders)
-    const forward = new Map<string, Set<string>>();
-    for (const edge of graph.edges) {
-      if (!isDirected(edge)) continue;
-      if (!forward.has(edge.from)) forward.set(edge.from, new Set());
-      forward.get(edge.from)!.add(edge.to);
-    }
-
-    // BFS from each decision node to find all reachable nodes
-    const reachable = new Set<string>();
-    const queue: string[] = [];
-
-    for (const dec of decisionNodes) {
-      queue.push(dec.id);
-      reachable.add(dec.id);
-    }
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      const neighbours = forward.get(current);
-      if (neighbours) {
-        for (const next of neighbours) {
-          if (!reachable.has(next)) {
-            reachable.add(next);
-            queue.push(next);
-          }
-        }
-      }
-    }
+    const reachable = reachableNodeIds(graph.edges, decisionNodes.map((n) => n.id));
 
     // Check if every goal is reachable
     for (const goal of goalNodes) {
@@ -644,31 +670,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[], lef
   // decision side. One reverse-BFS from the goal nodes over the same
   // forward adjacency computes the honest set; true dead-ends (edged
   // nodes with no forward path to the goal) still fail.
-  const reverse = new Map<string, Set<string>>();
-  for (const edge of graph.edges) {
-    if (!isDirected(edge)) continue;
-    if (!reverse.has(edge.to)) reverse.set(edge.to, new Set());
-    reverse.get(edge.to)!.add(edge.from);
-  }
-
-  const canReachGoal = new Set<string>();
-  const reverseQueue: string[] = [];
-  for (const goal of goalNodes) {
-    canReachGoal.add(goal.id);
-    reverseQueue.push(goal.id);
-  }
-  while (reverseQueue.length > 0) {
-    const current = reverseQueue.shift()!;
-    const predecessors = reverse.get(current);
-    if (predecessors) {
-      for (const prev of predecessors) {
-        if (!canReachGoal.has(prev)) {
-          canReachGoal.add(prev);
-          reverseQueue.push(prev);
-        }
-      }
-    }
-  }
+  const canReachGoal = reachableNodeIds(graph.edges, goalNodes.map((n) => n.id), true);
 
   // Suppress the redundant flag for options already reported by
   // OPTION_NO_FACTOR_EDGES: an option with no outbound factor edge
@@ -724,6 +726,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[], lef
     // but an edged node can still be a dead-end with no path to the goal.
     const hasAnyEdge = graph.edges.some((e) => e.from === node.id || e.to === node.id);
     if (hasAnyEdge) {
+      if (node.kind === 'option') refusedOptions.add(node.id);
       violations.push({
         code: 'NO_PATH_TO_GOAL',
         detail: `Node "${node.id}" (${node.label}) cannot reach the goal via directed paths`,
@@ -731,6 +734,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[], lef
       });
     }
   }
+  return refusedOptions;
 }
 
 function checkCycles(graph: GraphV3T, violations: StructuralViolation[]): void {

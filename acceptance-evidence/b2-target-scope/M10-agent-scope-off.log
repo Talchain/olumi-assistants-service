@@ -1,0 +1,35 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 32ms
+     × the Agent target-only note keeps the partial option scope and permits clean options' licences 29ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > the Agent target-only note keeps the partial option scope and permits clean options' licences
+AssertionError: expected undefined to deeply equal [ 'starter' ]
+
+- Expected:
+[
+  "starter",
+]
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:165:33
+    163|     const out = withholdGoalFiguresForUntestableTarget(envelope(), g, …
+    164|     for (const agent of [goalChanceWithheldForAgent({ enrichment: out …
+    165|       expect(agent?.option_ids).toEqual(['starter']);
+       |                                 ^
+    166|       expect(agent?.note).not.toContain('EVERY option');
+    167|       expect(agent?.note).toContain('Other options');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:46:03
+   Duration  4.85s (transform 3.50s, setup 106ms, import 4.59s, tests 32ms, environment 0ms)
+

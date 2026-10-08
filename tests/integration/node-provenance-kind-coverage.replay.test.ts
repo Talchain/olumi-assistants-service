@@ -621,6 +621,12 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "count_noun",
       "description",
       "display_value",
+      // P05b #2854, 8 Oct (DL lease: automatic widening at draft time) — THE VALUE-BEARING DECISION: `draft_widening` is
+      // NOT value-bearing and joins neither `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is Olumi's stamp on a node it
+      // added unasked (provenance 'ai_suggested_widen') plus the risk's attachment as words and ids (hits / through /
+      // affects / mechanism / relies_on / watch_for). It asserts no magnitude, and a stamped risk stays
+      // 'retained_excluded' with zero links, so nothing in it can reach the calculation or read as a figure.
+      "draft_widening",
       "encoding_map",
       // event_risk.v1, 7 Oct (Science 393023 pilot) — THE VALUE-BEARING DECISION: `event_risk` IS value-bearing. It carries
       // a stated magnitude (the occurrence range p_low..p_high, attested by its REQUIRED `basis`), so it JOINS `carriesValue`

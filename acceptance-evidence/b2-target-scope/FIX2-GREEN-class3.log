@@ -1,0 +1,40 @@
+Load gate exit: 0
+{"load":4.57421875,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t 'class 3' < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (19 tests | 1 failed | 17 skipped) 35ms
+     × class 3: an unsized churn feed withholds X moving inflow, while Y keeps its own chance 31ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 3: an unsized churn feed withholds X moving inflow, while Y keeps its own chance
+AssertionError: expected { Object (x) } to deeply equal { Object (x) }
+
+- Expected
++ Received
+
+  {
+    "x": {
+-     "message": "Not shown. It can't yet be tested against your target (at least 800 subscribers), because it needs a size for the link from Unrelated A to Unrelated B. Roughly how much does Unrelated B change, in % / month, when Unrelated A rises by £1?",
++     "message": "Not shown. It can't yet be tested against your target (at least 800 subscribers), because it needs a size for the link from Unrelated A to Unrelated B. Roughly how much does Unrelated B change, in percentage points, when Unrelated A rises by £1?",
+    },
+  }
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:145:38
+    143|     expect(out.option_comparison.find((r: Rec) => r.option_id === 'y')…
+    144|     expect(warning(out)?.option_ids).toEqual(['x']);
+    145|     expect(warning(out)?.per_option).toEqual({ x: { message:
+       |                                      ^
+    146|       "Not shown. It can't yet be tested against your target (at least…
+    147|       + 'from Unrelated A to Unrelated B. Roughly how much does Unrela…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 17 skipped (19)
+   Start at  18:42:06
+   Duration  3.80s (transform 2.67s, setup 105ms, import 3.55s, tests 35ms, environment 0ms)
+

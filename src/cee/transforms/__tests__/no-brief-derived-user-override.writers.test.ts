@@ -264,6 +264,16 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // (`admit-model.ts`). Executed in `agent-lane/__tests__/goal-current-level-from-chat.test.ts`.
   "orchestrator-v5/agent-lane/goal-current-level.ts":
     "a stamp site — USER_EDIT_SOURCE on the goal's current level ONLY after the user stated it in chat (user_stated required, and the figure present in the user's own typed words) AND approved the exact held proposal (authorise_change); never read from the brief",
+  // ── P45 #4b (8 Oct 2026): identity part levels through the identity door.
+  //
+  // HOW THE VALUE REACHES THE STAMP: the user types a part's figure in chat; the route/Agent proposes the
+  // identity card carrying that figure (refused unless the exact figure is in the user's typed words); the
+  // writer stamps it ONLY when the user approves that exact held card (authorise_change on the stored,
+  // content-hashed proposal). Never read from the brief. Executed in identity-confirm-part-figure.test.ts.
+  "orchestrator-v5/system-events/identity-confirm-edit.ts":
+    "a stamp site — USER_EDIT_SOURCE on an identity part's level ONLY when the user typed the figure and approved the exact held identity card; never read from the brief",
+  "orchestrator-v5/agent-lane/runtime/agent-capabilities.ts":
+    "reader only — compares a part's saved observed_state.source with the identity writer's stamp to tell whether the user's figure is already saved; performs no write",
   "orchestrator-v5/admission/analysis-admission.ts":
     "comment only, and NOT a writer — the literal appears once in censusConfidenceParameters' docblock naming the control the ratified arm differs from; the module is a pure counter with no write path (proven on a deep-frozen graph across four arms) and derives no authorship rule of its own, delegating every authorship decision to earnsAuthorshipCredit. ⚠ Unlike the reader entries above its failure direction is NOT safe — a permissive mis-read would license comparative_leader — so the delegation, not the direction, is what makes it sound",
 };

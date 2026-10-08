@@ -1,0 +1,91 @@
+GitHub Actions run 37805655370, job 113409111351
+2026-10-08T16:02:40.0146041Z Complete job name: Required — tests 5/5
+2026-10-08T16:02:44.3734319Z HEAD is now at d55877c Merge a4981a7afc5511fff9bf042573a6c1f158a43af8 into 2cf61b60bb8eec079cb3e5a6f6843ecaf69eb588
+2026-10-08T16:12:03.8692291Z ##[error]Process completed with exit code 1.
+2026-10-08T16:12:03.5336362Z ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+2026-10-08T16:12:03.5336913Z 
+2026-10-08T16:12:03.5340814Z  FAIL  src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts > the Run carries A7 as a typed warning (served m1 through the real handler) > RED: it rides beside the target withhold, never in place of it (two separate facts)
+2026-10-08T16:12:03.5348769Z AssertionError: expected [ …(6) ] to include 'GOAL_FIGURES_TARGET_NOT_TESTABLE'
+2026-10-08T16:12:03.5350936Z  ❯ src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts:118:19
+2026-10-08T16:12:03.5437360Z     116|   it('RED: it rides beside the target withhold, never in place of it (…
+2026-10-08T16:12:03.5439577Z     117|     const codes = warningsOf(await runOn(M1.graph)).map((w) => w.code);
+2026-10-08T16:12:03.5441639Z     118|     expect(codes).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
+2026-10-08T16:12:03.5443051Z        |                   ^
+2026-10-08T16:12:03.5444367Z     119|     expect(codes).toContain(GOAL_HORIZON_NOT_TESTED);
+2026-10-08T16:12:03.5445317Z     120|   });
+2026-10-08T16:12:03.5445558Z 
+2026-10-08T16:12:03.5445920Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+2026-10-08T16:12:03.5446216Z 
+2026-10-08T16:12:03.5446261Z 
+2026-10-08T16:12:03.5484700Z  Test Files  1 failed | 703 passed | 2 skipped (706)
+2026-10-08T16:12:03.5597240Z       Tests  1 failed | 13473 passed | 30 skipped (13504)
+2026-10-08T16:12:03.5598324Z    Start at  16:03:42
+2026-10-08T16:12:03.5609933Z    Duration  501.33s (transform 46.15s, setup 34.57s, import 976.99s, tests 342.01s, environment 111ms)
+2026-10-08T16:12:03.5611954Z 
+2026-10-08T16:12:03.6374332Z JSON report written to /home/runner/work/olumi-assistants-service/olumi-assistants-service/.vitest-reports/shard-5.json
+
+GitHub Actions run 37805655370, job 113409111545
+2026-10-08T16:02:37.9424961Z Complete job name: Required — tests 4/5
+2026-10-08T16:02:42.6066378Z HEAD is now at d55877c Merge a4981a7afc5511fff9bf042573a6c1f158a43af8 into 2cf61b60bb8eec079cb3e5a6f6843ecaf69eb588
+2026-10-08T16:09:47.1119805Z ##[error]Process completed with exit code 1.
+2026-10-08T16:09:46.7645837Z ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+2026-10-08T16:09:46.7646128Z 
+2026-10-08T16:09:46.7648007Z  FAIL  tests/contract/tier3-leak-guard.static.guard.test.ts > Tier-3 leak guard — static producer scan (Brief 5 Part A) > ratified Tier-3 keys appear only in allow-listed, classified files
+2026-10-08T16:09:46.7654494Z AssertionError: tools/handlers/run-analysis.ts: references a ratified Tier-3 deny key (flip_thresholds, edge_e_values, inference_warnings, m1_coaching) but is not an allow-listed transport/structured/cage site. A user-facing string producer must not consume Tier-3 fields — consult isClaimUsable (claim-safety-cage.ts) and take the addition through claim-safety review (Brief 4 §9) before allow-listing it here with a classification.: expected false to be true // Object.is equality
+2026-10-08T16:09:46.7655761Z 
+2026-10-08T16:09:46.7655873Z - Expected
+2026-10-08T16:09:46.7656086Z + Received
+2026-10-08T16:09:46.7656181Z 
+2026-10-08T16:09:46.7656271Z - true
+2026-10-08T16:09:46.7656688Z + false
+2026-10-08T16:09:46.7656788Z 
+2026-10-08T16:09:46.7657094Z  ❯ tests/contract/tier3-leak-guard.static.guard.test.ts:202:9
+2026-10-08T16:09:46.7682605Z     200|           `fields — consult isClaimUsable (claim-safety-cage.ts) and t…
+2026-10-08T16:09:46.7683169Z     201|           `review (Brief 4 §9) before allow-listing it here with a cla…
+2026-10-08T16:09:46.7683769Z     202|       ).toBe(true);
+2026-10-08T16:09:46.7684125Z        |         ^
+2026-10-08T16:09:46.7684345Z     203|     }
+2026-10-08T16:09:46.7684564Z     204|   });
+2026-10-08T16:09:46.7684678Z 
+2026-10-08T16:09:46.7684887Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+2026-10-08T16:09:46.7685091Z 
+2026-10-08T16:09:46.7686120Z  FAIL  src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts > GUIDED HONESTY round 4: D1 non-converting band uses the same guided list > r9 inspector user band keeps existing recovery words without an Olumi-band press
+2026-10-08T16:09:46.7687116Z AssertionError: expected 'I can\'t yet say how likely ‘Launch s…' to contain 'I can\'t yet say how likely any optio…'
+2026-10-08T16:09:46.7687424Z 
+2026-10-08T16:09:46.7688564Z Expected: "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. You set this link as moderate. To test your £126,000 / month target I need it in £/month: roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+2026-10-08T16:09:46.7690467Z Received: "I can't yet say how likely ‘Launch starter tier’ is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. You set this link as moderate. To test your £126,000 / month target I need it in £/month: roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+2026-10-08T16:09:46.7691460Z 
+2026-10-08T16:09:46.7691968Z  ❯ src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts:365:18
+2026-10-08T16:09:46.7775265Z     363|     expect(guidedSizingActions(draft, graph)).toEqual([]);
+2026-10-08T16:09:46.7776719Z     364|     const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
+2026-10-08T16:09:46.7778236Z     365|     expect(said).toContain(warning!.say);
+2026-10-08T16:09:46.7778959Z        |                  ^
+2026-10-08T16:09:46.7779750Z     366|     expect(said).not.toContain('Olumi has it as a band');
+2026-10-08T16:09:46.7780814Z     367|     expect(said).not.toContain("The chance isn't shown yet:");
+2026-10-08T16:09:46.7781462Z 
+2026-10-08T16:09:46.7782031Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+2026-10-08T16:09:46.7782490Z 
+2026-10-08T16:09:46.7783976Z  FAIL  src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts > GUIDED HONESTY round 4: D1 non-converting band uses the same guided list > r9 refused-conversion user_specified provenance cannot receive Olumi-band attribution
+2026-10-08T16:09:46.7784890Z 
+2026-10-08T16:09:46.7786140Z  FAIL  src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts > GUIDED HONESTY round 4: D1 non-converting band uses the same guided list > r9 refused-conversion user_stated provenance cannot receive Olumi-band attribution
+2026-10-08T16:09:46.7787758Z AssertionError: expected 'I can\'t yet say how likely ‘Launch s…' to contain 'I can\'t yet say how likely any optio…'
+2026-10-08T16:09:46.7788236Z 
+2026-10-08T16:09:46.7789584Z Expected: "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+2026-10-08T16:09:46.7791711Z Received: "I can't yet say how likely ‘Launch starter tier’ is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+2026-10-08T16:09:46.7792766Z 
+2026-10-08T16:09:46.7793475Z  ❯ src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts:383:57
+2026-10-08T16:09:46.7794287Z     381|       option_comparison: options(graph).map(option_id => ({ option_id,…
+2026-10-08T16:09:46.7795053Z     382|     expect(guidedSizingForRun(run, graph)).toBeUndefined();
+2026-10-08T16:09:46.7795814Z     383|     expect(goalChanceWithheldForAgent(run, graph)?.say).toContain(warn…
+2026-10-08T16:09:46.7796433Z        |                                                         ^
+2026-10-08T16:09:46.7796834Z     384|   });
+2026-10-08T16:09:46.7797160Z     385|
+2026-10-08T16:09:46.7797339Z 
+2026-10-08T16:09:46.7797627Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+2026-10-08T16:09:46.7797879Z 
+2026-10-08T16:09:46.7835013Z  Test Files  2 failed | 700 passed | 5 skipped (707)
+2026-10-08T16:09:46.7897692Z       Tests  4 failed | 13398 passed | 44 skipped | 11 todo (13457)
+2026-10-08T16:09:46.7898456Z    Start at  16:03:23
+2026-10-08T16:09:46.7907728Z    Duration  383.25s (transform 39.73s, setup 23.21s, import 686.97s, tests 340.38s, environment 59ms)
+2026-10-08T16:09:46.7910885Z 
+2026-10-08T16:09:46.8824112Z JSON report written to /home/runner/work/olumi-assistants-service/olumi-assistants-service/.vitest-reports/shard-4.json

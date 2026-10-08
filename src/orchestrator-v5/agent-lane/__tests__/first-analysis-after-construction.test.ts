@@ -18,6 +18,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
+import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 import { registrationRequestHash, registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { runFirstAnalysisAfterConstruction } from '../first-analysis.js';
 import { RUN_PROVENANCE_ENRICHMENT_KEY, buildAutoRunProvenance, buildConstructionAutoRunProvenance } from '../../context/run-initiator.js';
@@ -160,7 +161,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
   it('RED: a retry with a NEW turn id and the same brief recovers the construction and runs nothing more', async () => {
     const p = product();
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(candidate('Hire a tech lead')) }; };
+    const call: CallStructuredModel = async (req) => { if (!isDraftWideningRequest(req)) generations += 1; return { text: JSON.stringify(candidate('Hire a tech lead')) }; };
     await build(capsFor(p, call));
     const retry = await build(capsFor(p, call));
     expect(retry.replayed, 'the real replay arm (findConstructionVersion)').toBe(true);

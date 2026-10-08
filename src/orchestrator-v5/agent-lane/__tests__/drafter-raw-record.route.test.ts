@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { GIT_COMMIT_SHA } from '../../../version.js';
+import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 
 const sha = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -156,6 +157,10 @@ function installFetch() {
     const body = JSON.parse(String(init?.body ?? '{}')) as Sent;
     if (body.text?.format?.name === 'brief_spans') {
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: READING }] }] }), { status: 200 });
+    }
+    // P05b #2854: Olumi's draft-time widening passes are not drafting; answer them empty (nothing added).
+    if (body.text?.format?.type === 'json_schema' && isDraftWideningRequest(body as { instructions?: unknown })) {
+      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: '{}' }] }], status: 'completed' }), { status: 200 });
     }
     if (body.text?.format?.type === 'json_schema') {
       const text = constructionText(constructionSent.length);
