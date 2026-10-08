@@ -4,7 +4,8 @@
  * The Agent owns conversation, reasoning, context and tool choice. This module
  * owns none of those: it carries messages, executes the tools the Agent chooses
  * inside the request's authenticated context, and returns the text the Agent
- * produced. It never composes an answer of its own.
+ * produced, or the caller's composed reply. If narration fails after a hold,
+ * it answers from that known held result so the user can still review it.
  *
  * ⭐ MEASURED PROTOCOL FACTS, not assumptions:
  *   · A reasoning model's `function_call` must be replayed WITH its preceding
@@ -467,6 +468,33 @@ export async function runAgentTurn(
   };
 
   let narrateNext = false;
+  let lastHeldCall: { name: string; args: unknown; result: ToolResult } | undefined;
+  /**
+   * ⛔ A NARRATION FAILURE NEVER LOSES A HELD CHANGE (Codex #2781 r3 / DL 6049608420, P1).
+   * The previous hop already prepared it: recover from its LAST held call and exact result, never from partial
+   * provider output. Keep the tool record intact so the normal reply still offers that proposal's approve card.
+   */
+  const recoverNarration = (err: unknown, hopsTaken: number): AgentTurnResult => {
+    const held = lastHeldCall!; // `narrateNext` is true only after a hop whose every call held a proposal.
+    const composed = input.composeReply?.(held.name, held.args, held.result);
+    const label = held.result.public_label;
+    const text = typeof composed === 'string' && composed.trim() !== '' ? composed
+      : typeof label === 'string' && label.trim() !== ''
+        ? `I have prepared this change: ${label}. Nothing is changed until you approve it.`
+        : 'I have prepared a change for you to review. Nothing is changed until you approve it.';
+    items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+    log.warn({ hop: hopsTaken, err: String(err) }, 'agent-lane: narration failed — answering from the held proposal');
+    return {
+      assistant_text: text,
+      items: handedOn(),
+      tool_calls: toolCalls,
+      tool_results: toolResults,
+      mutated,
+      hops: hopsTaken,
+      stopped_reason: 'answered',
+      timing: ((t) => { emitTiming(t); return t; })(timingAt(hopsTaken)),
+    };
+  };
   for (let hop = 0; hop < maxHops; hop++) {
     const providerStartedAt = now();
     // Eligibility, not the raw catalogue. `eligibleTools` starts from
@@ -493,10 +521,20 @@ export async function runAgentTurn(
     } else {
       providerCalls += 1;
     }
-    const resp: ModelCallResponse = hostCall !== undefined
-      ? { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] }
-      : await callModel(request);
+    let resp: ModelCallResponse;
+    try {
+      resp = hostCall !== undefined
+        ? { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] }
+        : await callModel(request);
+    } catch (err: unknown) {
+      if (!narrateHop) throw err;
+      providerMs += Math.max(0, now() - providerStartedAt);
+      return recoverNarration(err, hop);
+    }
     if (hostCall === undefined) providerMs += Math.max(0, now() - providerStartedAt);
+    if (narrateHop && answerIsIncomplete(resp)) {
+      return recoverNarration(new Error(`narration incomplete: ${resp.incomplete_reason ?? 'unknown'}`), hop);
+    }
     const out = resp.output ?? [];
     /**
      * ⛔ EVERY CALL IN THE OUTPUT, NOT THE FIRST ONE.
@@ -650,6 +688,13 @@ export async function runAgentTurn(
       });
     }
     narrateNext = hopOnlyHeldProposals(calls.map((c) => ({ name: String(c.name) })), toolResults.slice(hopResultsFrom));
+    lastHeldCall = undefined;
+    if (narrateNext) {
+      const call = calls.at(-1)!;
+      let args: unknown;
+      try { args = JSON.parse(String(call.arguments ?? '{}')); } catch { args = undefined; }
+      lastHeldCall = { name: String(call.name), args, result: toolResults.at(-1)! };
+    }
     // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
     if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {
       let args: unknown;

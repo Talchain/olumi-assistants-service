@@ -11,10 +11,11 @@
  *   - the route sends the model's banked `narrate` effort, and only for a model that has one.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { hopOnlyHeldProposals, NARRATE_LABEL_LINE, runAgentTurn, type ModelCallRequest } from '../runtime/agent-loop.js';
+import { hopOnlyHeldProposals, NARRATE_LABEL_LINE, runAgentTurn, type AgentTurnResult, type ModelCallRequest } from '../runtime/agent-loop.js';
 import type { AgentCapabilities } from '../runtime/agent-tools.js';
 import { budgetFor, callEffortFor, conversationBudgetFor } from '../model-budgets.js';
 import { approvalChipsFor, NOT_ON_NARRATION, proposalsAwaitingApproval } from '../approval-chips.js';
+import { narrateWriteOutcome } from '../write-outcome.js';
 
 /** agent-capabilities.ts `proposeNewRisk`, held (its success shape). */
 const HELD = {
@@ -77,6 +78,24 @@ describe('the narrating call may withdraw, never approve (Codex r1 P1 / r2 P2; D
   const answer = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Shall I add it?' }] }] };
   const fc = (name: string, args: unknown, id: string) => ({ type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) });
 
+  // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
+  it('RED P2: a narration-only refusal says awaiting approval and keeps the exact held proposal card', async () => {
+    const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true }));
+    const caps = { proposeNewRisk: vi.fn(async () => HELD), authoriseChange } as unknown as AgentCapabilities;
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [call] })
+      .mockResolvedValueOnce({ output: [fc('authorise_change', { proposal_id: HELD.proposal_id }, 'c2')] })
+      .mockResolvedValueOnce(answer);
+    const r = await runAgentTurn(base as never, caps, callModel as never);
+    const held = r.tool_results[0]!;
+    expect(held.proposal_id).toBe(HELD.proposal_id);
+    expect(approvalChipsFor(r.tool_calls).find((c) => c.id === `agent-approve-proposal:${held.proposal_id}`)).toBeDefined();
+    expect(authoriseChange).not.toHaveBeenCalled();
+    const status = narrateWriteOutcome(r.assistant_text, r.tool_calls, r.tool_results).status;
+    expect(status).toContain('approval');
+    expect(status).not.toMatch(/Not saved|try again/i);
+  });
+
   it('RED: authorise_change on the narrating call is refused before dispatch, and the held change keeps its approve card', async () => {
     const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true }));
     const caps = { proposeNewRisk: vi.fn(async () => HELD), authoriseChange } as unknown as AgentCapabilities;
@@ -129,6 +148,124 @@ describe('the narrating call may withdraw, never approve (Codex r1 P1 / r2 P2; D
       .mockResolvedValueOnce(answer);
     await runAgentTurn({ ...base, message: 'Yes, approve it.', composeReply: () => null } as never, caps, callModel as never);
     expect(authoriseChange).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * ⛔ A NARRATION FAILURE NEVER LOSES A HELD CHANGE (Codex #2781 r3 / DL 6049608420, P1).
+ * The provider cannot undo a successful hold; the answer and approve card keep that result's exact identity.
+ */
+describe('narration recovery from the known held result', () => {
+  const args = { label: 'Onboarding new hires takes longer than expected', affects: [{ target_label: 'G', direction: 'negative' }], rationale: 'r', whole_request: false };
+  const call = { type: 'function_call', call_id: 'c1', name: 'propose_new_risk', arguments: JSON.stringify(args) };
+  const base = { ctx: { scenario_id: 's', authenticated_user_id: 'u', request_id: 'r' }, history: [], message: 'Add a risk.', instructions: 'i', maxOutputTokens: 500 };
+  const recovered = (r: AgentTurnResult, held = HELD) => {
+    expect(r.stopped_reason).toBe('answered');
+    expect(r.assistant_text.trim()).not.toBe('');
+    expect(r.tool_calls).toEqual([{ name: 'propose_new_risk', ok: true, mutated: false, proposal_id: held.proposal_id }]);
+    expect(r.tool_results).toEqual([held]);
+    expect(r.mutated).toBe(false);
+    expect(approvalChipsFor(r.tool_calls).find((c) => c.id === `agent-approve-proposal:${r.tool_results[0]!.proposal_id}`)?.id)
+      .toBe(`agent-approve-proposal:${held.proposal_id}`);
+    expect(r.items.at(-1)).toEqual({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: r.assistant_text }] });
+    expect(JSON.stringify(r.items)).not.toContain(NARRATE_LABEL_LINE);
+    expect(r.timing).toMatchObject({ provider_calls: 2, tool_calls: 1, hops: 1 });
+  };
+
+  it.each([
+    ['error', new Error('openai_500')],
+    ['timeout', Object.assign(new Error('deadline exceeded'), { name: 'AbortError' })],
+  ])('RED P1 %s: a rejected narrating call answers from the held label and preserves its approve card', async (_kind, error) => {
+    let wallTime = 0;
+    const caps = { proposeNewRisk: vi.fn(async () => { wallTime += 20; return HELD; }) } as unknown as AgentCapabilities;
+    const callModel = vi.fn()
+      .mockImplementationOnce(async () => { wallTime += 10; return { output: [call] }; })
+      .mockImplementationOnce(async () => { wallTime += 30; throw error; });
+    const r = await runAgentTurn({ ...base, now: () => wallTime } as never, caps, callModel as never);
+    recovered(r);
+    expect(r.assistant_text).toBe(`I have prepared this change: ${HELD.public_label}. Nothing is changed until you approve it.`);
+    expect(r.timing).toMatchObject({ total_ms: 60, provider_ms: 40, tool_ms: 20, overhead_ms: 0 });
+  });
+
+  it('RED P1 composeReply: recovery composes from the held call name, parsed arguments and exact result', async () => {
+    const caps = { proposeNewRisk: vi.fn(async () => HELD) } as unknown as AgentCapabilities;
+    // Keep the existing one-call compose branch: defer there so the failed narration reaches recovery.
+    const composeReply = vi.fn().mockReturnValueOnce(null).mockReturnValue('COMPOSED');
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [call] }).mockRejectedValueOnce(new Error('openai_500'));
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    recovered(r);
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(r.assistant_text).toBe('COMPOSED');
+    expect(composeReply).toHaveBeenCalledTimes(2);
+    expect(composeReply).toHaveBeenLastCalledWith('propose_new_risk', args, HELD);
+  });
+
+  it('RED P1 previous hop: recovery composes from the held proposal after an earlier read', async () => {
+    const read = { ok: true, mutated: false };
+    const held = { ...HELD, proposal_id: 'gmh_previous_hop', public_label: 'Add the risk "Delivery is delayed"' };
+    const heldArgs = { ...args, label: 'Delivery is delayed' };
+    const caps = { getCanonicalState: vi.fn(async () => read), proposeNewRisk: vi.fn(async () => held) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn().mockReturnValueOnce(null).mockReturnValue('COMPOSED');
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [{ type: 'function_call', call_id: 'read', name: 'get_canonical_state', arguments: '{}' }] })
+      .mockResolvedValueOnce({ output: [{ ...call, call_id: 'hold', arguments: JSON.stringify(heldArgs) }] })
+      .mockRejectedValueOnce(new Error('openai_500'));
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    expect(r.stopped_reason).toBe('answered');
+    expect(r.assistant_text).toBe('COMPOSED');
+    expect(composeReply).toHaveBeenLastCalledWith('propose_new_risk', heldArgs, held);
+    expect(r.tool_results).toEqual([read, held]);
+    expect(r.tool_calls).toHaveLength(2);
+    expect(approvalChipsFor(r.tool_calls).find((c) => c.id === `agent-approve-proposal:${held.proposal_id}`)).toBeDefined();
+  });
+
+  it.each([
+    ['envelope', { status: 'incomplete', incomplete_reason: 'max_output_tokens', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Unfinished' }] }] }],
+    ['message', { output: [{ type: 'message', status: 'incomplete', content: [{ type: 'output_text', text: 'Unfinished' }] }] }],
+    ['tool call', { status: 'incomplete', incomplete_reason: 'max_output_tokens', output: [{ type: 'function_call', call_id: 'c2', name: 'authorise_change', arguments: JSON.stringify({ proposal_id: HELD.proposal_id }) }] }],
+  ])('RED P1 incomplete %s: recovery keeps the held result and excludes all partial output', async (_kind, incomplete) => {
+    const authoriseChange = vi.fn();
+    const caps = { proposeNewRisk: vi.fn(async () => HELD), authoriseChange } as unknown as AgentCapabilities;
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [call] }).mockResolvedValueOnce(incomplete);
+    const r = await runAgentTurn(base as never, caps, callModel as never);
+    recovered(r);
+    expect(r.assistant_text).toContain(HELD.public_label);
+    expect(JSON.stringify(r.items)).not.toContain('Unfinished');
+    expect(authoriseChange).not.toHaveBeenCalled();
+    expect(callModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('RED P1 no label: a blank compose result falls back to the deterministic review sentence', async () => {
+    const held = { ...HELD, public_label: '   ' };
+    const caps = { proposeNewRisk: vi.fn(async () => held) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn(() => '   ');
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [call] }).mockRejectedValueOnce(new Error('openai_500'));
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    recovered(r, held);
+    expect(r.assistant_text).toBe('I have prepared a change for you to review. Nothing is changed until you approve it.');
+  });
+
+  it('CONTROL: a model error on call 1 still rejects with the original error', async () => {
+    const error = new Error('openai_500');
+    const callModel = vi.fn().mockRejectedValueOnce(error);
+    await expect(runAgentTurn(base as never, {} as AgentCapabilities, callModel as never)).rejects.toBe(error);
+  });
+
+  it('CONTROL: a model error after a refused hop still rejects with the original error', async () => {
+    const error = new Error('openai_500');
+    const caps = { proposeNewRisk: vi.fn(async () => REFUSED) } as unknown as AgentCapabilities;
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [call] }).mockRejectedValueOnce(error);
+    await expect(runAgentTurn(base as never, caps, callModel as never)).rejects.toBe(error);
+  });
+
+  it('CONTROL: a composed first-call reply still answers without making a narrating call', async () => {
+    const caps = { proposeNewRisk: vi.fn(async () => HELD) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn(() => 'COMPOSED');
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [call] });
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    expect(r.assistant_text).toBe('COMPOSED');
+    expect(callModel).toHaveBeenCalledTimes(1);
+    expect(composeReply).toHaveBeenCalledExactlyOnceWith('propose_new_risk', args, HELD);
   });
 });
 
