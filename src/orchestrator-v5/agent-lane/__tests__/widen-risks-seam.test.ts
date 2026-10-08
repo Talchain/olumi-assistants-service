@@ -2,7 +2,8 @@
  * ⭐ S-C MODEL WIDENING, target risks, on the LIVE route end to end (DL 0fd71f 7 Oct, lane WIDEN; Paul's prod test D-11):
  *   "Suggest risks" press → ONE tool-less model call → the identity gate → a deterministic reply (method, what each hits,
  *   one gap question) + one Add per item + Something else, NOTHING stored → Add → NO model call → the existing add-risk
- *   door holds ONE card → the existing approve → the risk is in the model WITH its driver (never inert, D-09).
+ *   door holds ONE card → the existing approve → the risk is in the model with its validated links (RC3: timing and
+ *   dependency risks threaten the outcome without inventing a factor driver).
  * The model is Paul's served v1 (scenario 6582edbc, CEE 7e3f8fb2), reconstructed from its run fact; the risk names are the
  * ones served as prose on turn #2 ("None has been added", no Add buttons).
  *
@@ -176,9 +177,9 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'filling both developer roles quickly', watch_for: 'no accepted offer by week 4' },
     { label: 'Wrong bottleneck', category: 'dependency', hits_id: 'hire_a_tech_lead', through_id: 'tech_lead_hires', through_direction: 'positive',
       affects_id: 'meet_our_next_feature_launch_deadline', direction: 'negative', relies_on: 'a Tech Lead removing the main delivery blocker', watch_for: 'delays persist after the Tech Lead starts' },
-    { label: 'Coordination drag', category: 'people', hits_id: 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive',
+    { label: 'Coordination drag', category: 'people', mechanism: 'drives', hits_id: 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive',
       affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'new developers joining without slowing the team', watch_for: 'senior time spent on onboarding' },
-    { label: 'Quality trade-off', category: 'cost', hits_id: 'hire_a_tech_lead', through_id: 'tech_lead_hires', through_direction: 'positive',
+    { label: 'Quality trade-off', category: 'cost', mechanism: 'drives', hits_id: 'hire_a_tech_lead', through_id: 'tech_lead_hires', through_direction: 'positive',
       affects_id: 'meet_our_next_feature_launch_deadline', direction: 'negative', relies_on: 'keeping quality while hiring under time pressure', watch_for: 'rising defect counts before launch' },
   ];
   const candidates = (items: unknown) => say(`<risk_suggestions>${JSON.stringify(items)}</risk_suggestions>`);
@@ -200,7 +201,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(addChips(t1).map((c) => c.label), JSON.stringify(t1.suggested_actions)).toEqual(['Add ‘Recruitment delay’', 'Add ‘Wrong bottleneck’', 'Add ‘Coordination drag’']);
     expect(t1.suggested_actions.map((c) => c.id).slice(3)).toEqual(['agent-widen-something-else']);
     expect(t1.assistant_text).toContain('(assumption-based planning)');
-    expect(t1.assistant_text).toContain('- ‘Hire Two Developers’ relies on filling both developer roles quickly. Risk: ‘Recruitment delay’ (timing), through ‘Developer Hires’. Watch for: no accepted offer by week 4.');
+    expect(t1.assistant_text).toContain('- ‘Hire Two Developers’ relies on filling both developer roles quickly. Risk: ‘Recruitment delay’ (timing): if it fails, it would lower ‘Feature Delivery Capacity’. In this model it affects every option alike for now, so it doesn\'t change the comparison yet. Watch for: no accepted offer by week 4.');
     expect((t1 as unknown as { model_gap?: { kind: string } }).model_gap?.kind, 'the typed gap rides the wire').toBe('deadline_missing');
     expect(t1.assistant_text).not.toContain('<risk_suggestions>');
     expect(t1.assistant_text.trim().split('\n').at(-1)).toBe(S1_ASK);
@@ -209,12 +210,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(nodeLabels(), 'nothing is written by the suggestion').toEqual(before);
   }, 120_000);
 
-  it('SR-2 RED: Add → NO model call → ONE held card through the add-risk door → approve → the risk is in the model WITH its driver (never inert)', async () => {
+  it('SR-2: Add → NO model call → ONE held card through the add-risk door → approve → timing risk threatens the outcome without an invented driver', async () => {
     paulV1();
     script = [() => candidates(TURN2)];
     const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
     const add = addChips(t1)[0]!;
-    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: driven by more ‘Developer Hires’, it would lower ‘Feature Delivery Capacity’.');
+    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: ‘Hire Two Developers’ relies on this not happening; if it happens, it would lower ‘Feature Delivery Capacity’.');
     const before = nodeLabels();
     const calls = openAiCalls;
     const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
@@ -229,12 +230,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const held = await heldOnLatestRow();
     expect(held).toHaveLength(1);
     const ops = held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`);
-    expect(ops).toEqual(['add_node risk_recruitment_delay', 'add_edge risk_recruitment_delay::feature_delivery_capacity', 'add_edge developer_hires::risk_recruitment_delay']);
+    expect(ops).toEqual(['add_node risk_recruitment_delay', 'add_edge risk_recruitment_delay::feature_delivery_capacity']);
     expect(nodeLabels(), 'nothing is written before the approval').toEqual(before);
     await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     const g = graphNow();
     expect(g.nodes.some((x) => x.id === 'risk_recruitment_delay' && x.kind === 'risk' && x.label === 'Recruitment delay')).toBe(true);
-    expect(g.edges.filter((e) => e.to === 'risk_recruitment_delay').map((e) => e.from), 'D-09: the risk has a parent the options move').toEqual(['developer_hires']);
+    expect(g.edges.filter((e) => e.to === 'risk_recruitment_delay').map((e) => e.from), 'RC3: hiring is not the cause of its timing precondition failing').toEqual([]);
     expect(g.edges.filter((e) => e.from === 'risk_recruitment_delay').map((e) => e.to)).toEqual(['feature_delivery_capacity']);
   }, 120_000);
 
@@ -277,7 +278,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   it('SR-7 (reload): the Add presses are live-only until the offers envelope admits their id, and stand only while the result is current and nothing awaits approval', async () => {
     const { isDurableAnswerOffer, stillValidOffers } = await import('../../../routes/agent-v1-turn.js');
     const { riskAddPressFor } = await import('../method-turn/widen-turn.js');
-    const add = riskAddPressFor({ label: 'Recruitment delay', hits: { id: 'hire_two_developers', label: 'Hire Two Developers', kind: 'option' },
+    const add = riskAddPressFor({ label: 'Recruitment delay', mechanism: 'drives', hits: { id: 'hire_two_developers', label: 'Hire Two Developers', kind: 'option' },
       through: { id: 'developer_hires', label: 'Developer Hires', direction: 'positive' },
       affects: { id: 'feature_delivery_capacity', label: 'Feature Delivery Capacity', direction: 'negative' } });
     expect(isDurableAnswerOffer(add)).toBe(false);
@@ -304,7 +305,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
 
   it('SR-9 (Codex r1 P1): a STALE Add — its factor renamed and a new node given the old name — is refused; nothing held', async () => {
     paulV1();
-    script = [() => candidates(TURN2)];
+    script = [() => candidates([TURN2[2]])];
     const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
     const add = addChips(t1)[0]!;
     const g = graphOf.get(SCENARIO) as { nodes: Record<string, unknown>[] };
@@ -398,7 +399,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const SERVED_ADD_MESSAGE = 'Add the risk ‘Weak starter demand’ to ‘Launch cheaper starter plan’: driven by less ‘Starter-plan paying subscribers’, it would lower ‘Starter-plan MRR’.';
   it('SR-14 RED (served sc-plus-1): canvas "+" Risk → Add with the served message VERBATIM → ONE held card AND the words say it is prepared, never "I couldn’t prepare"', async () => {
     graphOf.set(SCENARIO, structuredClone(STARTER));
-    script = [() => candidates([{ label: 'Weak starter demand', category: 'external', hits_id: 'opt_launch', through_id: 'fac_subs', through_direction: 'negative',
+    script = [() => candidates([{ label: 'Weak starter demand', category: 'external', mechanism: 'drives', hits_id: 'opt_launch', through_id: 'fac_subs', through_direction: 'negative',
       affects_id: 'out_starter_mrr', direction: 'negative', relies_on: 'attracting new paying subscribers with a cheaper plan', watch_for: 'interest fails to convert into paid subscriptions' }])];
     const t1 = await turn({ message: 'What could go wrong, or unexpectedly well, that this model doesn’t have yet?', source: 'chip', chip: { id: 'ask:risks' } });
     const add = addChips(t1)[0]!;
@@ -432,5 +433,118 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     script = [(body) => { bodies.push(asSent(body) as Record<string, unknown>); return say('No suggestion.'); }];
     await turn({ message: 'What other options could answer this that I have not put on the board?', source: 'chip', chip: { id: 'ask:widen' } });
     expect(((bodies[0]!['tools'] ?? []) as { name?: string }[]).map((x) => x.name)).toEqual(['propose_new_option']);
+  }, 120_000);
+
+  /** RC3: Paul's pricing precondition, separate from the historical hiring fixture above. */
+  const RC3_PRICING = {
+    nodes: [
+      { id: 'dec_pricing', kind: 'decision', label: 'How should we price the Pro plan?' },
+      { id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold_unit: '£', goal_threshold_raw: 50000 },
+      { id: 'pro_plan_price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 0.49, raw_value: 49, unit: '£', cap: 100 } },
+      { id: 'keep_49', kind: 'option', label: 'Keep £49', is_baseline: true, interventions: { pro_plan_price: { value: 0.49, raw_value: 49, unit: '£' } } },
+      { id: 'raise_59', kind: 'option', label: 'Raise Pro price to £59', interventions: { pro_plan_price: { value: 0.59, raw_value: 59, unit: '£' } } },
+    ],
+    edges: [
+      { from: 'dec_pricing', to: 'keep_49', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'dec_pricing', to: 'raise_59', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'keep_49', to: 'pro_plan_price', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive', origin: 'repair' },
+      { from: 'raise_59', to: 'pro_plan_price', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'pro_plan_price', to: 'mrr', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    ],
+    goal_node_id: 'mrr',
+    goal_constraints: [],
+  };
+  const RC3_TIMING = {
+    label: 'Feature release slips', category: 'timing', hits_id: 'raise_59', through_id: 'pro_plan_price', through_direction: 'negative', mechanism: 'drives',
+    affects_id: 'mrr', direction: 'negative', relies_on: 'the feature release enabling the planned price increase', watch_for: 'release date moves',
+  };
+
+  it('rc3-paul-known-answer: timing overrides model drives; Add → no model → hold → approve stores only risk → MRR', async () => {
+    const { assembleGuidanceSignals } = await import('../turn-context/guidance-signals.js');
+    const { riskGate, risksTurnFromSignals } = await import('../method-turn/widen-turn.js');
+    graphOf.set(SCENARIO, structuredClone(RC3_PRICING));
+    const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [], graph: RC3_PRICING,
+      analysisState: undefined, analysisResult: undefined, optionParticipation: undefined, leaderLicensed: false });
+    expect(signals['model.status_quo_option_id']).toBe('keep_49');
+    const method = risksTurnFromSignals(signals, RC3_PRICING);
+    if (method.kind !== 'run_risks') throw new Error(`expected a risks run, got ${method.kind}`);
+    expect(method.options.map((o) => o.id)).toEqual(['raise_59']);
+    const gate = riskGate(method, [RC3_TIMING]);
+    expect(gate.kept, 'the known-answer item is accepted, never silently dropped').toHaveLength(1);
+    expect((gate.kept[0] as typeof gate.kept[number] & { mechanism?: string }).mechanism,
+      'M1: timing deterministically overrides the model’s drives').toBe('relies_on');
+
+    script = [() => candidates([RC3_TIMING])];
+    const before = nodeLabels();
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    expect(openAiCalls, 'one suggestion call').toBe(1);
+    const adds = addChips(t1);
+    expect(adds).toHaveLength(1);
+    const add = adds[0]!;
+    expect(add.message).toBe('Add the risk ‘Feature release slips’ to ‘Raise Pro price to £59’: ‘Raise Pro price to £59’ relies on this not happening; if it happens, it would lower ‘MRR’.');
+    expect(add.message).not.toContain('driven by');
+    expect(t1.assistant_text).toContain('In this model it affects every option alike for now, so it doesn\'t change the comparison yet.');
+    expect(nodeLabels(), 'suggesting writes nothing').toEqual(before);
+    const calls = openAiCalls;
+    const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
+    expect(openAiCalls, 'the Add press makes no model call').toBe(calls);
+    expect(t2._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_risk', true]]);
+    expect(t2.assistant_text).toContain('I’ve prepared this change');
+    expect(t2.assistant_text).not.toContain('driven by');
+    const approve = approveChipOf(t2);
+    expect(approve?.id, JSON.stringify(t2.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`), 'the relies_on door holds no factor → risk change')
+      .toEqual(['add_node risk_feature_release_slips', 'add_edge risk_feature_release_slips::mrr']);
+    expect(nodeLabels(), 'holding writes nothing').toEqual(before);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const g = graphNow();
+    expect(g.nodes.some((x) => x.id === 'risk_feature_release_slips' && x.kind === 'risk' && x.label === 'Feature release slips')).toBe(true);
+    expect(g.edges.some((e) => e.from === 'pro_plan_price' && e.to === 'risk_feature_release_slips'), 'no invented price → release-slip driver').toBe(false);
+    expect(g.edges.filter((e) => e.from === 'risk_feature_release_slips')).toHaveLength(1);
+    expect(g.edges.find((e) => e.from === 'risk_feature_release_slips' && e.to === 'mrr'))
+      .toMatchObject({ from: 'risk_feature_release_slips', to: 'mrr', effect_direction: 'negative', strength: { mean: -0.5 } });
+  }, 120_000);
+
+  it('rc3-drives-control: explicit cost/drives keeps the exact old Add wording and stores price → risk → MRR', async () => {
+    const { assembleGuidanceSignals } = await import('../turn-context/guidance-signals.js');
+    const { riskGate, risksTurnFromSignals } = await import('../method-turn/widen-turn.js');
+    graphOf.set(SCENARIO, structuredClone(RC3_PRICING));
+    const cost = { ...RC3_TIMING, label: 'Price-driven churn', category: 'cost', mechanism: 'drives', through_direction: 'positive',
+      relies_on: 'customers accepting the increased price', watch_for: 'cancellations after the price increase' };
+    const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [], graph: RC3_PRICING,
+      analysisState: undefined, analysisResult: undefined, optionParticipation: undefined, leaderLicensed: false });
+    expect(signals['model.status_quo_option_id']).toBe('keep_49');
+    const method = risksTurnFromSignals(signals, RC3_PRICING);
+    if (method.kind !== 'run_risks') throw new Error(`expected a risks run, got ${method.kind}`);
+    expect(method.options.map((o) => o.id)).toEqual(['raise_59']);
+    const gate = riskGate(method, [cost]);
+    expect(gate.kept).toHaveLength(1);
+    expect((gate.kept[0] as typeof gate.kept[number] & { mechanism?: string }).mechanism).toBe('drives');
+    script = [() => candidates([cost])];
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    const add = addChips(t1)[0]!;
+    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Price-driven churn’ to ‘Raise Pro price to £59’: driven by more ‘Pro plan price’, it would lower ‘MRR’.');
+    const calls = openAiCalls;
+    const before = nodeLabels();
+    const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
+    expect(openAiCalls, 'the drives Add press also makes no model call').toBe(calls);
+    expect(t2._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_risk', true]]);
+    const approve = approveChipOf(t2);
+    expect(approve?.id, JSON.stringify(t2.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`))
+      .toEqual(['add_node risk_price_driven_churn', 'add_edge risk_price_driven_churn::mrr', 'add_edge pro_plan_price::risk_price_driven_churn']);
+    expect(nodeLabels(), 'holding writes nothing').toEqual(before);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const g = graphNow();
+    expect(g.nodes.some((x) => x.id === 'risk_price_driven_churn' && x.kind === 'risk' && x.label === 'Price-driven churn')).toBe(true);
+    expect(g.edges.filter((e) => e.to === 'risk_price_driven_churn').map((e) => e.from)).toEqual(['pro_plan_price']);
+    expect(g.edges.find((e) => e.from === 'pro_plan_price' && e.to === 'risk_price_driven_churn'))
+      .toMatchObject({ effect_direction: 'positive', strength: { mean: 0.5 } });
+    expect(g.edges.find((e) => e.from === 'risk_price_driven_churn' && e.to === 'mrr'))
+      .toMatchObject({ effect_direction: 'negative', strength: { mean: -0.5 } });
   }, 120_000);
 });
