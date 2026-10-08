@@ -699,8 +699,11 @@ export function formatEdgeStrengthUnchanged(input: {
   readonly fromLabel: string;
   readonly toLabel: string;
   readonly mean: number;
+  /** Science 393023 LICENCE ruling 3: a placeholder's default is not a size, so no band is named for it. */
+  readonly unsized?: boolean;
 }): string {
   const link = `The link between ${input.fromLabel} and ${input.toLabel}`;
+  if (input.unsized === true) return `${link} has not been sized yet; nothing was changed.`;
   if (Math.abs(input.mean) < NEAR_ZERO_INFLUENCE_THRESHOLD) {
     return `${link} already has no material influence.`;
   }

@@ -13,6 +13,8 @@ import { linkSizing } from '../../../../cee/magnitude/link-sizing.js';
 import type { HandlerInvocation } from '../../registry.js';
 import type { ProposalAction } from '../../../routing/types.js';
 import type { GraphV3T } from '../../../../schemas/cee-v3.js';
+import { diffRunInputs } from '../../../coaching/run-input-changes.js';
+import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 
 const invocation = (graph: GraphV3T, entityId: string, strength: number): HandlerInvocation => ({
   context: { session_id: 'scn-r8', stage: 'frame', request_id: 'req-r8', prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null } as unknown as HandlerInvocation['context'],
@@ -63,5 +65,46 @@ describe('finding 2: the Olumi-authored count never claims the user\'s own stren
     Object.assign(edge, { provenance: { source: 'cee_hypothesis' }, defaulted: true, strength: { mean: 0.5, std: 0.125 } });
     expect(linkSizing(edge)).toBe('placeholder');
     expect(deriveOlumiLinkStrengths(g).map(key)).toContain('starter_subscribers->starter_tier_mrr');
+  });
+});
+
+// ── r9 (Codex review @b7358162, review-r8.out) ──────────────────────────────────────────────────────────────────────
+describe('r9 finding 1: the NO-OP receipt never names a placeholder band', () => {
+  it('a user-drawn projected link (Science ruling 1: unsized) set to its own value says it is not sized, never "already strong"', async () => {
+    const g = structuredClone(buildD1Fixture());
+    const e = g.edges.find((x) => x.from === 'f-budget' && x.to === 'g-revenue')! as Record<string, unknown>;
+    Object.assign(e, { strength: { mean: 0.5, std: 0.125 }, provenance: { source: 'user_specified', mean_projected: true } });
+    expect(linkSizing(e)).toBe('placeholder');
+    const out = await createAdjustEdgeStrengthHandler()(invocation(g, 'f-budget→g-revenue', 0.5));
+    expect(out.assistant_text).toContain('has not been sized yet');
+    expect(out.assistant_text).not.toMatch(/already (strong|moderate|slight|very strong)/);
+  });
+  it('CONTROL: the sized fixture link (0.4/0.1) set to its own value still says "is already …"', async () => {
+    const out = await createAdjustEdgeStrengthHandler()(invocation(structuredClone(buildD1Fixture()), 'f-budget→g-revenue', 0.4));
+    expect(out.assistant_text).toMatch(/is already /);
+  });
+});
+
+describe('r9 finding 2: a band move that ends on a placeholder is never a strength row', () => {
+  const snap = (link: Record<string, unknown>): RunInputSnapshot => ({
+    snapshot_version: 1, sent_digest: 'a'.repeat(64), residual_digest: 'c'.repeat(64),
+    goal: { node_id: 'goal_rev', label: 'Revenue', target_raw: 100, unit: 'GBP', operator: '>=' },
+    options: [{ option_id: 'opt-a', label: 'A', settings: [{ factor_id: 'price', label: 'Price', raw: 5, unit: 'GBP', encoded: 5 }] }],
+    options_not_sent: [], constraints: [], factors: [{ factor_id: 'goal_rev' }],
+    links: [{ from: 'price', to: 'revenue', ...link }],
+  } as unknown as RunInputSnapshot);
+  const strengthRows = (r: ReturnType<typeof diffRunInputs>) => r.rows.filter((row) => row.field === 'strength');
+  it('price → revenue placeholder strong (0.5) → placeholder moderate (0.3): no strength row; coverage partial', () => {
+    const r = diffRunInputs(snap({ mean: 0.5, std: 0.125, band: 'strong', sizing: 'placeholder' }), snap({ mean: 0.3, std: 0.125, band: 'moderate', sizing: 'placeholder' }));
+    expect(strengthRows(r)).toEqual([]);
+    expect(r.complete).toBe(false);
+  });
+  it('CONTROL: the same move on an Olumi estimate keeps its strength row', () => {
+    const r = diffRunInputs(snap({ mean: 0.5, std: 0.1, band: 'strong', sizing: 'olumi_estimate' }), snap({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'olumi_estimate' }));
+    expect(strengthRows(r)).toHaveLength(1);
+  });
+  it('CONTROL: placeholder → the user\'s size keeps its row (readers suppress the before band)', () => {
+    const r = diffRunInputs(snap({ mean: 0.5, std: 0.125, band: 'strong', sizing: 'placeholder' }), snap({ mean: 0.1, std: 0.1, band: 'slight', sizing: 'user' }));
+    expect(strengthRows(r)).toHaveLength(1);
   });
 });

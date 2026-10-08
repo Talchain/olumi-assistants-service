@@ -636,7 +636,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       const assistantText = replacesHeldFigure && heldFigure !== null
         ? userFigureReplacedReceipt(heldFigure, resultBandWord)
         : noop
-        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean })
+        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean, unsized: isPlaceholderLink(rawTargetEdge ?? targetEdge) })
         : formatEdgeAdjustment({
             fromLabel,
             toLabel,

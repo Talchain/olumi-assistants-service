@@ -353,7 +353,9 @@ export function prepareLinkEffectUnitReadings(
     // unit alone cannot supersede the gauge, and an already stored gauge remains established.
     const ownBeforeGauge = reading?.via === 'gauge' && reading.stored !== true
       && ((ownNoun !== undefined && eligible(node, edges, from, to, ownNoun.unit))
-        || (unit !== undefined && eligible(node, edges, from, to, unit)));
+        || (unit !== undefined && eligible(node, edges, from, to, unit)
+          // A structured percent LEVEL keeps its authority: only a percentage-point unit may supersede its gauge.
+          && (!percentLevels.has(String(node.id)) || levelUnitKey(unit) === levelUnitKey('%'))));
     const mediatedUnit = reading === undefined || (reading.via === 'gauge' && (node === source || ownBeforeGauge)) ? undefined : reading.unit;
     const magnitude = view.get(String(node.id));
     const frame = magnitude === undefined ? undefined : resolveMagnitudeFrame(magnitude);

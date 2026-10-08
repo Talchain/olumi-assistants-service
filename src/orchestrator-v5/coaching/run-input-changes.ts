@@ -367,7 +367,12 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // move is the frame's, never a `strength` row. The mean move it carries stays partial below (coverage unchanged).
     const sameNaturalEffect = sameNaturalSize(pe, ce);
     const bandMoved = !sameNaturalEffect && pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
-    if (bandMoved) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
+    // Science 393023 LICENCE ruling 3: a placeholder's band is its default, not a size. A band move that ENDS on a link the
+    // later Run still reads as a placeholder is never a `strength` row (no surface may word either default band); the move
+    // stays partial coverage. A move FROM a placeholder to a sized link keeps its row: readers suppress the before band.
+    const unsizedEitherRun = cl.sizing === 'placeholder';
+    if (bandMoved && !unsizedEitherRun) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
+    else if (bandMoved) complete = false;
     if (pl.sizing !== undefined && cl.sizing !== undefined) {
       // Science 393023 LICENCE (a)/(b), 7 Oct: the same stored link can change class under the new reader.
       const readerReclassified = ((pl.sizing === 'unmarked' && cl.sizing === 'placeholder')

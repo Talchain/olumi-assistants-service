@@ -670,6 +670,19 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     expect(result).toEqual(unitMismatch);
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, cPoss as CorpusRow, before);
   });
+  it('r9 SYNTHETIC percent LEVEL (constraint-only, d39c05ba clone): a literal £ never supersedes the gauge on a % level', async () => {
+    const g = fixture(cPoss as CorpusRow);
+    const node = (g.nodes as Json[]).find(nd => nd.id === cPoss.to)!;
+    expect(node).not.toHaveProperty('observed_state');
+    node.scale_frame = 100;
+    g.goal_constraints = [...((g.goal_constraints as Json[] | undefined) ?? []), { constraint_id: 'r9_drag_cap', node_id: cPoss.to, operator: '<=', value: 10, unit: '%', value_frame: 'level' }];
+    const row = { ...cPoss, id: 'r9-pct-level-gbp', quote: 'Every 2 extra developers add about £1 of onboarding drag.',
+      effect: effect(1, 'GBP', 2, 'developers') } as CorpusRow;
+    const w = world(row, g); const result = await propose(w, row);
+    const proposal = result.ok === true ? w.proposals.get(String(result.proposal_id)) : undefined;
+    const readings = JSON.stringify(proposal?.operations ?? []);
+    expect(readings, JSON.stringify(result)).not.toMatch(/"unit_reading":\{"unit":"GBP"/);
+  });
   it('P52 NO stated unit: the placeholder kid retains the 1b945d35 refusal by link identity', async () => {
     const row = { ...cPoss, id: 'P52-no-unit', quote: 'Every 2 extra developers add about 1 of onboarding drag.' } as CorpusRow;
     const w = world(row); const before = w.graph();
