@@ -21,7 +21,7 @@
  */
 
 import { drawnLinkAdoptionFor } from '../../agent-lane/drawn-link-adoption-context.js';
-import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
+import { isPlaceholderLink, sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { z } from 'zod';
 
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -333,6 +333,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         ...factEndpointLabels,
         strength: { ...targetEdge.strength },
         effect_direction: targetEdge.effect_direction,
+        // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side says nobody sized it, so no reader names
+        // the prior as a band ("Strong → Moderate"). Additive: \`before\` is a record on both receipt schemas.
+        ...(isPlaceholderLink(targetEdge) ? { sizing: 'placeholder' as const } : {}),
       };
       // Direction at numeric zero is authority-sensitive. It therefore rides
       // the invocation side band stamped by the strict system-event adapter,
