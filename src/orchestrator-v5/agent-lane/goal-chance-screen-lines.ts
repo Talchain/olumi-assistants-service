@@ -63,6 +63,18 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   return [...points, ...ranges];
 }
 
+/**
+ * B15 (DL CHANGES_REQUIRED on #2783, Codex P1): ONE sentence in which the narrator gave this option's screen figure in its
+ * own accepted words (the option named, then its figure) — the same acceptance `alreadySaid` uses, bound to one sentence
+ * so the route can type it as this finding's leading evidence. Never the canonical sentence (typed already).
+ */
+export function chanceInOwnWords(sentence: string, l: GoalChanceScreenLine): boolean {
+  const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
+  const p = plain(sentence);
+  const at = p.indexOf(plain(l.label));
+  return sentence !== l.chance && at >= 0 && p.indexOf(plain(l.figure), at + plain(l.label).length) >= 0;
+}
+
 /** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */
 function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
   if (sameWordsIn(text, l.chance)) return true;

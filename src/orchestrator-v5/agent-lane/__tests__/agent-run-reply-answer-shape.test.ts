@@ -266,6 +266,26 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 
+  it('B15 route, Agent wording (DL CHANGES_REQUIRED 6049287605, Codex P1): share first, then each chance in the narrator’s own words → the first option-bound chance sentence leads', async () => {
+    hostRunFixture();
+    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    expect(screen, 'positive control: two current licensed screen findings').toHaveLength(2);
+    const share = 'In this model, 71% of runs supported ‘Raise Pro to £59 at release’.';
+    // The narrator's own accepted wording: label + the screen's figure, never the canonical sentence.
+    const own = [...screen].reverse().map(l => `${l.label}: ${l.figure}.`);
+    const narrated = [share, ...own].join('\n\n');
+    for (const l of screen) expect(narrated, 'control: canonical sentence absent').not.toContain(l.chance);
+    const { b, turnId } = await typedRun(narrated);
+    expect(b._answer_shape, b.assistant_text).toBeDefined();
+    expect(b._answer_shape!.headline).toBe(own[0]);
+    expect(b._answer_shape!.headline).not.toContain(share);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    for (const sentence of sentenceMultiset(narrated)) {
+      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence)).toHaveLength(1);
+    }
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
+  });
+
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
     hostRunFixture();
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);

@@ -101,7 +101,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { chanceInOwnWords, GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -4461,6 +4461,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: `${l.chance} ${l.depends}`, lead: true as const }]),
           { role: 'evidence', text: l.chance, lead: true },
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends }]),
+          // B15: where the narrator gave this figure in its own accepted words (so nothing was added), THAT sentence is
+          // the finding: typed as leading evidence, by this option's label and screen figure (Codex P1, DL 6049287605).
+          ...(reply.includes(l.chance) ? [] : reply.split('\n').map((row) => row.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, ''))
+            .flatMap((row) => sentencesOf(row)).filter((s) => chanceInOwnWords(s, l)).slice(0, 1)
+            .map((text): FaceObligation => ({ role: 'evidence', text, lead: true }))),
         ]),
         ...[basis, rootLine].filter((l): l is string => typeof l === 'string' && l.trim() !== '')
           .map((text) => ({ role: 'evidence' as const, text })),
