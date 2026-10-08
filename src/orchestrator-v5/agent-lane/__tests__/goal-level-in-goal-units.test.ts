@@ -20,7 +20,10 @@ describe('the goal’s derived level in the goal’s own units', () => {
   it('RED (served): "12,250.00 in its own units" → "£12,250 a month"; every other word, and every other warning, unchanged', () => {
     const out = withGoalLevelInGoalUnits(served.analysis_result, served.graph);
     const warnings = out.enrichment.inference_warnings;
-    expect(warnings.find((w) => w.code === 'GOAL_LEVEL_FROM_IDENTITY_INPUTS')!.message).toBe(SERVED_WORDS.replace('12,250.00 in its own units', '£12,250 a month'));
+    // Science goals §(i) (8 Oct): this served graph carries a definitional "less" term with no figure, so the level is said
+    // BEFORE it (goal-level-before-term.test.ts holds the no-addend control).
+    expect(warnings.find((w) => w.code === 'GOAL_LEVEL_FROM_IDENTITY_INPUTS')!.message).toBe(SERVED_WORDS.replace('12,250.00 in its own units',
+      '£12,250 a month, before ‘MRR lost to price sensitivity’, which has no figure yet'));
     expect(warnings.filter((w) => w.code !== 'GOAL_LEVEL_FROM_IDENTITY_INPUTS')).toEqual(
       served.analysis_result.enrichment.inference_warnings.filter((w) => w.code !== 'GOAL_LEVEL_FROM_IDENTITY_INPUTS'));
   });
