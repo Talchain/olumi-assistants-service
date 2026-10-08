@@ -3127,7 +3127,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const widenTarget = widenTargetOf(pressedChipId, message);
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTarget !== null) {
       const rb = await readBackState(readingDispatch, scenarioId);
-      widenTurn = widenTarget === 'factors' ? factorsTurnForReadback(rb)
+      widenTurn = widenTarget === 'factors' ? factorsTurnForReadback(rb,
+        selectedElements?.node_ids.length === 1 && selectedElements.edge_ids.length === 0 ? selectedElements.node_ids[0] : undefined)
         : widenTarget === 'risks' ? risksTurnForReadback(rb, toolCtx.user_text ?? '') : widenTurnForReadback(pressedChipId, rb);
       if (widenTurn !== null) fastPath = 'method';
       if (widenTurn !== null && widenTurn.kind === 'unavailable') {

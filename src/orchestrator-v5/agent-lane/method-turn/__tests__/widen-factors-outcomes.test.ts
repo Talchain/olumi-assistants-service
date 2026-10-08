@@ -48,6 +48,33 @@ const labels = (g: Gate) => g.kept.map((x) => x.label);
 const methodLine = (_door: Door) => 'I looked for what else could drive ‘profit’, across customers and demand, money and price, people and capacity, timing, how the work is done, and outside conditions (influence-diagram elicitation).';
 const caveat = (_door: Door) => 'Possible drivers to consider, not established causes.';
 
+const focusedTurn = (clickedId: string) => (mod.factorsTurnForReadback as
+  (rb: { graph: unknown }, clickedId: string) => mod.RunFactorsWidenTurn)({ graph: seed() }, clickedId);
+
+describe('P14 round 4 clicked factor anchor', () => {
+  it('CLICKED-GATE: Revenue drops a Cost candidate; Revenue control offers an Add bound to Revenue', () => {
+    const turn = focusedTurn('revenue');
+    const wrong = mod.factorGate(turn, [candidate('factors', { anchor_id: 'cost' })]);
+    expect(wrong.kept).toEqual([]);
+    expect(wrong.dropped[0]?.failed).toContain('FD-ANCHOR');
+    const right = mod.factorGate(turn, [candidate('factors', { anchor_id: 'revenue' })]);
+    expect(right.kept).toHaveLength(1);
+    const add = right.kept[0]!.press;
+    expect(mod.factorAddCallOf(add.id, add.message, { graph: seed() })?.args.factors)
+      .toEqual([{ label: 'Customer retention', affects: 'revenue', direction: 'positive' }]);
+  });
+
+  it('CLICKED-DIRECTIVE: only the clicked eligible node is offered to the model; no-selection keeps both', () => {
+    const anchors = (t: mod.RunFactorsWidenTurn) => JSON.parse(t.directive.split('\n')
+      .find((line) => line.startsWith('Use an exact anchor_id'))!.split('node: ')[1]!.split('. Never drive')[0]!);
+    expect(anchors(focusedTurn('revenue')).map((n: { id: string }) => n.id)).toEqual(['revenue']);
+    const ordinary = mod.factorsTurnForReadback({ graph: seed() });
+    expect(ordinary.kind).toBe('run_factors');
+    if (ordinary.kind !== 'run_factors') throw new Error(ordinary.kind);
+    expect(anchors(ordinary).map((n: { id: string }) => n.id)).toEqual(['profit', 'revenue', 'cost']);
+  });
+});
+
 describe('P14 press identity', () => {
   it('PI-F: DGAI factor press opens factors', () => {
     expect(mod.widenTargetOf('ask:missing-factor', 'What else could change how this turns out that the model doesn’t have yet?')).toBe('factors');

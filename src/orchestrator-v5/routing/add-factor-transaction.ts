@@ -31,7 +31,9 @@ import { PLACEHOLDER_MAGNITUDE } from '../../cee/magnitude/link-sizing.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
-import { hypothesisEdgeValue, isStatedTodayObservedState, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
+import { sameFoldedLabel } from '../label-fold.js';
+import { hypothesisEdgeValue, isStatedTodayObservedState, reachesGoal, type AddOptionGraphView } from './add-option-transaction.js';
+import { factorDefinitionRedirect } from './factor-definition-target.js';
 
 /** At most this many new factors in ONE change (the ruling: 1..3). */
 export const MAX_FACTORS_PER_ADD = 3;
@@ -65,6 +67,7 @@ export type AddFactorSkipReason =
   | 'factor_id_collision'
   | 'node_not_found'
   | 'target_not_allowed'
+  | 'target_is_defined'
   | 'new_factor_unreachable'
   | 'too_many_ops';
 
@@ -104,8 +107,8 @@ export function buildAddFactorTransaction(
   for (const f of parsed.data.factors) {
     const label = f.label.trim();
     // A second node by the same name is not a new factor: the user could not tell the two apart.
-    if (graph.nodes.some((n) => sameLabel(n.label, label))) return fail('factor_label_exists');
-    if (factors.some((x) => sameLabel(x.label, label))) return fail('factor_label_repeated');
+    if (graph.nodes.some((n) => sameFoldedLabel(n.label, label))) return fail('factor_label_exists');
+    if (factors.some((x) => sameFoldedLabel(x.label, label))) return fail('factor_label_repeated');
     let id: string;
     if (f.id !== undefined) {
       if (!CANONICAL_ID_RE.test(f.id)) return fail('factor_id_invalid');
@@ -150,6 +153,7 @@ export function buildAddFactorTransaction(
 export function recheckAddFactorBatch(
   operations: readonly PatchOperation[],
   graph: AddOptionGraphView | null,
+  internal?: { readonly kind: 'olumi_direction'; readonly raw: unknown },
 ): AddFactorSkipReason | null {
   if (graph === null) return 'no_graph';
   const valueOf = (o: PatchOperation): Record<string, unknown> =>
@@ -162,6 +166,8 @@ export function recheckAddFactorBatch(
     const own = edges.filter((e) => valueOf(e).from === n.path);
     if (own.length !== 1) return 'parameters_invalid';
     const e = valueOf(own[0]!);
+    if (internal?.kind === 'olumi_direction' && typeof e.to === 'string'
+      && factorDefinitionRedirect(internal.raw, e.to) !== undefined) return 'target_is_defined';
     factors.push({ id: n.path, label: valueOf(n).label, link: { to_id: e.to, effect_direction: e.effect_direction } });
   }
   const built = buildAddFactorTransaction({ factors }, graph);

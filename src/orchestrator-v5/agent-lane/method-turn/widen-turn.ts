@@ -33,7 +33,8 @@ import type { AgentCapabilities, ToolResult } from '../runtime/agent-tools.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { buildAddFactorTransaction, isNewFactorTarget } from '../../routing/add-factor-transaction.js';
-import { currentDefinitionalCarrier, endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
+import { factorDefinitionRedirect } from '../../routing/factor-definition-target.js';
+import { foldWords, sameFoldedLabel } from '../../label-fold.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
@@ -83,7 +84,7 @@ type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
 const quote = (label: string): string => `‘${label}’`;
 /** Labels compare after folding curly quotes, case and whitespace: the same entity, however the model typed it. */
-const norm = (s: string): string => s.replace(/[‘’]/gu, "'").replace(/[“”]/gu, '"').replace(/\s+/gu, ' ').trim().toLowerCase();
+const norm = foldWords;
 
 export interface Graph {
   readonly nodes: Rec[];
@@ -180,7 +181,7 @@ export type WidenUnavailableReason = 'model_unread' | 'no_goal' | 'not_an_assump
 /** ONE deterministic "can't widen because …" reply, with 'Talk it through'. No model call. */
 export interface WidenUnavailableTurn {
   readonly kind: 'unavailable';
-  readonly reason: WidenUnavailableReason;
+  readonly reason: WidenUnavailableReason | 'factor_anchor_ineligible' | 'factor_anchor_defined';
   readonly reply: string;
   readonly actions: readonly SuggestedAction[];
 }
@@ -694,7 +695,6 @@ export const SUGGEST_RISKS_CHIP = {
 /** The canvas "+" chooser's Risk press (DGAI `WhatElseChooser.tsx` → `askAi.ts` `ask:risks`). */
 export const CANVAS_RISKS_PRESS_ID = 'ask:risks';
 
-const foldWords = (s: string): string => s.replace(/[‘’]/gu, "'").replace(/\s+/gu, ' ').trim().toLowerCase();
 
 /** Which target a press opens, by identity; null for every other press (including the pre-mortem's risk request). */
 export function widenTargetOf(chipId: unknown, message?: unknown): WidenTarget | null {
@@ -1143,6 +1143,7 @@ export const OLUMI_DIRECTION_BASIS = "Olumi's suggestion: the direction is Olumi
 export interface RunFactorsWidenTurn {
   readonly kind: 'run_factors'; readonly target: 'factors'; readonly graph: Graph;
   readonly raw: unknown; readonly directive: string; readonly goal_label: string;
+  readonly clickedId?: string;
 }
 export interface FactorSuggestion {
   readonly label: string; readonly category: string; readonly since: string;
@@ -1161,7 +1162,7 @@ const factorCandidateSchema = z.object({
 // Bounded candidate lengths precede every regex. No masking: Olumi supplies both the name and mechanism.
 const COVERAGE_BAN = /\b(?:key|main|most important|top|primary|root cause|the real|the answer|best|winners?|recommend\w*|ahead|beats?|leader\w*|you missed|you forgot|your model is wrong|incomplete|all the drivers|complete|everything that matters|will|proven|research shows|likely|probably|hidden risks|unintended consequences|lever|uncontrollable)\b/iu;
 function coverageWordsAllowed(label: string, since: string): boolean {
-  return ![label, since].some((t) => /[\d?\n‘’]/u.test(t) || COVERAGE_BAN.test(foldWords(t)))
+  return ![label, since].some((t) => /\p{Nd}/u.test(t) || /[%٪﹪％⁒?\n‘’]/u.test(t) || COVERAGE_BAN.test(foldWords(t)))
     && label.split(/\s+/u).length <= 6 && since.split(/\s+/u).length <= 12;
 }
 function uniqueCoverageAnchor(g: Graph, id: string): Rec | undefined {
@@ -1171,36 +1172,32 @@ function uniqueCoverageAnchor(g: Graph, id: string): Rec | undefined {
   return label !== null && label.length <= 200 && !/[\n‘’]/u.test(label)
     && g.nodes.filter((x) => norm(String(x.label ?? '')) === norm(label)).length === 1 ? n : undefined;
 }
-/** S-DEF is reached through its real held-carrier predicate, never inferred from a node's label. */
-function definitionRedirect(turn: Pick<RunFactorsWidenTurn, 'graph' | 'raw'>, id: string): string | undefined {
-  const n = turn.graph.nodes.find((x) => x.id === id);
-  if (n === undefined || labelOf(n) === null) return undefined;
-  const ends = endsOfGraph(turn.raw);
-  const fixed = rec(n.nonlinear_identity);
-  const operands = new Set(Array.isArray(fixed?.factor_ids) ? fixed.factor_ids : []);
-  const sources = turn.graph.edges.filter((e) => e.to === id && (operands.has(e.from)
-    || (currentDefinitionalCarrier(e) !== undefined && ['definition', 'user_range'].includes(heldLinkOf(e, ends(e))?.reason ?? ''))))
-    .map((e) => turn.graph.nodes.find((x) => x.id === e.from)).filter((x): x is Rec => x !== undefined && labelOf(x) !== null);
-  // An identity can name its operands without drawing their edges.
-  for (const source of turn.graph.nodes.filter((x) => operands.has(x.id) && labelOf(x) !== null)) {
-    if (!sources.some((x) => x.id === source.id)) sources.push(source);
-  }
-  if (sources.length === 0) return undefined;
-  return `${quote(labelOf(n)!)} is worked out from ${sources.map((x) => quote(labelOf(x)!)).join(' and ')}, so a new cause would act on one of those. Press + on one of them.`;
-}
-export function factorsTurnForReadback(rb: MethodReadback): RunFactorsWidenTurn | WidenUnavailableTurn {
+export function factorsTurnForReadback(rb: MethodReadback, clickedId?: string): RunFactorsWidenTurn | WidenUnavailableTurn {
   if (rb.graph === undefined || rb.graph === null) return { ...unavailable('model_unread'),
     reply: 'I can’t suggest factors right now because I couldn’t read your model. Try again in a moment.' };
   const graph = graphOf(rb.graph); const goal = goalOf(rb.graph, graph);
-  const anchors = graph.nodes.filter((n) => isNewFactorTarget(n as never) && uniqueCoverageAnchor(graph, String(n.id)) !== undefined);
+  if (clickedId !== undefined) {
+    const clicked = uniqueCoverageAnchor(graph, clickedId);
+    if (clicked === undefined || !isNewFactorTarget(clicked as never)) return {
+      kind: 'unavailable', reason: 'factor_anchor_ineligible', actions: [TALK_IT_THROUGH_CHIP],
+      reply: `${quote(labelOf(graph.nodes.find((n) => n.id === clickedId)) ?? clickedId)} can’t take a new driver here. Press + on an outcome or a factor it depends on.`,
+    };
+    const definition = factorDefinitionRedirect(rb.graph, clickedId);
+    if (definition !== undefined) return {
+      kind: 'unavailable', reason: 'factor_anchor_defined', reply: definition, actions: [TALK_IT_THROUGH_CHIP],
+    };
+  }
+  const anchors = graph.nodes.filter((n) => (clickedId === undefined || n.id === clickedId)
+    && isNewFactorTarget(n as never) && uniqueCoverageAnchor(graph, String(n.id)) !== undefined);
   const directive = [
     'METHOD TURN: influence-diagram elicitation. Do not write prose. Reply with ONLY <factor_suggestions>JSON array</factor_suggestions>. The server writes every word the user sees.',
     `Return up to ${FACTOR_MAX_ITEMS} possible drivers, one per distinct category, from ${JSON.stringify(FACTOR_METHOD.categories)}.`,
     'Each item has exactly label, category, anchor_id, direction (positive or negative), since (at most twelve words). Label: at most six words. No digits in label or since. No rankings, certainty, diagnosis or completeness claims.',
-    `Use an exact anchor_id from these nodes; new factor links INTO that node: ${JSON.stringify(anchors.map((n) => ({ id: n.id, label: n.label, definition: definitionRedirect({ graph, raw: rb.graph }, String(n.id)) ?? null })))}. Never drive a node fixed by a definition.`,
+    `Use an exact anchor_id from these nodes; new factor links INTO that node: ${JSON.stringify(anchors.map((n) => ({ id: n.id, label: n.label, definition: factorDefinitionRedirect(rb.graph, String(n.id)) ?? null })))}. Never drive a node fixed by a definition.`,
     `All existing labels (never repeat them): ${JSON.stringify(graph.nodes.map((n) => n.label))}.`,
   ].join('\n');
-  return { kind: 'run_factors', target: 'factors', graph, raw: rb.graph, directive, goal_label: labelOf(goal) ?? 'your goal' };
+  return { kind: 'run_factors', target: 'factors', graph, raw: rb.graph, directive, goal_label: labelOf(goal) ?? 'your goal',
+    ...(clickedId !== undefined ? { clickedId } : {}) };
 }
 function factorAddMessage(s: Pick<FactorSuggestion, 'label' | 'anchor' | 'direction'>): string {
   return `Add the factor ${quote(s.label)}: it could ${s.direction === 'positive' ? 'raise' : 'lower'} ${quote(s.anchor.label)}.`;
@@ -1220,11 +1217,12 @@ export function factorGate(turn: RunFactorsWidenTurn, candidates: unknown): Fact
     const parsed = factorCandidateSchema.safeParse(item);
     if (!parsed.success) { dropped.push({ index, failed: ['FD-SCHEMA'] }); continue; }
     const c = parsed.data; const failed: string[] = [];
-    if (turn.graph.nodes.some((n) => sameLabel(typeof n.label === 'string' ? n.label : undefined, c.label))
-      || kept.some((n) => sameLabel(n.label, c.label))) failed.push('FD-NO-DUP');
+    if (turn.graph.nodes.some((n) => sameFoldedLabel(typeof n.label === 'string' ? n.label : undefined, c.label))
+      || kept.some((n) => sameFoldedLabel(n.label, c.label))) failed.push('FD-NO-DUP');
     const anchor = uniqueCoverageAnchor(turn.graph, c.anchor_id);
-    if (anchor === undefined || !isNewFactorTarget(anchor as never)) failed.push('FD-ANCHOR');
-    const definition = definitionRedirect(turn, c.anchor_id);
+    if (anchor === undefined || !isNewFactorTarget(anchor as never)
+      || (turn.clickedId !== undefined && c.anchor_id !== turn.clickedId)) failed.push('FD-ANCHOR');
+    const definition = factorDefinitionRedirect(turn.raw, c.anchor_id);
     if (definition !== undefined) { failed.push('FD-NOT-DEFINED'); redirect ??= definition; }
     if (!coverageWordsAllowed(c.label, c.since)) failed.push('FD-WORDS');
     if (kept.some((n) => n.category === c.category)) failed.push('FD-DISTINCT');

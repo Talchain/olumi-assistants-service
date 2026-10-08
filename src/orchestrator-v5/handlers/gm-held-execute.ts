@@ -785,7 +785,8 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // P14's widen Add has no user figure. Its explicit door stamp opts into the same name and target rules;
   // another door's factor+edge batch never acquires those rules from its shape.
   if ((input.userToday !== undefined && input.userToday.length > 0) || input.olumiDirection === true) {
-    const conflict = recheckAddFactorBatch(operations, toGraphView(input.currentGraph));
+    const conflict = recheckAddFactorBatch(operations, toGraphView(input.currentGraph),
+      input.olumiDirection === true ? { kind: 'olumi_direction', raw: input.currentGraph } : undefined);
     if (conflict !== null) {
       log.warn(
         {

@@ -7,6 +7,7 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import type { PendingAction } from '../../session/pending-action.js';
 import { buildAddFactorTransaction, GM_HELD_OLUMI_DIRECTION_KEY, isNewFactorTarget, recheckAddFactorBatch } from '../../routing/add-factor-transaction.js';
 import { hypothesisEdgeValue } from '../../routing/add-option-transaction.js';
+import { factorDefinitionRedirect } from '../../routing/factor-definition-target.js';
 import { evaluateEditGraphMutations } from '../edit-graph-referee-gate.js';
 import { toGraphView } from '../add-option-dispatch.js';
 import { dispatchAddFactorTransaction } from '../add-factor-dispatch.js';
@@ -136,5 +137,54 @@ describe('P14 no-figure add-factor hold recheck', () => {
     expect((control.mutatedGraph as Graph).nodes.find((n) => n.id === built.proposal.factors[0]!.id)?.observed_state)
       .toBeUndefined();
     expect(JSON.stringify(before), 'successful application also clones its input graph').toBe(beforeBytes);
+  });
+
+  it.each(['sum identity', 'held definitional link'] as const)('RECHECK-DEFINITION: approval refuses when the target became a %s; nothing persists; unchanged target executes', (definition) => {
+    const before = graph();
+    const held = dispatchAddFactorTransaction({
+      params: { factors: [{ label: LABEL, link: { to_id: TARGET, effect_direction: 'positive' } }] },
+      variant: 'olumi_direction', mode: 'live', currentGraph: before,
+      currentGraphHash: hash(before), freshness: 'none',
+      scenarioId: SCENARIO, turnId: 'p14-definition-propose', requestId: 'p14-definition-propose', stage: 'frame',
+    });
+    expect(held.kind).toBe('held');
+    if (held.kind !== 'held') throw new Error(held.reason);
+    const read = readGmHeldResume(held.pendingActions[0]!);
+    expect(read.kind).toBe('ok');
+    if (read.kind !== 'ok') throw new Error(read.kind);
+    expect(read.olumiDirection).toBe(true);
+    const confirm = (currentGraph: Graph) => executeGmHeldResume({
+      ...read, currentGraph, currentGraphHash: hash(currentGraph), freshness: 'none', hasExistingAnalysis: false,
+      scenarioId: SCENARIO, turnId: 'p14-definition-confirm', requestId: 'p14-definition-confirm',
+    });
+    const moved = structuredClone(before);
+    if (definition === 'sum identity') {
+      moved.nodes.find((n) => n.id === TARGET)!.nonlinear_identity = {
+        operation: 'sum', factor_ids: ['new_senior_engineers_hired', 'new_junior_engineers_hired'], stated_in_brief: true,
+      };
+    } else {
+      const edge = moved.edges.find((e) => e.from === 'new_senior_engineers_hired' && e.to === TARGET)!;
+      edge.strength = { mean: 0.5, std: 0.1 };
+      edge.provenance = { source: 'user_specified', magnitude: 'user_stated', definitional: true,
+        natural_effect: { amount: 1, amount_unit: 'engineers', strength_mean: 0.5, per_source_change: 1,
+          per_source_change_unit: 'engineers', strength_mean_frame: 'edge_strength', stated_range: { low: 0.5, high: 1.5 } } };
+    }
+    // The changed target remains a valid graph and otherwise meets the factor door's name, kind and reachability rules.
+    expect(toGraphView(moved)).not.toBeNull();
+    expect(factorDefinitionRedirect(moved, TARGET)).toBeDefined();
+    expect(recheckAddFactorBatch(read.operations, toGraphView(moved))).toBeNull();
+    const movedBytes = JSON.stringify(moved);
+    const refused = confirm(moved);
+    expect(refused).toEqual({ status: 'apply_failed', reason: 'apply_error' });
+    expect('mutatedGraph' in refused).toBe(false);
+    expect(JSON.stringify(moved), 'the graph handed to the commit door remains byte-identical').toBe(movedBytes);
+
+    const beforeBytes = JSON.stringify(before);
+    const control = confirm(before);
+    expect(control.status).toBe('executed');
+    if (control.status !== 'executed') throw new Error(control.status);
+    expect((control.mutatedGraph as Graph).nodes).toHaveLength(before.nodes.length + 1);
+    expect((control.mutatedGraph as Graph).edges).toHaveLength(before.edges.length + 1);
+    expect(JSON.stringify(before)).toBe(beforeBytes);
   });
 });

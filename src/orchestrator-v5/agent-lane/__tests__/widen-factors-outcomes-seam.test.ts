@@ -216,6 +216,85 @@ describe('P14 factors on the live route and real held commit door', () => {
     return add!;
   };
 
+  const revenueGraph = (defined = false) => graphOf.set(SCENARIO, {
+    goal_node_id: 'goal', goal_constraints: [],
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'Sustainable business', goal_threshold: 0.8 },
+      { id: 'profit', kind: 'outcome', label: 'Profit', unit: 'GBP', observed_state: { value: 0.4, unit: 'GBP' },
+        ...(defined ? { nonlinear_identity: { operation: 'sum', factor_ids: ['revenue', 'cost'], weights: [1, -1], stated_in_brief: true } } : {}) },
+      { id: 'revenue', kind: 'factor', label: 'Revenue', category: 'external', observed_state: { value: 0.6, unit: 'GBP' } },
+      { id: 'cost', kind: 'factor', label: 'Cost', category: 'external', observed_state: { value: 0.2, unit: 'GBP' } },
+      { id: 'lever', kind: 'factor', label: 'Hiring lever', category: 'controllable' },
+      { id: 'option', kind: 'option', label: 'Hire staff', interventions: { lever: 1 } },
+    ],
+    edges: [
+      { from: 'revenue', to: 'profit', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8 },
+      { from: 'cost', to: 'profit', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.8 },
+      { from: 'profit', to: 'goal', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8 },
+    ],
+  });
+  const focusedPress = (ids: string[]) => turn({ message: PRESS.factors.message, source: 'chip',
+    chip: { id: PRESS.factors.id }, selected_elements: { node_ids: ids, edge_ids: [] } });
+  const factorDraft = (anchor_id: string) => say(`<factor_suggestions>${JSON.stringify([{
+    label: 'Customer retention', category: 'customers and demand', anchor_id, direction: 'positive',
+    since: 'steadier relationships support the work',
+  }])}</factor_suggestions>`);
+
+  it('SF-R4-CLICKED: + on Revenue drops a Cost candidate and offers nothing for Cost', async () => {
+    revenueGraph(); const before = await reread();
+    script = [() => factorDraft('cost')];
+    const b = await focusedPress(['revenue']);
+    expect(openAiCalls).toBe(1);
+    expect(addChips(b)).toEqual([]);
+    expect(b.assistant_text).not.toContain('Cost');
+    expect(await reread()).toEqual(before);
+  });
+
+  it('SF-R4-2 WRITER: + on Revenue → Revenue Add → real approval links new factor only to Revenue', async () => {
+    paulV1();
+    const valid = JSON.parse(JSON.stringify(graphOf.get(SCENARIO)).replaceAll('"feature_delivery_capacity"', '"revenue"')) as GraphNow;
+    valid.nodes.find((node) => node.id === 'revenue')!.label = 'Revenue';
+    graphOf.set(SCENARIO, valid); const before = await reread();
+    script = [() => factorDraft('revenue')];
+    const b = await focusedPress(['revenue']);
+    const add = addChips(b)[0]; expect(add?.label).toBe('Add ‘Customer retention’');
+    const held = await press(add!); const approve = approveChipOf(held);
+    expect(approve, JSON.stringify(held)).toBeDefined(); expect(await reread()).toEqual(before);
+    const approved = await press(approve!);
+    expect(approved._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(openAiCalls).toBe(1);
+    const after = await reread();
+    const ids = added(nodeIds(after.graph), nodeIds(before.graph)); expect(ids).toHaveLength(1);
+    expect(added(edgeIds(after.graph), edgeIds(before.graph))).toEqual([`${ids[0]}::revenue`]);
+    expect(after.graph.edges.some((e) => e.from === ids[0] && e.to === 'cost')).toBe(false);
+    expect(await reread()).toEqual(after); expect(routerCalls).toEqual([]);
+  });
+
+  it.each([['goal', 'Sustainable business'], ['lever', 'Hiring lever'], ['option', 'Hire staff'], ['missing', 'missing']])
+  ('SF-R4-INELIGIBLE: + on %s deterministically refuses with zero model calls', async (id, label) => {
+    revenueGraph(); const before = await reread();
+    const b = await focusedPress([id!]);
+    expect(b.assistant_text).toBe(`‘${label}’ can’t take a new driver here. Press + on an outcome or a factor it depends on.`);
+    expect(openAiCalls).toBe(0); expect(addChips(b)).toEqual([]);
+    expect(await reread()).toEqual(before);
+  });
+
+  it('SF-R4-DEFINITION: + on Profit redirects to Revenue and Cost verbatim with zero model calls', async () => {
+    revenueGraph(true); const before = await reread();
+    script = [() => say('<factor_suggestions>[]</factor_suggestions>')];
+    const b = await focusedPress(['profit']);
+    expect(b.assistant_text).toBe('‘Profit’ is worked out from ‘Revenue’ and ‘Cost’, so a new cause would act on one of those. Press + on one of them.');
+    expect(openAiCalls).toBe(0); expect(addChips(b)).toEqual([]);
+    expect(await reread()).toEqual(before);
+  });
+
+  it('SF-R4-MULTI control: several selected nodes keep model choice from the eligible anchors', async () => {
+    revenueGraph(); script = [() => factorDraft('cost')];
+    const b = await focusedPress(['revenue', 'profit']);
+    expect(openAiCalls).toBe(1); expect(addChips(b)).toHaveLength(1);
+    expect(addChips(b)[0]!.message).toContain('‘Cost’');
+  });
+
   for (const door of ['factors'] as const) {
     const row = 'SF';
     it(`${row}-1: typed press → ONE tool-less call, ≤3 exact suggestions and Adds, Something else; no graph write`, async () => {
