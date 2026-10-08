@@ -2,6 +2,7 @@ import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
 import { currentLevelAskForAnswerRow } from '../orchestrator-v5/agent-lane/current-level-ask-carry.js';
+import { parseAnswerOffers } from '../orchestrator-v5/agent-lane/answer-offers-envelope.js';
 /**
  * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
  *
@@ -776,7 +777,10 @@ export function isDurableAnswerOffer(action: SuggestedAction): boolean {
   return !('action_type' in action) && !('detail' in action)
     && typedApprovalOf({ chip: { id: action.id } }) === undefined
     && action.id !== RUN_OFFER_CHIP.id && !isRunExplanationChip(action.id)
-    && (METHOD_PRESS_IDS.has(action.id) || isWidenAddPressId(action.id));
+    && (METHOD_PRESS_IDS.has(action.id) || isWidenAddPressId(action.id))
+    // ⛔ AIE 6048621134: the answer RPC refuses the WHOLE row on one offer outside the migration's envelope (a widen Add
+    // id carries ':'), so the answer was never recorded. An offer the database would refuse stays live and is not stored.
+    && parseAnswerOffers([{ id: action.id, label: action.label, message: action.message }]) !== null;
 }
 
 /**
@@ -4510,7 +4514,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
     const answerOffers = ((wireBody.suggested_actions ?? []) as readonly SuggestedAction[])
-      .filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message }));
+      // The migration's cap is 8 offers per row; a ninth would refuse the whole row, so it stays live only.
+      .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id, label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
