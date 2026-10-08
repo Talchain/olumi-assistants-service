@@ -4,7 +4,7 @@
  *
  * The served journey (red team #87 5999041843, guest 078e521e, CEE 7b1d8414): the user followed Olumi's own correction,
  * set the goal's target to "at most 400" and re-ran, and every option's win share, the leader and the brief went —
- * "This run doesn't show how often each option reaches the goal's target". The target cannot be TESTED (no level today,
+ * a withheld goal-chance sentence. The target cannot be TESTED (no level today,
  * P1; links not sized in the goal's unit, P5), but the ORDERING needs neither: the shared offset cancels on each draw.
  *
  * Fixture: the red team's wire, verbatim. `graph_with_target` is the post-edit graph (`<=` 400 row, held `<=`, no

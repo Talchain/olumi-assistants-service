@@ -98,6 +98,7 @@ describe('set_factor_value handler', () => {
     expect(outcome.handler_facts).toHaveLength(1);
     const fact = outcome.handler_facts[0];
     expect(fact.fact_type).toBe('set_factor_value');
+    if (fact.fact_type !== 'set_factor_value') throw new Error('Expected a set_factor_value fact');
     expect(fact.result.target_id).toBe('f-churn');
     expect(fact.result.status).toBe('applied');
     expect(fact.result.after).toMatchObject({ value: 0.05, raw_value: 5, unit: '%' });
@@ -148,6 +149,7 @@ describe('set_factor_value handler', () => {
       ),
     );
     const fact = outcome.handler_facts[0];
+    if (fact.fact_type !== 'set_factor_value') throw new Error('Expected a set_factor_value fact');
     expect(fact.result.after).toMatchObject({ raw_value: 3, value: 0.03 });
   });
 
@@ -165,6 +167,7 @@ describe('set_factor_value handler', () => {
       ),
     );
     const fact = outcome.handler_facts[0];
+    if (fact.fact_type !== 'set_factor_value') throw new Error('Expected a set_factor_value fact');
     expect(fact.result.after).toMatchObject({ raw_value: 60000 });
   });
 
@@ -469,6 +472,7 @@ describe('set_factor_value handler', () => {
       ),
     );
     const fact = outcome.handler_facts[0];
+    if (fact.fact_type !== 'set_factor_value') throw new Error('Expected a set_factor_value fact');
     expect(fact.noop).toBe(true);
     expect(fact.result.status).toBe('noop');
     // No LLM was called and the analysis-affecting hash is unchanged,

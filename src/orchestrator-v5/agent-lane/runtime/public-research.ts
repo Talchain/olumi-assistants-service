@@ -16,7 +16,7 @@
  * the answer row keeps, so a reload shows the same sources).
  */
 import { createHash } from 'node:crypto';
-import { REPLY_SHAPE_INSTRUCTION } from '../reply/compose-reply.js';
+import { REPLY_SHAPE_INSTRUCTION } from '../reply/reply-shape-instruction.js';
 
 /** Hosted search calls one research request may make (the handoff's `max_tool_calls`). */
 export const RESEARCH_MAX_TOOL_CALLS = 3;

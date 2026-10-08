@@ -2,7 +2,8 @@
  * ⭐ A7 SAID LAST TURN → MORE DETAIL (DL 58e392 follow-up after RC6). Paul's test, 8 Oct (scenario 632b92b9): "This model
  * doesn't yet say whether any option gets there within 12 months." sat on the FACE of the Explain reply at 00:24:38 after
  * the reply before had already said it. Stored replies are the RC6 fixture (verbatim). When the latest answer said A7 word
- * for word, the route types it `detail`: still said, under More detail, never removed.
+ * for word, the route types it `detail`: still said, under More detail, never removed. A horizon beside a goal chance
+ * remains mandatory on the face even when the latest answer already said it.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -12,8 +13,10 @@ import { withA7AsDetail } from '../../../routes/agent-v1-turn.js';
 const served = JSON.parse(readFileSync(new URL('../reply/__tests__/fixtures/paul-test-20261008-explain.json', import.meta.url), 'utf8')) as {
   explain_00_24_38: string; no_leader_with_reason: string; withhold_sentence: string;
 };
-const A7 = 'This model doesn\'t yet say whether any option gets there within 12 months.';
-const TEXT = served.explain_00_24_38;
+const A7 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
+// Retain the served narrator/gate corpus, applying only the shared writer's new words. The short variant keeps this
+// historical no-chance control within the ordinary coaching pool budget; full 12-month words are pinned at route level.
+const TEXT = served.explain_00_24_38.replace("This model doesn't yet say whether any option gets there within 12 months.", A7);
 // The route's own typing of this reply (RC6 rows): the gate's closing and its bare reason.
 const ROUTE: FaceObligation[] = [
   { role: 'withheld_reason', text: served.no_leader_with_reason },
@@ -21,7 +24,7 @@ const ROUTE: FaceObligation[] = [
 ];
 
 describe('A7 said last turn', () => {
-  it('CONTROL (served today): untyped, A7 is a FACE bullet of the 00:24:38 Explain', () => {
+  it('CONTROL (ordinary coaching): untyped A7 fits the pool and stays a FACE bullet', () => {
     expect(TEXT).toContain(A7);
     const c = composeReplyShape({ text: TEXT, obligations: ROUTE });
     expect(c.shape, 'the reply shapes').not.toBeNull();
@@ -42,5 +45,11 @@ describe('A7 said last turn', () => {
     expect(withA7AsDetail(ROUTE, A7, 'Another reply.')).toEqual(ROUTE);
     const hosted = [...ROUTE, { role: 'host' as const, text: A7 }];
     expect(withA7AsDetail(hosted, A7, TEXT).filter((o) => o.text === A7)).toEqual([{ role: 'detail', text: A7 }]);
+  });
+
+  it('a repeated horizon beside a face chance is never retyped as detail', () => {
+    const hosted: FaceObligation[] = [...ROUTE, { role: 'host', text: A7 }];
+    expect(withA7AsDetail(hosted, A7, TEXT, true)).toEqual(hosted);
+    expect(withA7AsDetail(hosted, A7, TEXT, true).find((o) => o.text === A7)?.role).not.toBe('detail');
   });
 });

@@ -1,4 +1,5 @@
 /** Existing target-not-testable-beside-ranges.route harness: real route, fixed narrator, in-memory readback/store. */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -17,6 +18,11 @@ const links = [{ from: 'pro_plan_price', to: 'mrr_per_pro_subscriber' }];
 const warning = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', severity: 'warning', links, node_ids: links.flatMap(l => [l.from, l.to]),
   withheld_claims: ['win_share', 'goal_probability'], message: 'A link on the goal path is unsized.' };
 const result = { type: 'analysis_result', computed_against_hash: 'restatement-h0', enrichment: { inference_warnings: [warning] } };
+// r15 contract re-pin: "cell-sourced marker". The recorded Run roster makes its existing typed
+// placeholder warning available on canonical withheld cells, rather than deriving a marker from the closing.
+const resultWithRoster = { ...result, enrichment: { ...result.enrichment,
+  option_comparison: graph.nodes.filter(n => (n as { kind?: string }).kind === 'option').map(n => ({ option_id: n.id })) } };
+let recordsOptionRoster = false;
 const state = { ...FX.state.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-07T12:00:00.000Z' },
   leader_claim: { permitted: false, withheld_reason: 'goal_path_unsized', separation: 'unavailable' } };
 let currentState = state;
@@ -62,12 +68,12 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: 'restatement-h0', analysis_result: result, analysis_state: currentState, analysis_ready: ready }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph, graph_hash: 'restatement-h0', analysis_result: recordsOptionRoster ? resultWithRoster : result, analysis_state: currentState, analysis_ready: ready }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { currentState = state; rows.clear(); saved.length = 0; modelReply = `${ranking} ${prose}`; });
+  beforeEach(() => { currentState = state; recordsOptionRoster = false; rows.clear(); saved.length = 0; modelReply = `${ranking} ${prose}`; });
 
   it('the recorded warning links supply subjects; words and legacy graph links never supply subjects', () => {
     expect(goalFigureCoHoldOf([result], graph)).toMatchObject({ say: closing, subjects: ['pro_plan_price→mrr_per_pro_subscriber'] });
@@ -93,7 +99,13 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     expect(face).not.toContain(closing);
   });
 
-  it.each(['gate appended', 'already present'] as const)('%s: the face carries the cause once; the restatement stays in detail and durable text', async (source) => {
+  it.each(['gate appended', 'already present'] as const)('%s: the face carries the typed cause marker once; the full cause and restatement stay in detail and durable text', async (source) => {
+    recordsOptionRoster = true;
+    const cells = withCanonicalAnalysisView({ graph, analysis_result: resultWithRoster, analysis_state: currentState,
+      analysis_ready: ready }, SCENARIO).canonical_analysis_view.options.map(row => row.cell);
+    expect(cells.length, 'the recorded Run has option cells').toBeGreaterThan(0);
+    expect(cells.every(cell => cell.kind === 'withheld' && cell.reasons.some(reason => reason.code === warning.code)),
+      'canonical withheld cells retain the unsized-path cause').toBe(true);
     if (source === 'already present') modelReply = `${prose}\n\n${closing}`;
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: 'What assumption remains unresolved?',
@@ -104,8 +116,14 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     expect(b.blocks).toContainEqual(expect.objectContaining({ type: 'analysis_result' }));
     expect(b._answer_shape, response.body).toBeDefined();
     const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join('\n');
-    expect(face).toContain(closing);
-    expect(face.split(closing)).toHaveLength(2);
+    // The canonical cells' recorded placeholder reason owns this marker; it never comes from note prose.
+    const marker = "Not shown: some relationships aren't sized yet";
+    expect(face).toContain(marker);
+    expect(b._answer_shape!.headline, 'withheld cells lead without a shown chance').toBe(marker);
+    expect(face.split(marker)).toHaveLength(2);
+    expect(face).not.toContain(closing);
+    expect(b._answer_shape!.detail.split(closing)).toHaveLength(2);
+    expect(b.assistant_text.split(closing)).toHaveLength(2);
     expect(face).not.toContain(narrator);
     expect(b._answer_shape!.detail).toContain(narrator);
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);

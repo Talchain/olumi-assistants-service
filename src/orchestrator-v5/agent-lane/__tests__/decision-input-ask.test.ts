@@ -9,6 +9,9 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, withB3LinesAtRest, withA7AfterGate } from '../decision-input-ask.js';
 import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '../write-outcome.js';
+import { sentencesOf } from '../reply/compose-reply.js';
+import type { AnswerShape } from '../../routing/answer-shape.js';
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 type Rec = Record<string, unknown>;
 const SERVED_FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };
@@ -21,7 +24,15 @@ const FX: typeof SERVED_FX = {
 const graphWith = (goal: Rec) => ({ nodes: [goal, { id: 'opt_a', kind: 'option', label: 'Angel pilot' }], edges: [] });
 // "Funding secured" reads no direction (`deriveGoalIntent` undetermined, no minimise), so the neutral words (AIQ 5924149215).
 const ASK = 'What figure should "Funding secured" reach or stay under within 2 months? I\'ll propose it as your target.';
-const A7 = 'This model doesn\'t yet say whether any option gets there within 2 months.';
+const ASK_QUESTION = 'What figure should "Funding secured" reach or stay under within 2 months?';
+const OBJECTIVE_QUESTION = 'What should this model help you explore?';
+const expectOwnAskOnce = (text: string, ask: string) => {
+  for (const sentence of sentencesOf(ask)) expect(text.split(sentence).length - 1, `own sentence once: ${sentence}`).toBe(1);
+};
+// r15 CONTRACT: "horizon form chosen by figure/range cell count; staging's chance-free horizon sentence when no cell
+// shows a chance". These host/Run fixtures show no chance cells, including when the target itself is stated.
+const A7 = "This model doesn't yet say whether any option gets there within 2 months.";
+const A7_TARGET = A7;
 const base = { restingText: 'The model is a sketch to challenge.', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
 const b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
 const captureB3 = (source: string, text: string, line: string, question: string) => {
@@ -46,6 +57,9 @@ describe('B3-7: offer the inferred objective before its target', () => {
   });
   it('RED: durable rendered-text history suppresses the objective offer without falling through to a target ask', () => {
     expect(decisionInputAsk(graphWith(inferredGoal), { ...base, recentReplies: [`Saved. ${OBJECTIVE_ASK}`] })).toBeNull();
+    const statement = 'I used "Quarterly revenue" as a provisional objective.';
+    expect(decisionInputAsk(graphWith(inferredGoal), { ...base, recentReplies: [`${OBJECTIVE_QUESTION}\n\n${statement}`] })).toBeNull();
+    expect(decisionInputAsk(graphWith({ ...inferredGoal, label: 'Another goal' }), { ...base, recentReplies: [`${OBJECTIVE_QUESTION}\n\n${statement}`] })).not.toBeNull();
   });
   it.each([{ awaitingApproval: true }, { restingText: 'Which matters most?' }, { builtOrRan: false }])('CONTROL: an existing step suppresses the offer (%j)', (over) => {
     expect(decisionInputAsk(graphWith(inferredGoal), { ...base, ...over })).toBeNull();
@@ -99,6 +113,9 @@ describe('the lines, on the served goal', () => {
   it('RED (PANEL 5944136475): the ask already in a recent answer is still OPEN → not said again; A7 stays', () => {
     const earlier = `Your results are ready. You can view them now or ask me to explain them. ${ASK}`;
     expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, recentReplies: ['Unrelated.', earlier] })).toEqual([A7]);
+    expect(decisionInputLines(graphWith(FX.goal_after_build), {
+      ...base, recentReplies: [`${ASK_QUESTION}\n\nI'll propose it as your target.`],
+    })).toEqual([A7]);
   });
 
   it('CONTROL: no recent answer carries THIS ask (none read, or another goal\'s ask) → the ask is said, as before', () => {
@@ -109,7 +126,7 @@ describe('the lines, on the served goal', () => {
 
   it('CONTROL: once Paul stated "at least £1,000,000" → no ask; the deadline line stays (still not answered)', () => {
     expect(goalHasStatedTarget(FX.goal_after_target)).toBe(true);
-    expect(decisionInputLines(graphWith(FX.goal_after_target), base)).toEqual([A7]);
+    expect(decisionInputLines(graphWith(FX.goal_after_target), base)).toEqual([A7_TARGET]);
   });
 
   it('CONTROL: a duration limit the analysis scores → no A7 line (the deadline is answered)', () => {
@@ -232,13 +249,15 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 describe('≤160 words on screen (DL 5923219186 · AIQ 5923963470): over the bound, A7 folds back behind the toggle — never the ask', () => {
   const prose = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ');
   const a7w = A7.split(/\s+/).length; const askw = ASK.split(/\s+/).length;
-  it('the measured line sizes: A7 13 words, the ask 18', () => { expect([a7w, askw]).toEqual([13, 18]); });
+  it('the measured line sizes: chance-free A7 13 words, the ask 18', () => { expect([a7w, askw]).toEqual([13, 18]); });
   it('RED: at rest + toggle label + both lines = 161 → A7 stays behind the toggle; the ask is said', () => {
     const resting = prose(160 - 7 - a7w - askw + 1);
+    expect(resting.split(/\s+/).length + 7 + a7w + askw, 'the fixture still exceeds the exact 160-word bound by one').toBe(161);
     expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, restingText: resting, questionsToggle: true })).toEqual([ASK]);
   });
   it('CONTROL: exactly 160 → both lines', () => {
     const resting = prose(160 - 7 - a7w - askw);
+    expect(resting.split(/\s+/).length + 7 + a7w + askw, 'the fixture still meets the exact 160-word bound').toBe(160);
     expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, restingText: resting, questionsToggle: true })).toEqual([A7, ASK]);
   });
   it('CONTROL: over the bound with NO toggle (a Run turn: nowhere to fold it) → A7 is still said', () => {
@@ -386,7 +405,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     ...(turnId !== undefined ? { turn_id: turnId } : {}), kind: 'message', scenario_id: scenarioId, message: 'Run analysis.', source: 'chip',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
   } });
-    return (explain ? await explainRun(app, scenarioId, first) : first).json() as { assistant_text: string };
+    return (explain ? await explainRun(app, scenarioId, first) : first).json() as { assistant_text: string; _answer_shape?: AnswerShape };
   };
 
   it('B3-7 RED: first successful Run offers the objective at rest; rerun and cold replay recognise that same ask', async () => {
@@ -394,14 +413,14 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const A = 'e311e890-734f-41b0-8b1f-718054e58109';
     const B = 'cd15ad39-7363-41b0-bc15-e068518c74fb';
     const first = (await runTurn(A)).assistant_text;
-    expect(textAtRest(first)).toContain(OBJECTIVE_ASK);
-    expect(first.split(OBJECTIVE_ASK)).toHaveLength(2);
+    expect(textAtRest(first)).toContain(OBJECTIVE_QUESTION);
+    expectOwnAskOnce(first, OBJECTIVE_ASK);
     expect(first.match(/\?/g)).toHaveLength(1);
-    expect((await runTurn(B)).assistant_text).not.toContain(OBJECTIVE_ASK);
+    expect((await runTurn(B)).assistant_text).not.toContain(OBJECTIVE_QUESTION);
     expect((await runTurn(B)).assistant_text).not.toContain('as your target.');
-    expect((await runTurn(A)).assistant_text).toContain(OBJECTIVE_ASK);
+    expectOwnAskOnce((await runTurn(A)).assistant_text, OBJECTIVE_ASK);
     blocked = true;
-    expect((await runTurn()).assistant_text).not.toContain(OBJECTIVE_ASK);
+    expect((await runTurn()).assistant_text).not.toContain(OBJECTIVE_QUESTION);
   });
 
   it.each(['cee_inference', 'unknown_legacy'])('B3-8 RED: the licensed %s basis precedes an unpunctuated question tail', async (source) => {
@@ -458,16 +477,22 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect((await runTurn()).assistant_text).not.toContain('Olumi’s estimates');
   });
 
-  it('RED: the Run turn on the no-target goal says the A7 line then the ask, once each, before any questions marker', async () => {
+  it('RED: the Run without a licensed chance already within the face ships whole with its one question and A7 once', async () => {
     const turnId = '5c0d7e1f-2a3b-4c5d-8e6f-7a8b9c0d1e2f';
-    const text = (await runTurn(turnId)).assistant_text;
-    expect(text.split(ASK).length - 1).toBe(1);
+    const reply = await runTurn(turnId);
+    const text = reply.assistant_text;
+    expectOwnAskOnce(text, ASK);
     // A cold replay of the same turn returns the answer row, written AFTER the text was composed: the same words.
     expect((await runTurn(turnId)).assistant_text).toBe(text);
     expect(text.split(A7).length - 1).toBe(1);
-    expect(text.indexOf(A7)).toBeLessThan(text.indexOf(ASK));
+    // Approved 5471d752 correction: a contract reply already within its face ships as written.
+    expect(reply._answer_shape).toBeUndefined();
+    expect(text).toBe([RUN_RESULT_READY_TEXT, A7, ASK].join('\n\n'));
+    expect(text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
+    expect(textAtRest(text)).toContain(ASK_QUESTION);
+    expect((text.match(/\?/gu) ?? [])).toHaveLength(1);
     const marker = text.indexOf('Questions this model does not answer yet:');
-    expect(marker === -1 || text.indexOf(ASK) < marker).toBe(true);
+    expect(marker === -1 || text.indexOf(ASK_QUESTION) < marker).toBe(true);
   });
 
   it('CONTROL: a BLOCKED Run (answered, nothing ran) already names what it needs → neither line', async () => {
@@ -481,7 +506,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     goal = FX.goal_after_target;
     const text = (await runTurn()).assistant_text;
     expect(text).not.toContain('as your target');
-    expect(text).toContain(A7);
+    expect(text).toContain(A7_TARGET);
   });
 
   it('CONTROL: the model asked its own question → the host adds no ask (one "?" in the turn)', async () => {
@@ -493,7 +518,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
 
   it('RED (PANEL 5944136475): a Rerun on the same scenario does NOT repeat the open target ask; the A7 fact stays', async () => {
     const first = (await runTurn('6d1e8f20-3b4c-4d5e-8f60-718293a4b5c6')).assistant_text;
-    expect(first.split(ASK).length - 1, 'control: the first Run asks').toBe(1);
+    expectOwnAskOnce(first, ASK);
     const again = (await runTurn('7e2f9031-4c5d-4e6f-8071-8293a4b5c6d7')).assistant_text;
     expect(again).not.toContain('as your target');
     expect(again).toContain(A7);
@@ -501,36 +526,36 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
 
   it('RED (R3 5944174003, journey-12 shape): the first Run asks, then FOUR more Run + Explain pairs → the ask is said ONCE in all', async () => {
     const first = (await runTurn('c374e586-91a2-43b4-a5c6-d7e8f90a1b23')).assistant_text;
-    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    expectOwnAskOnce(first, ASK);
     const ids = ['d485f697-a2b3-44c5-b6d7-e8f90a1b2c34', 'e596a7b8-b3c4-45d6-87e8-f90a1b2c3d45', 'f6a7b8c9-c4d5-46e7-98f9-0a1b2c3d4e56', '07b8c9d0-d5e6-47f8-a90a-1b2c3d4e5f67'];
     for (const id of ids) await runTurn(id, true);
     // Bound to the durable ANSWER ROWS — what each turn shipped and a replay returns (the Explain reply is not the Run's).
     const sid = [...rows.values()].find((r) => r.turn_id === 'c374e586-91a2-43b4-a5c6-d7e8f90a1b23')?.scenario_id;
     const answers = [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim'));
     expect(answers.length, 'precondition: 9 answers — beyond a 6-row window').toBe(9);
-    const asking = answers.filter((r) => String(r.assistant_message ?? '').includes(ASK)).map((r) => String(r.turn_id));
+    const asking = answers.filter((r) => String(r.assistant_message ?? '').includes(ASK_QUESTION)).map((r) => String(r.turn_id));
     expect(asking, 'only the first Run asked').toEqual(['c374e586-91a2-43b4-a5c6-d7e8f90a1b23']);
   });
 
   it('RED (Codex P2 @4433c99f): a lost Rerun response retried stays ask-free; the first Run retried still asks', async () => {
     const A = '1a2b3c4d-0e1f-4a2b-8c3d-4e5f6a7b8c90', B = '2b3c4d5e-1f2a-4b3c-9d4e-5f6a7b8c9d01';
-    expect((await runTurn(A)).assistant_text.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    expectOwnAskOnce((await runTurn(A)).assistant_text, ASK);
     expect((await runTurn(B)).assistant_text, 'precondition: the Rerun does not').not.toContain('as your target');
     // A replay of a lost Run response is REBUILT from the current readback (never the stored words): it reads the history too.
     expect((await runTurn(B)).assistant_text, 'B retried').not.toContain('as your target');
     // …but never its OWN row: a response the user never received has not said the ask.
-    expect((await runTurn(A)).assistant_text.split(ASK).length - 1, 'A retried').toBe(1);
+    expectOwnAskOnce((await runTurn(A)).assistant_text, ASK);
   });
 
   it('CONTROL (Codex): an in-process sub-turn row holding the ask text (never shown) does not count as said → the Run asks', async () => {
     const sid = scenarioNow();
     rows.set(`${sid}|sub-1`, { scenario_id: sid, turn_id: 'sub-1', request_hash: 'sha256:0f1e2d3c', assistant_message: `Earlier: ${ASK}` });
-    expect((await runTurn('3c4d5e6f-2a3b-4c4d-8e5f-6a7b8c9d0e12')).assistant_text.split(ASK).length - 1).toBe(1);
+    expectOwnAskOnce((await runTurn('3c4d5e6f-2a3b-4c4d-8e5f-6a7b8c9d0e12')).assistant_text, ASK);
   });
 
   it('RED (Codex r2): 21 sub-turn rows NEWER than the ask do not push it out of the window — the cap counts AFTER the drop', async () => {
     const first = (await runTurn('4d5e6f70-3b4c-4d5e-9f60-7a8b9c0d1e23')).assistant_text;
-    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    expectOwnAskOnce(first, ASK);
     const sid = scenarioNow();
     for (let i = 0; i < 21; i += 1) rows.set(`${sid}|sub-${i}`, { scenario_id: sid, turn_id: `sub-${i}`, request_hash: `sha256:${i}`, assistant_message: 'handler text' });
     expect((await runTurn('5e6f7081-4c5d-4e6f-8071-8b9c0d1e2f34')).assistant_text, 'the Rerun').not.toContain('as your target');
@@ -549,17 +574,17 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
 
   it('CONTROL (DL 5944162815): the goal CHANGES between Runs → its new ask is said (an open ask binds to its own goal)', async () => {
     const first = (await runTurn('a152c364-7f80-4192-83a4-b5c6d7e8f901')).assistant_text;
-    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    expectOwnAskOnce(first, ASK);
     goal = { ...FX.goal_after_build, label: 'Monthly spend' };
     const again = (await runTurn('b263d475-8091-42a3-94b5-c6d7e8f90a12')).assistant_text;
-    expect(again.split(ASK.replace('Funding secured', 'Monthly spend')).length - 1, 'the changed goal is asked for').toBe(1);
-    expect(again).not.toContain(ASK);
+    expectOwnAskOnce(again, ASK.replace('Funding secured', 'Monthly spend'));
+    expect(again).not.toContain(ASK_QUESTION);
   });
 
   it('CONTROL: the recent answers cannot be read → the Rerun asks again (today\'s behaviour, never a silent drop)', async () => {
     await runTurn('8f30a142-5d6e-4f70-8182-93a4b5c6d7e8');
     recentFails = true;
     const again = (await runTurn('9041b253-6e7f-4081-8293-a4b5c6d7e8f9')).assistant_text;
-    expect(again.split(ASK).length - 1).toBe(1);
+    expectOwnAskOnce(again, ASK);
   });
 });

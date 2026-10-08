@@ -3,6 +3,7 @@
  * bound Explain control with fixed narrator words, through the served-readback/store
  * harness from agent-run-reply-answer-shape.test.ts. No provider is contacted.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -16,6 +17,7 @@ import { collectFactorIdsSetByEveryOption } from '../../context/intervention-con
 import { analysedOptionIds } from '../conditional-input-basis.js';
 import { decisionInputAsk, textAtRest } from '../decision-input-ask.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { sentencesOf } from '../reply/compose-reply.js';
 
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
   state: { draft_graph: unknown; analysis_state: Record<string, unknown>; analysis_ready: {
@@ -42,6 +44,7 @@ const shapedNarrator = (n: number) => `${bulletedNarrator(n)} ${LONG_TAIL}`;
 const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** Exact public sentences, pinned independently of the selector so base/mutants cannot redefine the oracle. */
 const SENTENCE = 'The result is not yet robust — small changes could flip it.';
+const ROBUSTNESS_MARKER = 'Small changes could change the comparison';
 const NO_FLIP_SENTENCE = 'The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.';
 const count = (text: string, sentence: string) => text.split(sentence).length - 1;
 const countSentenceCopies = (text: string, sentence: string) => {
@@ -114,10 +117,10 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH,
       blocks: [readbackResult], analysis_ready: readbackReady, analysis_state: readbackState,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState,
       analysis_ready: readbackReady, analysis_result: readbackResult,
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -157,30 +160,41 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     if (!replay) expect(r.json()._diagnostic_trace.fast_path).toBe('explain');
     return r.json() as Body;
   };
+  const assertShapedCaveat = (b: Body, sentence = SENTENCE) => {
+    const shape = b._answer_shape!;
+    const face = [shape.headline, ...shape.bullets].join('\n');
+    expect(shape.bullets[0], 'the caveat marker is must-face, immediately after the headline').toBe(ROBUSTNESS_MARKER);
+    expect(face, 'the full caveat belongs behind progressive disclosure').not.toContain(sentence);
+    expect(countSentenceCopies(shape.detail, sentence), 'the full sentence appears verbatim once in detail').toBe(1);
+    expect(shape.detail).toContain(sentence);
+    expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
+  };
   const assertCaveat = (b: Body, sentence = SENTENCE) => {
-    const prefix = `${NARRATOR} ${sentence}`;
-    expect(b.assistant_text.slice(0, prefix.length)).toBe(prefix);
+    expect(b._answer_shape).toBeDefined();
+    expect(b._answer_shape!.headline).toBe(NARRATOR);
+    assertShapedCaveat(b, sentence);
     expect(count(b.assistant_text, sentence)).toBe(1);
     expect(count(b.assistant_text, sentence === SENTENCE ? NO_FLIP_SENTENCE : SENTENCE)).toBe(0);
   };
 
-  it('W1: licensed + low/false + no flip rows — caveat immediately after the narrator (RED at base)', async () => {
+  it('W1: licensed + low/false + no flip rows — marker after narrator, full caveat once detail', async () => {
     const b = await press(await run());
     expect(b.analysis_state.leader_claim.permitted).toBe(true);
     assertCaveat(b);
-    expect(b._answer_shape).toBeUndefined();
   });
   it('W2: licensed + high/true — neither caveat', async () => {
-    // Robust contrast: keep a shapeable narrator so absence is checked on the face as well as in text.
+    // Approved 5471d752 correction: this exact 76-word contract reply is already within the face.
     narrator = shapedNarrator(2);
     readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
     const b = await press(await run());
     expect(b.assistant_text.slice(0, NARRATOR.length)).toBe(NARRATOR);
     expect(count(b.assistant_text, SENTENCE)).toBe(0);
     expect(count(b.assistant_text, NO_FLIP_SENTENCE)).toBe(0);
-    expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.bullets).toEqual(NARRATOR_BULLETS.slice(0, 2));
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    expect(b._answer_shape).toBeUndefined();
+    expect(b.assistant_text).toBe(narrator);
+    expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
+    for (const bullet of NARRATOR_BULLETS.slice(0, 2)) expect(count(b.assistant_text, bullet)).toBe(1);
   });
   it('W3: withheld + low/false — neither caveat', async () => {
     readbackState.leader_claim = { permitted: false, separation: 'separated', withheld_reason: 'constraint_verdict_withheld' };
@@ -215,16 +229,16 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(readFlipClaimPosture(readbackResult.enrichment)).toBe('attested_no_flip');
     assertCaveat(await press(await run()), NO_FLIP_SENTENCE);
   });
-  // W7: a caveat alone must preserve headline-first rendering and narrator bullet order.
-  it('W7: licensed + fragile keeps the shape with the exact caveat as bullet 1', async () => {
+  // W7: a caveat marker preserves headline-first rendering and narrator bullet order.
+  it('W7: licensed + fragile keeps the shape with the exact marker as bullet 1 and full caveat once in detail', async () => {
     narrator = shapedNarrator(2);
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe(NARRATOR);
-    expect(b._answer_shape!.bullets).toEqual([SENTENCE, ...NARRATOR_BULLETS.slice(0, 2)]);
+    expect(b._answer_shape!.bullets).toEqual([ROBUSTNESS_MARKER, ...NARRATOR_BULLETS.slice(0, 2)]);
     expect(count(b.assistant_text, SENTENCE)).toBe(1);
     expect(count(b.assistant_text, NO_FLIP_SENTENCE)).toBe(0);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    assertShapedCaveat(b);
   });
   // Exact narrator copies in a shaped answer must move to bullet 1, without surviving elsewhere.
   it.each(['bullet', 'detail'])('W7 contrast: narrator already carries the caveat in %s', async placement => {
@@ -234,10 +248,9 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe(NARRATOR);
-    expect(b._answer_shape!.bullets).toEqual([SENTENCE, ...NARRATOR_BULLETS.slice(0, 2)]);
+    expect(b._answer_shape!.bullets).toEqual([ROBUSTNESS_MARKER, ...NARRATOR_BULLETS.slice(0, 2)]);
     expect(count(b.assistant_text, SENTENCE)).toBe(1);
-    expect(b._answer_shape!.detail).not.toContain(SENTENCE);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    assertShapedCaveat(b);
   });
   // W8: adding the face caveat displaces only the last narrator bullet, without losing or doubling words.
   it('W8: three narrator bullets move the last to the start of detail', async () => {
@@ -245,22 +258,22 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe(NARRATOR);
-    expect(b._answer_shape!.bullets).toEqual([SENTENCE, ...NARRATOR_BULLETS.slice(0, 2)]);
+    expect(b._answer_shape!.bullets).toEqual([ROBUSTNESS_MARKER, ...NARRATOR_BULLETS.slice(0, 2)]);
     // S-A: a bullet in detail keeps its own list marker (the composer moves lines, it never rewrites them).
     expect(b._answer_shape!.detail.startsWith(`- ${NARRATOR_BULLETS[2]!}`)).toBe(true);
     const content = [...b._answer_shape!.bullets, b._answer_shape!.detail].join('\n');
     for (const bullet of NARRATOR_BULLETS) expect(count(content, bullet)).toBe(1);
     expect(count(b.assistant_text, SENTENCE)).toBe(1);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    assertShapedCaveat(b);
   });
-  // W9: an independent basis obligation still forces whole text, with the caveat before that host line.
-  it('W9: an owed basis disclosure ships whole, caveat immediately after narrator', async () => {
+  // W9: the marker qualifies the narrator; the independent basis and full caveat remain intact in detail.
+  it('W9: an owed basis disclosure stays once in detail beside the full caveat', async () => {
     narrator = bulletedNarrator(2);
     readbackReady = structuredClone(FX.state.analysis_ready);
     const b = await press(await run());
-    expect(b._answer_shape).toBeUndefined();
-    expect(b.assistant_text).toBe(`${narrator} ${SENTENCE}\n\n${BASIS_UNAVAILABLE}`);
-    expect(count(b.assistant_text, SENTENCE)).toBe(1);
+    assertCaveat(b);
+    expect(count(b._answer_shape!.detail, BASIS_UNAVAILABLE)).toBe(1);
+    for (const line of narrator.split('\n')) expect(count(b.assistant_text, line.replace(/^[-*•]\s+/, ''))).toBe(1);
   });
   // W10: scope can narrow authority after narration; neither ranking nor caveat can rely on the initial licence.
   it('W10: initial permission, final retained scope issue withholds leader and caveat', async () => {
@@ -275,7 +288,13 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(b.narration?.status).toBe('ready');
     expect(b.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
     expect(b.assistant_text).not.toContain(NARRATOR);
+    // r15 contract re-pin: "cell-sourced marker". This final leader-scope refusal has no goal-chance
+    // cell, so its short fixed reason ships whole. Authority and caveat exclusions stay exact.
+    const withheld = 'No single option can be put forward yet, and the reason is not recorded, so I will not guess at one; ask me to run the analysis and I can tell you then.';
     expect(b._answer_shape).toBeUndefined();
+    expect(b.assistant_text).toBe(withheld);
+    expect(count(b.assistant_text, withheld)).toBe(1);
+    expect(b.assistant_text).not.toContain('Not shown yet; why is under More detail');
     expect(count(b.assistant_text, SENTENCE)).toBe(0);
     expect(count(b.assistant_text, NO_FLIP_SENTENCE)).toBe(0);
   });
@@ -334,14 +353,14 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     narrator = `${SENTENCE} ${shapedNarrator(2)}`;
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.bullets[0]).toBe(SENTENCE);
+    expect(b._answer_shape!.bullets[0]).toBe(ROBUSTNESS_MARKER);
     expect(b._answer_shape!.headline).toBe(NARRATOR);
     expect(count(b.assistant_text, SENTENCE)).toBe(1);
     for (const bullet of NARRATOR_BULLETS.slice(0, 2)) expect(count(b.assistant_text, bullet)).toBe(1);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    assertShapedCaveat(b);
   });
   // W15: reuse the B3 question-tail variants; neither the caveat nor the independent basis may fold away.
-  it.each([[true, true], [false, true], [true, false], [false, false]])('W15: whole-text caveat stays before questions (basis present=%s punctuated=%s)', async (present, punctuated) => {
+  it.each([[true, true], [false, true], [true, false], [false, false]])('W15: marker faces, full caveat detail stays before questions (basis present=%s punctuated=%s)', async (present, punctuated) => {
     readbackReady = structuredClone(FX.state.analysis_ready);
     const question = punctuated ? 'What baseline should we use?' : 'The baseline is unknown';
     const marker = 'Questions this model does not answer yet:';
@@ -349,13 +368,14 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     const b = await press(await run());
     expect(b.narration?.status).toBe('ready');
     expect(b.analysis_state.leader_claim.permitted).toBe(true);
-    expect(b._answer_shape).toBeUndefined();
+    assertCaveat(b);
     expect(count(textAtRest(b.assistant_text), SENTENCE)).toBe(1);
     expect(count(b.assistant_text, SENTENCE)).toBe(1);
     expect(b.assistant_text).toContain(`${marker} ${question}`);
     expect(b.assistant_text.indexOf(SENTENCE)).toBeLessThan(b.assistant_text.indexOf(marker));
     expect(b.assistant_text.slice(b.assistant_text.indexOf(marker))).not.toContain(SENTENCE);
-    expect(b.assistant_text.startsWith(`${NARRATOR}\n\n${SENTENCE}`)).toBe(true);
+    expect(b._answer_shape!.detail).toContain(`${marker} ${question}`);
+    expect(b._answer_shape!.detail.indexOf(SENTENCE)).toBeLessThan(b._answer_shape!.detail.indexOf(marker));
     expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
   });
   it('W16: spaced caveat-first narration retains one caveat and the second sentence as headline', async () => {
@@ -364,7 +384,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     const shape = b._answer_shape!;
-    expect(shape.bullets[0]).toBe(sentence);
+    expect(shape.bullets[0]).toBe(ROBUSTNESS_MARKER);
     expect(shape.headline).toBe(NARRATOR);
     const shapedText = [shape.headline, ...shape.bullets, shape.detail].join('\n');
     expect(countSentenceCopies(shapedText, sentence)).toBe(1);
@@ -373,18 +393,18 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
       expect(count(shapedText, bullet)).toBe(1);
       expect(count(b.assistant_text, bullet)).toBe(1);
     }
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
+    assertShapedCaveat(b, sentence);
   });
-  it('W17a: unsplittable whole narration keeps one trailing caveat after the narrator', async () => {
+  it('W17a: short narration keeps one marker and one full caveat in detail after the narrator', async () => {
     const sentence = NOT_ROBUST_SENTENCE.trim();
     narrator = `${NARRATOR} ${sentence} ${sentence}`;
     const b = await press(await run());
-    expect(b._answer_shape).toBeUndefined();
+    assertCaveat(b, sentence);
     expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
     expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
     expect(count(b.assistant_text, NARRATOR)).toBe(1);
     expect(b.assistant_text.indexOf(NARRATOR)).toBeLessThan(b.assistant_text.indexOf(sentence));
-    expect(b.assistant_text.startsWith(`${NARRATOR} ${sentence}`)).toBe(true);
+    expect(b._answer_shape!.headline).toBe(NARRATOR);
   });
   it('W17b: a caveat at rest and in the questions tail becomes one copy before all questions', async () => {
     const sentence = NOT_ROBUST_SENTENCE.trim();
@@ -395,7 +415,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     const b = await press(await run());
     expect(b.narration?.status).toBe('ready');
     expect(b.analysis_state.leader_claim.permitted).toBe(true);
-    expect(b._answer_shape).toBeUndefined();
+    assertCaveat(b, sentence);
     expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
     expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
     const markerAt = b.assistant_text.indexOf(marker);
@@ -411,10 +431,11 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     narrator = `${shapedNarrator(2)}\n\nQuestions this model does not answer yet: ${question}`;
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.bullets[0]).toBe(sentence);
+    expect(b._answer_shape!.bullets[0]).toBe(ROBUSTNESS_MARKER);
     expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
     expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
     expect(b.assistant_text).toContain(question);
+    assertShapedCaveat(b, sentence);
   });
   it('W19: display the exact double-space ID-bearing ask before adjacent caveat removal', async () => {
     const sentence = NOT_ROBUST_SENTENCE.trim();
@@ -433,9 +454,12 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     const displayedAtRest = displayAsk!.replace(/[^\S\n]+/g, ' ');
     narrator = `${rawAsk} ${sentence}\nCompare with prop_abcdefabcdefabcdefabcdefabcdefab.`;
     const b = await press(await run());
-    expect(count(b.assistant_text, displayedAtRest)).toBe(1);
+    // Progressive disclosure moves the typed ask's two sentences into their own shape slots; each byte-exact
+    // sentence still survives once, with the existing horizontal-whitespace fold already applied by the route.
+    for (const part of sentencesOf(displayedAtRest)) expect(count(b.assistant_text, part)).toBe(1);
     expect(b.assistant_text).not.toMatch(/prop_[0-9a-f]{6,}/);
     expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+    assertShapedCaveat(b, sentence);
   });
   // One class row: seven narrator variants crossed with both host-obligation states.
   it.each(['plain', 'bulleted', 'questions tail', 'exact copy', 'spaced copy', 'caveat bullet', 'two copies']
@@ -461,9 +485,9 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
       const b = await press(await run());
       expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
       expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
-      if (!basisUnavailable) expect(b._answer_shape !== undefined).toBe(control._answer_shape !== undefined);
-      else {
-        expect(b._answer_shape).toBeUndefined();
+      assertCaveat(b, sentence);
+      if (basisUnavailable) {
+        expect(count(b._answer_shape!.detail, BASIS_UNAVAILABLE)).toBe(1);
         expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
       }
       // Shape rendering changes bullet glyphs; every non-caveat line's words still survive once.

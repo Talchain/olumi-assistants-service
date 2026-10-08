@@ -4,7 +4,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
-import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
+import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent, whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 import {
   GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_USER_EFFECT_CLAMPED,
@@ -415,5 +415,54 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     expect(HOST_TOOL_CONTRACT).toContain('Name an assumption the ordering is sensitive to ONLY from the result’s `decision_sensitivity`');
     expect(HOST_TOOL_CONTRACT).toContain('Never translate either EVPPI status into no measurable assumption or no measurable goal-chance driver');
     expect(HOST_TOOL_CONTRACT).toContain('This availability grants no permission to name or rank a driver or an option.');
+  });
+});
+
+describe('#2840: the headline\'s "what would change it" names the licensed CHANCE driver only (#87; DL; Science §(n).3)', () => {
+  // A real belief link (DL review P2): price → churn. Price → MRR is a declared identity and never a driver.
+  const churnStrength = { ...strengthDriver, quantity_id: 'strength:pro_plan_price->monthly_churn', to: 'monthly_churn' };
+  const churnExistence = { ...existenceDriver, quantity_id: 'existence:pro_plan_price->monthly_churn', to: 'monthly_churn' };
+  const both = (a: Json, b: Json) => driven(a, { driver_by_option: { [A]: a, [B]: b } });
+  it.each([
+    ['strength', churnStrength, 'What would change it: how strongly ‘Pro plan price’ affects ‘Monthly churn’.'],
+    ['factor', factorDriver, 'What would change it: the value of ‘Pro plan price’.'],
+    ['existence', churnExistence, 'What would change it: whether ‘Pro plan price’ really affects ‘Monthly churn’.'],
+  ])('%s driver on every shown option: one unscoped exact line, naming the driver the screen sentence names', (_k, driver, line) => {
+    const read = both(driver as Json, driver as Json);
+    expect(Object.keys(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph))).toEqual([A, B]);
+    expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe(line);
+  });
+  it('different drivers say it per option, in licence order', () => {
+    const differ = both(churnStrength, factorDriver);
+    expect(whatChangesFaceLine(differ.analysis_result, differ.graph)).toBe(
+      'What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’; for ‘Raise to £54’, the value of ‘Pro plan price’.');
+  });
+  it('(P1-2) another shown option WITHOUT a driver (point) → scoped to the option that has one; the other gets nothing', () => {
+    const read = driven(churnStrength); // B's chance is shown (about 50%) with no driver
+    expect(Object.keys(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph))).toEqual([A]);
+    expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe('What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’.');
+  });
+  it('(P1-2) another option shown as a RANGE → scoped as well, never an unscoped line', () => {
+    const rangeB = { ...rangeRecord, option_ids: [B], range_by_option: { [B]: rangeRecord.range_by_option[B] } };
+    const read = fixture([{ ...licence, driver_by_option: { [A]: churnStrength } }, rangeB]);
+    expect(Object.keys(goalChanceRangeDisplayForAgent(read.analysis_result, read.graph) ?? {})).toEqual([B]);
+    expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe('What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’.');
+  });
+  it('withheld chance → silent: no licence, a run-wide withhold, or an unruled driver gives null, never the sensitivity leader', () => {
+    const none = fixture([]);
+    // Contrast: this graph's outcome-sensitivity leader is 'paying_subscribers' (elasticity 1); it must never appear.
+    expect(none.analysis_result.enrichment.factor_sensitivity?.[0]?.factor_id).toBe('paying_subscribers');
+    expect(whatChangesFaceLine(none.analysis_result, none.graph)).toBeNull();
+    const unruled = driven({ ...churnExistence, authored_by: 'user' });
+    expect(whatChangesFaceLine(unruled.analysis_result, unruled.graph)).toBeNull();
+    const withheld = driven(churnStrength);
+    withheld.analysis_result.enrichment.inference_warnings.push({ code: GOAL_FIGURES_PLACEHOLDER_PATH, option_ids: [A] });
+    expect(goalChanceDriverDisplayForAgent(withheld.analysis_result, withheld.graph)).toEqual({});
+    expect(whatChangesFaceLine(withheld.analysis_result, withheld.graph)).toBeNull();
+  });
+  it('never names an option by id: an unlabelled option in a per-option line silences the line', () => {
+    const differ = both(churnStrength, factorDriver);
+    differ.graph.nodes.find((n: Json) => n.id === B).label = '';
+    expect(whatChangesFaceLine(differ.analysis_result, differ.graph)).toBeNull();
   });
 });

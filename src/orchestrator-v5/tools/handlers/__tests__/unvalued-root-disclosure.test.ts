@@ -89,7 +89,7 @@ describe('every sampled unvalued root kind on the goal path has a typed gap', ()
     expect(assessRouteAdmission(g).may_run).toBe(true);
     expect(assessRouteAdmission(g).unvalued_roots).toEqual(unvaluedRoots(g));
     expect(assessRouteAdmission(g).readiness_issues).not.toContainEqual(expect.objectContaining({ factor_id: 'root_gap' }));
-    expect(stillNeededLine(readinessViewOf(g))).toBe('No figure is set for "Lack of AI experience" yet, so the analysis treats it as zero. How likely or how large is it today?');
+    expect(stillNeededLine(readinessViewOf(g))).toBe('No figure is set for "Lack of AI experience" yet, so the analysis treats it as zero. How likely or how large is "Lack of AI experience" today?');
   });
 
   it('R1-contrast: the same risk with a finite level has no gap and runs', () => {
@@ -116,7 +116,7 @@ describe('every sampled unvalued root kind on the goal path has a typed gap', ()
     expect(rootIssues(g)).toEqual([]);
     expect(assessRouteAdmission(g).unvalued_roots).toEqual(unvaluedRoots(g));
     expect(assessRouteAdmission(g).readiness_issues).not.toContainEqual(expect.objectContaining({ factor_id: 'root_gap' }));
-    expect(stillNeededLine(readinessViewOf(g))).toBe('No figure is set for "Current delivery capacity" yet, so the analysis treats it as zero. How likely or how large is it today?');
+    expect(stillNeededLine(readinessViewOf(g))).toBe('No figure is set for "Current delivery capacity" yet, so the analysis treats it as zero. How likely or how large is "Current delivery capacity" today?');
     expect(buildCanonicalAnalysisReadyFromGraph(g)?.unvalued_roots).toEqual([{ node_id: 'root_gap', label: 'Current delivery capacity', kind, treated_as: 'zero' }]);
     expect(assessRouteAdmission(g).may_run).toBe(true);
   });
@@ -143,7 +143,7 @@ describe('every sampled unvalued root kind on the goal path has a typed gap', ()
 
 const RISK_IDS = ['risk:ai_experience', 'risk:hiring_mismatch'] as const;
 const RISK_LABELS = ['Lack of AI experience', 'Hiring mismatch'] as const;
-const TWO_RISK_LINE = 'No figures are set for "Lack of AI experience" and "Hiring mismatch" yet, so the analysis treats them as zero. How likely or how large is each today?';
+const TWO_RISK_LINE = 'No figures are set for "Lack of AI experience" and "Hiring mismatch" yet, so the analysis treats them as zero. How likely or how large is each of "Lack of AI experience" and "Hiring mismatch" today?';
 
 /** Paul's fresh hiring shape: both levers valued; the risks have no figure. */
 function freshHiringDraft(withRisks = true, valuedRisks = false) {
@@ -296,7 +296,7 @@ describe('DL gate 2: non-factor roots disclose zero and ask without refusing Run
   it('the deterministic ask names two plus the remainder and puts levels first', () => {
     const view = readinessViewOf(freshHiringDraft());
     expect(stillNeededLine({ ...view, treated_as_zero: [...RISK_LABELS, 'Technical debt', 'Overload'] }))
-      .toBe('No figures are set for "Lack of AI experience" and "Hiring mismatch" and 2 more yet, so the analysis treats them as zero. How likely or how large is each today?');
+      .toBe('No figures are set for "Lack of AI experience" and "Hiring mismatch" and 2 more yet, so the analysis treats them as zero. How likely or how large is each of "Lack of AI experience" and "Hiring mismatch" and 2 more today?');
     expect(stillNeededLine({ ...view, levels_not_set: [{ option: 'Hire a Tech Lead', factor: 'Tech leads' }] }))
       .toBe(`One level is not set yet: what does "Hire a Tech Lead" set Tech leads to? ${TWO_RISK_LINE}`);
     expect(stillNeededLine({ ...view, may_run: false })).toBeNull();

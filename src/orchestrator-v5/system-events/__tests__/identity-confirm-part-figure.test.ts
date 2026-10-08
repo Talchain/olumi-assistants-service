@@ -361,7 +361,9 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     for (const [price, total] of [[49, 14_700], [59, 17_700]]) {
       const be = breakEvenFor(arithmeticReading(r.mutatedGraph as Rec, price!));
       expect(be).toMatchObject({ baseline_price: price, baseline_volume: 300, baseline_volume_by: 'user', baseline_goal: total });
-      expect(breakEvenLine(be!)).toContain(`at £${price}/subscriber/month and 300 Pro paying subscribers, MRR is £${total!.toLocaleString('en-GB')}/month today.`);
+      // r15 copy re-pin, existing break-even rule: "its per-item denominator is not repeated:
+      // \"£49 a month\", \"£12,250 a month\"". Count and arithmetic stay exact.
+      expect(breakEvenLine(be!)).toContain(`at £${price} a month and 300 Pro paying subscribers, MRR is £${total!.toLocaleString('en-GB')} a month today.`);
     }
     expect(breakEvenFor(arithmeticReading(beforeYes(), 49))).toBeNull();
   });
@@ -375,7 +377,8 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     const be = breakEvenFor(annual);
     expect(be).toMatchObject({ baseline_goal: 14_700, unit: 'GBP/subscriber/year' });
     const words = breakEvenLine(be!);
-    expect(words).toContain('Annual recurring revenue is £14,700/year today.');
-    expect(words).not.toContain('£14,700/month');
+    // The same existing "per-item denominator is not repeated" rule applies annually; monthly guard polarity stays.
+    expect(words).toContain('Annual recurring revenue is £14,700 a year today.');
+    expect(words).not.toContain('a month');
   });
 });

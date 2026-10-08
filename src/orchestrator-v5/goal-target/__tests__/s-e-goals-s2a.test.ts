@@ -201,6 +201,8 @@ describe('recognition and persisted carrier survival', () => {
     expect(goalKindOf(goal(g))).toBe('level'); // a node cannot attest its incoming links
     expect(targetTestabilityOf(g).kind).not.toBe('not_testable');
     expect(untestedHorizonLine(g)).toBeNull();
+    expect(untestedHorizonLine(g, { besideChance: true })).toBeNull();
+    expect(untestedHorizonLine(g, { besideChance: true, plural: true })).toBeNull();
   });
   it('recognises the harness’s scalar switch interventions as well as persisted value objects', () => {
     const g = graph();

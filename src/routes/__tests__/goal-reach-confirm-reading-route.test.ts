@@ -4,6 +4,7 @@
  * .p45 patch candidate with GOAL_REACH_ROUTE_CANDIDATE=1; that evidence is candidate-only.
  * No identity writer, action handler, proposal store, reload route or Run payload builder is mocked.
  */
+import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import paul from '../../orchestrator-v5/agent-lane/__tests__/fixtures/goal-reach-paul-graph-632b92b9.json';
@@ -23,6 +24,8 @@ import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
+import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
 
 const { port, source } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -43,7 +46,9 @@ vi.mock('../../orchestrator/user-identity.js', async importOriginal => ({
   ...await importOriginal<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'verified', userId: OWNER }),
 }));
 vi.mock('../scenario-graph-analysis-read.js', async importOriginal => ({
-  ...await importOriginal<Record<string, unknown>>(), readScenarioAnalysis: async () => source.analysis,
+  ...await importOriginal<Record<string, unknown>>(), readScenarioAnalysis: async () => withCanonicalAnalysisView({
+    ...source.analysis, graph: source.graph, graph_hash: hashOf(source.graph), analysis_ready: READY,
+  }, scenario),
 }));
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }, emit: vi.fn(),
@@ -296,7 +301,8 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
     } finally { forced.mockRestore(); }
   });
   it('DL CHANGES_REQUIRED (#2816): an EXPLICIT Run reply says the carried reason\'s §(g) sentence, by identity; CONTROL: no reason → not said', async () => {
-    const SENTENCE = "Olumi can't show the chance of reaching your MRR target in this Run because of a fault on Olumi's side. The rest of this Run's results still stand.";
+    const FINDING = "Olumi can't show the chance of reaching your MRR target in this Run because of a fault on Olumi's side.";
+    const RETAINED_RESULTS = "The rest of this Run's results still stand.";
     const run = async () => {
       turnSerial += 1;
       const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario,
@@ -305,12 +311,32 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
       expect(response.statusCode, response.body).toBe(200);
       const body = response.json();
       expect(body._diagnostic_trace?.fast_path).toBe('run');
-      return String(body.assistant_text);
+      return body as { assistant_text: string; _answer_shape?: AnswerShape };
     };
     setThresholdRefused('non_finite_conversion_input');
-    expect(await run()).toContain(SENTENCE);
+    expect(source.analysis.analysis_result).toMatchObject({ enrichment: { inference_warnings: expect.arrayContaining([
+      expect.objectContaining({ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', detail: { reason: 'non_finite_conversion_input' } }),
+    ]) } });
+    const reply = await run();
+    expect(reply._answer_shape, reply.assistant_text).toBeDefined();
+    const shape = reply._answer_shape!;
+    // r11d: this served result has no canonical option roster; zero withheld cells means zero marker.
+    expect(shape.headline).toBe(RUN_RESULT_READY_TEXT);
+    const face = [shape.headline, ...shape.bullets].join('\n');
+    expect(face).not.toContain(FINDING);
+    expect(shape.detail.split(FINDING)).toHaveLength(2);
+    expect(face).toContain(RUN_RESULT_READY_TEXT);
+    expect(face).not.toMatch(/Not shown(?::| yet;)/);
+    // The typed Olumi-side fault owes no user question; its exact full finding is retained under More detail.
+    expect(face.match(/\?/g) ?? []).toHaveLength(0);
+    expect(shape.detail).not.toContain(RUN_RESULT_READY_TEXT);
+    expect(shape.detail).toContain(RETAINED_RESULTS);
+    for (const sentence of [FINDING, RETAINED_RESULTS, RUN_RESULT_READY_TEXT]) {
+      expect(reply.assistant_text.split(sentence)).toHaveLength(2);
+    }
+    expect(reply.assistant_text).toBe(deriveAnswerTextFromShape(shape));
     setWithheld();
-    expect(await run()).not.toContain("because of a fault on Olumi's side");
+    expect((await run()).assistant_text).not.toContain("because of a fault on Olumi's side");
   });
   it('Codex r1 P1-3: while a held change waits (the identity card), a set_current_level press persists NO ask', async () => {
     setThresholdRefused('missing_goal_baseline');
