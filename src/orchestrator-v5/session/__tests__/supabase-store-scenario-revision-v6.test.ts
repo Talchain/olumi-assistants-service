@@ -1,8 +1,8 @@
 /**
  * RED-first specification for Shared Data Phase 2(c).
- * Authored before implementation; not executed because the build brief prohibits
- * test suites. The shipping switch stays false. Exercise the dormant seam
- * directly rather than introducing a runtime configuration escape hatch.
+ * Round 2 refusal rows run RED before the fix, then GREEN in this file only.
+ * The shipping switch stays false. Exercise the dormant seam directly rather
+ * than introducing a runtime configuration escape hatch.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -143,37 +143,56 @@ describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
     },
   );
 
-  it('maps revision_conflict to the v5 CAS error class, with no success side effects or fallback', async () => {
+  it.each([
+    ['OLRV1', 'revision_conflict'],
+    ['OLGC1', 'rpc_cas_conflict'],
+  ])('maps v6 %s to GraphStaleWriteError %s before generic/fence handling', async (code, category) => {
     const sessionStore = store();
+    const turnWrite = write({ expectedGraphIdentityHash: HASH });
     const resolveDraftLoss = vi.spyOn(sessionStore, 'resolveDraftLossAfterGraphCommit' as never);
-    rpc.mockResolvedValue({
-      data: {
-        turn_row_id: null,
-        model_version_receipt: null,
-        reason: 'revision_conflict',
-        revision: 8,
-      },
-      error: null,
+    const emitCasConflict = vi.spyOn(sessionStore, 'emitRpcCasConflict' as never);
+    const emitFence = vi.spyOn(sessionStore, 'emitFenceEvaluated' as never);
+    const markGraphWriteFailed = vi.spyOn(sessionStore, 'markGraphWriteFailed' as never);
+    const rpcError = {
+      code,
+      message: code === 'OLRV1' ? 'append_turn_atomic_v6: revision_conflict' : 'stale graph write',
+      details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }),
+    };
+
+    // Route the disabled v5 dispatch through the real v6 seam in this mock.
+    // This exercises the downstream OLGC1/fence/generic handlers too, without
+    // changing the shipping flag or adding a runtime switch to production.
+    rpc.mockImplementation(async (rpcName: string, rpcArgs: Record<string, unknown>) => {
+      if (rpcName === 'append_turn_atomic_v5') {
+        return sessionStore['callAppendTurnAtomicV6'](turnWrite, rpcArgs);
+      }
+      return { data: null, error: rpcError };
     });
 
-    const error = await sessionStore['callAppendTurnAtomicV6'](write(), {})
+    const error = await sessionStore['appendAtomicVersioned'](turnWrite, {
+      p_scenario_id: SCENARIO, p_turn_id: TURN, p_request_hash: turnWrite.request_hash,
+    }, 'enforce', null)
       .then(() => null, (caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(GraphStaleWriteError);
-    expect(error).toMatchObject({ conflict_category: 'revision_conflict' });
+    expect(error).toMatchObject({
+      conflict_category: category,
+      cause: rpcError,
+      expected_base_graph_hash: HASH,
+    });
     expect(cache.invalidateAll).not.toHaveBeenCalled();
     expect(resolveDraftLoss).not.toHaveBeenCalled();
-    expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v6');
-
-    // Bind the claimed error-class parity to the real, still-active v5 path.
-    rpc.mockClear();
-    rpc.mockResolvedValue({ data: null, error: { code: 'OLGC1', message: 'stale graph write' } });
-    await expect(sessionStore.append(write())).rejects.toBeInstanceOf(GraphStaleWriteError);
-    expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v5');
-    expect(cache.invalidateAll).not.toHaveBeenCalled();
-    expect(resolveDraftLoss).not.toHaveBeenCalled();
+    expect(emitFence).not.toHaveBeenCalled();
+    expect(markGraphWriteFailed).not.toHaveBeenCalled();
+    expect(rpc.mock.calls.map(([rpcName]) => rpcName)).toEqual([
+      'append_turn_atomic_v5', 'append_turn_atomic_v6',
+    ]);
+    expect(rpc.mock.calls[1]![1]).toMatchObject({ p_expected_revision: 7 });
+    if (code === 'OLGC1') {
+      expect(emitCasConflict).toHaveBeenCalledExactlyOnceWith(turnWrite, 'enforce', 'OLGC1');
+    } else {
+      expect(emitCasConflict).not.toHaveBeenCalled();
+    }
   });
 
   it('does not fall back when the new RPC is absent', async () => {

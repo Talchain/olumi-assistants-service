@@ -1649,7 +1649,7 @@ export class SupabaseSessionStore implements SessionStore {
     return USE_APPEND_V6 ? { ...parsed, revision: data.revision } : parsed;
   }
 
-  /** Always-on revision CAS on the new path; never refresh the expected value here. */
+  /** Fresh-turn revision CAS on the new path; never refresh the expected value here. */
   private async callAppendTurnAtomicV6(write: SessionTurnWrite, rpcArgs: Record<string, unknown>) {
     if (!isScenarioRevision(write.expectedRevision)) {
       throw new StateCommitFailedError(
@@ -1660,12 +1660,14 @@ export class SupabaseSessionStore implements SessionStore {
       ...rpcArgs,
       p_expected_revision: write.expectedRevision,
     });
-    if (!result.error && result.data?.reason === 'revision_conflict') {
+    // Classify the v6-only refusal before the shared fence, OLGC1 and generic
+    // handlers in appendAtomicVersioned; all other RPC errors pass through.
+    if (errCode(result.error) === 'OLRV1') {
       throw new GraphStaleWriteError(
         `append_turn_atomic_v6 rejected a stale revision for scenario ${write.scenario_id}; refresh and reconfirm.`,
         {
           conflict_category: 'revision_conflict',
-          cause: result.data,
+          cause: result.error,
           expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
         },
       );

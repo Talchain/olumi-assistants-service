@@ -5,9 +5,9 @@
 --
 -- WHAT / WHY
 --   Add a monotonic scenario revision and a NEW append_turn_atomic_v6 wrapper.
---   v6 locks the scenario and ALWAYS compares p_expected_revision before calling
---   the existing v5 authority in the same transaction. A fresh successful turn
---   increments revision once; an accepted replay leaves it unchanged.
+--   v6 locks the scenario and detects replay before comparing the revision.
+--   The existing v5 authority runs in the same transaction. A fresh successful
+--   turn increments revision once; an accepted replay leaves it unchanged.
 --   Existing v2-v5 writers do not read or increment this new column.
 --
 -- ADDITIVE-ONLY PROOF
@@ -24,8 +24,8 @@
 --   turn_row_id and model_version_receipt (which may be NULL on a fresh commit
 --   or replay). It has no replay flag and no JSON CAS-refusal arm: stale graph
 --   CAS RAISES SQLSTATE OLGC1. v6 preserves all delegated v5 exceptions without
---   catching them. Revision refusal uses v5's two result keys plus reason and
---   revision, with both result keys NULL because no turn was committed.
+--   catching them. Revision CAS refusal RAISES SQLSTATE OLRV1 with JSON DETAIL
+--   containing reason, expected, and current; it has no JSON refusal result.
 --   Detect replay under the same scenario lock via the existing turn row, not
 --   via a NULL receipt. v5 still validates replay turn/mutation identity.
 --   A missing scenario is compared as revision 0; v5 retains its existing
@@ -33,7 +33,8 @@
 --   v5's last argument p_expected_base_known DEFAULT FALSE is made explicitly
 --   required in v6 because PostgreSQL requires all arguments after a defaulted
 --   input to have defaults, while p_expected_revision must remain required.
---   A replay must supply the CURRENT revision: the compare always precedes v5.
+--   A replay may supply its original stale revision: v5 validates its identity,
+--   revision CAS is skipped, and the current revision is returned without a bump.
 -- =============================================================================
 
 ALTER TABLE public.scenarios
@@ -90,17 +91,6 @@ BEGIN
     v_revision := 0;
   END IF;
 
-  -- Revision CAS has no enforcement mode or unknown-base exemption. In
-  -- particular, NULL expectations are refused by the null-safe comparison.
-  IF p_expected_revision IS DISTINCT FROM v_revision THEN
-    RETURN jsonb_build_object(
-      'turn_row_id', NULL,
-      'model_version_receipt', NULL,
-      'reason', 'revision_conflict',
-      'revision', v_revision
-    );
-  END IF;
-
   -- A NULL model_version_receipt cannot identify replay: fresh guest/no-op
   -- commits also return NULL. The scenario lock serialises this lookup with
   -- the delegated v5 append. v5/v4 retain all replay identity checks.
@@ -108,6 +98,22 @@ BEGIN
     SELECT 1 FROM public.v5_conversation_turns
       WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id
   ) INTO v_turn_preexisting;
+
+  -- Replay is decided before revision CAS: its expected revision describes an
+  -- already-committed turn, so even a stale expectation recovers that result.
+  -- Fresh turns have no enforcement mode or unknown-base exemption; NULL
+  -- expectations are refused by the null-safe comparison.
+  IF NOT v_turn_preexisting THEN
+    IF p_expected_revision IS DISTINCT FROM v_revision THEN
+      RAISE EXCEPTION 'append_turn_atomic_v6: revision_conflict'
+        USING ERRCODE = 'OLRV1',
+              DETAIL = jsonb_build_object(
+                'reason', 'revision_conflict',
+                'expected', p_expected_revision,
+                'current', v_revision
+              )::text;
+    END IF;
+  END IF;
 
   v_result := public.append_turn_atomic_v5(
     p_scenario_id,
@@ -144,12 +150,14 @@ BEGIN
 
   -- v5 returns only after a successful append or replay. Its refusals raise
   -- and roll back this transaction, including every delegated side effect.
-  IF NOT v_turn_preexisting THEN
-    UPDATE public.scenarios
-      SET revision = revision + 1
-      WHERE id = p_scenario_id
-      RETURNING revision INTO v_revision;
+  IF v_turn_preexisting THEN
+    RETURN v_result || jsonb_build_object('revision', v_revision);
   END IF;
+
+  UPDATE public.scenarios
+    SET revision = revision + 1
+    WHERE id = p_scenario_id
+    RETURNING revision INTO v_revision;
 
   RETURN v_result || jsonb_build_object('revision', v_revision);
 END;
