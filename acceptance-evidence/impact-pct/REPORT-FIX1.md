@@ -79,3 +79,11 @@ node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node --import
 - Regression caught in review of FIX-1: "The risk of churn is 7% within 6 months." had become a 7% likelihood. It states a churn RATE, and the base refused it. "risk" is removed from the "<word> of/that … is N%" event bridge, while "N% risk" stays direct. Rows `fix1-risk-of-metric-is-not-a-likelihood` ×2.
 - Neighbours green: stated-event-risk + held-proposal seam 273; draft + door seam 43; zero-treatment + card-copy 7.
 - The scripts (compare-corpus.ts, run-mutants.mjs, measure-timing.ts) are kept in the lane evidence folder, not the repo.
+
+## r2 (author, after Codex review r2 at 7c483c21, VERDICT FAIL: 4 P1, 2 P2; buddy cap reached)
+- **P1 comma binding** ("Supplier fails, unlike Release slips, has a 30% chance…"): the drafter now also requires exactly one risk named in the whole likelihood clause (the reader exposes `clause_text`). Row `r2-comma-two-names`.
+- **P1 "chance-free":** a cue word may not run on into a hyphen.
+- **P1 "a chance that MRR will be down 10%":** the event-prefix form now needs a bridge ("is/at/of N%").
+- **P1 "It may happen: 10% of our customers cancel":** the happen form needs its window directly after the figure.
+- **P2:** "probable" added. "e.g.", "i.e.", "etc.", "vs.", "approx." and "incl." are not clause boundaries.
+- All 8 new rows are RED at 7c483c21. Neighbours green (277 / 47 / 7). 170-message corpus: 8 correct, 0 wrong, 0 false reads, 0 base-correct lost. Committed 76: 4 correct, 1 documented refusal, 0 false reads.

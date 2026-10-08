@@ -137,6 +137,26 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     expect(readStatedEventRisk(text)).toBeUndefined();
   });
 
+  it.each([
+    'Add a risk: a 10% chance-free drop in MRR within 6 months.',
+    'There is a chance that MRR will be down 10% within 6 months.',
+    'It may happen: 10% of our customers cancel within 6 months.',
+    'It may happen 10% of our customers cancel within 6 months.',
+  ])('r2-impact-next-to-a-cue-is-not-a-likelihood: %s', (text) => {
+    expect(readStatedEventRisk(text)).toBeUndefined();
+    expect(readStatedLikelihoodWithoutWindow(text.replace(/ within 6 months/, ''))).toBe(false);
+  });
+
+  it.each([
+    ['probable', 'Supplier failure is 30% probable within 6 months.', 0.3, 6],
+    ['abbreviation', 'There is a 30% chance the supplier fails (e.g. insolvency) within 6 months.', 0.3, 6],
+    ['abbreviation-ie', 'There is a 30% chance of a key loss, i.e. a senior engineer leaving, within 6 months.', 0.3, 6],
+  ])('r2-plain-likelihood-%s', (_id, text, p, months) => {
+    const read = readStatedEventRisk(text)!;
+    expect(read.event_risk.occurrence).toMatchObject({ p_low: p, p_high: p, basis: 'user' });
+    expect(read.event_risk.horizon.months).toBe(months);
+  });
+
   it('fix1-uncued-first-alternative-is-ambiguous', () => {
     expect(readStatedEventRisk('20% or 30% chance within 6 months')).toBeUndefined();
     expect(readStatedLikelihoodWithoutWindow('20% or 30% chance')).toBe(false);

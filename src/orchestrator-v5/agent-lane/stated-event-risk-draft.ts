@@ -30,7 +30,10 @@ export function holdStatedEventRisks<
     // keeps comma-attached event context but excludes names across a semicolon.
     // No figure/likelihood on a node is read.
     const matches = risks.filter((r) => r.names.length > 0 && r.names.every((w) => named.has(w)));
-    if (matches.length !== 1) continue;
+    // Another risk named anywhere in the clause makes the binding ambiguous ("Supplier fails, unlike Release slips, has…").
+    const inClause = new Set(words(stated.clause_text));
+    const clauseMatches = risks.filter((r) => r.names.length > 0 && r.names.every((w) => inClause.has(w)));
+    if (matches.length !== 1 || clauseMatches.length !== 1) continue;
     const id = matches[0]!.node.id;
     const previous = claims.get(id) ?? [];
     previous.push(stated);

@@ -193,6 +193,24 @@ describe('event_risk.v1 slice 2c', () => {
     expect(input).toEqual(before);
   });
 
+  it('r2-comma-two-names: a clause naming two risks stamps neither (Codex #2828 r2 P1-1)', () => {
+    const input = {
+      nodes: [
+        { id: 'risk_supplier', kind: 'risk', label: 'Supplier fails' },
+        { id: 'risk_release', kind: 'risk', label: 'Release slips' },
+        { id: 'outcome_mrr', kind: 'outcome', label: 'MRR' },
+      ],
+      edges: [
+        { id: 'impact_supplier', from: 'risk_supplier', to: 'outcome_mrr', exists_probability: 0.7 },
+        { id: 'impact_release', from: 'risk_release', to: 'outcome_mrr', exists_probability: 0.7 },
+      ],
+    };
+    const before = structuredClone(input);
+    const result = holdStatedEventRisks(input.nodes, input.edges, 'Supplier fails, unlike Release slips, has a 30% chance within 6 months.');
+    expect(result.held).toEqual([]);
+    expect({ nodes: result.nodes, edges: result.edges }).toEqual(before);
+  });
+
   it('FIX-1-supplier-own-clause: supplier likelihood holds only its named risk', () => {
     const input = graph();
     input.nodes.push({ id: 'risk_release', kind: 'risk', label: 'Release slips' });

@@ -24,8 +24,9 @@ const IMPACT_BY = /\bby[ \t]{1,8}(?:(?:about|around|roughly|approximately|at lea
 const IMPACT_AFTER = /^[ \t]{0,8}(?:(?:ARR|MRR|revenue|sales|cost|price|monthly|annual)[ \t]{1,8})?(?:drops?|falls?|declines?|cuts?|reductions?|increases?|rises?|loss(?:es)?|hits?|growth|lower|higher|more|less|fewer|churn|conversion|margin|adoption|of[ \t]{1,8}(?:ARR|MRR|revenue|sales|costs?|profit|customers?|investment|budget))\b/i;
 const IMPACT_VERB = /\b(?:cuts?|cutting|costs?|costing|reduce[ds]?|reducing|lowers?|lowered|lowering|raises?|raised|raising|increase[ds]?|increasing|drops?|dropped|dropping|falls?|fell|falling|lose[st]?|lost|losing|shrinks?|shrank|shrinking|grows?|grew|growing|decrease[ds]?|decreasing)\b[^%,;.!?\r\n]{0,120}$/i;
 const MODIFIER = String.raw`(?:about|around|roughly|a|an)${GAP}`;
-const LIKELIHOOD_WORD = String.raw`(?:chances?|likely|probability|likelihood|odds|risk)`;
-const DIRECT_LIKELIHOOD_AFTER = new RegExp(String.raw`^${SPACE}(?:${MODIFIER}){0,3}${LIKELIHOOD_WORD}\b`, 'i');
+const LIKELIHOOD_WORD = String.raw`(?:chances?|likely|probable|probability|likelihood|odds|risk)`;
+// "10% chance-free drop" is not a cue (Codex #2828 r2): the word must not run on into a hyphen.
+const DIRECT_LIKELIHOOD_AFTER = new RegExp(String.raw`^${SPACE}(?:${MODIFIER}){0,3}${LIKELIHOOD_WORD}\b(?!-)`, 'i');
 const DIRECT_LIKELIHOOD_BEFORE = new RegExp(String.raw`\b(?:chances?|probability|likelihood|odds|risk)${GAP}(?:(?:of|that|is|at)${GAP}|=${SPACE}|${MODIFIER}){0,4}$`, 'i');
 // Not "risk": "the risk of churn is 7%" states a churn RATE, not a likelihood (base refused it; "N% risk" stays direct).
 const EVENT_LIKELIHOOD_BEFORE = new RegExp(String.raw`\b(?:chances?|probability|likelihood|odds)${GAP}(?:of|that)${GAP}[^,;.!?\r\n]{1,60}$`, 'i');
@@ -34,6 +35,8 @@ const HEDGE_BEFORE = new RegExp(String.raw`\b(?:maybe|perhaps|possibly|probably)
 const ESTIMATE_BEFORE = new RegExp(String.raw`\bi(?:(?:['’]d|${GAP}would)${GAP}(?:put${GAP}it${GAP}at|say)|${GAP}(?:reckon|estimate|guess))${GAP}(?:${MODIFIER}){0,3}$`, 'i');
 // "It may happen 10–30% in the next 6 months" (the card's own words) and "<event> might happen, N%".
 const BARE_EVENT = new RegExp(String.raw`\b(?:may|might|could)${GAP}happen${SPACE}[,:]?${SPACE}(?:(?:about|around|roughly)${GAP})?$`, 'i');
+// The happen form's figure must be followed directly by its window: "It may happen: 10% of our customers cancel" is a share.
+const WINDOW_NEXT = new RegExp(String.raw`^${SPACE}(?:within|in|over|during)\b`, 'i');
 const ALTERNATIVE_BEFORE = new RegExp(String.raw`\bor${GAP}(?:${MODIFIER}){0,3}$`, 'i');
 const ALTERNATIVE_AFTER = new RegExp(String.raw`^${SPACE}or\b`, 'i');
 
@@ -43,6 +46,11 @@ type ProbabilityCandidate = { match: RegExpMatchArray; likelihood: boolean; clau
 
 function isDecimalPoint(text: string, i: number): boolean {
   return text[i] === '.' && /\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? '');
+}
+
+/** "e.g.", "i.e.", "etc.", "vs.", "approx." and "incl." are not clause boundaries (Codex #2828 r2). */
+function isAbbreviationPoint(text: string, i: number): boolean {
+  return text[i] === '.' && /(?:\b(?:e\.g|e|i\.e|i|etc|vs|approx|incl)|\b[a-z]\.[a-z])$/i.test(text.slice(Math.max(0, i - 8), i));
 }
 
 /** Window clauses and their comma fragments, once per input. Decimal points stay in their numeric token. */
@@ -58,7 +66,7 @@ function likelihoodClauses(text: string): Clause[] {
       fragmentStart = i + 1;
       continue;
     }
-    if (i !== text.length && (ch === undefined || !';.!?\r\n'.includes(ch) || isDecimalPoint(text, i))) continue;
+    if (i !== text.length && (ch === undefined || !';.!?\r\n'.includes(ch) || isDecimalPoint(text, i) || isAbbreviationPoint(text, i))) continue;
     fragments.push({ start: fragmentStart, end: i });
     clauses.push({ start, end: i, fragments });
     start = i + 1;
@@ -98,12 +106,13 @@ function statedProbabilityCandidates(userText: string): ProbabilityCandidate[] {
     const before = userText.slice(Math.max(clause.start, index - 160), index);
     const after = userText.slice(index + match[0].length, Math.min(clause.end, index + match[0].length + 160));
     const directWord = DIRECT_LIKELIHOOD_AFTER.test(after) || DIRECT_LIKELIHOOD_BEFORE.test(before);
-    const eventWord = EVENT_LIKELIHOOD_BEFORE.test(before);
+    // "a chance that MRR will be down 10%" names an event, then an amount: the event form needs "is/at/of N%" (Codex #2828 r2).
+    const eventWord = EVENT_LIKELIHOOD_BEFORE.test(before) && LIKELIHOOD_BRIDGE.test(before);
     const directLikelihood = directWord || eventWord || HEDGE_BEFORE.test(before) || ESTIMATE_BEFORE.test(before);
     // "probability of losing a customer is 30%" describes an event; "risk of losing 10%" describes its impact.
     const eventVerbIsLikelihood = directWord || (eventWord && LIKELIHOOD_BRIDGE.test(before));
     if (IMPACT_BY.test(before) || IMPACT_AFTER.test(after) || (!eventVerbIsLikelihood && IMPACT_VERB.test(before))) continue;
-    const bareEvent = BARE_EVENT.test(before);
+    const bareEvent = BARE_EVENT.test(before) && WINDOW_NEXT.test(after);
     if (!directLikelihood && !bareEvent && !ALTERNATIVE_BEFORE.test(before) && !ALTERNATIVE_AFTER.test(after)) continue;
     candidates.push({ match, likelihood: directLikelihood || bareEvent, clause, binding });
   }
@@ -161,7 +170,7 @@ export function isFactorNamedByUser(label: string, userText: string): boolean {
 }
 
 /** Reader metadata for draft name binding; never serialize this span into a held occurrence member. */
-export function readStatedEventRiskWithBindingSpan(userText: string): { event_risk: EventRiskV1T; quote: string; binding_span: string } | undefined {
+export function readStatedEventRiskWithBindingSpan(userText: string): { event_risk: EventRiskV1T; quote: string; binding_span: string; clause_text: string } | undefined {
   if (typeof userText !== 'string') return undefined;
   const candidate = statedProbability(userText);
   // A bare "in year" from "cost in year one" was never a supported window; it must not hide a real window.
@@ -216,7 +225,8 @@ export function readStatedEventRiskWithBindingSpan(userText: string): { event_ri
   if (!parsed.success) return undefined;
   const start = Math.min(probability.index!, horizon.index!);
   const end = Math.max(probability.index! + probability[0].length, horizon.index! + horizon[0].length);
-  return { event_risk: parsed.data, quote: userText.slice(start, end), binding_span: userText.slice(candidate.binding.start, candidate.binding.end) };
+  return { event_risk: parsed.data, quote: userText.slice(start, end), binding_span: userText.slice(candidate.binding.start, candidate.binding.end),
+    clause_text: userText.slice(candidate.clause.start, candidate.clause.end) };
 }
 
 /** Keep the occurrence/quote wire shape unchanged for held-card and approval consumers. */
