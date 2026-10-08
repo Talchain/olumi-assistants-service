@@ -5,15 +5,17 @@ import * as admission from '../admit-model.js';
 import type { AdmittedModel, CandidateModel } from '../admit-model.js';
 import * as widening from '../runtime/widen-draft.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
-import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { risksTurnFromSignals, widenGate, widenTurnFromSignals } from '../method-turn/widen-turn.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { inertRiskBranch, preconditionRiskIds, withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
-import { CONSTRUCTION_TAIL_RESERVE_MS } from '../../../routes/agent-v1-turn.js';
+import { constructionDeadline } from '../../../routes/agent-v1-turn.js';
 import { log } from '../../../utils/telemetry.js';
-import { recordingDrafter } from '../../drafter-raw/record.js';
+import { recordingDrafter, type DrafterCallRecord } from '../../drafter-raw/record.js';
+import * as drafterRaw from '../../drafter-raw/index.js';
 
 type Rec = Record<string, any>;
 const BRIEF = 'We want to deliver 20 features in six months. I propose Hire a Tech Lead. Today we have 0 Developer hires, 0 Tech lead hires, and 0 Contractor hours. Developer hires can range up to 10 people; Tech lead hires up to 10 people; Contractor hours up to 100 hours. Background demand is 10 enquiries, up to 100 enquiries.';
@@ -74,7 +76,8 @@ function expectOriginalIdentity(before: AdmittedModel, after: AdmittedModel) {
 }
 function builder(c: CandidateModel, pass: CallStructuredModel, brief = BRIEF, deadlineAt = Date.now() + 60_000) {
   let graph: Rec | undefined;
-  const callStructured = vi.fn<CallStructuredModel>(async (req) => isRisks(req) || isOptions(req) ? pass(req) : { text: JSON.stringify(c) });
+  const recording: DrafterCallRecord[] = [];
+  const callStructured = vi.fn<CallStructuredModel>(async (req, callDeadlineAt) => isRisks(req) || isOptions(req) ? pass(req, callDeadlineAt) : { text: JSON.stringify(c) });
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
       graph = structuredClone((body as { graph: Rec }).graph);
@@ -82,10 +85,10 @@ function builder(c: CandidateModel, pass: CallStructuredModel, brief = BRIEF, de
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, versions: [] } };
   };
-  const promise = buildModelFromBrief(SCENARIO, brief, dispatch, callStructured, undefined, deadlineAt).then((out) => ({ out: out as Rec, graph, callStructured }));
-  return { promise, callStructured };
+  const promise = buildModelFromBrief(SCENARIO, brief, dispatch, recordingDrafter(callStructured, recording), undefined, deadlineAt, callStructured).then((out) => ({ out: out as Rec, graph, callStructured, recording }));
+  return { promise, callStructured, recording };
 }
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllEnvs(); drafterRaw.resetDrafterRawStoreForTests(); });
 
 describe('P05b automatic widening, rows bound to graph identity', () => {
   it('aw-rich: a rich draft still runs both passes and every existing node and edge stays byte-identical', async () => {
@@ -278,10 +281,10 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(event).not.toHaveProperty('triggered');
   });
 
-  it('aw-no-budget: less than five seconds in the real turn tail skips both calls byte-identically', async () => {
+  it('aw-no-budget: less than five seconds before the construction deadline skips both calls byte-identically', async () => {
     const input = fixture();
     const now = 1_800_000_000_000;
-    input.deadlineAt = now - CONSTRUCTION_TAIL_RESERVE_MS + 8_000 + 4_999;
+    input.deadlineAt = now + 4_999;
     const bytes = JSON.stringify(input);
     const events = vi.spyOn(log, 'info').mockImplementation(() => {});
     const callStructured = generator();
@@ -293,17 +296,17 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(event).not.toHaveProperty('triggered');
   });
 
-  it('aw-deadline-cap: a real construction deadline preserves the eight-second tail under fake timers', async () => {
+  it('aw-deadline-cap: deadlineAt minus now caps both passes below twenty seconds under fake timers', async () => {
     vi.useFakeTimers();
     const now = 1_800_000_000_000;
     vi.setSystemTime(now);
     const input = fixture({ risks: 1, nonSq: 2 });
-    input.deadlineAt = now - CONSTRUCTION_TAIL_RESERVE_MS + 8_000 + 6_000;
+    input.deadlineAt = now + 6_000;
     let settled = false;
     let result: unknown;
     const events = vi.spyOn(log, 'info').mockImplementation(() => {});
     const callStructured = vi.fn<CallStructuredModel>(() => new Promise(() => {}));
-    const promise = widening.widenDraft({ ...input, callStructured: recordingDrafter(callStructured, []) }).then((out) => { settled = true; result = out; });
+    const promise = widening.widenDraft({ ...input, callStructured }).then((out) => { settled = true; result = out; });
     expect(callStructured).toHaveBeenCalledTimes(2);
     expect(callStructured.mock.calls.map(([, deadlineAt]) => deadlineAt)).toEqual([now + 6_000, now + 6_000]);
     await vi.advanceTimersByTimeAsync(5_999);
@@ -314,6 +317,34 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const event = events.mock.calls.find(([, message]) => message === 'agent_draft_widen')![0] as Rec;
     expect(event).toMatchObject({ outcome: 'timeout', calls: 2, ms: 6_000, enrichment_incomplete: true });
     if (settled) await promise;
+  });
+
+  it('aw-at-deadline: the construction deadline itself leaves no widening budget or calls', async () => {
+    const input = fixture();
+    const now = 1_800_000_000_000;
+    input.deadlineAt = now;
+    const bytes = JSON.stringify(input);
+    const events = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const callStructured = generator();
+    expect(await widening.widenDraft({ ...input, clock: () => now, callStructured })).toBeNull();
+    expect(callStructured).toHaveBeenCalledTimes(0);
+    expect(JSON.stringify(input)).toBe(bytes);
+    expect(events.mock.calls.find(([, message]) => message === 'agent_draft_widen')![0]).toMatchObject({ outcome: 'no_budget', calls: 0 });
+  });
+
+  it('aw-worked-deadline: a 125 second proxy and construction ending at 99.9 seconds skips widening', async () => {
+    const input = fixture();
+    const started = 1_800_000_000_000;
+    const now = started + 99_900;
+    input.deadlineAt = constructionDeadline(started, 125_000);
+    expect(input.deadlineAt).toBe(started + 100_000);
+    const bytes = JSON.stringify(input);
+    const events = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const callStructured = generator();
+    expect(await widening.widenDraft({ ...input, clock: () => now, callStructured })).toBeNull();
+    expect(callStructured).toHaveBeenCalledTimes(0);
+    expect(JSON.stringify(input)).toBe(bytes);
+    expect(events.mock.calls.find(([, message]) => message === 'agent_draft_widen')![0]).toMatchObject({ outcome: 'no_budget', calls: 0 });
   });
 
   it('aw-timeout: a never-resolving call closes at exactly the default 20 second cap', async () => {
@@ -344,24 +375,41 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     if (settled) await promise;
   });
 
-  it('aw-late-timeout: a provider resolving after the cap cannot trigger readmission', async () => {
+  it('aw-late-timeout: separate late risk and option responses leave admission, recording and persisted graph unchanged', async () => {
     vi.useFakeTimers();
-    const input = fixture({ risks: 1 });
-    const bytes = JSON.stringify(input);
+    const c = candidate({ risks: 1, nonSq: 2 });
+    const bytes = JSON.stringify(c);
     const spy = vi.spyOn(admission, 'admitCandidateModel');
-    let release: (() => void) | undefined;
-    const callStructured = vi.fn<CallStructuredModel>(() => new Promise((resolve) => {
-      release = () => resolve({ text: JSON.stringify({ risk_suggestions: riskSuggestions() }) });
+    const releases: Partial<Record<'risks' | 'options', () => void>> = {};
+    const pass = vi.fn<CallStructuredModel>((req) => new Promise((resolve) => {
+      const kind = isRisks(req) ? 'risks' : 'options';
+      releases[kind] = () => resolve({ text: JSON.stringify(kind === 'risks' ? { risk_suggestions: riskSuggestions() } : optionsArgs()) });
     }));
-    const promise = widening.widenDraft({ ...input, callStructured });
+    const run = builder(c, pass);
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(await promise).toBeNull();
-    expect(spy).toHaveBeenCalledTimes(0);
-    expect(release).toBeDefined();
-    release!();
+    const actual = await run.promise;
+    expect(actual.out.ok, JSON.stringify(actual.out)).toBe(true);
+    expect(actual.out).not.toHaveProperty('widened');
+    expect(pass).toHaveBeenCalledTimes(2);
+    expect(releases.risks).toBeDefined();
+    expect(releases.options).toBeDefined();
+    expect(releases.risks).not.toBe(releases.options);
+    const admittedBefore = spy.mock.calls.length;
+    const recordingBefore = JSON.stringify(actual.recording);
+    const recordingLength = actual.recording.length;
+    const graphBefore = JSON.stringify(actual.graph);
+    const resultBefore = JSON.stringify(actual.out);
+    expect(recordingLength).toBeGreaterThan(0);
+    releases.risks!();
+    releases.options!();
     await vi.advanceTimersByTimeAsync(0);
-    expect(spy, 'late generation must stop before admission or telemetry can change').toHaveBeenCalledTimes(0);
-    expect(JSON.stringify(input)).toBe(bytes);
+    expect(spy, 'late generation must stop before re-admission').toHaveBeenCalledTimes(admittedBefore);
+    expect(actual.recording).toHaveLength(recordingLength);
+    expect(JSON.stringify(actual.recording)).toBe(recordingBefore);
+    expect(JSON.stringify(actual.recording)).not.toContain(RATIONALE);
+    expect(JSON.stringify(actual.graph)).toBe(graphBefore);
+    expect(JSON.stringify(actual.out)).toBe(resultBefore);
+    expect(JSON.stringify(c)).toBe(bytes);
   });
 
   it('aw-same-admission: widening forwards the brief and every original admission callback', async () => {
@@ -448,6 +496,49 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(await widening.widenDraft({ ...input, callStructured: generator([], args) })).toBeNull();
   });
 
+  it('aw-complete-option-label: Complete hiring pilot is dropped', async () => {
+    const input = fixture({ sameLever: true });
+    const option = { ...optionsArgs().options[0]!, label: 'Complete hiring pilot' };
+    expect(await widening.widenDraft({ ...input, callStructured: generator([], { options: [option] }) })).toBeNull();
+  });
+
+  it('aw-improved-risk-label: Improved onboarding delays is dropped', async () => {
+    const input = fixture({ risks: 1 });
+    const risk = { ...riskSuggestions()[0]!, label: 'Improved onboarding delays' };
+    expect(await widening.widenDraft({ ...input, callStructured: generator([risk], { options: [] }) })).toBeNull();
+  });
+
+  it.each(['better', 'best', 'improving', 'completed', 'you missed', 'winner', 'recommended'])(
+    'aw-full-ranking-words-%s: widened labels and retained copy reject the complete word rule', async (word) => {
+      for (const field of ['option_label', 'basis', 'risk_label', 'relies_on', 'watch_for'] as const) {
+        const input = fixture({ risks: 1, sameLever: true });
+        const option = structuredClone(optionsArgs().options[0]!);
+        const risk = { ...riskSuggestions()[0]! };
+        if (field === 'option_label') option.label = `${word} hiring pilot`;
+        else if (field === 'basis') for (const act of option.acts_on) act.level.basis = `${word} working pattern`;
+        else if (field === 'risk_label') risk.label = `${word} recruitment delay`;
+        else risk[field] = `${word} working pattern`;
+        const optionField = field === 'option_label' || field === 'basis';
+        const out = await widening.widenDraft({ ...input, callStructured: generator(optionField ? [] : [risk], { options: optionField ? [option] : [] }) });
+        expect(out, `${field} must reject ${word}`).toBeNull();
+      }
+    });
+
+  it.each(['label', 'basis', 'relies_on', 'watch_for'] as const)(
+    'aw-no-label-exemption-%s: quoting an existing user label does not exempt widened copy from the word rule', async (field) => {
+      const c = candidate({ risks: 1 });
+      c.options[1]!.label = 'Better hiring pilot';
+      const brief = BRIEF.replace('Hire a Tech Lead', 'Better hiring pilot');
+      const input = { candidate: c, admitted: ADMIT(c, {}, brief), brief, deadlineAt: Date.now() + 60_000 };
+      const option = structuredClone(optionsArgs().options[0]!);
+      const risk = { ...riskSuggestions()[0]! };
+      if (field === 'label') option.label = 'Better hiring pilot with developers';
+      else if (field === 'basis') for (const act of option.acts_on) act.level.basis = 'A trial beside Better hiring pilot';
+      else risk[field] = 'Better hiring pilot taking effect';
+      const optionField = field === 'label' || field === 'basis';
+      expect(await widening.widenDraft({ ...input, callStructured: generator(optionField ? [] : [risk], { options: optionField ? [option] : [] }) })).toBeNull();
+    });
+
   it.each([undefined, '', '   '])('aw-basis: drop levels with missing or empty basis %s', async (basis) => {
     const input = fixture({ sameLever: true });
     const args = optionsArgs();
@@ -512,7 +603,7 @@ describe('P05b build seam and words', () => {
     const baseline = await builder(c, generator()).promise;
     vi.restoreAllMocks();
     const pass = generator();
-    const deadlineAt = Date.now() - CONSTRUCTION_TAIL_RESERVE_MS + 8_000 + 4_000;
+    const deadlineAt = Date.now() + 4_000;
     const actual = await builder(c, pass, BRIEF, deadlineAt).promise;
     expect(actual.out.ok).toBe(true);
     expect(pass).toHaveBeenCalledTimes(0);
@@ -558,6 +649,42 @@ describe('P05b build seam and words', () => {
     expect(added.filter((n: Rec) => n.kind === 'option')).toHaveLength(actual.out.widened.options);
     expect(GraphV3.safeParse(actual.graph).success).toBe(true);
     expect(JSON.stringify(actual.graph)).not.toContain(RATIONALE);
+  });
+
+  it('aw-served-recording: widened rationale never reaches the stored drafter recording or ToolResult', async () => {
+    const rows: drafterRaw.DrafterRawRow[] = [];
+    vi.stubEnv('SUPABASE_URL', 'https://drafter-recording.invalid');
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-recording-key');
+    drafterRaw.resetDrafterRawStoreForTests();
+    vi.spyOn(drafterRaw.SupabaseDrafterRawStore.prototype, 'insert').mockImplementation(async row => {
+      rows.push(structuredClone(row));
+      return 'written';
+    });
+    let graph: Rec | undefined;
+    const dispatch: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) {
+        graph = structuredClone((body as { graph: Rec }).graph);
+        return { status: 200, json: { model_version: { version_number: 1 } } };
+      }
+      return { status: 200, json: { graph: graph ?? { nodes: [], edges: [] }, versions: [] } };
+    };
+    const c = candidate({ risks: 1, nonSq: 2 });
+    const pass = generator();
+    const callStructured: CallStructuredModel = async (req, deadlineAt) => isRisks(req) || isOptions(req)
+      ? pass(req, deadlineAt) : { text: JSON.stringify(c) };
+    const caps = createAgentCapabilities(dispatch, new ProposalStore(), callStructured, 'full', undefined, { deadlineAt: Date.now() + 60_000 });
+    const out = await caps.buildModelFromBrief({ scenario_id: SCENARIO, authenticated_user_id: 'user-aw', request_id: 'req-aw' }, { brief: BRIEF });
+    await drafterRaw.settleDrafterRawWritesForTests();
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(pass).toHaveBeenCalledTimes(2);
+    expect(out).toHaveProperty('widened');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.calls.length).toBeGreaterThan(0);
+    expect(rows[0]!.calls.every(call => call.raw_text === JSON.stringify(c))).toBe(true);
+    expect(JSON.stringify(rows)).not.toContain(RATIONALE);
+    expect(JSON.stringify(rows)).not.toContain('rationale');
+    expect(JSON.stringify(out)).not.toContain(RATIONALE);
+    expect(JSON.stringify(graph)).not.toContain(RATIONALE);
   });
 
   const goldenDrafts = (JSON.parse(readFileSync(new URL('./fixtures/keep-risks-live-drafts-20260930.json', import.meta.url), 'utf8')) as { drafts: { id: string; brief: string; raw: string }[] }).drafts.filter((d) => ['mrr-12m', 'hiring', 'funding'].includes(d.id));

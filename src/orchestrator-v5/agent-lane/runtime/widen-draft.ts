@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { admitCandidateModel, canonicalLabel, type AdmittedModel, type CandidateModel } from '../admit-model.js';
 import type { CallStructuredModel } from './build-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -8,9 +9,13 @@ import { applyDisconfirm, doorFactorOf, existingLevers, riskGate, risksTurnFromS
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { budgetFor } from '../model-budgets.js';
 import { doorLevelOf, estimateLevelPersists } from './agent-capabilities.js';
-import { CONSTRUCTION_TAIL_RESERVE_MS } from './construction-deadline.js';
 
 type AdmissionArgs = Parameters<typeof admitCandidateModel>;
+interface FinalGraph {
+  readonly nodes: readonly { readonly id: string }[];
+  readonly edges: readonly { readonly id?: string; readonly from: string; readonly to: string }[];
+  readonly goal_constraints?: unknown;
+}
 export interface WidenDraftInput {
   admitted: AdmittedModel;
   candidate: CandidateModel;
@@ -19,6 +24,8 @@ export interface WidenDraftInput {
   deadlineAt?: number;
   timeoutMs?: number;
   clock?: () => number;
+  /** The same pure path used for persistence, including occurrence binding and refit, before clamp. */
+  finalGraph?: (admitted: AdmittedModel) => FinalGraph;
   admissionArgs?: [goalLevelStated?: AdmissionArgs[3], targetFigureWrittenAgain?: AdmissionArgs[4],
     goalLevelFromBrief?: AdmissionArgs[5], sizeWritten?: AdmissionArgs[6], sizeRangeEnd?: AdmissionArgs[7]];
 }
@@ -31,6 +38,8 @@ export interface WidenDraftResult {
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
+const forbiddenWideningWords = /\b(better|best|improv\w*|complete\w*|you missed|winner|recommend\w*)\b/i;
+const hasForbiddenWideningWords = (text: unknown): boolean => typeof text === 'string' && forbiddenWideningWords.test(text);
 const objectSchema = (properties: Rec): Rec => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 const string = { type: 'string' };
 const direction = { type: 'string', enum: ['positive', 'negative'] };
@@ -54,6 +63,16 @@ function existingUnchanged(before: AdmittedModel, after: AdmittedModel): boolean
     && JSON.stringify(before.goal_constraints) === JSON.stringify(after.goal_constraints);
 }
 
+/** Compare identities after every post-admission reader has had the opportunity to change their meaning. */
+function finalExistingUnchanged(before: FinalGraph, after: FinalGraph): boolean {
+  const nodes = new Map(after.nodes.map(node => [node.id, node]));
+  const edgeId = (edge: FinalGraph['edges'][number]): string => edge.id ?? `${edge.from}::${edge.to}`;
+  const edges = new Map(after.edges.map(edge => [edgeId(edge), edge]));
+  return before.nodes.every(node => isDeepStrictEqual(node, nodes.get(node.id)))
+    && before.edges.every(edge => isDeepStrictEqual(edge, edges.get(edgeId(edge))))
+    && isDeepStrictEqual(before.goal_constraints, after.goal_constraints);
+}
+
 function optionCandidates(turn: RunWidenTurn, args: unknown, pathIds: ReadonlySet<string>): CandidateModel['options'] {
   const a = rec(args) ?? {};
   const gate = widenGate(turn, a);
@@ -62,13 +81,8 @@ function optionCandidates(turn: RunWidenTurn, args: unknown, pathIds: ReadonlySe
     const option = rec(raw[index])!;
     const acts = (option.acts_on as unknown[]).map(item => rec(item)!);
     if (!acts.some(act => pathIds.has(doorFactorOf(turn, act.factor_label)!))) return [];
-    const ranks = (text: string): boolean => {
-      // Existing model labels are the user's context. Only newly authored superiority claims are refused.
-      const authored = turn.graph.nodes.reduce((words, node) => typeof node.label === 'string'
-        ? words.replaceAll(node.label.toLowerCase(), ' ') : words, text.toLowerCase());
-      return /\b(?:better|best|improved)\b|you\s+missed/u.test(authored);
-    };
-    if (ranks(option.label as string) || acts.some(act => ranks(rec(act.level)!.basis as string))) return [];
+    if (hasForbiddenWideningWords(option.label)
+      || acts.some(act => hasForbiddenWideningWords(rec(act.level)!.basis))) return [];
     // Copy only the gated intervention and its basis. The generator's rationale never crosses this boundary.
     return [{ label: option.label as string, provenance: 'ai_proposed',
       draft_widening: { provenance: 'ai_suggested_widen' as const },
@@ -99,7 +113,7 @@ function optionLevelsUnchanged(turn: RunWidenTurn, options: CandidateModel['opti
   });
 }
 
-/** Two parallel generators share the construction tail; failed passes cost only their own suggestions. */
+/** Two parallel generators stay inside the drafter's deadline; failed passes cost only their own suggestions. */
 export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResult | null> {
   const clock = input.clock ?? Date.now;
   const started = clock();
@@ -110,8 +124,8 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
   let finished = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    // The drafter's absolute deadline already leaves this reserve. Keep 8s for admission, registration and reply.
-    const cap = Math.min(20_000, (input.deadlineAt ?? Infinity) + CONSTRUCTION_TAIL_RESERVE_MS - 8_000 - started);
+    // Registration, readbacks and narration retain the tail already reserved beyond this absolute deadline.
+    const cap = Math.min(20_000, (input.deadlineAt ?? Infinity) - started);
     if (cap < 5_000) { outcome = 'no_budget'; return null; }
     const timeoutMs = Math.min(cap, input.timeoutMs ?? 20_000);
     const graph = { nodes: input.admitted.nodes, edges: input.admitted.edges,
@@ -123,6 +137,7 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
     if (risksTurn.kind !== 'run_risks' || optionsTurn.kind !== 'run') {
       outcome = 'unavailable'; return null;
     }
+    const finalBefore = input.finalGraph?.(input.admitted);
     const budget = budgetFor('gpt-5.6-terra', 'widening');
     const call = async (instructions: string, schema: Rec): Promise<unknown> => {
       calls += 1;
@@ -139,7 +154,12 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
       if (finished) return null;
       const riskArgs = riskReply.status === 'fulfilled' ? riskReply.value : undefined;
       const optionArgs = optionReply.status === 'fulfilled' ? optionReply.value : undefined;
-      const candidates = rec(riskArgs)?.risk_suggestions;
+      const rawRisks = rec(riskArgs)?.risk_suggestions;
+      // These automatic suggestions have a stricter copy rule than the shared interactive risk gate.
+      const candidates = Array.isArray(rawRisks) ? rawRisks.filter(item => {
+        const risk = rec(item);
+        return ![risk?.label, risk?.relies_on, risk?.watch_for].some(hasForbiddenWideningWords);
+      }) : rawRisks;
       const risks = applyDisconfirm(risksTurn, { ...riskGate(risksTurn, candidates), candidates }).kept.slice(0, 3);
       const options = optionCandidates(optionsTurn, optionArgs, new Set(signals['model.goal_path_factor_ids']));
       partial = (risks.length === 0) !== (options.length === 0);
@@ -156,6 +176,11 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
           let admitted = admitCandidateModel(merged, {}, input.brief, ...(input.admissionArgs ?? []));
           admitted = { ...admitted, nodes: admitted.nodes.map(n => oldIds.has(n.id) ? n : markOlumiOptions([n], merged, input.brief)[0]!) };
           if (!existingUnchanged(input.admitted, admitted)) { outcome = 'existing_changed'; return null; }
+          if (finalBefore !== undefined && input.finalGraph !== undefined) {
+            const finalAfter = input.finalGraph(admitted);
+            if (!finalExistingUnchanged(finalBefore, finalAfter)) { outcome = 'existing_changed'; return null; }
+            if (!GraphV3.safeParse(finalAfter).success) { outcome = 'graph_invalid'; return null; }
+          }
           if (!optionLevelsUnchanged(optionsTurn, keptOptions, admitted)) { outcome = 'level_changed'; return null; }
           if (!GraphV3.safeParse({ nodes: admitted.nodes, edges: admitted.edges,
             ...(admitted.goal_constraints.length > 0 ? { goal_constraints: admitted.goal_constraints } : {}) }).success) {
