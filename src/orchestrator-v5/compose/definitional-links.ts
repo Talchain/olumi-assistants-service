@@ -20,7 +20,9 @@ import { composeEdgeIdentity } from './edge-address.js';
 
 export interface DefinitionalLink {
   readonly carrier_id: string;
-  readonly operation: 'product' | 'sum';
+  readonly operation: 'product' | 'sum' | 'accumulation';
+  /** `accumulation` only: the months the stock is worked out over (the carrier's `horizon_months`). */
+  readonly horizon_months?: number;
   /** The identity's `factor_ids`, in order. */
   readonly operand_ids: readonly string[];
   /** The identity's `addends` (absent → empty). */
@@ -59,9 +61,13 @@ function declaredIdentities(graph: unknown): DefinitionalLink[] {
     const operands = ids(identity.factor_ids);
     const addends = ids(identity.addends);
     if (operands === null || addends === null || operands.length === 0) continue;
+    // ⭐ CEE #3: an accumulation's three inputs DEFINE its stock at the horizon too; it is never read as a product.
+    const accumulation = identity.operation === 'accumulation';
+    if (accumulation && (operands.length !== 3 || !Number.isInteger(identity.horizon_months))) continue;
     out.push({
       carrier_id: node.id,
-      operation: identity.operation === 'sum' ? 'sum' : 'product',
+      operation: accumulation ? 'accumulation' : identity.operation === 'sum' ? 'sum' : 'product',
+      ...(accumulation ? { horizon_months: identity.horizon_months as number } : {}),
       operand_ids: operands,
       addend_ids: addends,
       stated_in_brief: identity.stated_in_brief === true,
@@ -153,11 +159,21 @@ export function definitionalLinkRefusalText(graph: unknown, link: DefinitionalLi
     const node = Array.isArray(nodes) ? nodes.map(rec).find((n) => n?.id === id) : undefined;
     return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : id;
   };
-  const term = link.operand_ids.map(labelOf).join(link.operation === 'sum' ? ' + ' : ' × ');
-  const formula = [term, ...link.addend_ids.map(labelOf)].join(' + ');
   const parts = [...link.operand_ids, ...link.addend_ids].map(labelOf);
   const change = parts.length <= 2 ? parts.join(' or ') : `${parts.slice(0, -1).join(', ')} or ${parts[parts.length - 1]}`;
   const carrier = labelOf(link.carrier_id);
+  // ⭐ CEE #3: an accumulation is never said as a product ("a × b × c"): it is worked out FROM its inputs over the months.
+  if (link.operation === 'accumulation') {
+    const inputs = `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+    const over = `over ${link.horizon_months} ${link.horizon_months === 1 ? 'month' : 'months'}`;
+    return link.stated_in_brief
+      ? `${carrier} is worked out from ${inputs} ${over}, so this link's strength is not something the analysis uses, `
+        + `and I haven't changed it. Change ${change} instead.`
+      : `Olumi works out ${carrier} from ${inputs} ${over}, so this link's strength isn't used while that holds, and I haven't `
+        + `changed it. Change ${change} instead. That reading is Olumi's, not yours; if ${carrier} isn't worked out that way, say so.`;
+  }
+  const term = link.operand_ids.map(labelOf).join(link.operation === 'sum' ? ' + ' : ' × ');
+  const formula = [term, ...link.addend_ids.map(labelOf)].join(' + ');
   // AIQ 5867435409 (2), CEE's N-c rule (`admit-model.ts`): a declaration the brief states is said as fact; any other is
   // Olumi's reading, said as such, with the way out.
   if (!link.stated_in_brief) {
