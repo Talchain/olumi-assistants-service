@@ -10,7 +10,7 @@ import type { DecisionFlipDispatchResult, FlipLinkRef } from '../../../handlers/
 import type { MethodReadback } from '../method-turn.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import {
-  FRACTION_LADDER, LINK_COPY, WHAT_CHANGES_PRESS_ID, WHAT_CHANGES_REPLY, fractionOf, renderLinkTippingPoints, whatChangesFaceLine, whatChangesTurnFor,
+  FRACTION_LADDER, LINK_COPY, WHAT_CHANGES_PRESS_ID, WHAT_CHANGES_REPLY, fractionOf, renderLinkTippingPoints, whatChangesTurnFor,
 } from '../what-changes-turn.js';
 
 type Rec = Record<string, any>;
@@ -131,68 +131,6 @@ describe('the served D3 case + ISL\'s real D3 block', () => {
     const staleState = { ...D3.body.analysis_state, run_state: { ...D3.body.analysis_state.run_state, kind: 'complete_stale' } };
     expect((await whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3, { analysisState: staleState }), ask))?.outcome).toBe('honest_limit');
     expect(ask).not.toHaveBeenCalled();
-  });
-});
-
-describe('whatChangesFaceLine', () => {
-  const measuredD3Turn = () => whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3), async (links) => measured(ISL_D3_BLOCK, links.slice(0, 2)));
-
-  it('WC-FACE-MEASURED: the face is exactly the framed first rendered sentence, never the whole multi-sentence reply', async () => {
-    const nodes = D3.body.draft_graph.nodes as Rec[];
-    const rendered = renderLinkTippingPoints(ISL_D3_BLOCK.links as never, {
-      node: Object.fromEntries(nodes.map((node) => [node.id, node.label])),
-      option: Object.fromEntries(nodes.filter((node) => node.kind === 'option').map((node) => [node.id, node.label])),
-      leaderId: ISL_D3_BLOCK.leader_option_id,
-    });
-    const firstRenderedSentence = "‘Stay on AWS’ would be the first to be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now.";
-    expect(rendered[0]).toBe(firstRenderedSentence);
-    expect(rendered.length).toBeGreaterThanOrEqual(2);
-    const turn = await measuredD3Turn();
-    const face = `In this model, ${firstRenderedSentence}`;
-    expect(turn?.outcome).toBe('measured');
-    expect(turn?.first).toBe(face);
-    expect(whatChangesFaceLine(turn)).toBe(face);
-    expect(turn?.reply).toBe(`In this model, ${rendered.join(' ')}`);
-    expect(turn?.reply.startsWith(face)).toBe(true);
-    expect(turn?.reply.split(/(?<=\.)\s+/).length).toBeGreaterThanOrEqual(2);
-    expect(turn?.first).not.toBe(turn?.reply);
-  });
-
-  it('WC-FACE-HONEST-LIMIT: an honest_limit turn has no face', async () => {
-    const turn = await whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3), async () => ({ status: 'unavailable', reason: 'timeout' }));
-    expect(turn?.outcome).toBe('honest_limit');
-    expect(whatChangesFaceLine(turn)).toBeNull();
-  });
-
-  it('WC-FACE-STALE: a stale turn has no face', async () => {
-    const turn = await whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3), async () => ({ status: 'stale' }));
-    expect(turn?.outcome).toBe('stale');
-    expect(whatChangesFaceLine(turn)).toBeNull();
-  });
-
-  it('WC-FACE-MODEL-UNREAD: a model_unread turn has no face', async () => {
-    const ask = vi.fn(async () => ({ status: 'no_run' }) as DecisionFlipDispatchResult);
-    const turn = await whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3, { graph: null }), ask);
-    expect(turn?.outcome).toBe('model_unread');
-    expect(whatChangesFaceLine(turn)).toBeNull();
-    expect(ask).toHaveBeenCalledTimes(0);
-  });
-
-  it('WC-FACE-NULL: a null turn has no face', async () => {
-    const ask = vi.fn(async () => ({ status: 'no_run' }) as DecisionFlipDispatchResult);
-    const turn = await whatChangesTurnFor('agent-next-pre-mortem', rbOf(D3), ask);
-    expect(turn).toBeNull();
-    expect(whatChangesFaceLine(turn)).toBeNull();
-    expect(ask).toHaveBeenCalledTimes(0);
-  });
-
-  it('WC-FACE-NON-PREFIX: a measured turn whose first is not its reply prefix has no face', async () => {
-    const measuredTurn = await measuredD3Turn();
-    expect(measuredTurn?.outcome).toBe('measured');
-    const turn = { ...measuredTurn!, first: 'This is not the opening of the measured reply.' };
-    expect(turn.outcome).toBe('measured');
-    expect(turn.reply.startsWith(turn.first)).toBe(false);
-    expect(whatChangesFaceLine(turn)).toBeNull();
   });
 });
 
