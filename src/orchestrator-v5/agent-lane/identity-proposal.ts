@@ -103,14 +103,16 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
 // "Royalties", "Percentages"); a label joining two things, or an average, is not ONE count.
 const NOT_A_COUNT_WORDS = new Set(['revenue', 'income', 'sale', 'price', 'cost', 'fee', 'spend', 'spending', 'budget', 'mrr', 'arr', 'arpu',
   'margin', 'profit', 'value', 'rate', 'ratio', 'share', 'percent', 'percentage', 'churn', 'conversion', 'royalty', 'earning', 'payment',
-  'pound', 'dollar', 'euro', 'cash', 'money', 'amount', 'average', 'mean', 'median', 'per', 'of', 'from', 'and', 'or', 'with', 'by']);
+  'pound', 'dollar', 'euro', 'cash', 'money', 'amount', 'average', 'mean', 'median', 'per', 'of', 'from', 'and', 'or', 'with', 'by',
+  // Codex r2 (#2826): compound operators join two quantities ("Customers plus subscribers").
+  'plus', 'minus', 'times', 'vs', 'versus', 'including', 'excluding', 'incl', 'excl', 'both', 'either', 'between', 'combined', 'total']);
 const singularWord = (w: string): string => w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.endsWith('ses') ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
 function labelCountUnit(n: Rec): string | undefined {
   if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
   const label = text(n.label);
   if (label === undefined || /[%£$€¥\d()]/.test(label)) return undefined;
   const words = label.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '');
-  if (words.length === 0 || words.length > 4 || words.some((w) => NOT_A_COUNT_WORDS.has(singularWord(w)))) return undefined;
+  if (words.length === 0 || words.length > 4 || words.some((w) => NOT_A_COUNT_WORDS.has(w) || NOT_A_COUNT_WORDS.has(singularWord(w)))) return undefined;
   const parts = readUnitParts(label);
   return parts?.kind === 'count' && parts.per === null && parts.period === null && (parts.noun?.length ?? 0) > 0 ? label : undefined;
 }

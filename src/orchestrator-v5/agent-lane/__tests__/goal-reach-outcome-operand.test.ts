@@ -35,7 +35,7 @@ describe('addendum 6 — an outcome operand of the declared product', () => {
     expect(proposeProductIdentity(graph(g => { noRiskLink(g); Object.assign(node(g, 'pro_paying_subscribers'), { label: 'Revenues from subscribers', observed_state: { unit: 'subscribers' } }); }))?.factor_ids)
       .toEqual(['pro_plan_monthly_price', 'pro_paying_subscribers']);
   });
-  it.each(['Percentages of subscribers', 'Revenues from subscribers', 'Royalties from subscribers', 'Subscribers and seats', 'Average order count', 'Subscribers (k)'])(
+  it.each(['Percentages of subscribers', 'Revenues from subscribers', 'Royalties from subscribers', 'Subscribers and seats', 'Average order count', 'Subscribers (k)', 'Customers plus subscribers', 'Total paying subscribers'])(
     'Codex r1 P1: "%s" is not ONE count → null', label => {
       expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = label; }))).toBeNull();
     });
