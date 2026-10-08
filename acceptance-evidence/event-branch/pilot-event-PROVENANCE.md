@@ -1,0 +1,2 @@
+SELF-AUTHORED by the EVENT-RISK lane (a2), 8 Oct: Paul's pricing pilot brief plus ONE figure-free discrete-event clause. It measures only whether the drafter instruction emits `occurrence` for a named discrete event. It is NOT evidence about how real users phrase risks: no traceable runner-authored brief names a discrete event, and shared-DB corpus rows stay local (RETRO correction c).
+The first pilot (pilot-paul-noevent/) used the unmodified Paul brief: 0/2 occurrence, and correctly so, because it names no discrete event.
