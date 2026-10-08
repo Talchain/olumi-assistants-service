@@ -3062,7 +3062,12 @@ export function admitCandidateModel(
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
   construction: ConstructionAdmission = {},
 ): AdmittedModel {
-  const prompted = construction.event_by_date_prompted === true;
+  // The flag replaces goal-token re-attestation for a draft that answered the event slice (typed drafter output, never
+  // text). A flagged brief drafted as an ordinary model, with no event goal, deliverable or added capacity
+  // (construction-acyclic: a price rise "with the next AI feature release"; sealedR-d3), takes the ordinary path as before.
+  const prompted = construction.event_by_date_prompted === true && (candidateModel.goal?.kind === 'event_by_date'
+    || (typeof candidateModel.goal?.deliverable === 'string' && candidateModel.goal.deliverable.trim() !== '')
+    || (Array.isArray(candidateModel.options) && candidateModel.options.some(o => o.added_capacity != null)));
   // A failed event slice must not cost the user a working ordinary model. Validate the same reachability
   // gate as Run, but return the untouched ordinary result: no new ledger entry, projection or event semantics.
   const failedEvent = (detail: typeof EVENT_BY_DATE_REFUSALS[number]): AdmittedModel => {

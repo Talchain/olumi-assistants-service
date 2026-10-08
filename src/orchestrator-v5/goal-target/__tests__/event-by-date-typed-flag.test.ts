@@ -140,21 +140,32 @@ function expectEventGraph(g: Rec) {
 }
 
 describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () => {
-  it('sealedR-d3 keeps its reachable ordinary graph byte-identical to base and logs the missing deliverable', async () => {
+  it('sealedR-d3 (flagged, drafted as an ordinary model) keeps its ordinary graph byte-identical to base, no event attempt', async () => {
     const info = vi.spyOn(log, 'info').mockImplementation(() => undefined);
     try {
       const admitted = flagged(sealed(), SEALED_BRIEF);
       expect(validateGraphStructure(GraphV3.parse(admitted), { leaveOutInertRisks: true }).valid).toBe(true);
       expect(createHash('sha256').update(JSON.stringify(admitted)).digest('hex')).toBe('758a0f1140259bf4641f687ca33d145d8629c2a56d899c36ee9b9618ce345dbf');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
-      expect(info).toHaveBeenCalledWith({ event: 'cee.event_by_date.fallback_kept', missing_piece: 'it needs the deliverable the date is for' },
-        'cee.event_by_date.fallback_kept');
+      expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);
       expect(result).toMatchObject({ ok: true, mutated: true });
       expect(registrations).toHaveLength(1);
       expect(createHash('sha256').update(JSON.stringify(registrations[0])).digest('hex'))
         .toBe('6b2f1c91002476b918f9322d2a0053d6f1d08cf73c43b7894d7ad2be464010e9');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
+    } finally { info.mockRestore(); }
+  });
+
+  it('an event-slice draft whose event admission fails keeps its reachable ordinary model and logs the missing piece', () => {
+    const info = vi.spyOn(log, 'info').mockImplementation(() => undefined);
+    try {
+      const c = { ...sealed(), goal: { ...sealed().goal, deliverable: 'the starter tier' } } as CandidateModel;
+      const admitted = flagged(c, SEALED_BRIEF);
+      expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
+      expect(admitted).toEqual(admitCandidateModel(c, {}, SEALED_BRIEF));
+      expect(info).toHaveBeenCalledWith({ event: 'cee.event_by_date.fallback_kept', missing_piece: 'it needs how much capacity each option adds' },
+        'cee.event_by_date.fallback_kept');
     } finally { info.mockRestore(); }
   });
 
