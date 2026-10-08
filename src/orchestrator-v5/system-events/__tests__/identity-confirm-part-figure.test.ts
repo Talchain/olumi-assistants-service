@@ -3,6 +3,7 @@
  * Both fixtures are stored B1 graphs; the pre-Yes copy only makes Olumi's goal reading unconfirmed.
  */
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { plotResolvesFrame } from '../../../cee/graph-readiness/identity-frames.js';
@@ -11,7 +12,8 @@ import { proposeProductIdentity } from '../../agent-lane/identity-proposal.js';
 import { breakEvenFor, breakEvenLine } from '../../agent-lane/break-even.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
-import { figureTheUserWroteFor } from '../../agent-lane/stated-by-user.js';
+import { figureTheUserWroteFor, hasApproximateFigureQualifier } from '../../agent-lane/stated-by-user.js';
+import { sayFigureWithoutRounding } from '../../agent-lane/say-figure.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../dispatch.js';
@@ -32,7 +34,8 @@ const beforeYes = (stored: Rec = OUTCOME): Rec => {
 };
 const hashOf = (g: Rec): string => computeAnalysisAffectingGraphHash(g as never) ?? '';
 const figure = { part_id: 'pro_paying_subscribers', raw_value: 300, unit: 'subscribers' };
-const args = { part_label: 'Pro paying subscribers', value: 300, unit: 'subscribers' };
+const partArgs = { part_label: 'Pro paying subscribers', value: 300, unit: 'subscribers' };
+const args = { parts: [partArgs] };
 const ctx = (user_turn_text: string) => ({ scenario_id: '550e8400-e29b-41d4-a716-4466554400c9', authenticated_user_id: null,
   request_id: 'identity-part-figure', user_text: user_turn_text, user_turn_text });
 const scope = (g: Rec) => ({ target: ['Pro paying subscribers'], exactFigure: true as const, others: g.nodes
@@ -67,8 +70,8 @@ function world(start: Rec) {
   return { state, store, caps, propose, approve };
 }
 
-const reading = (g: Rec = beforeYes(), part_level = figure): IdentityConfirmReading => ({
-  ...proposeProductIdentity(g)!, part_level,
+const reading = (g: Rec = beforeYes(), partLevel = figure): IdentityConfirmReading => ({
+  ...proposeProductIdentity(g)!, part_levels: [partLevel],
 });
 const press = (g: Rec, r = reading(g), reading_token = identityConfirmReadingToken(r)) => applyIdentityConfirmEdit({
   persistedGraph: g, ...r, expected_graph_hash: hashOf(g), reading_token,
@@ -84,17 +87,18 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     expect(w.state.writes).toBe(0);
     const proposal = w.store.get(String(offered.proposal_id))!;
     expect(proposal.operations).toHaveLength(1);
-    expect(proposal.operations[0]).toMatchObject({ op: 'confirm_identity', value: { part_level: figure } });
-    expect(identityReadingOf(proposal)).toMatchObject({ part_level: figure });
+    expect(proposal.operations[0]).toMatchObject({ op: 'confirm_identity', value: { part_levels: [figure] } });
+    expect(identityReadingOf(proposal)).toMatchObject({ part_levels: [figure] });
     expect(offered.card.words).toContain('‘Pro paying subscribers’ (300, your figure)');
     expect(readingOfIdentityApproval(identityApproveMessage(offered.card.words))).toBe(offered.card.words);
     expect(await w.approve(offered)).toMatchObject({ ok: true, mutated: true, applied: true });
     expect(w.state.sent).toHaveLength(1);
-    expect(w.state.sent[0]).toMatchObject({ links: [], levels: [], identity_confirm: { part_level: figure } });
+    expect(w.state.sent[0]).toMatchObject({ links: [], levels: [], identity_confirm: { part_levels: [figure] } });
     expect(w.state.writes).toBe(1);
     const after = w.state.graph;
     expect(node(after, 'mrr').nonlinear_identity.stated_in_brief).toBe(true);
     expect(node(after, figure.part_id).observed_state).toEqual({ value: 0.15, raw_value: 300, unit: 'subscribers', source: 'user_override' });
+    expect(node(after, figure.part_id).scale_frame).toBe(2000);
     expect(identityPartsWithoutLevel(after, node(after, 'mrr').nonlinear_identity.factor_ids)).toEqual([]);
     expect(JSON.stringify(before)).toBe(unchanged);
     // run-analysis.ts assembles the whole PLoT payload inline; there is no pure whole-request translator in CEE.
@@ -105,7 +109,7 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     expect(after.edges.filter((e: Rec) => e.to === figure.part_id).map((e: Rec) => e.from).sort())
       .toEqual(['monthly_churn', 'new_pro_subscribers_per_month']);
     expect(after.edges).toEqual(before.edges);
-    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', figure)).toBe(true);
+    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', [figure])).toBe(true);
     for (const change of [
       (g: Rec) => { node(g, figure.part_id).observed_state.source = 'user_confirmed'; },
       (g: Rec) => { node(g, figure.part_id).observed_state.raw_value = 350; },
@@ -115,8 +119,98 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
       (g: Rec) => { g.edges.find((e: Rec) => e.to === figure.part_id).strength.mean = 0.9; },
     ]) {
       const extra = structuredClone(after); change(extra);
-      expect(identityConfirmPostimageIsScoped(before, extra, 'mrr', figure)).toBe(false);
+      expect(identityConfirmPostimageIsScoped(before, extra, 'mrr', [figure])).toBe(false);
     }
+  });
+
+  it('P1-a 828d87ac: two missing parts get one card and both figures in one write; either missing figure refuses', async () => {
+    const before = beforeYes();
+    // A stored observed_state requires value. Clear the raw level and its user authorship while keeping its unit/frame.
+    delete node(before, 'pro_plan_price').observed_state.raw_value;
+    node(before, 'pro_plan_price').observed_state.source = 'cee_inference';
+    expect(identityPartsWithoutLevel(before, node(before, 'mrr').nonlinear_identity.factor_ids).map(p => p.id))
+      .toEqual(['pro_plan_price', figure.part_id]);
+    const priceArgs = { part_label: 'Pro plan price', value: 49, unit: '£ per Pro subscriber per month' };
+    const both = { parts: [priceArgs, partArgs] };
+    const text = 'Pro plan price is £49 per Pro subscriber per month; we have 300 Pro subscribers.';
+    const w = world(before);
+    const offered = await w.caps.proposeIdentity!(ctx(text), both) as Rec;
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.card.words).toContain('‘Pro plan price’ (£49 per Pro subscriber per month, your figure)');
+    expect(offered.card.words).toContain('‘Pro paying subscribers’ (300, your figure)');
+    expect(w.state.writes).toBe(0);
+    expect(await w.approve(offered)).toMatchObject({ ok: true, applied: true });
+    expect(w.state.writes).toBe(1);
+    expect(w.state.sent).toHaveLength(1);
+    const levels = [{ part_id: 'pro_plan_price', raw_value: 49, unit: priceArgs.unit }, figure];
+    expect(w.state.sent[0]?.identity_confirm?.part_levels).toEqual(levels);
+    expect(node(w.state.graph, 'pro_plan_price').observed_state).toMatchObject({ raw_value: 49, source: 'user_override' });
+    expect(node(w.state.graph, figure.part_id).observed_state).toMatchObject({ raw_value: 300, source: 'user_override' });
+    expect(identityConfirmPostimageIsScoped(before, w.state.graph, 'mrr', levels)).toBe(true);
+    const changed = structuredClone(w.state.graph);
+    node(changed, 'pro_plan_price').observed_state.raw_value = 59;
+    expect(identityConfirmPostimageIsScoped(before, changed, 'mrr', levels)).toBe(false);
+    for (const [parts, other] of [[[partArgs], 'Pro plan price'], [[priceArgs], 'Pro paying subscribers']] as const) {
+      const partial = world(structuredClone(before));
+      const refused = await partial.caps.proposeIdentity!(ctx(text), { parts }) as Rec;
+      expect(refused).toMatchObject({ ok: false, mutated: false, refusal: 'identity_operand_level_missing' });
+      expect(refused.detail).toContain(other);
+      expect(refused).not.toHaveProperty('card');
+      expect(partial.state.writes).toBe(0);
+    }
+    const unwritten = await world(structuredClone(before)).caps.proposeIdentity!(ctx('We have 300 Pro subscribers'), both) as Rec;
+    expect(unwritten).toMatchObject({ ok: false, mutated: false });
+    expect(unwritten.detail).toContain('Pro plan price');
+    expect(unwritten).not.toHaveProperty('card');
+  });
+
+  it('P1-a distinct part ids: duplicate tool entries and duplicate token-bound levels refuse', async () => {
+    const before = beforeYes();
+    const w = world(before);
+    const refused = await w.caps.proposeIdentity!(ctx('We have 300 Pro subscribers'), { parts: [partArgs, partArgs] }) as Rec;
+    expect(refused).toMatchObject({ ok: false, mutated: false });
+    expect(refused).not.toHaveProperty('card');
+    expect(press(before, { ...reading(before), part_levels: [figure, figure] })).toMatchObject({ kind: 'refused', reason: 'part_level_not_asked' });
+    expect(w.state.writes).toBe(0);
+  });
+
+  it.each(['scale_frame', 'cap', 'pair'])('P1-b frame below 5,000 (%s): normalize to 0.5 on a persisted 10,000 frame, guard mirrors it', frame => {
+    const before = beforeYes();
+    const shown = reading(before);
+    const part = node(before, figure.part_id);
+    if (frame === 'cap') { delete part.scale_frame; part.observed_state = { value: 0.125, raw_value: 250, cap: 2000, unit: figure.unit, source: 'cee_inference' }; }
+    if (frame === 'pair') { delete part.scale_frame; part.observed_state = { value: 0.125, raw_value: 250, unit: figure.unit, source: 'cee_inference' }; }
+    const level = { ...figure, raw_value: 5000 };
+    const r = press(before, { ...shown, part_levels: [level] });
+    expect(r.kind).toBe('mutated');
+    if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
+    const after = r.mutatedGraph as Rec;
+    expect(node(after, figure.part_id).scale_frame).toBe(10_000);
+    expect(node(after, figure.part_id).observed_state).toEqual({ value: 0.5, raw_value: 5000, unit: 'subscribers', source: 'user_override' });
+    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', [level])).toBe(true);
+    node(after, figure.part_id).scale_frame = 2000;
+    node(after, figure.part_id).observed_state.value = 2.5;
+    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', [level])).toBe(false);
+  });
+
+  it('P2-d exact formatting keeps extra digits and currency placement without placeholder replacement', () => {
+    expect(sayFigureWithoutRounding(300.125, '')).toBe('300.125');
+    expect(sayFigureWithoutRounding(49.123456, 'GBP/month')).toBe('£49.123456 / month');
+    expect(sayFigureWithoutRounding(49.12, 'GBP/month')).toBe('£49.12 / month');
+  });
+
+  it('P2-e both exactFigure qualifier regexes take <50ms on 20,000 spaces and repeated about', () => {
+    const times: number[] = [];
+    for (const text of [' '.repeat(20_000), 'about '.repeat(3334).slice(0, 20_000)]) {
+      for (const side of ['before', 'after']) {
+        const start = performance.now();
+        hasApproximateFigureQualifier(side === 'before' ? text : '', side === 'after' ? text : '');
+        const elapsed = performance.now() - start;
+        expect(elapsed, `${side} qualifier: ${elapsed}ms`).toBeLessThan(50);
+        times.push(elapsed);
+      }
+    }
+    process.stdout.write(`exactFigure qualifier timings (ms): ${times.map(t => t.toFixed(3)).join(', ')}\n`);
   });
 
   it('R1 frame control: an asked OUTCOME with no PLoT-resolvable frame is given exactly 2× the typed count', () => {
@@ -128,7 +222,7 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     const after = r.mutatedGraph as Rec;
     expect(node(after, figure.part_id).scale_frame).toBe(600);
     expect(node(after, figure.part_id).observed_state).toEqual({ value: 0.5, raw_value: 300, unit: 'subscribers', source: 'user_override' });
-    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', figure)).toBe(true);
+    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', [figure])).toBe(true);
     expect(after.edges).toEqual(before.edges);
   });
 
@@ -152,26 +246,26 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     delete part.scale_frame;
     part.observed_state = { value: 0.25, raw_value: 0.25, cap: 1, unit: 'subscribers', source: 'cee_inference' };
     const level = { ...figure, raw_value: 0.125 };
-    const r = press(before, { ...shown, part_level: level });
+    const r = press(before, { ...shown, part_levels: [level] });
     expect(r.kind).toBe('mutated');
     if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
     const after = r.mutatedGraph as Rec;
     expect(node(after, figure.part_id).observed_state).toEqual({ value: 0.125, raw_value: 0.125, unit: 'subscribers', source: 'user_override' });
     expect(node(after, figure.part_id).scale_frame).toBe(1);
     expect(plotResolvesFrame(node(after, figure.part_id))).toBe(true);
-    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', level)).toBe(true);
+    expect(identityConfirmPostimageIsScoped(before, after, 'mrr', [level])).toBe(true);
   });
 
   it('R3 exact precision: the card never rounds the figure its Yes writes', async () => {
     const w = world(beforeYes());
-    const offered = await w.caps.proposeIdentity!(ctx('300.125'), { ...args, value: 300.125 }) as Rec;
+    const offered = await w.caps.proposeIdentity!(ctx('300.125'), { parts: [{ ...partArgs, value: 300.125 }] }) as Rec;
     expect(offered).toMatchObject({ ok: true, mutated: false });
     expect(offered.card.words).toContain('(300.125, your figure)');
     expect(await w.approve(offered)).toMatchObject({ ok: true, applied: true });
     expect(node(w.state.graph, figure.part_id).observed_state.raw_value).toBe(300.125);
   });
 
-  it.each(['about three hundred', '300-ish', 'a few hundred'])('R3 unreadable %j: not the user’s exact 300; no card or write', async text => {
+  it.each(['about 300', 'about three hundred', '300-ish', 'a few hundred'])('R3 unreadable %j: not the user’s exact 300; no card or write', async text => {
     const before = beforeYes();
     expect(figureTheUserWroteFor(300, 'subscribers', text, scope(before))).toBe(false);
     const w = world(before);
@@ -204,16 +298,16 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
 
   it.each([
     { name: 'not an asked part', args: { part_label: 'Pro plan price', value: 59, unit: '£ per Pro subscriber per month' } },
-    { name: 'unknown label', args: { ...args, part_label: 'Absent subscribers' } },
-    { name: 'zero', args: { ...args, value: 0 } },
-    { name: 'negative', args: { ...args, value: -300 } },
-    { name: 'nonfinite', args: { ...args, value: Infinity } },
-    { name: 'missing unit', args: { part_label: args.part_label, value: 300 } },
+    { name: 'unknown label', args: { ...partArgs, part_label: 'Absent subscribers' } },
+    { name: 'zero', args: { ...partArgs, value: 0 } },
+    { name: 'negative', args: { ...partArgs, value: -300 } },
+    { name: 'nonfinite', args: { ...partArgs, value: Infinity } },
+    { name: 'missing unit', args: { part_label: partArgs.part_label, value: 300 } },
     { name: 'missing label', args: { value: 300, unit: 'subscribers' } },
   ])('R3 admission guard: $name cannot offer a card or write', async row => {
     const before = beforeYes();
     const w = world(before);
-    const offered = await w.caps.proposeIdentity!(ctx('We have 300 Pro subscribers; price is £59 per Pro subscriber per month'), row.args as never) as Rec;
+    const offered = await w.caps.proposeIdentity!(ctx('We have 300 Pro subscribers; price is £59 per Pro subscriber per month'), { parts: [row.args] } as never) as Rec;
     expect(offered).toMatchObject({ ok: false, mutated: false });
     expect(offered).not.toHaveProperty('card');
     expect(offered).not.toHaveProperty('proposal_id');
@@ -224,7 +318,7 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
   it('R4: a token bound to 300 cannot approve 350, even with identical card words', () => {
     const before = beforeYes();
     const shown = reading(before);
-    const changed = { ...shown, part_level: { ...figure, raw_value: 350 } };
+    const changed = { ...shown, part_levels: [{ ...figure, raw_value: 350 }] };
     expect(identityConfirmReadingToken(shown)).not.toBe(identityConfirmReadingToken(changed));
     expect(press(before, changed, identityConfirmReadingToken(shown))).toMatchObject({ kind: 'refused', reason: 'reading_not_confirmed' });
     expect(node(before, figure.part_id).observed_state).toBeUndefined();
@@ -240,7 +334,7 @@ describe('CEE #4b: the asked count is saveable in the single identity confirmati
     expect(identityPartsWithoutLevel(cold, node(cold, 'mrr').nonlinear_identity.factor_ids)).toEqual([]);
   });
 
-  it('R6: the user-levelled price was not asked; part_level on it is refused whole', () => {
+  it('R6: the user-levelled price was not asked; part_levels on it is refused whole', () => {
     const before = beforeYes();
     const unchanged = JSON.stringify(before);
     const r = press(before, reading(before, { part_id: 'pro_plan_price', raw_value: 59, unit: '£ per Pro subscriber per month' }));

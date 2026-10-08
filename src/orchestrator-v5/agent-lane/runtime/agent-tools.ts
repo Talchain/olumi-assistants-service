@@ -777,14 +777,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Offer the user Olumi\u2019s reading of the goal as the product of two of their own figures (for example "Is MRR your '
       + 'price \u00d7 your subscribers?"), when a run_analysis result carries `identity_card` or the user answers an asked part. Call it with no arguments '
       + 'when all the parts already have the user\u2019s figures; the reading and its arithmetic come from the stored model. '
-      + 'Optionally pass part_label, value and unit together: '
-      + 'only the figure the user just typed for a part the model asked for. This does NOT change anything: it records the reading and '
+      + 'Optionally pass parts: [{part_label, value, unit}] for ALL missing parts: '
+      + 'only exact figures the user just typed for parts the model asked for. This does NOT change anything: it records the reading and '
       + 'returns its `card.words`. Ask the user those words exactly, never reworded, and tell them to confirm on the button. '
       + 'Never state the reading as a fact before they confirm, and never run the analysis again yourself.',
     parameters: obj({
-      part_label: { type: 'string', description: 'The exact label of the part the model asked the user for.' },
-      value: { type: 'number', description: 'Only the figure the user just typed for a part the model asked for; never guess, round or invent it.' },
-      unit: { type: 'string', description: 'The unit of that asked part, matching the figure the user just typed.' },
+      parts: { type: 'array', items: obj({
+        part_label: { type: 'string', description: 'The exact label of a missing part the model asked the user for.' },
+        value: { type: 'number', description: 'Only the exact figure the user just typed for this part; never guess, round or invent it.' },
+        unit: { type: 'string', description: 'The unit of that asked part, matching the figure the user just typed.' },
+      }, ['part_label', 'value', 'unit']) },
     }, []),
   },
   {
@@ -982,7 +984,7 @@ export interface AgentCapabilities {
     goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
-  proposeIdentity?(ctx: AgentToolContext, args?: { part_label: string; value: number; unit: string }): Promise<ToolResult>;
+  proposeIdentity?(ctx: AgentToolContext, args?: { parts: readonly { part_label: string; value: number; unit: string }[] }): Promise<ToolResult>;
   /** C5: the Agent's own provisional view on a withheld turn (`../provisional-view.ts`). Optional: absent ⇒ refused plainly. */
   giveProvisionalView?(ctx: AgentToolContext, args: { view: string; reasoning: string; confirm_step: string }): Promise<ToolResult>;
   /**

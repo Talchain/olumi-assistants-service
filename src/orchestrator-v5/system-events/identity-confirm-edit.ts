@@ -72,8 +72,8 @@ export interface IdentityConfirmReading {
   readonly factor_ids: readonly string[];
   /** The card's displayed sentence (1..400), bound into the token so other words cannot approve it. */
   readonly words: string;
-  /** The missing part's figure shown on this same card, written only by its Yes. */
-  readonly part_level?: IdentityPartLevel;
+  /** Every missing part's figure shown on this same card, written together only by its Yes. */
+  readonly part_levels?: readonly IdentityPartLevel[];
 }
 
 export interface ApplyIdentityConfirmEditParams extends IdentityConfirmReading {
@@ -118,7 +118,7 @@ const WORDS_MAX = 400;
  */
 export function identityConfirmReadingToken(reading: IdentityConfirmReading): string {
   const bound = { outcome_id: reading.outcome_id, operation: 'product', factor_ids: [...reading.factor_ids], words: reading.words,
-    ...(reading.part_level !== undefined ? { part_level: reading.part_level } : {}) };
+    ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}) };
   return `identity:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 
@@ -140,10 +140,15 @@ function partLevelWrite(part: Rec, level: IdentityPartLevel): { scale_frame?: nu
   const os = isRec(part.observed_state) ? part.observed_state : undefined;
   const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
   const pairFrame = positive(os?.value) && positive(os?.raw_value) ? os.raw_value / os.value : 0;
-  const cap = positive(os?.cap) ? os.cap : positive(part.scale_frame) ? part.scale_frame
-    : Number.isFinite(pairFrame) && pairFrame >= 2 * level.raw_value ? pairFrame : 2 * level.raw_value;
-  const observed_state = { value: level.raw_value / cap, raw_value: level.raw_value, unit: level.unit, source: 'user_override' };
-  return { ...(!plotResolvesFrame(part) || !plotResolvesFrame({ ...part, observed_state }) ? { scale_frame: cap } : {}), observed_state };
+  const existingFrame = positive(os?.cap) ? os.cap : positive(part.scale_frame) ? part.scale_frame
+    : positive(pairFrame) ? pairFrame : undefined;
+  const frame = existingFrame !== undefined && existingFrame >= level.raw_value ? existingFrame : 2 * level.raw_value;
+  const observed_state = { value: level.raw_value / frame, raw_value: level.raw_value, unit: level.unit, source: 'user_override' };
+  // The written level has no cap. Retain its selected frame on the node if the old one was insufficient, or if removing
+  // the cap would expose a different scale_frame. A resolving pair alone may retain an adequate frame as before.
+  const writeFrame = existingFrame === undefined || existingFrame < level.raw_value
+    || !plotResolvesFrame({ ...part, observed_state }) || (positive(part.scale_frame) && part.scale_frame !== frame);
+  return { ...(writeFrame ? { scale_frame: frame } : {}), observed_state };
 }
 
 /** This identity door saves both kinds; the general level writer's kinds stay unchanged. */
@@ -153,6 +158,11 @@ function partLevelWasAsked(graph: unknown, ids: readonly string[], level: Identi
     && typeof level.unit === 'string' && level.unit.trim() !== ''
     && identityPartsWithoutLevel(graph, ids).some(p => p.id === level.part_id
       && IDENTITY_PART_LEVEL_KINDS.some(kind => kind === p.kind));
+}
+
+function partLevelsWereAsked(graph: unknown, ids: readonly string[], levels: readonly IdentityPartLevel[]): boolean {
+  return Array.isArray(levels) && levels.every(level => partLevelWasAsked(graph, ids, level))
+    && new Set(levels.map(level => level.part_id)).size === levels.length;
 }
 
 /**
@@ -221,10 +231,10 @@ const refuse = (reason: IdentityConfirmRefusal, detail?: string): IdentityConfir
   ({ kind: 'refused', reason, ...(detail !== undefined ? { detail } : {}) });
 
 export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams): IdentityConfirmEditResult {
-  const { outcome_id, factor_ids, words, part_level } = params;
+  const { outcome_id, factor_ids, words, part_levels } = params;
   if (typeof words !== 'string' || words.trim() === '' || words.length > WORDS_MAX) return refuse('words_invalid');
   if (typeof params.reading_token !== 'string'
-    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words, part_level })) {
+    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words, part_levels })) {
     return refuse('reading_not_confirmed');
   }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
@@ -257,12 +267,14 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   // ── THE CONSTRUCTION RULE, on the stored graph ─────────────────────────────────────────────────────────────────────
   const admitted = admitStoredProductDeclaration(params.persistedGraph, { outcome_id, factor_ids: distinct });
   if (!admitted.ok) return admitted.reason === 'invalid_graph' ? refuse('invalid_graph') : refuse(admitted.reason, admitted.detail);
-  if (part_level !== undefined) {
-    if (!partLevelWasAsked(params.persistedGraph, factorOrder, part_level)) return refuse('part_level_not_asked');
-    const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === part_level.part_id)!;
-    const expected = partLevelWrite(part, part_level);
-    if (expected.scale_frame !== undefined) part.scale_frame = expected.scale_frame;
-    part.observed_state = expected.observed_state;
+  if (part_levels !== undefined) {
+    if (!partLevelsWereAsked(params.persistedGraph, factorOrder, part_levels)) return refuse('part_level_not_asked');
+    for (const level of part_levels) {
+      const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id)!;
+      const expected = partLevelWrite(part, level);
+      if (expected.scale_frame !== undefined) part.scale_frame = expected.scale_frame;
+      part.observed_state = expected.observed_state;
+    }
   }
   const unlevelled = identityPartsWithoutLevel(graph, factorOrder);
   if (unlevelled.length > 0) {
@@ -316,7 +328,7 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
  * ⛔ ONLY THE ONE CARRIER MAY CHANGE: no other node, no other member of this node, no edge, no top-level field — and,
  * on a confirmed part read at today's level, exactly the range and today level it lacked (`todaysWrite`).
  */
-export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string, partLevel?: IdentityPartLevel): boolean {
+export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string, partLevels?: readonly IdentityPartLevel[]): boolean {
   const before = normaliseAbsenceOnly(storedBefore);
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
   if (after.nodes.length !== before.nodes.length) return false;
@@ -328,17 +340,20 @@ export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: u
   if (Object.hasOwn(was, 'nonlinear_identity')) now.nonlinear_identity = structuredClone(was.nonlinear_identity);
   else delete now.nonlinear_identity;
   const confirmed = isRec(after.nodes.find((n) => isRec(n) && n.id === outcomeId)) ? (after.nodes.find((n) => isRec(n) && n.id === outcomeId) as Rec).nonlinear_identity : undefined;
-  if (partLevel !== undefined) {
-    if (!isRec(confirmed) || !Array.isArray(confirmed.factor_ids) || !partLevelWasAsked(before, confirmed.factor_ids, partLevel)) return false;
-    const part = restored.nodes.find((n): n is Rec => isRec(n) && n.id === partLevel.part_id);
-    const prior = before.nodes.find((n): n is Rec => isRec(n) && n.id === partLevel.part_id);
-    if (part === undefined || prior === undefined) return false;
-    const expected = partLevelWrite(prior, partLevel);
-    if (!isDeepStrictEqual(part.observed_state, expected.observed_state)
-      || (expected.scale_frame !== undefined && part.scale_frame !== expected.scale_frame)) return false;
-    if (Object.hasOwn(prior, 'observed_state')) part.observed_state = structuredClone(prior.observed_state); else delete part.observed_state;
-    if (expected.scale_frame !== undefined) {
-      if (Object.hasOwn(prior, 'scale_frame')) part.scale_frame = structuredClone(prior.scale_frame); else delete part.scale_frame;
+  if (partLevels !== undefined) {
+    if (!isRec(confirmed) || !Array.isArray(confirmed.factor_ids) || !partLevelsWereAsked(before, confirmed.factor_ids, partLevels)
+      || identityPartsWithoutLevel(after, confirmed.factor_ids).length > 0) return false;
+    for (const level of partLevels) {
+      const part = restored.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id);
+      const prior = before.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id);
+      if (part === undefined || prior === undefined) return false;
+      const expected = partLevelWrite(prior, level);
+      if (!isDeepStrictEqual(part.observed_state, expected.observed_state)
+        || (expected.scale_frame !== undefined && part.scale_frame !== expected.scale_frame)) return false;
+      if (Object.hasOwn(prior, 'observed_state')) part.observed_state = structuredClone(prior.observed_state); else delete part.observed_state;
+      if (expected.scale_frame !== undefined) {
+        if (Object.hasOwn(prior, 'scale_frame')) part.scale_frame = structuredClone(prior.scale_frame); else delete part.scale_frame;
+      }
     }
   }
   for (const id of isRec(confirmed) && Array.isArray(confirmed.factor_ids) ? confirmed.factor_ids : []) {

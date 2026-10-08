@@ -14,10 +14,14 @@
  *   - Offered once per stored graph revision: the proposal's id is its content (revision + reading), so a Run on the same
  *     revision does not offer it again (`identityCardHintFor`).
  */
-import type { IdentityProposal } from './identity-proposal.js';
+import { labelCountUnit, proposeProductIdentity, type IdentityPartLevel, type IdentityProposal } from './identity-proposal.js';
 import type { StructuredProposal } from './proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../session/pending-action.js';
 import { agentProposalOf, isHeldProposal } from './proposal-object/record.js';
+import { identityPartsWithoutLevel } from '../system-events/identity-confirm-edit.js';
+import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { countsInWords, figureTheUserWroteForSpan, moneyUnitScale } from './stated-by-user.js';
+import { countedNoun } from './counted-nouns.js';
 
 /** The proposal operation that carries a reading to confirm. `path` is the goal's id. */
 export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
@@ -25,18 +29,23 @@ export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
 /** The stored reading a `confirm_identity` proposal carries, or `undefined` for any other proposal. */
 export function identityReadingOf(proposal: StructuredProposal): IdentityProposal | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === CONFIRM_IDENTITY_OP ? proposal.operations[0]! : undefined;
-  const v = (op?.value ?? {}) as { outcome_id?: unknown; operation?: unknown; factor_ids?: unknown; words?: unknown; part_level?: unknown };
+  const v = (op?.value ?? {}) as { outcome_id?: unknown; operation?: unknown; factor_ids?: unknown; words?: unknown; part_levels?: unknown };
   if (op === undefined || typeof v.outcome_id !== 'string' || v.outcome_id !== op.path || v.operation !== 'product'
     || !Array.isArray(v.factor_ids) || v.factor_ids.length !== 2 || !v.factor_ids.every((f) => typeof f === 'string' && f !== '')
     || typeof v.words !== 'string' || v.words.trim() === '') return undefined;
-  const level = v.part_level;
-  if (level !== undefined && (typeof level !== 'object' || level === null || Array.isArray(level))) return undefined;
-  const part = level as { part_id?: unknown; raw_value?: unknown; unit?: unknown } | undefined;
-  if (part !== undefined && (typeof part.part_id !== 'string' || !v.factor_ids.includes(part.part_id)
-    || typeof part.raw_value !== 'number' || !Number.isFinite(part.raw_value) || part.raw_value <= 0
-    || typeof part.unit !== 'string' || part.unit.trim() === '')) return undefined;
+  const levels = v.part_levels;
+  if (levels !== undefined && !Array.isArray(levels)) return undefined;
+  const parts: IdentityPartLevel[] = [];
+  for (const level of levels ?? []) {
+    if (typeof level !== 'object' || level === null || Array.isArray(level)) return undefined;
+    const part = level as { part_id?: unknown; raw_value?: unknown; unit?: unknown };
+    if (typeof part.part_id !== 'string' || !v.factor_ids.includes(part.part_id) || parts.some(p => p.part_id === part.part_id)
+      || typeof part.raw_value !== 'number' || !Number.isFinite(part.raw_value) || part.raw_value <= 0
+      || typeof part.unit !== 'string' || part.unit.trim() === '') return undefined;
+    parts.push({ part_id: part.part_id, raw_value: part.raw_value, unit: part.unit });
+  }
   return { outcome_id: v.outcome_id, operation: 'product', factor_ids: [v.factor_ids[0] as string, v.factor_ids[1] as string], words: v.words,
-    ...(part !== undefined ? { part_level: { part_id: part.part_id as string, raw_value: part.raw_value as number, unit: part.unit as string } } : {}) };
+    ...(levels !== undefined ? { part_levels: parts } : {}) };
 }
 
 /**
@@ -66,8 +75,8 @@ export function identityIssuedText(issued: unknown): string {
 /** What the Agent is told when a Run's stored model holds a reading to confirm. */
 export const IDENTITY_CARD_NOTE =
   'Olumi has a reading of the goal for the user to confirm. Call propose_identity with no arguments when all its parts '
-  + 'already have the user’s figures. If the user just typed a figure for a part the model asked for, pass part_label, '
-  + 'value and unit together, using only that figure. Then ask the user its '
+  + 'already have the user’s figures. If the user just typed every figure the model asked for, pass parts with each '
+  + 'part_label, value and unit together, using only those figures. Then ask the user its '
   + '`words` exactly as returned, and tell them to confirm on the button. Never state the reading as fact, never change its '
   + 'figures, and never run the analysis again yourself.';
 
@@ -95,6 +104,68 @@ export function identityCardToIssue(
   type Hinted = { identity_card?: { available?: unknown }; first_analysis?: { identity_card?: { available?: unknown } } };
   return toolResults.some((r) => (r as Hinted | null | undefined)?.identity_card?.available === true
     || (r as Hinted | null | undefined)?.first_analysis?.identity_card?.available === true);
+}
+
+/**
+ * A typed answer to the reading's missing parts reaches the same proposal door even when the Agent calls no tool.
+ * Only THIS turn's exact figures qualify; every missing part must be answered. Issuance writes nothing and the
+ * card remains the only authority for recording both the reading and its figures.
+ */
+export function identityPartFiguresToIssue(p: {
+  readonly graph: unknown;
+  readonly userText: string | null;
+  readonly toolCalls: readonly { readonly name: string }[];
+  readonly mutated: boolean;
+  readonly proposalOffered: boolean;
+  readonly pending: readonly PendingAction[];
+}): { readonly parts: readonly { readonly part_label: string; readonly value: number; readonly unit: string }[] } | undefined {
+  if (p.userText === null || p.userText.trim() === '' || p.mutated || p.proposalOffered
+    || p.toolCalls.some(c => c.name === 'propose_identity' || c.name === 'authorise_change')
+    || heldChangeBlocksIdentity(p.pending)) return undefined;
+  const card = proposeProductIdentity(p.graph);
+  if (card === null) return undefined;
+  const missing = identityPartsWithoutLevel(p.graph, card.factor_ids);
+  if (missing.length === 0) return undefined;
+  const graph = p.graph as { nodes?: unknown[] };
+  const isNode = (n: unknown): n is Record<string, unknown> => typeof n === 'object' && n !== null && !Array.isArray(n);
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter(isNode) : [];
+  const amounts = [...findStatedAmounts(p.userText), ...countsInWords(p.userText)];
+  type Figure = { part_label: string; value: number; unit: string; start: number; end: number };
+  const candidates: Figure[][] = [];
+  for (const part of missing) {
+    const node = nodes.find(n => n.id === part.id);
+    if (node === undefined) return undefined;
+    const os = isNode(node.observed_state) ? node.observed_state : undefined;
+    const storedUnit = typeof os?.unit === 'string' && os.unit.trim() !== '' ? os.unit : undefined;
+    const unit = storedUnit ?? labelCountUnit(node) ?? part.label.split(/[^\p{L}]+/u).find(countedNoun);
+    if (unit === undefined) return undefined;
+    const others = nodes.filter(n => n.kind !== 'option' && n.kind !== 'decision')
+      .flatMap(n => typeof n.label === 'string' && n.label !== part.label ? [n.label] : []);
+    const figures = amounts.flatMap(a => {
+      const value = a.magnitude / moneyUnitScale(unit);
+      if (!Number.isFinite(value) || value <= 0) return [];
+      const span = figureTheUserWroteForSpan(value, unit, p.userText, { target: [part.label], others, exactFigure: true, at: a.index });
+      return span === null ? [] : [{ part_label: part.id, value, unit, ...span }];
+    });
+    if (figures.length === 0) return undefined;
+    candidates.push(figures);
+  }
+  // A short answer can name no label under the existing reader. It can answer only ONE missing part: the same writing
+  // is never reused for another. If more than one complete figure assignment remains, nothing is chosen for the user.
+  const answers = new Map<string, { part_label: string; value: number; unit: string }[]>();
+  const assign = (index: number, chosen: Figure[]): void => {
+    if (answers.size > 1) return;
+    if (index === candidates.length) {
+      const parts = chosen.map(({ start: _start, end: _end, ...part }) => part);
+      answers.set(JSON.stringify(parts), parts);
+      return;
+    }
+    for (const figure of candidates[index]!) {
+      if (!chosen.some(other => other.start === figure.start && other.end === figure.end)) assign(index + 1, [...chosen, figure]);
+    }
+  };
+  assign(0, []);
+  return answers.size === 1 ? { parts: [...answers.values()][0]! } : undefined;
 }
 
 /**

@@ -139,7 +139,7 @@ describe('⭐ a user-confirmed product is ONE commit through the real level door
     const edgesBefore = structuredClone(fixture.edges);
     const reading = { outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'],
       words: 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’ (300, your figure). Is that how you work it out?',
-      part_level: { part_id: 'pro_paying_subscribers', raw_value: 300, unit: 'subscribers' } };
+      part_levels: [{ part_id: 'pro_paying_subscribers', raw_value: 300, unit: 'subscribers' }] };
     const res = await commitOptionLevelsInProcess(input({}, reading), 'req-ic-part-figure');
     expect(res.status, JSON.stringify(res)).toBe('committed');
     expect(rows.size).toBe(1);
@@ -148,6 +148,26 @@ describe('⭐ a user-confirmed product is ONE commit through the real level door
       .toMatchObject({ raw_value: 300, source: 'user_override', unit: 'subscribers' });
     expect(reloaded.nodes.find(n => n.id === 'mrr')?.nonlinear_identity?.stated_in_brief).toBe(true);
     expect((persisted as { edges: unknown }).edges).toEqual(edgesBefore);
+  });
+
+  it('P1-a ONE APPEND: both missing part figures and the confirmed reading survive reload together', async () => {
+    const fixture = JSON.parse(readFileSync('src/orchestrator-v5/system-events/__tests__/fixtures/b1-828d87ac-stored-graph.json', 'utf8'));
+    fixture.nodes.find((n: { id: string }) => n.id === 'mrr').nonlinear_identity.stated_in_brief = false;
+    const price = fixture.nodes.find((n: { id: string }) => n.id === 'pro_plan_price');
+    delete price.observed_state.raw_value;
+    price.observed_state.source = 'cee_inference';
+    persisted = fixture;
+    const reading = { outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'],
+      words: 'Olumi reads ‘MRR’ as ‘Pro plan price’ (£49, your figure) × ‘Pro paying subscribers’ (300, your figure). Is that how you work it out?',
+      part_levels: [{ part_id: 'pro_plan_price', raw_value: 49, unit: '£ per Pro subscriber per month' },
+        { part_id: 'pro_paying_subscribers', raw_value: 300, unit: 'subscribers' }] };
+    const res = await commitOptionLevelsInProcess(input({}, reading), 'req-ic-all-part-figures');
+    expect(res.status, JSON.stringify(res)).toBe('committed');
+    expect(rows.size).toBe(1);
+    const cold = GraphV3.parse(projectGraphForPersistence(persisted));
+    for (const part of reading.part_levels) expect(cold.nodes.find(n => n.id === part.part_id)?.observed_state)
+      .toMatchObject({ raw_value: part.raw_value, unit: part.unit, source: 'user_override' });
+    expect(cold.nodes.find(n => n.id === 'mrr')?.nonlinear_identity?.stated_in_brief).toBe(true);
   });
 
   it('NO WRITE: the card\'s token with OTHER words (or other factors) is refused', async () => {
