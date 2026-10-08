@@ -940,7 +940,9 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
     // A driver needs its direction: a "drives" item without one is a precondition (never an invented driver direction).
     const mechanism: RiskSuggestion['mechanism'] = c.category === 'timing' || c.category === 'dependency'
       || c.mechanism !== 'drives' || c.through_direction === undefined ? 'relies_on' : 'drives';
-    if (allLabels.some((l) => sameLabel(l, c.label)) || kept.some((k) => sameLabel(k.label, c.label))) failed.push('RK-NO-DUP');
+    // A disclosed shared precondition is an item too (Codex #2817): it reserves its name, its class and a slot.
+    if (allLabels.some((l) => sameLabel(l, c.label)) || kept.some((k) => sameLabel(k.label, c.label))
+      || sharedPreconditions.some((p) => sameLabel(p.label, c.label))) failed.push('RK-NO-DUP');
     const hitNode = byId.get(c.hits_id);
     const option = turn.options.find((o) => o.id === c.hits_id);
     // A factor stands in for "every option" ONLY when no option changes it (Science: a shared assumption, offered last).
@@ -955,7 +957,7 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
     const affects = byId.get(c.affects_id);
     const affectsLabel = affects?.kind === 'goal' || affects?.kind === 'outcome' ? uniqueLabel(affects) : null;
     if (affectsLabel === null) failed.push('RK-AFFECTS');
-    if (kept.some((k) => k.category === c.category)) failed.push('RK-DISTINCT');
+    if (kept.some((k) => k.category === c.category) || sharedPreconditions.some((p) => p.category === c.category)) failed.push('RK-DISTINCT');
     const words = (t: string): number => t.split(/\s+/u).filter(Boolean).length;
     if (words(c.label) > 6 || words(c.relies_on) > 12 || words(c.watch_for) > 8 || /[‘’\n]/u.test(c.label)
       || [c.label, c.relies_on, c.watch_for].some((t) => /[?\n]/u.test(t))
@@ -969,7 +971,7 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
       mechanism === 'relies_on' ? { option_id: c.hits_id } : undefined);
       if (!built.matched) failed.push('RK-DOOR');
     }
-    if (failed.length === 0 && kept.length >= RISK_MAX_ITEMS) failed.push('RK-COUNT');
+    if (kept.length + sharedPreconditions.length >= RISK_MAX_ITEMS && (failed.length === 0 || (failed.length === 1 && failed[0] === 'RK-SHARED-PRECONDITION'))) failed.push('RK-COUNT');
     if (failed.length === 1 && failed[0] === 'RK-SHARED-PRECONDITION') {
       sharedPreconditions.push({ label: c.label.trim(), category: c.category, relies_on: c.relies_on.replace(/[.!]+$/u, '') });
     }
@@ -1142,7 +1144,7 @@ export interface SettledRisksTurn {
 export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): SettledRisksTurn {
   const gate = riskGate(turn, readRiskCandidates(draft));
   // A shared precondition is SAID, never silence (DL 8 Oct): it can't be added yet, so it carries no Add press.
-  const sharedLines = gate.shared_preconditions.slice(0, Math.max(0, RISK_MAX_ITEMS - gate.kept.length)).map((p) => `- Every option relies on ${p.relies_on}. Risk: ${quote(p.label)} `
+  const sharedLines = gate.shared_preconditions.map((p) => `- Every option relies on ${p.relies_on}. Risk: ${quote(p.label)} `
     + `(${CATEGORY_WORDS[p.category]}). This model can't yet hold a precondition that every option shares, so I haven't offered to add it.`);
   if (gate.kept.length === 0 && sharedLines.length === 0) {
     return { reply: risksFallbackReply(turn), offered: 0, actions: [TALK_IT_THROUGH_CHIP], gate };

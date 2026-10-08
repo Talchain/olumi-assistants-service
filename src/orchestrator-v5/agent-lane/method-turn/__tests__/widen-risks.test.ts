@@ -489,6 +489,19 @@ describe('EVENT-RISK RC3 (a′): a precondition stays on the model with zero lin
     expect(settled.actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
   });
 
+  it('hotfix-shared-note-is-an-item: duplicates are one note, and a disclosed note takes a slot before later risks (Codex #2817 P2 ×2)', () => {
+    const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
+      mechanism: 'relies_on', affects_id: 'feature_delivery_capacity', direction: 'positive',
+      relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
+    const twice = settleRisksTurn(turnOn(fixture('v1')), appendix([shared, shared]));
+    expect(twice.gate.shared_preconditions).toHaveLength(1);
+    expect(twice.reply.split('\n')[0]).toBe('One risk you haven’t mapped yet.');
+    const first = settleRisksTurn(turnOn(fixture('v1')), appendix([shared, ...TURN2.slice(0, 3)]));
+    expect(first.gate.shared_preconditions.map((p) => p.label)).toEqual(['Team attrition']);
+    expect(first.reply).toContain('Risk: ‘Team attrition’ (outside events).');
+    expect(first.gate.kept.length + first.gate.shared_preconditions.length).toBeLessThanOrEqual(3);
+  });
+
   it('rc3-shared-precondition: a shared relies_on item is refused because it has no option identity to stamp', () => {
     const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
       through_direction: 'negative', mechanism: 'relies_on', affects_id: 'feature_delivery_capacity', direction: 'positive',
