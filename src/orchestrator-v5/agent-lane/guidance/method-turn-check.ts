@@ -46,9 +46,9 @@ export function internalValueTerms(text: string, labels: readonly (string | unde
   return [...new Set(hits)];
 }
 /**
- * RX-NO-CONTRARY-SAME: every "nothing / no input changed" claim (seven forms passed the two-phrase ban once M2 relied on
- * this checker, CODEX CEE BUDDY 5940259670). "Nothing else changed." is the honest control ONLY with complete coverage
- * and no unsaid changes. The same claim class includes "else" when a recorded or possible change goes unsaid.
+ * RX-NO-CONTRARY-SAME: preserve the complete-coverage check; with unsaid changes, classify negation + change/input
+ * rather than enumerate narrator paraphrases. Sameness also negates change, including fronted forms. Uncertainty
+ * qualifies only its own clause, never a subsequent assertion. The composer and provisional view share this check.
  */
 const contrarySame = (nothing: string): RegExp => new RegExp(String.raw`\b(${nothing}(?:'s| has| had)? changed|${nothing} (?:was|has been|had been) changed`
   + String.raw`|${nothing} in (?:your|the) model(?:'s| has| had)? changed|same inputs?`
@@ -57,13 +57,46 @@ const contrarySame = (nothing: string): RegExp => new RegExp(String.raw`\b(${not
   + String.raw`|no changes? (?:were|was|have been|has been) made`
   + String.raw`|(?:didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\b`, 'iu');
 const CONTRARY_SAME = contrarySame('nothing');
-const CONTRARY_SAME_WITH_UNSAID = contrarySame('nothing(?: else)?');
-/** Qualify each claim separately: uncertainty about one claim cannot license a later contrary assertion. */
-function assertsContrarySame(text: string, ban: RegExp, labels: readonly (string | undefined)[]): boolean {
-  const own = maskedFor(text, ban, labels);
+const NEGATION = /\b(?:no|none|nothing|never|not|cannot|can't|isn't|aren't|wasn't|weren't|doesn't|don't|didn't|hasn't|haven't|hadn't|won't|wouldn't|shouldn't|couldn't)\b/iu;
+const CHANGE_INPUT = /\b(?:chang(?:e|es|ed|ing)|alter(?:s|ed|ing){0,1}|mov(?:e|es|ed|ing)|inputs{0,1}|unchanged)\b/iu;
+const SAME_STATE = /\b(?:unchanged|same)\b|\bas (?:they|it) (?:were|was)\b/iu;
+const REMAINDER = /\b(?:rest|everything|all|others{0,1})\b/iu;
+const UNCERTAIN = /\b(?:cannot|can't) (?:confirm(?: that){0,1}|say (?:what|whether))\b|\bisn't sure whether\b/iu;
+const UNSAID_TERMS = new RegExp(`${NEGATION.source}|${CHANGE_INPUT.source}|${SAME_STATE.source}|${REMAINDER.source}`, 'iu');
+// A bounded lexer skips whitespace without retrying a whitespace tail at every character. Sentence boundaries survive;
+// joining tokens supplies single spaces even for a 20k whitespace run. No unbounded or nested quantifiers are needed.
+const CLAIM_TOKEN = /[a-z][a-z']{0,63}|[.!?,;\n]/giu;
+function assertsContrarySame(text: string, changesUnsaid: boolean, labels: readonly (string | undefined)[]): boolean {
+  // A label that itself asserts the forbidden class cannot license that assertion. Reuse this same predicate with no
+  // labels, rather than introduce a separate phrase list for label masking.
+  const grounding = changesUnsaid ? labels.filter(label => typeof label !== 'string' || !assertsContrarySame(label, true, [])) : labels;
+  const own = maskedFor(text, changesUnsaid ? UNSAID_TERMS : CONTRARY_SAME, grounding);
+  if (changesUnsaid) {
+    const tokens = [...own.matchAll(CLAIM_TOKEN)].map(match => match[0].toLowerCase()).join(' ');
+    for (const sentence of tokens.split(/[.!?\n]/u)) {
+      // Remove only an uncertain complement. A comma or contrast/conjunction starts a fresh claim. Keep other clauses
+      // together so "As they were, the other inputs stayed" still has both its subject and sameness assertion.
+      const asserted = sentence.split(/[,;]|\b(?:but|however|yet|and)\b/iu).map(clause => {
+        const qualifier = UNCERTAIN.exec(clause);
+        return qualifier === null ? clause : clause.slice(0, qualifier.index);
+      }).join(' ');
+      const same = SAME_STATE.test(asserted);
+      if ((NEGATION.test(asserted) || same) && CHANGE_INPUT.test(asserted)
+        || same && REMAINDER.test(asserted)) return true;
+    }
+    return false;
+  }
+  // Full coverage keeps the existing claim matcher, including the licensed "Nothing else changed" control.
+  const ban = CONTRARY_SAME;
   for (const match of own.matchAll(new RegExp(ban.source, 'giu'))) {
-    const prefix = own.slice(0, match.index);
-    if (!/\b(?:(?:cannot|can't)\s+confirm(?:\s+that)?|isn't\s+sure\s+whether)\s+$/iu.test(prefix)) return true;
+    // Fold whitespace only in the qualifier prefix; matching the claim itself remains byte-for-byte legacy behavior.
+    let prefix = '';
+    let whitespace = false;
+    for (const chunk of own.slice(0, match.index).matchAll(/\s{1,256}|\S{1,256}/gu)) {
+      if (/^\s/u.test(chunk[0])) { if (!whitespace) prefix += ' '; whitespace = true; }
+      else { prefix += chunk[0]; whitespace = false; }
+    }
+    if (!/\b(?:(?:cannot|can't) confirm(?: that){0,1}|isn't sure whether) $/iu.test(prefix)) return true;
   }
   return false;
 }
@@ -116,7 +149,9 @@ function supplied(token: string, figures: readonly string[]): boolean {
 }
 
 /** Exactly the text post-checks; no mechanism judgement and no fallback generation. */
-export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: MethodInputs, decisionStories = true): MethodTurnCheck {
+export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: MethodInputs, decisionStories = true,
+  /** Composition checks the narrator's input-change claims, while other checks still see the record alongside it. */
+  narratorText = reply): MethodTurnCheck {
   const failed: string[] = [];
   let targets: (string | null)[] = [];
   // shared.label_masking: every node label of the current model is the user's word, never a claim.
@@ -165,7 +200,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     // A named OR unsaid change is never "no change". Incomplete coverage also cannot license "nothing else changed".
     const changesUnsaid = inputs.changes_unsaid === true;
     check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 && !changesUnsaid
-      || !assertsContrarySame(reply, changesUnsaid ? CONTRARY_SAME_WITH_UNSAID : CONTRARY_SAME, labels));
+      || !assertsContrarySame(changesUnsaid ? narratorText : reply, changesUnsaid, labels));
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'RC-WIDEN') {

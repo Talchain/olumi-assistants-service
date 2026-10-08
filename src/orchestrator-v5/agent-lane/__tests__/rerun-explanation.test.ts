@@ -322,7 +322,7 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
 
   it('exhaustiveness: every producer pair has a sentence or a skipped-row disclosure, never a silent omission', () => {
     const prior = snapshot({
-      goal: { node_id: 'mrr', label: 'MRR', target_raw: 55000, unit: 'GBP', operator: '>=', direction: 'maximize' },
+      goal: { node_id: 'mrr', label: 'MRR', target_raw: 55000, unit: 'GBP', operator: '>=', direction: 'maximise' },
       factors: [{ factor_id: 'mrr', label: 'MRR', raw: 40000, unit: 'GBP', encoded: 0.4 },
         { factor_id: 'price', label: 'Pro plan price', raw: 49, unit: 'GBP', encoded: 49 }],
       options: [{ option_id: 'o', label: 'Raise price', settings: [{ factor_id: 'price', label: 'Pro plan price', raw: 49, unit: 'GBP', encoded: 49 }] }],
@@ -331,11 +331,11 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
         natural_effect: { amount: 2, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'days' } }],
     });
     const current = snapshot({
-      goal: { ...prior.goal!, target_raw: 60000, unit: 'USD', operator: '>', direction: 'minimize' },
+      goal: { ...prior.goal!, target_raw: 60000, unit: 'USD', operator: '>', direction: 'minimise' },
       factors: prior.factors.map((f) => ({ ...f, raw: 59, encoded: 59 })),
       options: [{ ...prior.options[0]!, settings: [{ ...prior.options[0]!.settings[0]!, raw: 59, encoded: 59 }] },
         { option_id: 'new', label: 'New option', settings: [] }],
-      constraints: [{ ...prior.constraints[0]!, raw: 60, operator: '<' }],
+      constraints: [{ ...prior.constraints[0]!, raw: 60, operator: '>=' }],
       links: [{ ...prior.links[0]!, mean: 0.8, band: 'strong', sizing: 'olumi_accepted',
         natural_effect: { ...prior.links[0]!.natural_effect!, amount: 3 } }, { from: 'price', to: 'risk', mean: -0.5 }],
     });
@@ -350,10 +350,10 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
       'goal:target': 'You changed the target for ‘MRR’: 55000 GBP → 60000 USD.',
       'goal:unit': '‘MRR’ is now measured in USD.',
       'goal:operator': 'You changed MRR: >= → >.',
-      'goal:direction': 'You changed MRR: maximize → minimize.',
+      'goal:direction': 'You changed MRR: maximise → minimise.',
       'goal:presence': '‘MRR’ is no longer the goal of the analysis.',
       'constraint:target': 'You changed Price limit: 50 GBP → 60 GBP.',
-      'constraint:operator': 'You changed Price limit: <= → <.',
+      'constraint:operator': 'You changed Price limit: <= → >=.',
       'link:presence': ENTERED[1],
       'link:sizing': "You accepted Olumi's estimate for how much Feature release slips changes MRR.",
       'link:strength': undefined,

@@ -8,7 +8,7 @@
  * A changes B.") and, when the earlier Run held its figures back (`win_probabilities_unavailable: 'prior_withheld'`,
  * schemas 0.70.0), that THIS is what held the comparison back — never that anything rose or fell.
  *
- * Pure. Read from the TYPED run_delta only (never words; never an inference from an empty array):
+ * Read from the TYPED run_delta only (never words; never an inference from an empty array):
  *   · the CODE LINE: rows → RC's `change_label_templates` with the graph's labels for the link's node ids (a `sizing` and a
  *     `strength` row on one link are ONE change; at most 3 named, the rest disclosed as "You also made N other changes.")
  *     + the case line; `complete` coverage with no rows → "Nothing you entered
@@ -23,6 +23,7 @@ import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
 import { POLICY } from './guidance/policy.js';
 import { CANVAS_BAND_WORD, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
+import { log } from '../../utils/telemetry.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -507,11 +508,16 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
   const dropped: string[] = [];
   const failed = new Set<string>();
   const own = normal(plan.codeLine);
+  let sentenceIndex = 0;
   const kept = reply.split(/\r?\n/u).map((line) => line.split(SENTENCE_BREAK).filter((sentence) => {
+    const index = sentenceIndex++;
     if (sentence.trim() === '' || own.includes(normal(sentence))) return false;
-    const verdict = checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${sentence}`, plan.inputs);
+    const verdict = checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${sentence}`, plan.inputs, true, sentence);
     if (verdict.failed.length === 0) return true;
     dropped.push(sentence);
+    // Narrator/user text is protected decision content: log only the policy failure and its zero-based draft index.
+    log.info({ event: 'agent_lane.rerun_sentence_dropped', policy_id: 'RERUN-EXPLANATION', sentence_index: index,
+      failed: verdict.failed }, 'agent-lane: rerun explanation sentence dropped');
     for (const id of verdict.failed) failed.add(id);
     return false;
   }).join(' ')).filter((line) => line.trim() !== '').join('\n').trim();
@@ -527,7 +533,7 @@ export function rerunViewFailures(view: object, plan: RerunExplanationPlan): str
   const failed = new Set<string>();
   for (const field of Object.values(view as Record<string, unknown>)) {
     if (typeof field !== 'string' || field.trim() === '') continue;
-    for (const id of checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${field}`, plan.inputs).failed) {
+    for (const id of checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${field}`, plan.inputs, true, field).failed) {
       if (id !== 'RX-NO-LEADER-UNLICENSED') failed.add(id);
     }
   }
