@@ -1,0 +1,29 @@
+Load gate exit: 0
+{"load":6.1240234375,"threshold":25}
+node_modules/.bin/vitest run src/routes/__tests__/b2-zero-spread.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t 'all-withheld Run' < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts (15 tests | 1 failed | 14 skipped) 9ms
+     × all-withheld Run: preserves Keep’s reason and face without any licensed point claim 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/b2-zero-spread.test.ts > B2 d2: zero spread when no option has a licensed point > all-withheld Run: preserves Keep’s reason and face without any licensed point claim
+AssertionError: expected null not to be null
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts:95:25
+     93|     const envelope = producerEnvelope();
+     94|     const licence = goalChanceLicenceOf(envelope, READ.graph, GOAL);
+     95|     expect(licence).not.toBeNull();
+       |                         ^
+     96|     expect(licence).toMatchObject({ form: 'each', message: '', option_…
+     97|       pct_by_option: {}, withheld_option_ids: IDS, withheld_reason_by_…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  21:19:38
+   Duration  2.91s (transform 1.99s, setup 141ms, import 2.63s, tests 9ms, environment 0ms)
+
