@@ -89,7 +89,7 @@ describe('RC3 FIX-r1 terminal writer coverage', () => {
     const candidate = { ...base, edges: [...base.edges, { from, to, edge_type: 'causal' }] };
     const { store, appendCalls } = makeSpyStore();
     await expect(commitDirectAnswer(composed(), {
-      ...META, graph: candidate, graph_hash: hash(candidate), baseGraphForInvariants: base,
+      ...META, graph: candidate, graph_hash: hash(candidate)!, baseGraphForInvariants: base,
     }, store)).rejects.toThrow("‘Feature release slips’ is tied to ‘Raise Pro price to £59’ and left out of the Run; this model can't link it yet.");
     expect(appendCalls).toEqual([]);
     expect(JSON.stringify(base)).toBe(before);
