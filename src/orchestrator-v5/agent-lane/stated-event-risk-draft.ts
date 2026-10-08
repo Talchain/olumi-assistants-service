@@ -1,5 +1,5 @@
 /** event_risk.v1 slice 2c: hold only an unambiguous occurrence stated in the brief. */
-import { readStatedEventRisk } from '../routing/stated-event-risk.js';
+import { readStatedEventRiskWithBindingSpan } from '../routing/stated-event-risk.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 
 // Single-character sentence boundaries; a decimal point is not a boundary. Both regexes
@@ -20,13 +20,15 @@ export function holdStatedEventRisks<
 } {
   const risks = nodes.filter((n) => n.kind === 'risk' && typeof n.label === 'string')
     .map((node) => ({ node, names: words(node.label as string) }));
-  const claims = new Map<string, Array<NonNullable<ReturnType<typeof readStatedEventRisk>>>>();
+  const claims = new Map<string, Array<NonNullable<ReturnType<typeof readStatedEventRiskWithBindingSpan>>>>();
   for (const sentence of brief.split(SENTENCE_END)) {
-    const stated = readStatedEventRisk(sentence);
+    const stated = readStatedEventRiskWithBindingSpan(sentence);
     if (stated === undefined) continue;
-    const named = new Set(words(sentence));
+    const named = new Set(words(stated.binding_span));
     // Stricter than nearest-word binding: EVERY label word must be written in this
-    // sentence, and exactly one risk may match. No figure/likelihood on a node is read.
+    // reader-exposed likelihood clause, and exactly one risk may match. The reader
+    // keeps comma-attached event context but excludes names across a semicolon.
+    // No figure/likelihood on a node is read.
     const matches = risks.filter((r) => r.names.length > 0 && r.names.every((w) => named.has(w)));
     if (matches.length !== 1) continue;
     const id = matches[0]!.node.id;

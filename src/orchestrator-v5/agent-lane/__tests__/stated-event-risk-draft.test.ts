@@ -170,6 +170,46 @@ describe('event_risk.v1 slice 2c', () => {
     expect(dev(result).event_risk).toBeUndefined();
   });
 
+  it.each([
+    ['impact-window', "Release slips would cut MRR by 10% within 6 months; there's a 30% chance the supplier fails."],
+    ['supplier-window', "Release slips would cut MRR by 10%; there's a 30% chance the supplier fails within 6 months."],
+  ])('FIX-1-wrong-risk-%s: supplier likelihood never stamps Release slips or changes its impact edge', (_id, brief) => {
+    const input = {
+      nodes: [
+        { id: 'risk_release', kind: 'risk', label: 'Release slips' },
+        { id: 'outcome_mrr', kind: 'outcome', label: 'MRR' },
+      ],
+      edges: [{ id: 'impact_release', from: 'risk_release', to: 'outcome_mrr', exists_probability: 0.7,
+        defaulted: true, strength: { mean: -0.3, std: 0.15 }, provenance: { magnitude: 'olumi_placeholder' } }],
+    };
+    const before = structuredClone(input);
+    const result = holdStatedEventRisks(input.nodes, input.edges, brief);
+    expect(result.nodes.find((node) => node.id === 'risk_release')!.event_risk).toBeUndefined();
+    expect({ nodes: result.nodes, edges: result.edges }).toEqual(before);
+    expect(result.nodes).toBe(input.nodes);
+    expect(result.edges).toBe(input.edges);
+    expect(result.held).toEqual([]);
+    expect(result.refused).toEqual([]);
+    expect(input).toEqual(before);
+  });
+
+  it('FIX-1-supplier-own-clause: supplier likelihood holds only its named risk', () => {
+    const input = graph();
+    input.nodes.push({ id: 'risk_release', kind: 'risk', label: 'Release slips' });
+    input.edges.push({ id: 'impact_release', from: 'risk_release', to: 'outcome_delivery', exists_probability: 0.7 });
+    const brief = "Release slips would cut MRR by 10%; there's a 30% chance the supplier fails within 6 months.";
+    const result = holdStatedEventRisks(input.nodes, input.edges, brief);
+    expect(result.nodes.find((node) => node.id === 'risk_supplier')!.event_risk).toEqual({
+      ...BLOCK, occurrence: { ...BLOCK.occurrence, p_low: 0.3, p_high: 0.3 },
+    });
+    expect(result.held).toEqual([{ risk_id: 'risk_supplier', quote: '30% chance the supplier fails within 6 months' }]);
+    expect(result.refused).toEqual([]);
+    expect(result.nodes.find((node) => node.id === 'risk_release')).toBe(input.nodes.find((node) => node.id === 'risk_release'));
+    expect(result.edges.find((edge) => edge.id === 'impact_release')).toBe(input.edges.find((edge) => edge.id === 'impact_release'));
+    expect(result.edges.find((edge) => edge.id === 'impact_supplier')).toEqual({ ...input.edges.find((edge) => edge.id === 'impact_supplier'), exists_probability: 1 });
+    expect(dev(result)).toBe(dev(input));
+  });
+
   it('2c-REACHABILITY-positive: buildModelFromBrief holds the block and discloses the loss sentence', async () => {
     const result = await build(BRIEF);
     const risk = result.graph.nodes.find((n) => n.kind === 'risk' && n.label === 'Key developer leaves')!;

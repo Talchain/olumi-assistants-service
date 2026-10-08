@@ -98,12 +98,68 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     ['cued-share-mrr', 'Maybe the release costs 10% of MRR within 6 months'],
     ['monthly-churn-rate', 'The risk of 7% monthly churn over 3 months is worrying.'],
     ['yearly-churn-rate', 'The risk of 7% annual churn over 3 months is worrying.'],
-    ['weak-risk-of', 'The risk of churn is 7% within 6 months.'],
     ['cue-other-sentence', 'It may happen, perhaps. Revenue is 10% within 6 months'],
   ])('impact-pct-must-not-read-%s', (_id, text) => {
     expect(readStatedEventRisk(text)).toBeUndefined();
     const withoutWindow = text.replace(/\b(?:within|in|over) (?:the next )?(?:6 months|12 months|3 months|a year|year)/gi, '');
     expect(readStatedLikelihoodWithoutWindow(withoutWindow)).toBe(false);
+  });
+
+  // FIX1: every review input is verbatim, recorded RED on a0a6ba70 before the classifier changes.
+  it.each([
+    ['probably-down', 'MRR will probably be down 10% within 6 months'],
+    ['probably-knock', 'Revenue probably takes a 10% knock within 6 months'],
+    ['maybe-shave', 'Maybe the launch will shave 10% off MRR within 6 months'],
+    ['percent-lower', '10 percent lower within a year'],
+    ['lose-customers', "we'd lose 10% of customers within 6 months"],
+    ['costs-us', 'costs us 10% within 6 months'],
+    ['fewer-signups', '10% fewer signups over the next 6 months'],
+    ['probably-hit', 'probably a 10% hit within 6 months'],
+    ['impact-verb-object-with-risk-cue', 'risk of losing 10% within 6 months'],
+    ['window-other-clause', 'Add a release slip risk: there is a 30% chance it happens; if it does, MRR will be lower by 10% over the next 6 months.'],
+    ['accepted-separate-window-refusal', 'Add a risk: 30% chance of an outage. Time window: within 6 months.'],
+  ])('fix1-must-not-read-%s', (_id, text) => {
+    expect(readStatedEventRisk(text)).toBeUndefined();
+  });
+
+  it.each([
+    'MRR will probably be down 10%',
+    'Revenue probably takes a 10% knock',
+    'Maybe the launch will shave 10% off MRR',
+  ])('fix1-without-window-must-not-read-%s', (text) => {
+    expect(readStatedLikelihoodWithoutWindow(text)).toBe(false);
+  });
+
+  it.each([
+    'The risk of churn is 7% within 6 months.',
+    'The risk of churn is 7% over 3 months.',
+  ])('fix1-risk-of-metric-is-not-a-likelihood: %s', (text) => {
+    expect(readStatedEventRisk(text)).toBeUndefined();
+  });
+
+  it('fix1-uncued-first-alternative-is-ambiguous', () => {
+    expect(readStatedEventRisk('20% or 30% chance within 6 months')).toBeUndefined();
+    expect(readStatedLikelihoodWithoutWindow('20% or 30% chance')).toBe(false);
+  });
+
+  it.each([
+    ['probability-of-event', 'The probability of losing our biggest customer is 30% within 6 months.', 0.3, 0.3, 6],
+    ['mixed-cost', 'The probability of losing our biggest customer is 30% within 6 months and the loss would cost us 10%.', 0.3, 0.3, 6],
+    ['percent-risk', "There's about a 30% risk the supplier fails within 6 months.", 0.3, 0.3, 6],
+    ['reckon-after-semicolon', 'The service could fail; I reckon 30% within 6 months', 0.3, 0.3, 6],
+    ['percent-likely', '30% likely within 6 months', 0.3, 0.3, 6],
+    ['odds-of', 'odds of 30% within a year', 0.3, 0.3, 12],
+    ['percent-probability', 'a 30 percent probability within 6 months', 0.3, 0.3, 6],
+    ['maybe-range', 'maybe 10–30% in the next 6 months', 0.1, 0.3, 6],
+    ['put-it-at-range', "I'd put it at about 15–25% within 3 months", 0.15, 0.25, 3],
+    ['chance', '10% chance it happens within 6 months', 0.1, 0.1, 6],
+    ['one-in', '1 in 10 chance within a year', 0.1, 0.1, 12],
+    ['may-happen-card-words', 'It may happen 10–30% in the next 6 months.', 0.1, 0.3, 6],
+    ['might-happen-colon', 'It might happen: about 20% within a year.', 0.2, 0.2, 12],
+  ])('fix1-must-still-read-%s', (_id, text, low, high, months) => {
+    expect(readStatedEventRisk(text)?.event_risk).toEqual({ version: 1, occurrence: {
+      p_low: low, p_high: high, basis: 'user', meaning: 'at_least_once_within_horizon',
+    }, horizon: { months } });
   });
 
   it.each([
