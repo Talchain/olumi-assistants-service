@@ -1,0 +1,8 @@
+-- PROPOSAL, NOT EXECUTED — Paul-gated rollback of the additive v4r wrapper only.
+-- Existing v4/v5/v6, scenario revision and its trigger remain unchanged.
+SET LOCAL lock_timeout = '3s';
+
+DROP FUNCTION public.append_turn_atomic_v4r(
+  UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB,
+  JSONB, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BIGINT, BIGINT
+);
