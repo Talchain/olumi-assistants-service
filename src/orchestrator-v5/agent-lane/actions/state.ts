@@ -30,6 +30,11 @@ import { proposalFigure } from '../proposal-reply.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { computeProposalId } from '../proposal.js';
 import { risksTurnForReadback } from '../method-turn/widen-turn.js';
+import { proposeProductIdentity } from '../identity-proposal.js';
+import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
+import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { scopeIssueBlocks } from '../goal-scope.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -71,6 +76,8 @@ export interface ActionFacts {
   readonly runAdmissible: boolean;
   readonly goalPresent: boolean;
   readonly goalLabel: string;
+  /** The same product proposer and dry-run door as propose_identity; null means its Yes cannot be offered. */
+  readonly identityReading: { readonly goalLabel: string; readonly a: string; readonly b: string } | null;
   readonly goalKind: GoalKind | null;
   readonly targetPresent: boolean;
   readonly approvalWaiting: boolean;
@@ -150,12 +157,25 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     runStale: rec(rec(read.analysisState)?.run_state)?.kind === 'complete_stale',
     runAdmissible: typeof ready?.may_run === 'boolean' ? ready.may_run : ready?.status === 'ready',
   };
-  const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
+  const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', identityReading: null, goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
     optionFrame: { nonSqOptionLabels: [], statusQuoPresent: false, sameLever: false },
     estimateCandidates: [], estimateDriverIds: [], olumiEstimateCount: 0, canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
   const nodes = raw.nodes.map(rec);
   try {
+    const card = proposeProductIdentity(raw);
+    let identityReading: ActionFacts['identityReading'] = null;
+    // Condition 5: this is a new caller, so check the same base and dry-run the sole writer.
+    // Codex r1 P2: the propose_identity capability refuses while a blocking goal-scope question is pending; so does the offer.
+    const scopeBlocked = (read.pending ?? []).some(p => scopeIssueBlocks(p.action));
+    if (card !== null && !scopeBlocked && identityConfirmBaseIsWritable(raw)) {
+      const graphHash = read.graphHash ?? computeAnalysisAffectingGraphHash(raw as never);
+      if (typeof graphHash === 'string' && applyIdentityConfirmEdit({ persistedGraph: raw, ...card,
+        expected_graph_hash: graphHash, reading_token: identityConfirmReadingToken(card) }).kind === 'mutated') {
+        const label = (id: string) => { const n = nodes.find(n => n?.id === id); return typeof n?.label === 'string' ? n.label : id; };
+        identityReading = { goalLabel: label(card.outcome_id), a: label(card.factor_ids[0]), b: label(card.factor_ids[1]) };
+      }
+    }
     const signals = assembleGuidanceSignals({
       request: 'turn', offeredSpecific: [], graph: read.graph, analysisState: read.analysisState, analysisResult: read.analysisResult,
       optionParticipation: read.optionParticipation,
@@ -169,6 +189,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     return {
       ...base,
       readable: true,
+      identityReading,
       canonicalStage: canonicalStageOf(signals['run.kind'], read.graph),
       estimateCandidates: signals['model.goal_path_factors'].flatMap(f => {
         if (f.value_authorship !== 'olumi_estimate' && f.value_authorship !== 'olumi_accepted') return [];
