@@ -365,6 +365,43 @@ describe('the model wrote a list: its lead-in becomes the headline, its first po
 });
 
 describe('RC6 said once', () => {
+  const longContext = 'The model compares four options on twelve months of revenue. Each figure rests on the values in your model today. Several of those values are Olumi estimates rather than yours. Changing any estimate changes what this model implies. The analysis does not rank the options for you.';
+  const faceOf = (c: ReturnType<typeof composeReplyShape>): string => [c.shape?.headline ?? c.text, ...(c.shape?.bullets ?? [])].join('\n');
+  it('prefer the typed copy (Codex r1 P1-2): an earlier untyped copy goes; the typed multi-sentence unit stays whole on the face', () => {
+    const typed = 'Revenue is £100. Churn is 5%.';
+    const text = ['Revenue is £100.', longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual(['Revenue is £100.']);
+    expect(faceOf(c)).toContain(typed);
+  });
+  it('prefer the typed copy (Codex r1 P1-2): a typed atomic statement + question keeps its question; the earlier loose copy goes', () => {
+    const typed = 'The price link is not sized yet. How sure are you of that size?';
+    const text = ['How sure are you of that size?', longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual(['How sure are you of that size?']);
+    expect(faceOf(c)).toContain(typed);
+  });
+  it('idempotent (Codex r1 P1-3): composing twice keeps the same face, the typed closing ask last both times', () => {
+    const closing = 'HOW sure are you?';
+    const text = [longContext, 'How sure are you?', 'Which assumption matters most?', closing].join('\n\n');
+    const obligations = [{ role: 'ask' as const, text: closing }];
+    const once = composeReplyShape({ text, obligations });
+    const twice = composeReplyShape({ text: once.text, obligations });
+    expect(twice.text).toBe(once.text);
+    expect(faceOf(twice)).toBe(faceOf(once));
+    expect(faceOf(once).trimEnd().endsWith(closing)).toBe(true);
+  });
+  it.each([
+    ['negation', 'The link is sized.', 'It is not true that the link is sized.'],
+    ['reported belief', 'Churn rises.', 'Nobody expects that churn rises.'],
+    ['condition', 'The goal is met.', 'If the price holds, the goal is met.'],
+  ])('a sentence inside another FRAME (%s) means something else: both are kept', (_why, short, framed) => {
+    const filler = 'The model compares four options on twelve months of revenue. Each figure rests on the values in your model today. Several of those values are Olumi estimates rather than yours. Changing any estimate changes what this model implies.';
+    const c = composeReplyShape({ text: `${short} ${filler} ${framed}` });
+    expect(c.measure?.said_once_dropped ?? []).toEqual([]);
+    expect(c.text).toContain(short);
+    expect(c.text).toContain(framed);
+  });
   it('quote fold (Science #2787 P1-A): a typed obligation in curly quotes binds the reply’s straight-quoted words, so it faces', () => {
     const typed = 'No single option can be put forward yet, because ‘MRR’ is read as ‘Pro plan price’ × ‘Pro paying subscribers’, which is not confirmed.';
     const written = typed.replace(/[‘’]/g, "'");
@@ -491,11 +528,13 @@ describe('RC6 said once', () => {
   it.each([
     ['container first', [largest, middle, smallest, equalSmallest]],
     ['container last', [middle, smallest, equalSmallest, largest]],
-  ])('never-both + normalisation chain, %s: nested containment and equal copies leave exactly the one full carrier', (_order, lines) => {
+  ])('never-both + normalisation chain, %s: the explanatory tail and equal copies go; a fragment inside another frame stays', (_order, lines) => {
     const text = (lines as string[]).join('\n');
     const c = composeReplyShape({ text });
-    expect(sentenceMultiset(c.text)).toEqual([largest]);
-    expect(c.measure!.said_once_dropped).toEqual([middle, smallest, equalSmallest]);
+    // The middle sentence is the largest's tail after "because": said again, dropped. The smallest sits inside a "depends on"
+    // frame, not a gloss, so it stays (once: its equal copy goes).
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset([largest, smallest].join(' ')));
+    expect(c.measure!.said_once_dropped).toEqual([middle, equalSmallest]);
     everySentenceExceptReportedKept(text, c);
   });
 
@@ -534,20 +573,19 @@ describe('RC6 said once', () => {
     everySentenceExceptReportedKept(text, c);
   });
 
-  it('an equal normalised earlier question becomes the typed closing ask; the FIRST wording survives unchanged', () => {
+  it('an equal normalised earlier question goes; the TYPED closing ask survives in its own wording (prefer the typed copy)', () => {
     const first = 'How sure are you of “Revenue” *rising*?';
     const closing = '“HOW sure are you of Revenue  \t rising”?';
     const text = [context, first, closing].join('\n\n');
     const c = composeReplyShape({ text, obligations: [{ role: 'ask', text: closing }] });
-    // One question left and little to hide: it ships as written, deduplicated (D-12 holds: one question, last).
     expect(['shaped', 'already_in_shape']).toContain(c.outcome);
     expect(c.reason).not.toBe('obligation_unlocated');
-    expect(c.text.trimEnd().endsWith(first)).toBe(true);
-    expect(c.text.split(first)).toHaveLength(2);
-    expect(c.text).not.toContain(closing);
-    expect(c.measure!.said_once_dropped).toEqual([closing]);
+    expect(c.text.trimEnd().endsWith(closing)).toBe(true);
+    expect(c.text).not.toContain(first);
+    expect(c.measure!.said_once_dropped).toEqual([first]);
     everySentenceExceptReportedKept(text, c);
   });
+
 
   it('Open Questions is untouched, including a copy of the face finding and repeated questions inside the protected segment', () => {
     const finding = 'Revenue may fall after churn.';

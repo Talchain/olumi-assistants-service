@@ -271,6 +271,9 @@ interface SaidOnce {
   readonly obligations: FaceObligation[];
   readonly questions: ReturnType<typeof openQuestionsSegment>;
 }
+/** The frame before a contained sentence that restates it as the container's reason or gloss (keys are normalised). */
+const SAID_AGAIN_AFTER = /(?:\bbecause|\bsince|[:;])\s*$/;
+
 function saidOnceKey(text: string): string {
   const key = text.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
   // A reverse scan avoids retrying a long nonterminal punctuation run at every character.
@@ -348,6 +351,18 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
     }
   }
 
+  // ⭐ PREFER THE TYPED COPY (Codex r1 on #2801, P1-2/P1-3): a sentence inside a typed obligation is what the host owes
+  // the face. Among equal copies the first TYPED one stays (else the first), so a typed role never has to move onto a
+  // surviving untyped copy, and composing twice is stable (the typed text is still there the second time). A contained
+  // sentence re-binds to its container as before (one whole sentence carries it).
+  const typedRanges = obligations.filter((o) => o.role !== 'detail' && o.text.trim() !== '').flatMap((o) => {
+    const ranges: { start: number; end: number }[] = [];
+    for (let at = text.indexOf(o.text); at !== -1; at = text.indexOf(o.text, at + o.text.length)) ranges.push({ start: at, end: at + o.text.length });
+    return ranges;
+  });
+  const isTyped = (span: SentenceSpan): boolean => typedRanges.some((r) => r.start <= span.start && span.end <= r.end);
+  for (const group of groups) group.first = group.copies.find(isTyped) ?? group.copies[0]!;
+
   // Aho-Corasick: all complete sentence keys are patterns; output links avoid copying suffix-match arrays.
   const trie: { next: Map<string, number>; fail: number; output: number; group?: number }[] = [
     { next: new Map(), fail: 0, output: 0 },
@@ -382,12 +397,18 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
   for (const idx of longestFirst) {
     if (carrier.has(idx)) continue;
     let node = 0;
-    for (const char of groups[idx]!.key) {
+    const containerKey = groups[idx]!.key;
+    for (let at = 0; at < containerKey.length; at += 1) {
+      const char = containerKey[at]!;
       while (node !== 0 && !trie[node]!.next.has(char)) node = trie[node]!.fail;
       node = trie[node]!.next.get(char) ?? 0;
+      // ⛔ Only the container's explanatory TAIL says the same finding ("…, because <it>", "…: <it>"). A sentence inside any
+      // other frame ("It is not true that <it>", "If X, <it>") means something else, and both are kept.
+      if (at !== containerKey.length - 1) continue;
       for (let match = node; match !== 0; match = trie[match]!.output) {
         const found = trie[match]!.group;
-        if (found !== undefined && groups[found]!.key.length < groups[idx]!.key.length
+        if (found !== undefined && groups[found]!.key.length < containerKey.length
+          && SAID_AGAIN_AFTER.test(containerKey.slice(0, containerKey.length - groups[found]!.key.length))
           && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
       }
     }
