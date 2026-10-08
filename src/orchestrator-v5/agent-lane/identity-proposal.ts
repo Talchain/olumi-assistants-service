@@ -104,13 +104,21 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
 const NOT_A_COUNT_WORDS = new Set(['revenue', 'income', 'sale', 'price', 'cost', 'fee', 'spend', 'spending', 'budget', 'mrr', 'arr', 'arpu',
   'margin', 'profit', 'value', 'rate', 'ratio', 'share', 'percent', 'percentage', 'churn', 'conversion', 'royalty', 'earning', 'payment',
   'pound', 'dollar', 'euro', 'cash', 'money', 'amount', 'average', 'mean', 'median', 'per', 'of', 'from', 'and', 'or', 'with', 'by',
-  // Codex r2 (#2826): compound operators join two quantities ("Customers plus subscribers").
-  'plus', 'minus', 'times', 'vs', 'versus', 'including', 'excluding', 'incl', 'excl', 'both', 'either', 'between', 'combined', 'total']);
+  // Codex r2 (#2826): compound operators join two quantities ("Customers plus subscribers"). Not 'total': "Total paying
+  // subscribers" is ONE count (DL pre-read).
+  'plus', 'minus', 'times', 'vs', 'versus', 'excluding', 'excl', 'both', 'either', 'between']);
 const singularWord = (w: string): string => w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.endsWith('ses') ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
 function labelCountUnit(n: Rec): string | undefined {
   if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
-  const label = text(n.label);
-  if (label === undefined || /[%£$€¥\d()]/.test(label)) return undefined;
+  // The drafter names a count AT A TIME ("Paying subscribers at month 12", "12-month paying subscribers", "Month-12 Pro
+  // paying subscribers", truncated "… at month…": 34 of 55 stored outcome operands, staging all-time, 8 Oct). A time POINT
+  // is not a rate: it is stripped, and the count that remains is the unit. A flow ("per month") still fails below.
+  const raw = text(n.label);
+  const label = raw === undefined ? undefined : raw.replace(/…/g, ' ')
+    .replace(/\b(?:at|in|by|after|within)\s+(?:(?:month|year|week|quarter)s?\s*\d*|\d+\s*(?:month|year|week|quarter)s?)\b/gi, ' ')
+    .replace(/\b(?:month|year|week|quarter)[-\s]?\d+\b|\b\d+[-\s]?(?:month|year|week|quarter)s?\b/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if (label === undefined || label === '' || /[%£$€¥\d()]/.test(label)) return undefined;
   const words = label.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '');
   if (words.length === 0 || words.length > 4 || words.some((w) => NOT_A_COUNT_WORDS.has(w) || NOT_A_COUNT_WORDS.has(singularWord(w)))) return undefined;
   const parts = readUnitParts(label);

@@ -35,11 +35,21 @@ describe('addendum 6 — an outcome operand of the declared product', () => {
     expect(proposeProductIdentity(graph(g => { noRiskLink(g); Object.assign(node(g, 'pro_paying_subscribers'), { label: 'Revenues from subscribers', observed_state: { unit: 'subscribers' } }); }))?.factor_ids)
       .toEqual(['pro_plan_monthly_price', 'pro_paying_subscribers']);
   });
-  it.each(['Percentages of subscribers', 'Revenues from subscribers', 'Royalties from subscribers', 'Subscribers and seats', 'Average order count', 'Subscribers (k)', 'Customers plus subscribers', 'Total paying subscribers'])(
+  it.each(['Percentages of subscribers', 'Revenues from subscribers', 'Royalties from subscribers', 'Subscribers and seats', 'Average order count', 'Subscribers (k)', 'Customers plus subscribers', 'Subscribers per month',
+    // Real stored outcome-operand labels (staging, all-time) that are NOT a count:
+    'Average Pro revenue per…', 'Landed unit cost', 'Effective Pro monthly revenue per subscriber'])(
     'Codex r1 P1: "%s" is not ONE count → null', label => {
       expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = label; }))).toBeNull();
     });
   it('CONTROL: an ordinary count label (word order varies) still reads as the count', () => {
     expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = 'Paying Pro subscribers'; }))).not.toBeNull();
+  });
+  // MUST-FIRE: every real stored subscriber label of an outcome operand (staging all-time, 8 Oct; 51 of 55 operands),
+  // plus "Total paying subscribers" (ONE count, DL pre-read): each reads as the count and the card is offered.
+  it.each(['Paying Pro subscribers', 'Paying subscribers at 12 months', 'Pro paying subscribers', 'Paying subscribers at month 12',
+    '12-month paying subscribers', 'Pro paying subscribers at month…', 'Pro plan paying subscribers', 'Pro paying subscribers in month…',
+    'Month-12 Pro paying subscribers', 'Paying Pro subscribers at month…', 'Total paying subscribers'])('MUST-FIRE: "%s" → the card', label => {
+    expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = label; }))?.factor_ids)
+      .toEqual(['pro_plan_monthly_price', 'pro_paying_subscribers']);
   });
 });
