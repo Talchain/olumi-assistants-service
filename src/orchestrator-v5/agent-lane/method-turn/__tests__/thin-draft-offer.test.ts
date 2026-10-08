@@ -92,4 +92,20 @@ describe('P05b button fits the stored answer-offer envelope (label 1–80 chars)
     expect(offer.button).toBe('Suggest up to 3 more risks, including one against ‘Raise Pro price to £59’');
     expect(offer.button.length).toBeLessThanOrEqual(THIN_DRAFT_BUTTON_MAX);
   });
+  it('R4 twenty rocket code points keep the exact named button despite its UTF-16 length exceeding 80', () => {
+    const graph = paulGraph();
+    const favouredLabel = '🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀';
+    graph.nodes = graph.nodes.map((n) => n.id === 'raise_59' ? { ...n, label: favouredLabel } : n);
+    const namedButton = `Suggest up to 3 more risks, including one against ‘${favouredLabel}’`;
+    expect([...favouredLabel]).toHaveLength(20);
+    expect([...namedButton]).toHaveLength(72);
+    expect([...namedButton].length).toBeLessThanOrEqual(THIN_DRAFT_BUTTON_MAX);
+    expect(namedButton.length).toBeGreaterThan(80);
+    const offer = thinDraftOffer(graph, true)!;
+    expect(offer.button).toBe(namedButton);
+    expect(offer.press).toEqual({ ...SUGGEST_RISKS_CHIP, label: namedButton });
+    expect(offer.press.id).toBe(SUGGEST_RISKS_CHIP.id);
+    expect(offer.press.message).toBe(SUGGEST_RISKS_CHIP.message);
+    expect(widenTargetOf(offer.press.id, offer.press.message)).toBe('risks');
+  });
 });

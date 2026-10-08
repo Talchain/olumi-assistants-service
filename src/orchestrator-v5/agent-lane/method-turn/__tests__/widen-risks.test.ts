@@ -93,6 +93,31 @@ describe('P05b RK-DISCONFIRM: challenge the brief’s option without bypassing t
     expect(gate).not.toHaveProperty('candidates');
     expect(settleRisksTurn(turn, appendix(candidates)).gate).toEqual(gate);
   });
+  it('R2 a schema-invalid namesake never steals the evicted kept item’s real source index', () => {
+    const turn = turnOn(graph());
+    expect(turn.favoured).toEqual(favoured);
+    const candidates = [{ label: 'Supplier disruption' }, ...firstThree, TURN2[1]];
+    const base = riskGate(turn, candidates);
+    expect(base.dropped).toEqual([
+      { index: 0, failed: ['RK-SCHEMA'] },
+      { index: 4, failed: ['RK-COUNT'] },
+    ]);
+    expect(base.kept.at(-1)?.label).toBe('Supplier disruption');
+    const gate = applyDisconfirm(turn, { ...base, candidates });
+    expect(gate.kept.map((r) => [r.label, r.hits.id, r.hits.label])).toEqual([
+      ['Recruitment delay', 'hire_two_developers', 'Hire Two Developers'],
+      ['Onboarding friction', 'hire_two_developers', 'Hire Two Developers'],
+      ['Wrong bottleneck', 'hire_a_tech_lead', 'Hire a Tech Lead'],
+    ]);
+    const droppedIndices = gate.dropped.map((d) => d.index);
+    expect(new Set(droppedIndices).size).toBe(droppedIndices.length);
+    expect(gate.dropped.filter((d) => d.index === 3)).toEqual([{ index: 3, failed: ['RK-COUNT'] }]);
+    expect(gate.dropped.filter((d) => d.index === 0)).toEqual([{ index: 0, failed: ['RK-SCHEMA'] }]);
+    expect(gate.dropped).toEqual([
+      { index: 0, failed: ['RK-SCHEMA'] },
+      { index: 3, failed: ['RK-COUNT'] },
+    ]);
+  });
   it('4b no candidate hits favoured: missing flag and exact disclosure before nothing-added line', () => {
     const settled = settleRisksTurn(turnOn(graph()), appendix(firstThree));
     expect(settled.gate.disconfirm_missing).toBe(true);
@@ -106,6 +131,20 @@ describe('P05b RK-DISCONFIRM: challenge the brief’s option without bypassing t
     expect(settled.gate.disconfirm_missing).toBe(true);
     expect(settled.reply).toBe(risksFallbackReply(turnOn(graph())));
     expect(settled.reply).not.toContain(missingLine);
+  });
+  it('R3 only a shared precondition survives: no “None of these bears directly on” disclosure without kept risks', () => {
+    const turn = turnOn(graph());
+    expect(turn.favoured).toEqual(favoured);
+    const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
+      mechanism: 'relies_on', affects_id: 'feature_delivery_capacity', direction: 'positive',
+      relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
+    const settled = settleRisksTurn(turn, appendix([shared]));
+    expect(settled.gate.kept).toEqual([]);
+    expect(settled.gate.shared_preconditions).toEqual([{ label: 'Team attrition', category: 'external', relies_on: 'the current team staying intact' }]);
+    expect(settled.gate.dropped).toEqual([{ index: 0, failed: ['RK-SHARED-PRECONDITION'] }]);
+    expect(settled.gate.disconfirm_missing).toBe(true);
+    expect(settled.reply).toContain("- Every option relies on the current team staying intact. Risk: ‘Team attrition’ (outside events). This model can't yet hold a precondition that every option shares, so I haven't offered to add it.");
+    expect(settled.reply).not.toContain('None of these bears directly on');
   });
   it('4d RK-WORDS is never bypassed by a count-only drop', () => {
     const turn = turnOn(graph());

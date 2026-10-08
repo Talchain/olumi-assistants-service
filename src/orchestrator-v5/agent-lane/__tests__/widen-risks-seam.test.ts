@@ -182,7 +182,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const THIN_BUTTON = 'Suggest up to 3 more risks, including one against ‘Raise to £59’';
   const CONSTRUCTION_BRIEF = 'Raise Pro £49 → £59 to reach £20,000 Total MRR within 12 months. One risk is customer churn.';
   /** A real constructor candidate: one user-proposed option, a declared baseline, and unquantified risks. */
-  const thinConstruction = async (riskCount: number) => {
+  const thinConstruction = async (riskCount: number, prepare?: () => void) => {
     constructionCandidate = {
       goal: { kind: null, deliverable: null, metric: 'Total MRR', operator: '>=', target_stated: true, value: 20000,
         unit: 'GBP', horizon_months: 12, provenance: 'explicit', frame: 'level', baseline_known: false,
@@ -200,6 +200,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       identities: [], unknowns: [], decision_question: null,
     };
     script = [() => fnCall('build_model_from_brief', { brief: CONSTRUCTION_BRIEF }), () => say('Here is the model to explore together.')];
+    prepare?.();
     const t = await turn({ message: CONSTRUCTION_BRIEF });
     expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true, mutated: true }));
     expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(riskCount);
@@ -219,6 +220,51 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       "This model doesn't yet say whether any option gets there within 12 months.",
       'Questions this model does not answer yet: Does "Total MRR" get there within 12 months? The model holds the deadline; no result answers that yet. The analysis can\'t run yet. The values involved are Olumi\'s own suggestions, not yours — ask Olumi to work them through, or set them yourself.',
     ].join('\n\n'));
+  }, 120_000);
+
+  it('R1 first-draft construction with a pending identity approval keeps exactly the offers without thin, including approve and decline', async () => {
+    const nextSteps = await import('../next-steps-from-guidance.js');
+    const { AMEND_CHIP } = await import('../approval-chips.js');
+    const selectOffers = nextSteps.nextStepOffersForTurn;
+    let withoutThin: Chip[] = [];
+    const selection = vi.spyOn(nextSteps, 'nextStepOffersForTurn').mockImplementation((...args) => {
+      const result = selectOffers(...args);
+      // Snapshot this turn's offers before the route can inject/relabel the thin press.
+      withoutThin = structuredClone(result.offered);
+      return result;
+    });
+    try {
+      expect(graphOf.has(SCENARIO)).toBe(false);
+      const t = await thinConstruction(0, () => {
+        const candidate = constructionCandidate!;
+        (candidate.factors as Record<string, unknown>[])[0]!.unit = 'GBP/month';
+        (candidate.factors as Record<string, unknown>[]).push({ label: 'Paying subscribers', role: 'observable',
+          baseline_known: false, baseline_value: 250, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 1000 });
+        (candidate.links as Record<string, unknown>[]).push({ from: 'Paying subscribers', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+          effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+        candidate.identities = [{ outcome: 'Total MRR', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'ai_proposed' }];
+        script.splice(1, 1, () => fnCall('propose_identity', {}), () => say('Here is the model to explore together.'));
+      });
+      const { thinDraftOffer } = await import('../method-turn/widen-turn.js');
+      expect(thinDraftOffer(graphNow(), true)?.button).toBe(THIN_BUTTON);
+      const identity = t._agent.tool_calls.find((c) => c.name === 'propose_identity');
+      expect(identity, JSON.stringify(t)).toMatchObject({ ok: true, mutated: false });
+      expect(identity!.proposal_id).toBeTypeOf('string');
+      const approveId = `agent-approve-proposal:${identity!.proposal_id}`;
+      const decline = { id: `agent-decline-proposal:${identity!.proposal_id}`, label: 'Not now', message: 'Not now.' };
+      const words = 'Olumi reads ‘Total MRR’ as ‘Pro plan price’ × ‘Paying subscribers’. Is that how you work it out?';
+      expect(withoutThin).toEqual([
+        { id: approveId, label: "Yes, that's how", message: `Yes — ${words}`, detail: words },
+        AMEND_CHIP,
+      ]);
+      // The unchanged downstream route inserts this approval's decline after Change something first.
+      expect(t.suggested_actions, JSON.stringify(t)).toEqual([...withoutThin, decline]);
+      expect(t.suggested_actions.find((c) => c.id === approveId)).toEqual(withoutThin[0]);
+      expect(t.suggested_actions.find((c) => c.id === decline.id)).toEqual(decline);
+      expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON)).toBe(false);
+    } finally {
+      selection.mockRestore();
+    }
   }, 120_000);
 
   it('P05b-8b CONTRAST: construction with three risks has no relabelled risks press', async () => {

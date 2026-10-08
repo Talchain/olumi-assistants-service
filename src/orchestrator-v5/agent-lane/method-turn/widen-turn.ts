@@ -712,7 +712,8 @@ export function thinDraftOffer(graph: unknown, mutated: boolean): { face: string
   const named = favoured !== null ? `Suggest up to 3 more risks, including one against ${quote(favoured.label)}` : generic;
   // The answer row stores an offer only when its label is 1–80 characters (append_agent_answer_with_offers): a longer
   // named button would be live-only and gone on reload, so it falls back to the generic words.
-  const button = named.length <= THIN_DRAFT_BUTTON_MAX ? named : generic;
+  // Counted in Unicode code points, as Postgres char_length counts them (never UTF-16 units).
+  const button = [...named].length <= THIN_DRAFT_BUTTON_MAX ? named : generic;
   return { face: risks === 1 ? 'Olumi found one risk in your brief.' : 'Olumi found no risks in your brief.',
     button, press: { ...SUGGEST_RISKS_CHIP, label: button } };
 }
@@ -1063,7 +1064,8 @@ export function applyDisconfirm(turn: RunRisksWidenTurn, gate: RiskGateResult & 
       if (dropped.failed.length !== 1 || dropped.failed[0] !== 'RK-COUNT') continue;
       const item = disconfirmCandidateOf(turn, raw[dropped.index], remaining);
       if (item === null || item.hits.id !== turn.favoured.id) continue;
-      const evictedIndex = raw.findIndex((c) => sameLabel(String(rec(c)?.label ?? ''), evicted.label));
+      // The evicted item's OWN source index: an accepted candidate (never one already dropped) with its label.
+      const evictedIndex = raw.findIndex((c, i) => !base.dropped.some((d) => d.index === i) && sameLabel(String(rec(c)?.label ?? ''), evicted.label));
       if (evictedIndex < 0) continue;
       const kept = [...remaining.kept, item];
       return { ...base, kept: [...kept.filter((r) => !r.shared), ...kept.filter((r) => r.shared)],
@@ -1227,7 +1229,7 @@ export interface SettledRisksTurn {
 export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): SettledRisksTurn {
   const candidates = readRiskCandidates(draft);
   const gate = applyDisconfirm(turn, { ...riskGate(turn, candidates), candidates });
-  const disconfirmLines = gate.disconfirm_missing === true && turn.favoured !== null
+  const disconfirmLines = gate.disconfirm_missing === true && turn.favoured !== null && gate.kept.length > 0
     ? [`None of these bears directly on ${quote(turn.favoured.label)}; ask for risks to it if you want them.`] : [];
   // A shared precondition is SAID, never silence (DL 8 Oct): it can't be added yet, so it carries no Add press.
   const sharedLines = gate.shared_preconditions.map((p) => `- Every option relies on ${midSentence(p.relies_on)}. Risk: ${quote(p.label)} `

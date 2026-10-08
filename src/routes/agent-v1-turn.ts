@@ -4041,7 +4041,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
     const thin = thinDraftOffer(readbackGraph, result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true));
-    if (thin !== null && heldCardOffer.length === 0 && fastPath !== 'method' && fastPath !== 'approve') {
+    if (thin !== null && heldCardOffer.length === 0 && approvals.length === 0 && carriedApproval.length === 0
+      && fastPath !== 'method' && fastPath !== 'approve') {
       nextStepOffers.offered.splice(0, nextStepOffers.offered.length, ...firstOfEachId([thin.press, ...nextStepOffers.offered]).slice(0, 3));
     }
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
