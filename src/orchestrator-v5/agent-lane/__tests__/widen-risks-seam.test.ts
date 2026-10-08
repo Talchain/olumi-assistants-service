@@ -208,6 +208,40 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     return t;
   };
 
+  /** R1's real first-draft identity card, reused by the identity-answer rows below. */
+  const thinIdentityConstruction = async (riskCount: number, prepare?: () => void) => {
+    const t = await thinConstruction(riskCount, () => {
+      const candidate = constructionCandidate!;
+      (candidate.factors as Record<string, unknown>[])[0]!.unit = 'GBP/month';
+      (candidate.factors as Record<string, unknown>[]).push({ label: 'Paying subscribers', role: 'observable',
+        baseline_known: false, baseline_value: 250, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 1000 });
+      (candidate.links as Record<string, unknown>[]).push({ from: 'Paying subscribers', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+      // Churn threatens the subscriber count. Give every risk its own real path, so the constructor does not repair
+      // an unconnected risk straight into the goal and change the product's two direct parents.
+      for (const risk of candidate.risks as { label: string }[]) {
+        (candidate.links as Record<string, unknown>[]).push({ from: risk.label, to: 'Paying subscribers', direction: 'negative', provenance: 'inferred',
+          effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
+      }
+      candidate.identities = [{ outcome: 'Total MRR', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'ai_proposed' }];
+      script.splice(1, 1, () => fnCall('propose_identity', {}), () => say('Here is the model to explore together.'));
+      prepare?.();
+    });
+    const identity = t._agent.tool_calls.find((c) => c.name === 'propose_identity');
+    expect(identity, `identity fixture setup: ${JSON.stringify(t)}`).toMatchObject({ ok: true, mutated: false });
+    expect(t.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t.suggested_actions)).toHaveLength(1);
+    expect(approveChipOf(t)!.id).toBe(`agent-approve-proposal:${identity!.proposal_id}`);
+    return t;
+  };
+  const pressCard = (chip: Chip) => turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+  const expectThinPress = (t: Body) => {
+    const runIndex = t.suggested_actions.findIndex((c) => c.id === 'agent-run-analysis');
+    expect(runIndex, JSON.stringify(t.suggested_actions)).toBeLessThanOrEqual(0);
+    expect(t.suggested_actions[runIndex === 0 ? 1 : 0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
+    expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
+    expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
+  };
+
   it('P05b-8a: construction with one risk puts the relabelled risks press first and leaves the base reply byte-identical', async () => {
     const t = await thinConstruction(1);
     expect(t.suggested_actions[0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
@@ -235,16 +269,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     });
     try {
       expect(graphOf.has(SCENARIO)).toBe(false);
-      const t = await thinConstruction(0, () => {
-        const candidate = constructionCandidate!;
-        (candidate.factors as Record<string, unknown>[])[0]!.unit = 'GBP/month';
-        (candidate.factors as Record<string, unknown>[]).push({ label: 'Paying subscribers', role: 'observable',
-          baseline_known: false, baseline_value: 250, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 1000 });
-        (candidate.links as Record<string, unknown>[]).push({ from: 'Paying subscribers', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
-          effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
-        candidate.identities = [{ outcome: 'Total MRR', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'ai_proposed' }];
-        script.splice(1, 1, () => fnCall('propose_identity', {}), () => say('Here is the model to explore together.'));
-      });
+      const t = await thinIdentityConstruction(0);
       const { thinDraftOffer } = await import('../method-turn/widen-turn.js');
       expect(thinDraftOffer(graphNow(), true)?.button).toBe(THIN_BUTTON);
       const identity = t._agent.tool_calls.find((c) => c.name === 'propose_identity');
@@ -265,6 +290,103 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     } finally {
       selection.mockRestore();
     }
+  }, 120_000);
+
+  it('r4a RED: Paul\'s B1 construction with a pending identity and one risk offers the exact thin press after Yes', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const identity = construction._agent.tool_calls.find((c) => c.name === 'propose_identity');
+    expect(identity, JSON.stringify(construction)).toMatchObject({ ok: true, mutated: false });
+    expect(construction.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON)).toBe(false);
+    const approve = approveChipOf(construction)!;
+    expect(approve.id).toBe(`agent-approve-proposal:${identity!.proposal_id}`);
+    const t = await pressCard(approve);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: identity!.proposal_id }));
+    expect(t._diagnostic_trace.fast_path).toBe('approve');
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r4a Run placement: a naturally runnable thin identity-answer keeps Run first and the thin press second', async () => {
+    const construction = await thinIdentityConstruction(0, () => {
+      const option = (constructionCandidate!.options as Record<string, unknown>[])[0]!;
+      option.interventions = [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP/month', provenance: 'explicit' }];
+    });
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(t.suggested_actions[0]?.id, JSON.stringify(t)).toBe('agent-run-analysis');
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r4b RED: Not now on the real B1 identity card offers the exact thin press without another confirm', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const identity = construction._agent.tool_calls.find((c) => c.name === 'propose_identity')!;
+    const decline = construction.suggested_actions.find((c) => c.id === `agent-decline-proposal:${identity.proposal_id}`)!;
+    expect(decline).toEqual({ id: `agent-decline-proposal:${identity.proposal_id}`, label: 'Not now', message: 'Not now.' });
+    const t = await pressCard(decline);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'withdraw_proposal', ok: true, mutated: false, proposal_id: identity.proposal_id }));
+    expect(t.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t)).toBe(false);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r4c CONTRAST: an ordinary chat turn after the identity Yes offers no relabelled thin press', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const answered = await pressCard(approveChipOf(construction)!);
+    expect(answered._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    script = [() => say('We can explore this model together.')];
+    const t = await turn({ message: 'What do you think about the pricing options?' });
+    expect(t._agent.tool_calls).toEqual([]);
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('r4c repeated-Yes CONTRAST: a settled identity card cannot offer the relabelled thin press twice', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const approve = approveChipOf(construction)!;
+    const first = await pressCard(approve);
+    expect(first._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    const repeated = await pressCard(approve);
+    expect(repeated._agent.tool_calls.some((c) => c.name === 'authorise_change' && c.mutated === true)).toBe(false);
+    expect(repeated.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(repeated)).toBe(false);
+  }, 120_000);
+
+  it('r4d CONTRAST and producer mutant: Yes on a non-identity link approval on a one-risk graph offers no relabelled thin press', async () => {
+    await thinConstruction(1);
+    script = [() => fnCall('propose_model_change', { from_label: 'Customer churn', to_label: 'Pro plan price', direction: 'negative', strength: 'strong' }),
+      () => say('I can connect Customer churn to Pro plan price as your strong negative influence. Shall I?')];
+    const proposed = await turn({ message: 'Connect Customer churn to Pro plan price with a strong negative influence.' });
+    const link = proposed._agent.tool_calls.find((c) => c.name === 'propose_model_change');
+    expect(link, JSON.stringify(proposed)).toMatchObject({ ok: true, mutated: false });
+    const t = await pressCard(approveChipOf(proposed)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: link!.proposal_id }));
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    const { thinDraftOffer } = await import('../method-turn/widen-turn.js');
+    expect(thinDraftOffer(graphNow(), true)?.button).toBe(THIN_BUTTON);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('r4e CONTRAST: Yes on an identity card when the graph has three risks offers no relabelled thin press', async () => {
+    const construction = await thinIdentityConstruction(3);
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(3);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(3);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('r4f unchanged diagnostic: construction with only an untyped goal-scope pending question already offers the thin press', async () => {
+    const t = await thinConstruction(1, () => {
+      const candidate = constructionCandidate!;
+      const goal = candidate.goal as Record<string, unknown>;
+      goal.metric = 'Non-Pro MRR';
+      goal.scope = { modelled: 'the Pro plan only', alternative: 'all plans together', stated_in_brief: false };
+      (candidate.links as Record<string, unknown>[])[0]!.to = 'Non-Pro MRR';
+    });
+    const pending = await store.readMostRecentPendingActions(SCENARIO) as { chip_id: string; action: { kind: string; expected?: string; scope?: unknown } }[];
+    expect(pending, JSON.stringify(pending)).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ chip_id: 'goal-scope:non_pro_mrr', action: { kind: 'reconcile_goal_scope', expected: 'scope' } });
+    expect(pending[0]!.action.scope).toBeUndefined();
+    expect(t.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:'))).toBe(false);
+    expectThinPress(t);
   }, 120_000);
 
   it('P05b-8b CONTRAST: construction with three risks has no relabelled risks press', async () => {
