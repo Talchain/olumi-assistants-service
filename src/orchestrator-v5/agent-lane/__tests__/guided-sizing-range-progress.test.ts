@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { goalChanceRangeOf, withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
-import { guidedSizingProgress, guidedSizingReplyText } from '../guided-sizing.js';
+import { guidedSizingProgress, guidedSizingReplyText, guidedSizingSentence } from '../guided-sizing.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 
 type Json = Record<string, any>;
@@ -38,7 +38,7 @@ describe('r13 P2(b): range promise uses G0 on the authoritative post-sizing grap
     const { graph, run, inputs } = postSizing();
     expect(goalChanceRangeOf(run.enrichment, graph, OPTION, inputs)).not.toBeNull();
     expect(guidedSizingProgress(graph, run)?.progress_line).toBe(RANGE_LINE);
-    expect(guidedSizingReplyText(guidedSizingProgress(graph, run)?.draft).guided).toContain('Size them to see the chance.');
+    expect(guidedSizingReplyText(guidedSizingProgress(graph, run)?.draft).guided).toContain('Give a rough strength for each to see the chance.');
   });
 
   it('without retained driver evidence the countdown makes no range promise', () => {
@@ -57,7 +57,9 @@ describe('r13 P2(b): range promise uses G0 on the authoritative post-sizing grap
     ]) });
     expect(goalChanceRangeOf(run.enrichment, graph, OPTION, inputs)).toBeNull();
     expect(guidedSizingProgress(graph, run)?.progress_line).toBe(COUNT_ONLY);
-    expect(guidedSizingReplyText(guidedSizingProgress(graph, run)?.draft).guided).toBeNull();
+    const draft = guidedSizingProgress(graph, run)!.draft;
+    expect(guidedSizingReplyText(draft).guided).toBe(guidedSizingSentence(draft, false));
+    expect(guidedSizingReplyText(draft).guided).not.toContain('Give a rough strength');
   });
 
   it('a non-converting estimate remains a blocker after the two placeholders are sized', () => {
@@ -82,7 +84,9 @@ describe('r13 P2(b): range promise uses G0 on the authoritative post-sizing grap
     // G0 can expose conditional groups now; that does not prove the remaining band permits the promised recovery.
     expect(goalChanceRangeOf(run.enrichment, graph, OPTION, inputs)).not.toBeNull();
     expect(guidedSizingProgress(graph, run)?.progress_line).toBe(COUNT_ONLY);
-    expect(guidedSizingReplyText(guidedSizingProgress(graph, run)?.draft).guided).toBeNull();
+    const draft = guidedSizingProgress(graph, run)!.draft;
+    expect(guidedSizingReplyText(draft).guided).toBe(guidedSizingSentence(draft, false));
+    expect(guidedSizingReplyText(draft).guided).not.toContain('Give a rough strength');
   });
 
   it('dirty driver evidence bars the promise despite a stale licensed-range carrier', () => {

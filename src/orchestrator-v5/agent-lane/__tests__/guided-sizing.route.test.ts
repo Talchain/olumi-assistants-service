@@ -13,7 +13,7 @@ type Json = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
 let SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c44';
 const CODE = 'GOAL_FIGURES_PLACEHOLDER_PATH';
-const WORDS = (n: number) => `Not shown yet: ${n} links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.`;
+const WORDS = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess. Give a rough strength for each to see the chance.";
 const PROGRESS = '2 more to go.';
 const LEVEL_ASK = "What's today's level of MRR?";
 const PAIRS = [
@@ -168,7 +168,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
   it('DRAW-2 three-placeholder variant: exact words, unchanged level ask, 3 directness-ordered identity presses and root hook', async () => {
     const body = await run();
     expect(body.assistant_text).toContain(LEVEL_ASK);
-    expect(body.assistant_text).not.toContain('Size them to see the chance');
+    expect(body.assistant_text).not.toContain('Give a rough strength');
     const presses = body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-size-link:'));
     const nodeLabel = (id: string) => graph.nodes.find((n: Json) => n.id === id).label;
     expect(presses.map((c: Json) => ({ id: c.id, label: c.label }))).toEqual(ORDERED_PAIRS.map(([from, to]) => ({
@@ -192,7 +192,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     fixture(false);
     const body = await run();
     expect(body.assistant_text).toContain(LEVEL_ASK);
-    expect(body.assistant_text).not.toContain('Size them to see the chance');
+    expect(body.assistant_text).not.toContain('Give a rough strength');
     expect(body.guided_sizing.total).toBe(2);
     expect(body.graph_hash).toMatch(/^[0-9a-f]{16}$/u);
     expect(body.guided_sizing.graph_hash).toBe(body.graph_hash);
@@ -246,7 +246,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     graph.nodes.find((n: Json) => n.id === 'mrr').observed_state = { value: 9800, raw_value: 9800, unit: '£/month' };
     result.enrichment.inference_warnings = result.enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
     const body = await run();
-    expect(body.assistant_text).toContain(WORDS(3));
+    expect(body.assistant_text).toContain(WORDS);
     expect(body.assistant_text).not.toContain("What's today's level");
     expect(body.guided_sizing.links).toHaveLength(3);
   });
@@ -323,7 +323,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     result.enrichment.inference_warnings = result.enrichment.inference_warnings.map((w: Json) => w.code === CODE ? warning : w);
     const body = await run();
     expect(body.assistant_text).toContain(LEVEL_ASK);
-    expect(body.assistant_text).not.toContain('Size them to see the chance');
+    expect(body.assistant_text).not.toContain('Give a rough strength');
     expect(body.guided_sizing.total).toBe(4);
     const expectedPairs = [['additional_revenue_driver', 'mrr'], ...ORDERED_PAIRS];
     expect(body.guided_sizing.links.map((link: Json) => [link.from, link.to])).toEqual(expectedPairs);
@@ -424,7 +424,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
       recent = [{ turn_id: 'closed-band', request_hash: `agent_turn:closed-band#chip:${digest}`, assistant_message: words }];
     }
     const body = await run();
-    expect(body.assistant_text).not.toContain('Not shown yet: 0');
+    expect(body.assistant_text).not.toContain("The chance isn't shown yet:");
     expect(body.guided_sizing.total).toBe(0);
     const presses = wirePresses(body);
     expect(presses.map(p => p.label)).toEqual(closed ? [] : [words]);
@@ -564,7 +564,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
   it('CONTROL: no PLACEHOLDER_PATH produces no guided words, press or hook', async () => {
     result.enrichment.inference_warnings = result.enrichment.inference_warnings.filter((w: Json) => w.code !== CODE);
     const body = await run();
-    expect(body.assistant_text).not.toContain("Olumi's stand-ins, not your model");
+    expect(body.assistant_text).not.toContain("The chance isn't shown yet:");
     expect(body.suggested_actions.some((c: Json) => c.id.startsWith('agent-size-link:'))).toBe(false);
     expect(body.guided_sizing).toBeUndefined();
   });

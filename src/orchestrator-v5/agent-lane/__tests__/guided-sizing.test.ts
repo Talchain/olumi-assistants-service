@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
-import { guidedSizingReplyText } from '../guided-sizing.js';
+import { guidedSizingForRun, guidedSizingReplyText, guidedSizingSentence } from '../guided-sizing.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
@@ -39,9 +39,10 @@ const CODE = GOAL_FIGURES_PLACEHOLDER_PATH;
 const OPTION = 'raise_pro_price_to_59';
 const EVALUATED = [{ node_id: 'mrr', evaluated: true }];
 const LEVEL_ASK = "What's today's level of MRR?";
-const LEVEL_WITHHOLD = `This run doesn’t show how often each option reaches the goal’s target. ${LEVEL_ASK}`;
-const WORDS_2 = "Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.";
-const WORDS_3 = "Not shown yet: 3 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.";
+const WORDS_2 = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, so any figure would be a guess. Give a rough strength for each to see the chance.";
+const WORDS_3 = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess. Give a rough strength for each to see the chance.";
+const WORDS_AFTER_ONE = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’ or how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess. Give a rough strength for each to see the chance.";
+const withoutPromise = (words: string): string => words.replace(/ Give a rough strength for (?:it|each) to see the chance\./u, '');
 const THREE = [
   { from: 'monthly_churn', to: 'paying_pro_subscribers' },
   { from: 'pro_plan_price', to: 'mrr_lost_to_price_sensitivity' },
@@ -82,6 +83,33 @@ function storedSize(graph: Json, from: string, to: string): void {
   delete edge.defaulted;
 }
 
+describe('GUIDED PATH r14 exact factor words', () => {
+  const pairs = [['A', 'B'], ['C', 'D'], ['E', 'F'], ['G', 'H'], ['I', 'J']].map(([from, to], order) => ({
+    from: from!, to: to!, from_label: from!, to_label: to!, order,
+  }));
+  it.each([
+    [1, "The chance isn't shown yet: the model doesn't yet say how strongly ‘A’ affects ‘B’, so any figure would be a guess. Give a rough strength for it to see the chance."],
+    [2, "The chance isn't shown yet: the model doesn't yet say how strongly ‘A’ affects ‘B’ or how strongly ‘C’ affects ‘D’, so any figure would be a guess. Give a rough strength for each to see the chance."],
+    [3, "The chance isn't shown yet: the model doesn't yet say how strongly ‘A’ affects ‘B’, how strongly ‘C’ affects ‘D’ or how strongly ‘E’ affects ‘F’, so any figure would be a guess. Give a rough strength for each to see the chance."],
+    [4, "The chance isn't shown yet: the model doesn't yet say how strongly ‘A’ affects ‘B’, how strongly ‘C’ affects ‘D’ or how strongly ‘E’ affects ‘F’ and 1 more, so any figure would be a guess. Give a rough strength for each to see the chance."],
+    [5, "The chance isn't shown yet: the model doesn't yet say how strongly ‘A’ affects ‘B’, how strongly ‘C’ affects ‘D’ or how strongly ‘E’ affects ‘F’ and 2 more, so any figure would be a guess. Give a rough strength for each to see the chance."],
+  ] as const)('%i pairs pin the exact header', (total, words) => {
+    expect(guidedSizingSentence({ total, links: pairs.slice(0, total) })).toBe(words);
+  });
+
+  it('an extra comparator cause keeps the explanation but removes only the promise', () => {
+    const { graph, run } = draw2();
+    graph.nodes.find((n: Json) => n.id === 'mrr').goal_direction = '<';
+    delete graph.nodes.find((n: Json) => n.id === 'mrr').goal_threshold;
+    const draft = guidedSizingForRun(onlyPlaceholder(run), graph)!;
+    expect(draft.target_verdict).toMatchObject({ kind: 'not_testable', failures: expect.arrayContaining([
+      expect.objectContaining({ code: 'comparator_unscorable' }),
+    ]) });
+    expect(guidedSizingReplyText(draft).guided).toBe(withoutPromise(WORDS_3));
+    expect(guidedSizingReplyText(draft).guided).not.toContain('Give a rough strength');
+  });
+});
+
 describe('GUIDED PATH: multi-link withhold', () => {
   it('capture remains unchanged evidence: the served warning has 2 links; the target names 3', () => {
     const warning = warningOf(captured.run);
@@ -96,9 +124,9 @@ describe('GUIDED PATH: multi-link withhold', () => {
   it('DRAW-2 three-placeholder variant: another level cause keeps its ask without a sizing promise', () => {
     const { graph, run } = draw2();
     expect(warningOf(run).links).toEqual(THREE);
-    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(LEVEL_WITHHOLD);
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(`${LEVEL_ASK} ${withoutPromise(WORDS_3)}`);
     expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('a size for the links');
-    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('Size them to see the chance.');
+    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('Give a rough strength');
   });
 
   it("captured DRAW-2: another level cause keeps its ask while the two sizing presses remain", () => {
@@ -106,9 +134,9 @@ describe('GUIDED PATH: multi-link withhold', () => {
     expect(warningOf(captured.run).acceptable_links).toEqual(THREE.slice(0, 2));
     expect(value?.total).toBe(2);
     expect(value?.links.map(l => ({ from: l.from, to: l.to }))).toEqual(THREE.slice(0, 2));
-    expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).toBe(LEVEL_WITHHOLD);
+    expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).toBe(`${LEVEL_ASK} ${withoutPromise(WORDS_2)}`);
     expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).not.toContain('a size for the links');
-    expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).not.toContain('Size them to see the chance.');
+    expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).not.toContain('Give a rough strength');
     expect(actions(value, captured.graph)).toHaveLength(2);
   });
 
@@ -201,7 +229,7 @@ describe('GUIDED PATH: multi-link withhold', () => {
       provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true } });
     warningOf(run).acceptable_links.push({ from: 'expansion', to: 'mrr' });
     // The recorded N remains four, but the fourth pair is outside this option's actual cause set.
-    expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).not.toContain('Size them to see the chance.');
+    expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).not.toContain('Give a rough strength');
     expect(sizing(run, graph)?.total).toBe(4);
     expect(sizing(run, graph)?.links[0]).toEqual(expect.objectContaining({ from: 'expansion', to: 'mrr', order: 0 }));
   });
@@ -278,7 +306,7 @@ describe('GUIDED PATH: multi-link withhold', () => {
     expect(sizing(run, graph)?.total).toBe(3);
     expect(sizing(run, graph)?.links).toHaveLength(3);
     expect(actions(sizing(run, graph), graph)).toHaveLength(3);
-    expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).toBe(WORDS_3);
+    expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).toBe("The chance isn't shown yet: the model doesn't yet say how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’, how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’ or how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess. Give a rough strength for each to see the chance.");
   });
 
   it('acceptable membership is authoritative: an unaskable second graph/link list cannot create a guided path', () => {
@@ -327,7 +355,7 @@ describe('GUIDED PATH: multi-link withhold', () => {
     expect(sizing(control, graph)).toBeUndefined();
   });
 
-  it('CONTROL exactly 1 unsized link: the base sentence is byte-identical; no multi-link hook or presses', () => {
+  it('CONTROL exactly 1 unsized pair: singular words with no multi-pair hook or presses', () => {
     const { graph, run } = draw2();
     storedSize(graph, THREE[0].from, THREE[0].to);
     storedSize(graph, THREE[1].from, THREE[1].to);
@@ -336,27 +364,27 @@ describe('GUIDED PATH: multi-link withhold', () => {
     warning.links = [THREE[2]];
     warning.acceptable_links = [THREE[2]];
     warning.message = 'Not shown. This comparison turns on the link from ‘Pro plan price’ to ‘Monthly churn’, whose strength isn’t sized in the model yet. Set it to see how much it matters.';
-    const today = 'This comparison turns on the link from ‘Pro plan price’ to ‘Monthly churn’, whose strength isn’t sized in the model yet. Set it to see how much it matters.';
+    const today = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess. Give a rough strength for it to see the chance.";
     expect(goalChanceWithheldForAgent(control, graph)?.say).toBe(today);
     expect(sizing(control, graph)).toBeUndefined();
     expect(actions(sizing(control, graph), graph)).toEqual([]);
   });
 
-  it('CONTROL exactly 1, mixed branch: the served target sentence is byte-identical', () => {
+  it('CONTROL exactly 1, mixed branch: the other level reason stays without a sizing promise', () => {
     const { graph, run } = draw2();
     storedSize(graph, THREE[0].from, THREE[0].to);
     storedSize(graph, THREE[1].from, THREE[1].to);
     warningOf(run).links = [THREE[2]];
     warningOf(run).acceptable_links = [THREE[2]];
-    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe('This run doesn’t show how often each option reaches the goal’s target. '
-      + "I can't yet say how likely any option is to keep MRR at or above £20,000 / month: I need today's level, and a size for the links from Monthly churn to Paying Pro subscribers, from Pro plan price to MRR lost to price sensitivity and from Pro plan price to Monthly churn. What's today's level of MRR?");
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(`${LEVEL_ASK} The chance isn't shown yet: the model doesn't yet say how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess.`);
     expect(sizing(run, graph)).toBeUndefined();
   });
 
-  it('exact placeholder word class: stand-ins cannot be mutated to estimates', () => {
+  it('exact factor-named words reject the old header and placeholder jargon', () => {
     const { graph, run } = draw2();
     expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).toBe(WORDS_3);
     expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).not.toContain('estimates');
+    expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).not.toMatch(/links|stand-ins/u);
   });
 });
 
@@ -370,7 +398,7 @@ describe('GUIDED PATH: progress from the stored graph after sizing', () => {
     const fresh = api.guidedSizingProgress?.(graph);
     expect(fresh).toBeDefined();
     expect(guidedSizingReplyText({ ...fresh!.draft, recovery_line: 'Existing recovery.' }, fresh))
-      .toEqual({ guided: `${WORDS_2} Existing recovery.`, progress: '2 more to go.' });
+      .toEqual({ guided: `${WORDS_AFTER_ONE} Existing recovery.`, progress: '2 more to go.' });
     expect(guidedSizingReplyText(undefined, fresh)).toEqual({ guided: null, progress: fresh!.progress_line });
     expect(guidedSizingReplyText(undefined)).toEqual({ guided: null, progress: null });
     expect(guidedSizingReplyText({ v: 1, total: 1, links: [] })).toEqual({ guided: null, progress: null });

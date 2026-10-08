@@ -199,12 +199,14 @@ describe.each(captures)('GUIDED HONESTY amended diagnostic: $name', capture => {
   });
 
   it('composition: another cause keeps its level ask without a promise; exact placeholders keep guided words', () => {
-    const said = goalChanceWithheldForAgent(runFor(capture), capture.graph)?.say;
+    const run = runFor(capture);
+    const draft = guidedSizingForRun(run, capture.graph)!;
+    const said = goalChanceWithheldForAgent(run, capture.graph)?.say;
     // Class (ii): a stored missing-level ask is another cause; sizing alone cannot promise the chance.
     if (capture.name === 'draw-2') {
-      expect(said).toBe("This run doesn’t show how often each option reaches the goal’s target. What's today's level of MRR?");
-      expect(said).not.toContain('Size them to see the chance');
-    } else expect(said).toBe(guidedSizingSentence(capture.guided.length));
+      expect(said).toBe(`What's today's level of MRR? ${guidedSizingSentence(draft, false)}`);
+      expect(said).not.toContain('Give a rough strength');
+    } else expect(said).toBe(guidedSizingSentence(draft));
     expect(said).not.toContain('a size for the link');
   });
 });
@@ -339,7 +341,7 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
     const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
     expect(said).toContain(warning!.say);
     expect(said).not.toContain('Olumi has it as a band');
-    expect(said).not.toContain('Not shown yet: 0 links');
+    expect(said).not.toContain("The chance isn't shown yet:");
     expect(guidedSizingProgressLine(graph)).toBeNull();
   });
 
@@ -379,13 +381,13 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
     expect(draft.total).toBe(2);
     expect(draft.links).toHaveLength(2);
     expect(guidedSizingActions(draft, graph).map(a => a.label).join(' ')).not.toContain('Olumi has it as a band');
-    expect(draft.recovery_line).toContain('I need a size for the link from Starter tier MRR to monthly recurring revenue.');
+    expect(draft.recovery_line).toContain('I need a size for the effect from Starter tier MRR to monthly recurring revenue.');
     expect(bindGuidedSizing(draft, guidedSizingActions(draft, graph), { graph_hash: '0123456789abcdef', run_key: 'same-run' }))
       .not.toHaveProperty('recovery_line');
     const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
     // Class (ii): the user's refused conversion still blocks after the two placeholders are sized.
-    expect(said).not.toContain('Size them to see the chance');
-    expect(said).toContain('I need a size for the link from Starter tier MRR to monthly recurring revenue.');
+    expect(said).not.toContain('Give a rough strength');
+    expect(said).toContain('I need a size for the effect from Starter tier MRR to monthly recurring revenue.');
     expect(said).toContain('Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?');
   });
 });

@@ -41,19 +41,25 @@ const fixture = (file: string): CapturedRun => {
 const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
 const PLACEHOLDER = 'GOAL_FIGURES_PLACEHOLDER_PATH';
 const TARGET = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
-// Science §(i) 4 changes the words only when placeholders are the complete cause set.
-const GUIDED_TWO = "Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.";
+const gpReason = (words: string): string => words.replace(/\blinks\b/gu, 'effects').replace(/\blink\b/gu, 'effect');
+// DL r14 changes the invitation only when placeholders are the complete cause set.
+const GUIDED_TWO_HEADER = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, so any figure would be a guess.";
+const GUIDED_TWO = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, so any figure would be a guess. Give a rough strength for each to see the chance.";
 const rows = [
-  { name: 'Run 1: two placeholder links, five target links', captured: fixture('served-item3-run1-placeholder-target.json'), placeholderCount: 2, more: 'and 2 more.' },
-  { name: 'Run 2: one placeholder link, four target links', captured: fixture('served-item3-run2-placeholder-target.json'), placeholderCount: 1, more: 'and 1 more.' },
+  { name: 'Run 1: two placeholder links, five target links', captured: fixture('served-item3-run1-placeholder-target.json'), placeholderCount: 2, more: 'and 2 more.',
+    header: "The chance isn't shown yet: the model doesn't yet say how strongly ‘Online booking rollout disruption’ affects ‘Monthly booked appointments’ or how strongly ‘Online booking availability’ affects ‘Online booking rollout disruption’, so any figure would be a guess.",
+    guided: "The chance isn't shown yet: the model doesn't yet say how strongly ‘Online booking rollout disruption’ affects ‘Monthly booked appointments’ or how strongly ‘Online booking availability’ affects ‘Online booking rollout disruption’, so any figure would be a guess. Give a rough strength for each to see the chance." },
+  { name: 'Run 2: one placeholder link, four target links', captured: fixture('served-item3-run2-placeholder-target.json'), placeholderCount: 1, more: 'and 1 more.',
+    header: "The chance isn't shown yet: the model doesn't yet say how strongly ‘Online booking rollout disruption’ affects ‘Monthly booked appointments’, so any figure would be a guess.",
+    guided: "The chance isn't shown yet: the model doesn't yet say how strongly ‘Online booking rollout disruption’ affects ‘Monthly booked appointments’, so any figure would be a guess. Give a rough strength for it to see the chance." },
 ];
 
-describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more }) => {
+describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more, header, guided }) => {
   const block = captured.analysis_result;
   const warnings = block.enrichment.inference_warnings;
   const placeholder = warnings.find((w) => w.code === PLACEHOLDER)!;
   const target = warnings.find((w) => w.code === TARGET)!;
-  const complete = `${OPENING} ${target.say}`;
+  const complete = `${gpReason(target.say!)} ${header}`;
 
   it('PRECONDITION: the captured wire carries both warnings with distinct claim and option scopes', () => {
     expect(warnings.map((w) => w.code)).toEqual(['FACTOR_EVPPI_NOT_COMPUTED', PLACEHOLDER, TARGET]);
@@ -72,16 +78,16 @@ describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more })
     expect(chance.say).toContain('from Online booking availability to Monthly booked appointments');
     expect(chance.say).toContain('from Additional evening opening hours to Monthly booked appointments');
     expect(chance.say).toContain(more);
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).not.toContain('Give a rough strength');
     // The target-only warning kept shares, but the mixed run did not. Keep the mixed licence and scope.
     expect(chance.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
     expect(chance.option_ids).toBeUndefined();
     expect(chance.node_ids).toEqual(placeholder.node_ids);
   });
 
-  it('placeholder alone: Science §(i) 4 changes 2-link words; exactly 1 keeps its words, note and scope', () => {
+  it('placeholder alone: r14 names one or two pairs with the invitation, keeping note and scope', () => {
     expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [placeholder] } })).toEqual({
-      withheld: true, say: placeholderCount >= 2 ? GUIDED_TWO : placeholder.message, node_ids: placeholder.node_ids,
+      withheld: true, say: guided, node_ids: placeholder.node_ids,
       note: PLACEHOLDER_PATH_NOTE, option_ids: placeholder.option_ids,
     });
   });
@@ -107,7 +113,7 @@ describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more })
   it('RED at base: the complete requirement is owed once, including a build first-pass holder', () => {
     const run = { ran: true, goal_chance: goalChanceWithheldForAgent(block) };
     expect(goalChanceLineOwed([run], complete)).toBeNull();
-    expect(goalChanceLineOwed([run], target.say!)).toBe(OPENING);
+    expect(goalChanceLineOwed([run], target.say!)).toBe(complete);
     expect(goalChanceSayFromThisTurn([{ first_analysis: run }])).toBe(complete);
     expect(goalChanceSayFromThisTurn([run, { ran: true }])).toBeNull();
   });
@@ -116,7 +122,7 @@ describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more })
     const { say: _say, ...withoutSay } = target;
     const older = warnings.map((w) => w.code === TARGET ? withoutSay : w);
     expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: older } })?.say)
-      .toBe(`${OPENING} ${target.message.replace(/^Not shown\.\s*/, '')}`);
+      .toBe(`${gpReason(target.message.replace(/^Not shown\.\s*/, ''))} ${header}`);
   });
 });
 
@@ -126,8 +132,8 @@ it('independent identity reasons remain beside the complete target ask, under th
   const warnings = rows[0]!.captured.analysis_result.enrichment.inference_warnings;
   const chance = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [...warnings, identity] } })!;
   const target = warnings.find(w => w.code === TARGET)!;
-  expect(chance.say).toBe(`${OPENING} ${identity.message.replace(/^Not shown\.\s*/, '')} ${target.say}`);
-  expect(chance.say).not.toContain('Size them to see the chance');
+  expect(chance.say).toBe(`${gpReason(identity.message.replace(/^Not shown\.\s*/, ''))} ${gpReason(target.say!)} ${rows[0]!.header}`);
+  expect(chance.say).not.toContain('Give a rough strength');
   expect(chance.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
   expect(chance.node_ids).toEqual([...new Set(warnings.concat(identity).flatMap((w) => w.node_ids ?? []))]);
 });
@@ -137,7 +143,7 @@ describe('R2 DL composition: draw-2 level ask before the ONE guided list', () =>
   const warnings = draw2.analysis_result.enrichment.inference_warnings.filter(w => [PLACEHOLDER, TARGET].includes(w.code));
   const target = warnings.find(w => w.code === TARGET)!;
   const LEVEL_ONLY = "What's today's level of MRR?";
-  const COMPLETE = `${OPENING} ${LEVEL_ONLY}`;
+  const COMPLETE = `${LEVEL_ONLY} ${GUIDED_TWO_HEADER}`;
 
   it('R13 RED: a stored missing-level ask is retained without a sizing promise or a repeated list clause', () => {
     expect(warnings.map(w => w.code)).toEqual([PLACEHOLDER, TARGET]);
@@ -145,8 +151,8 @@ describe('R2 DL composition: draw-2 level ask before the ONE guided list', () =>
     expect(target.say).toContain('a size for the links from');
     const chance = goalChanceWithheldForAgent({ enrichment: { inference_warnings: warnings } }, draw2.graph)!;
     expect(chance.say).toBe(COMPLETE);
-    expect(chance.say).not.toContain('a size for the links from');
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).not.toContain('a size for the effects from');
+    expect(chance.say).not.toContain('Give a rough strength');
     expect(goalChanceLineOwed([{ ran: true, goal_chance: chance }], GUIDED_TWO)).toBe(COMPLETE);
   });
 
@@ -160,7 +166,8 @@ describe('R2 DL composition: draw-2 level ask before the ONE guided list', () =>
     const chance = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [warnings[0], warning] } }, graph)!;
     expect(chance.say).toContain(LEVEL_ONLY);
     expect(chance.say).toContain("I need today's level");
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).toContain(GUIDED_TWO_HEADER);
+    expect(chance.say).not.toContain('Give a rough strength');
   });
 
   it('r9 CONTROL: the original confirmed draw-2 product derives its level and asks only for its unsized links', () => {
@@ -212,7 +219,8 @@ describe('R13 exact cause-set contrast beside two placeholder presses', () => {
     expect(guidedSizingForRun(run, graph)?.total).toBe(2);
     const chance = goalChanceWithheldForAgent(run, graph)!;
     expect(chance.say).toContain("can't yet test a '< £20,000 / month' target");
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).toContain(GUIDED_TWO_HEADER);
+    expect(chance.say).not.toContain('Give a rough strength');
   });
 
   it('R13 RED: identity_unconfirmed plus placeholders keeps the other links and makes no sizing promise', () => {
@@ -225,7 +233,8 @@ describe('R13 exact cause-set contrast beside two placeholder presses', () => {
     const chance = goalChanceWithheldForAgent(run, graph)!;
     expect(chance.say).toContain('from Pro plan price to MRR');
     expect(chance.say).toContain('from Paying Pro subscribers to MRR');
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).toContain(GUIDED_TWO_HEADER);
+    expect(chance.say).not.toContain('Give a rough strength');
   });
 
   it('R13 RED: a refused Olumi conversion remains a separate cause beside the two placeholders', () => {
@@ -236,14 +245,17 @@ describe('R13 exact cause-set contrast beside two placeholder presses', () => {
     expect(draft.links.some(l => l.nonconverting === true && l.from === 'pro_plan_price' && l.to === 'monthly_churn')).toBe(true);
     const chance = goalChanceWithheldForAgent(run, graph)!;
     expect(chance.say).toContain("Olumi has it as a band, which can't be turned into your goal's units.");
+    expect(chance.say).toContain(GUIDED_TWO_HEADER);
     expect(chance.say).not.toContain('Roughly how much');
-    expect(chance.say).not.toContain('a size for the links from');
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).not.toContain('a size for the effects from');
+    expect(chance.say).not.toContain('Give a rough strength');
   });
 });
 
 describe('R13 residual causes retain their words without a guided promise', () => {
-  const rawPlaceholder: Warning = { code: PLACEHOLDER, message: `Not shown. ${GUIDED_TWO}`,
+  const RAW_HEADER = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Price’ affects ‘Churn’ or how strongly ‘Churn’ affects ‘Goal’, so any figure would be a guess.";
+  const RAW_GUIDED = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Price’ affects ‘Churn’ or how strongly ‘Churn’ affects ‘Goal’, so any figure would be a guess. Give a rough strength for each to see the chance.";
+  const rawPlaceholder: Warning = { code: PLACEHOLDER, message: `Not shown. ${RAW_GUIDED}`,
     acceptable_links: [{ from: 'price', to: 'churn' }, { from: 'churn', to: 'goal' }] };
   const cut = { code: 'GOAL_FIGURES_USER_EFFECT_CLAMPED', node_ids: ['paying_subscribers', 'mrr'],
     message: "Not shown. Your size for how ‘Paying subscribers’ moves ‘MRR’ is bigger than this model's scale can hold, so the run couldn't use it at full size, and the figures that depend on it would be wrong." };
@@ -253,12 +265,12 @@ describe('R13 residual causes retain their words without a guided promise', () =
   it.each([cut, identical])('R13 residual RED: a graph-less raw generated placeholder sentence never promises beside $code', other => {
     const chance = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [rawPlaceholder, other] } })!;
     expect(chance.say).toContain(other.message.replace(/^Not shown\.\s*/, ''));
-    expect(chance.say).not.toContain('Size them to see the chance');
-    expect(chance.say).not.toContain('Not shown yet: 2');
+    expect(chance.say).not.toContain('Give a rough strength');
+    expect(chance.say).toContain(RAW_HEADER);
   });
 
-  it('R13 residual CONTROL: graph-less exact placeholder cause retains amendment A words', () => {
-    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [rawPlaceholder] } })?.say).toBe(GUIDED_TWO);
+  it('R14 residual CONTROL: graph-less exact placeholder cause retains the named-pair invitation', () => {
+    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [rawPlaceholder] } })?.say).toBe(RAW_GUIDED);
   });
 
   it('R13 residual RED: N=0 bands exhausted by identity_unconfirmed stay suppressed while its reason remains', () => {
@@ -286,8 +298,8 @@ describe('R13 residual causes retain their words without a guided promise', () =
     expect(draft?.links).toHaveLength(2);
     expect(guidedSizingActions(draft, graph)).toEqual([]);
     const chance = goalChanceWithheldForAgent(run, graph)!;
-    expect(chance.say).toContain(target.say!);
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).toContain(gpReason(target.say!));
+    expect(chance.say).not.toContain('Give a rough strength');
   });
 
   it('R13 residual RED: an unoffered band keeps its own endpoints beside two offered placeholder questions', () => {
@@ -329,6 +341,7 @@ describe('R13 residual causes retain their words without a guided promise', () =
     const chance = goalChanceWithheldForAgent(run, graph)!;
     expect(chance.say).toContain('from Price to Unsized mediator');
     expect(chance.say).toContain('Roughly how much does Unsized mediator change when Price changes?');
-    expect(chance.say).not.toContain('Size them to see the chance');
+    expect(chance.say).toContain("The chance isn't shown yet: the model doesn't yet say how strongly ‘Price’ affects ‘far’ or how strongly ‘Price’ affects ‘near’, so any figure would be a guess.");
+    expect(chance.say).not.toContain('Give a rough strength');
   });
 });
