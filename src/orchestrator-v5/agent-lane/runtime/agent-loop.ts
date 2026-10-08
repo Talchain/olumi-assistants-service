@@ -25,6 +25,7 @@ import { composeRecoveredProposalReply } from '../proposal-reply.js';
 import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
+import { emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import {
   eligibleTools,
   type CanonicalContextPacket,
@@ -469,6 +470,8 @@ export async function runAgentTurn(
   };
 
   let narrateNext = false;
+  let previousHopBuilt = false;
+  let writingEmitted = false;
   let lastHeldCall: { name: string; args: unknown; result: ToolResult } | undefined;
   /**
    * ⛔ A NARRATION FAILURE NEVER LOSES A HELD CHANGE (Codex #2781 r3 / DL 6049608420, P1).
@@ -528,9 +531,16 @@ export async function runAgentTurn(
     }
     let resp: ModelCallResponse;
     try {
-      resp = hostCall !== undefined
-        ? { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] }
-        : await callModel(request);
+      if (hostCall !== undefined) {
+        resp = { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] };
+      } else {
+        // ⭐ P44 S2 — only the real reply call after the previous hop's successful, unreplayed build.
+        if (hop > 0 && previousHopBuilt && !writingEmitted) {
+          emitAgentPhase('writing');
+          writingEmitted = true;
+        }
+        resp = await callModel(request);
+      }
     } catch (err: unknown) {
       if (!narrateHop) throw err;
       providerMs += Math.max(0, now() - providerStartedAt);
@@ -692,7 +702,13 @@ export async function runAgentTurn(
         output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
       });
     }
-    narrateNext = hopOnlyHeldProposals(calls.map((c) => ({ name: String(c.name) })), toolResults.slice(hopResultsFrom));
+    const hopResults = toolResults.slice(hopResultsFrom);
+    // ⛔ P44 S2 — align each call with its own result; refused and replayed builds cannot announce writing.
+    previousHopBuilt = calls.some((call, index) => {
+      const result = hopResults[index];
+      return call.name === 'build_model_from_brief' && result?.ok === true && result.mutated === true && result.replayed !== true;
+    });
+    narrateNext = hopOnlyHeldProposals(calls.map((c) => ({ name: String(c.name) })), hopResults);
     lastHeldCall = undefined;
     if (narrateNext) {
       const call = calls.at(-1)!;
