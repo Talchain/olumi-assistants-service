@@ -576,14 +576,15 @@ describe('R3 carrier ownership and licence recovery controls', () => {
   });
 });
 
-it('R3 event-span tokenisation 20k -> 160k timing row <22x', () => {
+it('R3 event-span tokenisation 5k -> 40k timing row <22x', () => {
   const c = candidate(); c.goal.metric = 'the app'; c.goal.deliverable = 'the app';
   const prefix = 'ship the app on time ', input = (n: number) => prefix + 'x'.repeat(n - prefix.length);
-  const small = input(20000), large = input(160000);
+  // 5k → 40k (8×), as stated-event-risk's 5k → 40k row: one call at 160k costs seconds, which only slows the gate.
+  const small = input(5000), large = input(40000);
   // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
   const m = scalingRatio(() => briefAttestsEventByDate(small, c.goal), () => briefAttestsEventByDate(large, c.goal));
   expect(m.ratio, m.detail).toBeLessThan(22);
-});
+}, 60_000);
 
 
 describe('DL accepted root rows and controls', () => {

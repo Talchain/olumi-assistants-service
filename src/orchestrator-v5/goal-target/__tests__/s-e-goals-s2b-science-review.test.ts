@@ -1,5 +1,4 @@
 /** REVIEW-2762 Science §d and lens 1: deterministic rows; no LLM or network. */
-import { performance } from 'node:perf_hooks';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as maths from '../event-by-date-share.js';
 import { teamShareMoments, extraShareMoments, exactChance, normalChance, gate, type ShareParts } from '../event-by-date-share.js';

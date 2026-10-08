@@ -2,7 +2,6 @@
  * Local mocks only: no database, network or language model.
  */
 import { readFileSync } from 'node:fs';
-import { performance } from 'node:perf_hooks';
 import { describe, expect, it, vi } from 'vitest';
 import { GraphV3Schema } from '@talchain/schemas';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
