@@ -120,5 +120,23 @@
       "why_now": "See the Olumi estimates feeding this result.",
       "offer_key": "cbeea79decf31897"
     }
-  ]
+  ],
+  "bias_risk": {
+    "v": 1,
+    "items": [
+      {
+        "claim_id": "DSK-B-001",
+        "name": "Anchoring",
+        "why": "Olumi’s starting figure for ‘Enterprise prospect signing likelihood’ could pull later estimates towards it.",
+        "action_id": "bias_anchoring",
+        "press_id": "act:bias_anchoring",
+        "offer_key": "a7161271d00a3ec5",
+        "science": {
+          "claim_id": "DSK-B-001",
+          "claim_title": "Anchoring and insufficient adjustment",
+          "evidence_strength": "strong"
+        }
+      }
+    ]
+  }
 }

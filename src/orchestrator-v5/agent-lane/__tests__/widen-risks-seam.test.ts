@@ -271,13 +271,16 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(addChips(t1)).toEqual([]);
   }, 120_000);
 
-  it('SR-7 RED (reload): the Add presses persist on the answer row like the press that offered them, and stand only while the result is current and nothing awaits approval', async () => {
+  // ⛔ AIE 6048621134: an Add id carries ':', which the answer-offers migration refuses, and the refusal cost the WHOLE answer
+  // its row. Until the envelope admits it (a migration, or a colon-free id in CEE and DGAI: DL ruling), the Add stays live
+  // and is NOT stored, and the answer is recorded (x4-answer-offers-reload rows 7b/7c). Reload durability is the open gap.
+  it('SR-7 (reload): the Add presses are live-only until the offers envelope admits their id, and stand only while the result is current and nothing awaits approval', async () => {
     const { isDurableAnswerOffer, stillValidOffers } = await import('../../../routes/agent-v1-turn.js');
     const { riskAddPressFor } = await import('../method-turn/widen-turn.js');
     const add = riskAddPressFor({ label: 'Recruitment delay', hits: { id: 'hire_two_developers', label: 'Hire Two Developers', kind: 'option' },
       through: { id: 'developer_hires', label: 'Developer Hires', direction: 'positive' },
       affects: { id: 'feature_delivery_capacity', label: 'Feature Delivery Capacity', direction: 'negative' } });
-    expect(isDurableAnswerOffer(add)).toBe(true);
+    expect(isDurableAnswerOffer(add)).toBe(false);
     const current = { analysisReady: undefined, modelExists: true, analysisState: { run_state: { kind: 'complete_current' }, usable_for_chips: true } };
     expect(stillValidOffers([add], { ...current, outstandingProposalIds: new Set() }).map((a) => a.id)).toEqual([add.id]);
     expect(stillValidOffers([add], { ...current, outstandingProposalIds: new Set(['gmh_0123456789ab']) })).toEqual([]);

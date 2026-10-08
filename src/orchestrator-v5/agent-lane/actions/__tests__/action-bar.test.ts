@@ -551,7 +551,8 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
       const d = decidePress({ id: `act:${id}` }, facts);
       if (d.kind !== 'reply') throw new Error('expected typed reply');
       const receipt = actionReceiptOf(d.press, facts.revision, 'ran', undefined, d.reply.science);
-      const expected = id === 'bias_anchoring' && (stage === 'frame' || stage === 'analyse');
+      // Science 393023: a compared Run (≥2 options) reads 'decide'; DSK-B-001 applies there too (decide→evaluate).
+      const expected = id === 'bias_anchoring' && (stage === 'frame' || stage === 'analyse' || stage === 'decide');
       expect(receipt.science).toEqual(expected ? resolveDskClaimProvenance('DSK-B-001') : undefined);
       expect(JSON.stringify(receipt).match(/DSK-B-001/g)?.length ?? 0).toBe(expected ? 1 : 0);
     }
