@@ -5,7 +5,7 @@ import { scopeTargetNotTestableWithRanges } from '../scope-target-not-testable.j
 import { GOAL_CHANCE_RANGE } from '../goal-chance-range.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { decisionReviewFor } from '../../agent-lane/decision-review-press.js';
-import { convertingOlumiEstimate, targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
+import { convertingOlumiEstimate, scoredGoalIdOf, targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE as TARGET } from '../../../orchestrator/context/option-result-source.js';
 import { goalChanceLineOwed, goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
@@ -201,7 +201,7 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     const out = scopeTargetNotTestableWithRanges(envelope, movedGraph);
     const say: string = warning(out)!.say;
     const movedEdge = movedGraph.edges.find((edge: Rec) => edge.from === otherLink.from && edge.to === otherLink.to);
-    expect(convertingOlumiEstimate(movedEdge, movedGraph)).toBe(true);
+    expect(convertingOlumiEstimate(movedEdge, movedGraph, scoredGoalIdOf(movedGraph))).toBe(true);
     expect(say).toBe('');
     expect(say).not.toContain(expectedSay);
   });
@@ -214,7 +214,7 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
       ? { ...n, interventions: { ...n.interventions, [rangedLink.from]: { value: 1 } } } : n) };
     const out = scopeTargetNotTestableWithRanges(envelope, sharedGraph);
     const sharedEdge = sharedGraph.edges.find((edge: Rec) => edge.from === rangedLink.from && edge.to === rangedLink.to);
-    expect(convertingOlumiEstimate(sharedEdge, sharedGraph)).toBe(true);
+    expect(convertingOlumiEstimate(sharedEdge, sharedGraph, scoredGoalIdOf(sharedGraph))).toBe(true);
     expect(warning(out)!.say).toBe('');
     expect(warning(out)!.first_ask).toBeUndefined();
   });
@@ -227,11 +227,11 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
         ['loyalty_app_incremental_sales', 'loyalty_app_gross_profit_uplift']]
       : [['loyalty_app_active', 'incremental_monthly_profit_from_loyalty_app']]).map(ends => JSON.stringify(ends)));
     for (const edge of refused.edges) if (ownPath.has(JSON.stringify([edge.from, edge.to]))) {
-      expect(convertingOlumiEstimate(edge, graph)).toBe(true);
+      expect(convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph))).toBe(true);
       changed += 1;
       if (kind === 'placeholder') edge.provenance.magnitude = 'olumi_placeholder';
       else delete edge.provenance.natural_effect;
-      expect(convertingOlumiEstimate(edge, refused)).toBe(false);
+      expect(convertingOlumiEstimate(edge, refused, scoredGoalIdOf(refused))).toBe(false);
     }
     expect(changed).toBe(name === 'unseen-1' ? 3 : 1);
     const out = scopeTargetNotTestableWithRanges(envelope, refused);

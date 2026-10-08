@@ -105,6 +105,7 @@ import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-g
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -2409,9 +2410,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      const gatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
+      const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
         runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
+        analysisResult: state.analysisResult, graph: state.graph ?? null,
+        current: (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
@@ -4629,6 +4634,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
       wireBody = { ...wireBody, assistant_text: resting.includes(freshScopeQuestion) ? resting : `${resting} ${freshScopeQuestion}`.trim() };
     }
+    // Every narrated reply, including ordinary follow-ups, crosses this boundary before shaping, history and storage.
+    wireBody = withEstimateGoalPointsAtEgress(wireBody, {
+      analysisResult, graph: readbackGraph ?? null,
+      current: (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+    });
     /**
      * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a
      * better length before with the three bullets as a construct"; `agent-lane/reply/compose-reply.ts`). HERE, after every

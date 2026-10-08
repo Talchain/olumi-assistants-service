@@ -124,7 +124,7 @@ describe('GUIDED PATH: multi-link withhold', () => {
   it('DRAW-2: typed hook total 3, one link per edge identity in directness order', () => {
     const { graph, run } = draw2();
     const value = sizing(run, graph);
-    expect(value).toEqual({ v: 1, total: 3, links: expectedLinks(graph) });
+    expect(value).toEqual({ v: 1, total: 3, scored_goal_id: 'mrr', links: expectedLinks(graph) });
   });
 
   it('DRAW-2: 3 exact press labels in the same directness order', () => {
@@ -157,7 +157,7 @@ describe('GUIDED PATH: multi-link withhold', () => {
     const hook = api.bindGuidedSizing?.(value, presses, record);
     expect(value?.links.map(l => l.id)).toEqual(['edge-1', 'edge-0', 'edge-2']);
     expect(presses.map(p => p.parameters)).toEqual(LINK_ORDER.map(l => ({ ...l, edge_id: `edge-${THREE.indexOf(l)}` })));
-    expect(hook).toEqual({ ...value, ...record, links: value?.links.map((l, i) => ({ ...l,
+    expect(hook).toEqual({ v: value?.v, total: value?.total, ...record, links: value?.links.map((l, i) => ({ ...l,
       press: { id: presses[i]!.id, parameters: presses[i]!.parameters } })) });
     expect(hook?.links.map(l => l.press)).toEqual(presses.map(p => ({ id: p.id, parameters: p.parameters })));
   });

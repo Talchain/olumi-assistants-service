@@ -339,8 +339,13 @@ try {
     if (Array.isArray(envelope.inference_warnings)) envelope.inference_warnings = envelope.inference_warnings.filter((w: unknown) =>
       !rec(w) || (w.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE' && w.code !== 'GOAL_CHANCE_LICENSED'));
     const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
-    const verdict = m.targetTestabilityOf(graph, evaluations);
-    const goalId = graph.nodes.filter(rec).find((n: Rec) => n.kind === 'goal')?.id;
+    const savedLicence = (Array.isArray(stored.inference_warnings) ? stored.inference_warnings : [])
+      .find((w: unknown) => rec(w) && w.code === 'GOAL_CHANCE_LICENSED');
+    const scoredGoalId = rec(run?.input_snapshot) ? run.input_snapshot.goal_node_id
+      : rec(stored.input_snapshot) ? stored.input_snapshot.goal_node_id : undefined;
+    const verdict = m.targetTestabilityOf(graph, evaluations,
+      scoredGoalId ?? (rec(savedLicence) ? savedLicence.goal_node_id : undefined) ?? stored.goal_node_id ?? graph.goal_node_id);
+    const goalId = verdict.kind === 'no_goal' ? undefined : verdict.goal_id;
     const analysed = m.asAnalysed(graph);
     const signals = m.assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph: analysed,
       analysisState: undefined, analysisResult: run, identityEvaluations: evaluations, leaderLicensed: false });
@@ -365,7 +370,7 @@ try {
     const unread = m.unreadGoalProduct(graph);
     if (unread !== null) gated = m.withholdOptionGoalFigures(gated, new Set(ids),
       m.unreadGoalProductWarning(unread, ids, 'GOAL_FIGURES_PRODUCT_NOT_READ'), { keepOrdering: true });
-    const goal = graph.nodes.filter(rec).find((n: Rec) => n.kind === 'goal');
+    const goal = graph.nodes.filter(rec).find((n: Rec) => n.kind === 'goal' && n.id === goalId);
     if (m.goalKindOf(goal, graph) === 'chance_of_event') gated = m.withholdOptionGoalFigures(gated, new Set(ids),
       { code: 'GOAL_FIGURES_CHANCE_AS_GOAL', option_ids: ids }, { keepOrdering: true });
     const warning = m.targetNotTestableWarning(graph, verdict, ids, 'GOAL_FIGURES_TARGET_NOT_TESTABLE');

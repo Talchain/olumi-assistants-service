@@ -95,6 +95,15 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** The scored identity wins; legacy graphs with exactly one goal remain unambiguous. */
+export function scoredGoalIdOf(graph: unknown, scoredGoalId?: unknown): string | undefined {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return undefined;
+  const goals = graph.nodes.filter((n): n is Rec & { id: string } => isRec(n) && n.kind === 'goal' && typeof n.id === 'string');
+  const id = scoredGoalId ?? graph.goal_node_id;
+  if (id !== undefined) return typeof id === 'string' && goals.some(n => n.id === id) ? id : undefined;
+  return goals.length === 1 ? goals[0]!.id : undefined;
+}
+
 /**
  * GOAL-REACH 3b, Science §(i) 1 (8 Oct): once the user has CONFIRMED the goal's product identity (the identity card's
  * Yes: `stated_in_brief: true`) and both factors carry today's level, the goal's level today is DERIVED from them — PLoT
@@ -140,11 +149,11 @@ function locallyConvertingNaturalEffect(edge: unknown, graph: unknown): boolean 
  * Follow readable conversion frames or the existing exact identity operands. Each downstream link keeps its OWN
  * case-(c) size check: removing this estimate's block never licenses a placeholder farther along the route.
  */
-export function convertingOlumiEstimate(edge: unknown, graph: unknown, identityEvaluations?: readonly unknown[]): boolean {
+export function convertingOlumiEstimate(edge: unknown, graph: unknown, goalId: unknown, identityEvaluations?: readonly unknown[]): boolean {
   if (!isRec(edge) || linkSizing(edge) !== 'olumi_estimate' || !locallyConvertingNaturalEffect(edge, graph)
     || !isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return false;
   const nodes = graph.nodes.filter(isRec);
-  const goal = nodes.find(n => n.kind === 'goal');
+  const goal = nodes.find(n => n.kind === 'goal' && n.id === goalId);
   if (goal === undefined) return false;
   const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit
     : isRec(goal.observed_state) && typeof goal.observed_state.unit === 'string' ? goal.observed_state.unit : undefined;
@@ -221,7 +230,7 @@ export function untestableGoalTargetRowId(input: unknown, identityEvaluations?: 
  * edges carry no causal size. Callers supply seeds: P5's option nodes, or the licence's actual moved factors.
  * No target, unit, sizing or intervention-level judgement is made by this walk.
  */
-export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[]): {
+export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[], scoredGoalId?: unknown): {
   reached: Set<unknown>;
   paths: Array<{ option_id: string; links: Record<string, unknown>[] }>;
   exactLinks: Set<Record<string, unknown>>;
@@ -229,10 +238,10 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.map(n => [n.id, n] as const));
-  const goal = nodes.find(n => n.kind === 'goal');
+  const goalId = scoredGoalIdOf(graph, scoredGoalId);
   const ids = optionIds;
   const walkable = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
-  const toGoal = new Set<unknown>(goal === undefined ? [] : [goal.id]);
+  const toGoal = new Set<unknown>(goalId === undefined ? [] : [goalId]);
   for (let grew = true; grew;) {
     grew = false;
     for (const e of edges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
@@ -285,10 +294,12 @@ export function targetTestabilityOf(
    * d5 ruling for #2644). Omitted (before a Run) = none attested: only a confirmed identity counts.
    */
   identityEvaluations?: readonly unknown[],
+  scoredGoalId?: unknown,
 ): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
-  const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && typeof n.id === 'string');
+  const selectedGoalId = scoredGoalIdOf(graph, scoredGoalId);
+  const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && n.id === selectedGoalId);
   if (goal === undefined) return { kind: 'no_goal' };
   const goalId = goal.id as string;
   const stated = statedGoalTargetOf(graph, goal);
@@ -328,7 +339,7 @@ export function targetTestabilityOf(
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
     const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     const optionIds = nodes.filter(n => n.kind === 'option' && typeof n.id === 'string').map(n => n.id as string);
-    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])));
+    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])), identityEvaluations, goalId);
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
@@ -346,7 +357,7 @@ export function targetTestabilityOf(
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
     const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
-      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph, identityEvaluations));
+      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph, goalId, identityEvaluations));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     // ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's sizes on both sides of a level-less mediator size the path (M's

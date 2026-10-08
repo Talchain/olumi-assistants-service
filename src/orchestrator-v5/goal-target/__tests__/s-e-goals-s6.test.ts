@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE as TARGET } from '../../../orchestrator/context/option-result-source.js';
 import {
   convertingOlumiEstimate,
+  scoredGoalIdOf,
   targetBecause,
   targetTestabilityOf,
   untestableTargetParts,
@@ -102,7 +103,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     const estimates = graph.edges.filter((edge: Rec) => path.some(link => link.from === edge.from && link.to === edge.to)
       && edge.provenance?.magnitude?.startsWith('olumi_'));
     expect(estimates).toHaveLength(3);
-    expect(estimates.every((edge: Rec) => convertingOlumiEstimate(edge, graph))).toBe(true);
+    expect(estimates.every((edge: Rec) => convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph)))).toBe(true);
     expect(onPath).toEqual([]);
     // The untouched capture records the old 11-link block; only its real placeholder still blocks now.
     expect(input.message).toContain('and 9 more.');
@@ -121,7 +122,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(targetTestabilityOf(graph, envelope.identity_evaluations)).toEqual({ kind: 'testable', goal_id: 'monthly_profit' });
     const estimate = graph.edges.find((edge: Rec) => edge.from === 'loyalty_app_active'
       && edge.to === 'incremental_monthly_profit_from_loyalty_app');
-    expect(convertingOlumiEstimate(estimate, graph)).toBe(true);
+    expect(convertingOlumiEstimate(estimate, graph, scoredGoalIdOf(graph))).toBe(true);
     const out = warning(scopeTargetNotTestableWithRanges(envelope, graph));
     expect(out.option_ids).toEqual(['carry_on_as_now', 'launch_loyalty_app']);
     expect(out.per_option).toBeUndefined();
@@ -198,7 +199,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     const graph = controlGraph();
     const edge = graph.edges.find((link: Rec) => link.from === 'factor' && link.to === 'goal');
     edge.provenance = { source: 'cee', magnitude };
-    expect(convertingOlumiEstimate(edge, graph)).toBe(false);
+    expect(convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph))).toBe(false);
     const verdict = notTestable(graph);
     expect(unsizedLinks(verdict)).toEqual([{ from: 'factor', to: 'goal' }]);
     const out = warning(withholdGoalFiguresForUntestableTarget(controlEnvelope(['option_a']), graph), 'goal');

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readOptionResultSources, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
-import { convertingOlumiEstimate, goalOrderedLinks, targetTestabilityOf, untestableTargetTail } from '../admission/target-testability.js';
+import { convertingOlumiEstimate, goalOrderedLinks, scoredGoalIdOf, targetTestabilityOf, untestableTargetTail } from '../admission/target-testability.js';
 import { linkEffectEndUnits } from '../system-events/link-effect-edit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from './goal-certainty.js';
@@ -20,6 +20,8 @@ export interface GuidedSizingDraft {
   readonly total: number;
   /** Existing user-size recovery, from this same scoped verdict; internal words only, never a hook field. */
   readonly recovery_line?: string;
+  /** Internal scored identity for conversion readers; omitted from the transport hook. */
+  readonly scored_goal_id?: string;
   readonly links: readonly {
     readonly id?: string;
     readonly from: string; readonly to: string;
@@ -34,7 +36,7 @@ export interface GuidedSizingDraft {
 export type GuidedSizingAction = SuggestedAction & {
   readonly parameters: { readonly from: string; readonly to: string; readonly edge_id?: string };
 };
-export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recovery_line'> {
+export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recovery_line' | 'scored_goal_id'> {
   readonly graph_hash: string;
   readonly run_key: string;
   readonly links: readonly (GuidedSizingDraft['links'][number] & {
@@ -50,7 +52,7 @@ export const guidedSizingSentence = (total: number): string =>
 
 /** N comes solely from ONE typed placeholder warning. The SAME case-(c) verdict supplies conversion carve-outs. */
 export function guidedSizingFromWarning(warning: unknown, graph: unknown, identityEvaluations?: readonly unknown[],
-  optionIds?: readonly string[]): GuidedSizingDraft | undefined {
+  optionIds?: readonly string[], scoredGoalId?: unknown): GuidedSizingDraft | undefined {
   const w = record(warning);
   if (w?.code !== GOAL_FIGURES_PLACEHOLDER_PATH && w?.code !== GOAL_FIGURES_TARGET_NOT_TESTABLE) return undefined;
   const links = (w.code === GOAL_FIGURES_PLACEHOLDER_PATH && Array.isArray(w.acceptable_links) ? w.acceptable_links : []).map(record);
@@ -70,9 +72,9 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
   const targetGraph = heldGraph !== undefined && Array.isArray(nodes) && scope !== undefined
     ? { ...heldGraph, nodes: nodes.filter(n => record(n)?.kind !== 'option' || scope.has(String(record(n)?.id))) }
     : graph;
-  const verdict = targetTestabilityOf(targetGraph, identityEvaluations);
+  const verdict = targetTestabilityOf(targetGraph, identityEvaluations, scoredGoalId);
   const carveouts = verdict.kind !== 'not_testable' ? [] : verdict.failures.filter(f => f.case === 'c').flatMap(f => f.links ?? [])
-    .filter(l => hasOlumiSize(edgeFor(l)) && !convertingOlumiEstimate(edgeFor(l), graph, identityEvaluations));
+    .filter(l => hasOlumiSize(edgeFor(l)) && !convertingOlumiEstimate(edgeFor(l), graph, verdict.goal_id, identityEvaluations));
   if (placeholders.length < 2 && carveouts.length === 0) return undefined;
   // A user-stated size that still cannot convert retains the established recovery, rather than Olumi attribution.
   const recovery = (() => {
@@ -85,7 +87,9 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
   })();
   // Existing reverse shortest-hop relaxation from goals; the optional tie rule preserves THIS warning's order.
   const ordered = [...goalOrderedLinks(graph, placeholders, true), ...goalOrderedLinks(graph, carveouts, true)];
-  return { v: 1, total: placeholders.length, ...(recovery !== null ? { recovery_line: recovery } : {}),
+  const goalId = verdict.kind === 'no_goal' ? undefined : verdict.goal_id;
+  return { v: 1, total: placeholders.length, ...(goalId !== undefined ? { scored_goal_id: goalId } : {}),
+    ...(recovery !== null ? { recovery_line: recovery } : {}),
     links: ordered.map((l, order) => {
       const matches = (Array.isArray(edges) ? edges.map(record) : []).filter(e => e?.from === l.from && e.to === l.to);
       const id = matches.length === 1 && typeof matches[0]?.id === 'string' ? matches[0].id : undefined;
@@ -107,6 +111,16 @@ function scoredOptionIdsForRun(result: unknown, warning: unknown): string[] | un
     ? [...new Set(recorded.filter((id): id is string => typeof id === 'string'))] : undefined;
 }
 
+/** The selected Run's scored identity is shared with its licence and later conversion checks. */
+function scoredGoalIdForRun(result: unknown, graph: unknown): string | undefined {
+  const r = record(result);
+  const enrichment = record(r?.enrichment);
+  const warnings = enrichment?.inference_warnings ?? r?.inference_warnings;
+  const licence = (Array.isArray(warnings) ? warnings.map(record) : []).find(w => w?.code === 'GOAL_CHANCE_LICENSED');
+  return scoredGoalIdOf(graph, record(r?.input_snapshot)?.goal_node_id ?? licence?.goal_node_id
+    ?? r?.goal_node_id ?? enrichment?.goal_node_id);
+}
+
 export function guidedSizingForRun(result: unknown, graph: unknown): GuidedSizingDraft | undefined {
   const r = record(result);
   const warnings = record(r?.enrichment)?.inference_warnings ?? r?.inference_warnings;
@@ -117,7 +131,7 @@ export function guidedSizingForRun(result: unknown, graph: unknown): GuidedSizin
   const warning = warnings.find(w => record(w)?.code === GOAL_FIGURES_PLACEHOLDER_PATH)
     ?? warnings.find(w => record(w)?.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
   return guidedSizingFromWarning(warning, graph, Array.isArray(evaluations) ? evaluations : undefined,
-    scoredOptionIdsForRun(result, warning));
+    scoredOptionIdsForRun(result, warning), scoredGoalIdForRun(result, graph));
 }
 
 const PRESS_PREFIX = 'agent-size-link:';
@@ -159,7 +173,7 @@ export function guidedSizingActions(sizing: GuidedSizingDraft | undefined, graph
     const matches = edges.map(record).filter(e => l.id !== undefined ? e?.id === l.id && e.from === l.from && e.to === l.to : e?.from === l.from && e.to === l.to);
     // The selected warning can predate a size: ask only for the SAME held, still-unsized edge.
     if (matches.length !== 1 || (l.nonconverting === true
-      ? !hasOlumiSize(matches[0]) || convertingOlumiEstimate(matches[0], graph)
+      ? !hasOlumiSize(matches[0]) || convertingOlumiEstimate(matches[0], graph, sizing.scored_goal_id ?? scoredGoalIdOf(graph))
       : !isPlaceholderLink(matches[0]))) return [];
     const ends = l.nonconverting === true ? linkEffectEndUnits(graph, l.from, l.to) : null;
     const unit = ends?.target.own[0] ?? ends?.target.adopted;
@@ -209,10 +223,13 @@ export function guidedSizingProgress(graph: unknown, run?: unknown): { draft: Gu
     return typeof id === 'string' ? [[id, held] as const] : [];
   }));
   const evals = Array.isArray(evaluations) ? evaluations : undefined;
-  const paths = unsizedLeaderGoalPaths(graph, options, evals, interventions.size > 0 ? interventions : undefined);
+  const goalId = scoredGoalIdForRun(run, graph);
+  const heldGraph = record(graph);
+  const scoredGraph = heldGraph !== undefined && goalId !== undefined ? { ...heldGraph, goal_node_id: goalId } : graph;
+  const paths = unsizedLeaderGoalPaths(scoredGraph, options, evals, interventions.size > 0 ? interventions : undefined);
   // Same predicate AND same deduplicating warning producer as a Run's N; no stale-warning subtraction.
   const freshWarning = placeholderGoalWarning(graph, paths, GOAL_FIGURES_PLACEHOLDER_PATH);
-  const draft = guidedSizingFromWarning(freshWarning, graph, evals, r !== undefined ? options : undefined);
+  const draft = guidedSizingFromWarning(freshWarning, graph, evals, r !== undefined ? options : undefined, goalId);
   return draft === undefined || draft.total < 2 ? undefined : { draft, remaining: draft.total,
     progress_line: `${draft.total} more to go; with 1 left, Olumi can show a range.` };
 }

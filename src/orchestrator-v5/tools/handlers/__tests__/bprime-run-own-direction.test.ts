@@ -25,7 +25,7 @@ import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { textNamesLeadingOption } from '../../../compose/leading-option-egress-guard.js';
-import { convertingOlumiEstimate, notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
+import { convertingOlumiEstimate, scoredGoalIdOf, notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 
@@ -164,11 +164,11 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     const graph = clone(F.graph_with_target);
     const estimates = graph.edges.filter((edge: Json) => edge.provenance?.magnitude === 'olumi_estimate');
     expect(estimates).toHaveLength(2);
-    expect(estimates.every((edge: Json) => !convertingOlumiEstimate(edge, graph))).toBe(true);
+    expect(estimates.every((edge: Json) => !convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph)))).toBe(true);
     for (const edge of estimates) {
       if (kind === 'placeholder') edge.provenance.magnitude = 'olumi_placeholder';
       else delete edge.provenance.natural_effect;
-      expect(convertingOlumiEstimate(edge, graph)).toBe(false);
+      expect(convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph))).toBe(false);
     }
     const verdict = targetTestabilityOf(graph);
     expect(verdict.kind).toBe('not_testable');

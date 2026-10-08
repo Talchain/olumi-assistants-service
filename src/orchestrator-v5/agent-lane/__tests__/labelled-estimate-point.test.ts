@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
+import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 import { narratorCountGuard, olumiEstimatesFeedingResult } from '../olumi-estimates-feeding-result.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
@@ -86,8 +87,13 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     expect(goalChanceScreenLinesForAgent(result(), g, true)[0]!.chance).toBe(wanted('Raise to £59', 67));
   });
   it('the narrator cannot discharge the labelled sentence by repeating the option and an unlabelled figure', () => {
-    const lines = goalChanceScreenLinesForAgent(result(), graph(), true);
-    const out = withScreenLinesOwed('Raise to £59: about 67% chance of meeting your goal, in this model.', lines);
+    const g = graph(), run = result();
+    run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    const lines = goalChanceScreenLinesForAgent(run, g, true);
+    const owed = withScreenLinesOwed('Raise to £59: about 67% chance of meeting your goal, in this model.', lines);
+    const out = { text: withEstimateGoalPointsAtEgress({ assistant_text: owed.text }, {
+      analysisResult: run, graph: g, current: true,
+    }).assistant_text };
     expect(out.text).toContain(wanted('Raise to £59', 67));
     expect(out.text).toContain(wanted('Keep £49', 43));
     expect(out.text).not.toContain('Raise to £59: about 67% chance of meeting your goal, in this model.');
@@ -98,22 +104,36 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     const run = withGoalChanceLicence({ option_comparison: [
       { option_id: 'raise', probability_of_goal: 0.67 }, { option_id: 'hold', probability_of_goal: 0.43 },
     ] }, g, 'mrr');
-    expect(agentLicenceRecordOf(run)?.olumi_estimate_link_count).toBe(1);
+    expect(agentLicenceRecordOf(run)).toMatchObject({
+      olumi_estimate_link_count: 1, goal_node_id: 'mrr', goal_label: 'MRR',
+      option_labels_by_option: { raise: 'Raise to £59', hold: 'Keep £49' },
+    });
     // A stored Run's attribution is producer-owned; the renderer cannot recalculate it on a later graph.
     const changed = structuredClone(g); changed.edges[0].provenance = { magnitude: 'user_stated' };
     expect(goalChanceScreenLinesForAgent(run, changed, true).map(l => l.chance)).toEqual([
       wanted('Raise to £59', 67), wanted('Keep £49', 43),
     ]);
   });
-  it.each(['Raise to £59 has a 67% chance of meeting your goal.', 'This gives a 67% chance.',
-    'This gives a 68% chance.', 'This gives a 67 % chance.'])(
-    'Explain narration with a bare chance is removed even beside an already complete labelled point: %s', bare => {
-    const lines = goalChanceScreenLinesForAgent(result(), graph(), true);
-    const out = withScreenLinesOwed(`${bare}\n\n${lines.map(l => l.chance).join(' ')}`, lines);
-    expect(out.added).toBe(0);
-    expect(out.text).not.toContain(bare);
-    expect(out.text.match(/67% chance/g)).toHaveLength(1);
-    for (const line of lines) expect(out.text).toContain(line.chance);
+  it.each(['Raise to £59 has a 67% chance of meeting your goal.', 'MRR reaches its target in 67% of model runs.',
+    'Raise to £59: about 67 % in this model.'])(
+    'Explain replaces a licence-bound point even beside an already complete labelled point: %s', bare => {
+    const g = graph(), run = result();
+    run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    const lines = goalChanceScreenLinesForAgent(run, g, true);
+    const owed = withScreenLinesOwed(`${bare}\n\n${lines.map(l => l.chance).join(' ')}`, lines);
+    expect(owed.added).toBe(0);
+    const text = withEstimateGoalPointsAtEgress({ assistant_text: owed.text }, { analysisResult: run, graph: g, current: true }).assistant_text;
+    expect(text).not.toContain(bare);
+    expect(text.match(/67% chance/g)).toHaveLength(1);
+    for (const line of lines) expect(text).toContain(line.chance);
+  });
+  it.each(['This gives a 67% chance.', 'Raise to £59 has a 68% chance.', 'The chance of supplier failure is 10%.'])(
+    'preserves a sentence without the licence value and subject together: %s', sentence => {
+    const g = graph(), run = result();
+    run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    const lines = goalChanceScreenLinesForAgent(run, g, true);
+    const text = `${sentence}\n\n${lines.map(l => l.chance).join(' ')}`;
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: run, graph: g, current: true }).assistant_text).toBe(text);
   });
   it('RC4 producer, not a second count: the sentence reads exactly the producer’s link-size result', () => {
     const census = olumiEstimatesFeedingResult;

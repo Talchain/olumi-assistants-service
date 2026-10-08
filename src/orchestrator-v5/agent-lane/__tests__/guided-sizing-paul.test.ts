@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import paul from './fixtures/goal-reach-paul-graph-632b92b9.json';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { assertIdentityYes, WORDS } from '../../../routes/__tests__/helpers/goal-reach-confirm-reading.js';
-import { convertingOlumiEstimate, targetNotTestableWarning, targetTestabilityOf } from '../../admission/target-testability.js';
+import { convertingOlumiEstimate, scoredGoalIdOf, targetNotTestableWarning, targetTestabilityOf } from '../../admission/target-testability.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { endsOfGraph, validatedDefinition, validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
@@ -105,7 +105,7 @@ describe('GUIDED PATH round 6 — Paul 632b92b9, without graph repair', () => {
     const ends = endsOfGraph(graph);
     const estimates: Json[] = graph.edges.filter((e: Json) => linkSizing(e) === 'olumi_estimate');
     const conversionRows = estimates.map((e: Json) => ({ id: `${e.from}->${e.to}`,
-      converts: convertingOlumiEstimate(e, graph), definition_unit: validatedDefinition(e, ends(e)) ?? null }));
+      converts: convertingOlumiEstimate(e, graph, scoredGoalIdOf(graph)), definition_unit: validatedDefinition(e, ends(e)) ?? null }));
     expect(conversionRows).toEqual([
       { id: 'pro_plan_price->monthly_churn_rate', converts: true, definition_unit: null },
       { id: 'monthly_churn_rate->mrr_lost_to_price_driven_churn', converts: true, definition_unit: null },

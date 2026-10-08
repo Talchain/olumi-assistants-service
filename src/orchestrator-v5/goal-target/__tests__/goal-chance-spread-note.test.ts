@@ -5,6 +5,7 @@ import {
   SPREAD_NOTE_WITHOUT_DOWNSIDE, type SentGoalThreshold,
 } from '../goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../../agent-lane/goal-chance-screen-lines.js';
+import { withEstimateGoalPointsAtEgress } from '../../agent-lane/goal-chance-estimate-egress.js';
 import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import { ContextPackRunDeltaSchema } from '../../context/context-pack-schema.js';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
@@ -197,8 +198,11 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(completed).toBe(b.chance);
     expect(withScreenLinesOwed(completed, [b]).added).toBe(0);
     const phrased = `${b.label}: ${b.figure}.`;
-    const phrasedDone = withScreenLinesOwed(phrased, [b]).text;
-    expect(phrasedDone).toBe(`${b.chance}${b.depends === '' ? '' : ` ${b.depends}`}`);
+    const phrasedOwed = withScreenLinesOwed(phrased, [b]).text;
+    const phrasedDone = withEstimateGoalPointsAtEgress({ assistant_text: phrasedOwed }, {
+      analysisResult: result, graph: g, current: true,
+    }).assistant_text;
+    expect(phrasedDone.trim()).toBe(`${b.chance}${b.depends === '' ? '' : ` ${b.depends}`}`);
     expect(phrasedDone).not.toContain(phrased);
     expect(withScreenLinesOwed(phrasedDone, [b]).added).toBe(0);
     const orphan = withScreenLinesOwed(`${SPREAD_NOTE_WITHOUT_DOWNSIDE}\n${chanceOnly}`, [b]).text;
@@ -236,13 +240,19 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     for (const edge of g.edges.filter((e: Json) => e.provenance?.magnitude === 'olumi_estimate')) {
       edge.provenance.definitional = false;
     }
-    const lines = goalChanceScreenLinesForAgent(result, g, true);
+    // Changing estimate ownership changes this Run's licence; its source records the new RC4 count.
+    const attributed = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, delta) as Json;
+    attributed.inference_warnings[0].shortfall_note_by_option = result.inference_warnings[0].shortfall_note_by_option;
+    const lines = goalChanceScreenLinesForAgent(attributed, g, true);
     for (const line of lines) {
       expect(line.olumi_estimate_link_count).toBe(2);
       expect(line.chance).toContain("using Olumi's estimates for 2 links (see Check estimates).");
     }
     const bare = 'Raise prices by 10% has a 55% chance of meeting your goal.';
-    const out = withScreenLinesOwed(bare, lines).text;
+    const owed = withScreenLinesOwed(bare, lines).text;
+    const out = withEstimateGoalPointsAtEgress({ assistant_text: owed }, {
+      analysisResult: attributed, graph: g, current: true,
+    }).assistant_text;
     expect(out).not.toContain(bare);
     for (const line of lines) expect(out).toContain(line.chance);
   });
@@ -412,7 +422,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(completed.text.split(b.spread_note!)).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [{ ...b, depends: '' }])).toEqual({ text: completed.text, added: 0 });
   });
-  it.each([B, SQ])('B19 label guard: %s’s structurally valid shortfall is dropped when its label differs from the graph', id => {
+  it.each([B, SQ])('B19 label guard: %s’s structurally valid shortfall is dropped when its label differs from the licence', id => {
     const { g, result, lines } = shortfallScreenFixture();
     const original = lines.find(l => l.option_id === id)!;
     expect(original.shortfall_note).toBeDefined();
@@ -423,16 +433,20 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(guarded.chance).not.toContain(`‘${original.label} stale’`);
     expect(guarded.spread_note).toBe(original.spread_note);
   });
-  it('B19 label guard: literal metacharacters in an exact graph label are accepted, and a stale Run stays silent', () => {
+  it('B19 label guard: literal metacharacters in an exact Run label are accepted, and a stale Run stays silent', () => {
     const { g, result, lines } = shortfallScreenFixture();
     const b = lines.find(l => l.option_id === B)!;
     const label = 'Raise (10%)+ [£]';
     g.nodes.find((n: Json) => n.id === B).label = label;
-    result.inference_warnings[0].shortfall_note_by_option[B] = b.shortfall_note!.replace(`‘${b.label}’`, `‘${label}’`);
-    const changed = goalChanceScreenLinesForAgent(result, g, true).find(l => l.option_id === B)!;
-    expect(changed.shortfall_note).toBe(result.inference_warnings[0].shortfall_note_by_option[B]);
+    const renamed = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, delta) as Json;
+    renamed.inference_warnings[0].shortfall_note_by_option = {
+      ...result.inference_warnings[0].shortfall_note_by_option,
+      [B]: b.shortfall_note!.replace(`‘${b.label}’`, `‘${label}’`),
+    };
+    const changed = goalChanceScreenLinesForAgent(renamed, g, true).find(l => l.option_id === B)!;
+    expect(changed.shortfall_note).toBe(renamed.inference_warnings[0].shortfall_note_by_option[B]);
     expect(changed.chance).toContain(`‘${label}’ falls short of your target`);
-    expect(goalChanceScreenLinesForAgent(result, g, false)).toEqual([]);
+    expect(goalChanceScreenLinesForAgent(renamed, g, false)).toEqual([]);
   });
   it('licence and Agent result projection keep the recorded frame and note; malformed notes stay silent', () => {
     const g = graph(); const result = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, level);

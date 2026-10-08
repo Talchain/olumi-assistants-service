@@ -30,14 +30,14 @@ const SIZE_QUESTION = 'How sure are you of that size?';
 const SCREEN_T1B_SAID_ONCE = SCREEN_T1B.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
 let analysisResult: Json = READ.analysis_result;
 
-const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
+const rows = new Map<string, Json>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string }) => {
+  append: vi.fn(async (w: Json) => {
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
-    const row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash };
+    const row = { ...w, assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` };
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
@@ -100,6 +100,20 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   const run = (reply: string) => [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }], say(reply)];
   const count = (text: string, s: string): number => text.split(s).length - 1;
+  const estimateScreenLine = () => {
+    READ = structuredClone(READ_T1B);
+    READ.graph.nodes.find((n: Json) => n.id === 'raise_prices_10').label = 'Raise to £59';
+    READ.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
+    analysisResult = structuredClone(READ.analysis_result);
+    analysisResult.enrichment.inference_warnings = [{
+      code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance of meeting your goal is licensed on this Run.',
+      form: 'each', option_ids: ['raise_prices_10'], pct_by_option: { raise_prices_10: 67 },
+      target: { comparator: 'at_least', value: 126000, unit: '£/month' }, olumi_estimate_link_count: 1,
+      goal_node_id: 'monthly_recurring_revenue', goal_label: 'Monthly recurring revenue',
+      option_labels_by_option: { raise_prices_10: 'Raise to £59' },
+    }];
+    return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
+  };
   const shortfallScreenLine = () => {
     READ = structuredClone(READ_T1B);
     READ.analysis_state.leader_claim = { permitted: true };
@@ -135,6 +149,34 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run(narration), 'Run it');
     expect(b.assistant_text).not.toContain('99 links');
     expect(b.assistant_text).toContain(line.chance);
+  });
+
+  it.each(['run', 'follow-up', 'added=0'] as const)('r10 %s: qualified points are labelled on wire, storage and replay', async kind => {
+    const line = estimateScreenLine();
+    const bare = kind === 'follow-up' ? 'The recorded chance for Raise to £59 is 67%.' : '‘Raise to £59’: about 67% in this model.';
+    const unrelated = 'The chance of supplier failure is 10%. The chance of supplier failure is 67%.';
+    const narration = `${bare} ${unrelated}${kind === 'added=0' ? `\n${line.chance}` : ''}`;
+    const outputs = kind === 'follow-up' ? [say(narration)] : run(narration);
+    const message = kind === 'follow-up' ? 'What was the recorded chance for Raise to £59?' : 'Run it';
+    const b = await turn(outputs, message);
+    const assertLabelled = (text: string) => {
+      expect(text).not.toContain(bare);
+      expect(count(text, line.chance), text).toBe(1);
+      expect(text).toContain(unrelated);
+    };
+    assertLabelled(b.assistant_text);
+    const saved = [...rows.values()].find(r => r.assistant_message === b.assistant_text);
+    expect(saved, 'the exact labelled wire text is the durable answer').toBeDefined();
+    assertLabelled(saved!.assistant_message);
+    // Even a historical ordinary answer with the old bare sentence crosses the current licence boundary on replay.
+    if (kind === 'follow-up') saved!.assistant_message = narration;
+    const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message, turn_id: saved!.turn_id,
+    } });
+    expect(replay.statusCode, replay.body).toBe(200);
+    const replayed = replay.json() as Body;
+    expect(replayed._agent.replayed).toBe(true);
+    assertLabelled(replayed.assistant_text);
   });
 
   it('fixture control: the served readback carries a range record and withholds the leader on a current Run', () => {

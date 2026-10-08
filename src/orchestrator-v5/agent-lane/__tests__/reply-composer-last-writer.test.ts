@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
 const ROUTE = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+const RELOAD = readFileSync(new URL('../../../routes/assist.v1.scenario-graph.ts', import.meta.url), 'utf8');
 const CALL = 'const composedReply = composeReplyShape(';
 const REGISTRATION = "app.post('/agent/v1/turn'";
 /** Functions that compose or rewrite reply text upstream of the composer; none may run after it. */
@@ -23,6 +24,7 @@ const TEXT_WRITERS = [
   'withDisclosures(', 'withWriteOutcome(', 'withB3LinesAtRest(', 'withBreakEvenAnswer(', 'withScreenLinesOwed(',
   'withA7AfterGate(', 'enforceAgentLaneLeaderClaimsAtWire(', 'enforceLeaderLicenceAtFinalEgress(',
   'withoutDriverAbsenceClaimsAtEgress(', 'withLeftOutOptionCorrectionAtEgress(',
+  'withEstimateGoalPointsAtEgress(',
   'withoutProposalIds(', 'composeDirectAnswerResponse(', 'textAtRest(',
 ];
 
@@ -65,7 +67,17 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
 
   it('2-CONTROL: the same scan over the WHOLE route finds the upstream writers (the probe sees writes and writers)', () => {
     expect(textWrites(ROUTE).length).toBeGreaterThan(5);
-    for (const writer of ['withDisclosures(', 'withBreakEvenAnswer(', 'enforceLeaderLicenceAtFinalEgress(']) expect(ROUTE).toContain(writer);
+    for (const writer of ['withDisclosures(', 'withBreakEvenAnswer(', 'enforceLeaderLicenceAtFinalEgress(', 'withEstimateGoalPointsAtEgress(']) expect(ROUTE).toContain(writer);
+  });
+
+  it('r10: live replies, same-id replay and conversation reload use the ONE estimate point classifier', () => {
+    const gate = 'withEstimateGoalPointsAtEgress(';
+    expect(ROUTE.split(gate).length - 1).toBe(2);
+    expect(RELOAD.split(gate).length - 1).toBe(1);
+    const liveAt = ROUTE.lastIndexOf(gate);
+    expect(liveAt).toBeLessThan(ROUTE.indexOf(CALL));
+    expect(liveAt).toBeLessThan(ROUTE.indexOf('const sentText = String(wireBody.assistant_text ?? text);'));
+    expect(RELOAD).toContain('analysisResult: authority.analysisResult, graph: authority.graph, current,');
   });
 
   it('2-MUTANT (in memory): a text write placed after the composer is caught', () => {

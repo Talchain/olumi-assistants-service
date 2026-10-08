@@ -28,7 +28,6 @@ import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
 import { goalChanceEstimateLinkCount } from './goal-chance-estimate-attribution.js';
-import { sentencesOf } from './reply/compose-reply.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
@@ -52,21 +51,6 @@ const CHANCE_LABEL = 'chance of meeting your goal, in this model';
 const ESTIMATE_POINT_END = '(see Check estimates).';
 const estimatePointSentence = (l: GoalChanceScreenLine): string => l.chance.slice(0, l.chance.indexOf(ESTIMATE_POINT_END) + ESTIMATE_POINT_END.length);
 
-/** Narrator points cannot coexist with an owed producer-bound estimate label, in either word order or shorthand. */
-function unlabelledGoalPoint(sentence: string, lines: readonly GoalChanceScreenLine[]): boolean {
-  const plain = (value: string): string => value.replace(/['"‘’“”*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-  const said = plain(sentence).replace(/^(?:[-•]|\d{1,3}[.)])\s+/, '');
-  // A percentage chance in either word order, including a standalone shorthand point.
-  const point = /^(?:(?:about|roughly|approximately|around|at least|at most|less than|more than)\s+)?\d+(?:\.\d+)?\s*%\s*[.!]?$/;
-  if (point.test(said) || (/\b(?:chance|probability)\b/.test(said) && /\d+(?:\.\d+)?\s*%/.test(said))) return true;
-  // An option's standalone point is a goal figure here; a percentage with another quantity remains narration.
-  return lines.some(l => {
-    const prefix = `${plain(l.label)}:`;
-    return said.startsWith(prefix)
-      && point.test(said.slice(prefix.length).trim());
-  });
-}
-
 /** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
 export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
   const facts = goalChanceFactsForAgent(result, graph, current);
@@ -83,7 +67,8 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
     .map((n) => [n.id as string, n.label as string]));
   const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string, point = false): GoalChanceScreenLine[] => {
-    const label = labels.get(optionId);
+    const recorded = rec(facts.goal_chance_licence?.option_labels_by_option)?.[optionId];
+    const label = typeof recorded === 'string' && recorded.trim() !== '' ? recorded : labels.get(optionId);
     // An option the graph cannot name has no line (the screen drops it too); never an id.
     if (label === undefined) return [];
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
@@ -246,14 +231,6 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
       }
     }
     body = narratorCountGuard(body, null).text;
-    // Only a complete producer-bound point may narrate these goal chances. The masked canonical
-    // sentences retain their bytes; any bare goal figure is removed before the labelled lines are owed.
-    body = body.split('\u0000').map(part =>
-      part.startsWith('GP_ESTIMATE_POINT_') ? part : part.split('\n').map(row => {
-        const sentences = sentencesOf(row);
-        const kept = sentences.filter(sentence => !unlabelledGoalPoint(sentence, lines));
-        return kept.length === sentences.length ? row : kept.join(' ');
-      }).join('\n')).join('\u0000');
     for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000`).join(chance);
   }
   const hasShortfall = lines.some(l => l.shortfall_note !== undefined);

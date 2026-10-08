@@ -106,6 +106,10 @@ export interface GoalChanceLicence {
   readonly option_ids: readonly string[];
   /** Each LICENSED option's DISPLAYED whole percentage — the figure the sentence quotes. */
   readonly pct_by_option: Readonly<Record<string, number>>;
+  /** Identity and labels captured on this scored Run; absent only on historical licences. */
+  readonly goal_node_id?: string;
+  readonly goal_label?: string;
+  readonly option_labels_by_option?: Readonly<Record<string, string>>;
   /** RC4's unaccepted link-size count for this scored Run; definitions are excluded. */
   readonly olumi_estimate_link_count?: number;
   /** The options whose chance was withheld for their own path (model order); present only when non-empty. Form is `each`. */
@@ -264,6 +268,12 @@ export function goalChanceLicenceOf(
     form,
     option_ids,
     pct_by_option: pct,
+    ...(typeof goalId === 'string' ? { goal_node_id: goalId } : {}),
+    ...(typeof goal?.label === 'string' ? { goal_label: goal.label } : {}),
+    option_labels_by_option: Object.fromEntries(option_ids.flatMap(id => {
+      const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
+      return typeof label === 'string' && label.trim() !== '' ? [[id, label]] : [];
+    })),
     ...(estimateLinks > 0 ? { olumi_estimate_link_count: estimateLinks } : {}),
     ...(spread === undefined && Object.keys(shortfall).length === 0 ? {} : { sent_threshold: sentThreshold }),
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
@@ -633,6 +643,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
   shortfall_note_by_option?: Readonly<Record<string, string>>;
   olumi_estimate_link_count?: number;
+  goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -678,6 +689,12 @@ export function goalChanceLicenceForAgent(result: unknown): {
   return {
     form,
     option_ids: optionIds,
+    ...(typeof r.goal_node_id === 'string' ? { goal_node_id: r.goal_node_id } : {}),
+    ...(typeof r.goal_label === 'string' ? { goal_label: r.goal_label } : {}),
+    ...(isRec(r.option_labels_by_option) ? { option_labels_by_option: Object.fromEntries(
+      Object.entries(r.option_labels_by_option).filter((entry): entry is [string, string] => optionIds.includes(entry[0])
+        && typeof entry[1] === 'string' && entry[1].trim() !== ''),
+    ) } : {}),
     ...(typeof r.olumi_estimate_link_count === 'number' && Number.isSafeInteger(r.olumi_estimate_link_count)
       && r.olumi_estimate_link_count > 0 ? { olumi_estimate_link_count: r.olumi_estimate_link_count } : {}),
     ...(validSent && sent !== undefined ? { sent_threshold: {

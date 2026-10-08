@@ -21,6 +21,7 @@ import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.
 import { bindGuidedSizing, guidedSizingForRun, guidedSizingSentence } from '../guided-sizing.js';
 import { guidedSizingActions, guidedSizingProgressLine } from '../guided-sizing.js';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
+import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 import * as estimateProducer from '../olumi-estimates-feeding-result.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
@@ -250,10 +251,12 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
 
   it('MUTANT: relaxed case(c), but the narrator gave the unlabelled chance → RED', () => {
     const graph = byDoor.natural!.graph;
-    const lines = goalChanceScreenLinesForAgent(pointWordRun(graph), graph, true);
+    const run = pointWordRun(graph);
+    const lines = goalChanceScreenLinesForAgent(run, graph, true);
     expect(lines).toHaveLength(2);
     const bare = '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.';
-    const text = withScreenLinesOwed(bare, [lines[0]!]).text;
+    const owed = withScreenLinesOwed(bare, [lines[0]!]).text;
+    const text = withEstimateGoalPointsAtEgress({ assistant_text: owed }, { analysisResult: run, graph, current: true }).assistant_text;
     expect(text).toContain('using Olumi\'s estimates for 1 link (see Check estimates)');
     expect(text).not.toContain(bare);
   });

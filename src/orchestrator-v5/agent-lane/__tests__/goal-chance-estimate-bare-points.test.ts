@@ -1,55 +1,59 @@
 import { describe, expect, it } from 'vitest';
-import { withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
+import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 
-const line: GoalChanceScreenLine = {
-  option_id: 'raise', label: 'Raise to £59', figure: 'about 67%', depends: '',
-  chance: '‘Raise to £59’: about 67% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 link (see Check estimates).',
-  olumi_estimate_link_count: 1,
-};
+const graph = { nodes: [{ id: 'raise', kind: 'option', label: 'Raise to £59' }, { id: 'goal', kind: 'goal', label: 'MRR' }], edges: [] };
+const result = (pct = 67) => ({ enrichment: { inference_warnings: [{
+  code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['raise'], pct_by_option: { raise: pct },
+  target: { comparator: 'at_least', value: 20000, unit: '£/month' }, olumi_estimate_link_count: 1,
+  goal_node_id: 'goal', goal_label: 'MRR', option_labels_by_option: { raise: 'Raise to £59' },
+}] } });
+const line = (pct = 67) => goalChanceScreenLinesForAgent(result(pct), graph, true)[0]!;
+const clean = (text: string, pct = 67): string => withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+  analysisResult: result(pct), graph, current: true,
+}).assistant_text;
 
-describe('r9: every unlabelled goal point is absent beside an owed estimate-labelled point', () => {
+describe('r10: estimate points require the licence value and its subject', () => {
   const bare = [
     'Raise to £59: about 67%.',
     '‘Raise to £59’: about 67%.',
     '- **Raise to £59**: about 67%.',
-    'Raise to £59: less than 1%.',
-    'Raise to £59: more than 99%.',
     'Raise to £59: roughly 67%.',
     'Raise to £59: approximately 67%.',
     'Raise to £59: around 67%.',
-    'Raise to £59: at least 67%.',
-    'Raise to £59: at most 67%.',
     'Raise to £59: 67%.',
-    'About 67%.',
-    'The chance is about 67%.',
-    'The probability is about 67%.',
-    'The chance of meeting your goal is about 67%.',
-    'The probability of reaching your target is about 67%.',
     'Raise to £59 has about 67% chance of meeting your goal.',
+    'MRR meets the target in 67% of runs.',
+    'Raise to £59: approximately 67% market share.',
   ];
-  it.each(bare)('removes %s before adding the complete point', sentence => {
-    const out = withScreenLinesOwed(sentence, [line]);
-    expect(out).toEqual({ text: line.chance, added: 1 });
-    expect(out.text).not.toContain(sentence);
+  it.each(bare)('replaces the bound point: %s', sentence => {
+    expect(clean(sentence)).toBe(line().chance);
+    expect(clean(sentence)).not.toContain(sentence);
   });
-  it.each(bare)('removes %s even when the complete point is already present (added=0)', sentence => {
-    const out = withScreenLinesOwed(`${sentence}\n${line.chance}`, [line]);
-    expect(out.added).toBe(0);
-    expect(out.text).toContain(line.chance);
-    expect(out.text).not.toContain(sentence);
+  it.each(bare)('removes the bare copy beside an already complete point: %s', sentence => {
+    const out = clean(`${sentence}\n${line().chance}`);
+    expect(out).toContain(line().chance);
+    expect(out.split(line().chance)).toHaveLength(2);
+    expect(out).not.toContain(sentence);
   });
-  it('preserves the complete producer-bound sentence and unrelated percentages', () => {
-    const facts = 'Costs are about 67% of revenue. Raise to £59: about 33% market share. Raise to £59: approximately 67% market share.';
-    const text = `${facts}\n${line.chance}`;
-    expect(withScreenLinesOwed(text, [line])).toEqual({ text, added: 0 });
+  it.each(['About 67%.', 'The chance is about 67%.', 'The chance of meeting your goal is about 67%.',
+    'Raise to £59: less than 1%.', 'Raise to £59: more than 99%.', 'Raise to £59: about 33% market share.',
+    'Costs are about 67% of revenue.'])('preserves the unbound sentence byte for byte: %s', sentence => {
+    const text = `  ${sentence}\t\n${line().chance}`;
+    expect(clean(text)).toBe(text);
   });
-  it('preserves the producer-bound conditional driver figure', () => {
-    const withDriver = { ...line, depends: 'It rests most on your link: in the runs where it does not hold, the chance is less than 1%.' };
-    const text = `${withDriver.chance} ${withDriver.depends}`;
-    expect(withScreenLinesOwed(text, [withDriver])).toEqual({ text, added: 0 });
+  it.each(['Raise to £59: <1%.', 'Raise to £59: less than 1%.', 'Raise to £59: 0%.'])('binds the licensed zero figure: %s', sentence => {
+    expect(clean(sentence, 0)).toBe(line(0).chance);
+    expect(clean(sentence, 0)).not.toContain(sentence);
   });
-  it('keeps the established shorthand behaviour when no estimate label is owed', () => {
-    const { olumi_estimate_link_count: _count, ...plain } = line;
+  it('keeps owing separate from the final value-bound egress, with added=0', () => {
+    const bare = '‘Raise to £59’: about 67% in this model.';
+    const owed = withScreenLinesOwed(`${bare}\n${line().chance}`, [line()]);
+    expect(owed.added).toBe(0);
+    expect(clean(owed.text)).not.toContain(bare);
+  });
+  it('keeps established shorthand when no estimate licence is owed', () => {
+    const { olumi_estimate_link_count: _count, ...plain } = line();
     plain.chance = '‘Raise to £59’: about 67% chance of meeting your goal, in this model.';
     const text = 'Raise to £59: about 67%.';
     expect(withScreenLinesOwed(text, [plain])).toEqual({ text, added: 0 });
