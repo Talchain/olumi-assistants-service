@@ -34,6 +34,7 @@ import { proposeProductIdentity } from '../identity-proposal.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { scopeIssueBlocks } from '../goal-scope.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -165,7 +166,9 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     const card = proposeProductIdentity(raw);
     let identityReading: ActionFacts['identityReading'] = null;
     // Condition 5: this is a new caller, so check the same base and dry-run the sole writer.
-    if (card !== null && identityConfirmBaseIsWritable(raw)) {
+    // Codex r1 P2: the propose_identity capability refuses while a blocking goal-scope question is pending; so does the offer.
+    const scopeBlocked = (read.pending ?? []).some(p => scopeIssueBlocks(p.action));
+    if (card !== null && !scopeBlocked && identityConfirmBaseIsWritable(raw)) {
       const graphHash = read.graphHash ?? computeAnalysisAffectingGraphHash(raw as never);
       if (typeof graphHash === 'string' && applyIdentityConfirmEdit({ persistedGraph: raw, ...card,
         expected_graph_hash: graphHash, reading_token: identityConfirmReadingToken(card) }).kind === 'mutated') {

@@ -136,7 +136,9 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   if (current === null && currentState !== undefined && classifyValueSource(currentState.source) === 'user_stated') return null;
   // Condition 4: a stated CURRENT level must reconcile at the factors' current raw values within the existing 5%.
   if (current !== null) {
-    if (!sameUnit(current.unit, goalUnit)) return null;
+    // Codex r1 P2: currency AND period read in the goal's own context ("Monthly recurring revenue" + GBP = £/month).
+    const cm = readMoneyTotal(current.unit, goalLabel); const gm = readMoneyTotal(goalUnit, goalLabel);
+    if (cm === null || gm === null || cm.code !== gm.code || cm.period !== gm.period) return null;
     const operands = [a, b].map(n => {
       const os = isRec(n.observed_state) ? n.observed_state : undefined;
       return typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) && text(os.unit) !== undefined

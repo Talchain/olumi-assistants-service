@@ -106,7 +106,7 @@ import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLines
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
+import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
@@ -3743,7 +3743,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
       readingWaiting: readbackGraph != null && proposeProductIdentity(readbackGraph) !== null && identityConfirmBaseIsWritable(readbackGraph),
     });
-    if (identityCardToIssue(result.tool_calls, result.tool_results) || reoffer) {
+    if (identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
       const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
       result = {
         ...result,

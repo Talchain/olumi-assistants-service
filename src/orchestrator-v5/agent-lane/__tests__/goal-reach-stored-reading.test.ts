@@ -5,7 +5,7 @@ import { unconfirmedGoalProductFor } from '../../tools/handlers/unconfirmed-goal
 import { actionFactsOf } from '../actions/state.js';
 import { actionBarOf } from '../actions/rank.js';
 import { decidePress } from '../actions/handlers.js';
-import { IDENTITY_ISSUED_FALLBACK, identityApproveMessage, identityIssuedText, readingOfIdentityApproval } from '../identity-card.js';
+import { IDENTITY_ISSUED_FALLBACK, identityApproveMessage, identityAutoIssueAllowed, identityIssuedText, readingOfIdentityApproval } from '../identity-card.js';
 
 type Graph = { nodes: Record<string, any>[]; edges: Record<string, any>[] };
 const PAUL = JSON.parse(readFileSync(new URL('./fixtures/goal-reach-paul-graph-632b92b9.json', import.meta.url), 'utf8')) as Graph;
@@ -141,4 +141,24 @@ describe('GOAL-REACH build 1 stored reading', () => {
     expect(identityIssuedText({})).toBe(IDENTITY_ISSUED_FALLBACK);
     expect(identityIssuedText({ card: null, public_label: 7 })).not.toMatch(/undefined|null|7/);
   });
+
+  it('Codex r1 P1: an automatic identity card (Run hint or re-offer) is never issued while another held change waits', () => {
+    expect(identityAutoIssueAllowed({ issue: true, reoffer: false, heldWaiting: false })).toBe(true);
+    expect(identityAutoIssueAllowed({ issue: false, reoffer: true, heldWaiting: false })).toBe(true);
+    expect(identityAutoIssueAllowed({ issue: true, reoffer: false, heldWaiting: true })).toBe(false);
+    expect(identityAutoIssueAllowed({ issue: false, reoffer: true, heldWaiting: true })).toBe(false);
+    expect(identityAutoIssueAllowed({ issue: false, reoffer: false, heldWaiting: false })).toBe(false);
+  });
+  it('Codex r1 P2: a blocking goal-scope question pending → no confirm_reading (the capability would refuse); a non-blocking one → offered', () => {
+    const bar = (pending: unknown[]) => { const b = actionBarOf(actionFactsOf({ scenarioId: 'goal-reach', graph: PAUL, pending } as never)); return [...b.priority, ...b.standard, ...b.more].filter(o => o.action_id === 'confirm_reading'); };
+    expect(bar([{ action: { kind: 'reconcile_goal_scope', expected: 'scope', scope: { extent: 'component' } } }])).toHaveLength(0);
+    expect(bar([{ action: { kind: 'reconcile_goal_scope', expected: 'scope' } }])).toHaveLength(1); // untyped drafter question: not blocking (scopeIssueBlocks)
+    expect(bar([])).toHaveLength(1);
+  });
+  it('Codex r1 P2: a stated monthly level reconciles when the threshold unit is GBP and the goal label says monthly; a yearly label does not', () => {
+    const g = (label: string) => { const x = withCurrent(14700); node(x, 'mrr').label = label; node(x, 'mrr').goal_threshold_unit = 'GBP'; return x; };
+    expect(proposeProductIdentity(g('Monthly recurring revenue'))).not.toBeNull();
+    expect(proposeProductIdentity(g('Annual recurring revenue'))).toBeNull();
+  });
 });
+

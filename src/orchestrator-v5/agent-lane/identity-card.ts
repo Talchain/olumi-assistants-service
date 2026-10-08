@@ -47,10 +47,11 @@ export function readingOfIdentityApproval(message: unknown): string | undefined 
 /** The held line when an issued card carries neither words nor a public label (COPY-SHAPE: never "undefined"). */
 export const IDENTITY_ISSUED_FALLBACK = 'I’ve prepared that confirmation for you to approve. Nothing changes until you approve it.';
 /** The reply text for a bar-issued identity card: its words, else its public label, else the fixed held line. */
-export function identityIssuedText(issued: { readonly card?: unknown; readonly public_label?: unknown }): string {
+export function identityIssuedText(issued: unknown): string {
   const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
-  const words = typeof issued.card === 'object' && issued.card !== null ? (issued.card as { words?: unknown }).words : undefined;
-  return nonEmpty(words) ? words : nonEmpty(issued.public_label) ? issued.public_label : IDENTITY_ISSUED_FALLBACK;
+  const r = typeof issued === 'object' && issued !== null ? (issued as { card?: unknown; public_label?: unknown }) : {};
+  const words = typeof r.card === 'object' && r.card !== null ? (r.card as { words?: unknown }).words : undefined;
+  return nonEmpty(words) ? words : nonEmpty(r.public_label) ? r.public_label : IDENTITY_ISSUED_FALLBACK;
 }
 
 /** What the Agent is told when a Run's stored model holds a reading to confirm. */
@@ -105,6 +106,17 @@ export function identityCardToReoffer(p: {
 }): boolean {
   if (p.fastPath !== undefined || p.mutated || p.proposalOffered || !p.readingWaiting) return false;
   return !p.toolCalls.some((c) => c.name === 'propose_identity' || c.name === 'authorise_change');
+}
+
+/**
+ * ⛔ AN AUTOMATIC IDENTITY CARD NEVER DISPLACES ANOTHER HELD CHANGE (GOAL-REACH Codex r1 P1): the route's supersession
+ * compares operation paths, so an identity card issued on its own (a Run's hint or the re-offer) could discard a held,
+ * unrelated goal edit the user has not answered yet. One approval carries one change: while another held proposal is live,
+ * nothing is issued automatically; the card returns on the next turn once that change is settled. A press of the bar's
+ * `confirm_reading` is the user's own request and is not gated here.
+ */
+export function identityAutoIssueAllowed(p: { readonly issue: boolean; readonly reoffer: boolean; readonly heldWaiting: boolean }): boolean {
+  return (p.issue || p.reoffer) && !p.heldWaiting;
 }
 
 type IdentityRefusalCode = 'reading_not_confirmed' | 'superseded' | 'not_admissible' | 'carrier_conflict' | 'already_carried' | string;
