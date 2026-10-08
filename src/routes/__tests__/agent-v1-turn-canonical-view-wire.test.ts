@@ -6,6 +6,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import { RunAnalysisHandlerFactSchema, type RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { ConversationContent } from '../../orchestrator-v5/session/conversation-content.js';
+import { reconciliationPending } from '../../orchestrator-v5/agent-lane/goal-scope.js';
+import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
 import type { LeaderFinalEgressOpts } from '../../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 
@@ -27,6 +29,13 @@ let viewChange: (view: Json) => unknown = view => view;
 let graphReads = 0;
 let scopeRecomposition = false;
 let producerCapture: Json | null = null;
+let afterGraphRead: (() => void) | undefined;
+let duringModelCall: (() => void) | undefined;
+let scopeRemovalPending: PendingAction | undefined;
+let readingScopeSnapshot = false;
+let snapshot: Json;
+let snapshotReadsAtFinal = 0;
+const snapshotReadDurations: number[] = [];
 const rows: (Json & Partial<ConversationContent>)[] = [];
 const modelBodies: Json[] = [];
 const store = {
@@ -79,6 +88,7 @@ async function canonicalRead(): Promise<Json> {
 beforeAll(async () => {
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
     modelBodies.push(JSON.parse(String(init?.body ?? '{}')));
+    duringModelCall?.();
     return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text',
       text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 });
   }));
@@ -113,9 +123,13 @@ beforeAll(async () => {
   app.post('/assist/v1/scenarios/:id/graph', async () => {
     graphReads += 1;
     if (producerCapture !== null) {
+      readingScopeSnapshot = true;
       const read = await producerReadApp.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
       expect(read.statusCode).toBe(200);
       finalRead = read.json();
+      readingScopeSnapshot = false;
+      snapshotReadsAtFinal = (store as Json).readExistingScenario.mock.calls.length;
+      afterGraphRead?.();
       return finalRead;
     }
     finalRead = await canonicalRead();
@@ -131,6 +145,10 @@ afterAll(async () => {
 beforeEach(() => {
   producerCapture = null; hashInput.mockReset();
   for (const key of ['readExistingScenario', 'readScenarioRunAnalysisFactsFor', 'readMostRecentPendingActions']) delete (store as Json)[key];
+  snapshot = { userId: null, graph: GRAPH, briefText: 'The strategic brief', analysisInvalidatedAt: null };
+  (store as Json).readExistingScenario = vi.fn(async () => structuredClone(snapshot));
+  afterGraphRead = undefined; duringModelCall = undefined; scopeRemovalPending = undefined;
+  readingScopeSnapshot = false; snapshotReadsAtFinal = 0; snapshotReadDurations.length = 0;
   selectRun('previous-run', '2026-09-30T12:00:00.000Z');
   scopeRecomposition = false; graphReads = 0; rows.length = 0; modelBodies.length = 0; viewChange = view => view;
 });
@@ -149,9 +167,15 @@ function useProducerCapture(capture: Json) {
       goal_certainty: capture.analysis_goal_certainty } }))); // Persisted facts are JSON, with absent optional keys.
   // Captures retain historical projection hashes: isolate the same hash-input seam as the neighbouring producer test.
   hashInput.mockReturnValue(fact.result.graph_hash_at_run);
-  (store as Json).readExistingScenario = vi.fn(async () => ({ userId: null, graph: structuredClone(capture.graph),
-    briefText: capture.brief_text, analysisInvalidatedAt: null, revision: 7 }));
-  (store as Json).readMostRecentPendingActions = vi.fn(async () => []);
+  snapshot = { userId: null, graph: structuredClone(capture.graph),
+    briefText: capture.brief_text, analysisInvalidatedAt: null, revision: 7 };
+  (store as Json).readExistingScenario = vi.fn(async () => {
+    const started = performance.now();
+    try { return structuredClone(snapshot); }
+    finally { snapshotReadDurations.push(performance.now() - started); }
+  });
+  (store as Json).readMostRecentPendingActions = vi.fn(async () =>
+    readingScopeSnapshot && scopeRemovalPending !== undefined ? [scopeRemovalPending] : []);
   (store as Json).readScenarioRunAnalysisFactsFor = vi.fn(async () => ({ facts: [{ fact,
     fact_row_id: 'captured-run', fact_created_at: fact!.result.computed_at }], total_count: 1 }));
 }
@@ -369,4 +393,84 @@ describe('canonical view on the same-page turn wire', () => {
     noViewBytes(modelFacingToolResult('get_canonical_state', { analysis: facts }));
     noViewBytes(projectModelFacingContextPack({ ...pack, run_delta: facts.run_delta } as never));
   });
+  it('Q2 PARITY: scope removal preserves the same snapshot revision and reload view', async () => {
+    useProducerCapture(PRODUCER_CAPTURES[0][1]);
+    const goal = snapshot.graph.nodes.find((node: Json) => node.kind === 'goal');
+    scopeRemovalPending = reconciliationPending(SCENARIO, {
+      kind: 'reconcile_goal_scope', goal_id: goal.id, goal_label: goal.label,
+      declared_scope: { modelled: 'all revenue', alternative: 'one stream', stated_in_brief: true },
+      question: 'Which revenue scope should this model represent?',
+      scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true,
+        source: { quote: 'all revenue' } }, expected: 'billing_basis', operands: [], derivations: [],
+    }, 0);
+    const response = await run();
+    expect(response.statusCode, response.body).toBe(200);
+    expect(finalRead.analysis_state.leader_claim.withheld_reason).toBe('goal_scope_unresolved');
+    const reload = await producerReadApp.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    expect(reload.statusCode, reload.body).toBe(200);
+    const turn = response.json();
+    expect(turn.canonical_analysis_view.staleness.revision).toBe(7);
+    expect(turn.canonical_analysis_view.run.run_id).toBe(reload.json().canonical_analysis_view.run.run_id);
+    expect(turn.canonical_analysis_view).toEqual(reload.json().canonical_analysis_view);
+  });
+
+  it.each(['revision', 'graph', 'graph and revision'] as const)(
+    'Q3 CONCURRENT WRITE: %s changes after the final read, so the view is omitted', async change => {
+      useProducerCapture(PRODUCER_CAPTURES[0][1]);
+      const currentRead = (store as Json).readExistingScenario;
+      afterGraphRead = () => {
+        if (change.includes('revision')) snapshot.revision += 1;
+        if (change.includes('graph')) snapshot.graph.edges[0].strength.mean += 0.125;
+      };
+      const response = await run();
+      expect(response.statusCode, response.body).toBe(200);
+      expect(Object.hasOwn(response.json(), 'canonical_analysis_view')).toBe(false);
+      expect(response.json().analysis_state).toEqual(finalRead.analysis_state);
+      expect(response.json().graph_hash).toBe(finalRead.graph_hash);
+      expect(currentRead.mock.calls.length - snapshotReadsAtFinal, 'one authoritative read after final readback').toBe(1);
+    },
+  );
+
+  it('Q3 UNCHANGED: one extra read preserves the exact canonical view', async () => {
+    useProducerCapture(PRODUCER_CAPTURES[0][1]);
+    const currentRead = (store as Json).readExistingScenario;
+    const response = await run();
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().canonical_analysis_view).toEqual(finalRead.canonical_analysis_view);
+    expect(currentRead.mock.calls.length - snapshotReadsAtFinal).toBe(1);
+    process.stdout.write(`Q3 egress latency: ${snapshotReadDurations.at(-1)!.toFixed(3)} ms; 1 extra read (fixture mock, not database latency)\n`);
+  });
+
+  it.each(['error', 'timeout', 'absent scenario', 'missing port'] as const)(
+    'Q3 UNAVAILABLE: %s omits the view without changing the answer', async unavailable => {
+      useProducerCapture(PRODUCER_CAPTURES[0][1]);
+      afterGraphRead = () => {
+        const port = (store as Json).readExistingScenario;
+        if (unavailable === 'error') port.mockRejectedValue(new Error('current scenario read unavailable'));
+        if (unavailable === 'timeout') port.mockImplementation(() => new Promise(() => {}));
+        if (unavailable === 'absent scenario') port.mockResolvedValue(null);
+        if (unavailable === 'missing port') delete (store as Json).readExistingScenario;
+      };
+      const response = await run();
+      expect(response.statusCode, response.body).toBe(200);
+      expect(Object.hasOwn(response.json(), 'canonical_analysis_view')).toBe(false);
+      expect(response.json().analysis_state).toEqual(finalRead.analysis_state);
+      expect(response.json().graph_hash).toBe(finalRead.graph_hash);
+    }, 10_000,
+  );
+
+  it('Q3 CACHED DURING MODEL: another tab writes during the model call without invalidating the turn cache', async () => {
+    useProducerCapture(PRODUCER_CAPTURES[0][1]);
+    duringModelCall = () => { snapshot.revision = 8; };
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      turn_id: randomUUID(), scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'What does the model hold?',
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(modelBodies.length).toBeGreaterThan(0);
+    expect(graphReads, 'the final read reuses the cached pre-model snapshot').toBe(1);
+    expect(finalRead.canonical_analysis_view.staleness.revision).toBe(7);
+    expect(snapshot.revision).toBe(8);
+    expect(Object.hasOwn(response.json(), 'canonical_analysis_view')).toBe(false);
+  });
+
 });
