@@ -36,7 +36,9 @@ describe('get_canonical_state: every link carries its band, on the canvas\'s tab
     const links = (s as unknown as { links: { to: string; band?: string; strength?: { mean: number } }[] }).links;
     const bandOf = Object.fromEntries(links.map((l) => [l.to, l.band]));
     // The lowest band in the canvas's word, "slight", never the enum's `weak` (Canvas #2021 B1: the model relays it).
-    expect(bandOf).toEqual({ lead: 'strong', cap: 'slight', coord: 'very strong', ramp: 'moderate', v: 'strong' });
+    // Science 393023 LICENCE ruling 3, re-derived: `lead` is the "+" door constant (0.5/0.125, `defaulted`), a placeholder,
+    // so it projects NO band (nobody sized it); `v` still carries "strong" on the same table.
+    expect(bandOf).toEqual({ lead: undefined, cap: 'slight', coord: 'very strong', ramp: 'moderate', v: 'strong' });
     expect(Object.values(bandOf)).not.toContain('weak');
     // The number is still there beside the word: the band is added, nothing is taken away.
     expect(links.find((l) => l.to === 'lead')?.strength?.mean).toBe(0.5);

@@ -238,7 +238,7 @@ import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { approvalSizes, isAcceptedOlumiSize, linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { approvalSizes, isAcceptedOlumiSize, linkSizing, sizedByApproval, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
@@ -1383,7 +1383,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
-      ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
+      // Science 393023 LICENCE ruling 3: a placeholder has no current band, so none is projected for the Agent to name.
+      ...(linkSizing(e) !== 'placeholder' && st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(countedOnce ? { exists_probability: 1, counted_once: true }
         : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
@@ -3183,8 +3184,10 @@ export function createAgentCapabilities(
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     const links = parent.operations.map((o) => {
       const [from, to] = o.path.split('::');
-      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown }; band?: unknown; author?: unknown };
-      return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band, author: v.author };
+      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown };
+        band?: unknown; author?: unknown; sizing_after_approval?: unknown };
+      return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band,
+        author: v.author, sizingAfterApproval: v.sizing_after_approval };
     });
     const readable = links.every((l) => l.from !== '' && l.to !== '' && typeof l.magnitude === 'number' && (l.intent === 'set' || l.intent === 'confirm_current')
       && isInfluenceBand(l.band) && typeof l.expected?.mean === 'number' && (l.expected.effect_direction === 'positive' || l.expected.effect_direction === 'negative')
@@ -3224,20 +3227,24 @@ export function createAgentCapabilities(
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
-    const holds = check !== null && sent.every((l) => {
+    const holds = check !== null && sent.every((l, index) => {
       const e = check.edges.find((x) => x.from === l.from && x.to === l.to) as { strength?: unknown; provenance?: unknown } | undefined;
       const mean = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
       const want = l.expected.effect_direction === 'negative' ? -l.magnitude : l.magnitude;
       const prov = (e?.provenance ?? {}) as { source?: unknown; magnitude?: unknown };
       // Whose, as approved: a band the user named that MOVED the link is theirs; a band they named that it already sat in,
       // and Olumi's band they agreed to, are REVIEW (`reviewed_by_user`, R11) — never the user's stamp on Olumi's figure.
-      const usersOwn = prov.source === 'user_specified' && (e as { defaulted?: unknown } | undefined)?.defaulted !== true;
+      const usersOwn = linkSizing(e) === 'user';
       const reviewed = (prov as { reviewed_by_user?: { intent?: unknown } }).reviewed_by_user?.intent === 'confirm';
-      const stamped = l.author === 'user_specified' && l.intent === 'set' ? prov.source === 'user_specified'
+      const stamped = l.author === 'user_specified' && l.intent === 'set' ? usersOwn
         : l.author === 'user_specified' ? reviewed : reviewed && !usersOwn;
+      const approvedPlaceholderMove = l.author === 'model_proposed' && l.intent === 'set'
+        && links[index]?.sizingAfterApproval === 'placeholder' && linkSizing(e) === 'placeholder';
       return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && stamped
-        // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-        && !approvalSizes(e);
+        // B1: confirm_current records a review of the stored mean, even when nobody has sized it yet.
+        // A user set must read back as sized. A model move predicted by the canonical adoption writer to remain a
+        // placeholder proves only its changed prior and review; review never earns sizing or authorship by itself.
+        && (l.intent === 'confirm_current' || approvedPlaceholderMove || !approvalSizes(e));
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -3253,15 +3260,22 @@ export function createAgentCapabilities(
      */
     const storedSizing = (l: { from: string; to: string }) => linkSizing(check!.edges.find((x) => x.from === l.from && x.to === l.to));
     const quotedLabel = (id: string): string => quoteLabelForUser(labelOf(id));
-    const parts = sent.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
+    const parts = sent.map((l) => storedSizing(l) === 'placeholder'
+      ? `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} ${l.intent === 'confirm_current'
+        ? 'reviewed, kept as it is' : 'changed; it isn\u2019t sized in the model yet'}`
+      : `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
     const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
     // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
-    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate', 'placeholder'].includes(storedSizing(l))).length;
+    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate'].includes(storedSizing(l))).length;
+    const reviewsOnly = sent.every((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
+    const placeholderChangesOnly = sent.every((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `Recorded ${sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
+      follow_up: `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
+        : placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
+        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
         + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
         + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
@@ -3612,13 +3626,15 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), direction: current },
+        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: linkBandWord(currentBand) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? (keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
+              ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
+              : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
@@ -3971,7 +3987,8 @@ export function createAgentCapabilities(
       const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
-      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; sizedBefore: LinkSizing };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean;
+        was: InfluenceBand; sizedBefore: LinkSizing; sizedAfterApproval: LinkSizing };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -4033,6 +4050,11 @@ export function createAgentCapabilities(
         // The link's review stamp as proposed (#2257's `reviewed_by_user`): the writer refuses the set if it moved since.
         const review = (edge.provenance as { reviewed_by_user?: { intent?: unknown; at?: unknown } } | undefined)?.reviewed_by_user;
         const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
+        // B1: preview the canonical review writer, then read it with THE predicate. Some contradictory projected
+        // records must remain unsized after review; their card must not promise an estimate that review cannot store.
+        const provenance = isPlainRecord(edge.provenance) ? edge.provenance : {};
+        const sizedAfterApproval = linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance,
+          reviewed_by_user: { intent: 'confirm' } }, edge) });
         /**
          * ⭐ F1 (#87 6006627551; DL lease c6): a band that MOVES a link holding the user's own figure would drop it — for
          * the user's band and Olumi's estimate alike (a brief figure is `brief_extraction` + `user_stated`, so the
@@ -4051,20 +4073,19 @@ export function createAgentCapabilities(
           const keeps = currentBand === band;
           // #2473 CR (CODEX_CLI_OVERFLOW 5937437431): the user's OWN strength, named in the band it already sits in, is
           // "already" — nothing to approve. Any other kept link is a review whose figure the writer holds byte-equal.
-          if (keeps && (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
-            && (edge as { defaulted?: unknown }).defaulted !== true) {
+          if (keeps && linkSizing(edge) === 'user') {
             already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`);
             continue;
           }
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand,
+            sizedBefore: linkSizing(edge), sizedAfterApproval });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
-        const usersOwn = (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
-          && (edge as { defaulted?: unknown }).defaulted !== true;
+        const usersOwn = linkSizing(edge) === 'user';
         if (usersOwn) {
           if (currentBand === band) { already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`); continue; }
           return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${linkBandWord(currentBand)}), and an estimate never replaces it. `
@@ -4079,8 +4100,11 @@ export function createAgentCapabilities(
         const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
         if (keeps && !approvalSizes(edge) && isAcceptedOlumiSize(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
-        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
+        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
+          expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed',
+          sizing_after_approval: sizedAfterApproval } });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand,
+          sizedBefore: linkSizing(edge), sizedAfterApproval });
       }
       if (ops.length === 0) {
         if (heldFigures.length > 0 && definitional.length === 0) {
@@ -4095,18 +4119,29 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'nothing_to_change', already,
           detail: 'Every link already holds what was asked, so nothing was prepared. Say so plainly.' };
       }
-      const whose = (x: Shown): string => x.yours
+      const remainsPlaceholder = (x: Shown): boolean => (x.keeps || !x.yours) && x.sizedAfterApproval === 'placeholder';
+      const reviewKeepsPlaceholder = (x: Shown): boolean => x.keeps && remainsPlaceholder(x);
+      const sourceRemainsUnmarked = (x: Shown): boolean => (x.keeps || !x.yours) && x.sizedAfterApproval === 'unmarked';
+      const reviewOnlyWhose = 'review only; nobody has sized this link';
+      const placeholderChangeWhose = 'placeholder prior changed; nobody has sized this link';
+      const whose = (x: Shown): string => sourceRemainsUnmarked(x) ? 'source of its size not recorded'
+        : reviewKeepsPlaceholder(x) ? reviewOnlyWhose : x.yours
         ? (x.keeps ? 'reviewed by you, kept as it is' : 'your estimate')
-        : 'Olumi\u2019s estimate';
+        : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
       /**
        * Whose figure each link holds AFTER the approval (M1 Accept receipt, Codex pre-review P2): naming the band a link
        * already sits in is review (R11), never authorship — the writer keeps who sized it, so a kept link is the user's
-       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its two literals are a typed contract
+       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its literals are a typed contract
        * (`proposal-reply.ts` `LINK_WHOSE`, fail-closed on any other).
        */
-      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' =>
-        x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours' : 'Olumi\u2019s estimate';
-      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user').length;
+      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' | 'Olumi\u2019s first estimate for a link nobody had sized'
+        | typeof reviewOnlyWhose | typeof placeholderChangeWhose | undefined =>
+        sourceRemainsUnmarked(x) ? undefined : remainsPlaceholder(x) ? (x.keeps ? reviewOnlyWhose : placeholderChangeWhose)
+          : x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours'
+          : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
+      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user' && !reviewKeepsPlaceholder(x)).length;
+      const reviewOnlyLinks = shown.filter(reviewKeepsPlaceholder);
+      const unsizedChanges = shown.filter(x => !x.keeps && remainsPlaceholder(x));
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4114,11 +4149,18 @@ export function createAgentCapabilities(
         operations: ops,
         provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}: `
-          + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
+        public_label: `${reviewOnlyLinks.length === shown.length
+          ? `Review ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          : unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          : `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}`}: `
+          + shown.map((x) => reviewKeepsPlaceholder(x)
+            ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet (kept as it is)`
+            : remainsPlaceholder(x) ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet`
+            : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
       });
       proposals.put(proposal);
-      const olumis = shown.filter((x) => !x.yours).length;
+      const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;
+      const firstEstimates = shown.filter((x) => whoseFigure(x) === 'Olumi\u2019s first estimate for a link nobody had sized');
       // A link Olumi had ALREADY estimated is re-sized, not sized: the Agent says so, never "your placeholders" (R3 DEFECT 2).
       const reEstimated = shown.filter((x) => !x.yours && !x.keeps && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted'));
       return {
@@ -4126,8 +4168,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), sizing: x.sizedBefore },
-          becomes: { band: linkBandWord(x.band) }, whose: whoseFigure(x), keeps_current_strength: x.keeps })),
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { ...(x.sizedBefore === 'placeholder' ? {} : { band: linkBandWord(x.was) }), sizing: x.sizedBefore },
+          becomes: remainsPlaceholder(x) ? { sizing: 'placeholder' } : { band: linkBandWord(x.band) },
+          whose: whoseFigure(x), keeps_current_strength: x.keeps,
+          ...(x.keeps || !x.yours ? { sizing_after_approval: x.sizedAfterApproval } : {}) })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
@@ -4136,6 +4180,19 @@ export function createAgentCapabilities(
           + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
+            : '')
+          + (firstEstimates.length > 0
+            ? 'For links nobody had sized, this offers Olumi\u2019s first estimate: approving records it as Olumi\u2019s, never as the user\u2019s own. '
+              + (firstEstimates.some((x) => x.keeps) ? 'Where the strength is kept as it is, approving records only the user\u2019s review, never authorship. ' : '')
+            : '')
+          + (reviewOnlyLinks.length > 0
+            ? 'These links aren\u2019t sized in the model yet: approving records only the user\u2019s review and keeps their stored strength. Never call their strengths the user\u2019s own or Olumi\u2019s estimates. '
+            : '')
+          + (unsizedChanges.length > 0
+            ? 'These changes move the stored placeholder strength, but the links still aren\u2019t sized in the model yet. Say that explicitly: approving changes the stored figure and records review, never an estimate or the user\u2019s authorship. '
+            : '')
+          + (shown.some(sourceRemainsUnmarked)
+            ? 'For links whose sizing stays unmarked, who set the strength is not recorded. Never call that strength the user\u2019s own, a placeholder or Olumi\u2019s estimate. '
             : '')
           + (keptNotTheirs > 0
             ? `${keptNotTheirs === shown.length ? 'Every link here' : `${keptNotTheirs} of these links`} already sits in the band the user named, so approving records only their review: its strength is kept exactly as it is and is never the user\u2019s own (\`whose\`). `
@@ -5674,10 +5731,10 @@ export function createAgentCapabilities(
           const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
           const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
           const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
-          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : p?.source === 'user_specified';
+          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : linkSizing(x) === 'user';
           return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
-            // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-            && !approvalSizes(x);
+            // B1: a same-band confirm reviews the unchanged mean; it may still be an unsized placeholder.
+            && (v.intent === 'confirm_current' || !approvalSizes(x));
         };
         /**
          * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of

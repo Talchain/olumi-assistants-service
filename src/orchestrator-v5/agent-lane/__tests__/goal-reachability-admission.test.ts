@@ -63,6 +63,7 @@ describe('risks are wired in, not deleted', () => {
       expect(e, `risk ${id} has no link to the goal`).toBeDefined();
       expect(e!.effect_direction).toBe('negative');
       expect((e as { defaulted?: boolean }).defaulted).toBe(true);
+      expect(e!.provenance!.magnitude).toBe('olumi_placeholder');
     }
   });
 
