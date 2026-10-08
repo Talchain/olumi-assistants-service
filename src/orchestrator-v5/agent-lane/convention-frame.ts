@@ -20,6 +20,7 @@ import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { sayFigure } from './say-figure.js';
 import { isCurrencyUnit } from '../../utils/currency-alphabet.js';
+import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 
 /** Words that make a quantity signed or able to exceed its range: never framed by the convention (Science §(s)(2), §(u)). */
 const SIGNED_OR_UNBOUNDED = /\b(change|changes|growth|grow|increase|decrease|uplift|delta|difference|margin|inflation|index|indexed|baseline|yoy|year[- ]on[- ]year|net|nrr|ndr|profit|profits|cash ?flow|balance|surplus|deficit|gain|gains|loss|losses|temperature|return|roi)\b/i;
@@ -34,7 +35,10 @@ const COUNT_HEADS = new Set(['subscriber', 'customer', 'user', 'account', 'clien
   'patient', 'student', 'shipment', 'installation']);
 
 /** A per-period tail on a count unit: "/month", "per month", "a year", "/wk"… */
-const PER_PERIOD = /(\/\s*|\bper\s+|\ba\s+|\beach\s+)(day|week|wk|month|mo|quarter|year|yr|annum)\b/i;
+const PER_PERIOD = /(\/\s*|\bper\s+|\ba\s+|\ban\s+|\beach\s+)(second|sec|minute|min|hour|hr|day|week|wk|fortnight|month|mo|quarter|year|yr|annum)s?\b/i;
+
+/** A count per period ("subscribers/month", "customers per hour"): a FLOW (Science §(v)(2)). */
+export const isFlowUnit = (unit: string | null | undefined): boolean => typeof unit === 'string' && PER_PERIOD.test(unit) && isCountUnit(unit);
 
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
@@ -157,7 +161,7 @@ export function olumiSignedSize(
   return { amount: sign * Math.abs(amount), per: Math.abs(per), resolved: true };
 }
 
-export interface SizedLinkReach { readonly from: string; readonly to: string; /** |amount ÷ per| */ readonly r: number }
+export interface SizedLinkReach { readonly from: string; readonly to: string; readonly amount: number; readonly per: number }
 export interface RescuedLink { readonly from: string; readonly to: string; readonly reframed: readonly string[]; readonly frames: { readonly from?: number; readonly to?: number } }
 
 /**
@@ -178,7 +182,10 @@ export function rescueConventionFrames(
   const ok = (x: number | undefined): x is number => finite(x) && x > 0;
   const beta = (l: SizedLinkReach, frame: (x: string) => number | undefined): number | undefined => {
     const a = frame(l.from); const b = frame(l.to);
-    return ok(a) && ok(b) ? (l.r * a) / b : undefined;
+    if (!ok(a) || !ok(b)) return undefined;
+    // #2842 review r2 #8: EXACTLY admission's arithmetic (`convertLinkEffect`), so a rescue and `sizeLink` never disagree at β = 1.
+    const beta = convertLinkEffect(l.amount, l.per, b, a);
+    return beta === null ? undefined : Math.abs(beta);
   };
   const applied = new Set<string>();
   for (const l of links) {

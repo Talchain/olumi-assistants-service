@@ -240,17 +240,62 @@ describe('NO HARM: a convention frame that would break a link representable toda
   it('the pure rule: each end is today\'s frame or the formula\'s, never a third value; harm removes, it never adds', () => {
     const today = (x: string) => ({ a: 200, b: 15, c: 2000 } as Record<string, number>)[x];
     // a → b needs a's 98 (β 2 → 0.98); b → c is fine today (β 0.18) and with b unchanged stays fine.
-    const r1 = rescueConventionFrames([{ from: 'a', to: 'b', r: 0.15 }, { from: 'b', to: 'c', r: 24 }], today, new Map([['a', 98]]));
+    const r1 = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1 }, { from: 'b', to: 'c', amount: 24, per: 1 }], today, new Map([['a', 98]]));
     expect(r1.applied).toEqual(['a']);
     expect(r1.rescued).toEqual([{ from: 'a', to: 'b', reframed: ['a'], frames: { from: 98 } }]);
     // b's formula 150 would rescue nothing and harm b → c (24 × 150 ÷ 2000 = 1.8): never applied.
-    const r2 = rescueConventionFrames([{ from: 'b', to: 'c', r: 24 }], today, new Map([['b', 150]]));
+    const r2 = rescueConventionFrames([{ from: 'b', to: 'c', amount: 24, per: 1 }], today, new Map([['b', 150]]));
     expect(r2.applied).toEqual([]);
     // an unknown far end (the goal): a source may only NARROW.
-    const r3 = rescueConventionFrames([{ from: 'a', to: 'b', r: 0.15 }, { from: 'a', to: 'goal', r: 1 }], today, new Map([['a', 98]]));
+    const r3 = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1 }, { from: 'a', to: 'goal', amount: 1, per: 1 }], today, new Map([['a', 98]]));
     expect(r3.applied).toEqual(['a']);
-    const r4 = rescueConventionFrames([{ from: 'b', to: 'c', r: 200 }, { from: 'b', to: 'goal', r: 1 }], today, new Map([['b', 30]]));
+    const r4 = rescueConventionFrames([{ from: 'b', to: 'c', amount: 200, per: 1 }, { from: 'b', to: 'goal', amount: 1, per: 1 }], today, new Map([['b', 30]]));
     expect(r4.applied).toEqual([]);
+  });
+});
+
+describe('#2842 review round 2: the rescue reads what admission reads', () => {
+  it('#1: a stated RANGE on an option setting counts by its ends (50–500 customers → the rescue frame covers 500)', () => {
+    const cust: Factor = { label: 'Existing customers', unit: 'customers', level: 100, max: 1000 };
+    const a = admit(candidate([cust, { label: 'Support load', unit: 'tickets', level: 10, max: 20 }],
+      [{ from: 'Existing customers', to: 'Support load', direction: 'positive', amount: 0.04 }], [
+        { label: 'Expand', provenance: 'explicit', interventions: [{ factor_label: 'Existing customers', value: 150, value_kind: 'absolute', unit: 'customers', provenance: 'explicit',
+          range: { low: 50, high: 500, meaning: 'likely_range', source: 'brief_extraction', source_quote: 'between 50 and 500' } }] },
+        { label: 'Hold', provenance: 'explicit', interventions: [] },
+      ]));
+    expect(frameOf(a, 'Existing customers')).toBeGreaterThanOrEqual(500 / 0.8);
+  });
+
+  it('#3: a constraint written on an ALIAS of the rate ("Monthly  churn", folded by assignIds) still keeps today\'s frame', () => {
+    const a = admit(candidate([CHURN(3), SUBS(1300, 2000)], [CHURN_TO_SUBS], undefined,
+      [{ metric: 'Monthly  churn', operator: '<', value: 8, unit: '%', provenance: 'explicit' }]));
+    expect(frameOf(a, 'Monthly churn')).toBe(100);
+  });
+
+  it('#6: a factor whose label FOLDS onto another entity (an outcome alias) is never re-framed', () => {
+    const c = candidate([CHURN(3), SUBS(1300, 2000)], [CHURN_TO_SUBS]) as unknown as { outcomes: unknown[] };
+    c.outcomes = [{ label: 'monthly churn', provenance: 'ai_proposed', unit: '%', plausible_max: 100 }];
+    const a = admit(c as unknown as CandidateModel);
+    expect(frameOf(a, 'Monthly churn')).toBe(100);
+  });
+
+  it('#7 (Science §(v)(2)): flow → stock is never rescued, even by widening the STOCK; "customers per hour" is a flow too', () => {
+    const a = admit(candidate([PRICE(49), { label: 'New Pro subscribers per month', unit: 'subscribers/month', level: 15, max: 200 }, SUBS(1500, 2000)],
+      [{ from: 'New Pro subscribers per month', to: 'Pro paying subscribers', direction: 'positive', amount: 12 }]));
+    expect(frameOf(a, 'Pro paying subscribers')).toBe(2000);
+    expect(edgeOf(a, 'New Pro subscribers per month', 'Pro paying subscribers').provenance?.magnitude).not.toBe('olumi_estimate');
+    const b = admit(candidate([PRICE(49), { label: 'Walk-in customers', unit: 'customers per hour', level: 15, max: 200 }, SUBS(1500, 2000)],
+      [{ from: 'Walk-in customers', to: 'Pro paying subscribers', direction: 'positive', amount: 12 }]));
+    expect(frameOf(b, 'Walk-in customers')).toBe(200);
+    expect(frameOf(b, 'Pro paying subscribers')).toBe(2000);
+  });
+
+  it('#8: at β = 1 exactly the rescue and admission agree — a logged rescue is ALWAYS an admitted estimate', () => {
+    const a = admit(candidate([PRICE(49), { label: 'Premium seats', unit: 'seats', level: 1.5, max: 1.96 }],
+      [{ from: 'Pro plan price', to: 'Premium seats', direction: 'positive', amount: 0.02 }]));
+    const logged = lossText(a).includes('convention_frame_rescue');
+    const e = edgeOf(a, 'Pro plan price', 'Premium seats');
+    expect(logged ? e.provenance?.magnitude : 'not rescued').toBe(logged ? 'olumi_estimate' : 'not rescued');
   });
 });
 

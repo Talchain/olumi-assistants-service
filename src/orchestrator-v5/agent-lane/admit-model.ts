@@ -57,7 +57,7 @@ import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, 
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, olumiSignedSize, rescueConventionFrames } from './convention-frame.js';
+import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames } from './convention-frame.js';
 import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
@@ -3240,7 +3240,8 @@ function admitOnce(
     // frame also covers that level's own spread.
     if (typeof f.baseline_value !== 'number') continue;
     const level = f.baseline_value;
-    const sameLabel = (x: string): boolean => x.trim().toLowerCase() === f.label.trim().toLowerCase();
+    // #2842 review r2 #3: the SAME fold `assignIds` uses, so a constraint written on an alias still counts.
+    const sameLabel = (x: string): boolean => canonicalLabel(x) === canonicalLabel(f.label);
     const constrained = model.constraints.filter((c) => sameLabel(c.metric));
     const cls = conventionClassOf(f.label, f.unit, level);
     // ⛔ #2842 review P1-6: a percent limit is read on PLoT's [0, 100] rung unless the target's frame is 100
@@ -3249,20 +3250,34 @@ function admitOnce(
     if (cls === 'bounded_rate' && constrained.length > 0) continue;
     if (typeof f.plausible_max === 'number' && briefWritesFigure(brief, f.plausible_max, cls, f.unit)) continue;
     const settings = [
-      ...model.options.flatMap((o) => (o.interventions ?? []).filter((iv) => iv.factor_label === f.label)
-        .map((iv) => ((iv as { value_kind?: unknown }).value_kind === 'additional' ? level + iv.value : iv.value))),
+      ...model.options.flatMap((o) => (o.interventions ?? []).filter((iv) => sameLabel(iv.factor_label)).flatMap((iv) => {
+        const additional = (iv as { value_kind?: unknown }).value_kind === 'additional';
+        // #2842 review r2 #1: a stated range on the setting counts by its ends too.
+        const range = (iv as { range?: { low?: unknown; high?: unknown } }).range;
+        const ends = additional ? [] : [range?.low, range?.high].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+        return [additional ? level + iv.value : iv.value, ...ends];
+      })),
       ...constrained.map((c) => c.value),
     ];
+    // #2842 review r2 #6: a label that FOLDS onto another entity (factor + outcome alias) is one admitted node whose frame
+    // this label-level reading cannot see: never re-framed (fail closed).
+    const folded = [model.goal.metric, ...model.factors.map((x) => x.label), ...model.outcomes.map((x) => x.label), ...model.risks.map((x) => x.label)]
+      .filter((x) => sameLabel(x)).length > 1;
+    if (folded) continue;
     const c = conventionFrameFor({ label: f.label, unit: f.unit, level, settings,
       ...(f.baseline_known ? {} : { spread_upper: estimatedSpreadUpper(level) }) });
     if (c === undefined || c.frame === capByLabel.get(f.label)) continue;
     candidates.set(f.label, { label: f.label, unit: f.unit as string, frame: c.frame, drafted: f.plausible_max ?? null,
       ...(c.widened_by !== undefined ? { widened_by: c.widened_by } : {}) });
   }
+  const unitOfLabel = (label: string): string | undefined =>
+    [...model.factors, ...model.outcomes, ...model.risks].find((n) => canonicalLabel(n.label) === canonicalLabel(label))?.unit ?? undefined;
   const sizedLinks = model.links.flatMap((l) => (typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
     && Number.isFinite(l.effect_amount) && Number.isFinite(l.effect_per_source_change) && l.effect_amount !== 0 && l.effect_per_source_change !== 0
     && (l.direction === 'positive' || l.direction === 'negative')
-    ? [{ from: l.from, to: l.to, r: Math.abs(l.effect_amount / l.effect_per_source_change) }] : []));
+    // #2842 review r2 #7 (Science §(v)(2)): a flow → stock size is never rescued, whichever end would move.
+    && !(isFlowUnit(unitOfLabel(l.from)) && !isFlowUnit(unitOfLabel(l.to)))
+    ? [{ from: l.from, to: l.to, amount: l.effect_amount, per: l.effect_per_source_change }] : []));
   // Today's frame of a link end: a factor's drafted range, or an outcome's or risk's (the goal's is not known here, so a
   // link into it can be rescued only by narrowing its source).
   const rangeOf = (label: string): number | undefined => {
