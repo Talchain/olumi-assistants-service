@@ -249,8 +249,11 @@ describe('R5: unit-class conversions (design §4)', () => {
     expect(questions(out).filter((q) => q.includes('"Pro plan price"') && q.includes('"Monthly churn"'))).toHaveLength(1);
   });
 
-  it('D8: "+£1 → +1 pt" is β = 2.0, which the engine would truncate to 1 — Olumi\'s estimate is withdrawn and asked, never silently cut', async () => {
-    const { graph, out } = await register(saas({ amount: 1, per: 1, by: 'ai_proposed' }));
+  // ⭐ RE-PINNED by #2842 (rescue-only convention frame, Science §(u) + DL "B"): "+£1 → +1 pt" was β 2.0 on the drafter's
+  // £0–200 and is β 0.98 on Olumi's formula frame £0–98, so it is now RESCUED (next row) — re-framed and said, never cut.
+  // D8's own claim is unchanged and kept on a size NO formula frame can hold: "+£1 → +3 pt" is β 6.0, and 2.94 even on £0–98.
+  it('D8: "+£1 → +3 pt" is β > 1 on every frame Olumi may use — Olumi\'s estimate is withdrawn and asked, never silently cut', async () => {
+    const { graph, out } = await register(saas({ amount: 3, per: 1, by: 'ai_proposed' }));
     const price = edge(graph, 'pro_plan_price', CHURN);
     expect(Math.abs(price.strength.mean)).toBeLessThanOrEqual(1);
     expect(price.strength.mean).toBe(0.5);
@@ -259,6 +262,17 @@ describe('R5: unit-class conversions (design §4)', () => {
     const asked = questions(out).filter((q) => q.includes('"Monthly churn"') && q.includes('"Pro plan price"'));
     expect(asked).toHaveLength(1);
     expect(asked[0]).toContain('more than the analysis can represent');
+  });
+});
+
+describe('#2842 rescue: the D8 size Olumi\'s formula frame CAN hold is admitted on it and said', () => {
+  it('"+£1 → +1 pt" on Olumi\'s £0–98 (twice the £49 level) is β 0.98: admitted as Olumi\'s estimate, the frame disclosed', async () => {
+    const { graph } = await register(saas({ amount: 1, per: 1, by: 'ai_proposed' }));
+    const price = edge(graph, 'pro_plan_price', CHURN);
+    expect(price.provenance?.magnitude).toBe('olumi_estimate');
+    expect(price.strength.mean).toBeCloseTo(0.98, 9);
+    const node = (graph.nodes as unknown as { id: string; observed_state?: { cap?: number } }[]).find((n) => n.id === 'pro_plan_price');
+    expect(node?.observed_state?.cap).toBe(98);
   });
 });
 

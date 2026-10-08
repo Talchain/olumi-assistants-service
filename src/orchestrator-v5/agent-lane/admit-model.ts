@@ -57,6 +57,8 @@ import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, 
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames } from './convention-frame.js';
+import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
@@ -3224,6 +3226,74 @@ function admitOnce(
     for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
   }
   /**
+   * ⭐ OLUMI'S CONVENTION FRAME, RESCUE-ONLY (Science §(s) + §(u) + §(v); DL "B", Science accepted 8 Oct; `convention-
+   * frame.ts`). A bounded rate or a non-negative level gets the convention's DETERMINISTIC frame instead of the drafter's
+   * own guess ONLY where that turns a sized link from not representable (|β| > 1 on the frames it has today) into
+   * representable — never a search for a frame that passes: each end is either today's frame or the formula's. Nothing
+   * else moves, so every draft without such a link is byte-identical to before. A ceiling the USER wrote wins; a rate the
+   * user constrained keeps today's frame. Every rescued link is logged by id, and each re-framed factor is said once.
+   */
+  type Candidate = { label: string; unit: string; frame: number; drafted: number | null; widened_by?: number };
+  const candidates = new Map<string, Candidate>();
+  for (const f of model.factors) {
+    // Science §(v)(1): an Olumi-ESTIMATED level is framed by the same convention (it stays labelled as Olumi's), and the
+    // frame also covers that level's own spread.
+    if (typeof f.baseline_value !== 'number') continue;
+    const level = f.baseline_value;
+    // #2842 review r2 #3: the SAME fold `assignIds` uses, so a constraint written on an alias still counts.
+    const sameLabel = (x: string): boolean => canonicalLabel(x) === canonicalLabel(f.label);
+    const constrained = model.constraints.filter((c) => sameLabel(c.metric));
+    const cls = conventionClassOf(f.label, f.unit, level);
+    // ⛔ #2842 review P1-6: a percent limit is read on PLoT's [0, 100] rung unless the target's frame is 100
+    // (`withholdUnprovablePercentFrames`), so a convention frame on a CONSTRAINED rate would turn the user's own limit
+    // ("keep churn under 8%") into "could not be checked". Such a rate keeps today's frame until that reader carries it.
+    if (cls === 'bounded_rate' && constrained.length > 0) continue;
+    if (typeof f.plausible_max === 'number' && briefWritesFigure(brief, f.plausible_max, cls, f.unit)) continue;
+    const settings = [
+      ...model.options.flatMap((o) => (o.interventions ?? []).filter((iv) => sameLabel(iv.factor_label)).flatMap((iv) => {
+        const additional = (iv as { value_kind?: unknown }).value_kind === 'additional';
+        // #2842 review r2 #1: a stated range on the setting counts by its ends too.
+        const range = (iv as { range?: { low?: unknown; high?: unknown } }).range;
+        const ends = additional ? [] : [range?.low, range?.high].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+        return [additional ? level + iv.value : iv.value, ...ends];
+      })),
+      ...constrained.map((c) => c.value),
+    ];
+    // #2842 review r2 #6: a label that FOLDS onto another entity (factor + outcome alias) is one admitted node whose frame
+    // this label-level reading cannot see: never re-framed (fail closed).
+    const folded = [model.goal.metric, ...model.factors.map((x) => x.label), ...model.outcomes.map((x) => x.label), ...model.risks.map((x) => x.label)]
+      .filter((x) => sameLabel(x)).length > 1;
+    if (folded) continue;
+    const c = conventionFrameFor({ label: f.label, unit: f.unit, level, settings,
+      ...(f.baseline_known ? {} : { spread_upper: estimatedSpreadUpper(level) }) });
+    if (c === undefined || c.frame === capByLabel.get(f.label)) continue;
+    candidates.set(f.label, { label: f.label, unit: f.unit as string, frame: c.frame, drafted: f.plausible_max ?? null,
+      ...(c.widened_by !== undefined ? { widened_by: c.widened_by } : {}) });
+  }
+  const unitOfLabel = (label: string): string | undefined =>
+    [...model.factors, ...model.outcomes, ...model.risks].find((n) => canonicalLabel(n.label) === canonicalLabel(label))?.unit ?? undefined;
+  const sizedLinks = model.links.flatMap((l) => (typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
+    && Number.isFinite(l.effect_amount) && Number.isFinite(l.effect_per_source_change) && l.effect_amount !== 0 && l.effect_per_source_change !== 0
+    && (l.direction === 'positive' || l.direction === 'negative')
+    // #2842 review r2 #7 (Science §(v)(2)): a flow → stock size is never rescued, whichever end would move.
+    && !(isFlowUnit(unitOfLabel(l.from)) && !isFlowUnit(unitOfLabel(l.to)))
+    ? [{ from: l.from, to: l.to, amount: l.effect_amount, per: l.effect_per_source_change }] : []));
+  // Today's frame of a link end: a factor's drafted range, or an outcome's or risk's (the goal's is not known here, so a
+  // link into it can be rescued only by narrowing its source).
+  const rangeOf = (label: string): number | undefined => {
+    const c = capByLabel.get(label);
+    if (c !== undefined) return c;
+    const x = [...model.outcomes, ...model.risks].find((n) => n.label === label)?.plausible_max;
+    return typeof x === 'number' && Number.isFinite(x) && x > 1 ? x : undefined;
+  };
+  const rescue = rescueConventionFrames(sizedLinks, rangeOf, new Map([...candidates].map(([k, v]) => [k, v.frame])));
+  const conventionFrames: Candidate[] = [];
+  for (const label of rescue.applied) {
+    const cf = candidates.get(label)!;
+    capByLabel.set(label, cf.frame);
+    conventionFrames.push(cf);
+  }
+  /**
    * ⛔ A LEVEL ABOVE THE STATED RANGE WIDENS THE RANGE; IT IS NEVER KEPT RAW BESIDE NORMALISED
    * SIBLINGS. It used to be written as stated (`150`) while every other level on the factor was
    * divided by the range (`0.05`): two value spaces on one factor, which `run_analysis` refuses
@@ -3718,6 +3788,28 @@ function admitOnce(
     } as RepairEntry);
   }
 
+  for (const l of rescue.rescued) {
+    loss.push({
+      field_path: `edges[${ids.get(l.from) ?? l.from}::${ids.get(l.to) ?? l.to}].convention_frame_rescue`,
+      before: null,
+      after: { frames: l.frames },
+      reason: 'Olumi\'s drafted size for this link did not fit the ranges its two ends had; read on Olumi\'s standard '
+        + 'range for ' + l.reframed.map((x) => `"${x}"`).join(' and ') + ' it does, so it is kept as Olumi\'s estimate.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+  for (const c of conventionFrames) {
+    loss.push({
+      field_path: `nodes[${ids.get(c.label) ?? c.label}].observed_state.cap`,
+      before: c.drafted,
+      after: c.frame,
+      reason: `${conventionFrameWords(c.label, c.unit, c.frame)}. That is Olumi's scale for reading sizes on it`
+        + (c.widened_by !== undefined ? `, widened to cover ${sayFigure(c.widened_by, c.unit)},` : ',')
+        + ' not a forecast or a limit; every figure for it is stored unchanged.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
   for (const w of widenedFrames) {
     loss.push({
       field_path: `nodes[${ids.get(w.label) ?? w.label}].observed_state.frame_widened`,
@@ -4134,10 +4226,28 @@ function admitOnce(
         others: quantityLabels.filter((q) => q !== source.label),
       })
       : null;
+    // ⭐ SCIENCE §(u)(b): for an OLUMI-drafted size the drawn direction is the one source of sign, and the size is
+    // |amount| per |change| (P44 arm: +3, +2.5 and +10,368 were written on links drawn as negative, and all were set aside
+    // as `sign_conflict`). Never a user's size: their sign wins and a conflict there is asked, exactly as before.
+    // ⚠ Science's guard "a basis that states the opposite direction is set aside, not resolved" has no carrier yet: the
+    // drafter link has no basis text (rowed as a tripwire in convention-frame-and-sign.test.ts).
+    const userClaimed = user_stated || signRefusedLinks.has(l) || l.provenance_source === 'user_specified'
+      || (l.effect_provenance ?? l.provenance) === 'explicit';
+    const signed = olumiSignedSize(l, userClaimed);
+    if (signed.resolved) {
+      loss.push({
+        field_path: `edges[${l.from}::${l.to}].effect_amount`,
+        before: { effect_amount: l.effect_amount ?? null, effect_per_source_change: l.effect_per_source_change ?? null },
+        after: { effect_amount: signed.amount, effect_per_source_change: signed.per },
+        reason: `Olumi's drafted size for this link was written with a sign against the link's own direction (${l.direction}); `
+          + 'the direction is the sign, so the size is read as the same amount in that direction.',
+        severity: 'info',
+      } as RepairEntry);
+    }
     const statement = {
       direction: l.direction,
-      effect_amount: l.effect_amount,
-      effect_per_source_change: l.effect_per_source_change,
+      effect_amount: signed.amount,
+      effect_per_source_change: signed.per,
       user_stated,
       ...(range !== null ? { stated_range: range } : {}),
     };
