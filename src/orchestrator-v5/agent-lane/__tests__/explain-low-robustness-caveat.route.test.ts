@@ -171,16 +171,17 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(b._answer_shape).toBeUndefined();
   });
   it('W2: licensed + high/true — neither caveat', async () => {
-    // Robust contrast: keep a shapeable narrator so absence is checked on the face as well as in text.
+    // Approved 5471d752 correction: this exact 76-word contract reply is already within the face.
     narrator = shapedNarrator(2);
     readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
     const b = await press(await run());
     expect(b.assistant_text.slice(0, NARRATOR.length)).toBe(NARRATOR);
     expect(count(b.assistant_text, SENTENCE)).toBe(0);
     expect(count(b.assistant_text, NO_FLIP_SENTENCE)).toBe(0);
-    expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.bullets).toEqual(NARRATOR_BULLETS.slice(0, 2));
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    expect(b._answer_shape).toBeUndefined();
+    expect(b.assistant_text).toBe(narrator);
+    expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
+    for (const bullet of NARRATOR_BULLETS.slice(0, 2)) expect(count(b.assistant_text, bullet)).toBe(1);
   });
   it('W3: withheld + low/false — neither caveat', async () => {
     readbackState.leader_claim = { permitted: false, separation: 'separated', withheld_reason: 'constraint_verdict_withheld' };
@@ -275,7 +276,11 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(b.narration?.status).toBe('ready');
     expect(b.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
     expect(b.assistant_text).not.toContain(NARRATOR);
-    expect(b._answer_shape).toBeUndefined();
+    // The typed final withheld contract derives the same fixed words; authority and caveat exclusions stay exact.
+    const withheld = 'No single option can be put forward yet, and the reason is not recorded, so I will not guess at one; ask me to run the analysis and I can tell you then.';
+    expect(b._answer_shape).toEqual({ headline: withheld, bullets: [], detail: '' });
+    expect(b.assistant_text).toBe(withheld);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
     expect(count(b.assistant_text, SENTENCE)).toBe(0);
     expect(count(b.assistant_text, NO_FLIP_SENTENCE)).toBe(0);
   });

@@ -25,7 +25,7 @@ let saved: Graph = { nodes: [], edges: [] };
 let askedToBuild = false;
 // COMPLETE retains final prose, not the provider's raw message. Include its captured goal-chance explanation
 // so the preservation row can prove it remains in detail. The paired producer row below leaves it to the host.
-const GOAL_CHANCE_CAPTURE = "This run doesn’t show how often each option reaches the goal’s target. Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.";
+const GOAL_CHANCE_CAPTURE = "This run doesn’t yet show each option’s chance of reaching £20,000. Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.";
 let narrator = `${FX.narrator}\n\n${GOAL_CHANCE_CAPTURE}`;
 const rows = new Map<string, Rec>();
 const store = {
@@ -166,7 +166,7 @@ describe('ONE reply contract through the build route', () => {
     const body = await buildTurn();
     expect(body._answer_shape).toBeDefined();
     expect(body.assistant_text).not.toContain("hasn't been confirmed");
-    expect(body.assistant_text).not.toContain('This run doesn’t show how often');
+    expect(body.assistant_text).not.toContain('This run doesn’t yet show each option’s chance of reaching £20,000.');
     expect(body.suggested_actions).toContainEqual(expect.objectContaining({ label: "Yes, that's how" }));
     expect(words(face(body._answer_shape!))).toBeLessThanOrEqual(80);
   });

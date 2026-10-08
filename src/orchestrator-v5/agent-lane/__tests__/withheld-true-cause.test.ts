@@ -285,7 +285,7 @@ describe('Codex buddy r2', () => {
     const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
     const run = { ran: true, goal_chance: chance };
     expect(goalChanceLineOwed([run], `Here is the run. ${placeholder.message}`)).toBe(chance.say);
-    expect(goalChanceLineOwed([run], `This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`)).toBe(chance.say);
+    expect(goalChanceLineOwed([run], `This run doesn’t yet show each option’s chance of meeting your goal. ${placeholder.message}`)).toBe(chance.say);
     // Control: a reply that says neither owes the whole line.
     expect(goalChanceLineOwed([run], 'Here is the run.')).toBe(chance.say);
   });

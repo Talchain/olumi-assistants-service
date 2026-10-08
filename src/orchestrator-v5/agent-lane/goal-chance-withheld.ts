@@ -29,6 +29,7 @@ import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-as
 import { guidedSizingActions, guidedSizingForRun, guidedSizingOnlyPlaceholders, guidedSizingReplyText,
   legacyGuidedSizingReplyText, withoutStaleGuidedSizingWords, type GuidedSizingDraft } from './guided-sizing.js';
 import { notTargetTestableSentence, untestableTargetTail, type TargetTestability } from '../admission/target-testability.js';
+import { statedTargetWords } from './decision-input-ask.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
@@ -42,8 +43,8 @@ export interface GoalChanceWithheld {
   readonly option_ids?: readonly string[];
 }
 
-// AIQ 5887096626: the one register ("reaches the target in N% of model runs", 5885116642).
-const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
+// DL words ruling (8 Oct): chance vocabulary, with the same held-target words as the horizon line.
+const WITHHELD_OPENING_PREFIX = /^This run doesn’t yet show each option’s chance of (?:reaching [^\n]{1,80}?|meeting your goal)\.(?=\s|$)/u;
 export const RANGE_OPENING = 'This run shows some options’ chances only as a range.';
 /** S2a removes only the scoped points; the other options keep their licences. */
 export const SHARE_APPROXIMATION_NOTE =
@@ -165,8 +166,9 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   const wordDraft = guided ?? (single?.total === 1 ? single : undefined);
   const block = recordOf(result);
   if (block === undefined) return undefined;
+  const target = statedTargetWords(graph);
   const opening = Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}).length > 0
-    ? RANGE_OPENING : OPENING;
+    ? RANGE_OPENING : `This run doesn’t yet show each option’s chance of ${target === null ? 'meeting your goal' : `reaching ${target}`}.`;
   const sourceWarnings = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : []))
     .map(recordOf)
@@ -361,7 +363,7 @@ export function goalChanceLineOwed(
   if (say === null || sameWordsIn(replyText, say)) return null;
   // MC D1 (Codex buddy r2 P2): a composite line (the opening + a warning's own words) owes only what the reply does not
   // already carry — the Agent quoting the placeholder's "Set them …" must not get it a second time.
-  const opening = [OPENING, RANGE_OPENING].find(line => say.startsWith(line));
+  const opening = say.match(WITHHELD_OPENING_PREFIX)?.[0] ?? (say.startsWith(RANGE_OPENING) ? RANGE_OPENING : undefined);
   if (opening !== undefined && say.length > opening.length && sameWordsIn(replyText, say.slice(opening.length).trim())) {
     return sameWordsIn(replyText, opening) ? null : opening;
   }

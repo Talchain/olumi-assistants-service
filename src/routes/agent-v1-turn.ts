@@ -2286,7 +2286,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             horizonPlural: goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
               (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current').length > 1 };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
-          const say = goalChanceLineOwed([{ ok: true, ran: true,
+          let say = goalChanceLineOwed([{ ok: true, ran: true,
             goal_chance: goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText),
             ...(askNow === null ? {} : { identity_ask_say: askNow }),
           }], RUN_RESULT_READY_TEXT);
@@ -2297,7 +2297,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (askNow !== null) owedNow.push(askNow);
           // ⭐ NEVER RE-ASK (G1b d4): the live Run turn's own rule, on the answers before the turn being replayed, at the live
           // turn's own stage: before the root line and the basis, which the live turn adds after it (Codex r1 on #2664 P2).
-          askEachOnce(owedNow, await repliesToCheckAsks(owedNow, historyReader, scenarioId, turnId));
+          const recentAskReplies = await repliesToCheckAsks(owedNow, historyReader, scenarioId, turnId);
+          askEachOnce(owedNow, recentAskReplies);
+          // Rebuild and type the same effective say. Appending the original would restore an already-open question
+          // and duplicate the reason that askEachOnce kept above.
+          if (say !== null) say = withoutAskedQuestion(say, recentAskReplies);
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const reasonNow = thresholdReasonLine(state.graph, state.analysisResult);
           if (reasonNow !== null) owedNow.push(reasonNow);
@@ -2333,7 +2337,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             { role: 'host', text: RUN_RESULT_READY_TEXT },
             ...(typeof say === 'string' && say.trim() !== '' ? [say, ...sentencesOf(say)].map((text): FaceObligation => ({ role: 'withheld_reason', text })) : []),
             // Mirror live typing: a combined goal-chance say may carry the level ask beside guided sizing.
-            ...[askNow, ...lines, say].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
+            ...[askNow, rootNow, ...lines, say].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
             ...indexNow.map((text): FaceObligation => ({ role: 'host', text })),
             ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !indexNow.includes(l) && !l.includes('?'))]
               .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text): FaceObligation => ({ role: 'evidence', text })),
@@ -2407,10 +2411,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
       if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
-      // ⛔ RELOAD = SAME, PROVED AT RUNTIME (Codex r1 on #2783): the rebuild re-derives the live turn's lines, and every
-      // live branch it does not mirror (leader gate, a proposal card's profile, a link ask, a held lapse…) would compose a
-      // different shape. So the shape rides only when the composed replay IS the stored words the user first saw; any
-      // other replay ships the rebuilt text whole, as before 2b-0 (the structural-challenge replay's rule).
+      // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
+      // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.
       // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
       const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, historyReader, scenarioId, turnId);
       const replayEstimates = replayObligations === undefined ? null : actionFactsOf({ scenarioId, graph: state.graph,
@@ -2430,8 +2432,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
-      const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
+      const parityReplayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
+      const replayComposed = parityReplayComposed ?? (composedCandidate !== null && composedCandidate.shape !== null
+        && replayScreen.length === 0 && replayObligations?.some(o => o.role === 'withheld_reason' && o.lead === true)
+        ? composedCandidate : null);
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: replayComposed !== null ? replayComposed.text : withoutProposalIds(replayText),
         stage: 'frame',
@@ -4802,8 +4807,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The scoped guided producer is both the withheld finding and the next step; its presses own that step.
       const guidedRunFinding = faceContract === 'run' && guidedReplyText.guided !== null && reply.includes(guidedReplyText.guided)
         ? guidedReplyText.guided : undefined;
-      const withheldRunFinding = guidedRunFinding ?? (screenLines.length === 0 && (fastPath === 'run' || explainsCurrentRun)
-        ? [reasonLine === null ? null : sentencesOf(reasonLine)[0], goalChanceOwed, coHold?.why, leaderGateClosing].find((line): line is string =>
+      const withheldRunFinding = guidedRunFinding ?? (screenLines.length === 0
+        && (fastPath === 'run' || explainsCurrentRun || (closingSubjects?.length ?? 0) > 0)
+        ? [reasonLine === null ? null : sentencesOf(reasonLine)[0], goalChanceOwed,
+          ...sentencesOf(goalChanceOwed ?? ''), coHold?.why, leaderGateClosing].find((line): line is string =>
           typeof line === 'string' && line !== '' && reply.includes(line)) : undefined);
       const obligations: FaceObligation[] = [
         ...(withheldRunFinding === undefined ? [] : [{ role: 'withheld_reason' as const, text: withheldRunFinding, lead: true as const,

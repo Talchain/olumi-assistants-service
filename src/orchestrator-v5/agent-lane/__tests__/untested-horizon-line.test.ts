@@ -6,7 +6,9 @@ import {
   untestedHorizonLine,
   withA7AfterGate,
   withUntestedHorizonWarning,
+  withShortHorizonBesideChance,
 } from '../decision-input-ask.js';
+import { GOAL_CHANCE_LICENSED } from '../../goal-target/goal-chance-licence.js';
 
 type Rec = Record<string, unknown>;
 const graphWith = (over: Rec = {}) => ({ nodes: [{
@@ -77,12 +79,19 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
     expect(untestedHorizonLine(graph, { besideChance: true })).toBe(SHORT);
   });
 
-  it('no held months leaves draft chat silent while the Run warning carries the short form', () => {
+  it('no held months leaves draft chat silent and only a licensed Run carries the exact short form', () => {
     const graph = graphWith({ goal_horizon_months: undefined });
     const context = { restingText: 'Draft ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false };
     expect(decisionInputLines(graph, context)).toEqual([]);
+    // Approved 5471d752 correction: the short warning is additive only on a licensed Run.
     const envelope = { inference_warnings: [] };
-    expect(withUntestedHorizonWarning(envelope, graph).inference_warnings).toEqual([
+    expect(withUntestedHorizonWarning(envelope, graph)).toBe(envelope);
+    expect(withShortHorizonBesideChance(envelope, graph)).toBe(envelope);
+    const unlicensed = { inference_warnings: [{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE' }] };
+    expect(withShortHorizonBesideChance(unlicensed, graph)).toBe(unlicensed);
+    const licence = { code: GOAL_CHANCE_LICENSED, severity: 'info' };
+    expect(withShortHorizonBesideChance({ inference_warnings: [licence] }, graph).inference_warnings).toEqual([
+      { ...licence, horizon_untested: true, horizon_line: SHORT },
       { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: SHORT, node_ids: ['goal'] },
     ]);
   });

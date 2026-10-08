@@ -197,6 +197,17 @@ export const UNTESTED_HORIZON_PREFIXES = [
   "These chances use the model's numbers as they are today",
 ] as const;
 
+/** The single goal's stated target in the user's unit, shared by the horizon and withheld-chance sentences. */
+export function statedTargetWords(graph: unknown): string | null {
+  const goal = goalOf(graph);
+  if (goal === undefined) return null;
+  const target = statedGoalTargetOf(recordOf(graph)!, goal);
+  if (target === null) return null;
+  const unit = target.unit ?? '';
+  const money = readMoneyTotal(unit, typeof goal.label === 'string' ? goal.label : '');
+  return sayFigure(target.value, money?.code ?? unit);
+}
+
 /**
  * ⭐ A7, THE ONE RULE (DL 0df0e1 → Reasoning, 4 Oct; beat 2): the goal holds the brief's deadline (`goal_horizon_months`)
  * and no duration limit scores it, so the analysis says nothing about meeting it in time. The chat's host line
@@ -212,10 +223,8 @@ export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: bool
   const basis = `${prefix}; the model doesn't project how they change over time yet`;
   const within = withinMonths(goal);
   if (within !== '' && !hasDurationLimit(graph)) {
-    const target = statedGoalTargetOf(recordOf(graph)!, goal);
-    const unit = target?.unit ?? '';
-    const money = readMoneyTotal(unit, typeof goal.label === 'string' ? goal.label : '');
-    const destination = target === null ? 'get there' : `reach ${sayFigure(target.value, money?.code ?? unit)}`;
+    const target = statedTargetWords(graph);
+    const destination = target === null ? 'get there' : `reach ${target}`;
     return `${basis}, so it can't say whether you'll ${destination}${within}.`;
   }
   return opts?.besideChance ? `${basis}.` : null;

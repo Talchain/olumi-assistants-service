@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { goalChanceLineOwed, goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
 
 type Json = Record<string, any>;
@@ -23,7 +24,7 @@ const PARAPHRASE = 'The run could not use the formula for Total cost, so it adds
 
 describe('goalChanceLineOwed', () => {
   it('RED (served shape): a paraphrase of the reason → the typed sentence is owed, verbatim', () => {
-    expect(SAY).toMatch(/^This run doesn’t show how often each option reaches the goal’s target\. 'Total cost' depends on Staff cost \+ Cloud cost/);
+    expect(SAY).toMatch(/^This run doesn’t yet show each option’s chance of meeting your goal\. 'Total cost' depends on Staff cost \+ Cloud cost/);
     expect(goalChanceLineOwed([runWithheld], PARAPHRASE)).toBe(SAY);
   });
 
@@ -72,7 +73,12 @@ describe('goalChanceLineOwed', () => {
       { warning_message: string; replies: { agent_text: string; served_reply: string }[] };
     const said = goalChanceWithheldForAgent(block(FX.warning_message))!;
     const run: Json = { ok: true, ran: true, goal_chance: said };
-    for (const r of FX.replies) {
+    // Keep the historical capture intact; project only its former opening into today's no-graph producer words.
+    // Quotes, emphasis, all warning words and the duplicate appended line remain as captured.
+    const opening = goalChanceWithheldForAgent(block(''))!.say;
+    const todayWords = (text: string): string => text.replace(/This run[^.\n]*\./gu, opening);
+    for (const captured of FX.replies) {
+      const r = { agent_text: todayWords(captured.agent_text), served_reply: todayWords(captured.served_reply) };
       expect(r.agent_text.includes(said.say), 'precondition: not a byte match (the served defect)').toBe(false);
       expect(r.served_reply.endsWith(said.say), 'precondition: served appended it').toBe(true);
       expect(goalChanceLineOwed([run], r.agent_text), r.agent_text.slice(0, 60)).toBeNull();
@@ -108,5 +114,34 @@ describe('goalChanceLineOwed', () => {
     expect(src.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
     // A later Run still clears an earlier withhold when no scoped final sentence exists.
     expect(goalChanceLineOwed([runWithheld, runShown], PARAPHRASE)).toBeNull();
+  });
+});
+
+
+describe('DL bounded chance-opening reader keeps owed-once behaviour', () => {
+  const targetGraph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Monthly recurring revenue',
+    goal_threshold_raw: 20000, goal_threshold_unit: '£/month' }], edges: [] };
+  const reason = SUM_WORDS.replace(/^Not shown\.\s*/, '');
+
+  it.each([
+    ['target held', targetGraph, 'This run doesn’t yet show each option’s chance of reaching £20,000.'],
+    ['no target', undefined, 'This run doesn’t yet show each option’s chance of meeting your goal.'],
+  ])('%s: a reason already said owes only its opening, and the completed reply owes nothing', (_name, graph, opening) => {
+    const chance = goalChanceWithheldForAgent(block(SUM_WORDS), graph)!;
+    expect(chance.say).toBe(`${opening} ${reason}`);
+    const run = { ran: true, goal_chance: chance };
+    expect(goalChanceLineOwed([run], reason)).toBe(opening);
+    expect(goalChanceLineOwed([run], `${reason} ${opening}`)).toBeNull();
+    expect(goalChanceLineOwed([run], chance.say)).toBeNull();
+  });
+
+  it('a 20,000-character target cannot be parsed as a bounded opening and finishes within 50 ms', () => {
+    const say = `This run doesn’t yet show each option’s chance of reaching ${'x'.repeat(20000)}. ${reason}`;
+    const run = { ran: true, goal_chance: { withheld: true, say } };
+    const started = performance.now();
+    const owed = goalChanceLineOwed([run], reason);
+    const elapsed = performance.now() - started;
+    expect(owed).toBe(say);
+    expect(elapsed).toBeLessThan(50);
   });
 });

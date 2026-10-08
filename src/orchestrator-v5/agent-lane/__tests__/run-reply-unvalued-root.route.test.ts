@@ -12,6 +12,10 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { decisionInputAsk } from '../decision-input-ask.js';
+import { sentencesOf } from '../reply/compose-reply.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
@@ -24,6 +28,7 @@ const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leade
 const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0002';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
+const WITHHELD_FINDING = 'This run doesn’t yet show each option’s chance of meeting your goal.';
 const SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is it today?';
 
 type Rec = Record<string, unknown>;
@@ -106,7 +111,28 @@ async function freshApp(): Promise<FastifyInstance> {
   return app;
 }
 
-type Body = { assistant_text: string; narration?: { status: string; run_key: string } };
+type Body = { assistant_text: string; _answer_shape?: AnswerShape; narration?: { status: string; run_key: string } };
+
+function expectWithheldContract(body: Body, rootLine?: string): void {
+  const shape = body._answer_shape;
+  expect(shape, body.assistant_text).toBeDefined();
+  expect(shape!.headline).toBe(WITHHELD_FINDING);
+  const rootOwnsAsk = rootLine?.includes('?') === true;
+  const targetAsk = rootOwnsAsk ? null : decisionInputAsk(graphWith(riskValued, riskLabel), {
+    restingText: [RUN_RESULT_READY_TEXT, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
+    questionsToggle: false, awaitingApproval: false, builtOrRan: true,
+  });
+  if (!rootOwnsAsk) expect(targetAsk).toBe('What figure should "Meet our next feature-launch deadline" reach or stay under? I\'ll propose it as your target.');
+  const targetSentences = targetAsk === null ? [] : sentencesOf(targetAsk);
+  expect(shape!.bullets).toEqual([rootOwnsAsk ? rootLine! : targetSentences[0]!]);
+  expect(shape!.detail).toBe([RUN_RESULT_READY_TEXT, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1)].filter(Boolean).join('\n\n'));
+  expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
+  expect(body.assistant_text.split(RUN_RESULT_READY_TEXT)).toHaveLength(2);
+  if (rootLine !== undefined) expect(body.assistant_text.split(rootLine)).toHaveLength(2);
+  for (const sentence of targetSentences) expect(body.assistant_text.split(sentence)).toHaveLength(2);
+  const face = [shape!.headline, ...shape!.bullets].join('\n');
+  expect(face.match(/\?/g) ?? []).toHaveLength(1);
+}
 
 describe('a native Run with an unvalued risk root says it is treated as zero, and asks for it (live route)', () => {
   let app: FastifyInstance;
@@ -123,9 +149,10 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   const runTurn = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
 
-  it('RED: the Run reply carries the disclosure AND the ask, after Olumi\'s fixed line', async () => {
+  it('RED: the Run face leads with the withheld finding and one disclosure/ask; Olumi\'s ready line is in detail', async () => {
     const body = (await runTurn(randomUUID())).json() as Body;
-    expect(body.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expect(goalChanceWithheldForAgent(SERVED.block, graphWith(riskValued, riskLabel))?.say).toBe(WITHHELD_FINDING);
+    expectWithheldContract(body, riskValued ? undefined : SENTENCE);
     expect(body.assistant_text).toContain(SENTENCE);
     expect(body.assistant_text.split(SENTENCE)).toHaveLength(2); // said once
   });
@@ -160,7 +187,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   it('CONTROL: the same risk with a figure → no treated-as-zero sentence', async () => {
     riskValued = true;
     const body = (await runTurn(randomUUID())).json() as Body;
-    expect(body.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expectWithheldContract(body);
     expect(body.assistant_text).not.toContain('treats it as zero');
   });
 
@@ -203,7 +230,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     riskLabel = label;
     const turnId = randomUUID();
     const first = (await runTurn(turnId)).json() as Body;
-    expect(first.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expectWithheldContract(first, TREATED_AS_ZERO_UNNAMED_ONE);
     expect(first.assistant_text.split(TREATED_AS_ZERO_UNNAMED_ONE)).toHaveLength(2);
     expect(first.assistant_text.split('treats it as zero')).toHaveLength(2);
     expect(first.assistant_text).not.toContain(tail);

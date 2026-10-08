@@ -454,7 +454,12 @@ describe('RC6 said once', () => {
     no_leader_with_reason: string;
   };
   const count = (text: string, sentence: string): number => text.split(sentence).length - 1;
-  const chanceIntro = 'This run doesn’t show how often each option reaches the goal’s target.';
+  const chanceIntro = 'This run doesn’t yet show each option’s chance of meeting your goal.';
+  // These captured replies predate the words ruling. Project only their opening into today's no-graph producer form;
+  // preserve the archived fixture and every reason, question and quote-restyling control.
+  for (const key of ['explain_00_24_38', 'explain_00_30_46'] as const) {
+    served[key] = served[key].replace(/This run doesn’t show how often each option reaches[^\n.]{1,80}\./gu, chanceIntro);
+  }
   const context = 'Current estimates need evidence before anyone relies on this comparison for planning across teams. Recruitment takes time, and new starters may need the existing team to stop and help them. Capacity is only one part of the path from hiring to timely delivery of a release. The evidence should show how the new people affect work already planned for this quarter.';
 
   it.each([

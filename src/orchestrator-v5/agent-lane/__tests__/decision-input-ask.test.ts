@@ -11,6 +11,7 @@ import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, 
 import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '../write-outcome.js';
 import { sentencesOf } from '../reply/compose-reply.js';
 import type { AnswerShape } from '../../routing/answer-shape.js';
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 type Rec = Record<string, unknown>;
 const SERVED_FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };
@@ -472,7 +473,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect((await runTurn()).assistant_text).not.toContain('Olumi’s estimates');
   });
 
-  it('RED: the Run without a licensed chance keeps the one question on its face and conserves A7 once in detail', async () => {
+  it('RED: the Run without a licensed chance already within the face ships whole with its one question and A7 once', async () => {
     const turnId = '5c0d7e1f-2a3b-4c5d-8e6f-7a8b9c0d1e2f';
     const reply = await runTurn(turnId);
     const text = reply.assistant_text;
@@ -480,8 +481,12 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     // A cold replay of the same turn returns the answer row, written AFTER the text was composed: the same words.
     expect((await runTurn(turnId)).assistant_text).toBe(text);
     expect(text.split(A7).length - 1).toBe(1);
-    expect([reply._answer_shape?.headline, ...(reply._answer_shape?.bullets ?? [])].join(' ')).toContain(ASK_QUESTION);
-    expect(reply._answer_shape?.detail).toContain(A7);
+    // Approved 5471d752 correction: a contract reply already within its face ships as written.
+    expect(reply._answer_shape).toBeUndefined();
+    expect(text).toBe([RUN_RESULT_READY_TEXT, A7, ASK].join('\n\n'));
+    expect(text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
+    expect(textAtRest(text)).toContain(ASK_QUESTION);
+    expect((text.match(/\?/gu) ?? [])).toHaveLength(1);
     const marker = text.indexOf('Questions this model does not answer yet:');
     expect(marker === -1 || text.indexOf(ASK_QUESTION) < marker).toBe(true);
   });

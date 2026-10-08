@@ -23,6 +23,8 @@ import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
+import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
 
 const { port, source } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -296,7 +298,8 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
     } finally { forced.mockRestore(); }
   });
   it('DL CHANGES_REQUIRED (#2816): an EXPLICIT Run reply says the carried reason\'s §(g) sentence, by identity; CONTROL: no reason → not said', async () => {
-    const SENTENCE = "Olumi can't show the chance of reaching your MRR target in this Run because of a fault on Olumi's side. The rest of this Run's results still stand.";
+    const FINDING = "Olumi can't show the chance of reaching your MRR target in this Run because of a fault on Olumi's side.";
+    const RETAINED_RESULTS = "The rest of this Run's results still stand.";
     const run = async () => {
       turnSerial += 1;
       const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario,
@@ -305,12 +308,25 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
       expect(response.statusCode, response.body).toBe(200);
       const body = response.json();
       expect(body._diagnostic_trace?.fast_path).toBe('run');
-      return String(body.assistant_text);
+      return body as { assistant_text: string; _answer_shape?: AnswerShape };
     };
     setThresholdRefused('non_finite_conversion_input');
-    expect(await run()).toContain(SENTENCE);
+    const reply = await run();
+    expect(reply._answer_shape, reply.assistant_text).toBeDefined();
+    const shape = reply._answer_shape!;
+    expect(shape.headline).toBe(FINDING);
+    const face = [shape.headline, ...shape.bullets].join('\n');
+    expect(face).not.toContain(RUN_RESULT_READY_TEXT);
+    // The Olumi-side fault owes no user question; the contract keeps its exact finding on the face.
+    expect(face.match(/\?/g) ?? []).toHaveLength(0);
+    expect(shape.detail).toContain(RUN_RESULT_READY_TEXT);
+    expect(shape.detail).toContain(RETAINED_RESULTS);
+    for (const sentence of [FINDING, RETAINED_RESULTS, RUN_RESULT_READY_TEXT]) {
+      expect(reply.assistant_text.split(sentence)).toHaveLength(2);
+    }
+    expect(reply.assistant_text).toBe(deriveAnswerTextFromShape(shape));
     setWithheld();
-    expect(await run()).not.toContain("because of a fault on Olumi's side");
+    expect((await run()).assistant_text).not.toContain("because of a fault on Olumi's side");
   });
   it('Codex r1 P1-3: while a held change waits (the identity card), a set_current_level press persists NO ask', async () => {
     setThresholdRefused('missing_goal_baseline');

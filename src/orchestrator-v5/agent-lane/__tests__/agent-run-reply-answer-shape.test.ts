@@ -507,10 +507,20 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(rows.get(turnId)?.assistant_message, 'the replayed row holds the same text').toBe(b.assistant_text);
   });
 
-  it.each([
-    ['one paragraph of two sentences', ONE_PARAGRAPH],
-    ['four paragraphs', PARAGRAPHS_NO_BULLETS],
-  ])('3. RUN: a reply with NO bullets (%s): the Run contract shapes and supporting sentences remain in detail', async (_what, text) => {
+  it('3. RUN: the two-sentence reply already within the face ships exactly as written, with its caveat once', async () => {
+    const { b } = await typedRun(ONE_PARAGRAPH);
+    expect(carriesResult(b), 'the control: an analysis-bearing turn').toBe(true);
+    // Approved 5471d752 correction: a contract reply already within its face ships as written.
+    const expected = `${ONE_PARAGRAPH} ${ROBUSTNESS_CAVEAT}`;
+    expect(b._answer_shape).toBeUndefined();
+    expect(b.assistant_text).toBe(expected);
+    expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
+    expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the same licensed caveat is kept once').toHaveLength(2);
+    expect(sentenceMultiset(b.assistant_text)).toEqual(sentenceMultiset(expected));
+  });
+
+  it('3. RUN: a four-paragraph reply with no bullets shapes, with its supporting sentences in detail', async () => {
+    const text = PARAGRAPHS_NO_BULLETS;
     const { b } = await typedRun(text);
     expect(carriesResult(b), 'the control: an analysis-bearing turn').toBe(true);
     expect(b._answer_shape).toBeDefined();
@@ -635,7 +645,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 
-  it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8 RED: question-tail basis is visible once (present=%s punctuated=%s)', async (present, punctuated) => {
+  it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8: a short question-tail reply ships whole with its basis visible once (present=%s punctuated=%s)', async (present, punctuated) => {
     readbackReady = FX.state.analysis_ready;
     const question = punctuated ? 'What baseline should we use?' : 'The baseline is unknown';
     const narrated = `The comparison is conditional. Questions this model does not answer yet: ${question}${present ? `\n\n${BASIS_UNAVAILABLE}` : ''}`;
@@ -643,9 +653,12 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
     expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
     expect(b.assistant_text).toContain(question);
-    expect(b._answer_shape).toBeDefined();
-    expect(faceOf(b._answer_shape!)).not.toContain(BASIS_UNAVAILABLE);
-    expect(b._answer_shape!.detail).toContain(BASIS_UNAVAILABLE);
+    // Approved 5471d752 correction: this exact short contract reply ships as written, without a shape.
+    const expected = ['The comparison is conditional.', ROBUSTNESS_CAVEAT, BASIS_UNAVAILABLE,
+      `Questions this model does not answer yet: ${question}`].join('\n\n');
+    expect(b._answer_shape).toBeUndefined();
+    expect(b.assistant_text).toBe(expected);
+    expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
     if (process.env.B3_WIRE_EVIDENCE) {
       b3WireCases.push({ source: 'actual Agent route; stubbed model/Run/readback', text: b.assistant_text, line: BASIS_UNAVAILABLE, question });

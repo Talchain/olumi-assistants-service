@@ -48,7 +48,7 @@ const WITH_NON_LEVER_FLIP = { ...PLOT, flip_thresholds: [NON_LEVER_FLIP] };
 const TEST_LINK = { kind: 'test_without_link', from_id: 'pro_plan_price', to_id: 'mrr' } as const;
 const WHAT_WOULD_CHANGE = { kind: 'what_would_change' } as const;
 /** goal-chance-withheld.ts's own opening: the withhold said without its reason (its fail-closed reading). */
-const WITHHELD_OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
+const WITHHELD_OPENING = 'This run doesn’t yet show each option’s chance of reaching £100,000.';
 
 describe('decisionReviewFor — one typed fact per item, on the bound Run', () => {
   it('a licensed Run: the default-0 factor (F2) and the most sensitive link (F5), with the link test and What would change', () => {
@@ -144,14 +144,14 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
   it('RED (Codex r2 P2): a goal-figure reason the editors would rewrite says the withhold in the reader\'s own opening', () => {
     const warning = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: ['mrr'], message: 'Not shown. ‘prop_abcdef12 cost’ is not evaluated yet.' };
     const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { inference_warnings: [warning] } }));
-    expect(turn.lines).toContain(`- ${WITHHELD_OPENING}`);
+    expect(turn.lines, JSON.stringify(turn.lines)).toContain(`- ${WITHHELD_OPENING}`);
     expect(turn.reply).not.toContain('prop_abcdef12');
   });
 
   it('CONTROL (F4): a goal-figure reason that reaches the user whole keeps its own words', () => {
     const warning = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: ['mrr'], message: 'Not shown. ‘Monthly cost’ is not evaluated yet.' };
     const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { inference_warnings: [warning] } }));
-    expect(turn.lines).toContain(`- ${WITHHELD_OPENING} ‘Monthly cost’ is not evaluated yet.`);
+    expect(turn.lines, JSON.stringify(turn.lines)).toContain(`- ${WITHHELD_OPENING} ‘Monthly cost’ is not evaluated yet.`);
   });
 
   it('CONTROL (F5): a fragile link between two real nodes that is not a link of the stored graph is not said, and offers no test', () => {
@@ -163,12 +163,14 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
   });
 
   it('F4 on the served withheld block: the typed reason’s own words; F7 stays silent for another withheld reason', () => {
-    const say = goalChanceWithheldForAgent(SERVED_0948.block)!.say;
+    // Bind the expected producer to the same stored graph as the review, including its held target words.
+    const say = goalChanceWithheldForAgent(SERVED_0948.block, STORED.graph)!.say;
+    expect(say).toBe(WITHHELD_OPENING);
     const turn = decisionReviewFor('9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0002', {
       graph: STORED.graph, graphHash: String(SERVED_0948.block.computed_against_hash), analysisReady: COMPARATIVE,
       analysisState: { ...SERVED_0948.analysis_state, run_state: current }, analysisResult: SERVED_0948.block,
     });
-    expect(turn.lines).toContain(`- ${say}`);
+    expect(turn.lines, JSON.stringify(turn.lines)).toContain(`- ${say}`);
     expect(turn.steps.some((s) => s.kind === 'strengthen')).toBe(false);
   });
 
