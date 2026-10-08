@@ -229,6 +229,46 @@ export function teamTimeAsk(graph: unknown): string | null {
     : `How long would ${part.deliverable} take with the team you have now?`;
 }
 
+export const EVENT_BY_DATE_REFUSALS = [
+  "Olumi couldn't connect your options to the launch date yet: it needs the deliverable the date is for.",
+  "Olumi couldn't connect your options to the launch date yet: it needs how much capacity each option adds.",
+  "Olumi couldn't connect your options to the launch date yet: the options don't change the team's capacity.",
+] as const;
+
+/** Closed producer-owned copy, carried by the existing refusal/detail and withheld carriers. */
+export function eventByDateRefusalDetail(detail: unknown): string | null {
+  return EVENT_BY_DATE_REFUSALS.find(sentence => sentence === detail) ?? null;
+}
+
+export function eventByDateRefusalOf(model: unknown): string | null {
+  if (!rec(model) || !Array.isArray(model.withheld)) return null;
+  const refusal = model.withheld.find(w => rec(w) && w.reason === 'event_goal_unadmitted'
+    && w.from === 'event_decision' && w.to === 'event_goal');
+  return eventByDateRefusalDetail(refusal?.detail);
+}
+
+export function refusedEventByDate(detail: typeof EVENT_BY_DATE_REFUSALS[number]): AdmittedModel {
+  return { nodes: [], edges: [], goal_constraints: [], loss: [], inference_classes: {},
+    withheld: [{ from: 'event_decision', to: 'event_goal', reason: 'event_goal_unadmitted', detail }] };
+}
+
+function validEventCapacity(capacity: CandidateModel['options'][number]['added_capacity']): boolean {
+  return !!capacity && [capacity.monthly_share_pct, capacity.lead_months_low, capacity.lead_months_high].every(Number.isFinite)
+    && capacity.monthly_share_pct >= 0 && capacity.monthly_share_pct <= 100
+    && capacity.lead_months_low >= 0 && capacity.lead_months_high >= capacity.lead_months_low;
+}
+
+/** Preconditions for a construction that already selected the event prompt; never classifies text. */
+export function eventByDateAdmissionRefusal(candidate: CandidateModel): typeof EVENT_BY_DATE_REFUSALS[number] | null {
+  const deliverable = candidate.goal?.deliverable;
+  if (typeof deliverable !== 'string' || !deliverable.trim() || deliverable.trim().length > 100) return EVENT_BY_DATE_REFUSALS[0];
+  if (!Array.isArray(candidate.options)) return EVENT_BY_DATE_REFUSALS[1];
+  const options = candidate.options.filter(o => o.is_status_quo !== true);
+  if (options.length === 0) return EVENT_BY_DATE_REFUSALS[2];
+  if (options.some(o => !validEventCapacity(o.added_capacity))) return EVENT_BY_DATE_REFUSALS[1];
+  return options.some(o => o.added_capacity!.monthly_share_pct > 0) ? null : EVENT_BY_DATE_REFUSALS[2];
+}
+
 export function admitEventByDate(candidate: CandidateModel, brief = ''): AdmittedModel {
   const deliverable = candidate.goal.deliverable?.trim();
   if (!deliverable || deliverable.length > 100) throw new Error('event_deliverable_required');
@@ -261,8 +301,7 @@ export function admitEventByDate(candidate: CandidateModel, brief = ''): Admitte
     if (o.is_status_quo === true) return;
     if (!capacity) { unresolved.push(id); return; }
     const { monthly_share_pct, lead_months_low, lead_months_high } = capacity;
-    if (![monthly_share_pct, lead_months_low, lead_months_high].every(Number.isFinite)
-      || monthly_share_pct < 0 || monthly_share_pct > 100 || lead_months_low < 0 || lead_months_high < lead_months_low) {
+    if (!validEventCapacity(capacity)) {
       unresolved.push(id);
       const reason = !Number.isFinite(monthly_share_pct) || monthly_share_pct < 0 || monthly_share_pct > 100
         ? `Olumi's added-capacity pace for "${o.label}" is not used. Enter a pace between 0% and 100% of ${deliverable} a month.`
