@@ -3162,11 +3162,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode);
       const held = issued?.ok === true && typeof issued.proposal_id === 'string';
       // A held card is NEVER worded as a refusal: the door's own reply, else what is held (served sc-plus-1 defect).
-      const text = held ? (call?.tool === 'propose_new_factor' ? String(issued.held_reply)
+      const FACTOR_HELD_FALLBACK = 'I’ve prepared that factor as a change for you to approve. Nothing is added until you approve it.';
+      const factorHeldSubject = typeof issued?.held_message === 'string'
+        ? /^Yes, ([\s\S]+?)\.?$/.exec(issued.held_message.trim())?.[1] : undefined;
+      const text = held ? (factorPress
+        ? (typeof issued.held_reply === 'string' && issued.held_reply.trim() !== '' ? issued.held_reply
+          : composeProposalReply(call!.tool, call!.args, issued, message)
+            ?? (factorHeldSubject !== undefined && factorHeldSubject.trim() !== ''
+              ? `Ready to ${factorHeldSubject}. Nothing is added until you approve the change.` : FACTOR_HELD_FALLBACK))
         : composeProposalReply(call!.tool, call!.args, issued, message) ?? riskHeldReply(call!))
-        : factorPress ? FACTOR_ADD_REFUSED_REPLY : RISK_ADD_REFUSED_REPLY;
+        : call === null ? 'I couldn’t tell which item that Add was for, so nothing was changed. Press its Add again.'
+          : factorPress ? FACTOR_ADD_REFUSED_REPLY : RISK_ADD_REFUSED_REPLY;
       fastPath = 'method';
-      widenAdd = { actions: held ? [] : [factorPress ? CANVAS_FACTORS_PRESS : RISKS_PRESS] };
+      widenAdd = { actions: held || call === null ? [] : [factorPress ? CANVAS_FACTORS_PRESS : RISKS_PRESS] };
       result = {
         assistant_text: text, items: [],
         tool_calls: call === null || issued === undefined ? [] : [{ name: call.tool, ok: held, mutated: false,

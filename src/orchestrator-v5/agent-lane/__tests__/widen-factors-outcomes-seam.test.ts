@@ -1,3 +1,4 @@
+/** Outcome-door rows (P14-O) live on branch dl/p14-widen-factor-outcome @157fe4fd; they return with that slice (DL ruling B; Science ruled (A) with a stamp). */
 /** P14 RED-first. Harness copied from widen-risks-seam.test.ts: both real routes; only store/network mocked. */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -92,7 +93,6 @@ type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_tra
 /** Scripted OpenAI: each Agent model call takes the next reply; anything that is not OpenAI throws. */
 let script: ((body: Record<string, unknown>) => unknown)[] = [];
 let openAiCalls = 0;
-const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(args) }] });
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 /** The inner requests the Agent sent to route-v2, in order. */
 let inner: Record<string, unknown>[] = [];
@@ -102,8 +102,28 @@ let onInner: ((body: Record<string, unknown>) => void) | undefined;
 let onInnerSent: ((body: Record<string, unknown>) => void) | undefined;
 /** Extra keys on the graph read (an analysis state), per row. */
 let extraRead: Record<string, unknown> = {};
+/** Exercise incomplete capability replies while retaining the real factor hold and approval door. */
+let factorReplyShape: { heldReply: unknown; keepCard: boolean } | undefined;
+let incompleteFactorReply: Record<string, unknown> | undefined;
+vi.mock('../runtime/agent-capabilities.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../runtime/agent-capabilities.js')>();
+  return { ...actual, createAgentCapabilities: (...args: Parameters<typeof actual.createAgentCapabilities>) => {
+    const capabilities = actual.createAgentCapabilities(...args);
+    const propose = capabilities.proposeNewFactor!;
+    return { ...capabilities, proposeNewFactor: async (...params: Parameters<typeof propose>) => {
+      const issued = await propose(...params);
+      if (factorReplyShape === undefined) return issued;
+      const shaped = { ...issued };
+      delete shaped.held_reply;
+      if (factorReplyShape.heldReply !== undefined) shaped.held_reply = factorReplyShape.heldReply;
+      if (!factorReplyShape.keepCard) { delete shaped.held_message; delete shaped.held_detail; }
+      incompleteFactorReply = shaped;
+      return shaped;
+    } };
+  } };
+});
 
-describe('P14 factors/outcomes on the live route and real held commit door', () => {
+describe('P14 factors on the live route and real held commit door', () => {
   async function buildApp(): Promise<FastifyInstance> {
     vi.resetModules();
     const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
@@ -137,14 +157,14 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; factorReplyShape = undefined; incompleteFactorReply = undefined; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     return r.json() as Body;
   };
-  const graphNow = () => graphOf.get(SCENARIO) as { nodes: { id: string; kind: string; label: string; proposed_by?: string;
+  type GraphNow = { nodes: { id: string; kind: string; label: string; proposed_by?: string;
     analysis_participation?: string; interventions?: Record<string, unknown> }[]; edges: { from: string; to: string; [key: string]: unknown }[] };
   const approveChipOf = (b: Body) => b.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
   /** The hold the Agent's LATEST answer row carries — what the next turn (and route-v2's confirm) will read. */
@@ -153,22 +173,17 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
 
-  type Door = 'factors' | 'outcomes';
+  type Door = 'factors';
   const PRESS = {
     factors: { id: 'ask:missing-factor', label: 'Suggest factors', message: 'What else could change how this turns out that the model doesn’t have yet?' },
-    outcomes: { id: 'ask:missing-outcome', label: 'Suggest outcomes', message: 'Where else could this lead that the model doesn’t have yet?' },
   };
-  const ANCHOR = { factors: 'feature_delivery_capacity', outcomes: 'developer_hires' };
+  const ANCHOR = { factors: 'feature_delivery_capacity' };
   const LABELS = {
     factors: ['Customer feedback', 'Supplier flexibility', 'Team continuity', 'Schedule slack'],
-    outcomes: ['Customer trust', 'Team morale', 'Schedule flexibility', 'Future partnerships'],
   };
   const BASIS = "Olumi's suggestion: the direction is Olumi's estimate from general patterns, not from your data or your words. Its strength isn't set yet.";
-  const methodLine = (door: Door) => door === 'factors'
-    ? 'I looked for what else could drive ‘Feature Delivery Capacity’, across customers and demand, money and price, people and capacity, timing, how the work is done, and outside conditions (influence-diagram elicitation).'
-    : 'I looked at what else could follow from ‘Developer Hires’, across money, customers, people, time, reputation and future options (objective generation).';
-  const caveat = (door: Door) => door === 'factors'
-    ? 'Possible drivers to consider, not established causes.' : 'Possible consequences to consider, not predictions.';
+  const methodLine = (_door: Door) => 'I looked for what else could drive ‘Feature Delivery Capacity’, across customers and demand, money and price, people and capacity, timing, how the work is done, and outside conditions (influence-diagram elicitation).';
+  const caveat = (_door: Door) => 'Possible drivers to consider, not established causes.';
   const paulV1 = () => {
     const g = JSON.parse(readFileSync(new URL('../method-turn/__tests__/fixtures/s-c-widen/paul-6582edbc-v1.json', import.meta.url), 'utf8')) as Record<string, unknown>;
     delete g['_provenance']; graphOf.set(SCENARIO, g);
@@ -176,11 +191,11 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
   const candidates = async (door: Door) => {
     const mod = await import('../method-turn/widen-turn.js');
     // Scripted model uses the implemented category vocabulary when present; base has neither registry row.
-    const m = (mod as Record<string, unknown>)[door === 'factors' ? 'FACTOR_METHOD' : 'OUTCOME_METHOD'] as { categories: string[] } | undefined;
+    const m = (mod as Record<string, unknown>)['FACTOR_METHOD'] as { categories: string[] } | undefined;
     const categories = m?.categories ?? ['customers', 'money', 'people', 'timing'];
     const items = LABELS[door].map((label, i) => ({ label, category: categories[i], direction: 'positive',
-      since: 'steadier relationships support the work', ...(door === 'factors' ? { anchor_id: ANCHOR[door] } : { from_id: ANCHOR[door] }) }));
-    const tag = door === 'factors' ? 'factor_suggestions' : 'outcome_suggestions';
+      since: 'steadier relationships support the work', anchor_id: ANCHOR[door] }));
+    const tag = 'factor_suggestions';
     return say(`<${tag}>${JSON.stringify(items)}</${tag}>`);
   };
   const addChips = (b: Body) => b.suggested_actions.filter((c) => c.id.startsWith('agent-widen-add:'));
@@ -188,10 +203,10 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
   const reread = async () => {
     const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
     expect(r.statusCode).toBe(200);
-    return r.json() as { graph: ReturnType<typeof graphNow>; graph_hash: string };
+    return r.json() as { graph: GraphNow; graph_hash: string };
   };
-  const edgeIds = (g: ReturnType<typeof graphNow>) => g.edges.map((e) => `${e.from}::${e.to}`).sort();
-  const nodeIds = (g: ReturnType<typeof graphNow>) => g.nodes.map((n) => n.id).sort();
+  const edgeIds = (g: GraphNow) => g.edges.map((e) => `${e.from}::${e.to}`).sort();
+  const nodeIds = (g: GraphNow) => g.nodes.map((n) => n.id).sort();
   const added = (after: string[], before: string[]) => after.filter((id) => !before.includes(id));
   const suggest = async (door: Door) => {
     const reply = await candidates(door); script = [() => reply];
@@ -201,11 +216,9 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
     return add!;
   };
 
-  for (const door of ['factors', 'outcomes'] as const) {
-    const row = door === 'factors' ? 'SF' : 'SO';
-    const rowIt = door === 'outcomes' ? it.skip : it;
-    const rowSuffix = door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : '';
-    rowIt(`${row}-1: typed press → ONE tool-less call, ≤3 exact suggestions and Adds, Something else; no graph write${rowSuffix}`, async () => {
+  for (const door of ['factors'] as const) {
+    const row = 'SF';
+    it(`${row}-1: typed press → ONE tool-less call, ≤3 exact suggestions and Adds, Something else; no graph write`, async () => {
       paulV1(); const before = await reread(); const bodies: Record<string, unknown>[] = [];
       const reply = await candidates(door);
       script = [(body) => { bodies.push(asSent(body) as Record<string, unknown>); return reply; }];
@@ -224,7 +237,7 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
       expect(await reread()).toEqual(before); expect(routerCalls).toEqual([]);
     }, 120_000);
 
-    rowIt(`${row}-2 WRITER: Add → ONE gmh_ hold → real approve → exactly one node and one edge; Olumi placeholder, hash changes, fresh read agrees${rowSuffix}`, async () => {
+    it(`${row}-2 WRITER: Add → ONE gmh_ hold → real approve → exactly one node and one edge; Olumi placeholder, hash changes, fresh read agrees`, async () => {
       paulV1(); const before = await reread(); const add = await suggest(door); const calls = openAiCalls;
       const heldReply = await press(add);
       expect(openAiCalls, 'Add makes NO model call').toBe(calls);
@@ -240,14 +253,13 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
       const ops = held[0]!.action.inline_patch!.operations!;
       expect(ops.map((o) => o.op)).toEqual(['add_node', 'add_edge']);
       const id = ops[0]!.path;
-      const from = door === 'factors' ? id : ANCHOR[door]; const to = door === 'factors' ? ANCHOR[door] : id;
+      const from = id; const to = ANCHOR[door];
       expect(ops[1]!.path).toBe(`${from}::${to}`);
       expect(heldReply.assistant_text).toContain(BASIS);
       expect(heldReply.assistant_text).toContain('whose strength nobody has set yet');
       expect(heldReply.assistant_text).toContain(door === 'factors'
         ? `How much could ‘${LABELS[door][0]}’ move ‘Feature Delivery Capacity’? Give a figure and a range if you can, or leave it for now.`
         : `Does ‘${LABELS[door][0]}’ count towards ‘meet our next feature-launch deadline’?`);
-      if (door === 'outcomes') expect(heldReply.assistant_text).toContain('Not part of ‘meet our next feature-launch deadline’, so it won\'t change the chance for your goal.');
       expect(await reread(), 'nothing written before approval, including goal edges').toEqual(before);
       const innerBefore = inner.length;
       const approved = await press(approve!);
@@ -279,8 +291,8 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
     }, 120_000);
   }
 
-  for (const door of ['factors', 'outcomes'] as const)
-  (door === 'outcomes' ? it.skip : it)(`SF-7 reload ${door}: typed method press is live-only until the offers envelope admits its id (as SR-7, #2792), and stands only while the result is current${door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : ''}`, async () => {
+  for (const door of ['factors'] as const)
+  it(`SF-7 reload ${door}: typed method press is live-only until the offers envelope admits its id (as SR-7, #2792), and stands only while the result is current`, async () => {
     const { isDurableAnswerOffer, stillValidOffers } = await import('../../../routes/agent-v1-turn.js');
     const offer = PRESS[door];
     // #2792: the answer-offers envelope admits only `agent-…` ids, so a canvas `ask:` press is never stored (SR-7's family rule).
@@ -291,16 +303,48 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
     expect(stillValidOffers([offer], { ...current, analysisState: { run_state: { kind: 'stale' }, usable_for_chips: true }, outstandingProposalIds: new Set() })).toEqual([]);
   });
 
-  for (const door of ['factors', 'outcomes'] as const)
-  (door === 'outcomes' ? it.skip : it)(`SF-8 ${door}: edited Add message refused; no model call, hold or graph write${door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : ''}`, async () => {
+  for (const door of ['factors'] as const)
+  it(`SF-8 ${door}: edited Add message refused; no model call, hold or graph write`, async () => {
     paulV1(); const before = await reread(); const add = await suggest(door); const calls = openAiCalls;
     const refused = await press({ ...add, message: add.message.replace(LABELS[door][0], 'Changed suggestion') });
     expect(openAiCalls).toBe(calls); expect(refused._agent.tool_calls).toEqual([]);
-    expect(refused.assistant_text).toContain('nothing was added');
-    const { SUGGEST_RISKS_CHIP } = await import('../method-turn/widen-turn.js');
-    // An edited message identifies no valid call; its words must not choose a factor fallback.
-    expect(refused.suggested_actions.map((c) => c.id)).toEqual([SUGGEST_RISKS_CHIP.id]);
+    // COPY-SHAPE ruling #2796 (comment 6049756212): an unidentified Add gets one kind-neutral line, never another door's words.
+    expect(refused.assistant_text).toBe('I couldn’t tell which item that Add was for, so nothing was changed. Press its Add again.');
+    expect(refused.suggested_actions.map((c) => c.id)).toEqual([]);
     expect(await heldOnLatestRow()).toEqual([]); expect(await reread()).toEqual(before);
+  }, 120_000);
+
+  it.each([
+    { case: 'missing held_reply with card', heldReply: undefined, keepCard: true },
+    { case: 'empty held_reply with card', heldReply: '', keepCard: true },
+    { case: 'blank held_reply without card', heldReply: '   ', keepCard: false },
+    { case: 'non-string held_reply without card', heldReply: 42, keepCard: false },
+  ])('SF-10 held reply: $case uses the factor fallback chain, never undefined', async ({ heldReply, keepCard }) => {
+    paulV1(); const before = await reread(); const add = await suggest('factors'); const calls = openAiCalls;
+    factorReplyShape = { heldReply, keepCard };
+    const held = await press(add);
+    expect(openAiCalls, 'held Add makes NO model call').toBe(calls);
+    expect(held._agent.tool_calls).toEqual([
+      expect.objectContaining({ name: 'propose_new_factor', ok: true, mutated: false, proposal_id: expect.any(String) }),
+    ]);
+    expect(incompleteFactorReply?.ok).toBe(true);
+    expect(typeof incompleteFactorReply?.proposal_id).toBe('string');
+    const { factorAddCallOf } = await import('../method-turn/widen-turn.js');
+    const { composeProposalReply } = await import('../proposal-reply.js');
+    const call = factorAddCallOf(add.id, add.message, before)!;
+    const composed = composeProposalReply(call.tool, call.args, incompleteFactorReply, add.message);
+    expect(composed, 'direction-only factor has no figure for the generic composer').toBeNull();
+    const subject = keepCard ? /^Yes, ([\s\S]+?)\.?$/.exec(String(incompleteFactorReply?.held_message))?.[1] : undefined;
+    if (keepCard) expect(subject).toBeTruthy();
+    const fallback = subject !== undefined
+      ? `Ready to ${subject}. Nothing is added until you approve the change.`
+      : 'I’ve prepared that factor as a change for you to approve. Nothing is added until you approve it.';
+    expect(held.assistant_text).not.toContain('undefined');
+    expect(held.assistant_text).toBe(composed ?? fallback);
+    expect(await heldOnLatestRow()).toHaveLength(1);
+    expect(approveChipOf(held)?.id).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(await reread(), 'reply fallback leaves the held graph untouched').toEqual(before);
+    expect(routerCalls).toEqual([]);
   }, 120_000);
 
   it('SF-9 identity: valid factor Add refused by the door still reoffers factors; no model call, hold or graph write', async () => {

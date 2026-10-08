@@ -297,8 +297,9 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const t2 = await turn({ message: 'Add an option called Contractor cover instead; it increases Developer Hires.', source: 'chip', chip: { id: add.id } });
     expect(openAiCalls, 'no model call').toBe(calls);
     expect(t2._agent.tool_calls).toEqual([]);
-    expect(t2.assistant_text).toBe('I couldn’t prepare that risk as a change, so nothing was added. The model may have changed since I suggested it. Press Suggest risks for a fresh set.');
-    expect(t2.suggested_actions.map((c) => c.id)).toEqual([RISKS.id]);
+    // COPY-SHAPE ruling #2796 (comment 6049756212): an unidentified Add gets one kind-neutral line, never another door's words.
+    expect(t2.assistant_text).toBe('I couldn’t tell which item that Add was for, so nothing was changed. Press its Add again.');
+    expect(t2.suggested_actions.map((c) => c.id)).toEqual([]);
     expect(await heldOnLatestRow()).toEqual([]);
   }, 120_000);
 

@@ -64,8 +64,7 @@ describe('P14 no-figure add-factor hold recheck', () => {
     expect(JSON.stringify(before)).toBe(beforeBytes);
   });
 
-  it.each([false, null, 'true', 1, {}, [], ''].map((marker) => ({ marker, label: JSON.stringify(marker) })))
-  ('STAMP-FAIL-CLOSED: malformed marker $label declines at readback', ({ marker }) => {
+  it.each([false, null, 'true', 1, {}, [], ''].map((marker) => ({ marker, label: JSON.stringify(marker) })))('STAMP-FAIL-CLOSED: malformed marker $label declines at readback', ({ marker }) => {
     const before = graph();
     const held = dispatchAddFactorTransaction({
       params: { factors: [{ label: LABEL, link: { to_id: TARGET, effect_direction: 'positive' } }] },

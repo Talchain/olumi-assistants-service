@@ -1,3 +1,4 @@
+/** Outcome-door rows (P14-O) live on branch dl/p14-widen-factor-outcome @157fe4fd; they return with that slice (DL ruling B; Science ruled (A) with a stamp). */
 /** P14 RED-first contracts. Science's 7 Oct ruling; no production exports stubbed or skipped. */
 import { describe, expect, it } from 'vitest';
 import * as mod from '../widen-turn.js';
@@ -7,19 +8,19 @@ type Rec = Record<string, unknown>;
 type Gate = { kept: { label: string; category: string; press: { id: string; message: string } }[];
   dropped: { index: number; failed: string[] }[] };
 type Settled = { reply: string; gate: Gate; actions: { id: string; label: string; message: string }[] };
-type Door = 'factors' | 'outcomes';
+type Door = 'factors';
 const api = mod as Record<string, unknown>;
 // FIRST assertion in every gate row: missing implementation is an assertion failure, never a missing named import.
 const fn = <T extends (...args: never[]) => unknown>(name: string): T => {
   expect(typeof api[name], `P14 missing widen-turn export: ${name}`).toBe('function');
   return api[name] as T;
 };
-const gateFn = (door: Door) => fn<(turn: unknown, items: unknown) => Gate>(door === 'factors' ? 'factorGate' : 'outcomeGate');
-const settleFn = (door: Door) => fn<(turn: unknown, draft: string) => Settled>(door === 'factors' ? 'settleFactorsTurn' : 'settleOutcomesTurn');
+const gateFn = (_door: Door) => fn<(turn: unknown, items: unknown) => Gate>('factorGate');
+const settleFn = (_door: Door) => fn<(turn: unknown, draft: string) => Settled>('settleFactorsTurn');
 const turnOn = (door: Door, graph = seed()) =>
   fn<(rb: { graph: unknown }) => unknown>(`${door}TurnForReadback`)({ graph });
-const method = (door: Door) => {
-  const name = door === 'factors' ? 'FACTOR_METHOD' : 'OUTCOME_METHOD';
+const method = (_door: Door) => {
+  const name = 'FACTOR_METHOD';
   expect(api[name], `P14 missing ${name}`).toBeTypeOf('object');
   return api[name] as { id: string; categories: string[] };
 };
@@ -30,9 +31,6 @@ const seed = () => ({
     { id: 'profit', kind: 'outcome', label: 'profit', unit: 'GBP', observed_state: { value: 0.4, unit: 'GBP' } },
     { id: 'revenue', kind: 'factor', label: 'revenue', category: 'external', observed_state: { value: 0.6, unit: 'GBP' } },
     { id: 'cost', kind: 'factor', label: 'cost', category: 'external', observed_state: { value: 0.2, unit: 'GBP' } },
-    { id: 'lever', kind: 'factor', label: 'Service capacity', category: 'controllable', observed_state: { value: 0.3 } },
-    { id: 'option', kind: 'option', label: 'Expand service', interventions: { lever: { value: 0.7 } } },
-    { id: 'risk', kind: 'risk', label: 'Service interruption' },
   ],
   edges: [
     { from: 'revenue', to: 'profit', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8 },
@@ -41,54 +39,45 @@ const seed = () => ({
   ],
 });
 const candidate = (door: Door, over: Rec = {}, categoryIndex = 0): Rec => ({
-  label: door === 'factors' ? 'Customer retention' : 'Team morale',
+  label: 'Customer retention',
   category: method(door).categories[categoryIndex], direction: 'positive', since: 'steadier relationships support the work',
-  ...(door === 'factors' ? { anchor_id: 'profit' } : { from_id: 'revenue' }), ...over,
+  anchor_id: 'profit', ...over,
 });
-const appendix = (door: Door, items: unknown) => `<${door === 'factors' ? 'factor' : 'outcome'}_suggestions>${JSON.stringify(items)}</${door === 'factors' ? 'factor' : 'outcome'}_suggestions>`;
+const appendix = (_door: Door, items: unknown) => `<factor_suggestions>${JSON.stringify(items)}</factor_suggestions>`;
 const labels = (g: Gate) => g.kept.map((x) => x.label);
-const methodLine = (door: Door) => door === 'factors'
-  ? 'I looked for what else could drive ‘profit’, across customers and demand, money and price, people and capacity, timing, how the work is done, and outside conditions (influence-diagram elicitation).'
-  : 'I looked at what else could follow from ‘revenue’, across money, customers, people, time, reputation and future options (objective generation).';
-const caveat = (door: Door) => door === 'factors'
-  ? 'Possible drivers to consider, not established causes.' : 'Possible consequences to consider, not predictions.';
+const methodLine = (_door: Door) => 'I looked for what else could drive ‘profit’, across customers and demand, money and price, people and capacity, timing, how the work is done, and outside conditions (influence-diagram elicitation).';
+const caveat = (_door: Door) => 'Possible drivers to consider, not established causes.';
 
 describe('P14 press identity', () => {
   it('PI-F: DGAI factor press opens factors', () => {
     expect(mod.widenTargetOf('ask:missing-factor', 'What else could change how this turns out that the model doesn’t have yet?')).toBe('factors');
   });
-  it.skip('PI-O: DGAI outcome press opens outcomes — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)', () => {
-    expect(mod.widenTargetOf('ask:missing-outcome', 'Where else could this lead that the model doesn’t have yet?')).toBe('outcomes');
-  });
 });
 
-for (const door of ['factors', 'outcomes'] as const) {
-  const prefix = door === 'factors' ? 'FD' : 'OD';
-  const rowIt = door === 'outcomes' ? it.skip : it;
-  const rowSuffix = door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : '';
+for (const door of ['factors'] as const) {
+  const prefix = 'FD';
   describe(`P14 ${door} identity gate and deterministic reply`, () => {
-    rowIt(`${prefix}-NO-DUP pair: fold-equal dropped; distinct label kept${rowSuffix}`, () => {
+    it(`${prefix}-NO-DUP pair: fold-equal dropped; distinct label kept`, () => {
       const gate = gateFn(door); const t = turnOn(door);
       expect(labels(gate(t, [candidate(door, { label: '  ReVeNuE  ' })]))).toEqual([]);
       expect(labels(gate(t, [candidate(door)]))).toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
     });
     for (const field of ['label', 'since'] as const) {
-      rowIt(`${prefix}-NO-FIGURE ${field}: digit dropped; no-digit control kept${rowSuffix}`, () => {
+      it(`${prefix}-NO-FIGURE ${field}: digit dropped; no-digit control kept`, () => {
         const gate = gateFn(door); const t = turnOn(door);
         expect(labels(gate(t, [candidate(door, { [field]: field === 'label' ? 'Retention phase 2' : 'relationships last 2 years' })]))).toEqual([]);
         expect(labels(gate(t, [candidate(door)]))).toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
       });
     }
-    rowIt.each(['key', 'main', 'top', 'root cause', 'the real', 'best', 'winner', 'recommend', 'ahead', 'beats', 'leader',
+    it.each(['key', 'main', 'top', 'root cause', 'the real', 'best', 'winner', 'recommend', 'ahead', 'beats', 'leader',
       'you missed', 'incomplete', 'all the drivers', 'complete', 'will', 'proven', 'likely', 'probably', 'hidden risks',
       'unintended consequences', 'most important', 'primary', 'the answer', 'you forgot', 'your model is wrong',
-      'the complete list', 'everything that matters', 'research shows'])
-    (`${prefix}-WORDS: "%s" dropped in label AND since; neutral control kept${rowSuffix}`, (word) => {
+      'the complete list', 'everything that matters', 'research shows'])(`${prefix}-WORDS: "%s" dropped in label AND since; neutral control kept`, (word) => {
       const gate = gateFn(door); const t = turnOn(door);
       for (const field of ['label', 'since']) expect(labels(gate(t, [candidate(door, { [field]: `${word} relationships` })])), field).toEqual([]);
       expect(labels(gate(t, [candidate(door)]))).toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
     });
-    rowIt(`${prefix}-CATEGORY: six categories; distinct categories, at most three exact items${rowSuffix}`, () => {
+    it(`${prefix}-CATEGORY: six categories; distinct categories, at most three exact items`, () => {
       const gate = gateFn(door); const t = turnOn(door); const m = method(door);
       expect(m.categories).toHaveLength(6);
       expect(new Set(m.categories).size).toBe(6);
@@ -99,14 +88,14 @@ for (const door of ['factors', 'outcomes'] as const) {
       expect(labels(gate(t, [items[0], { ...items[1], category: m.categories[0] }]))).toEqual(['Customer retention']);
       expect(labels(gate(t, [candidate(door, { category: 'unrecognised' })]))).toEqual([]);
     });
-    rowIt(`${prefix}-WORDS cap: thirteen-word since dropped; twelve-word control kept${rowSuffix}`, () => {
+    it(`${prefix}-WORDS cap: thirteen-word since dropped; twelve-word control kept`, () => {
       const gate = gateFn(door); const t = turnOn(door);
       const words = 'steadier customer relationships support the team through long periods of changing outside conditions';
       expect(labels(gate(t, [candidate(door, { since: words })]))).toEqual([]);
       expect(labels(gate(t, [candidate(door, { since: words.split(' ').slice(0, 12).join(' ') })])))
         .toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
     });
-    rowIt(`${prefix}-METHOD: named method and uncertainty lines VERBATIM${rowSuffix}`, () => {
+    it(`${prefix}-METHOD: named method and uncertainty lines VERBATIM`, () => {
       const settle = settleFn(door); const t = turnOn(door);
       expect(method(door).id).toBe(door === 'factors' ? 'influence_diagram_elicitation' : 'objective_generation');
       const s = settle(t, appendix(door, [candidate(door)]));
@@ -115,7 +104,7 @@ for (const door of ['factors', 'outcomes'] as const) {
       expect(s.reply).toContain(caveat(door));
       expect(s.actions.map((a) => a.label)).toEqual([`Add ‘${s.gate.kept[0]!.label}’`, 'Something else']);
     });
-    rowIt(`${prefix}-RX: twenty-thousand whitespace in candidate words stays bounded and is dropped${rowSuffix}`, () => {
+    it(`${prefix}-RX: twenty-thousand whitespace in candidate words stays bounded and is dropped`, () => {
       const gate = gateFn(door); const t = turnOn(door);
       const time = (n: number) => {
         let best = Infinity;
@@ -154,10 +143,4 @@ it('FD-NOT-DEFINED: profit = revenue − cost has held definitional carriers; re
   expect(settle(t, appendix('factors', [candidate('factors')])).reply)
     .toBe('‘profit’ is worked out from ‘revenue’ and ‘cost’, so a new cause would act on one of those. Press + on one of them.');
   expect(labels(gate(t, [candidate('factors', { anchor_id: 'revenue' })]))).toEqual(['Customer retention']);
-});
-
-it.skip('OD-FROM / OD-NOT-GOAL: existing factor or outcome only; never the goal, option, risk or unknown id — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)', () => {
-  const gate = gateFn('outcomes'); const t = turnOn('outcomes');
-  for (const from_id of ['revenue', 'lever', 'profit']) expect(labels(gate(t, [candidate('outcomes', { from_id })]))).toEqual(['Team morale']);
-  for (const from_id of ['goal', 'option', 'risk', 'unknown']) expect(labels(gate(t, [candidate('outcomes', { from_id })])), from_id).toEqual([]);
 });
