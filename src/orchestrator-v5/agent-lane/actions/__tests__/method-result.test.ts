@@ -204,6 +204,16 @@ describe('"Test without this link": rows are the reply\'s allowlisted lines, bou
 });
 
 describe('"What would change this?": RC\'s measured lines only, and only beside a hero that agrees (ruling 4)', () => {
+  it('Codex review P1 @a8117113: a superlative licence must NAME the run-share top as its leader; a similar hero names none', () => {
+    const options = [RAISE, STARTER, KEEP];
+    const withForm = (form: string, extra: Json = {}) => { const b = structuredClone(BLOCK); const lic = b.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED'); delete lic.summary_withheld; Object.assign(lic, { form, ...extra }); return b; };
+    expect(changeRowsAgreeWithHero(withForm('highest', { leader_option_id: STARTER, next_option_id: RAISE }), options, STARTER)).toBe(true);
+    expect(changeRowsAgreeWithHero(withForm('highest', { leader_option_id: RAISE, next_option_id: STARTER }), options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero(withForm('highest_all_likely_to_miss', { leader_option_id: RAISE, next_option_id: STARTER }), options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero(withForm('similar'), options, STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero(BLOCK, options, STARTER)).toBe(true); // control: the served 'each' record
+  });
+
   it('valid T1b licence: producer ships the quoted row when its top equals the run-share top; the same licence with another top withholds', async () => {
     const turn = await licensedTurn();
     expect(turn.outcome).toBe('measured');

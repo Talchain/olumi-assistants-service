@@ -101,7 +101,12 @@ export function changeRowsAgreeWithHero(analysisResult: unknown, optionIds: read
       && optionIds.some((id) => w.range_by_option != null && Object.hasOwn(w.range_by_option, id)))) return false;
     const top = Math.max(...optionIds.map((id) => licence.pct_by_option[id]!));
     const atTop = optionIds.filter((id) => licence.pct_by_option[id] === top);
-    return atTop.length === 1 && atTop[0] === runShareTopId;
+    if (atTop.length !== 1 || atTop[0] !== runShareTopId) return false;
+    // The hero's headline names the RECORD's leader on the superlative forms, not the percentage top (Codex review P1 @a8117113):
+    // both must be the run-share top. A 'similar' hero names no single top, so no comparison rows stand beside it.
+    const named = (licence as { leader_option_id?: unknown }).leader_option_id;
+    if ((licence.form === 'highest' || licence.form === 'highest_all_likely_to_miss') && named !== runShareTopId) return false;
+    return licence.form !== 'similar';
   } catch {
     return false;
   }
