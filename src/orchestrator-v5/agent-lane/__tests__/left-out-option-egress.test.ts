@@ -128,18 +128,19 @@ describe('Q6 egress carriers', () => {
 
 describe('Q6 timing', () => {
   for (const [name, regex] of Object.entries(LEFT_OUT_COPY_REGEXES)) {
-    it.each([' ', '£54 '])(`${name}: 5k → 20k %s repeats, ratio < 8`, shape => {
+    it.each([' ', '£54 '])(`${name}: 2.5k → 20k %s repeats (8×), ratio < 30`, shape => {
       const run = (text: string) => {
         regex.lastIndex = 0;
         if (regex.global) void [...text.matchAll(regex)];
         else regex.test(text);
         regex.lastIndex = 0;
       };
-      const [small, large] = [5_000, 20_000].map(n => shape.repeat(n));
+      // 8× the input, bar 30: linear ≈ 8, quadratic ≈ 64. A 4× step with a bar of 8 read 8.19 on a CI runner (#2888).
+      const [small, large] = [2_500, 20_000].map(n => shape.repeat(n));
       const m = scalingRatio(() => run(small), () => run(large));
       process.stdout.write(`Q6 timing ${name} ${JSON.stringify(shape)}: ${m.detail}\n`);
-      expect(m.ratio, m.detail).toBeLessThan(8);
-    });
+      expect(m.ratio, m.detail).toBeLessThan(30);
+    }, 30_000);
   }
   it('the whole correction scales linearly: 20k → 160k "the £54 test " under 22×', () => {
     const [small, large] = [1_540, 12_310].map(n => 'the £54 test '.repeat(n));
