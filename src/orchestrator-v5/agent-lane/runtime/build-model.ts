@@ -45,7 +45,7 @@ import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-te
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitOrdinaryCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admittedPassesStructure, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -55,8 +55,7 @@ import {
   nodeIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
-import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
-import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
@@ -1836,7 +1835,7 @@ export async function buildModelFromBrief(
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
   const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
   if (eventFallbackRefusal !== undefined && draftedTeamPartOf(admitted) === null
-    && !validateGraphStructure(admitted as unknown as GraphV3T, { leaveOutInertRisks: true }).valid) {
+    && !admittedPassesStructure(admitted)) {
     return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
   }
 

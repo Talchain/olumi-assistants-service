@@ -35,7 +35,7 @@ import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-adm
 import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
-import type { InterventionV3T, GraphV3T } from '../../schemas/cee-v3.js';
+import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
 import { log } from '../../utils/telemetry.js';
 import { admitInterventionRange } from '../intervention-range.js';
@@ -3014,6 +3014,11 @@ export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
   };
 }
 
+/** The Run's reachability gate (readiness leaves inert risks out) read on an admitted model, before it is registered. */
+export function admittedPassesStructure(model: AdmittedModel): boolean {
+  return validateGraphStructure(model as never, { leaveOutInertRisks: true }).valid;
+}
+
 /** Owned by construction, outside the drafter schema. The verdict that selected the prompt is never re-read. */
 export interface ConstructionAdmission {
   readonly event_by_date_prompted?: boolean;
@@ -3062,7 +3067,7 @@ export function admitCandidateModel(
   const failedEvent = (detail: typeof EVENT_BY_DATE_REFUSALS[number]): AdmittedModel => {
     try {
       const ordinary = admitOrdinaryCandidateModel(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
-      if (validateGraphStructure(ordinary as unknown as GraphV3T, { leaveOutInertRisks: true }).valid) {
+      if (admittedPassesStructure(ordinary)) {
         log.info({ event: 'cee.event_by_date.fallback_kept', missing_piece: detail.slice("Olumi couldn't connect your options to the launch date yet: ".length, -1) },
           'cee.event_by_date.fallback_kept');
         return ordinary;
