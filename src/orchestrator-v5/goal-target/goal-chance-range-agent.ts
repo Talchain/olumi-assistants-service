@@ -1,18 +1,20 @@
+import { shareGoalChanceWords } from './share-goal-chance-words.js';
 /** Agent-only readers of the selected Run's licences. No inference from figures or prose. */
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import {
   GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES,
   GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  GOAL_FIGURES_SHARE_APPROXIMATION,
 } from '../../orchestrator/context/option-result-source.js';
 import { agentLicenceRecordOf, goalChanceDisplayFromLicence, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
+import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
+import { SHARE_BY_DATE_UNIT, isShareCalendarDate } from './goal-kind.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
 const id = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
 const ids = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.every(id) && new Set(v).size === v.length;
-const pct = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100;
-const rounding = (v: unknown): boolean => v === 'whole' || v === 'nearest_5';
 
 function warningsOf(result: unknown): Rec[] {
   const r = rec(result);
@@ -31,8 +33,16 @@ export function runHasGoalChanceLicenceRecord(result: unknown): boolean {
 
 export interface GoalChanceRangeDisplay {
   readonly range: string;
+  readonly stated_time?: {
+    readonly estimate: string;
+    readonly by_date?: string;
+    readonly deliverable?: string;
+    readonly chance_words?: string;
+    readonly slow_time?: string;
+    readonly fast_time?: string;
+  };
   readonly depends_on: {
-    readonly kind: 'link_strength' | 'link_existence';
+    readonly kind: 'link_strength' | 'link_existence' | 'stated_time';
     readonly from_label: string;
     readonly to_label: string;
     readonly among: 'all' | 'unsized_links';
@@ -45,13 +55,9 @@ const rangeEnd = (v: number): string => v === 0 ? 'less than 1%' : v === 100 ? '
 export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown): Record<string, GoalChanceRangeDisplay> | undefined {
   const records = warningsOf(result).filter((w) => w.code === GOAL_CHANCE_RANGE);
   if (records.length !== 1) return undefined;
-  const r = records[0]!;
-  const optionIds = r.option_ids;
-  const ranges = rec(r.range_by_option);
-  if (r.severity !== 'info' || !id(r.message) || !ids(optionIds) || ranges === undefined
-    || Object.keys(ranges).length !== optionIds.length || !Object.keys(ranges).every((k) => optionIds.includes(k))
-    || (r.horizon_untested !== undefined && r.horizon_untested !== true)
-    || (r.horizon_line !== undefined && (r.horizon_untested !== true || !id(r.horizon_line)))) return undefined;
+  const r = goalChanceRangeRecordOf(records[0]);
+  if (r === undefined) return undefined;
+  const optionIds = r.option_ids, ranges = r.range_by_option;
   const horizons = warningsOf(result).filter((w) => w.code === GOAL_HORIZON_NOT_TESTED);
   if (r.horizon_line !== undefined && horizons.some((w) => w.message !== r.horizon_line)) return undefined;
   const nodes = rec(graph)?.nodes;
@@ -59,20 +65,33 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
     .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
   const out: Record<string, GoalChanceRangeDisplay> = {};
   for (const optionId of optionIds) {
-    const v = Object.hasOwn(ranges, optionId) ? rec(ranges[optionId]) : undefined;
-    if (v === undefined || !pct(v.low_pct) || !pct(v.high_pct) || v.low_pct >= v.high_pct
-      || !rounding(v.low_rounding) || !rounding(v.high_rounding)
-      || (v.low_rounding === 'nearest_5' && v.low_pct % 5 !== 0) || (v.high_rounding === 'nearest_5' && v.high_pct % 5 !== 0)
-      || (v.kind !== 'link_strength' && v.kind !== 'link_existence') || !id(v.from) || !id(v.to) || v.from === v.to
-      || (v.among !== 'all' && v.among !== 'unsized_links')) return undefined;
+    const v = ranges[optionId]!;
     // ⛔ S2 review r1 #1 (Codex AMEND #87 6028260969): the SCREEN's words (DGAI `goalChanceRangeLine`): 0 is "less than 1%",
     // 100 is "more than 99%", the high end drops its "about"; an unresolved link label drops the line, never a raw id.
     const fromLabel = labels.get(v.from);
     const toLabel = labels.get(v.to);
     if (fromLabel === undefined || toLabel === undefined) continue;
+    const target = rec(r.target);
+    const source = (Array.isArray(nodes) ? nodes : []).map(rec).find(n => n?.id === v.from);
+    const stated = rec(rec(source?.observed_state)?.stated_time);
+    const time = v.quantity === 'months_to_finish';
+    const hasEstimate = stated !== undefined && stated.quantity === v.quantity && typeof stated.low === 'number' && Number.isFinite(stated.low)
+      && typeof stated.high === 'number' && Number.isFinite(stated.high) && stated.high >= stated.low;
+    const estimateUnit = time ? ' months' : typeof stated?.unit === 'string'
+      ? `${stated.unit.startsWith('%') ? '' : ' '}${stated.unit}` : ' per month';
+    const estimate = hasEstimate
+      ? `${(stated.low as number).toLocaleString('en-GB')}–${(stated.high as number).toLocaleString('en-GB')}${estimateUnit}`
+      : time ? 'time estimate' : 'pace estimate';
     Object.defineProperty(out, optionId, { enumerable: true, configurable: true, value: {
       range: `between ${rangeEnd(v.low_pct)} and ${rangeEnd(v.high_pct).replace(/^about /, '')}`,
       depends_on: { kind: v.kind, from_label: fromLabel, to_label: toLabel, among: v.among },
+      ...(v.kind === 'stated_time' ? { stated_time: { estimate,
+        ...(time && hasEstimate ? { slow_time: `${stated.high} months`, fast_time: `${stated.low} months` } : {}),
+        ...(typeof target?.unit === 'string' && SHARE_BY_DATE_UNIT.test(target.unit)
+          ? { deliverable: target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''),
+            ...(isShareCalendarDate(target.by_date) ? { chance_words: shareGoalChanceWords(
+              target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), target.by_date) } : {}) } : {}),
+        ...(isShareCalendarDate(target?.by_date) ? { by_date: target.by_date } : {}) } } : {}),
     } });
   }
   return out;
@@ -102,7 +121,7 @@ export function goalChanceOptionWithheldForAgent(result: unknown, optionId: stri
  * never bar the range; every other withhold (PLoT's run-wide pair, product not read, options identical, probability
  * unusable) still does, with the point predicate's own scope.
  */
-const RANGE_COMPATIBLE_WITHHOLDS: ReadonlySet<string> = new Set([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE]);
+const RANGE_COMPATIBLE_WITHHOLDS: ReadonlySet<string> = new Set([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_SHARE_APPROXIMATION]);
 export function goalChanceRangeBarredForAgent(result: unknown, optionId: string): boolean {
   return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
     && !RANGE_COMPATIBLE_WITHHOLDS.has(w.code)
@@ -190,6 +209,7 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   goal_chance_display?: Record<string, string>;
   goal_chance_driver_display?: Record<string, string>;
   goal_chance_range_display?: Record<string, GoalChanceRangeDisplay>;
+  goal_chance_words?: string;
   goal_horizon_line?: string;
 } {
   if (!current) return {};
@@ -199,12 +219,16 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
     .filter(([optionId]) => !goalChanceRangeBarredForAgent(result, optionId)));
   const display = pointDisplayForAgent(result, ranges);
   const hasChance = Object.keys(display).length > 0;
+  const target = rec(agentLicenceRecordOf(result)?.target);
+  const shareWords = hasChance && typeof target?.unit === 'string' && SHARE_BY_DATE_UNIT.test(target.unit) && isShareCalendarDate(target.by_date)
+    ? shareGoalChanceWords(target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), target.by_date) : undefined;
   const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};
   const hasRange = Object.keys(rangeDisplay).length > 0;
   const horizon = warningsOf(result).filter((w) => w.code === GOAL_HORIZON_NOT_TESTED);
   const line = horizon.length === 1 && horizon[0]!.severity === 'info' && id(horizon[0]!.message) ? horizon[0]!.message : undefined;
   return {
     ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),
+    ...(shareWords !== undefined ? { goal_chance_words: shareWords } : {}),
     ...(Object.keys(drivers).length > 0 ? { goal_chance_driver_display: drivers } : {}),
     ...(hasRange ? { goal_chance_range_display: rangeDisplay } : {}),
     ...((hasChance || hasRange) && line !== undefined ? { goal_horizon_line: line } : {}),

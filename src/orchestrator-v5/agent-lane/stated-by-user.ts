@@ -394,6 +394,9 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   const attestation = attestHorizon(brief, goal);
   if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
   const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown; readonly goal_threshold_frame?: unknown };
+  if ((node as { threshold_source?: unknown }).threshold_source === 'definitional') {
+    return { nodes: [...nodes], held: { target: false, direction: true, horizon: false }, horizon: attestation };
+  }
   const raw = node.goal_threshold_raw;
   // R1 S4-core: a CHANGE target is stored as the contract's figure (a fraction r for `change_rel`, a signed c for
   // `change_abs`) and the brief writes it as the user said it: "cut it by 15%" is 15 in "%", "by 2 points" is 2 in the

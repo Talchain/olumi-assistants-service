@@ -36,6 +36,14 @@ describe('(e) a band the user set is said before its size is asked', () => {
     expect(question(paul({ ...BAND, provenance_display: undefined }))).toBe(ASK);
   });
 
+  it('LICENCE: the asked investment_firm_meetings → securing_funding link with a projected mean is not a band the user set', () => {
+    // Science 393023 LICENCE ruling 3, re-derived: "You set this link as strong" → the unchanged size question;
+    // user_specified records drawing the link, mean_projected means nobody sized it even beside the stale display.
+    const g = paul({ ...BAND, provenance: { source: 'user_specified', mean_projected: true } });
+    expect(question(g)).toBe(ASK);
+    expect(question(g)).not.toContain('You set this link as');
+  });
+
   it('CONTROL: a link whose SIZE the user stated is not a band (it would not be asked at all)', () => {
     const g = paul({ ...BAND, provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 1000 } } });
     expect(question(g) ?? ASK).not.toContain('You set this link as');

@@ -57,7 +57,9 @@ describe('⭐ PJ-C1 lever 2: a structural link is said by its ends only', () => 
       expect(causal.length).toBeGreaterThan(0);
       for (const l of causal) {
         expect(l, JSON.stringify(l)).toHaveProperty('strength');
-        expect(l).toHaveProperty('band');
+        // Science 393023 LICENCE ruling 3, re-derived: a placeholder (nobody sized it) projects no band; every other keeps it.
+        if ((l as { sizing?: unknown }).sizing === 'placeholder') expect(l).not.toHaveProperty('band');
+        else expect(l).toHaveProperty('band');
       }
     });
   }

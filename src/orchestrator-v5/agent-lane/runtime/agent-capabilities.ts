@@ -1,3 +1,6 @@
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 /**
  * Agent lane — the capabilities, each delegating to an existing Olumi path.
  *
@@ -201,7 +204,7 @@ import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
-import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -231,7 +234,7 @@ import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { approvalSizes, isAcceptedOlumiSize, linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { approvalSizes, isAcceptedOlumiSize, linkSizing, sizedByApproval, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
@@ -1283,7 +1286,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
-      ...(goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
+      ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
+        : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
@@ -1363,7 +1367,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
-      ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
+      // Science 393023 LICENCE ruling 3: a placeholder has no current band, so none is projected for the Agent to name.
+      ...(linkSizing(e) !== 'placeholder' && st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(countedOnce ? { exists_probability: 1, counted_once: true }
         : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
@@ -1667,12 +1672,14 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     const chancePermitted = legacyRun
       ? current && goalChance === undefined && permissions.leader_may_be_named === true
       : goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
+    const projectedChance = chancePermitted && typeof row?.probability_of_goal === 'number'
+      ? goalChancePointForAgent(row.probability_of_goal, goalChanceDisplay?.[id], shownChance.get(id)) : undefined;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
-      ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
-        ? { probability_of_goal: shownChance.get(id) ?? row.probability_of_goal } : {}),
+      ...(projectedChance !== undefined && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
+        ? { probability_of_goal: projectedChance } : {}),
       ...(decision !== undefined && !Object.hasOwn(goalFacts.goal_chance_range_display ?? {}, id) ? { goal_certainty: decision } : {}),
     }];
   }) : [];
@@ -3024,6 +3031,40 @@ export function createAgentCapabilities(
     };
   };
 
+  /** The approved current-team duration goes through the single atomic team-time writer. */
+  const applyTeamTime = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!, a = op.value as ApprovedTeamTime;
+    if (op.path !== a.team_id || opts.commitOptionLevels === undefined) return { ok: false, mutated: false, applied: false, refusal: 'unavailable' };
+    const part = draftedTeamPartOf(approvedRead.raw);
+    if (part === null || part.team.id !== a.team_id || part.goal.id !== a.goal_id || goalDeadlineOf(part.goal) !== a.deadline) {
+      return { ok: false, mutated: false, applied: false, refusal: 'superseded' };
+    }
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: approvedRead.graph_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#team-time`), links: [], levels: [], team_time: a });
+    if (res.status === 'unconfirmed') {
+      const reread = await readGraph(ctx.scenario_id), held = draftedTeamPartOf(reread?.raw);
+      if (reread !== null && held !== null
+        && teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), reread.raw)
+        && teamSharePostimageIsScoped(approvedRead.raw, reread.raw, a.team_id)) {
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [a.team_id], receipts: [] });
+      }
+      return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed' };
+    }
+    if (res.status !== 'committed') return { ok: false, mutated: false, applied: false, refusal: res.status };
+    const check = await readGraph(ctx.scenario_id);
+    const held = draftedTeamPartOf(check?.raw);
+    if (held === null || !teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), check?.raw)) {
+      return { ok: false, mutated: true, applied: false, refusal: 'not_verified' };
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    proposals.markApplied(parent.proposal_id, receipts);
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      observed_state: held.team.observed_state,
+      ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
+  };
+
   /**
    * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
    * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
@@ -3064,9 +3105,24 @@ export function createAgentCapabilities(
       turn_id: authorisationTurnId(`${parent.proposal_id}#deadline`),
       links: [],
       levels: [],
-      goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null },
+      goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
+        ...(draftedTeamPartOf(approvedRead.raw) !== null ? { reference_date: (op.value as { reference?: string }).reference } : {}) },
     });
+    // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
+    if ((res.status === 'committed' || res.status === 'unconfirmed') && draftedTeamPartOf(approvedRead.raw) !== null) {
+      const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline,
+        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference });
+      const postimage = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : undefined;
+      if (postimage !== undefined) proposals.markPartial(parent.proposal_id, {
+        revision: computeAnalysisAffectingGraphHash(postimage as never)!, landed: [op.path], receipts: [], expected_postimage: postimage,
+      });
+    }
     if (res.status === 'unconfirmed') {
+      const reread = await readGraph(ctx.scenario_id);
+      if (reread !== null && goalDeadlineOf(reread.nodes.find(n => n.id === op.path)) === v.deadline
+        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
+      }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
         detail: 'This deadline was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
     }
@@ -3085,8 +3141,8 @@ export function createAgentCapabilities(
     }
     proposals.markApplied(parent.proposal_id, receipts);
     return {
-      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
-      follow_up: `Your deadline for "${String(goal.label)}" is now ${date}.`,
+      ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      follow_up: `Your deadline for "${String(check?.nodes.find(n => n.id === op.path)?.label ?? goal.label)}" is now ${date}.`,
     };
   };
 
@@ -3107,8 +3163,10 @@ export function createAgentCapabilities(
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     const links = parent.operations.map((o) => {
       const [from, to] = o.path.split('::');
-      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown }; band?: unknown; author?: unknown };
-      return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band, author: v.author };
+      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown };
+        band?: unknown; author?: unknown; sizing_after_approval?: unknown };
+      return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band,
+        author: v.author, sizingAfterApproval: v.sizing_after_approval };
     });
     const readable = links.every((l) => l.from !== '' && l.to !== '' && typeof l.magnitude === 'number' && (l.intent === 'set' || l.intent === 'confirm_current')
       && isInfluenceBand(l.band) && typeof l.expected?.mean === 'number' && (l.expected.effect_direction === 'positive' || l.expected.effect_direction === 'negative')
@@ -3148,20 +3206,24 @@ export function createAgentCapabilities(
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
-    const holds = check !== null && sent.every((l) => {
+    const holds = check !== null && sent.every((l, index) => {
       const e = check.edges.find((x) => x.from === l.from && x.to === l.to) as { strength?: unknown; provenance?: unknown } | undefined;
       const mean = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
       const want = l.expected.effect_direction === 'negative' ? -l.magnitude : l.magnitude;
       const prov = (e?.provenance ?? {}) as { source?: unknown; magnitude?: unknown };
       // Whose, as approved: a band the user named that MOVED the link is theirs; a band they named that it already sat in,
       // and Olumi's band they agreed to, are REVIEW (`reviewed_by_user`, R11) — never the user's stamp on Olumi's figure.
-      const usersOwn = prov.source === 'user_specified' && (e as { defaulted?: unknown } | undefined)?.defaulted !== true;
+      const usersOwn = linkSizing(e) === 'user';
       const reviewed = (prov as { reviewed_by_user?: { intent?: unknown } }).reviewed_by_user?.intent === 'confirm';
-      const stamped = l.author === 'user_specified' && l.intent === 'set' ? prov.source === 'user_specified'
+      const stamped = l.author === 'user_specified' && l.intent === 'set' ? usersOwn
         : l.author === 'user_specified' ? reviewed : reviewed && !usersOwn;
+      const approvedPlaceholderMove = l.author === 'model_proposed' && l.intent === 'set'
+        && links[index]?.sizingAfterApproval === 'placeholder' && linkSizing(e) === 'placeholder';
       return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && stamped
-        // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-        && !approvalSizes(e);
+        // B1: confirm_current records a review of the stored mean, even when nobody has sized it yet.
+        // A user set must read back as sized. A model move predicted by the canonical adoption writer to remain a
+        // placeholder proves only its changed prior and review; review never earns sizing or authorship by itself.
+        && (l.intent === 'confirm_current' || approvedPlaceholderMove || !approvalSizes(e));
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -3177,15 +3239,22 @@ export function createAgentCapabilities(
      */
     const storedSizing = (l: { from: string; to: string }) => linkSizing(check!.edges.find((x) => x.from === l.from && x.to === l.to));
     const quotedLabel = (id: string): string => quoteLabelForUser(labelOf(id));
-    const parts = sent.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
+    const parts = sent.map((l) => storedSizing(l) === 'placeholder'
+      ? `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} ${l.intent === 'confirm_current'
+        ? 'reviewed, kept as it is' : 'changed; it isn\u2019t sized in the model yet'}`
+      : `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
     const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
     // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
-    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate', 'placeholder'].includes(storedSizing(l))).length;
+    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate'].includes(storedSizing(l))).length;
+    const reviewsOnly = sent.every((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
+    const placeholderChangesOnly = sent.every((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `Recorded ${sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
+      follow_up: `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
+        : placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
+        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
         + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
         + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
@@ -3536,13 +3605,15 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), direction: current },
+        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: linkBandWord(currentBand) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? (keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
+              ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
+              : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
@@ -3895,7 +3966,8 @@ export function createAgentCapabilities(
       const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
-      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; sizedBefore: LinkSizing };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean;
+        was: InfluenceBand; sizedBefore: LinkSizing; sizedAfterApproval: LinkSizing };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -3957,6 +4029,11 @@ export function createAgentCapabilities(
         // The link's review stamp as proposed (#2257's `reviewed_by_user`): the writer refuses the set if it moved since.
         const review = (edge.provenance as { reviewed_by_user?: { intent?: unknown; at?: unknown } } | undefined)?.reviewed_by_user;
         const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
+        // B1: preview the canonical review writer, then read it with THE predicate. Some contradictory projected
+        // records must remain unsized after review; their card must not promise an estimate that review cannot store.
+        const provenance = isPlainRecord(edge.provenance) ? edge.provenance : {};
+        const sizedAfterApproval = linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance,
+          reviewed_by_user: { intent: 'confirm' } }, edge) });
         /**
          * ⭐ F1 (#87 6006627551; DL lease c6): a band that MOVES a link holding the user's own figure would drop it — for
          * the user's band and Olumi's estimate alike (a brief figure is `brief_extraction` + `user_stated`, so the
@@ -3975,20 +4052,19 @@ export function createAgentCapabilities(
           const keeps = currentBand === band;
           // #2473 CR (CODEX_CLI_OVERFLOW 5937437431): the user's OWN strength, named in the band it already sits in, is
           // "already" — nothing to approve. Any other kept link is a review whose figure the writer holds byte-equal.
-          if (keeps && (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
-            && (edge as { defaulted?: unknown }).defaulted !== true) {
+          if (keeps && linkSizing(edge) === 'user') {
             already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`);
             continue;
           }
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand,
+            sizedBefore: linkSizing(edge), sizedAfterApproval });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
-        const usersOwn = (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
-          && (edge as { defaulted?: unknown }).defaulted !== true;
+        const usersOwn = linkSizing(edge) === 'user';
         if (usersOwn) {
           if (currentBand === band) { already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`); continue; }
           return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${linkBandWord(currentBand)}), and an estimate never replaces it. `
@@ -4003,8 +4079,11 @@ export function createAgentCapabilities(
         const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
         if (keeps && !approvalSizes(edge) && isAcceptedOlumiSize(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
-        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
+        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
+          expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed',
+          sizing_after_approval: sizedAfterApproval } });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand,
+          sizedBefore: linkSizing(edge), sizedAfterApproval });
       }
       if (ops.length === 0) {
         if (heldFigures.length > 0 && definitional.length === 0) {
@@ -4019,18 +4098,29 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'nothing_to_change', already,
           detail: 'Every link already holds what was asked, so nothing was prepared. Say so plainly.' };
       }
-      const whose = (x: Shown): string => x.yours
+      const remainsPlaceholder = (x: Shown): boolean => (x.keeps || !x.yours) && x.sizedAfterApproval === 'placeholder';
+      const reviewKeepsPlaceholder = (x: Shown): boolean => x.keeps && remainsPlaceholder(x);
+      const sourceRemainsUnmarked = (x: Shown): boolean => (x.keeps || !x.yours) && x.sizedAfterApproval === 'unmarked';
+      const reviewOnlyWhose = 'review only; nobody has sized this link';
+      const placeholderChangeWhose = 'placeholder prior changed; nobody has sized this link';
+      const whose = (x: Shown): string => sourceRemainsUnmarked(x) ? 'source of its size not recorded'
+        : reviewKeepsPlaceholder(x) ? reviewOnlyWhose : x.yours
         ? (x.keeps ? 'reviewed by you, kept as it is' : 'your estimate')
-        : 'Olumi\u2019s estimate';
+        : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
       /**
        * Whose figure each link holds AFTER the approval (M1 Accept receipt, Codex pre-review P2): naming the band a link
        * already sits in is review (R11), never authorship — the writer keeps who sized it, so a kept link is the user's
-       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its two literals are a typed contract
+       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its literals are a typed contract
        * (`proposal-reply.ts` `LINK_WHOSE`, fail-closed on any other).
        */
-      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' =>
-        x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours' : 'Olumi\u2019s estimate';
-      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user').length;
+      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' | 'Olumi\u2019s first estimate for a link nobody had sized'
+        | typeof reviewOnlyWhose | typeof placeholderChangeWhose | undefined =>
+        sourceRemainsUnmarked(x) ? undefined : remainsPlaceholder(x) ? (x.keeps ? reviewOnlyWhose : placeholderChangeWhose)
+          : x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours'
+          : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
+      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user' && !reviewKeepsPlaceholder(x)).length;
+      const reviewOnlyLinks = shown.filter(reviewKeepsPlaceholder);
+      const unsizedChanges = shown.filter(x => !x.keeps && remainsPlaceholder(x));
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4038,11 +4128,18 @@ export function createAgentCapabilities(
         operations: ops,
         provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}: `
-          + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
+        public_label: `${reviewOnlyLinks.length === shown.length
+          ? `Review ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          : unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          : `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}`}: `
+          + shown.map((x) => reviewKeepsPlaceholder(x)
+            ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet (kept as it is)`
+            : remainsPlaceholder(x) ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet`
+            : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
       });
       proposals.put(proposal);
-      const olumis = shown.filter((x) => !x.yours).length;
+      const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;
+      const firstEstimates = shown.filter((x) => whoseFigure(x) === 'Olumi\u2019s first estimate for a link nobody had sized');
       // A link Olumi had ALREADY estimated is re-sized, not sized: the Agent says so, never "your placeholders" (R3 DEFECT 2).
       const reEstimated = shown.filter((x) => !x.yours && !x.keeps && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted'));
       return {
@@ -4050,8 +4147,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), sizing: x.sizedBefore },
-          becomes: { band: linkBandWord(x.band) }, whose: whoseFigure(x), keeps_current_strength: x.keeps })),
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { ...(x.sizedBefore === 'placeholder' ? {} : { band: linkBandWord(x.was) }), sizing: x.sizedBefore },
+          becomes: remainsPlaceholder(x) ? { sizing: 'placeholder' } : { band: linkBandWord(x.band) },
+          whose: whoseFigure(x), keeps_current_strength: x.keeps,
+          ...(x.keeps || !x.yours ? { sizing_after_approval: x.sizedAfterApproval } : {}) })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
@@ -4060,6 +4159,19 @@ export function createAgentCapabilities(
           + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
+            : '')
+          + (firstEstimates.length > 0
+            ? 'For links nobody had sized, this offers Olumi\u2019s first estimate: approving records it as Olumi\u2019s, never as the user\u2019s own. '
+              + (firstEstimates.some((x) => x.keeps) ? 'Where the strength is kept as it is, approving records only the user\u2019s review, never authorship. ' : '')
+            : '')
+          + (reviewOnlyLinks.length > 0
+            ? 'These links aren\u2019t sized in the model yet: approving records only the user\u2019s review and keeps their stored strength. Never call their strengths the user\u2019s own or Olumi\u2019s estimates. '
+            : '')
+          + (unsizedChanges.length > 0
+            ? 'These changes move the stored placeholder strength, but the links still aren\u2019t sized in the model yet. Say that explicitly: approving changes the stored figure and records review, never an estimate or the user\u2019s authorship. '
+            : '')
+          + (shown.some(sourceRemainsUnmarked)
+            ? 'For links whose sizing stays unmarked, who set the strength is not recorded. Never call that strength the user\u2019s own, a placeholder or Olumi\u2019s estimate. '
             : '')
           + (keptNotTheirs > 0
             ? `${keptNotTheirs === shown.length ? 'Every link here' : `${keptNotTheirs} of these links`} already sits in the band the user named, so approving records only their review: its strength is kept exactly as it is and is never the user\u2019s own (\`whose\`). `
@@ -4189,6 +4301,10 @@ export function createAgentCapabilities(
       const goal = goals[0]!;
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
+      if (isEventShareForecast(g.raw)) {
+        return { ok: false, mutated: false, refusal: 'goal_measures_a_forecast',
+          detail: 'This goal measures the forecast share finished by its deadline. Its full-deliverable target stays held. Type the soonest and latest times with your current team, for example "6–10 months".' };
+      }
       if (goalKindOf(goal) === 'chance_of_event') {
         return { ok: false, mutated: false, refusal: 'goal_measures_a_chance',
           detail: `The goal "${goal.label}" is measured as a chance of an event, which Olumi works out, so it takes no target figure. Nothing was prepared. `
@@ -4314,6 +4430,41 @@ export function createAgentCapabilities(
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
             + (levelLeftOut.host_line !== undefined ? '; Olumi already tells the user it was not included, so do not repeat it.' : '.') : ''),
       };
+    },
+
+    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
+    async proposeTeamTime(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const stated = readTeamTime(ctx.user_turn_text);
+      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
+        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
+          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineOf(part.goal);
+      if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
+        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+      const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()) };
+      if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
+        detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
+      if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
+        return { ok: false, mutated: false, refusal: 'already_held',
+          detail: a.low_months === a.high_months ? 'Your most likely time is already held. Type the soonest and latest times with your current team, for example "6–10 months".'
+            : 'That team-time range is already held. To change it, type the new soonest and latest times, for example "6–9 months".' };
+      }
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
+        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === 'set_team_time')) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
+        base_revision: g.graph_hash, team_time: a };
     },
 
     /**
@@ -5413,6 +5564,10 @@ export function createAgentCapabilities(
       }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const recovery = proposals.partialProgressOf(args.proposal_id);
+      if (recovery?.expected_postimage !== undefined && !isDeepStrictEqual(recovery.expected_postimage, before.raw)) {
+        return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: args.proposal_id };
+      }
       const decision = proposals.authorise({
         proposal_id: args.proposal_id,
         scenario_id: ctx.scenario_id,
@@ -5554,10 +5709,10 @@ export function createAgentCapabilities(
           const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
           const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
           const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
-          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : p?.source === 'user_specified';
+          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : linkSizing(x) === 'user';
           return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
-            // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-            && !approvalSizes(x);
+            // B1: a same-band confirm reviews the unchanged mean; it may still be an unsized placeholder.
+            && (v.intent === 'confirm_current' || !approvalSizes(x));
         };
         /**
          * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of
@@ -5826,6 +5981,7 @@ export function createAgentCapabilities(
       // door is wired here, nothing is written and the Agent says so — never a strength-only or register fallback.
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
