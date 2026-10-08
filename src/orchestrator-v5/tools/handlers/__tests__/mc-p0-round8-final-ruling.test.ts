@@ -38,6 +38,13 @@ import { runP0Graph } from './mc-p0-run-helper.js';
 import { appendLegacyFiguresAfterLeaderSentence, isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 
 type R = Record<string, any>;
+const fa027Graph = JSON.parse(readFileSync(new URL('../../../handlers/__tests__/fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as R;
+// pre-ruling legacy class: a defaulted size that is not the door constant (Science 393023 LICENCE (a))
+const fa027Legacy = structuredClone(fa027Graph);
+for (const edge of fa027Legacy.edges) {
+  if (edge.defaulted === true && Math.abs(edge.strength.mean) === 0.5 && edge.strength.std === 0.125
+    && edge.provenance?.magnitude === undefined && edge.provenance?.natural_effect === undefined) edge.strength.std = 0.1;
+}
 const ids = ['a', 'b'];
 const scenario = '714abc5c-4e82-4436-9454-eec6c8f68589';
 const edge = (from: string, to: string, provenance: R = { source: 'cee_hypothesis', mean_projected: true }) => ({
@@ -191,9 +198,15 @@ it('R8-1: identity exactInto, user sizing and estimates never withhold, legacy d
   const g = graph(); g.nodes[0].nonlinear_identity = { operation: 'product', factor_ids: ['x'], stated_in_brief: true };
   expect(unsizedLeaderGoalPaths(g, ids)).toEqual([]);
   delete g.nodes[0].nonlinear_identity;
-  for (const provenance of [{ source: 'user_specified', mean_projected: true }, { source: 'cee_hypothesis', magnitude: 'user_stated', mean_projected: true }, { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1 } }]) {
+  for (const provenance of [{ source: 'cee_hypothesis', magnitude: 'user_stated', mean_projected: true }, { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1 } }]) {
     link(g).provenance = provenance; expect(unsizedLeaderGoalPaths(g, ids)).toEqual([]);
   }
+  // Science 393023 LICENCE ruling 1 (7 Oct 20:48Z), re-derived: `user_specified` + `mean_projected` = the user drew the
+  // link and gave no number, so it is unsized and withholds (was: read as the user's size).
+  link(g).provenance = { source: 'user_specified', mean_projected: true };
+  const withheld = unsizedLeaderGoalPaths(g, ids);
+  expect(withheld.map(p => p.option_id).sort()).toEqual([...ids].sort());
+  for (const p of withheld) expect(p.links).toContainEqual({ from: link(g).from, to: link(g).to });
   g.nodes.push({ id: 'dead', kind: 'factor', label: 'Unused' }); g.edges.push(edge('x', 'dead', { source: 'cee_hypothesis' }));
   expect(legacyLeaderGoalLinks(g, ids)).toEqual([]);
 });
@@ -246,7 +259,7 @@ it('R8-3 frame fallback writes projected mean together with a magnitude change',
   expect(link(after).provenance.mean_projected).toBe(true); expect(link(after).provenance.magnitude).toBeUndefined(); expect(hash(after)).not.toBe(hash(g));
 });
 
-it('R8-2 AST: only the leader licence reads mean_projected in production; writers and schema only declare/destructure', () => {
+it('R8-2 AST: only link-sizing reads mean_projected in production; writers and schema only declare/destructure', () => {
   const found: string[] = [];
   function scan(dir: string): void {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
@@ -266,7 +279,8 @@ it('R8-2 AST: only the leader licence reads mean_projected in production; writer
   }
   // DL 7 Oct (L1, Science 393023 ruling (b)): the absent-mediator-unit reader reads the flag ONLY to EXCLUDE a projected
   // mean from unit authority (fail-closed: an estimate never establishes a unit). The licence stays the one 'unsized' reader.
-  scan('src'); expect([...new Set(found)].sort()).toEqual(['src/orchestrator-v5/agent-lane/goal-certainty.ts', 'src/orchestrator/context/placeholder-parts.ts'].sort());
+  // Science 393023 LICENCE (b) ONE predicate: link-sizing owns the placeholder reading.
+  scan('src'); expect([...new Set(found)].sort()).toEqual(['src/cee/magnitude/link-sizing.ts', 'src/orchestrator/context/placeholder-parts.ts'].sort());
 });
 
 it('R8 wording budget keeps exact singular/plural grammar and truncates only endpoint labels', () => {
@@ -288,7 +302,7 @@ it.each([true, false])('R8-3 register writer cannot set/clear projection alone; 
 
 
 it('RD-1/RD-2 fa027 stored shape: licence permitted, all legacy names immediately after leader sentence, reply allowlist + cold read', async () => {
-  const g = JSON.parse(readFileSync(new URL('../../../handlers/__tests__/fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8'));
+  const g = structuredClone(fa027Legacy);
   const saved = await saveAndReload(g);
   // The stored shape has an unvalued Split Sprint arm the real loader excludes; the synthetic engine must score only the sent arms.
   const body = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8'));
@@ -317,6 +331,45 @@ it('RD-1/RD-2 fa027 stored shape: licence permitted, all legacy names immediatel
   const cold = await readScenarioAnalysis({ scenarioId: scenario, graph: persisted.graph as never, requestId: 'r8-fa027-cold' });
   if (cold.analysis_result?.type !== 'analysis_result') throw new Error('R8 fa027 cold read omitted analysis_result');
   expect(cold.analysis_state?.leader_claim).toMatchObject({ permitted: true });
+  expect(cold.analysis_result?.leading_option_id).toBe(r.leading_option_id);
+  expect(cold.analysis_result?.enrichment?.inference_warnings).toEqual(r.enrichment.inference_warnings);
+});
+
+it('RD-1/RD-2 LICENCE (a): as-served fa027 door constants withhold, exact names survive reply + cold read', async () => {
+  const g = structuredClone(fa027Graph);
+  const saved = await saveAndReload(g);
+  // The stored shape has an unvalued Split Sprint arm the real loader excludes; the synthetic engine must score only the sent arms.
+  const body = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8'));
+  const compared = ['ai_reporting_module_sprint', 'integration_bug_fix_sprint', 'continue_current_plan'];
+  body.option_comparison = compared.map((id, i) => ({ option_id: id, option_label: g.nodes.find((n: R) => n.id === id).label, win_probability: i === 0 ? 0.8 : 0.1, probability_of_goal: null, status: 'computed', outcome: { mean: 0.8 - i * 0.2, std: 0.05, p10: 0.5, p50: 0.6, p90: 0.9, n_samples: 10000, n_valid_samples: 10000, validity_ratio: 1, percentiles_source: 'samples' } }));
+  body.results = structuredClone(body.option_comparison);
+  body.identity_evaluations = []; body.inference_warnings = []; body.fact_objects = []; body.review_cards = [];
+  body.decision_brief = { options: structuredClone(body.option_comparison), analysis_summary: { leading_option: compared[0], win_probability: 0.8 } };
+  const r = await runP0Graph(saved.graph, 'Compare the sprint options.', body);
+  // Science 393023 LICENCE (a)/(b), 7 Oct: fa027 door defaults now withhold as placeholder paths.
+  const w = r.enrichment.inference_warnings.find((w: R) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
+  expect(r.enrichment.inference_warnings.map((w: R) => w.code)).not.toContain('GOAL_FIGURES_OLUMI_SUPPLIED_LINK');
+  const words = "This comparison turns on the links from ‘Enterprise prospect signing likelihood’ to ‘Quarterly revenue’, from ‘Revenue lost to trial abandonment’ to ‘Quarterly revenue’ and from ‘Trial profile abandonment rate’ to ‘Revenue lost to trial abandonment’, whose strengths aren't sized in the model yet. To size them, I first need today’s level of ‘Quarterly revenue’. What is it, in currency/quarter?";
+  expect(w.message).toBe(words);
+  expect(w.links).toEqual([
+    { from: 'enterprise_prospect_signing_likelihood', to: 'quarterly_revenue' },
+    { from: 'revenue_lost_to_trial_abandonment', to: 'quarterly_revenue' },
+    { from: 'trial_profile_abandonment_rate', to: 'revenue_lost_to_trial_abandonment' },
+  ]);
+  // Science 393023 LICENCE (a)/(b), 7 Oct: the unsized path withholds the leader.
+  expect(r.leading_option_id).toBeNull();
+  const shadow = leaderLicenceShadow({ fact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: r } as never, graph: saved.graph, scenarioId: scenario, summaryNamesLeader: true });
+  // Science 393023 LICENCE (a)/(b), 7 Oct: the shadow records the placeholder-path withhold.
+  expect(shadow.verdict).toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: 'goal_figures_withheld' });
+  // Science 393023 LICENCE (a)/(b), 7 Oct: the summary keeps the existing no-leader fallback and disclosure tails.
+  expect(r.summary).toBe("Ran analysis on your current scenario. 'Continue Current Plan' was analysed as no change — the factors it compares against were held at the values your model records today. I supplied 17 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.");
+  expect(isAllowedRunAnalysisAssistantText(r.summary)).toBe(true);
+  const persisted = await saveAndReload(saved.graph, [{ fact_type: 'run_analysis', fact_version: 1, noop: false, result: r }]);
+  reads.facts = persisted.facts;
+  const cold = await readScenarioAnalysis({ scenarioId: scenario, graph: persisted.graph as never, requestId: 'r8-fa027-cold' });
+  if (cold.analysis_result?.type !== 'analysis_result') throw new Error('R8 fa027 cold read omitted analysis_result');
+  // Science 393023 LICENCE (a)/(b), 7 Oct: cold read keeps the same placeholder-path withhold.
+  expect(cold.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_path_unsized' });
   expect(cold.analysis_result?.leading_option_id).toBe(r.leading_option_id);
   expect(cold.analysis_result?.enrichment?.inference_warnings).toEqual(r.enrichment.inference_warnings);
 });
@@ -377,7 +430,8 @@ it('R7-3 (#2613 CR b, DL 0df0e1 + e8): unread whole-product gate AND projected-m
   const contrast = placeholderGoalWarning(g, unsizedLeaderGoalPaths(g, optionIds), 'GOAL_FIGURES_PLACEHOLDER_PATH');
   expect(contrast.message).toMatch(/Set (?:it|them) to see how much/);
   expect(contrast.acceptable_links).toContainEqual({ from: 'pro_plan_price', to: 'mrr' });
-  expect(legacyLeaderGoalLinks(g, optionIds)).toContainEqual(expect.objectContaining({ from: 'pro_paying_subscribers', to: 'mrr' }));
+  // Science 393023 LICENCE (a)/(b), 7 Oct: the untagged door constant is a placeholder, never legacy.
+  expect(legacyLeaderGoalLinks(g, optionIds)).toEqual([]);
   for (const reason of [undefined, 'goal_path_unsized'] as const) {
     const wire = enforceAgentLaneLeaderClaimsAtWire({ assistant_text: 'An option currently leads.',
       blocks: [{ type: 'analysis_result', ...r }] } as never,

@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * RT-10 B′ follow-through, DL e8 condition 1: the shares and the leader come from ISL AT THE RUN'S OWN DIRECTION
  * (minimise → "came out lowest"), with a maximise contrast, and a stale-shares mutant goes RED.
@@ -52,7 +53,9 @@ const reduceLabel = (graph: Json): Json => {
   return g;
 };
 
-async function runOn(graph: Json): Promise<{ sent: Json; result: Json }> {
+async function runOn(graph: Json, asServed = false): Promise<{ sent: Json; result: Json }> {
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+  graph = asServed ? structuredClone(graph) : legacyDoorGraph(graph);
   const store = {
     readMostRecentPendingActions: async () => [],
     loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: 'Monthly cancellations should come down.' })),
@@ -175,4 +178,10 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(withoutTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
     expect(withTarget.result.summary).not.toMatch(/lowest reduce|came out lowest/i);
   });
+});
+
+it('Science 393023: as-served rt10b leader → withheld on the untagged door path', async () => {
+  const { result } = await runOn(F.graph_with_target, true);
+  expect(result.leading_option_id).toBeNull();
+  expect(result.enrichment.inference_warnings.some((w: Json) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')).toBe(true);
 });

@@ -4709,6 +4709,9 @@ function admitOnce(
   let finalEdges: AdmittedEdge[] = brokenEdges;
 
   if (goalForReach !== undefined) {
+    // RC3 a′'s `relies_on` stamp is SERVER-authored by the More-risks hold/apply door on a stored GraphV3. This fresh
+    // drafter CandidateModel path accepts no stamp and never re-admits that stored graph; neither register nor the
+    // Run loader calls it. Do not carry a model-provided stamp into these risk entities or exempt it from this repair.
     const hasOutgoingNow = new Set(brokenEdges.map((e) => e.from));
     // A risk whose own link was withheld as direction-unknown was answered
     // "I cannot say which way" — not left unconnected.
@@ -4723,7 +4726,7 @@ function admitOnce(
         exists_probability: DEFAULT_EXISTS_PROBABILITY,
         // The same structured provenance every other machine-authored edge
         // carries — a repaired link is a hypothesis, and must read as one.
-        provenance: { source: 'cee_hypothesis', mean_projected: true },
+        provenance: { source: 'cee_hypothesis', mean_projected: true, magnitude: 'olumi_placeholder' },
         defaulted: true,
       } as AdmittedEdge);
       loss.push({

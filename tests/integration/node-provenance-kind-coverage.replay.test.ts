@@ -693,6 +693,8 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // `goal_direction` above. A node carrying only a frame carries no value; joining would let "change" read as one.
       "quantity_frame",
       "ref",
+      // RC3 a′: an option identity governing Run inclusion, never a magnitude; it does not join carriesValue.
+      "relies_on",
       "scale_frame",
       "source_quote",
       "starterId",

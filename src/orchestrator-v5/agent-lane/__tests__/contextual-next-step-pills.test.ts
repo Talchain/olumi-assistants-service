@@ -35,6 +35,7 @@ const nearTie = fixture('turn-003-S1-run1-1791329872317.json');
 const proposal = fixture('turn-005-W1-third-1791329935342.json');
 const run = fixture('turn-002-P2-run1-1791329859108.json');
 
+// Science 393023 LICENCE (a)/(b), 7 Oct: captured mean-projected links now select S1; captured bytes stay unchanged.
 function inputs(capture: Capture, specific: readonly SuggestedAction[] = []): TurnGuidanceInputs {
   return {
     request: capture._diagnostic_trace.fast_path === 'run' ? 'run_result'
@@ -54,12 +55,13 @@ function compose(capture: Capture, specific: readonly SuggestedAction[] = [], ov
 }
 
 for (const [name, capture] of [['1 W6 T1b draft', draft], ['2 W6 example after Run', example]] as const) {
-  it(name + ': real selection offers Suggest risks first', () => {
+  it(name + ': the real selection supplies its contextual first offer', () => {
     const { selection, offered } = compose(capture);
-    assert.equal(selection?.slot1?.policy_id, 'RC-WIDEN');
-    assert.equal(selection?.slot1?.variant, 'W6');
-    assert.equal(selection?.slot1?.target, 'risks');
-    assert.deepEqual(offered[0], SUGGEST_RISKS_CHIP);
+    // Science 393023 LICENCE (a)/(b), 7 Oct: draft Suggest risks/W6 → Strengthen/S1; the example stays W6.
+    assert.equal(selection?.slot1?.policy_id, capture === draft ? 'RC-STRENGTHEN-ITEM' : 'RC-WIDEN');
+    assert.equal(selection?.slot1?.variant, capture === draft ? 'S1' : 'W6');
+    assert.equal(selection?.slot1?.target, capture === draft ? undefined : 'risks');
+    assert.deepEqual(offered[0], capture === draft ? { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' } : SUGGEST_RISKS_CHIP);
     assert.equal(offered[0]!.label, selection?.slot1?.primary_action.label);
     assert.equal('action_type' in offered[0]!, false);
     assert.equal(offered.length, 3);
@@ -67,15 +69,16 @@ for (const [name, capture] of [['1 W6 T1b draft', draft], ['2 W6 example after R
     assert.deepEqual(withheldToolsOf({ kind: 'message', message: offered[0]!.message, source: 'chip', chip: { id: offered[0]!.id } }), CHIP_TURN_WITHHELD_TOOLS);
   });
 }
-it('3 S3L: real S6 card is null, so the existing Strengthen the model press leads', () => {
+it('3 served S6 now offers the S1 card and Give your estimate', () => {
   const { selection, offered } = compose(strengthen);
-  assert.equal(selection?.slot1?.variant, 'S3L');
-  assert.equal(selection?.slot1?.item, 'advisory_service_hours_per_week->annual_advisory_service_revenue');
-  assert.deepEqual(selection?.slot1?.item_ref, { kind: 'link', from_id: 'advisory_service_hours_per_week', to_id: 'annual_advisory_service_revenue' });
+  // Science 393023 LICENCE (a)/(b), 7 Oct: S3L/no card → S1/card on annual advisory service revenue → annual revenue.
+  assert.equal(selection?.slot1?.variant, 'S1');
+  assert.equal(selection?.slot1?.item, 'annual_advisory_service_revenue->annual_revenue');
+  assert.deepEqual(selection?.slot1?.item_ref, { kind: 'link', from_id: 'annual_advisory_service_revenue', to_id: 'annual_revenue' });
   assert.equal(offered[0]!.id, 'agent-next-strengthen');
-  assert.equal(strengthenCardFor(inputs(strengthen).state), null);
+  assert.ok(strengthenCardFor(inputs(strengthen).state));
   assert.equal(selection?.slot1?.primary_action.label, 'Give your estimate');
-  assert.deepEqual(offered[0], NEXT_STEP_CHIPS[2]);
+  assert.deepEqual(offered[0], { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' });
   assert.equal(offered[0]!.message, NEXT_STEP_CHIPS[2].message);
   assert.equal(offered.filter(chip => chip.id === 'agent-next-strengthen').length, 1);
 });
@@ -162,7 +165,8 @@ it('RC-WIDEN options W1–W5: Suggest options leads when offered; not offered �
   }
 });
 it('a new risks press reserves Suggest options and drops the last fixed chip', () => {
-  const selection = compose(draft).selection;
+  // The unchanged example's W6 risks row pins this mapping independently of the draft's new S1 selection.
+  const selection = compose(example).selection;
   assert.deepEqual(nextStepsFromGuidance(NEXT_STEP_CHIPS, selection, true),
     [SUGGEST_RISKS_CHIP, ...nextStepsWithWiden(NEXT_STEP_CHIPS, true).slice(0, 2)]);
 });
@@ -179,4 +183,14 @@ it('Give your estimate is used only for the actual S1 card target; a different i
   assert.equal(row.item, `${card.target.from_id}->${card.target.to_id}`);
   assert.deepEqual(actual.offered[0], { ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' });
   assert.deepEqual(nextStepsFromGuidance(NEXT_STEP_CHIPS, { slot1: { ...row, item: 'different->link' } }, false, state)[0], NEXT_STEP_CHIPS[2]);
+});
+
+it('Science 393023: as-served draft W6 and S3L → S1 Strengthen, before the previous offer', () => {
+  for (const capture of [draft, strengthen]) {
+    const base = inputs(capture);
+    const current = compose(capture, [], { state: { ...base.state, graph: structuredClone(capture.draft_graph) } });
+    assert.equal(current.selection?.slot1?.policy_id, 'RC-STRENGTHEN-ITEM');
+    assert.equal(current.selection?.slot1?.variant, 'S1');
+    assert.equal(current.offered[0]?.id, 'agent-next-strengthen');
+  }
 });

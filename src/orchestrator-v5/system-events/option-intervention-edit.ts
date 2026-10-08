@@ -94,6 +94,7 @@ import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './id
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { goalDeadlineOf } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -721,7 +722,7 @@ async function applyApprovedLinkStrengths(
     // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
     const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
       { provenance?: { source?: unknown; reviewed_by_user?: { intent?: unknown; at?: unknown } }; defaulted?: unknown } | undefined;
-    if (l.adopted && stored?.provenance?.source === 'user_specified' && stored.defaulted !== true
+    if (l.adopted && linkSizing(stored) === 'user'
       && drawnLinkAdoptionFor(ctx.scenarioId, l.from, l.to, l.magnitude, stored) === undefined) return refuse('link_became_users_own', i);
     // …and a link the user REVIEWED since the proposal (a canvas confirm writes only that stamp) is their settled view.
     const review = stored?.provenance?.reviewed_by_user;

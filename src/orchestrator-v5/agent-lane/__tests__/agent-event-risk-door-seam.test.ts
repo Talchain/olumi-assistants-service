@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -261,8 +262,11 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
   it('2a-door-caused: likelihood plus caused_by commits an ordinary risk and explains why', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const { result, approve } = await offer(NAMED_DRIVER_MSG, true);
-    const note = "I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen.";
+    const note = HELD_RISK_CAUSE_NOTE;
     expect(result.note).toContain(note);
+    expect(result.note).not.toMatch(/\bI(?:'|’| ha)ve added\b/i);
+    expect(result.note).not.toMatch(/\badded it\b/i);
+    expect(result.note).toContain('until you approve');
     expect((result.risk as Record<string, unknown>).likelihood).toBeUndefined();
     await approveOffer(approve);
     const risk = newRisk()!;
@@ -296,9 +300,12 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
   it.each(['Price', 'fac_price'])('said-door-named-driver-%s: naming the driver preserves the ordinary risk and cause note', async (driverLabel) => {
     graphOf.set(SCENARIO, seedGraph());
     const message = "There's a risk of a competitive response because our price goes up. I'd put it at about 15–25% within 3 months. Add it.";
-    const note = "I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen.";
+    const note = HELD_RISK_CAUSE_NOTE;
     const { result, approve } = await offer(message, true, driverLabel);
     expect(result.note).toContain(note);
+    expect(result.note).not.toMatch(/\bI(?:'|’| ha)ve added\b/i);
+    expect(result.note).not.toMatch(/\badded it\b/i);
+    expect(result.note).toContain('until you approve');
     expect(result.dropped_drivers).toBeUndefined();
     expect((result.risk as Record<string, unknown>).likelihood).toBeUndefined();
     expect(approve.detail ?? '').not.toContain('It may happen');
@@ -339,10 +346,13 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
   it('said-door-no-window: an ordinary risk asks for the missing time window', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const message = 'Competitive response could lower revenue, maybe about 20%, add it.';
-    const note = 'You gave a likelihood but no time window, so I\'ve added it as an ordinary risk. Say how soon (for example "within 6 months") and I\'ll add it as an event that may happen.';
+    const note = HELD_RISK_WINDOW_NOTE;
     const { result, approve } = await offer(message);
     expect((result.risk as Record<string, unknown>).likelihood).toBeUndefined();
     expect(result.note).toContain(note);
+    expect(result.note).not.toMatch(/\bI(?:'|’| ha)ve added\b/i);
+    expect(result.note).not.toMatch(/\badded it\b/i);
+    expect(result.note).toContain('until you approve');
     expect(approve.detail ?? '').not.toContain('It may happen');
     const { composeProposalReply } = await import('../proposal-reply.js');
     expect(composeProposalReply('propose_new_risk', { whole_request: true }, result, '')).toContain(note);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readTeamTime, TEAM_TIME } from '../team-share-write.js';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 
 // Duration subspans are quoted verbatim; surrounding domain clauses are not team-time answers.
 const outside = [
@@ -87,13 +88,11 @@ describe('outside team-duration corpus', () => {
     expect(readTeamTime('4 weeks')?.low_months).toBeCloseTo(4 * 7 * 12 / 365.25, 12);
     expect(readTeamTime('1 year')).toEqual({ low_months: 12, high_months: 12 });
   });
-  it('P1-B-REGEX-SCALING: 5k to 20k whitespace growth', () => {
-    const measure = (n: number): number => { const s = ' '.repeat(n), start = performance.now();
-      for (let i = 0; i < 50000; i++) TEAM_TIME.test(s); return performance.now() - start; };
-    measure(5000); measure(20000);
-    const small = measure(5000), large = measure(20000);
-    process.stdout.write(`P1-B-REGEX-SCALING ${JSON.stringify({ small, large, growth: large / small })}\n`);
-    expect(large / small).toBeLessThan(8);
+  it('P1-B-REGEX-SCALING: 20k to 160k whitespace growth', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
+    const run = (s: string) => () => { TEAM_TIME.lastIndex = 0; return TEAM_TIME.test(s); };
+    const m = scalingRatio(run(' '.repeat(20000)), run(' '.repeat(160000)));
+    expect(m.ratio, m.detail).toBeLessThan(22);
     expect(readTeamTime(' '.repeat(20000))).toBeNull();
   });
 });

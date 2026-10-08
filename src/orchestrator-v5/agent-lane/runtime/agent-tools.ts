@@ -97,6 +97,8 @@ export interface AgentToolContext {
   /** The drawn tuple resolved by the host press, never model output. */
   readonly drawn_link?: { readonly press_id: string; readonly from: string; readonly to: string };
   readonly grounded_links?: readonly { readonly from: string; readonly to: string }[];
+  /** RC3: bound only by a re-minted widen Add press, outside every model-authored tool argument. */
+  readonly widen_relies_on?: { readonly option_id: string };
   /**
    * The user's own words in this conversation (its user messages, this turn's last), bound by the route — never
    * from model output. A figure is recorded as the user's only when it is written here (`stated-by-user.ts`);

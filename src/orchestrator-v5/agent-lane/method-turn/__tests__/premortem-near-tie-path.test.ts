@@ -1,3 +1,4 @@
+import { reclassifiedCTurn } from '../../__tests__/licence-test-graphs.js';
 /** W9b: untouched A2 read captures, through the same method adapter as the route. */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -16,6 +17,7 @@ type Read = {
   analysis_identity_evaluated_node_ids?: string[];
 };
 const load = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/w9b/${name}.json`, import.meta.url), 'utf8'));
+// Science 393023 LICENCE (a)/(b), 7 Oct: C's mean-projected links are now grounded as unsized; captured bytes stay unchanged.
 const captured = (name: string): Read => load(name).j;
 const base = load('base-turns') as Record<string, MethodTurn>;
 const readback = (c: Read): MethodReadback => ({
@@ -104,7 +106,8 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     const c = captured('C');
     const out = run(turn(c));
     const expected = JSON.parse(readFileSync(new URL('./fixtures/w9c/r2-controls.json', import.meta.url), 'utf8')).C;
-    assert.equal(JSON.stringify(out), JSON.stringify(expected.turn));
+    // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; every other whole-turn field stays pinned.
+    assert.equal(JSON.stringify(out), JSON.stringify(reclassifiedCTurn(expected.turn)));
     const fallback = settleMethodTurn(out, '');
     assert.equal(fallback.reply, expected.fallback);
     assert.equal(JSON.stringify(fallback), JSON.stringify(expected.settled));
@@ -173,4 +176,15 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
       assert.equal(turn(c)?.kind, 'unavailable');
     });
   }
+});
+
+it('Science 393023: as-served near-tie C now supplies a placeholder link', () => {
+  const c = load('C').j as Read;
+  const signals = signalsOf(c);
+  assert.ok(signals['model.goal_path_links'].some(l => l.link_sizing === 'placeholder'));
+  assert.deepEqual(run(turn(c)).context.supplied_items.map(i => i.id), [
+    'price_rise', 'starter_tier_subscribers', 'support_capacity_strain->monthly_recurring_revenue',
+    'price_rise->price_rise_churn', 'starter_tier_support_cost->support_capacity_strain',
+    'starter_tier_subscribers->starter_tier_support_cost', 'price_rise_churn', 'support_capacity_strain',
+  ]);
 });

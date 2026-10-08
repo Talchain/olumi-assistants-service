@@ -11,7 +11,7 @@
  * THE CLASSES (read off the stored provenance, nothing inferred):
  *   · `user`           — the user sized it: `source: 'user_specified'`, or a size construction credits to the user
  *                        (`magnitude: 'user_stated'`).
- *   · `placeholder`    — nobody sized it: Olumi's default strength (`magnitude: 'olumi_placeholder'`).
+ *   · `placeholder`    — nobody sized it: tagged, mean-projected or untagged door default (Science 393023 LICENCE (a)/(b), 7 Oct).
  *   · `olumi_accepted` — Olumi's estimate the user approved (`olumi_*` + `reviewed_by_user` confirm). Still Olumi's figure:
  *                        it earns no authorship credit (`earnsAuthorshipCredit` reads authorship, not this).
  *   · `olumi_estimate` — Olumi's estimate, not yet reviewed.
@@ -24,6 +24,8 @@
  *        strength ({@link isSizedOnlyByOlumi}, the parts rule, unchanged).
  * Pure.
  */
+import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -39,11 +41,41 @@ function reviewedByUser(p: Rec): boolean {
   return isRec(r) && r.intent === 'confirm';
 }
 
+/**
+ * The default doors (Science 393023 LICENCE (b), 7 Oct 20:48Z): every producer that writes a size nobody chose writes
+ * `defaulted: true` and the tag; this table is how the reader still knows the links a door wrote before it tagged.
+ * One row per door, never only `hypothesisEdgeValue`'s. A bare 0.5 with no `defaulted` is never matched: a user's 0.5
+ * must never read as a placeholder.
+ */
+export const DOOR_DEFAULT_CONSTANTS: ReadonlyArray<{ readonly door: string; readonly mean: number; readonly std: number }> = [
+  { door: 'hypothesisEdgeValue (+ Option / + Risk / add-factor)', mean: STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
+  { door: 'factor enricher (enricher.ts)', mean: 0.5, std: 0.2 },
+];
+
+function isUntaggedDoorDefault(edge: unknown, p: Rec | undefined): boolean {
+  if (p?.magnitude !== undefined || p?.natural_effect !== undefined) return false;
+  if (!isRec(edge) || edge.defaulted !== true || !isRec(edge.strength)) return false;
+  const { mean, std } = edge.strength;
+  return typeof mean === 'number' && DOOR_DEFAULT_CONSTANTS.some((d) => Math.abs(mean) === d.mean && std === d.std);
+}
+
+/**
+ * Order (Science 393023 LICENCE rulings 1-2, 7 Oct 20:48Z):
+ *   1. `magnitude: 'user_stated'`: the user stated the size.
+ *   2. `mean_projected`: a projected mean is unsized WHATEVER its magnitude or natural_effect (a contradictory record
+ *      fails closed: a misreading may only withhold or range) and whatever its source (`user_specified` + a projected
+ *      mean = the user drew the link but gave no number).
+ *   3. `source: 'user_specified'`.
+ *   4. the tag, the other `olumi_*` classes, then the untagged door constants ({@link DOOR_DEFAULT_CONSTANTS}).
+ */
 export function linkSizing(edge: unknown): LinkSizing {
   const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
-  if (p?.source === 'user_specified' || p?.magnitude === 'user_stated') return 'user';
+  if (p?.magnitude === 'user_stated') return 'user';
+  if (p?.mean_projected === true) return 'placeholder';
+  if (p?.source === 'user_specified') return 'user';
   if (p?.magnitude === PLACEHOLDER_MAGNITUDE) return 'placeholder';
   if (typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) return reviewedByUser(p) ? 'olumi_accepted' : 'olumi_estimate';
+  if (isUntaggedDoorDefault(edge, p)) return 'placeholder';
   return 'unmarked';
 }
 
@@ -88,6 +120,15 @@ export function approvalSizes(edge: unknown): boolean {
  */
 export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
   if (!approvalSizes(edge)) return provenance;
+  // Science 393023 LICENCE ruling 1 / R3 B1: `user_specified` on a projected mean records who drew the link, not who
+  // sized it. A review must keep that carrier: clearing it would make the unchanged prior read `user` under the ONE
+  // predicate's ordering and award authorship for a confirm. Record the review only; no size or source is rewritten.
+  const stored = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
+  if (stored?.source === 'user_specified' && stored.mean_projected === true) return provenance;
+  // R8-3 (Science 393023 ruling 1): a projected mean beside Olumi's estimate is a placeholder, but an approval that would
+  // write the same magnitude would clear the carrier ALONE, and the carrier is outside the analysis hash. Nothing is
+  // written: the link stays a placeholder (fail-closed) rather than reading sized against an unchanged hash.
+  if ((provenance as { magnitude?: unknown }).magnitude === ESTIMATE_MAGNITUDE) return provenance;
   // R8 hash safety: approval changes magnitude; confirm-only review keeps the carrier.
   const { mean_projected: _projectedMean, ...kept } = provenance as P & { mean_projected?: unknown };
   return { ...kept, magnitude: ESTIMATE_MAGNITUDE } as P;
