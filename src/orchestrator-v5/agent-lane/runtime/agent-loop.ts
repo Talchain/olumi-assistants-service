@@ -66,6 +66,17 @@ export interface ModelCallResponse {
  * ⛔ AN UNFINISHED ANSWER IS NOT AN ANSWER (AIX-001): the envelope, or any message in it, says `incomplete` — the
  * visible text may stop before its closing caveat. Absent status is read as finished, as the API did before it had one.
  */
+/**
+ * ⭐ ONE WORDING FOR "A CHANGE IS WAITING FOR YOUR APPROVAL" when no typed reply exists: narration recovery here, and the
+ * route's hop-limit / cut-short answers (DL 58e392, 8 Oct; EDIT-UX be7a896f turn 3a5a1258: "I could not settle that within
+ * this turn, and nothing in your model was changed" shipped over a held card the user then saved).
+ */
+export function heldChangeSentence(label: unknown): string {
+  return typeof label === 'string' && label.trim() !== ''
+    ? `I have prepared this change: ${label.trim()}. Nothing is changed until you approve it.`
+    : 'I have prepared a change for you to review. Nothing is changed until you approve it.';
+}
+
 export function answerIsIncomplete(resp: ModelCallResponse): boolean {
   if (resp.status === 'incomplete') return true;
   return (resp.output ?? []).some((o) => o['type'] === 'message' && o['status'] === 'incomplete');
@@ -485,11 +496,8 @@ export async function runAgentTurn(
     // Preserve the user-figure honesty gate; an absent runtime message is treated as ''.
     const recoveredReply = typeof composed === 'string' && composed.trim() !== '' ? composed
       : composeRecoveredProposalReply(held.name, held.args, held.result, input.message ?? '');
-    const label = held.result.public_label;
     const text = typeof recoveredReply === 'string' && recoveredReply.trim() !== '' ? recoveredReply
-      : typeof label === 'string' && label.trim() !== ''
-        ? `I have prepared this change: ${label}. Nothing is changed until you approve it.`
-        : 'I have prepared a change for you to review. Nothing is changed until you approve it.';
+      : heldChangeSentence(held.result.public_label);
     items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
     log.warn({ hop: hopsTaken, err: String(err) }, 'agent-lane: narration failed — answering from the held proposal');
     return {
