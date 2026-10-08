@@ -362,7 +362,7 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
     expect(draft).toBeUndefined();
     expect(guidedSizingActions(draft, graph)).toEqual([]);
     const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
-    expect(said).toContain(warning!.say);
+    expect(said).toContain(warning!.say!.replace("I can't yet say how likely any option is", "I can't yet say how likely ‘Launch starter tier’ is"));
     expect(said).not.toContain('Olumi has it as a band');
     expect(said).not.toContain("The chance isn't shown yet:");
     expect(guidedSizingProgressLine(graph)).toBeNull();
@@ -380,7 +380,7 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
     const run = { enrichment: withholdGoalFiguresForUntestableTarget({ inference_warnings: [],
       option_comparison: options(graph).map(option_id => ({ option_id, probability_of_goal: 0.5 })) }, graph) };
     expect(guidedSizingForRun(run, graph)).toBeUndefined();
-    expect(goalChanceWithheldForAgent(run, graph)?.say).toContain(warning!.say);
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toContain(warning!.say!.replace("I can't yet say how likely any option is", "I can't yet say how likely ‘Launch starter tier’ is"));
   });
 
   it('r9 mixed two-placeholder list retains existing recovery for a user-sized refused conversion', () => {

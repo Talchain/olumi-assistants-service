@@ -1,0 +1,12 @@
+{
+  "head": "eaf73f7424bd2f886700d4d6c96d841adc04f049",
+  "branch": "dl/b2-per-option-target-withhold",
+  "origin_staging": "178cc5bf045cf3e13281359c56c14cfd0845e73b",
+  "merge_head": null,
+  "status": " M src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts\n M src/orchestrator-v5/goal-target/target-testability-per-option.ts\n?? acceptance-evidence/b2-target-scope/FIX2-2858-files.txt\n?? acceptance-evidence/b2-target-scope/FIX2-GREEN-class3-final.log\n?? acceptance-evidence/b2-target-scope/FIX2-GREEN-class3.log\n?? acceptance-evidence/b2-target-scope/FIX2-MUTANT-class3-off.log\n?? acceptance-evidence/b2-target-scope/FIX2-RED-class3.log\n?? acceptance-evidence/b2-target-scope/FIX2-class3.patch\n?? acceptance-evidence/b2-target-scope/FIX2-final-tree.json\n?? acceptance-evidence/b2-target-scope/FIX2-mutation-summary.json\n?? acceptance-evidence/b2-target-scope/FIX2-post-merge-plan.json\n?? acceptance-evidence/b2-target-scope/FIX2-staging-added-files.txt\n?? acceptance-evidence/b2-target-scope/FIX2-staging-blob-audit.json\n?? acceptance-evidence/b2-target-scope/FIX2-staging-diff-files.txt\n?? acceptance-evidence/b2-target-scope/FIX2-unmerged-core.log\n?? acceptance-evidence/b2-target-scope/FIX2-unmerged-eslint-changed.log\n?? acceptance-evidence/b2-target-scope/FIX2-unmerged-eslint-full.log\n?? acceptance-evidence/b2-target-scope/FIX2-unmerged-handlers.log\n?? acceptance-evidence/b2-target-scope/FIX2-unmerged-schema.log\n?? acceptance-evidence/b2-target-scope/FIX2-unmerged-tsc-full.log\n?? acceptance-evidence/b2-target-scope/FIX2-unmerged-tsc-summary.json\n?? acceptance-evidence/b2-target-scope/REPORT-FIX2.md\n?? acceptance-evidence/b2-target-scope/checks-fix2.jsonl\n?? acceptance-evidence/b2-target-scope/run-checks-fix2.py\n?? acceptance-evidence/b2-target-scope/run-mutant-fix2.py\n",
+  "no_supabase_changes": true,
+  "source_sha256": {
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts": "d6819582078779484384dab81078154aae9dbe9ea560eb00355e2e94033f5e25",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts": "ca6d14b362c1f644ba46e9d37dfeabf7326843321b1aba6ca39a9dc3e7b5eb2a"
+  }
+}

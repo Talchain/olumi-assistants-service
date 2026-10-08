@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 17ms
+     × class 1: an upstream unsized link feeding operand A also affects an option moving operand B 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 1: an upstream unsized link feeding operand A also affects an option moving operand B
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:93:79
+     91|     expect(v.failures.flatMap(f => f.links ?? [])).toEqual([link]);
+     92|     const paths = optionPathsOf(g, ids, undefined, 'goal');
+     93|     expect(scopedFailuresFor(v.failures, paths.get('raise') ?? [], id …
+       |                                                                               ^
+     94|     expect(scopedFailuresFor(v.failures, paths.get('keep') ?? [], id =…
+     95|     const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal'…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:45:16
+   Duration  6.30s (transform 4.55s, setup 157ms, import 5.91s, tests 17ms, environment 0ms)
+
