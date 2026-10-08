@@ -143,7 +143,7 @@ import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, set
 import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
-  settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
+  constructionRegistrationTurnId, settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
   widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
@@ -4133,18 +4133,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
-    // Only propose_identity produces this stored operation; the pre-turn carrier excludes settled-card re-presses.
-    const identityResolved = result.tool_calls.some(c => c.ok === true && typeof c.proposal_id === 'string'
-      && (c.name === 'authorise_change' || (c.name === WITHDRAW_PROPOSAL && c.proposal_id === declinedHold))
-      && heldAtStart.some(h => {
-        const proposal = agentProposalOf(h);
-        return proposal !== undefined && proposal.proposal_id === c.proposal_id && proposal.operations.length === 1
-          && proposal.operations[0]?.op === 'confirm_identity';
-      }));
-    const thin = thinDraftOffer(readbackGraph, identityResolved
+    // A resolved construction card, whatever it confirms. The complete stored window must attest both the first
+    // public user answer and its exact-brief construction registration; neither a later card nor unknown history qualifies.
+    const constructionConfirmResolved = await (async (): Promise<boolean> => {
+      const resolved = heldAtStart.flatMap(h => {
+        const record = proposalRecord(h, undefined);
+        return record !== undefined && result.tool_calls.some(c => c.ok === true && c.proposal_id === record.proposal_id
+          && (c.name === 'authorise_change' || (c.name === WITHDRAW_PROPOSAL && c.proposal_id === declinedHold))) ? [record] : [];
+      });
+      if (resolved.length === 0) return false;
+      try {
+        const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
+        if (rows.length >= CONVERSATION_ROWS_READ) return false;
+        const construction = [...rows].reverse().find(r => !r.turn_id.endsWith(':claim')
+          && r.response_emitted === true && r.request_hash.startsWith('agent_turn:')
+          && typeof r.user_message === 'string' && r.user_message.trim().length > 0);
+        if (construction === undefined) return false;
+        const constructedAt = Date.parse(construction.created_at);
+        const registrationId = constructionRegistrationTurnId(scenarioId, construction.user_message!);
+        if (!Number.isFinite(constructedAt) || !rows.some(r => r.response_emitted === false
+          && r.turn_id === registrationId && r.request_hash.startsWith('graph_registration:')
+          && Date.parse(r.created_at) < constructedAt)) return false;
+        const issuers = await proposalIssuers(resolved, heldAtStart);
+        return resolved.some(r => issuers.get(r.revision) === construction.turn_id);
+      } catch (err) {
+        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: construction issuing window unreadable');
+        return false;
+      }
+    })();
+    const thin = thinDraftOffer(readbackGraph, constructionConfirmResolved
       || result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true));
     if (thin !== null && heldCardOffer.length === 0 && approvals.length === 0 && carriedApproval.length === 0
-      && fastPath !== 'method' && (fastPath !== 'approve' || identityResolved)) {
+      && fastPath !== 'method' && (fastPath !== 'approve' || constructionConfirmResolved)) {
       nextStepOffers.offered.splice(0, nextStepOffers.offered.length, ...firstOfEachId([
         ...nextStepOffers.offered.filter(c => c.id === RUN_OFFER_CHIP.id), thin.press, ...nextStepOffers.offered,
       ]).slice(0, 3));
