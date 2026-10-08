@@ -9,6 +9,9 @@
 -- Row (c) proves the malformed fact is accepted and retained by the real RPC;
 -- the harness deliberately does not COMMIT it outside this disposable scope.
 -- Every requested row prints PASS/FAIL; the final aggregate RAISE rejects FAIL.
+-- There are 26 report rows plus the final transaction-cleanup check (27 total);
+-- preflight is a separate prerequisite check. New j-p probes preserve the
+-- original a-h data deltas by rolling back their synthetic writes immediately.
 --
 -- REVISION ORDERING (b): v4 UPDATEs graph BEFORE INSERTing handler facts:
 -- 20260806120000_v5_turn_fence_first_write_exemption.sql:322-347. v5 delegates
@@ -101,7 +104,7 @@ CREATE TEMP TABLE phase2_a_results (
 ) ON COMMIT DROP;
 CREATE TEMP TABLE phase2_a_seed (scenario_id UUID NOT NULL, prefix TEXT NOT NULL) ON COMMIT DROP;
 CREATE TEMP TABLE phase2_a_baseline (
-  derived BIGINT NOT NULL, quarantined BIGINT NOT NULL,
+  derived BIGINT NOT NULL, quarantined BIGINT NOT NULL, skipped_legacy BIGINT NOT NULL,
   runs BIGINT NOT NULL, options BIGINT NOT NULL, quarantine BIGINT NOT NULL
 ) ON COMMIT DROP;
 
@@ -122,19 +125,35 @@ BEGIN
 END;
 $report$;
 
+-- Exactly the backfill's valid pre-run-identity shell. Malformed carriers and
+-- non-object results remain actionable quarantine candidates, even without IDs.
+CREATE FUNCTION pg_temp.phase2_a_is_legacy(f public.v5_handler_facts)
+RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE AS $legacy$
+  SELECT COALESCE(f.action_type = 'run_analysis'
+    AND f.payload->>'fact_type' = 'run_analysis'
+    AND f.payload->'fact_version' = '1'::jsonb AND f.noop = FALSE
+    AND jsonb_typeof(f.payload->'result') = 'object'
+    AND (f.payload #> '{result,run_id}' IS NULL OR f.payload #> '{result,run_id}' = 'null'::jsonb), FALSE);
+$legacy$;
+
 -- Drain existing eligible facts before the synthetic cases so the global
 -- backfill in (g) has exactly three pending facts. This is a real derivation,
 -- not a synthetic quarantine or a claim that a data copy has no old facts.
+-- Legacy rows remain in the fact table without run/quarantine markers. Count
+-- that census once and exclude it from no-progress detection and loop exit.
 -- A quiescent isolated copy and successful quarantine storage are required;
 -- no-progress detection prevents a silently non-terminating backfill loop.
 DO $baseline_backfill$
 DECLARE v_result JSONB; v_pending BIGINT; v_remaining BIGINT;
-        v_derived BIGINT := 0; v_quarantined BIGINT := 0;
+        v_derived BIGINT := 0; v_quarantined BIGINT := 0; v_skipped_legacy BIGINT;
 BEGIN
   BEGIN
+    SELECT count(*) INTO v_skipped_legacy FROM public.v5_handler_facts f
+    WHERE pg_temp.phase2_a_is_legacy(f);
     LOOP
       SELECT count(*) INTO v_pending FROM public.v5_handler_facts f
       WHERE (f.action_type = 'run_analysis' OR f.payload->>'fact_type' = 'run_analysis')
+        AND NOT pg_temp.phase2_a_is_legacy(f)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = f.id)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = f.id);
       EXIT WHEN v_pending = 0;
@@ -143,6 +162,7 @@ BEGIN
       v_quarantined := v_quarantined + (v_result->>'quarantined')::bigint;
       SELECT count(*) INTO v_remaining FROM public.v5_handler_facts f
       WHERE (f.action_type = 'run_analysis' OR f.payload->>'fact_type' = 'run_analysis')
+        AND NOT pg_temp.phase2_a_is_legacy(f)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = f.id)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = f.id);
       IF v_remaining >= v_pending THEN
@@ -150,20 +170,22 @@ BEGIN
       END IF;
     END LOOP;
     INSERT INTO phase2_a_baseline
-    SELECT v_derived, v_quarantined, (SELECT count(*) FROM public.analysis_runs),
+    SELECT v_derived, v_quarantined, v_skipped_legacy, (SELECT count(*) FROM public.analysis_runs),
            (SELECT count(*) FROM public.analysis_run_options),
            (SELECT count(*) FROM public.analysis_run_quarantine);
     PERFORM pg_temp.phase2_a_report('baseline_backfill', TRUE,
-      format('existing facts: %s derived, %s quarantined; all changes rolled back', v_derived, v_quarantined));
+      format('existing facts: %s derived, %s quarantined, %s legacy skipped; all changes rolled back',
+             v_derived, v_quarantined, v_skipped_legacy));
   EXCEPTION WHEN OTHERS THEN
     PERFORM pg_temp.phase2_a_report('baseline_backfill', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
-    INSERT INTO phase2_a_baseline VALUES (0, 0, 0, 0, 0);
+    INSERT INTO phase2_a_baseline VALUES (0, 0, 0, 0, 0, 0);
   END;
 END;
 $baseline_backfill$;
 
 SELECT 'after existing-fact baseline backfill' AS phase,
        derived AS existing_facts_derived, quarantined AS existing_facts_quarantined,
+       skipped_legacy AS existing_facts_skipped_legacy,
        runs AS analysis_runs_rows, options AS analysis_run_options_rows,
        quarantine AS analysis_run_quarantine_rows FROM phase2_a_baseline;
 
@@ -489,7 +511,8 @@ BEGIN
        OR EXISTS (SELECT 1 FROM public.analysis_run_options WHERE run_id = v_prefix || 'malformed')
        OR (SELECT count(*) FROM public.analysis_run_quarantine WHERE fact_id = v_fact_id) <> 1
        OR NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine WHERE fact_id = v_fact_id
-                       AND scenario_id = v_scenario AND raw = v_fact->'payload' AND btrim(reason) <> '') THEN
+                       AND scenario_id = v_scenario AND btrim(reason) <> '')
+       OR NOT EXISTS (SELECT 1 FROM public.v5_handler_facts WHERE id = v_fact_id AND payload = v_fact->'payload') THEN
       RAISE EXCEPTION 'malformed chance 1.7 must keep the real fact, leak no run/options, and record exactly one quarantine';
     END IF;
     PERFORM pg_temp.phase2_a_report('c_malformed_fact_retained', TRUE, 'RPC returned; fact retained; 0 run/options, 1 quarantine (outer rehearsal later rolls back)');
@@ -569,8 +592,10 @@ BEGIN
     END IF;
     v_backfill := public.backfill_analysis_runs(1000);
     v_repeat := public.backfill_analysis_runs(1000);
-    IF v_backfill IS DISTINCT FROM '{"derived":3,"quarantined":0}'::jsonb
-       OR v_repeat IS DISTINCT FROM '{"derived":0,"quarantined":0}'::jsonb
+    IF v_backfill IS DISTINCT FROM jsonb_build_object('derived', 3, 'quarantined', 0,
+            'skipped_legacy', (SELECT LEAST(997::bigint, skipped_legacy) FROM phase2_a_baseline))
+       OR v_repeat IS DISTINCT FROM jsonb_build_object('derived', 0, 'quarantined', 0,
+            'skipped_legacy', (SELECT LEAST(1000::bigint, skipped_legacy) FROM phase2_a_baseline))
        OR (SELECT count(*) FROM public.analysis_runs WHERE scenario_id = v_scenario AND run_id LIKE v_prefix || 'backfill-%') <> 3
        OR (SELECT count(*) FROM public.analysis_run_options WHERE run_id LIKE v_prefix || 'backfill-%') <> 9
        OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine q JOIN public.v5_handler_facts f ON f.id = q.fact_id
@@ -579,7 +604,7 @@ BEGIN
                        AND tgname = 'v5_handler_facts_derive_run' AND tgenabled = 'O') THEN
       RAISE EXCEPTION 'backfill must derive 3/0, repeat 0/0, and leave trigger enabled; got %, %', v_backfill, v_repeat;
     END IF;
-    PERFORM pg_temp.phase2_a_report('g_backfill_three_then_zero', TRUE, format('first %, repeat %', v_backfill, v_repeat));
+    PERFORM pg_temp.phase2_a_report('g_backfill_three_then_zero', TRUE, format('first %s, repeat %s', v_backfill, v_repeat));
   EXCEPTION WHEN OTHERS THEN
     -- The sub-block rollback restores ENABLEd trigger state even if an insert
     -- fails between DISABLE and ENABLE. No later probe runs with it disabled.
@@ -609,6 +634,251 @@ BEGIN
   END;
 END;
 $rehearsal$;
+
+-- Each new synthetic probe rolls its writes back on the dedicated success
+-- sentinel before reporting, preserving the original a-h data-count checks.
+CREATE FUNCTION pg_temp.phase2_a_expect_quarantine(p_scenario_id UUID, p_turn_id TEXT,
+                                                  p_fact JSONB, p_expected_reason TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $expect_quarantine$
+DECLARE v_turn UUID; v_fact_id UUID;
+BEGIN
+  v_turn := pg_temp.phase2_a_append_v4(p_scenario_id, p_turn_id, jsonb_build_array(p_fact), NULL);
+  SELECT f.id INTO v_fact_id FROM public.v5_handler_facts f WHERE f.v5_conversation_turn_id = v_turn;
+  IF v_fact_id IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.v5_handler_facts f WHERE f.id = v_fact_id AND f.payload = p_fact->'payload')
+     OR EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = v_fact_id)
+     OR (SELECT count(*) FROM public.analysis_run_quarantine q WHERE q.fact_id = v_fact_id) <> 1
+     OR NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = v_fact_id
+                    AND q.scenario_id = p_scenario_id AND q.reason = p_expected_reason) THEN
+    RAISE EXCEPTION 'Fact must be retained without a run and with exactly one % quarantine', p_expected_reason;
+  END IF;
+END;
+$expect_quarantine$;
+
+DO $round3$
+DECLARE
+  v_scenario UUID;
+  v_prefix TEXT;
+  v_fact JSONB;
+  v_turn UUID;
+  v_fact_ids UUID[] := ARRAY[]::UUID[];
+  v_case INTEGER;
+  v_expected_reason TEXT;
+  v_early TIMESTAMPTZ;
+  v_result JSONB;
+  v_repeat JSONB;
+BEGIN
+  SELECT scenario_id, prefix INTO STRICT v_scenario, v_prefix FROM phase2_a_seed;
+
+  BEGIN
+    IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.analysis_run_quarantine'::regclass
+                AND attname = 'raw' AND NOT attisdropped)
+       OR (SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.analysis_run_quarantine'::regclass
+            AND attnum > 0 AND NOT attisdropped) <> 5
+       OR NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q
+         JOIN public.v5_handler_facts f ON f.id = q.fact_id
+         WHERE f.scenario_id = v_scenario AND f.payload #>> '{result,run_id}' = v_prefix || 'malformed'
+           AND f.payload #> '{result,enrichment,option_comparison,2,probability_of_goal}' = '1.7'::jsonb) THEN
+      RAISE EXCEPTION 'Quarantine must keep only id/fact_id/scenario_id/reason/seen_at; original payload stays in facts';
+    END IF;
+    PERFORM pg_temp.phase2_a_report('j_quarantine_reference_only', TRUE, 'no raw column; retained fact is the payload reference');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.phase2_a_report('j_quarantine_reference_only', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
+  END;
+
+  BEGIN
+    BEGIN
+      FOR v_case IN 1..2 LOOP
+        v_fact := pg_temp.phase2_a_fact(v_scenario, v_prefix || 'live-absent-' || v_case);
+        IF v_case = 1 THEN v_fact := v_fact #- '{payload,result,run_id}';
+        ELSE v_fact := jsonb_set(v_fact, '{payload,result,run_id}', 'null'::jsonb); END IF;
+        PERFORM pg_temp.phase2_a_expect_quarantine(v_scenario, v_prefix || 'turn-live-absent-' || v_case,
+                                                  v_fact, 'run_id_absent');
+      END LOOP;
+      RAISE SQLSTATE 'P2A01' USING MESSAGE = 'rollback successful synthetic probe';
+    EXCEPTION WHEN SQLSTATE 'P2A01' THEN NULL;
+    END;
+    PERFORM pg_temp.phase2_a_report('k_trigger_absent_quarantined', TRUE, 'live missing and JSON-null run_id both quarantine run_id_absent');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.phase2_a_report('k_trigger_absent_quarantined', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
+  END;
+
+  BEGIN
+    BEGIN
+      -- Earlier than the local copy's existing facts so the strict bounded
+      -- backfill selects and locks these two synthetic legacy shells rather
+      -- than locking the complete historical legacy corpus.
+      SELECT COALESCE(min(created_at), now()) - interval '1 second' INTO v_early FROM public.v5_handler_facts;
+      IF NOT isfinite(v_early) THEN RAISE EXCEPTION 'Legacy probe requires finite source fact timestamps'; END IF;
+      ALTER TABLE public.v5_handler_facts DISABLE TRIGGER v5_handler_facts_derive_run;
+      FOR v_case IN 1..2 LOOP
+        v_fact := pg_temp.phase2_a_fact(v_scenario, v_prefix || 'legacy-' || v_case);
+        IF v_case = 1 THEN v_fact := v_fact #- '{payload,result,run_id}';
+        ELSE v_fact := jsonb_set(v_fact, '{payload,result,run_id}', 'null'::jsonb); END IF;
+        v_turn := pg_temp.phase2_a_append_v4(v_scenario, v_prefix || 'turn-legacy-' || v_case, jsonb_build_array(v_fact), NULL);
+        UPDATE public.v5_handler_facts SET created_at = v_early WHERE v5_conversation_turn_id = v_turn;
+        v_fact_ids := v_fact_ids || ARRAY(SELECT id FROM public.v5_handler_facts WHERE v5_conversation_turn_id = v_turn);
+      END LOOP;
+      ALTER TABLE public.v5_handler_facts ENABLE TRIGGER v5_handler_facts_derive_run;
+      v_result := public.backfill_analysis_runs(2);
+      v_repeat := public.backfill_analysis_runs(2);
+      IF v_result IS DISTINCT FROM '{"derived":0,"quarantined":0,"skipped_legacy":2}'::jsonb
+         OR v_repeat IS DISTINCT FROM v_result OR cardinality(v_fact_ids) <> 2
+         OR (SELECT count(*) FROM public.v5_handler_facts WHERE id = ANY(v_fact_ids)) <> 2
+         OR EXISTS (SELECT 1 FROM public.analysis_runs WHERE fact_id = ANY(v_fact_ids))
+         OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine WHERE fact_id = ANY(v_fact_ids)) THEN
+        RAISE EXCEPTION 'Backfill must repeatedly skip both retained pre-run-identity facts without markers; got %, %', v_result, v_repeat;
+      END IF;
+      RAISE SQLSTATE 'P2A01' USING MESSAGE = 'rollback successful synthetic probe';
+    EXCEPTION WHEN SQLSTATE 'P2A01' THEN NULL;
+    END;
+    PERFORM pg_temp.phase2_a_report('l_backfill_legacy_skipped', TRUE, 'missing/null: skipped_legacy=2; repeat=2; no run/quarantine marker');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.phase2_a_report('l_backfill_legacy_skipped', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
+  END;
+
+  BEGIN
+    BEGIN
+      FOR v_case IN 1..3 LOOP
+        v_fact := pg_temp.phase2_a_fact(v_scenario, v_prefix || 'invalid-id-' || v_case);
+        v_fact := jsonb_set(v_fact, '{payload,result,run_id}',
+          CASE v_case WHEN 1 THEN '""'::jsonb WHEN 2 THEN '"  "'::jsonb ELSE '17'::jsonb END);
+        PERFORM pg_temp.phase2_a_expect_quarantine(v_scenario, v_prefix || 'turn-invalid-id-' || v_case,
+                                                  v_fact, 'run_id_invalid');
+      END LOOP;
+      -- The same present-but-invalid IDs stay quarantine candidates in the
+      -- BACKFILL path; they must not be mistaken for absent legacy identity.
+      ALTER TABLE public.v5_handler_facts DISABLE TRIGGER v5_handler_facts_derive_run;
+      FOR v_case IN 1..2 LOOP
+        v_fact := pg_temp.phase2_a_fact(v_scenario, v_prefix || 'backfill-invalid-' || v_case);
+        v_fact := jsonb_set(v_fact, '{payload,result,run_id}', CASE v_case WHEN 1 THEN '""'::jsonb ELSE 'false'::jsonb END);
+        PERFORM pg_temp.phase2_a_append_v4(v_scenario, v_prefix || 'turn-backfill-invalid-' || v_case,
+                                         jsonb_build_array(v_fact), NULL);
+      END LOOP;
+      ALTER TABLE public.v5_handler_facts ENABLE TRIGGER v5_handler_facts_derive_run;
+      v_result := public.backfill_analysis_runs(2);
+      IF v_result IS DISTINCT FROM '{"derived":0,"quarantined":2,"skipped_legacy":0}'::jsonb
+         OR (SELECT count(*) FROM public.analysis_run_quarantine q JOIN public.v5_handler_facts f ON f.id = q.fact_id
+              JOIN public.v5_conversation_turns t ON t.id = f.v5_conversation_turn_id
+              WHERE t.scenario_id = v_scenario AND t.turn_id LIKE v_prefix || 'turn-backfill-invalid-%'
+                AND q.reason = 'run_id_invalid') <> 2 THEN
+        RAISE EXCEPTION 'Backfill must prioritize and quarantine present invalid IDs before legacy rows; got %', v_result;
+      END IF;
+      RAISE SQLSTATE 'P2A01' USING MESSAGE = 'rollback successful synthetic probe';
+    EXCEPTION WHEN SQLSTATE 'P2A01' THEN NULL;
+    END;
+    PERFORM pg_temp.phase2_a_report('m_present_run_id_invalid', TRUE, 'empty/blank/non-string trigger IDs and empty/boolean backfill IDs quarantine run_id_invalid');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.phase2_a_report('m_present_run_id_invalid', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
+  END;
+
+  BEGIN
+    BEGIN
+      FOR v_case IN 1..5 LOOP
+        v_fact := pg_temp.phase2_a_fact(v_scenario, v_prefix || 'shape-' || v_case);
+        CASE v_case
+          WHEN 1 THEN v_expected_reason := 'scenario_id_mismatch';
+            v_fact := jsonb_set(v_fact, '{payload,result,scenario_id}', to_jsonb(gen_random_uuid()::text));
+          WHEN 2 THEN v_expected_reason := 'leading_option_id_shape';
+            v_fact := jsonb_set(v_fact, '{payload,result,leading_option_id}', '17'::jsonb);
+          WHEN 3 THEN v_expected_reason := 'summary_shape';
+            v_fact := jsonb_set(v_fact, '{payload,result,summary}', '{}'::jsonb);
+          WHEN 4 THEN v_expected_reason := 'result_shape';
+            v_fact := jsonb_set(v_fact, '{payload,result}', '[]'::jsonb);
+          WHEN 5 THEN v_expected_reason := 'constraint_may_name_leading_option_shape';
+            v_fact := jsonb_set(v_fact, '{payload,result,constraint_verdict}', '{"may_name_leading_option":"true"}'::jsonb);
+        END CASE;
+        PERFORM pg_temp.phase2_a_expect_quarantine(v_scenario, v_prefix || 'turn-shape-' || v_case,
+                                                  v_fact, v_expected_reason);
+      END LOOP;
+      RAISE SQLSTATE 'P2A01' USING MESSAGE = 'rollback successful synthetic probe';
+    EXCEPTION WHEN SQLSTATE 'P2A01' THEN NULL;
+    END;
+    PERFORM pg_temp.phase2_a_report('n_distinct_shape_reasons', TRUE,
+      'scenario_id_mismatch; leading_option_id_shape; summary_shape; result_shape; constraint_may_name_leading_option_shape');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.phase2_a_report('n_distinct_shape_reasons', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
+  END;
+
+  BEGIN
+    BEGIN
+      FOR v_case IN 1..4 LOOP
+        v_fact := pg_temp.phase2_a_fact(v_scenario, v_prefix || 'producer-' || v_case);
+        IF v_case < 3 THEN
+          v_fact := jsonb_set(v_fact, '{payload,result,leading_option_id}', '"launch_49_starter_tier"'::jsonb);
+          v_fact := jsonb_set(v_fact, '{payload,result,constraint_verdict}',
+            jsonb_build_object('may_name_leading_option', v_case = 1));
+        ELSIF v_case = 4 THEN
+          v_fact := jsonb_set(v_fact, '{payload,result,constraint_verdict}', '{}'::jsonb);
+        END IF;
+        PERFORM pg_temp.phase2_a_append_v4(v_scenario, v_prefix || 'turn-producer-' || v_case,
+                                         jsonb_build_array(v_fact), NULL);
+        IF NOT EXISTS (SELECT 1 FROM public.analysis_runs WHERE run_id = v_prefix || 'producer-' || v_case
+              AND leading_option_id IS NOT DISTINCT FROM CASE WHEN v_case < 3 THEN 'launch_49_starter_tier'::text ELSE NULL END
+              AND constraint_may_name_leading_option IS NOT DISTINCT FROM CASE WHEN v_case < 3 THEN v_case = 1 ELSE NULL::boolean END)
+           OR (SELECT count(*) FROM public.analysis_run_options WHERE run_id = v_prefix || 'producer-' || v_case
+                AND chance IS NOT NULL AND licence_status = 'permitted_with_caveat') <> 3 THEN
+          RAISE EXCEPTION 'Producer source leader/verdict must preserve true/false/absent NULL without inferring or overriding option licences';
+        END IF;
+      END LOOP;
+      RAISE SQLSTATE 'P2A01' USING MESSAGE = 'rollback successful synthetic probe';
+    EXCEPTION WHEN SQLSTATE 'P2A01' THEN NULL;
+    END;
+    PERFORM pg_temp.phase2_a_report('o_producer_leader_fields', TRUE, 'source leader and true/false verdict preserved; absent outer/nested verdict and null leader remain NULL');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.phase2_a_report('o_producer_leader_fields', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
+  END;
+END;
+$round3$;
+
+-- Statement timeout starts when a statement enters the server, so SET LOCAL
+-- and the deliberately slow INSERT are separate commands. Test-only sleep is
+-- injected INSIDE the actual derivation exception sub-block; the production
+-- trigger remains installed. The savepoint restores the exact function body.
+-- Sequence advancement survives a savepoint rollback, proving the timeout
+-- reached the derivation body rather than firing during planning or locking.
+CREATE TEMP TABLE phase2_a_cancel_before ON COMMIT DROP AS
+SELECT (SELECT count(*) FROM public.v5_handler_facts) AS facts,
+       (SELECT count(*) FROM public.analysis_runs) AS runs,
+       (SELECT count(*) FROM public.analysis_run_options) AS options,
+       (SELECT count(*) FROM public.analysis_run_quarantine) AS quarantine,
+       pg_get_functiondef('public.analysis_run_from_fact(public.v5_handler_facts,text)'::regprocedure) AS derivation;
+CREATE TEMP SEQUENCE phase2_a_cancel_entered;
+SAVEPOINT phase2_a_cancel_probe;
+DO $inject_slow_derivation$
+DECLARE v_definition TEXT; v_anchor TEXT := E'  BEGIN\n    IF p_fact.action_type';
+BEGIN
+  SELECT derivation INTO v_definition FROM phase2_a_cancel_before;
+  IF strpos(v_definition, v_anchor) = 0 THEN RAISE EXCEPTION 'Derivation sleep injection anchor missing'; END IF;
+  EXECUTE replace(v_definition, v_anchor,
+    E'  BEGIN\n    PERFORM nextval(''pg_temp.phase2_a_cancel_entered''::regclass);\n    PERFORM pg_sleep(1); -- test-only cancellation probe\n    IF p_fact.action_type');
+END;
+$inject_slow_derivation$;
+SET LOCAL statement_timeout = '25ms';
+\set phase2_a_cancel_sqlstate 00000
+\set ON_ERROR_STOP off
+INSERT INTO public.v5_handler_facts (v5_conversation_turn_id, scenario_id, user_id, handler_id, action_type, noop, payload)
+SELECT t.id, s.scenario_id, NULL, 'run_analysis', 'run_analysis', FALSE,
+       pg_temp.phase2_a_fact(s.scenario_id, s.prefix || 'cancelled') -> 'payload'
+FROM phase2_a_seed s JOIN public.v5_conversation_turns t
+  ON t.scenario_id = s.scenario_id AND t.turn_id = s.prefix || 'turn-a';
+\set phase2_a_cancel_failed :ERROR
+\if :phase2_a_cancel_failed
+  \set phase2_a_cancel_sqlstate :LAST_ERROR_SQLSTATE
+\endif
+ROLLBACK TO SAVEPOINT phase2_a_cancel_probe;
+\set ON_ERROR_STOP on
+RELEASE SAVEPOINT phase2_a_cancel_probe;
+SELECT pg_temp.phase2_a_report('p_statement_timeout_cancels',
+  :'phase2_a_cancel_failed'::boolean AND :'phase2_a_cancel_sqlstate' = '57014'
+    AND (SELECT is_called AND last_value = 1 FROM pg_temp.phase2_a_cancel_entered)
+    AND (SELECT facts FROM phase2_a_cancel_before) = (SELECT count(*) FROM public.v5_handler_facts)
+    AND (SELECT runs FROM phase2_a_cancel_before) = (SELECT count(*) FROM public.analysis_runs)
+    AND (SELECT options FROM phase2_a_cancel_before) = (SELECT count(*) FROM public.analysis_run_options)
+    AND (SELECT quarantine FROM phase2_a_cancel_before) = (SELECT count(*) FROM public.analysis_run_quarantine)
+    AND (SELECT derivation FROM phase2_a_cancel_before) = pg_get_functiondef('public.analysis_run_from_fact(public.v5_handler_facts,text)'::regprocedure),
+  format('standalone INSERT SQLSTATE %s; entered derivation before timeout; no fact/run/option/quarantine persisted; original function restored',
+         :'phase2_a_cancel_sqlstate'));
 
 -- Actual SELECT attempts as each restricted role; errors are captured per
 -- surface rather than inferring denial from a catalog grant inspection.
@@ -652,7 +922,7 @@ $authenticated_acl$;
 RESET ROLE;
 RELEASE SAVEPOINT phase2_a_authenticated_acl;
 
-SELECT 'after a-h real writer/replay/backfill/role probes' AS phase,
+SELECT 'after a-h and j-p writer/backfill/cancellation/role probes' AS phase,
        (SELECT count(*) FROM public.scenarios) AS scenarios_rows,
        (SELECT count(*) FROM public.v5_conversation_turns) AS v5_conversation_turns_rows,
        (SELECT count(*) FROM public.v5_handler_facts) AS v5_handler_facts_rows,
@@ -700,7 +970,7 @@ BEGIN
       RAISE EXCEPTION 'Rollback left a Phase 2(a) object installed';
     END IF;
     IF EXISTS (
-      WITH current_schema AS (
+      WITH schema_now AS (
         SELECT 'relation'::text AS kind, c.oid,
                jsonb_build_object('name', c.relname, 'kind', c.relkind, 'acl', c.relacl, 'options', c.reloptions,
                                   'rls', c.relrowsecurity, 'force_rls', c.relforcerowsecurity) AS definition
@@ -714,7 +984,7 @@ BEGIN
         FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'
       )
-      SELECT 1 FROM current_schema c FULL JOIN phase2_a_schema_before b USING (kind, oid)
+      SELECT 1 FROM schema_now c FULL JOIN phase2_a_schema_before b USING (kind, oid)
       WHERE c.definition IS DISTINCT FROM b.definition
     ) OR EXISTS (
       SELECT 1 FROM phase2_a_counts_after
@@ -741,6 +1011,9 @@ SELECT 'after proposal rollback (synthetic facts still inside transaction)' AS p
 DO $aggregate$
 DECLARE v_failures TEXT;
 BEGIN
+  IF (SELECT count(*) FROM phase2_a_results) <> 26 THEN
+    RAISE EXCEPTION 'Phase 2(a) rehearsal must record all 26 checks before transaction cleanup';
+  END IF;
   SELECT string_agg(check_name || ': ' || COALESCE(detail, 'expected assertion did not hold'), '; ' ORDER BY check_name)
     INTO v_failures FROM phase2_a_results WHERE NOT passed;
   IF v_failures IS NOT NULL THEN

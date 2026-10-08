@@ -33,6 +33,8 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
   'fact_version',
   'result.scenario_id',
   'result.run_id',
+  'result.leading_option_id',
+  'result.constraint_verdict.may_name_leading_option',
   'result.computed_at',
   'result.input_snapshot',
   'result.input_snapshot.sent_digest',
@@ -64,6 +66,8 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
 
 export interface TypedRunRowsContext {
   readonly scenarioId: string;
+  /** Match the SQL boundary: live inserts quarantine absent identity; backfill skips it. */
+  readonly mode?: 'trigger' | 'backfill';
   /** Only the identity of the graph this frozen Run evaluated, when attested by the caller. */
   readonly graphIdentityHash?: string | null;
 }
@@ -83,6 +87,9 @@ export interface TypedRunOptionRow {
 /** Reference mapping for the SQL trigger; SQL owns scenario/user/revision/fact_id and the option rows' run_id. */
 export interface TypedRunRows {
   readonly run_id: string;
+  /** producer verdict at Run time; compose applies further remove-only gates; NOT the final permission */
+  readonly leading_option_id: string | null;
+  readonly constraint_may_name_leading_option: boolean | null;
   readonly canonical_request_hash: string;
   readonly status: 'succeeded' | 'failed' | 'withheld';
   readonly computed_at: string;
@@ -91,10 +98,12 @@ export interface TypedRunRows {
   readonly options: readonly TypedRunOptionRow[];
 }
 
-export type TypedRunRowsResult = { readonly ok: TypedRunRows } | { readonly quarantine: string };
+export type TypedRunRowsResult = { readonly ok: TypedRunRows }
+  | { readonly quarantine: string }
+  | { readonly skipped_legacy: true };
 
 /**
- * Maps ONE persisted fact. Malformed/legacy facts quarantine individually; no array-wide rejection or throws.
+ * Maps ONE persisted fact. Malformed facts quarantine individually; backfill skips pre-run-identity facts.
  * Inputs are never rebuilt from the current graph. The canonical hash is the snapshot's sent_digest (the schema's
  * SHA-256 of the actual PLoT request, request ID excluded). graph_hash_at_run is an analysis-affecting currentness
  * hash, so it is deliberately NOT relabelled as graph_identity_hash.
@@ -113,7 +122,40 @@ export function toTypedRunRows(fact: unknown, ctx: TypedRunRowsContext): TypedRu
 }
 
 function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult {
-  const parsed = RunAnalysisHandlerFactSchema.safeParse(fact);
+  const source = recordOf(fact);
+  const sourceResult = recordOf(source?.result);
+  let producerPermission: boolean | null = null;
+  let schemaFact = fact;
+  // Check the identity boundary before the current schema: legacy payloads may
+  // predate its other required fields, and JSON-null identity is also legacy.
+  if (source?.fact_type === 'run_analysis' && source.fact_version === 1 && source.noop === false) {
+    if (sourceResult === undefined) return { quarantine: 'result_shape' };
+    if (!Object.hasOwn(sourceResult, 'run_id') || sourceResult.run_id === null) {
+      return ctx.mode === 'backfill' ? { skipped_legacy: true } : { quarantine: 'run_id_absent' };
+    }
+    if (!nonEmpty(sourceResult.run_id)) return { quarantine: 'run_id_invalid' };
+    if (!nonEmpty(ctx.scenarioId) || sourceResult.scenario_id !== ctx.scenarioId) {
+      return { quarantine: 'scenario_id_mismatch' };
+    }
+    if (sourceResult.leading_option_id !== null && typeof sourceResult.leading_option_id !== 'string') {
+      return { quarantine: 'leading_option_id_shape' };
+    }
+    if (typeof sourceResult.summary !== 'string') return { quarantine: 'summary_shape' };
+    if (Object.hasOwn(sourceResult, 'constraint_verdict')) {
+      const verdict = recordOf(sourceResult.constraint_verdict);
+      if (verdict === undefined || (Object.hasOwn(verdict, 'may_name_leading_option')
+        && typeof verdict.may_name_leading_option !== 'boolean')) {
+        return { quarantine: 'constraint_may_name_leading_option_shape' };
+      }
+      producerPermission = typeof verdict.may_name_leading_option === 'boolean' ? verdict.may_name_leading_option : null;
+      // This projection reads only the source boolean. The verdict's other
+      // members are not this table's permission contract; absence stays NULL.
+      const schemaResult = { ...sourceResult };
+      delete schemaResult.constraint_verdict;
+      schemaFact = { ...source, result: schemaResult };
+    }
+  }
+  const parsed = RunAnalysisHandlerFactSchema.safeParse(schemaFact);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return { quarantine: `invalid run_analysis fact at ${issue?.path.join('.') || 'root'}: ${issue?.message ?? 'schema mismatch'}` };
@@ -121,9 +163,9 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   const runFact = parsed.data;
   const result = runFact.result;
   if (runFact.noop !== false) return { quarantine: 'run_analysis noop does not attest a Run execution' };
-  if (!nonEmpty(result.run_id)) return { quarantine: 'result.run_id is required for a typed Run' };
+  if (!nonEmpty(result.run_id)) return { quarantine: 'run_id_invalid' };
   if (!nonEmpty(ctx.scenarioId) || result.scenario_id !== ctx.scenarioId) {
-    return { quarantine: 'result.scenario_id does not match the scenario context' };
+    return { quarantine: 'scenario_id_mismatch' };
   }
   if (!nonEmpty(result.computed_at) || !Number.isFinite(Date.parse(result.computed_at))) {
     return { quarantine: 'result.computed_at must be a recorded timestamp' };
@@ -214,6 +256,8 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   }
   return { ok: {
     run_id: result.run_id,
+    leading_option_id: result.leading_option_id,
+    constraint_may_name_leading_option: producerPermission,
     canonical_request_hash: result.input_snapshot.sent_digest,
     status, computed_at: result.computed_at, graph_identity_hash: graphIdentityHash,
     input_snapshot: result.input_snapshot, options,

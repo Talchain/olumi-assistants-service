@@ -1,6 +1,7 @@
 -- =============================================================================
 -- PROPOSAL, NOT EXECUTED — Shared Data Phase 2(a): typed analysis runs
--- this trigger fires on PRODUCTION fact inserts; it never raises
+-- this trigger fires on PRODUCTION fact inserts; derivation errors never raise
+-- Cancellation and assertion failures propagate; they are never quarantined.
 -- =============================================================================
 -- Prerequisite: 20261008160000_phase2_c_scenario_revision.sql.
 -- Three new tables, one index/view, three functions and one AFTER INSERT trigger.
@@ -15,6 +16,8 @@
 -- payload_path: fact_version
 -- payload_path: result.scenario_id
 -- payload_path: result.run_id
+-- payload_path: result.leading_option_id
+-- payload_path: result.constraint_verdict.may_name_leading_option
 -- payload_path: result.computed_at
 -- payload_path: result.input_snapshot
 -- payload_path: result.input_snapshot.sent_digest
@@ -49,10 +52,18 @@
 -- Status/licence/Wilson/driver policy mirrors the r1 TypeScript spec and helpers.
 -- A leader withhold does not suppress independently licensed option chances.
 -- Runs/options share one exception subtransaction. A malformed fact quarantines
--- without aborting its production INSERT; even quarantine failure is swallowed.
+-- without aborting its production INSERT; ordinary quarantine errors are swallowed.
+-- producer verdict at Run time; compose applies further remove-only gates; NOT the final permission
+-- leading_option_id and constraint_may_name_leading_option copy producer fields only.
+-- Quarantine stores a fact reference, never another copy of its payload.
 -- RLS has no anon/authenticated policies. Tables/view/functions are service-only.
--- Backfill is explicit, bounded, skips already derived/quarantined fact IDs,
--- and is NOT invoked by this migration. Historical revision is unknowable:
+-- Backfill is explicit, bounded, and is NOT invoked by this migration. It skips
+-- already derived/quarantined IDs and valid pre-run-identity facts whose run_id
+-- is absent/null.
+-- Such live inserts quarantine as run_id_absent. Actionable backfill facts sort
+-- before legacy facts, so the historical prefix cannot consume every batch.
+-- skipped_legacy counts rows observed in this call, not a durable skip marker.
+-- Historical revision is unknowable:
 -- both trigger and backfill record scenarios.revision at derivation time.
 -- Latest v4: 20260806120000_v5_turn_fence_first_write_exemption.sql:322-347
 -- updates graph BEFORE inserting facts. Later brief_text/model-version updates
@@ -69,6 +80,8 @@ CREATE TABLE public.analysis_runs (
   canonical_request_hash TEXT NOT NULL,
   status                 TEXT NOT NULL CHECK (status IN ('succeeded', 'failed', 'withheld')),
   computed_at            TIMESTAMPTZ NOT NULL,
+  leading_option_id      TEXT NULL,
+  constraint_may_name_leading_option BOOLEAN NULL,
   graph_identity_hash    TEXT,
   input_snapshot         JSONB NOT NULL,
   fact_id                UUID NOT NULL REFERENCES public.v5_handler_facts(id) ON DELETE CASCADE,
@@ -96,7 +109,6 @@ CREATE TABLE public.analysis_run_quarantine (
   fact_id     UUID,
   scenario_id UUID,
   reason      TEXT NOT NULL,
-  raw         JSONB,
   seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -120,7 +132,7 @@ ORDER BY scenario_id, scenario_revision DESC, computed_at DESC, run_id DESC;
 REVOKE ALL ON TABLE public.latest_successful_run FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.latest_successful_run TO service_role;
 
-CREATE FUNCTION public.analysis_run_from_fact(p_fact public.v5_handler_facts)
+CREATE FUNCTION public.analysis_run_from_fact(p_fact public.v5_handler_facts, p_mode text DEFAULT 'trigger')
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -145,6 +157,7 @@ DECLARE
   v_warning JSONB;
   v_option_id TEXT;
   v_run_id TEXT;
+  v_constraint_may_name_leading_option BOOLEAN;
   v_raw_status TEXT;
   v_status TEXT;
   v_reason TEXT;
@@ -181,14 +194,36 @@ BEGIN
       RAISE EXCEPTION 'invalid run_analysis discriminator, fact_version or noop';
     END IF;
     v_result := p_fact.payload->'result';
-    IF jsonb_typeof(v_result) IS DISTINCT FROM 'object'
-       OR jsonb_typeof(v_result->'run_id') IS DISTINCT FROM 'string'
-       OR NULLIF(btrim(v_result->>'run_id', v_trim_chars), '') IS NULL
-       OR v_result->>'scenario_id' IS DISTINCT FROM p_fact.scenario_id::text
-       OR jsonb_typeof(v_result->'leading_option_id') NOT IN ('string', 'null')
-       OR NOT v_result ? 'leading_option_id'
-       OR jsonb_typeof(v_result->'summary') IS DISTINCT FROM 'string' THEN
-      RAISE EXCEPTION 'result.run_id required or result.scenario_id mismatch';
+    IF jsonb_typeof(v_result) IS DISTINCT FROM 'object' THEN
+      RAISE EXCEPTION 'result_shape';
+    END IF;
+    IF v_result->'run_id' IS NULL OR v_result->'run_id' = 'null'::jsonb THEN
+      IF p_mode = 'backfill' THEN RETURN; END IF;
+      RAISE EXCEPTION 'run_id_absent';
+    END IF;
+    IF jsonb_typeof(v_result->'run_id') IS DISTINCT FROM 'string'
+       OR NULLIF(btrim(v_result->>'run_id', v_trim_chars), '') IS NULL THEN
+      RAISE EXCEPTION 'run_id_invalid';
+    END IF;
+    IF v_result->>'scenario_id' IS DISTINCT FROM p_fact.scenario_id::text THEN
+      RAISE EXCEPTION 'scenario_id_mismatch';
+    END IF;
+    IF NOT v_result ? 'leading_option_id'
+       OR jsonb_typeof(v_result->'leading_option_id') NOT IN ('string', 'null') THEN
+      RAISE EXCEPTION 'leading_option_id_shape';
+    END IF;
+    IF jsonb_typeof(v_result->'summary') IS DISTINCT FROM 'string' THEN
+      RAISE EXCEPTION 'summary_shape';
+    END IF;
+    IF v_result ? 'constraint_verdict'
+       AND jsonb_typeof(v_result->'constraint_verdict') IS DISTINCT FROM 'object' THEN
+      RAISE EXCEPTION 'constraint_may_name_leading_option_shape';
+    END IF;
+    IF v_result->'constraint_verdict' ? 'may_name_leading_option' THEN
+      IF jsonb_typeof(v_result #> '{constraint_verdict,may_name_leading_option}') IS DISTINCT FROM 'boolean' THEN
+        RAISE EXCEPTION 'constraint_may_name_leading_option_shape';
+      END IF;
+      v_constraint_may_name_leading_option := (v_result #>> '{constraint_verdict,may_name_leading_option}')::boolean;
     END IF;
     v_run_id := v_result->>'run_id';
     IF jsonb_typeof(v_result->'computed_at') IS DISTINCT FROM 'string'
@@ -300,10 +335,12 @@ BEGIN
     SELECT revision INTO STRICT v_revision FROM public.scenarios WHERE id = p_fact.scenario_id;
     INSERT INTO public.analysis_runs (
       run_id, scenario_id, user_id, scenario_revision, canonical_request_hash,
-      status, computed_at, graph_identity_hash, input_snapshot, fact_id
+      status, computed_at, leading_option_id, constraint_may_name_leading_option,
+      graph_identity_hash, input_snapshot, fact_id
     ) VALUES (
       v_run_id, p_fact.scenario_id, p_fact.user_id, v_revision, v_snapshot->>'sent_digest',
-      v_status, v_computed_at, NULL, v_snapshot, p_fact.id
+      v_status, v_computed_at, v_result->>'leading_option_id', v_constraint_may_name_leading_option,
+      NULL, v_snapshot, p_fact.id
     ); -- duplicate run_id is a per-fact quarantine, never an upsert
 
     FOR v_option IN SELECT value FROM jsonb_array_elements(v_comparisons)
@@ -436,12 +473,16 @@ BEGIN
         run_id, option_id, chance, low, high, licence_status, withheld_reason, driver
       ) VALUES (v_run_id, v_option_id, v_chance, v_low, v_high, v_licence_status, v_reason, v_driver);
     END LOOP;
-  EXCEPTION WHEN OTHERS OR query_canceled OR assert_failure THEN
+  EXCEPTION WHEN OTHERS THEN
     BEGIN
-      INSERT INTO public.analysis_run_quarantine (fact_id, scenario_id, reason, raw)
-      VALUES (p_fact.id, p_fact.scenario_id, format('[%s] %s', SQLSTATE, SQLERRM), p_fact.payload);
-    EXCEPTION WHEN OTHERS OR query_canceled OR assert_failure THEN
-      NULL; -- quarantine unavailability must never reject a production fact
+      INSERT INTO public.analysis_run_quarantine (fact_id, scenario_id, reason)
+      VALUES (p_fact.id, p_fact.scenario_id,
+        CASE WHEN SQLSTATE = 'P0001' AND SQLERRM IN (
+          'result_shape', 'run_id_absent', 'run_id_invalid', 'scenario_id_mismatch',
+          'leading_option_id_shape', 'summary_shape', 'constraint_may_name_leading_option_shape'
+        ) THEN SQLERRM ELSE format('[%s] %s', SQLSTATE, SQLERRM) END);
+    EXCEPTION WHEN OTHERS THEN
+      NULL; -- ordinary quarantine failures must never reject a production fact
     END;
   END;
   RETURN;
@@ -457,14 +498,14 @@ AS $$
 BEGIN
   PERFORM public.analysis_run_from_fact(NEW);
   RETURN NULL;
-EXCEPTION WHEN OTHERS OR query_canceled OR assert_failure THEN
+EXCEPTION WHEN OTHERS THEN
   RETURN NULL; -- also guard failures before entering the derivation body
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.analysis_run_from_fact(public.v5_handler_facts),
+REVOKE ALL ON FUNCTION public.analysis_run_from_fact(public.v5_handler_facts, text),
   public.v5_handler_facts_derive_run() FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.analysis_run_from_fact(public.v5_handler_facts),
+GRANT EXECUTE ON FUNCTION public.analysis_run_from_fact(public.v5_handler_facts, text),
   public.v5_handler_facts_derive_run() TO service_role;
 
 CREATE TRIGGER v5_handler_facts_derive_run
@@ -481,6 +522,7 @@ DECLARE
   v_fact public.v5_handler_facts;
   v_derived INTEGER := 0;
   v_quarantined INTEGER := 0;
+  v_skipped_legacy INTEGER := 0;
 BEGIN
   IF p_limit IS NULL OR p_limit <= 0 THEN
     RAISE EXCEPTION 'backfill_analysis_runs: p_limit must be positive' USING ERRCODE = '22023';
@@ -490,18 +532,30 @@ BEGIN
     WHERE (f.action_type = 'run_analysis' OR f.payload->>'fact_type' = 'run_analysis')
       AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = f.id)
       AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = f.id)
-    ORDER BY f.created_at, f.id
+    ORDER BY CASE WHEN f.action_type = 'run_analysis'
+      AND f.payload->>'fact_type' = 'run_analysis'
+      AND f.payload->'fact_version' = '1'::jsonb AND f.noop IS FALSE
+      AND jsonb_typeof(f.payload->'result') = 'object'
+      AND (f.payload #> '{result,run_id}' IS NULL OR f.payload #> '{result,run_id}' = 'null'::jsonb)
+      THEN 1 ELSE 0 END, f.created_at, f.id
     LIMIT p_limit
     FOR UPDATE OF f SKIP LOCKED
   LOOP
-    PERFORM public.analysis_run_from_fact(v_fact);
+    PERFORM public.analysis_run_from_fact(v_fact, 'backfill');
     IF EXISTS (SELECT 1 FROM public.analysis_runs WHERE fact_id = v_fact.id) THEN
       v_derived := v_derived + 1;
     ELSIF EXISTS (SELECT 1 FROM public.analysis_run_quarantine WHERE fact_id = v_fact.id) THEN
       v_quarantined := v_quarantined + 1;
+    ELSIF v_fact.action_type = 'run_analysis'
+      AND v_fact.payload->>'fact_type' = 'run_analysis'
+      AND v_fact.payload->'fact_version' = '1'::jsonb AND v_fact.noop IS FALSE
+      AND jsonb_typeof(v_fact.payload->'result') = 'object'
+      AND (v_fact.payload #> '{result,run_id}' IS NULL OR v_fact.payload #> '{result,run_id}' = 'null'::jsonb) THEN
+      v_skipped_legacy := v_skipped_legacy + 1;
     END IF;
   END LOOP;
-  RETURN jsonb_build_object('derived', v_derived, 'quarantined', v_quarantined);
+  RETURN jsonb_build_object('derived', v_derived, 'quarantined', v_quarantined,
+                           'skipped_legacy', v_skipped_legacy);
 END;
 $$;
 

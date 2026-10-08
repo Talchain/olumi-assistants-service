@@ -5,7 +5,7 @@ SET LOCAL lock_timeout = '3s';
 DROP TRIGGER v5_handler_facts_derive_run ON public.v5_handler_facts;
 DROP FUNCTION public.v5_handler_facts_derive_run();
 DROP FUNCTION public.backfill_analysis_runs(int);
-DROP FUNCTION public.analysis_run_from_fact(public.v5_handler_facts);
+DROP FUNCTION public.analysis_run_from_fact(public.v5_handler_facts, text);
 DROP VIEW public.latest_successful_run;
 DROP TABLE public.analysis_run_options;
 DROP TABLE public.analysis_runs;
