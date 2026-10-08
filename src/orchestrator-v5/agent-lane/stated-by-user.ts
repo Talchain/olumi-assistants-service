@@ -31,7 +31,7 @@
  * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
-import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels, LINK_EFFECT_CHANGE_AFTER as CHANGE_AFTER } from './link-effect-figures.js';
+import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels, withoutLinkEffectBoundComparators, LINK_EFFECT_CHANGE_AFTER as CHANGE_AFTER } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import type { CandidateModel } from './admit-model.js';
@@ -872,7 +872,7 @@ function negatedOutsideEnds(text: string, ends: { readonly source: string; reado
   const masked = [ends.source, ends.target]
     .filter(label => !labelWords(label).every(w => /^(?:not|never|no|nor|neither|hardly|cannot|without)$/.test(w)))
     .sort((a, b) => b.length - a.length)
-    .reduce((t, label) => maskLabel(t, label, JOINED_BY_SPACE_OR_HYPHEN), text);
+    .reduce((t, label) => maskLabel(t, label, JOINED_BY_SPACE_OR_HYPHEN), withoutLinkEffectBoundComparators(text));
   return NEGATOR.test(masked);
 }
 const labelWords = (label: string): string[] => [...label.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map(t => t[0]);
@@ -1071,7 +1071,7 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  * Both numbers must occur in ONE affirmed sentence about the named or request-selected link.
  * The typed approval card is the consent to the reading; no movement vocabulary is required here.
  */
-export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
+export type LinkEffectStatementMiss = 'question' | 'denied' | 'hypothetical' | 'reported' | 'figures_not_in_statement' | 'end_not_named'
   | 'not_one_statement' | 'unclear_figure' | 'source_figure_a_level' | 'target_figure_a_level' | 'no_change_stated'
   | 'figure_counts_another_unit' | 'figure_of_another_quantity';
 /**
@@ -1171,8 +1171,32 @@ export function withoutCorrectedFigureTail(sentence: string): string {
 export function linkEffectQuoteContextMiss(quote: string, userText: string): 'question' | 'denied' | null {
   const enclosing = enclosingSentences(userText, quote);
   const misses = enclosing.map(sentence => sentence.includes('?') || (AUXILIARY_FIRST.test(sentence) && !REQUEST_FORM.test(sentence))
-    ? 'question' as const : NEGATOR.test(withoutCorrectedFigureTail(sentence)) ? 'denied' as const : null);
+    ? 'question' as const : NEGATOR.test(withoutLinkEffectBoundComparators(withoutCorrectedFigureTail(sentence))) ? 'denied' as const : null);
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
+}
+
+export type LinkEffectStatementClassification = 'asserted' | 'denied' | 'question' | 'hypothetical' | 'reported';
+/**
+ * The person's WHOLE sentence is the source of an effect, including words around an inner quote. An explicit thought
+ * experiment or somebody else's reported claim supplies no assertion by this person. Ordinary causal conditions
+ * ("If price rises by £1, margin increases by 5 points") can still be their assertion.
+ */
+export function linkEffectStatementClassification(quote: string, userText: string,
+  ends?: { readonly source: string; readonly target: string }): LinkEffectStatementClassification {
+  const enclosing = enclosingSentences(userText, quote);
+  if (enclosing.length === 0) return 'reported';
+  const classifications = enclosing.map((sentence): LinkEffectStatementClassification => {
+    if (sentence.includes('?') || (AUXILIARY_FIRST.test(sentence) && !REQUEST_FORM.test(sentence))) return 'question';
+    const stated = withoutCorrectedFigureTail(sentence);
+    if (ends === undefined ? NEGATOR.test(withoutLinkEffectBoundComparators(stated)) : negatedOutsideEnds(stated, ends)) return 'denied';
+    if (/\b(?:imagine|suppose|supposing|hypothetical(?:ly)?|thought experiment)\b/i.test(stated)) return 'hypothetical';
+    const adopts = /\b(?:I|we)\s+(?:agree|adopt|endorse|stand\s+by)\b/i.test(stated);
+    const reports = /\baccording\s+to\b|\b(?:said|says|reported|reports|claimed|claims)\b/i.test(stated);
+    if (reports && !adopts) return 'reported';
+    return 'asserted';
+  });
+  // A repeated quote with differing speech acts is ambiguous; never select its asserted occurrence silently.
+  return classifications.find(classification => classification !== 'asserted') ?? 'asserted';
 }
 /**
  * A sentence that ENDS by denying any change at all: "It doesn't change.", "No, it doesn't really move.", "It has no effect
@@ -1223,7 +1247,8 @@ export function linkEffectTheUserStated(
   scope: LinkEffectScope,
 ): LinkEffectStatementMiss | null {
   const q = quote.trim();
-  if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
+  const classification = linkEffectStatementClassification(q, q, ends);
+  if (classification !== 'asserted') return classification;
   // The figure a correction replaces is neither a denial nor a stated figure (`withoutCorrectedFigureTail`).
   const sentences = sentencesOf(q).map(withoutCorrectedFigureTail);
   if (negatedOutsideEnds(sentences.join(' '), ends)) return 'denied';
@@ -1666,6 +1691,11 @@ function linkEffectInOneSentence(
   }
   if (!CHANGE_STATED.test(q)) return 'no_change_stated';
   if (scope.link_selected === true) return null;
+  return linkEffectStatementNamesEndpoints(q, ends) ? null : 'end_not_named';
+}
+
+/** The statement binder's one endpoint rule, shared with bound source grounding. */
+export function linkEffectStatementNamesEndpoints(q: string, ends: { readonly source: string; readonly target: string }): boolean {
   const quoteWords = wordsOf(q);
   const named = (end: string, other: string): boolean => {
     const own = wordsOf(end).filter(w => !wordsOf(other).some(o => sameWord(w, o)));
@@ -1677,5 +1707,5 @@ function linkEffectInOneSentence(
     const outside = maskLabel(q, other, JOINED_BY_ANY_PUNCTUATION);
     return wordsOf(end).length > 0 && maskLabel(outside, end, JOINED_BY_SPACE_OR_HYPHEN) !== outside;
   };
-  return named(ends.source, ends.target) && named(ends.target, ends.source) ? null : 'end_not_named';
+  return named(ends.source, ends.target) && named(ends.target, ends.source);
 }

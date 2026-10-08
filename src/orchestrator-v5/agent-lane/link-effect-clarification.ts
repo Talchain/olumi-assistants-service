@@ -1,5 +1,6 @@
 /** The stated effect and its open question survive until that same link is resolved. */
 import { readLinkEffectFloorAnswer } from './link-effect-lower-bound.js';
+import { linkEffectStatementClassification } from './stated-by-user.js';
 import { randomUUID } from 'node:crypto';
 import { computeSurvivingPriorPendings } from '../commit.js';
 import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../session/pending-action.js';
@@ -20,8 +21,16 @@ const records = (value: unknown): Rec[] => Array.isArray(value) ? value.map(reco
 const linkKey = (link: LinkEffectClarificationLink): string => JSON.stringify([link.from_id, link.to_id]);
 const isAsk = (pending: PendingAction | null): pending is LinkEffectClarificationPending => pending?.action.kind === 'elicit_link_effect_clarification';
 
+/** Legacy carriers are re-read too; no stored flag can turn a denial into an assertion. */
+export function linkEffectClarificationIsAssertion(action: Omit<LinkEffectClarificationAction, 'kind'>): boolean {
+  return (action.statement_classification === undefined || action.statement_classification === 'asserted')
+    && linkEffectStatementClassification(action.quote, action.source_text ?? action.quote,
+      { source: action.from_label, target: action.to_label }) === 'asserted';
+}
+
 /** A changed revision or a Run is not resolution; only the held link and its authorship decide. */
 function sameUnresolvedLink(ask: LinkEffectClarificationPending, graph: unknown): boolean {
+  if (!linkEffectClarificationIsAssertion(ask.action)) return false;
   const found = linkEffectTargetOf(graph, ask.action.from_id, ask.action.to_id);
   if (found.kind !== 'one') return false;
   const provenance = record(found.edge.provenance);
@@ -50,13 +59,16 @@ export function liveLinkEffectClarifications(
 export function linkEffectClarificationOnRefusal(input: {
   action: Omit<LinkEffectClarificationAction, 'kind'>; message: string; scenarioId: string; graph: unknown; emittedAtIso: string;
 }): LinkEffectClarificationPending | null {
-  if (!input.message.includes(input.action.quote)) return null;
+  if (!input.message.includes(input.action.quote) || !linkEffectClarificationIsAssertion(input.action)
+    || linkEffectStatementClassification(input.action.quote, input.message,
+      { source: input.action.from_label, target: input.action.to_label }) !== 'asserted') return null;
   const emittedMs = Date.parse(input.emittedAtIso);
   if (!Number.isFinite(emittedMs)) return null;
   const id = randomUUID();
   const pending = parsePendingAction({
     id, scenario_id: input.scenarioId, chip_id: `agent-link-effect-clarification:${id}`,
-    action: { kind: 'elicit_link_effect_clarification', ...input.action },
+    action: { kind: 'elicit_link_effect_clarification', ...input.action, statement_classification: 'asserted',
+      source_text: input.action.source_text ?? input.message },
     // A Run can change the hash; the exact held pair above is the answer's licence.
     preconditions: { target_entity_ids: [input.action.from_id, input.action.to_id] },
     expires_at_turn_count: LINK_EFFECT_CLARIFICATION_TURN_TTL, emitted_at_iso: input.emittedAtIso,
@@ -107,7 +119,9 @@ export function linkEffectClarificationForReply(
   const entities = records(canonical.entities);
   const heldLinks = records(canonical.links);
   const live = asks.filter(ask => {
-    if (isPendingActionExpired(ask, Date.now())
+    // The discarded surrounding text of a legacy quote cannot be reconstructed by a short unit answer.
+    if (ask.action.statement_classification !== 'asserted' || typeof ask.action.source_text !== 'string'
+      || !linkEffectClarificationIsAssertion(ask.action) || isPendingActionExpired(ask, Date.now())
       || !entities.some(e => e.id === ask.action.from_id && e.label === ask.action.from_label)
       || !entities.some(e => e.id === ask.action.to_id && e.label === ask.action.to_label)) return false;
     const links = heldLinks.filter(l => l.from === ask.action.from_id && l.to === ask.action.to_id);

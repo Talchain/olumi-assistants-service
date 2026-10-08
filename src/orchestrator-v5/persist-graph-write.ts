@@ -108,7 +108,8 @@
  *   narrower claim than one storage generation.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
+import { linkEffectClarificationIsAssertion, liveLinkEffectClarifications } from './agent-lane/link-effect-clarification.js';
+import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -176,8 +177,9 @@ export interface CheckedGraphAppendParams {
    * HERE, just before the append, not only against the caller's earlier read. A request that reconciled its held
    * proposals and then took seconds to answer must neither put back one another request approved or declined meanwhile
    * (a supplied held item is kept only while the latest row still holds it) nor erase one another request minted
-   * meanwhile (a held item on the latest row that this request never saw is carried). `seenByThisRequest`: every held
-   * item this request read, so the ones it settled itself (approved, declined, lapsed: each said) are never re-added.
+   * meanwhile (a held item on the latest row that this request never saw is carried). The same arrival obligation
+   * applies to live link-effect clarifications. `seenByThisRequest`: every held item and clarification this request
+   * handled, so the ones it settled itself (approved, declined, resolved, lapsed: each said) are never re-added.
    * S-D.1b compares the identity of this read inside the conditional append RPC,
    * then rereads and repeats this reconciliation on contention (three attempts).
    */
@@ -397,10 +399,25 @@ export async function appendCheckedGraphWrite(
       if (params.heldProposals !== undefined) {
         const { isHeld, seenByThisRequest } = params.heldProposals;
         const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
-        const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
-        const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
+        let kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
+        const graph = writesGraph ? write.graph : params.baseGraphForInvariants;
+        const shapedGraph = graph !== null && typeof graph === 'object' && !Array.isArray(graph)
+          && Array.isArray((graph as { nodes?: unknown }).nodes) && Array.isArray((graph as { edges?: unknown }).edges);
+        // A missing graph read cannot establish resolution. Carry those words without granting an answer licence.
+        const liveClarifications = shapedGraph ? liveLinkEffectClarifications(prior, write.scenario_id, graph)
+          : prior.filter(p => p.action.kind === 'elicit_link_effect_clarification' && linkEffectClarificationIsAssertion(p.action)
+            && !isPendingActionExpired(p, Date.now()));
+        const arrivingClarifications = liveClarifications.filter(p => !seenByThisRequest.has(p.chip_id)
+          && !kept.some(n => n.chip_id === p.chip_id));
+        // A fresh question replaces only its exact directed link, never another link that shares an endpoint.
+        kept = kept.filter(p => p.action.kind !== 'elicit_link_effect_clarification'
+          || !arrivingClarifications.some(n => n.action.kind === 'elicit_link_effect_clarification'
+            && p.action.kind === 'elicit_link_effect_clarification'
+            && n.action.from_id === p.action.from_id && n.action.to_id === p.action.to_id));
+        const arrivingHolds = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
+        const arrived = [...arrivingHolds, ...arrivingClarifications];
         if (kept.length !== supplied.length || arrived.length > 0) {
-          for (const p of arrived) arriving.add(p.chip_id);
+          for (const p of arrivingHolds) arriving.add(p.chip_id);
           // A concurrently arriving offer keeps its room alongside this answer's offer. Other holds remain oldest first.
           supplied = capWithHeldPriority([...kept, ...arrived]);
           write = { ...write, pending_actions: supplied };

@@ -3,8 +3,9 @@ import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defau
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
+import { isDirectedEdge } from '../../schemas/graph.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { afterChangeWord, denominatorWords, isChangeWord, levelDenominatorOf, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { afterChangeWord, denominatorWords, isChangeWord, levelDenominatorOf, linkEffectStatementClassification, linkEffectTheUserStated, namesSourceOf, ownUnitsOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { singular, words } from '../agent-lane/same-unit.js';
 import { boundedLinkEffectText, findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
 import { isPercentageLevelUnit, resolveMagnitudeFrame, sourceUnitWords } from '../../cee/magnitude/link-effect.js';
@@ -27,10 +28,23 @@ export interface LinkEffectClarificationReading {
   readonly node_id: string;
   readonly quote: string;
   readonly answer: string;
+  /** The original person's enclosing sentence and assertion classification, retained across the answer turn. */
+  readonly statement_classification?: 'asserted';
+  readonly source_text?: string;
+  readonly from_id?: string;
+  readonly to_id?: string;
   /** RC2: the recorded minimum and its settled unit reading, never a point estimate. */
   readonly floor?: LinkEffectFloor;
   /** The upper plausible extreme supplied in the same answer, in the floor's reading. */
   readonly upper?: number;
+  /** A relative ordinary percentage, converted only against this exact link's current model level. */
+  readonly relative?: {
+    readonly percent: number;
+    readonly current_level: number;
+    readonly current_level_unit: string;
+    readonly from_id: string;
+    readonly to_id: string;
+  };
 }
 
 /** No conversion or chosen figure: only the literal percentage's own magnitude read explicitly as points. */
@@ -61,6 +75,73 @@ export function linkEffectClarificationSettlesPoints(
     && reply.slice(0, one.index).trim() === ''
     && /^percentage\s+points?$/i.test(reply.slice(one.index + one.matchedText.length).trim());
 }
+/** The ordinary reading answer, shared by admission, the card and the final writer. */
+export function isRelativeLinkEffectAnswer(answer: string): boolean {
+  const reply = answer.trim().replace(/^(?:I mean|I meant|it['’]?s|that['’]?s)\s+/i, '').replace(/[.!]$/, '').trim();
+  return /^relative(?:\s+(?:change|increase|decrease))?$/i.test(reply);
+}
+
+/** No figure in the sentence can supply a missing current level: the basis must be in the current model. */
+function modelCurrentLevel(node: Rec, frame: number | undefined): number | undefined {
+  const state = isRec(node.observed_state) ? node.observed_state : undefined;
+  if (state === undefined) return undefined;
+  if (typeof state.raw_value === 'number' && Number.isFinite(state.raw_value)) return state.raw_value;
+  if (typeof state.value !== 'number' || !Number.isFinite(state.value)) return undefined;
+  return state.value * (frame ?? 1);
+}
+
+export function readOrdinaryLinkEffectRelative(
+  graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string, answer: string,
+): { readonly kind: 'ask'; readonly question: string; readonly literal_effect: LinkEffectStatement }
+  | { readonly kind: 'answer'; readonly effect: LinkEffectStatement; readonly literal_effect: LinkEffectStatement;
+    readonly clarification: LinkEffectClarificationReading } | null {
+  if (!isRelativeLinkEffectAnswer(answer) || hasLinkEffectRange(quote) || boundedLinkEffectText(quote) !== undefined
+    || !isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return null;
+  const nodes = graph.nodes.filter(isRec);
+  const sources = nodes.filter(n => n.id === from), targets = nodes.filter(n => n.id === to);
+  if (sources.length !== 1 || targets.length !== 1
+    || graph.edges.filter(isRec).filter(e => e.from === from && e.to === to && isDirectedEdge(e as never)).length !== 1) return null;
+  const source = sources[0]!, target = targets[0]!;
+  const ends = { source: String(source.label ?? from), target: String(target.label ?? to) };
+  if (linkEffectStatementClassification(quote, quote, ends) !== 'asserted') return null;
+  const scope = { quantities: nodes.filter(n => n.kind !== 'option' && n.kind !== 'decision').map(n => String(n.label ?? n.id)),
+    target_units: ownUnitsOf(target) };
+  // A model may send either the original percentage or its conversion. Bind the original percentage first;
+  // exactly one literal percentage must name this target while the source denominator binds the other endpoint.
+  const candidates = findLinkEffectAmounts(quote).filter(a => a.kind === 'percent').map(a => ({
+    ...effect, amount: Math.sign(effect.amount) * a.magnitude, amount_unit: '%',
+  })).filter(literal => linkEffectTheUserStated(quote, literal, ends, scope) === null);
+  if (candidates.length !== 1) return null;
+  const literal_effect = candidates[0]!;
+  const percentLevels = percentLevelIds(graph);
+  const magnitude = magnitudeNodes(nodes, percentLevels).get(to)!;
+  const frame = resolveMagnitudeFrame(magnitude);
+  const level = modelCurrentLevel(target, frame);
+  const unit = unitOf(target);
+  if (level === undefined || unit === undefined) return { kind: 'ask', literal_effect,
+    question: `What is the current level of “${ends.target}”, in its model units, so I can convert the relative ${Math.abs(literal_effect.amount)}% change?` };
+  const amount_unit = percentLevels.has(to) || isPercentageLevelUnit(unit, frame) ? POINTS_UNIT : unit;
+  return { kind: 'answer', literal_effect,
+    effect: { ...effect, amount: literal_effect.amount * level / 100, amount_unit },
+    clarification: { node_id: to, from_id: from, to_id: to, statement_classification: 'asserted', source_text: quote, quote, answer, relative: { percent: literal_effect.amount, current_level: level,
+      current_level_unit: unit, from_id: from, to_id: to } } };
+}
+
+/** Approval's independent check: current basis, original percentage and exact endpoint pair all still hold. */
+export function linkEffectClarificationSettlesRelative(
+  clarification: LinkEffectClarificationReading | undefined, graph: unknown, from: string, to: string,
+  effect: LinkEffectStatement, quote: string,
+): boolean {
+  if (!isRec(clarification) || clarification.floor !== undefined || clarification.node_id !== to
+    || clarification.quote !== quote || typeof clarification.answer !== 'string' || clarification.answer.length > 400
+    || !isRec(clarification.relative) || clarification.relative.from_id !== from || clarification.relative.to_id !== to) return false;
+  const reading = readOrdinaryLinkEffectRelative(graph, from, to, effect, quote, clarification.answer);
+  if (reading?.kind !== 'answer' || effect.amount !== reading.effect.amount || effect.amount_unit !== reading.effect.amount_unit) return false;
+  return clarification.relative.percent === reading.clarification.relative!.percent
+    && clarification.relative.current_level === reading.clarification.relative!.current_level
+    && clarification.relative.current_level_unit === reading.clarification.relative!.current_level_unit;
+}
+
 export interface PreparedLinkEffectUnitReadings {
   readonly unit_readings: readonly LinkEffectUnitReading[];
   /** % level ends whose change is points in the user's own terms: at a TYPED 0, a bare % can only be points (Science F1);
@@ -403,6 +484,13 @@ export function prepareLinkEffectUnitReadings(
     const switchUnit = node === source && magnitude !== undefined && sourceUnitWords(magnitude, frame) === 'switch'
       ? 'switch' : undefined;
     const establishedUnit = unitOf(node) ?? mediatedUnit ?? (current === undefined ? undefined : endpointUnit(current, String(node.id))) ?? switchUnit;
+    if (node === target && options?.clarification !== undefined && options.clarification.floor === undefined
+      && options.clarification.node_id === to && options.clarification.quote === quote
+      && isRelativeLinkEffectAnswer(options.clarification.answer)) {
+      if (linkEffectClarificationSettlesRelative(options.clarification, graph, from, to, effect, quote)) continue;
+      const relative = readOrdinaryLinkEffectRelative(graph, from, to, effect, quote, options.clarification.answer);
+      if (relative?.kind === 'ask') { asks.push(relative.question); continue; }
+    }
     const literalPercent = amounts.find(a => a.magnitude === Math.abs(value) && a.kind === 'percent');
     const sourceLevels = node === source
       ? linkEffectSourceLevels(quote, namesSourceOf({ source: String(source.label ?? source.id), target: String(target.label ?? target.id) })) : undefined;
@@ -440,6 +528,10 @@ export function prepareLinkEffectUnitReadings(
     } else {
       unit_readings.push({ node_id: String(node.id), unit_reading: { unit, source: 'user_stated', source_quote: one!.clause } });
     }
+  }
+  // A definite unit settles the reading only. It never makes an explicit lower/upper bound a point estimate.
+  if (boundedLinkEffectText(quote) !== undefined && options?.clarification?.floor === undefined && asks.length === 0) {
+    asks.push(`You said “${boundedLinkEffectText(quote)}”. What single change in “${String(target.label ?? target.id)}” do you mean, rather than a bound?`);
   }
   // One question even when both ends need clarification.
   return { unit_readings, ...(points_at_zero.length > 0 ? { points_at_zero } : {}), ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };

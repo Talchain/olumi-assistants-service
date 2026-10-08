@@ -148,6 +148,7 @@ function seedClarification(cafe = false): Json {
     action: { kind: 'elicit_link_effect_clarification', from_id: cafe ? 'prices' : 'pro_plan_price',
       to_id: cafe ? 'daily_visits' : 'monthly_churn', from_label: cafe ? 'Prices' : 'Pro plan price',
       to_label: cafe ? 'Daily visits' : 'Monthly churn', quote: cafe ? CAFE_QUOTE : PAUL_QUOTE,
+      statement_classification: 'asserted', source_text: cafe ? CAFE_QUOTE : PAUL_QUOTE,
       question: cafe ? CAFE_QUESTION : PAUL_QUESTION, refusal: 'unit_mismatch', value_text: cafe ? '5%' : 'at least increase 1%' },
     preconditions: {}, emitted_at_iso: now(),
     expires_at_iso: new Date(Date.now() + 86_400_000).toISOString(), expires_at_turn_count: 6 };
@@ -194,6 +195,142 @@ describe('RC2 stated-effect carry, the real /agent/v1/turn door', () => {
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as Json;
   };
+
+  it.each([false, true])('F1 RED: denial plus percentage points never arms, cards or writes (grouped=%s)', async grouped => {
+    const quote = 'A £10 rise in Pro plan price adds about 0.5% to monthly churn';
+    const denial = `I do not believe this claim: ${quote}`;
+    const args = { ...PAUL_ARGS, amount: 0.5, per_source_change: 10, quote };
+    const before = structuredClone(graph);
+    script.push(calls(['propose_link_effect', grouped ? { links: [args] } : args]), message('That claim is denied.'));
+    const denied = await turn(denial);
+    const armed = structuredClone(clarifications());
+    script.push(calls(['propose_link_effect', grouped ? { links: [{ ...args, amount_unit: 'percentage points' }] } : { ...args, amount_unit: 'percentage points' }]), message('Nothing was recorded.'));
+    const answered = await turn('percentage points');
+    expect(armed, 'a denied sentence never arms the inner assertion').toEqual([]);
+    for (const body of [denied, answered]) expect(body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+    expect(doorCalls).toEqual([]);
+    expect(graph).toEqual(before);
+  });
+
+  it('F1b RED: a stale carrier cannot drop denial context at answer time', async () => {
+    const quote = 'A £10 rise in Pro plan price adds about 0.5% to monthly churn';
+    const seeded = seedClarification();
+    seeded.action = { ...seeded.action, quote, statement_classification: 'asserted', source_text: `I do not believe this claim: ${quote}` };
+    pending.set(SID, [seeded]);
+    script.push(calls(['propose_link_effect', { ...PAUL_ARGS, amount: 0.5, per_source_change: 10, amount_unit: 'percentage points', quote }]), message('Nothing was recorded.'));
+    const body = await turn('percentage points');
+    expect(providerBodies[0]?.tool_choice).not.toEqual({ type: 'function', name: 'propose_link_effect' });
+    expect(body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+    expect(doorCalls).toEqual([]);
+  });
+
+  it('F2 RED: Paul’s churn statement never sizes price to Gross margin, including a later guess', async () => {
+    graph.nodes.push({ id: 'gross_margin', label: 'Gross margin', kind: 'factor', category: 'observable',
+      observed_state: { raw_value: 50, value: 0.5, cap: 100, unit: '%', source: 'brief_extraction' } });
+    graph.edges.push({ from: 'pro_plan_price', to: 'gross_margin', strength: { mean: 0.2, std: 0.1 }, effect_direction: 'positive', exists_probability: 0.8,
+      defaulted: true, provenance: { source: 'cee_hypothesis' } });
+    graph.nodes.find((n: Json) => n.id === 'raise_to_59').interventions.pro_plan_price = { raw_value: 59, value: 0.295, unit: '£ per subscriber per month', source: 'user_specified' };
+    const before = structuredClone(graph.edges.find((e: Json) => e.to === 'gross_margin'));
+    const args = { ...PAUL_ARGS, to_label: 'Gross margin', amount_unit: 'percentage points' };
+    script.push(calls(['propose_link_effect', args]), message('Please supply the size.'));
+    await turn(PAUL);
+    script.push(calls(['propose_link_effect', args]), message('Please give your best guess.'));
+    await turn('percentage points');
+    const armedFloor = clarifications().find(c => c.action.to_id === 'gross_margin')?.action.floor;
+    script.push(calls(['propose_link_effect', { ...args, amount: 2, per_source_change: 10 }]), message('Review this figure.'));
+    const body = await turn('My best guess is 2 points.');
+    const card = body.suggested_actions.find((c: Json) => c.id.startsWith('agent-approve-proposal:'));
+    if (card) await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect(armedFloor, 'the source-grounded bound must still name this target').toBeUndefined();
+    expect(card).toBeUndefined();
+    expect(doorCalls).toEqual([]);
+    expect(graph.edges.find((e: Json) => e.to === 'gross_margin')).toEqual(before);
+  });
+
+  const REVIEW_BOUNDS = [
+    'at least 5 percentage points', '5 percentage points or more', 'no less than 5 points',
+    'at minimum 5 points', 'a minimum of 5 points', 'upwards of 5 points', 'more than 5 points', 'over 5 points', '+5 points or more',
+    'no more than 5 points', 'at most 5 points', 'up to 5 points', '5 points or less', 'a maximum of 5 points', 'less than 5 points', 'under 5 points',
+  ];
+  it.each(REVIEW_BOUNDS)('F3 RED: bounded effect is refused and carried, never a point (%s)', async bound => {
+    graph = cafeGraph();
+    graph.edges.push({ from: 'prices', to: 'margin', strength: { mean: 0.1, std: 0.05 }, effect_direction: 'positive', exists_probability: 0.8, defaulted: true,
+      provenance: { source: 'cee_hypothesis' } });
+    const quote = `Raising prices by £1 will increase gross margin by ${bound}.`;
+    const before = structuredClone(graph);
+    script.push(calls(['propose_link_effect', { from_label: 'Prices', to_label: 'Gross margin', amount: 5, amount_unit: 'percentage points',
+      per_source_change: 1, per_source_change_unit: 'GBP', quote }]), message('Please give your best guess.'));
+    const body = await turn(quote);
+    expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'propose_link_effect', ok: false }));
+    expect(clarifications()).toHaveLength(1);
+    expect(clarifications()[0]!.action).toMatchObject({ quote, statement_classification: 'asserted' });
+    expect(body.assistant_text.match(/\?/g)).toHaveLength(1);
+    expect(body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+    expect(doorCalls).toEqual([]);
+    expect(graph).toEqual(before);
+  });
+
+  it.each(['more than', 'over'])('F3 CONTROL: a strict lower bound cannot later license an equal best guess (%s)', async comparator => {
+    graph = cafeGraph();
+    graph.edges.push({ from: 'prices', to: 'margin', strength: { mean: 0.1, std: 0.05 }, effect_direction: 'positive', exists_probability: 0.8,
+      defaulted: true, provenance: { source: 'cee_hypothesis' } });
+    const quote = `Raising prices by £1 will increase gross margin by ${comparator} 5 points.`;
+    const args = { from_label: 'Prices', to_label: 'Gross margin', amount: 5, amount_unit: 'percentage points',
+      per_source_change: 1, per_source_change_unit: 'GBP', quote };
+    script.push(calls(['propose_link_effect', args]), message('Please give your best guess.'));
+    await turn(quote);
+    expect(clarifications()[0]!.action.floor).toMatchObject({ value: 5, exclusive: true });
+    script.push(calls(['propose_link_effect', args]), message('Please give a guess above the minimum.'));
+    const body = await turn('My best guess is 5 points.');
+    expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'propose_link_effect', ok: false, refusal: 'outside_stated_bounds' }));
+    expect(body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+    expect(doorCalls).toEqual([]);
+  });
+
+  it.each([100, 80])('F4 RED: café relative answer converts from CURRENT %s level and discloses its basis', async level => {
+    graph = cafeGraph();
+    graph.nodes.find((n: Json) => n.id === 'daily_visits').observed_state = { raw_value: level, value: level / 100, cap: 100, unit: '%', source: 'brief_extraction' };
+    script.push(calls(['propose_link_effect', CAFE_ARGS]), message('Please clarify the reading.'));
+    await turn(CAFE_QUOTE);
+    script.push(calls(['propose_link_effect', CAFE_ARGS]), message('Review this figure.'));
+    const body = await turn('relative');
+    const card = body.suggested_actions.find((c: Json) => c.id.startsWith('agent-approve-proposal:'));
+    expect(card, JSON.stringify(body)).toBeDefined();
+    expect(card.detail).toContain('relative');
+    expect(card.detail).toContain(String(level));
+    await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    const edge = graph.edges.find((e: Json) => e.from === 'prices' && e.to === 'daily_visits');
+    expect(edge.provenance.natural_effect.amount).toBe(-5 * level / 100);
+    expect(edge.provenance.natural_effect.amount_unit).toBe('percentage points');
+    expect(clarifications()).toEqual([]);
+  });
+
+  it('F4b RED: relative with unknown CURRENT level carries one current-level question and writes nothing', async () => {
+    graph = cafeGraph();
+    graph.nodes.find((n: Json) => n.id === 'daily_visits').observed_state = { unit: '%' };
+    seedClarification(true);
+    script.push(calls(['propose_link_effect', CAFE_ARGS]), message('Please clarify the reading.'));
+    const body = await turn('relative');
+    expect(clarifications()).toHaveLength(1);
+    expect(clarifications()[0]!.action.question).toMatch(/current|today/i);
+    expect(clarifications()[0]!.action.question).not.toMatch(/or 5%|5-point/);
+    expect(body.assistant_text.match(/\?/g)).toHaveLength(1);
+    expect(body.suggested_actions.filter((c: Json) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+    expect(doorCalls).toEqual([]);
+  });
+
+  it.each([
+    'How does Pro plan price affect Monthly support requests?',
+    'Should we size Pro plan price → Monthly support requests in percentage points?',
+    'Can we allocate at least two support hours each week?',
+  ])('F7 RED: a churn clarification preserves the unrelated question: %s', async unrelatedQuestion => {
+    script.push(calls(['propose_link_effect', PAUL_ARGS]), message(unrelatedQuestion));
+    const body = await turn(PAUL_QUOTE);
+    expect(clarifications()).toHaveLength(1);
+    expect(body.assistant_text).toContain(unrelatedQuestion);
+    expect(body.assistant_text).toContain(clarifications()[0]!.action.question);
+    expect(doorCalls).toEqual([]);
+  });
 
   it('R1 RED: Paul’s exact statement offers churn=4% and persists its one unresolved effect verbatim', async () => {
     script.push(calls(['propose_link_effect', PAUL_ARGS], ['propose_assumptions', { assumptions: [{ factor_label: 'Monthly churn', value: 4, unit: '%',
@@ -452,7 +589,7 @@ describe('RC2 stated-effect carry, the real /agent/v1/turn door', () => {
     ].map((action, i) => {
       const id = randomUUID();
       return { ...structuredClone(first), id, chip_id: `agent-link-effect-clarification:${id}`,
-        action: { ...first.action, ...action }, preconditions: { target_entity_ids: [action.from_id, action.to_id] },
+        action: { ...first.action, ...action, source_text: action.quote }, preconditions: { target_entity_ids: [action.from_id, action.to_id] },
         emitted_at_iso: new Date(Date.now() - (3 - i) * 60_000).toISOString() };
     });
     pending.set(SID, [effects[2]!, effects[0]!, effects[1]!]); // Timestamp, rather than input order, decides which one lapses.
@@ -499,7 +636,8 @@ describe('RC2 stated-effect carry, the real /agent/v1/turn door', () => {
     expect(pressed._diagnostic_trace.fast_path).toBe('approve');
     expect(pressed._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true }));
     expect(doorCalls).toHaveLength(1);
-    expect(doorCalls[0]!.link_effect.clarification).toEqual({ node_id: 'daily_visits', quote: CAFE_QUOTE, answer: 'percentage points' });
+    expect(doorCalls[0]!.link_effect.clarification).toEqual({ node_id: 'daily_visits', quote: CAFE_QUOTE, answer: 'percentage points',
+      from_id: 'prices', to_id: 'daily_visits', statement_classification: 'asserted', source_text: CAFE_QUOTE });
     const recorded = graph.edges.find((e: Json) => e.from === 'prices' && e.to === 'daily_visits');
     expect(recorded.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', source_quote: CAFE_QUOTE,
       reading: 'agent_proposed_user_confirmed', natural_effect: { amount: -5, amount_unit: 'percentage points' } });

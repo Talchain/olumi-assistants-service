@@ -4476,15 +4476,51 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .map(p => p.action);
     if (!leaderFreeEnvelope && effectQuestions.length > 0) {
       let resting = textAtRest(String(wireBody.assistant_text ?? ''));
+      const pairKey = (action: Pick<LinkEffectClarificationAction, 'from_id' | 'to_id'>): string => JSON.stringify([action.from_id, action.to_id]);
+      const questionOwners = new Map<string, Set<string>>();
+      for (const { action } of [...effectAsks, ...effectNext]) {
+        for (const words of [action.question, ...sentencesOf(action.question)]) {
+          const owners = questionOwners.get(words) ?? new Set<string>();
+          owners.add(pairKey(action)); questionOwners.set(words, owners);
+        }
+      }
+      const failedPairs = new Set(effectQuestions.map(pairKey));
+      // Deictic reading/size questions can inherit a pair only from this turn's one structured failed effect.
+      // Their whole vocabulary must concern that reading; a label or bound phrase never grants a replacement licence.
+      const effectVocabulary = new Set(('what which how much do does did can could would should is are was were '
+        + 'you we i me us your our it its this that these those the a an as for of to or and mean meant read reading '
+        + 'treat record use choose expect expecting supply give propose think say said single change changes figure '
+        + 'figures size effect guess best range most least plausibly upper lower end increase decrease rise fall cut '
+        + 'point points percentage percent relative absolute current today todays level one two three four five '
+        + 'six seven eight nine ten by in at than less more no').split(' '));
+      const effectOnlyWords = (sentence: string): boolean => {
+        const tokens = sentence.toLowerCase().replace(/[’']s\b/g, 's').match(/[a-z]+|\d+(?:\.\d+)?|%/g) ?? [];
+        return tokens.length > 0 && tokens.length <= 35
+          && tokens.every(token => /^\d|^%$/.test(token) || effectVocabulary.has(token));
+      };
+      const readingOrSizeCue = /\b(?:(?:single|best)\s+(?:change|figure|size|guess)|effect|reading|percentage\s+points?|relative|absolute)\b/i;
+      const entityNodes = parsedGraphOrNull(readbackGraph)?.nodes ?? [];
+      const hasOtherSubject = (words: string, ask: LinkEffectClarificationAction): boolean => entityNodes.some(node =>
+        node.id !== ask.from_id && node.id !== ask.to_id && typeof node.label === 'string'
+        && words.toLowerCase().includes(node.label.toLowerCase()));
+      const questionBelongsTo = (sentence: string, previous: string | undefined, ask: LinkEffectClarificationAction): boolean => {
+        const key = pairKey(ask), owners = questionOwners.get(sentence);
+        if (owners !== undefined) return owners.size === 1 && owners.has(key);
+        if (failedPairs.size !== 1 || !failedPairs.has(key) || !effectOnlyWords(sentence) || !readingOrSizeCue.test(sentence)
+          || hasOtherSubject([previous, sentence].filter(Boolean).join(' '), ask)) return false;
+        // A deictic follow-up to another topic has no effect identity, even when its words ask for a single figure.
+        if (previous !== undefined) {
+          const priorOwners = questionOwners.get(previous);
+          if (priorOwners !== undefined) return priorOwners.size === 1 && priorOwners.has(key);
+          if (!effectOnlyWords(previous) || !readingOrSizeCue.test(previous)) return false;
+        }
+        return true;
+      };
       for (const ask of effectQuestions) {
         if (resting.includes(ask.question)) continue;
-        // Replace only a narrator question about this same effect; preserve other reasoning and disclosures.
-        const boundWords = ask.value_text?.match(/^(?:at least|at most|no less than|no more than|more than|less than)/i)?.[0];
-        const namesEffect = (sentence: string): boolean => [ask.from_label, ask.to_label, ask.value_text, boundWords]
-          .some(words => words !== undefined && sentence.toLowerCase().includes(words.toLowerCase()));
+        // Replacement is keyed by the producer's exact directed pair; unidentified or other-pair questions remain.
         resting = sentencesOf(resting).filter((sentence, i, all) => !sentence.includes('?')
-          || (!namesEffect(sentence) && !(i > 0 && namesEffect(all[i - 1]!)
-            && /\b(?:single (?:change|figure|size)|percentage points?|relative|absolute|reading)\b/i.test(sentence)))).join(' ');
+          || !questionBelongsTo(sentence, all[i - 1], ask)).join(' ');
         resting = `${resting} ${ask.question}`.trim();
       }
       wireBody = { ...wireBody, assistant_text: resting };
@@ -4677,7 +4713,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
           // ⭐ S-D: held proposals are reconciled again against the latest row just before the append: one another request
           // declined meanwhile is never resurrected, and one another request minted meanwhile is never erased.
-          heldProposals: { isHeld: isHeldProposal, seenByThisRequest: heldSeenThisTurn,
+          heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set([...heldSeenThisTurn, ...effectAsks.map(p => p.chip_id)]),
             offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
             onReconciled: (write, overCap, overCapClarifications) => {
               heldRecords = (write.pending_actions ?? []).flatMap(p => {

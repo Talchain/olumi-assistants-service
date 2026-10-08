@@ -1,15 +1,18 @@
 /** RC2 Science (h): a recorded minimum is never the link's best guess. */
 import { statedRangeSpread } from '../stated-range-spread.js';
-import { boundedLinkEffectText, findLinkEffectAmounts } from './link-effect-figures.js';
+import { findLinkEffectAmounts, findLinkEffectBounds, withoutLinkEffectBoundComparators } from './link-effect-figures.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 import { resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
-import { linkEffectTheUserStated } from './stated-by-user.js';
+import { linkEffectTheUserStated, linkEffectStatementClassification, linkEffectStatementNamesEndpoints } from './stated-by-user.js';
 import { linkEffectEndUnits, linkEffectTargetOf, type LinkEffectStatement } from '../system-events/link-effect-edit.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectClarificationPending } from './link-effect-clarification.js';
 
 export interface LinkEffectFloor {
+  readonly from_id?: string;
+  readonly to_id?: string;
   readonly value: number;
+  readonly exclusive?: true;
   readonly unit: string;
   readonly reading: 'points' | 'relative' | 'absolute';
   readonly words: string;
@@ -27,7 +30,8 @@ const words = (v: unknown): v is string => typeof v === 'string' && v.trim() !==
 
 export function isLinkEffectFloor(v: unknown): v is LinkEffectFloor {
   const f = record(v);
-  return f !== undefined && finite(f.value) && f.value > 0 && words(f.unit) && words(f.words)
+  return f !== undefined && (f.exclusive === undefined || f.exclusive === true)
+    && ((f.from_id === undefined && f.to_id === undefined) || words(f.from_id) && words(f.to_id)) && finite(f.value) && f.value > 0 && words(f.unit) && words(f.words)
     && finite(f.per_source_change) && f.per_source_change !== 0 && words(f.per_source_change_unit) && words(f.reading_answer)
     && (f.reading === 'points' || f.reading === 'absolute' || f.reading === 'relative')
     && (f.reading !== 'relative' || finite(f.relative_base) && f.relative_base > 0);
@@ -39,7 +43,7 @@ export function naturalFloorAmount(floor: LinkEffectFloor, value: number): numbe
 
 export function linkEffectFloorQuestion(floor: LinkEffectFloor): string {
   // AIQ: words pending. Science's sentence, including its question and coverage, is authoritative.
-  if (floor.reading === 'points' && floor.value === 1 && /churn/i.test(floor.target_label ?? '')) return "You said churn will rise by at least 1 point. What's your best single guess, and what's the most it could plausibly be?";
+  if (floor.exclusive !== true && floor.reading === 'points' && floor.value === 1 && /churn/i.test(floor.target_label ?? '')) return "You said churn will rise by at least 1 point. What's your best single guess, and what's the most it could plausibly be?";
   return `You said the effect will be ${floor.words}. What's your best single guess, and what's the most it could plausibly be?`;
 }
 
@@ -75,8 +79,8 @@ export function readLinkEffectFloorAnswer(floor: LinkEffectFloor, answer: string
   }
   const guess = first.magnitude;
   const upper = second?.magnitude;
-  if (guess < floor.value || upper !== undefined && guess > upper) return { ok: false, refusal: 'outside_stated_bounds',
-    question: `Your best guess must be at least ${floor.value} ${floor.unit}${upper === undefined ? '' : ` and no more than ${upper} ${floor.unit}`}. What's your best single guess, and what's the most it could plausibly be?` };
+  if (guess < floor.value || floor.exclusive === true && guess === floor.value || upper !== undefined && guess > upper) return { ok: false, refusal: 'outside_stated_bounds',
+    question: `Your best guess must be ${floor.exclusive === true ? 'more than' : 'at least'} ${floor.value} ${floor.unit}${upper === undefined ? '' : ` and no more than ${upper} ${floor.unit}`}. What's your best single guess, and what's the most it could plausibly be?` };
   if (upper === undefined) return { ok: true, guess };
   const spread = statedRangeSpread(floor.value, upper, 0.9);
   if (!spread.ok) return { ok: false, refusal: spread.refusal, question };
@@ -86,22 +90,28 @@ export function readLinkEffectFloorAnswer(floor: LinkEffectFloor, answer: string
 /** Resolve the unit reading, recording the bound and the actual source change it refers to. */
 export function linkEffectFloorFromStatement(graph: unknown, from: string, to: string, quote: string,
   effect: LinkEffectStatement, readingAnswer: string): LinkEffectFloor | null {
-  const bound = boundedLinkEffectText(quote);
-  if (bound === undefined || !/^(?:at least|no less than|minimum(?: of)?)\b/i.test(bound)) return null;
-  const amount = findLinkEffectAmounts(bound)[0];
+  const detected = findLinkEffectBounds(quote);
+  const lower = detected.length === 1 && detected[0]!.direction === 'lower' ? detected[0] : undefined;
+  if (lower === undefined) return null;
+  const bound = lower.text;
+  const amount = lower.amount;
   // The scanner's bound span ends at the figure; its immediately following unit still settles the reading.
-  const statedPoints = /^\s*(?:(?:percentage\s+)?points?|pp)\b/i.test(quote.slice(quote.indexOf(bound) + bound.length));
+  const statedPoints = /^\s*(?:(?:percentage\s+)?points?|pp)\b/i.test(quote.slice(amount.index + amount.matchedText.length));
   if (amount === undefined || amount.magnitude <= 0 || effect.amount !== amount.magnitude) return null;
   const g = record(graph);
   const nodes = Array.isArray(g?.nodes) ? g.nodes.map(record).filter((n): n is Rec => n !== undefined) : [];
+  const source = nodes.find(n => n.id === from);
   const target = nodes.find(n => n.id === to);
+  const ends = { source: String(source?.label ?? ''), target: String(target?.label ?? '') };
+  // Grounding an option's source change never supplies a different target.
+  if (linkEffectStatementClassification(quote, quote, ends) !== 'asserted'
+    || !linkEffectStatementNamesEndpoints(quote, ends)) return null;
   const relative = /^relative(?:\s+(?:change|increase|decrease))?[.!]?$/i.test(readingAnswer.trim());
   const points = /^(?:(?:one|a|1(?:\.0+)?)\s+)?percentage\s+points?[.!]?$/i.test(readingAnswer.trim())
     || /^(?:absolute|percentage[-\s]point)(?:\s+(?:change|increase|decrease))?[.!]?$/i.test(readingAnswer.trim());
   if (amount.kind === 'percent' && !relative && !points && !statedPoints) return null;
   let per = effect.per_source_change;
   if (/\bthis\s+(?:price\s+)?(?:increase|rise|change)\b/i.test(quote)) {
-    const source = nodes.find(n => n.id === from);
     const os = record(source?.observed_state);
     const baseline = os?.raw_value ?? os?.value;
     const changes = finite(baseline) ? nodes.filter(n => n.kind === 'option' && n.is_baseline !== true).flatMap(n => {
@@ -115,7 +125,7 @@ export function linkEffectFloorFromStatement(graph: unknown, from: string, to: s
     per = unique[0]!;
   } else {
     // Removing the bound words only checks the source warrant; it never licenses the bound as a size.
-    const unbounded = quote.replace(bound, bound.replace(/^(?:at least|no less than|minimum(?: of)?)\s*/i, ''));
+    const unbounded = withoutLinkEffectBoundComparators(quote);
     const targetUnit = record(target?.observed_state)?.unit;
     if (linkEffectTheUserStated(unbounded, effect, { source: String(nodes.find(n => n.id === from)?.label ?? ''), target: String(target?.label ?? '') },
       { quantities: nodes.map(n => String(n.label ?? '')), target_units: typeof targetUnit === 'string' ? [targetUnit] : [] }) !== null) return null;
@@ -134,8 +144,8 @@ export function linkEffectFloorFromStatement(graph: unknown, from: string, to: s
   }
   const reading = relative ? 'relative' : amount.kind === 'percent' || points || statedPoints ? 'points' : 'absolute';
   const unit = reading === 'points' ? 'percentage points' : reading === 'relative' ? '%' : effect.amount_unit;
-  const floor: LinkEffectFloor = { value: amount.magnitude, unit, reading,
-    words: reading === 'points' ? `at least ${amount.magnitude} ${amount.magnitude === 1 ? 'point' : 'points'}` : `at least ${amount.magnitude}${reading === 'relative' ? '% relative' : ` ${unit}`}`,
+  const floor: LinkEffectFloor = { from_id: from, to_id: to, ...(lower.inclusive ? {} : { exclusive: true as const }), value: amount.magnitude, unit, reading,
+    words: reading === 'points' ? `${lower.inclusive ? 'at least' : 'more than'} ${amount.magnitude} ${amount.magnitude === 1 ? 'point' : 'points'}` : `${lower.inclusive ? 'at least' : 'more than'} ${amount.magnitude}${reading === 'relative' ? '% relative' : ` ${unit}`}`,
     per_source_change: per, per_source_change_unit: effect.per_source_change_unit,
     reading_answer: readingAnswer || unit, target_label: String(target?.label ?? ''), ...(base === undefined ? {} : { relative_base: base }) };
   return isLinkEffectFloor(floor) ? floor : null;

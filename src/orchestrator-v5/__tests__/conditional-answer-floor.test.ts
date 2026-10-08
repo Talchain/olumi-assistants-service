@@ -16,8 +16,11 @@ const scope: PendingAction = { ...held('scope'), action: { kind: 'reconcile_goal
 const answer = (pending: readonly PendingAction[]): SessionTurnWrite => ({ scenario_id: SCENARIO, turn_id: 'answer',
   turn_class: 'direct_answer', handler_id: null, request_hash: 'agent_turn:digest', response_emitted: true,
   llm_calls_used: 0, duration_ms: 1, handler_facts: [], assistantMessage: 'Here is your answer.', pending_actions: pending });
-const clarification = (chip: string, second: number): PendingAction => ({ ...held(chip),
+const clarification = (chip: string, second: number): PendingAction & {
+  action: Extract<PendingAction['action'], { kind: 'elicit_link_effect_clarification' }>;
+} => ({ ...held(chip),
   emitted_at_iso: `2026-10-06T00:00:0${second}Z`,
+  expires_at_iso: '2099-10-08T00:00:00Z',
   action: { kind: 'elicit_link_effect_clarification', from_id: chip, to_id: 'churn', from_label: chip,
     to_label: 'Monthly churn', quote: 'Churn will rise by at least 1%.', question: 'Points or relative?',
     refusal: 'unit_mismatch', value_text: 'at least 1%' } });
@@ -81,6 +84,63 @@ describe('S-D.1b conditional answer floor', () => {
     expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(['row-0', 'row-1']);
     expect(s.written[0]?.pending_actions).toEqual([scope, hold, arrival]);
     expect(s.written[0]?.pending_actions?.[2]).toBe(arrival);
+  });
+
+  it('RC2 F6 RED: a slow answer prepared without an ask preserves the fast request’s fresh clarification', async () => {
+    const fresh = clarification('effect-fresh', 2);
+    // The slow caller prepared its empty list before the fast request wrote this latest row.
+    const s = setup([fresh], []);
+    await appendCheckedGraphWrite({ store: s.store, write: answer([]), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set() } });
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]?.pending_actions).toEqual([fresh]);
+    expect(s.written[0]?.pending_actions?.[0]).toBe(fresh);
+  });
+
+  it('RC2 F6 RED: a clarification arriving after the slow read survives the CAS retry', async () => {
+    const fresh = clarification('effect-fresh', 2);
+    const s = setup([], [[fresh]]);
+    await s.run(answer([]));
+    expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(['row-0', 'row-1']);
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]?.pending_actions).toEqual([fresh]);
+    expect(s.written[0]?.pending_actions?.[0]).toBe(fresh);
+  });
+
+  it('RC2 F6 RED: arriving clarifications stay below cards and name the oldest clarification’s capacity lapse', async () => {
+    const old = clarification('effect-old', 0), fresh = clarification('effect-fresh', 2);
+    const s = setup([old, hold, arrival], [[old, hold, arrival, fresh]]);
+    const lapses: (readonly PendingAction[])[] = [];
+    await appendCheckedGraphWrite({ store: s.store, write: answer([old, hold, arrival]), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set([hold.chip_id, arrival.chip_id]),
+        onReconciled: (w, _holds, clarifications: readonly PendingAction[]) => {
+          lapses.push(clarifications); return w;
+        } } });
+    expect(s.written[0]?.pending_actions).toEqual([fresh, hold, arrival]);
+    expect(lapses).toEqual([[], [old]]);
+  });
+
+  it('RC2 F6 CONTROL: this request’s consumed clarification is never re-added from its earlier row', async () => {
+    const seen = clarification('effect-seen', 0);
+    const s = setup([seen], []);
+    await s.run(answer([]));
+    expect(s.written[0]?.pending_actions).toEqual([]);
+  });
+
+  it('RC2 F6 CONTROL: an arriving question replaces only the same exact pair and preserves a shared-target question', async () => {
+    const old = clarification('effect-old', 0), unrelated = clarification('effect-unrelated', 1);
+    const fresh: PendingAction = { ...clarification('effect-fresh', 2),
+      action: { ...old.action, question: 'What is your best single guess?' } };
+    const s = setup([old, unrelated], [[old, unrelated, fresh]]);
+    await s.run(answer([old, unrelated]));
+    expect(s.written[0]?.pending_actions).toEqual([unrelated, fresh]);
+  });
+
+  it('RC2 F6 CONTROL: an expired clarification arriving during the slow answer is not carried', async () => {
+    const expired: PendingAction = { ...clarification('effect-expired', 2), expires_at_iso: '2000-01-01T00:00:00Z' };
+    const s = setup([], [[expired]]);
+    await s.run(answer([]));
+    expect(s.written[0]?.pending_actions).toEqual([]);
   });
 
   it('RC2 C3 RED: a held proposal arriving at append lapses the oldest clarification and reports it beside held lapses', async () => {

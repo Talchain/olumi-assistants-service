@@ -91,6 +91,13 @@ describe('stated-effect clarification licence and lifetime', () => {
     expect(linkEffectAnswerFirstCall(undefined, [ask], 'relative', false)).toBeUndefined();
   });
 
+  it('F1c RED: a legacy carrier without its original assertion classification cannot license a reading answer', () => {
+    const ask = make();
+    const legacy = { ...ask, action: { ...ask.action, statement_classification: undefined, source_text: undefined } };
+    expect(linkEffectAnswerFirstCall(state, [legacy], 'percentage points', false)).toBeUndefined();
+    expect(linkEffectAnswerFirstCall(state, [legacy], 'relative', false)).toBeUndefined();
+  });
+
   it('forces only a definite reading answer for one unchanged canonical link', () => {
     const ask = make();
     expect(linkEffectAnswerFirstCall(state, [ask], 'one percentage point', false)).toBe(LINK_EFFECT_TOOL);

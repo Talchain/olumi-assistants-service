@@ -25,10 +25,11 @@ import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 import { linkEffectSourceLevels } from './link-effect-figures.js';
-import { namesSourceOf } from './stated-by-user.js';
+import { namesSourceOf, linkEffectStatementClassification } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
 import { statedInOneOf } from '../system-events/link-effect-edit.js';
-import { naturalFloorAmount, readLinkEffectFloorAnswer, type LinkEffectFloor } from './link-effect-lower-bound.js';
+import { naturalFloorAmount, readLinkEffectFloorAnswer } from './link-effect-lower-bound.js';
+import { isRelativeLinkEffectAnswer, type LinkEffectClarificationReading } from '../system-events/link-effect-unit-reading.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -389,7 +390,7 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
-      quote?: unknown; clarification?: { quote?: unknown; answer?: unknown; node_id?: unknown; floor?: LinkEffectFloor; upper?: number }; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
+      quote?: unknown; clarification?: LinkEffectClarificationReading; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
@@ -479,7 +480,10 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
       + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
   }
   if (op.clarification !== undefined) {
-    if (op.clarification.quote !== op.quote || typeof op.clarification.answer !== 'string'
+    if (op.clarification.statement_classification !== 'asserted' || typeof op.clarification.source_text !== 'string'
+      || op.clarification.from_id !== op.from || op.clarification.to_id !== op.to
+      || linkEffectStatementClassification(op.quote, op.clarification.source_text, { source: labels.from, target: labels.to }) !== 'asserted'
+      || op.clarification.quote !== op.quote || typeof op.clarification.answer !== 'string'
       || (op.clarification.node_id !== op.from && op.clarification.node_id !== op.to)) return undefined;
     if (op.clarification.floor !== undefined) {
       const floor = op.clarification.floor;
@@ -491,6 +495,15 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
       disclosures.push(`Your recorded floor: “${floor.words}”.`
         + (answer.upper === undefined ? ' No range was supplied.'
           : ` Your plausible extremes are ${unsigned(floor.value, floor.unit)} and ${unsigned(answer.upper, floor.unit)}; your best guess is ${unsigned(answer.guess, floor.unit)}.`));
+    }
+    if (op.clarification.relative !== undefined) {
+      const basis = op.clarification.relative;
+      if (op.clarification.floor !== undefined || !isRelativeLinkEffectAnswer(op.clarification.answer)
+        || op.clarification.node_id !== op.to || basis.from_id !== op.from || basis.to_id !== op.to
+        || !Number.isFinite(basis.percent) || !Number.isFinite(basis.current_level) || typeof basis.current_level_unit !== 'string'
+        || basis.percent * basis.current_level / 100 !== e.amount || !meetsReading(e.amount_unit, basis.current_level_unit)) return undefined;
+      disclosures.push(`Relative basis: ${Math.abs(basis.percent)}% of the current ${unsigned(basis.current_level, basis.current_level_unit)} `
+        + `level of “${labels.to}” = ${signed(e.amount, e.amount_unit)}.`);
     }
     // AIQ: words pending
     disclosures.push(`Your clarification: “${op.clarification.answer}”.`);
