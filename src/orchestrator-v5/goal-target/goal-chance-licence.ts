@@ -171,22 +171,28 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
 
 /** The DISPLAYED whole percentage of a chance: the figure the user reads, and the one Science's gap is tested on. */
 /**
- * Science §(ab)(2) face words for a zero-spread option, verbatim in shape: "Meets £20k by month 12 if today's rates
- * hold." / "Falls short of £20k if today's rates hold." "rates" only where the goal's level is projected from monthly rates (an accumulation
- * carrier in the model); any other fixed result holds "today's figures". The month only where the goal states its horizon.
+ * Science §(ab)(2) face words for a zero-spread option (93 @0ecd69e4, ruled (a): never " / month" on the face):
+ *  · the goal's level projected from monthly rates (an accumulation carrier): "Meets £20,000 a month by month 12 if today’s
+ *    rates hold." / "Falls short of £20,000 a month by month 12 if today’s rates hold.";
+ *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
+ *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
  */
+export const ZERO_SPREAD_NEEDS_MONTHLY_CHANGES = 'Not shown yet: needs month-by-month changes';
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown,
 ): Record<string, GoalChanceZeroSpread> {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const rates = nodes.some((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation');
   const horizon = goal?.goal_horizon_months;
-  const by = typeof horizon === 'number' && Number.isInteger(horizon) && horizon > 0 ? ` by month ${horizon}` : '';
-  const hold = `if today’s ${rates ? 'rates' : 'figures'} hold.`;
-  const figure = sayFigureAsWritten(value, unit);
+  const months = typeof horizon === 'number' && Number.isInteger(horizon) && horizon > 0 ? horizon : undefined;
+  // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
+  const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
-    out[id] = { reason: 'zero_spread', side, line: side === 'meets' ? `Meets ${figure}${by} ${hold}` : `Falls short of ${figure} ${hold}` };
+    const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
+    const line = !rates && months !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES
+      : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
+    out[id] = { reason: 'zero_spread', side, line };
   }
   return out;
 }

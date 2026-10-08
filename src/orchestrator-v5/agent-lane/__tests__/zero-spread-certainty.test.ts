@@ -37,19 +37,25 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     expect(Object.values(licence!.pct_by_option)).not.toContain(100);
     // The typed reason the face renders instead of a % (a1 #7 keys on it); words per Science §(ab)(2).
     expect(licence!.withheld_reason_by_option).toEqual({
-      keep_pro_price_at_49: { reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 / month by month 12 if today’s figures hold.' },
+      // 828d87ac holds a 12-month horizon and no accumulation carrier: §(o′) wins (Science 93 @0ecd69e4), never c6.
+      keep_pro_price_at_49: { reason: 'zero_spread', side: 'meets', line: 'Not shown yet: needs month-by-month changes' },
     });
   });
 
-  it('the face line: falls short at an exact 0; "rates" where the goal is projected from monthly rates; no reason on other withholds', () => {
+  it('the face line (Science 93 @0ecd69e4): "a month", never " / month"; rates + horizon with a carrier; figures without one', () => {
     const short = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 0, 0, 18500) : r));
-    expect(goalChanceLicenceOf({ option_comparison: short }, graph, 'mrr', earnedBy(short))!.withheld_reason_by_option)
-      .toEqual({ keep_pro_price_at_49: { reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 / month if today’s figures hold.' } });
     const acc = structuredClone(graph);
     acc.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').nonlinear_identity = { operation: 'accumulation',
       factor_ids: ['s0', 'monthly_churn', 'new_pro_subscribers_per_month'], horizon_months: 12, rate_scale: 0.01, stated_in_brief: true };
-    expect(goalChanceLicenceOf({ option_comparison: fixedRates }, acc, 'mrr', earnedBy(fixedRates))!.withheld_reason_by_option!.keep_pro_price_at_49.line)
-      .toBe('Meets £20,000 / month by month 12 if today’s rates hold.');
+    const lineOf = (g: Rec, records: Rec[]) => goalChanceLicenceOf({ option_comparison: records }, g, 'mrr', earnedBy(records))!
+      .withheld_reason_by_option!.keep_pro_price_at_49;
+    expect(lineOf(acc, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 a month by month 12 if today’s rates hold.' });
+    expect(lineOf(acc, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 a month by month 12 if today’s rates hold.' });
+    const noHorizon = structuredClone(graph);
+    delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
+    expect(lineOf(noHorizon, fixedRates).line).toBe('Meets £20,000 a month if today’s figures hold.');
+    expect(lineOf(noHorizon, short).line).toBe('Falls short of £20,000 a month if today’s figures hold.');
+    expect(lineOf(graph, short).line).toBe('Not shown yet: needs month-by-month changes');
     // CONTRAST: an exact 1 withheld for an UNSIZED path (spread present, not earned) carries no zero-spread reason.
     const spread = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 1, 400, 22500) : r));
     const licence = goalChanceLicenceOf({ option_comparison: spread }, graph, 'mrr', () => false)!;
