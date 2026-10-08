@@ -6,6 +6,7 @@ import { goalChanceCellFacesForAgent, goalChanceScreenLinesForAgent } from '../.
 import { buildAnalysisResultBlock } from '../../orchestrator-v5/compose.js';
 import { readStoredGoalCertainty } from '../../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import * as chanceReaders from '../../orchestrator-v5/goal-target/goal-chance-range-agent.js';
+import * as licenceReaders from '../../orchestrator-v5/goal-target/goal-chance-licence.js';
 
 type Json = Record<string, any>;
 const saved: Json = JSON.parse(readFileSync(new URL('./fixtures/canonical-view-b1.json', import.meta.url), 'utf8')).j;
@@ -21,6 +22,9 @@ const graph = { nodes: [
 ], edges: [] };
 const licence = { code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
   option_ids: ['raise', 'keep'], withheld_option_ids: ['raise'], pct_by_option: { keep: 63 } };
+const zeroSpreadLicence = { ...licence, withheld_reason_by_option: { raise: {
+  reason: 'zero_spread', side: 'falls_short', line: 'Not shown yet: needs month-by-month changes',
+} } };
 const certainty = { option_id: 'raise', probability_of_goal: 1, earned: false,
   unsized_path: { from: 'price', enters_goal_through: 'revenue' }, no_break_even: 'not_an_identity',
   say: 'Olumi can’t yet say how likely ‘Raise’ is to meet the goal: it depends on how ‘Price’ moves ‘Revenue’, which isn’t sized.' };
@@ -35,6 +39,20 @@ function args(warnings: Json[] = [licence], decisions: Json[] = []): Json {
 }
 function project(input: Json): Json { return projectCanonicalAnalysisView(input as never); }
 const cell = (view: Json, id = 'raise'): Json => view.options.find((o: Json) => o.option_id === id).cell;
+
+// a2 owns forwarding this carrier from the stored licence. Exercise the local
+// projection at that reader seam without changing its current implementation.
+function projectWithReasonCarrier(input: Json, reasonCarrier: Json): Json {
+  const carried = licenceReaders.goalChanceLicenceForAgent(input.currentResult);
+  if (carried === undefined) throw new Error('Expected a licensed reader fixture');
+  const spy = vi.spyOn(licenceReaders, 'goalChanceLicenceForAgent')
+    .mockReturnValue({ ...carried, withheld_reason_by_option: reasonCarrier } as typeof carried);
+  try {
+    return project(input);
+  } finally {
+    spy.mockRestore();
+  }
+}
 
 describe('canonical cell faces — moved copy, one existing chance composer', () => {
   it('FACE-DIGITS: captured point faces equal the existing CEE prose and their displayed percentages', () => {
@@ -128,6 +146,32 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
     expect(cell(project(args())).why).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
   });
 
+  it('FACE-WITHHELD-ZERO-SPREAD-REASON: the carried reason beats generic licence words, below certainty and identity', () => {
+    const reasons = zeroSpreadLicence.withheld_reason_by_option;
+    const c = cell(projectWithReasonCarrier(args([zeroSpreadLicence]), reasons));
+    expect(c.why).toBe(reasons.raise.line);
+    expect(c.face).toBe(OPTION_CHANCE_NOT_SHOWN);
+    expect(cell(projectWithReasonCarrier(args([zeroSpreadLicence], [certainty]), reasons)).why).toBe(certainty.say);
+    expect(cell(projectWithReasonCarrier(args([zeroSpreadLicence, identity], [certainty]), reasons)).why).toBe(identity.message);
+  });
+
+  it('FACE-WITHHELD-ZERO-SPREAD-PROTOTYPE: toString without an own entry falls through to the licence line', () => {
+    const input = args([{ ...licence, option_ids: ['toString', 'keep'], withheld_option_ids: ['toString'] }]);
+    input.graph = { ...graph, nodes: graph.nodes.map(node => node.id === 'raise' ? { ...node, id: 'toString' } : node) };
+    input.currentResult.enrichment.option_comparison[0].option_id = 'toString';
+    const reasons = Object.create({ toString: zeroSpreadLicence.withheld_reason_by_option.raise });
+    expect(Object.hasOwn(reasons, 'toString')).toBe(false);
+    expect(cell(projectWithReasonCarrier(input, reasons), 'toString').why).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
+  });
+
+  it('FACE-WITHHELD-ZERO-SPREAD-LINE: only non-empty strings count and accepted bytes stay verbatim', () => {
+    for (const line of ['', ' \n\t ', null, 42]) {
+      expect(cell(projectWithReasonCarrier(args(), { raise: { line } })).why).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
+    }
+    const line = `  ${zeroSpreadLicence.withheld_reason_by_option.raise.line}  `;
+    expect(cell(projectWithReasonCarrier(args(), { raise: { line } })).why).toBe(line);
+  });
+
   it('FACE-LABELS: only a recorded string or graph label may name a withheld option', () => {
     const input = args([{ ...licence, option_ids: ['toString', 'keep'], withheld_option_ids: ['toString'],
       option_labels_by_option: {} }]);
@@ -155,18 +199,20 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
     labels.currentResult.enrichment.option_comparison[0].option_id = 'toString';
     const placeholder = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', message: 'Not shown. A link is not sized.' };
     const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: 'Not shown. The target cannot be tested yet.' };
-    const cases = [
+    const cases: { input: Json; id: string; reasonCarrier?: Json }[] = [
       { input: args([licence, identity], [certainty]), id: 'raise' },
       { input: args([licence], [certainty]), id: 'raise' },
       { input: args([licence], [{ ...certainty, no_break_even: 'unknown_future_reason' }]), id: 'raise' },
       { input: args(), id: 'raise' },
+      { input: args([zeroSpreadLicence]), id: 'raise', reasonCarrier: zeroSpreadLicence.withheld_reason_by_option },
       { input: labels, id: 'toString' },
       { input: args([{ code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', option_ids: ['raise'] }]), id: 'raise' },
       { input: args([licence, placeholder, target, identity, identity]), id: 'raise' },
       { input: args([licence, { ...identity, message: 'Not shown. raw_node_id is unresolved.' }]), id: 'raise' },
     ];
-    for (const { input, id } of cases) {
-      const c = cell(project(input), id);
+    for (const { input, id, reasonCarrier } of cases) {
+      const view = reasonCarrier === undefined ? project(input) : projectWithReasonCarrier(input, reasonCarrier);
+      const c = cell(view, id);
       expect(c.kind).toBe('withheld');
       expect(Buffer.from(c.face)).toEqual(Buffer.from(OPTION_CHANCE_NOT_SHOWN));
       expect(c.face.split(/\s+/).length).toBeLessThanOrEqual(8);

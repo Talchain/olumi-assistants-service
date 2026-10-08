@@ -162,11 +162,15 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
       const reasons = goalChanceWithheldReasonsForAgent(result, option_id);
       const recordedLabel = licence?.option_labels_by_option?.[option_id];
       const label = typeof recordedLabel === 'string' && recordedLabel.trim() !== '' ? recordedLabel : labels.get(option_id);
+      const reasonByOption = rec(rec(licence)?.withheld_reason_by_option);
+      const carriedLine = reasonByOption !== undefined && Object.hasOwn(reasonByOption, option_id)
+        ? rec(reasonByOption[option_id])?.line : undefined;
+      const reasonLine = typeof carriedLine === 'string' && carriedLine.trim() !== '' ? carriedLine : undefined;
       // MOVED c6 licence line: DGAI analysis-hero/goalChanceCopy.ts:135, same commit.
       const licenceLine = licence?.withheld_option_ids?.includes(option_id) && label !== undefined
         ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
       // DGAI RunView:125 precedence, applied only to the existing withheld cell.
-      const withheldWhy = identityMessage ?? certainty.get(option_id) ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
+      const withheldWhy = identityMessage ?? certainty.get(option_id) ?? reasonLine ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
       const face = faces.get(option_id);
       const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
         : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
