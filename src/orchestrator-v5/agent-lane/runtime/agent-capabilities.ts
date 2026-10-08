@@ -23,6 +23,7 @@ import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
 import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
 import { parseDrawnLinkPress } from '../drawn-link-press.js';
 import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { chatRiskPreconditionFor } from '../../routing/chat-risk-precondition.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -947,6 +948,8 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 
 interface GraphRead {
   readonly graph_hash: string;
+  /** Stored user brief from the SAME canonical graph read, never model arguments or conversation guesses. */
+  readonly brief_text?: string | null;
   /**
    * ⭐ THE IDENTITY-SPACE HASH OF THE SAME READ — "is this the same graph
    * object?" — kept so a write can assert the identity it actually read.
@@ -2169,6 +2172,7 @@ export function createAgentCapabilities(
     return {
       identity_run_use: withdrawn === null ? null : { withdrawn: new Set(withdrawn) },
       graph_hash: String(r.json.graph_hash ?? ''),
+      brief_text: typeof r.json.brief_text === 'string' ? r.json.brief_text : null,
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
       // producer's own return value — `computeGraphIdentityHash(graph)`, type
       // `GraphIdentityHash | null` = `{kind, value, algorithm, ...}` — so the
@@ -8313,18 +8317,29 @@ export function createAgentCapabilities(
       if (label === '') {
         return { ok: false, mutated: false, refusal: 'unreadable_risk', detail: 'A new risk needs a name, in the user’s words. Nothing was prepared.' };
       }
-      const affects = Array.isArray(args?.affects) ? args.affects : [];
-      const causedBy = Array.isArray(args?.caused_by) ? args.caused_by : [];
-      const precondition = ctx.widen_relies_on === undefined ? undefined : readReliesOnRisk(ctx.widen_relies_on);
-      if (ctx.widen_relies_on !== undefined && (precondition === undefined || affects.length !== 0 || causedBy.length !== 0)) {
+      const requestedAffects = Array.isArray(args?.affects) ? args.affects : [];
+      const requestedCauses = Array.isArray(args?.caused_by) ? args.caused_by : [];
+      const widenPrecondition = ctx.widen_relies_on === undefined ? undefined : readReliesOnRisk(ctx.widen_relies_on);
+      if (ctx.widen_relies_on !== undefined && (widenPrecondition === undefined || requestedAffects.length !== 0 || requestedCauses.length !== 0)) {
         return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'Nothing was prepared: this option precondition must have no links.' };
       }
-      if (affects.length === 0 && precondition === undefined) {
+      // Preserve the ordinary no-affects refusal without a read. Only a non-empty chat lease needs the canonical read first.
+      const chatLease = typeof args?.relies_on_option === 'string' && args.relies_on_option.trim() !== '' ? args.relies_on_option : undefined;
+      if (requestedAffects.length === 0 && widenPrecondition === undefined && chatLease === undefined) {
         return { ok: false, mutated: false, refusal: 'no_affects',
           detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      // A model label is only a lease: the HOST mints the stamp, through exactly the existing widen hold path.
+      // Invalid/unrelated/ambiguous/baseline labels are ignored; their ordinary links are left intact.
+      const precondition = widenPrecondition ?? chatRiskPreconditionFor(chatLease, label, g, g.brief_text);
+      const affects = precondition === undefined ? requestedAffects : [];
+      const causedBy = precondition === undefined ? requestedCauses : [];
+      if (affects.length === 0 && precondition === undefined) {
+        return { ok: false, mutated: false, refusal: 'no_affects',
+          detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
+      }
       const preconditionOption = precondition === undefined ? undefined : g.nodes.find((n) => n.id === precondition.option_id && n.kind === 'option');
       if (precondition !== undefined && preconditionOption === undefined) {
         return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'The option this risk relies on is no longer in the model. Nothing was prepared.' };
@@ -8361,6 +8376,7 @@ export function createAgentCapabilities(
       }
       // Only the user's turn may author the likelihood or name its drivers.
       const userText = ctx.user_turn_text ?? ctx.user_text ?? '';
+      // A precondition carries no occurrence: the reader can mistake an impact ("cut MRR by 10% within 6 months") for a likelihood (Codex #2823 r1).
       const stated = precondition === undefined ? readStatedEventRisk(userText) : undefined;
       const driverLabels = stated === undefined ? [] : causedBy.map((c) => {
         const asked = String(c?.factor_label ?? '');
@@ -8449,6 +8465,7 @@ export function createAgentCapabilities(
         risk: {
           label,
           ...(precondition === undefined ? {} : { relies_on: { option_id: precondition.option_id, option_label: preconditionOption!.label } }),
+          ...(precondition !== undefined && (requestedAffects.length > 0 || requestedCauses.length > 0) ? { links_dropped: true } : {}),
           ...(eventRisk !== undefined ? { likelihood: { p_low_pct: eventRisk.event_risk.occurrence.p_low * 100, p_high_pct: eventRisk.event_risk.occurrence.p_high * 100, horizon_months: eventRisk.event_risk.horizon.months, basis: 'user', quote: eventRisk.quote } } : {}),
           threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
@@ -8456,7 +8473,8 @@ export function createAgentCapabilities(
         },
         ...(droppedDrivers.length > 0 ? { dropped_drivers: droppedDrivers } : {}),
         note: precondition !== undefined
-          ? "Nothing has changed yet. This risk stays on the model with no links. The Run leaves it out because it cannot yet apply the risk to that option alone; that option's chance does not include it yet."
+          ? `Nothing has changed yet. This risk is kept without links because it is a precondition of ‘${preconditionOption!.label}’. `
+          + "The Run leaves it out because it cannot yet apply the risk to that option alone; that option's chance does not include it yet. Nothing is added until you approve it."
           : 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
           + (stated !== undefined && riskCauses.length > 0 ? ' ' + HELD_RISK_CAUSE_NOTE : '')

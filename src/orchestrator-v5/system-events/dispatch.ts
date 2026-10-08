@@ -3475,7 +3475,7 @@ export type HoldAddRiskInput = {
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
   readonly risk: { readonly id?: string; readonly label: string };
-  /** RC3: server-owned option identity from the widen press, never from model arguments. */
+  /** RC3: server-owned option identity from the widen press or verified chat label lease, never a model-authored stamp. */
   readonly relies_on?: { readonly option_id: string };
   /** event_risk.v1 slice 2a: CEE-held user words, outside producer operations. */
   readonly user_event_risk?: { readonly event_risk: EventRiskV1T; readonly quote: string };
