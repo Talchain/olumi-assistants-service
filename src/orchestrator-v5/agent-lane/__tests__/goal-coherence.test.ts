@@ -439,3 +439,27 @@ describe('Science §(f) addendum 2: definitional addends count, causal parents a
   });
 });
 
+describe('RC5b buddy r1: every definitional contribution counts; unreadable figures fail closed', () => {
+  it('a definitional LOSS marked on the edge is subtracted: £392,000 − £300,000 = £92,000 (4.6×) stays silent', () => {
+    const graph = paulsShape(8_000, true);
+    level(graph, 'backlash').raw_value = 300_000;
+    const edge = graph.edges.find((e) => e.from === 'backlash') as Record<string, unknown>;
+    edge.provenance = { source: 'cee_hypothesis', definitional: true };
+    expect(goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toBeNull();
+  });
+
+  it('the same loss on a CAUSAL edge is ignored (asks at £392,000)', () => {
+    const graph = paulsShape(8_000, true);
+    level(graph, 'backlash').raw_value = 300_000;
+    expect(goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toMatchObject({ implied: 392_000 });
+  });
+
+  it('a listed addend with a figure but no readable unit fails closed', () => {
+    const graph = paulsShape(8_000, true);
+    (node(graph, GOAL).nonlinear_identity as unknown as Record<string, unknown>).addends = ['backlash'];
+    const os = level(graph, 'backlash') as unknown as Record<string, unknown>;
+    os.raw_value = -300_000; delete os.unit;
+    expect(goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toBeNull();
+  });
+});
+

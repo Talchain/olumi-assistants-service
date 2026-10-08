@@ -82,6 +82,15 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   // addend is skipped. An addend outside the goal's parents or units fails closed.
   const addendIds = (Array.isArray(identity.addends) ? identity.addends : []) as unknown[];
   if (!addendIds.every((id) => typeof id === 'string' && parents.includes(id) && !(identity.factor_ids as unknown[]).includes(id))) return null;
+  // Definitional contributions are also marked on EDGES (provenance.definitional, buddy r1 P1): they count with the edge's sign.
+  const edgesIn = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec).filter((e) => e.to === node.id) : [];
+  const edgeDefinitional = new Map<string, -1 | 1>();
+  for (const e of edgesIn) {
+    if (typeof e.from !== 'string' || (identity.factor_ids as unknown[]).includes(e.from) || addendIds.includes(e.from)) continue;
+    if (!isRec(e.provenance) || e.provenance.definitional !== true) continue;
+    const mean = isRec(e.strength) && finite(e.strength.mean) ? e.strength.mean : undefined;
+    edgeDefinitional.set(e.from, e.effect_direction === 'negative' || (mean !== undefined && mean < 0) ? -1 : 1);
+  }
   const [aId, bId] = identity.factor_ids as [string, string];
   const aNode = byId.get(aId); const bNode = byId.get(bId);
   if (aNode === undefined || bNode === undefined) return null;
@@ -96,14 +105,22 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   const [rate, count] = c.rate === aId ? [a, b] : [b, a];
   let addendSum = 0;
   const addendFigures: string[] = [];
-  for (const id of addendIds as string[]) {
+  const contributions: Array<[string, -1 | 1 | 0]> = [...(addendIds as string[]).map((id) => [id, 0] as [string, 0]), ...edgeDefinitional];
+  for (const [id, edgeSign] of contributions) {
     const addend = byId.get(id);
     if (addend === undefined) return null;
     const level = levelFor(graph, addend);
-    if (level === null) continue;
+    if (level === null) {
+      // Levelless = skipped (Science). A stated figure whose unit can't be read is NOT levelless: fail closed (buddy r1 P1).
+      const os = isRec(addend.observed_state) ? addend.observed_state : undefined;
+      if (os !== undefined && os.raw_value !== undefined && os.raw_value !== null) return null;
+      continue;
+    }
     if (!inUnit(level.unit, String(addend.label), unit, label)) return null;
-    addendSum += level.raw;
-    if (level.raw !== 0) addendFigures.push(`${level.raw < 0 ? '−' : '+'} ${sayFigureAsWritten(Math.abs(level.raw), readMoney(level.unit, String(addend.label))?.code ?? '')}`);
+    // A listed addend is added signed, as ISL adds it; an edge-marked one takes the edge's sign on its magnitude.
+    const signed = edgeSign === 0 ? level.raw : edgeSign * Math.abs(level.raw);
+    addendSum += signed;
+    if (signed !== 0) addendFigures.push(`${signed < 0 ? '−' : '+'} ${sayFigureAsWritten(Math.abs(signed), readMoney(level.unit, String(addend.label))?.code ?? '')}`);
   }
   const implied = rate.raw * count.raw + addendSum;
   const unconfirmed = identity.stated_in_brief === false;
@@ -183,7 +200,7 @@ export function goalCoherenceAsk(input: unknown, edited: { nodeId: string; previ
         product = productFor(graph, node, parentsOf(id), byId, carrierUnit);
         if (product === null) return null;
         level = { node, raw: product.implied, unit: carrierUnit };
-        expressions.push(product.parts.map(figure).join(' × '));
+        expressions.push([product.parts.map(figure).join(' × '), ...product.addendFigures].join(' '));
       } else {
         level = levelFor(graph, node);
         if (level !== null) expressions.push(figure(level));
