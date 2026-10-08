@@ -35,20 +35,22 @@ describe('M1 S1 target on served Run turns (RC contract a00cb9c8; expect = refer
     expect(target === null ? null : { from_id: target.from_id, to_id: target.to_id }).toEqual(c.id === 'D1-sprint-run' ? { from_id: 'enterprise_prospect_signing_likelihood', to_id: 'quarterly_revenue' } : { from_id: 'gcp_workload_share', to_id: 'monthly_cloud_savings' });
     expect(JSON.stringify(graph)).toBe(before);
   });
-  it('D1: the whole target — labels from the graph, band = the writer’s own band of |mean|', () => {
+  it('D1: the whole placeholder target — labels from the graph, no current band', () => {
     const g = d1();
     const nodeLabel = (id: string) => g.nodes.find((n) => n.id === id)!.label;
     expect(selectStrengthenPlaceholder(g, D1.current_run_option_ids)).toEqual({
       variant: 'S1', from_id: AI.from, to_id: AI.to, from_label: nodeLabel(AI.from), to_label: nodeLabel(AI.to),
-      band: edgeBandFromMagnitude(Math.abs(edgeOf(g, AI).strength!.mean as number)),
     });
-    expect(selectStrengthenPlaceholder(g, D1.current_run_option_ids)!.band).toBe('moderate');
+    expect(selectStrengthenPlaceholder(g, D1.current_run_option_ids)).not.toHaveProperty('band');
   });
-  it('the band follows the stored |mean| on the writer’s cuts, sign ignored', () => {
+  it('placeholder means never supply a band; independently sized controls keep the writer’s cuts, sign ignored', () => {
     for (const [mean, band] of [[0.55, 'strong'], [-0.8, 'very strong'], [0.1, 'weak']] as const) {
       const g = d1();
       edgeOf(g, AI).strength = { mean };
-      expect(selectStrengthenPlaceholder(g, D1.current_run_option_ids)!.band).toBe(band);
+      expect(linkTargetOf(g, AI.from, AI.to)).not.toHaveProperty('band');
+      estimate(g, AI);
+      expect(linkTargetOf(g, AI.from, AI.to)!.band).toBe(band);
+      expect(linkTargetOf(g, AI.from, AI.to)!.band).toBe(edgeBandFromMagnitude(Math.abs(mean)));
     }
   });
 });
@@ -126,10 +128,16 @@ describe('linkTargetOf: ONE read of any link (T3’s method-turn card reads link
   });
 });
 
-describe('handoff: the target is exactly ONE propose_link_strengths call (HARNESS makes it; the helper writes nothing)', () => {
-  it('one link, a band the tool accepts, labels as the state names them, no from_words', () => {
+describe('handoff: only a sized target supplies a propose_link_strengths band', () => {
+  it('a placeholder target carries labels for a size ask, never a default band', () => {
     const g = d1();
     const t = selectStrengthenPlaceholder(g, D1.current_run_option_ids)!;
+    expect(t).not.toHaveProperty('band');
+    expect(g.nodes.map((n) => n.label)).toEqual(expect.arrayContaining([t.from_label, t.to_label]));
+  });
+  it('CONTROL: an independently sized link still supplies one band the tool accepts, no from_words', () => {
+    const g = estimate(d1(), AI);
+    const t = linkTargetOf(g, AI.from, AI.to)!;
     const tool = AGENT_TOOLS.find((x) => x.name === 'propose_link_strengths')!;
     const params = tool.parameters as { required: string[]; properties: { links: { maxItems: number; items: { required: string[]; properties: { strength: { enum: string[] } } } } } };
     const call = { links: [{ from_label: t.from_label, to_label: t.to_label, strength: t.band }] };

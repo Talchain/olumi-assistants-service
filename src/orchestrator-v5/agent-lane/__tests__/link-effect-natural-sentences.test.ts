@@ -19,7 +19,7 @@ import { linkEffectEndUnits, statedInOneOf, type LinkEffectStatement } from '../
 import { ProposalStore } from '../proposal.js';
 import { isPlaceholderLink } from '../../../cee/magnitude/link-sizing.js';
 import { mediatorReadings } from '../mediator-reading.js';
-import { approvalChipsFor } from '../approval-chips.js';
+import { approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 import { agentSelectionContext } from '../selection-context.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -612,24 +612,87 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
     oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
   });
-  // Science 393023 LICENCE ruling 3 (7 Oct 20:48Z), re-derived from the predicate, not re-recorded. On served d39c05ba
-  // the kid link "Onboarding drag" → "Feature points per developer-week" is the untagged "+" door constant (0.5/0.125,
-  // `defaulted`), now a placeholder (ruling (b)). Mediator-reading then gauges "Onboarding drag" in its child's unit, so
-  // "1 percentage point of onboarding drag" is a unit mismatch: the user is asked again, no card, nothing stored. Base
-  // does the same today for any TAGGED placeholder kid (a pre-existing gauge rule; follow-up: the gauge should yield to a
-  // unit the user writes). The CONTROL's own claim (the end itself is never a possessive) is kept on a SYNTHETIC
-  // variant whose kid link is sized (std 0.1, not a door constant).
+  // P52: served d39c05ba's kid link is a door-constant placeholder. Its unwritten gauge borrows the child's unit,
+  // but the user's eligible stated unit takes precedence and is shown for approval. Stored readings still govern.
+  // The original SYNTHETIC sized-kid control stays separate from this served fixture.
   const cPoss = { ...headcount, id: 'C-poss', quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.',
     effect: effect(1, 'percentage points', 2, 'developers') } as const;
   const kidLink = (g: Json) => (g.edges as Json[]).filter(e => e.from === 'onboarding_drag' && e.to === 'feature_points_per_developer_week');
-  it('AS SERVED (ruling 3): the end itself on d39c05ba → the gauge reads the placeholder kid link → unit_mismatch, no card, nothing stored', async () => {
+  const unitMismatch = { ok: false, mutated: false, refusal: 'unit_mismatch',
+    detail: 'Nothing was prepared: "Onboarding drag" is measured in feature points/developer/week and "Developer headcount" in developers. Ask the user for their figure in those units; never convert it yourself.' };
+  it('AS SERVED (P52): C-poss on d39c05ba → stated percentage points supersede the unwritten gauge, card, nothing stored', async () => {
     const served = fixture(cPoss as CorpusRow);
     expect(kidLink(served)).toHaveLength(1);
     expect(isPlaceholderLink(kidLink(served)[0])).toBe(true);
-    expect(mediatorReadings(served).get('onboarding_drag')).toMatchObject({ via: 'gauge', child: 'feature_points_per_developer_week' });
+    const reading = mediatorReadings(served).get(cPoss.to);
+    expect(reading).toMatchObject({ via: 'gauge', child: 'feature_points_per_developer_week' });
+    expect(reading).not.toHaveProperty('stored');
     const w = world(cPoss as CorpusRow); const before = w.graph(); const result = await propose(w, cPoss as CorpusRow);
-    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    const proposal = w.proposals.get(String(result.proposal_id))!;
+    expect(proposal.operations).toHaveLength(1);
+    expect(proposal.operations[0]).toMatchObject({ op: 'set_link_effect', path: `${cPoss.from}::${cPoss.to}`,
+      value: { from: cPoss.from, to: cPoss.to, effect: cPoss.effect,
+        unit_readings: [{ node_id: cPoss.to, unit_reading: { unit: '%', source: 'user_stated',
+          source_quote: '1 percentage point of onboarding drag' } }] } });
+    const cards = cardsFor(w, result);
+    expect(cards).toHaveLength(2);
+    const card = cards.find(c => c.id === approvalChipIdFor(proposal.proposal_id))!;
+    expect(card.detail).toContain('+1 percentage point in "Onboarding drag"');
+    expect(card.detail).toContain('I\'ve taken "Onboarding drag" to be in %, from your words.');
+    expect(card.detail).toContain(`From your words: "${cPoss.quote}"`);
+    expect(card.message).toBe(`Yes — ${card.detail}`);
+    expect(w.attempts).toEqual([]); expect(w.rows).toEqual([]); expect(w.commits).toEqual([]);
+    expect(w.graph()).toEqual(before);
+  });
+  it('P52 STORED gauge: the same stated percentage points still refuse, no card, nothing stored', async () => {
+    const g = fixture(cPoss as CorpusRow); const kid = kidLink(g)[0]!;
+    kid.strength.mean = -1;
+    Object.assign(kid.provenance, { magnitude: 'olumi_estimate', sized_by_identity: { op: 'gauge' } });
+    expect(mediatorReadings(g).get(cPoss.to)).toMatchObject({ via: 'gauge', stored: true,
+      unit: 'feature points/developer/week', child: 'feature_points_per_developer_week' });
+    const w = world(cPoss as CorpusRow, g); const before = w.graph(); const result = await propose(w, cPoss as CorpusRow);
+    expect(result).toEqual(unitMismatch);
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, cPoss as CorpusRow, before);
+  });
+  it('P52 U1 stored-size guard: an incompatible touching size makes stated percentage points ineligible beside an unwritten gauge', async () => {
+    const g = fixture(cPoss as CorpusRow);
+    // A bidirected touching size is outside the mediator's directed chain, but still subject to U1's stored-size guard.
+    g.edges.push({ from: cPoss.to, to: 'tech_lead_headcount', edge_type: 'bidirected', strength: { mean: 0.1, std: 0.01 },
+      provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1,
+        amount_unit: 'tech leads', per_source_change: 1, per_source_change_unit: 'days',
+        strength_mean: 0.1, strength_mean_frame: 'edge_strength' } }, effect_direction: 'positive', exists_probability: 0.8 });
+    expect(nodeOf(g, cPoss.to)).not.toHaveProperty('observed_state');
+    const reading = mediatorReadings(g).get(cPoss.to);
+    expect(reading).toMatchObject({ via: 'gauge', child: 'feature_points_per_developer_week' });
+    expect(reading).not.toHaveProperty('stored');
+    const w = world(cPoss as CorpusRow, g); const before = w.graph(); const result = await propose(w, cPoss as CorpusRow);
+    expect(result).toEqual(unitMismatch);
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, cPoss as CorpusRow, before);
+  });
+  it('P52 NO stated unit: the placeholder kid retains the 1b945d35 refusal by link identity', async () => {
+    const row = { ...cPoss, id: 'P52-no-unit', quote: 'Every 2 extra developers add about 1 of onboarding drag.' } as CorpusRow;
+    const w = world(row); const before = w.graph();
+    expect(edgeOf(before, row)).toMatchObject({ from: cPoss.from, to: cPoss.to });
+    expect(isPlaceholderLink(kidLink(before)[0])).toBe(true);
+    const result = await propose(w, row);
+    expect(result).toEqual(unitMismatch);
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
+  });
+  it('P52 NO stated unit CONTROL: the existing gauge unit retains the 1b945d35 proposal and no-card outcome by link identity', async () => {
+    const row = { ...cPoss, id: 'P52-no-unit-gauge', quote: 'Every 2 extra developers add about 1 of onboarding drag.',
+      effect: effect(1, 'feature points/developer/week', 2, 'developers') } as CorpusRow;
+    const w = world(row); const before = w.graph(); const result = await propose(w, row);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    const proposal = w.proposals.get(String(result.proposal_id))!;
+    expect(proposal.operations).toHaveLength(1);
+    expect(proposal.operations[0]).toMatchObject({ op: 'set_link_effect', path: `${row.from}::${row.to}`,
+      value: { from: row.from, to: row.to, effect: row.effect,
+        mediator_readings: [{ node_id: row.to, via: 'gauge', unit: 'feature points/developer/week' }] } });
+    expect((proposal.operations[0]!.value as Json).unit_readings).toBeUndefined();
+    expect(cardsFor(w, result)).toEqual([]);
+    expect(w.attempts).toEqual([]); expect(w.rows).toEqual([]); expect(w.commits).toEqual([]);
+    expect(w.graph()).toEqual(before);
   });
   it('CONTROL (SYNTHETIC, kid link sized at std 0.1): the end itself ("…of onboarding drag") still cards', async () => {
     const g = fixture(cPoss as CorpusRow);

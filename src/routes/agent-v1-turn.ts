@@ -2998,7 +2998,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && (body['chip'] as { id?: unknown } | null | undefined)?.id === STRENGTHEN_PRESS_CHIP_ID) {
       const fastStartedAt = Date.now();
       const card = strengthenCardFor(await readBackState(readingDispatch, scenarioId));
-      const issued = card === null ? undefined
+      // Science 393023 LICENCE ruling 3: a placeholder S1 target is ASKED for its size; no proposal records its prior.
+      if (card !== null && card.ask_only === true) {
+        fastPath = 'strengthen';
+        handledGuidancePress = { policy_id: 'RC-STRENGTHEN-ITEM', item: `${card.target.from_id}->${card.target.to_id}` };
+        const text = card.text; const ms = Date.now() - fastStartedAt;
+        result = {
+          assistant_text: text,
+          items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }],
+          tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+          timing: { total_ms: ms, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+        };
+      }
+      const issued = card === null || result !== undefined ? undefined
         : await dispatchTool('propose_link_strengths', JSON.stringify(card.args), toolCtx, capabilities, mode);
       if (card !== null && issued !== undefined && issued.ok === true && typeof issued.proposal_id === 'string') {
         fastPath = 'strengthen';

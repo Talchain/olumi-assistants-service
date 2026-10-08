@@ -1363,7 +1363,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
-      ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
+      // Science 393023 LICENCE ruling 3: a placeholder has no current band, so none is projected for the Agent to name.
+      ...(linkSizing(e) !== 'placeholder' && st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(countedOnce ? { exists_probability: 1, counted_once: true }
         : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
@@ -3536,7 +3537,7 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), direction: current },
+        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: linkBandWord(currentBand) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
@@ -4050,7 +4051,7 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), sizing: x.sizedBefore },
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { ...(x.sizedBefore === 'placeholder' ? {} : { band: linkBandWord(x.was) }), sizing: x.sizedBefore },
           becomes: { band: linkBandWord(x.band) }, whose: whoseFigure(x), keeps_current_strength: x.keeps })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
