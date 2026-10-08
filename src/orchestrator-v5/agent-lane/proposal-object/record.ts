@@ -22,7 +22,8 @@ import { createHash } from 'node:crypto';
 
 import type { StrengthBand } from '@talchain/schemas/boundary';
 
-import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
+import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../../session/pending-action.js';
+import { conversationAsSeen } from '../../session/conversation-as-seen.js';
 import { GM_HELD_HANDLER_ID, buildGmHeldPublicCopy } from '../../handlers/edit-graph-referee-gate.js';
 import { describeChangeset } from '../../handlers/describe-changeset.js';
 import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMember } from '../../routing/add-option-transaction.js';
@@ -126,6 +127,8 @@ export interface ProposalRecord<F extends ProposalField = ProposalField> {
    * that revision, so two panels can never approve each other's values (Codex P0 on the design).
    */
   readonly revision: string;
+  /** Carrier time for bounded issuance lookup only; excluded from the displayed digest and wire. */
+  readonly emitted_at_iso: string;
   /**
    * What the panel SHOWED, bound: the card's words, every field (its ends, their labels, direction, value and whose it
    * is) and the missing data, hashed. Edits name it and the door re-derives it from the stored hold on the stored model,
@@ -290,6 +293,7 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
   return {
     proposal_id: pa.chip_id,
     revision: pa.id,
+    emitted_at_iso: pa.emitted_at_iso,
     digest,
     dialect: 'product_hold',
     base_graph_hash: pin,
@@ -349,7 +353,7 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
   }
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
   const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [] });
-  return { proposal_id: p.proposal_id, revision: pa.id, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
+  return { proposal_id: p.proposal_id, revision: pa.id, emitted_at_iso: pa.emitted_at_iso, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
     approve_action: approve, decline_action: decline, operations: p.operations, fields, missing: [] };
 }
 /** One envelope, with a reader for each stored dialect. */
@@ -379,6 +383,69 @@ export function heldChangeName(pa: PendingAction): string | undefined {
   return agentProposalOf(pa) !== undefined ? `The held change "${name.replace(/\.$/, '')}"` : `The held change to add ${name}`;
 }
 
+/** The existing conversation rows needed to locate the answer that first carried a held revision. */
+export interface ProposalIssuingRow {
+  readonly turn_id: string;
+  readonly created_at?: string;
+  readonly request_hash?: string | null;
+  readonly user_message?: string | null;
+  readonly assistant_message?: string | null;
+  readonly pending_actions?: readonly unknown[];
+}
+
+/**
+ * P53: use only the loaded window. The earliest public answer at/after emission (allowing 2 s app/DB clock skew)
+ * is the ONE candidate for a revision. Verify its carrier inline or with one exact-row read, never scan onward.
+ * A hold predating this window, an unverifiable candidate or a failed read remains unknown. Claim markers and
+ * conversation the user did not see never issue cards. Neither graph nor stored conversation changes.
+ */
+export async function issuedTurnIdsForProposalRecords(
+  records: readonly ProposalRecord[],
+  rows: readonly ProposalIssuingRow[],
+  readCommittedTurn?: (turnId: string) => Promise<{ readonly pending_actions?: readonly unknown[] } | null>,
+): Promise<ReadonlyMap<string, string>> {
+  const issued = new Map<string, string>();
+  if (records.length === 0) return issued;
+  const datedRows = rows.flatMap(row => {
+    const at = typeof row.created_at === 'string' ? Date.parse(row.created_at) : NaN;
+    return Number.isFinite(at) ? [at] : [];
+  });
+  if (datedRows.length === 0) return issued;
+  const windowStart = Math.min(...datedRows);
+  const chronological = [...conversationAsSeen(rows)].reverse()
+    .filter(row => !row.turn_id.endsWith(':claim')
+      && (typeof row.user_message === 'string' || typeof row.assistant_message === 'string'))
+    .sort((a, b) => {
+      const at = typeof a.created_at === 'string' ? Date.parse(a.created_at) : NaN;
+      const bt = typeof b.created_at === 'string' ? Date.parse(b.created_at) : NaN;
+      if (Number.isFinite(at) && Number.isFinite(bt)) return at - bt || a.turn_id.localeCompare(b.turn_id);
+      // Keep undated legacy rows after the dated durable rows, preserving their supplied order.
+      if (Number.isFinite(at)) return -1;
+      if (Number.isFinite(bt)) return 1;
+      return 0;
+    });
+  for (const record of records) {
+    const emittedAt = Date.parse(record.emitted_at_iso);
+    if (!Number.isFinite(emittedAt) || emittedAt < windowStart - 2000) continue;
+    const row = chronological.find(candidate => typeof candidate.created_at === 'string'
+      && Date.parse(candidate.created_at) >= emittedAt - 2000);
+    if (row === undefined) continue;
+    let pendingActions = row.pending_actions;
+    if (pendingActions === undefined) {
+      try { pendingActions = (await readCommittedTurn?.(row.turn_id))?.pending_actions; }
+      catch { continue; }
+    }
+    for (const raw of pendingActions ?? []) {
+      const pending = parsePendingAction(raw);
+      if (pending !== null && pending.id === record.revision) {
+        issued.set(pending.id, row.turn_id);
+        break;
+      }
+    }
+  }
+  return issued;
+}
+
 /** ⭐ THE WIRE (design §4): `_proposal_fields` on a turn, `proposal_fields` on the graph read. Absent when none is held. */
 export interface ProposalFieldsWire {
   readonly version: 1;
@@ -387,6 +454,7 @@ export interface ProposalFieldsWire {
     readonly proposal_id: string;
     readonly revision: string;
     readonly digest: string;
+    readonly issued_turn_id: string | null;
     readonly approve_action: CardAction;
     readonly decline_action: CardAction;
     readonly fields: readonly ProposalField[];
@@ -395,7 +463,11 @@ export interface ProposalFieldsWire {
 }
 
 /** Only records pinned to `graphHash` are projected: the values shown are the values on the model the user sees. */
-export function proposalFieldsWire(records: readonly ProposalRecord[], graphHash: string | undefined): ProposalFieldsWire | undefined {
+export function proposalFieldsWire(
+  records: readonly ProposalRecord[],
+  graphHash: string | undefined,
+  issuedTurnIds: ReadonlyMap<string, string> = new Map(),
+): ProposalFieldsWire | undefined {
   if (graphHash === undefined || graphHash === '') return undefined;
   const pinned = records.filter((r) => r.base_graph_hash === graphHash);
   if (pinned.length === 0) return undefined;
@@ -404,6 +476,8 @@ export function proposalFieldsWire(records: readonly ProposalRecord[], graphHash
     graph_hash: graphHash,
     proposals: pinned.map((r) => ({
       proposal_id: r.proposal_id, revision: r.revision, digest: r.digest, approve_action: r.approve_action, decline_action: r.decline_action,
+      // Wire-only context: issuing a card never changes the digest of what that card showed.
+      issued_turn_id: issuedTurnIds.get(r.revision) ?? null,
       fields: r.fields, missing: r.missing,
     })),
   };

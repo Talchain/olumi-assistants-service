@@ -44,7 +44,6 @@ const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown
   const raw = row ? (jsonbOrder(JSON.parse(JSON.stringify(row.pending_actions))) as unknown[]) : [];
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
-let tick = 0;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   scenarioExists: vi.fn(async () => true),
@@ -61,13 +60,12 @@ const store = {
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
-      tick += 1;
       rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash,
         assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
         handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
-        created_at: new Date(Date.UTC(2026, 8, 27, 0, 0, tick)).toISOString() });
+        created_at: new Date().toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) {
         graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
@@ -107,7 +105,7 @@ vi.mock('../../../adapters/llm/prompt-loader.js', () => ({ getSystemPrompt: asyn
 
 type Chip = { id: string; label: string; message: string; detail?: string };
 type Call = { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string };
-type Body = { _proposal_fields?: import('../proposal-object/record.js').ProposalFieldsWire; assistant_text: string; suggested_actions: Chip[]; _agent: { tool_calls: Call[] }; _provider_calls?: { provider: string }[] };
+type Body = { _proposal_fields?: import('../proposal-object/record.js').ProposalFieldsWire; assistant_text: string; suggested_actions: Chip[]; _agent: { tool_calls: Call[]; receipts: readonly import('../turn-receipts.js').TurnReceipt[] }; _provider_calls?: { provider: string }[] };
 type G = { nodes: { id: string; kind: string; label: string; [k: string]: unknown }[]; edges: { from: string; to: string; [k: string]: unknown }[]; goal_constraints?: Record<string, unknown>[] };
 
 /** Canonical minimal graph. No incidental constraint or intervention repair can fail the writer's scope check. */
@@ -151,10 +149,16 @@ describe('S-D slice 2 Agent proposals', () => {
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 600_000);
-  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; atFloorRead = undefined; });
+  afterAll(async () => { await app?.close(); vi.useRealTimers(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => {
+    // App emission and DB row times share a clock. Only Date is fake; network/server timers stay real.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-08T12:00:00.000Z'));
+    nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; atFloorRead = undefined; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
+    // Separate user turns beyond the resolver's 2 s app/DB skew allowance.
+    vi.setSystemTime(Date.now() + 10_000);
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     return r.json() as Body;
@@ -196,6 +200,7 @@ describe('S-D slice 2 Agent proposals', () => {
     return turn({ ...press(p), proposal_edits: { proposal_id: p.proposal_id, revision: p.revision, digest: p.digest,
       graph_hash: b._proposal_fields!.graph_hash, fields, ...extra } });
   };
+  const stalePlainApprovalWords = 'Nothing changed. That card is out of date: the change it shows has been replaced. Use the newest card for it.';
   const os = (id: string) => graphNow().nodes.find(n => n.id === id)!.observed_state as Record<string, unknown>;
 
   it('CONTROL passes at base: plain A1 approval retains the existing figures and authorship in one commit', async () => {
@@ -343,14 +348,160 @@ describe('S-D slice 2 Agent proposals', () => {
     expect((await turn(press(shown(b))))._agent.tool_calls).toContainEqual(expect.objectContaining({ ok: true, mutated: true }));
   }, 120_000);
 
-  it('empty Submit RED: metadata still binds, then this panel approves unchanged in one commit', async () => {
+  it.each(['revision', 'digest', 'graph_hash'])('P53 prop plain approval RED: stale %s refuses with card words, no graph bytes or writes', async (key) => {
     seed(); const b = await assumptions(); const before = bytes();
-    const refused = await submit(b, [], { revision: 'another' });
-    expect(bytes()).toBe(before); expect(refused.assistant_text).toContain('Nothing in the model changed');
+    const refused = await submit(b, [], { [key]: 'another' });
+    expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+    expect(refused.assistant_text).toBe(stalePlainApprovalWords);
+    expect(refused._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false }));
     const landed = await submit(refused, []);
     expect(landed._agent.tool_calls).toContainEqual(expect.objectContaining({ ok: true, mutated: true }));
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption' });
+  }, 120_000);
+  it('P53 prop plain approval RED: current empty binding commits with the byte-equal no-edits twin reply', async () => {
+    seed(); const bound = await assumptions();
+    const current = await submit(bound, []);
+    expect(current._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+    const acceptedHours = structuredClone(os('fac_hours'));
+    const acceptedCost = structuredClone(os('fac_cost'));
+    const acceptedGraph = structuredClone(graphNow());
+    const acceptedFacts = structuredClone(latestRow()!.handler_facts);
+    acceptedHours['reviewed_by_user'] = { ...(acceptedHours['reviewed_by_user'] as object), at: expect.any(String) };
+    acceptedCost['reviewed_by_user'] = { ...(acceptedCost['reviewed_by_user'] as object), at: expect.any(String) };
+    for (const node of acceptedGraph.nodes) {
+      if (node.observed_state !== undefined) {
+        const state = node.observed_state as Record<string, unknown>;
+        state['reviewed_by_user'] = { ...(state['reviewed_by_user'] as object), at: expect.any(String) };
+      }
+    }
+    nextScenario(); seed(); const twin = await assumptions();
+    const plain = await turn(press(shown(twin)));
+    expect(plain._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+    expect(current.assistant_text).toBe(plain.assistant_text);
+    expect(current.assistant_text).not.toMatch(/You set|Left as Olumi's estimate/);
+    expect(os('fac_hours')).toEqual(acceptedHours); expect(os('fac_cost')).toEqual(acceptedCost);
+    expect(graphNow()).toEqual(acceptedGraph);
+    expect(plain._agent.receipts).toEqual(current._agent.receipts);
+    expect(latestRow()!.handler_facts).toEqual(acceptedFacts);
+  }, 120_000);
+  it('P53 prop stale same-target card RED: its own empty binding cannot approve the newer held value', async () => {
+    seed();
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Hours', value: 10, unit: 'hours', basis: 'First estimate' }] }), () => say('Use ten hours?')];
+    const first = await turn({ message: 'Suggest ten hours as a starting estimate.' }); const old = shown(first);
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Hours', value: 20, unit: 'hours', basis: 'Second estimate' }] }), () => say('Use twenty hours?')];
+    const second = await turn({ message: 'Suggest twenty hours instead.' }); const newer = shown(second);
+    expect(newer.proposal_id).not.toBe(old.proposal_id);
+    expect(second._proposal_fields!.proposals.map(p => p.proposal_id)).toEqual([newer.proposal_id]);
+    const before = bytes(); const r = await submit(first, []);
+    expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+    expect(r.assistant_text).toBe(stalePlainApprovalWords);
+    expect(r._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', proposal_id: old.proposal_id, ok: false, mutated: false }));
+    const landed = await submit(second, []);
+    expect(landed._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', proposal_id: newer.proposal_id, ok: true, mutated: true }));
+    expect(os('fac_hours')).toMatchObject({ raw_value: 20, source: 'user_assumption' });
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+  }, 120_000);
+  it('P53 prop issued rows RED: two distinct live holds preserve order and bind each revision to its first answer row', async () => {
+    seed(); const firstTurn = randomUUID();
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Hours', value: 10, unit: 'hours', basis: 'First estimate' }] }), () => say('Use ten hours?')];
+    const first = await turn({ turn_id: firstTurn, message: 'Suggest ten hours as a starting estimate.' }); const old = shown(first);
+    const secondTurn = randomUUID();
+    script = [() => fnCall('propose_assumptions', { assumptions: [{ factor_label: 'Cost', value: 200, unit: 'GBP', basis: 'Second estimate' }] }), () => say('Use two hundred pounds?')];
+    const second = await turn({ turn_id: secondTurn, message: 'Suggest two hundred pounds as the cost estimate.' }); const newer = shown(second);
+    expect(newer.proposal_id).not.toBe(old.proposal_id);
+    expect(second._proposal_fields!.proposals.map(p => p.proposal_id)).toEqual([old.proposal_id, newer.proposal_id]);
+    const expected = [{ proposal_id: old.proposal_id, issued_turn_id: firstTurn }, { proposal_id: newer.proposal_id, issued_turn_id: secondTurn }];
+    expect(second._proposal_fields!.proposals).toEqual(expected.map(p => expect.objectContaining(p)));
+    const continued = await turn({ message: 'Explain both estimates.' });
+    expect(continued._proposal_fields!.proposals).toEqual(expected.map(p => expect.objectContaining(p)));
+    const { default: scenarioGraphRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    const reload = Fastify({ logger: false }); await reload.register(scenarioGraphRoute); await reload.ready();
+    const fullRowRead = store.readRecent.getMockImplementation()!;
+    try {
+      const r = await reload.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json().proposal_fields.proposals).toEqual(expected.map(p => expect.objectContaining(p)));
+      // Production readRecent omits pending_actions. Preserve that shape here, so the exact committed-row
+      // fallback is also witnessed instead of only passing on this harness's convenient full rows.
+      store.readRecent.mockImplementation(async sid => [...order].reverse().map(k => rows.get(k)!)
+        .filter(row => row.scenario_id === sid && !row.turn_id.endsWith(':claim'))
+        .map(row => { const summary = { ...row }; Reflect.deleteProperty(summary, 'pending_actions'); return summary; }));
+      const committedReads = store.readCommittedTurn.mock.calls.length;
+      const fallback = await reload.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+      expect(fallback.statusCode, fallback.body).toBe(200);
+      expect(fallback.json().proposal_fields.proposals).toEqual(expected.map(p => expect.objectContaining(p)));
+      const newReads = store.readCommittedTurn.mock.calls.slice(committedReads);
+      expect(newReads.length).toBeLessThanOrEqual(2);
+      expect(newReads).toContainEqual([SCENARIO, firstTurn]);
+      expect(newReads).toContainEqual([SCENARIO, secondTurn]);
+    } finally { store.readRecent.mockImplementation(fullRowRead); await reload.close(); }
+  }, 120_000);
+  it('P53 prop unmatched issuing row RED: graph read labels a legacy hold with issued_turn_id null', async () => {
+    seed(); const offered = await assumptions(); const p = shown(offered);
+    // A legacy carrier has no user-visible issuing message. Its live pending record remains present;
+    // neither a claim row nor a textless carrier is a conversation row that can own a rendered card.
+    const carrier = latestRow()!;
+    carrier.user_message = null; carrier.assistant_message = null;
+    const claim = rows.get(`${SCENARIO}:${carrier.turn_id}:claim`)!;
+    claim.pending_actions = structuredClone(carrier.pending_actions);
+    const { default: scenarioGraphRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    const reload = Fastify({ logger: false }); await reload.register(scenarioGraphRoute); await reload.ready();
+    const before = bytes();
+    try {
+      const read = await reload.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+      expect(read.statusCode, read.body).toBe(200);
+      expect(read.json().proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: p.proposal_id, revision: p.revision, digest: p.digest, issued_turn_id: null }),
+      ]);
+      expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+    } finally { await reload.close(); }
+  }, 120_000);
+  it('P53 prop digest CONTROL: the same held record has the same digest under different issuing rows', async () => {
+    seed(); const offered = await assumptions(); const p = shown(offered);
+    const { proposalRecord, proposalFieldsWire } = await import('../proposal-object/record.js');
+    const held = (await pending()).find(pa => pa.id === p.revision)!;
+    const record = proposalRecord(held, graphNow())!;
+    const firstTurn = randomUUID(); const secondTurn = randomUUID();
+    const first = proposalFieldsWire([record], offered._proposal_fields!.graph_hash, new Map([[record.revision, firstTurn]]))!;
+    const second = proposalFieldsWire([record], offered._proposal_fields!.graph_hash, new Map([[record.revision, secondTurn]]))!;
+    expect(first.proposals[0]!.issued_turn_id).toBe(firstTurn);
+    expect(second.proposals[0]!.issued_turn_id).toBe(secondTurn);
+    expect(first.proposals[0]!.digest).toBe(p.digest);
+    expect(second.proposals[0]!.digest).toBe(p.digest);
+    expect(record.digest).toBe(p.digest);
+    expect({ ...first.proposals[0], issued_turn_id: null }).toEqual({ ...second.proposals[0], issued_turn_id: null });
+  }, 120_000);
+  it('P53 prop reload replay RED: latest reply retains the first issuing row and graph-read binding still commits', async () => {
+    seed(); const offered = await assumptions(); const issued = latestRow()!.turn_id;
+    const latest = randomUUID(); const message = 'Explain the estimate before I approve it.';
+    const original = await turn({ turn_id: latest, message });
+    expect(shown(original)).toMatchObject({ proposal_id: shown(offered).proposal_id, issued_turn_id: issued });
+    vi.resetModules();
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const { default: scenarioGraphRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    const cold = Fastify({ logger: false });
+    await cold.register(scenarioGraphRoute); await cold.register(agentV1TurnRoute); await cold.ready();
+    try {
+      const replay = await cold.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: latest, message } });
+      expect(replay.statusCode, replay.body).toBe(200);
+      expect((replay.json() as Body)._proposal_fields).toEqual(original._proposal_fields);
+      const read = await cold.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+      expect(read.statusCode, read.body).toBe(200);
+      const wire = read.json().proposal_fields as NonNullable<Body['_proposal_fields']>;
+      expect(wire).toEqual(original._proposal_fields);
+      const p = wire.proposals.find(x => x.proposal_id === shown(offered).proposal_id)!;
+      const approval = await cold.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...press(p),
+        proposal_edits: { proposal_id: p.proposal_id, revision: p.revision, digest: p.digest, graph_hash: wire.graph_hash, fields: [] } } });
+      expect(approval.statusCode, approval.body).toBe(200);
+      const accepted = approval.json() as Body;
+      expect(accepted._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+      expect(graphWrites.get(SCENARIO)).toBe(1);
+      expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption' });
+      expect(accepted.assistant_text).not.toMatch(/You set|Left as Olumi's estimate/);
+    } finally { await cold.close(); }
   }, 120_000);
   it('floor cap RED: a concurrent arrival and this new approval keep room; the displaced hold is re-projected, and said at the start of the next reply', async () => {
     seed(); const first = await assumptions(); const second = await links(); const two = await pending();

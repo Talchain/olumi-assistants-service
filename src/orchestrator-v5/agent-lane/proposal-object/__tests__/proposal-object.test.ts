@@ -3,7 +3,7 @@
  * inflight/lane-edit-panel-DESIGN.md). Pure rows; the route-level journey is `held-proposal-user-in-control-seam.test.ts`.
  * Fixtures are the add-risk door's REAL batch shape (`add-risk-transaction.ts` + `hypothesisEdgeValue`).
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { findForbiddenPhraseHit } from '../../../compose/forbidden-user-facing-phrases.js';
@@ -12,7 +12,7 @@ import { hypothesisEdgeValue } from '../../../routing/add-option-transaction.js'
 import { tryShortConfirmResume } from '../../../routing/deterministic-short-confirm.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { amendHeldOperations, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../amend.js';
-import { FIELD_CLASS_BY_OP, declinedProposalOf, heldChangeName, productHoldRecord, proposalFieldsWire } from '../record.js';
+import { FIELD_CLASS_BY_OP, declinedProposalOf, heldChangeName, issuedTurnIdsForProposalRecords, productHoldRecord, proposalFieldsWire, proposalRecord, type ProposalIssuingRow } from '../record.js';
 import { PROPOSAL_IDLE_TTL_MS, reconcileHeldProposals, refreshedHold } from '../lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../reply.js';
 
@@ -54,6 +54,81 @@ const hold = (over: Partial<PendingAction> & { ops?: unknown[]; ref?: string } =
 });
 const TO_GOAL = 'link_strength:risk_competitive_response::goal_x';
 const FROM_PRICE = 'link_strength:fac_price::risk_competitive_response';
+
+describe('P53 bounded issuing-answer lookup', () => {
+  const emittedMs = Date.parse(hold().emitted_at_iso);
+  const answer = (turnId: string, offsetMs: number, pending?: readonly unknown[]): ProposalIssuingRow => ({
+    turn_id: turnId, created_at: new Date(emittedMs + offsetMs).toISOString(),
+    request_hash: `agent_turn:${turnId}`, user_message: 'Continue the shared reasoning.', assistant_message: 'The change is held.',
+    ...(pending === undefined ? {} : { pending_actions: pending }),
+  });
+
+  it('the inclusive 2 s skew boundary selects the earliest public answer, with one verification read and the same digest', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const rows = [answer('later', 1000), answer('skew-boundary', -2000), answer('too-early', -2001),
+      answer('claim:claim', -1500), { ...answer('internal', -1750), request_hash: 'sha256:internal' }];
+    const read = vi.fn(async () => ({ pending_actions: [pending] }));
+    const before = JSON.stringify({ record, rows });
+    const issued = await issuedTurnIdsForProposalRecords([record], rows, read);
+    expect([...issued]).toEqual([[record.revision, 'skew-boundary']]);
+    expect(read.mock.calls).toEqual([['skew-boundary']]);
+    const bound = proposalFieldsWire([record], HASH, issued)!;
+    expect(bound.proposals[0]!.issued_turn_id).toBe('skew-boundary');
+    expect(bound.proposals[0]!.digest).toBe(record.digest);
+    expect({ ...bound.proposals[0], issued_turn_id: null }).toEqual(proposalFieldsWire([record], HASH)!.proposals[0]);
+    expect(JSON.stringify({ record, rows })).toBe(before);
+  });
+
+  it('a candidate carrying another revision stays unknown, even when a later answer has the requested hold', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const other = hold({ id: '22222222-2222-4222-8222-222222222222' });
+    const read = vi.fn(async (turnId: string) => ({ pending_actions: turnId === 'first' ? [other] : [pending] }));
+    const issued = await issuedTurnIdsForProposalRecords([record], [answer('later', 5000), answer('first', 0)], read);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+    expect(read.mock.calls).toEqual([['first']]);
+  });
+
+  it('one failed candidate read leaves only that hold unknown and verifies the other hold once', async () => {
+    const first = hold();
+    const second = hold({ id: '22222222-2222-4222-8222-222222222222', ref: 'gmh_bbbbbbbbbbbb',
+      emitted_at_iso: new Date(emittedMs + 10_000).toISOString() });
+    const records = [proposalRecord(first, graph)!, proposalRecord(second, graph)!];
+    const read = vi.fn(async (turnId: string) => {
+      if (turnId === 'first') throw new Error('Exact row unavailable');
+      return { pending_actions: [first, second] };
+    });
+    const issued = await issuedTurnIdsForProposalRecords(records, [answer('later', 20_000), answer('second', 10_000), answer('first', 0)], read);
+    expect(proposalFieldsWire(records, HASH, issued)!.proposals.map(p => [p.revision, p.issued_turn_id]))
+      .toEqual([[first.id, null], [second.id, 'second']]);
+    expect(read.mock.calls).toEqual([['first'], ['second']]);
+  });
+
+  it.each([
+    ['invalid emission', 'not-a-date', [answer('first', 0)]],
+    ['undated rows', hold().emitted_at_iso, [{ ...answer('first', 0), created_at: undefined }]],
+    ['invalid row date', hold().emitted_at_iso, [{ ...answer('first', 0), created_at: 'not-a-date' }]],
+    ['no row at the cutoff', new Date(emittedMs + 10_000).toISOString(), [answer('first', 0)]],
+    ['hold before the window', hold().emitted_at_iso, [answer('carried', 2001)]],
+    ['only a claim row', hold().emitted_at_iso, [answer('claim:claim', 0)]],
+    ['no public text', hold().emitted_at_iso, [{ ...answer('first', 0), user_message: null, assistant_message: null }]],
+  ] as const)('%s stays unknown with zero verification reads', async (_reason, emittedAt, rows) => {
+    const pending = hold({ emitted_at_iso: emittedAt }); const record = proposalRecord(pending, graph)!;
+    const read = vi.fn(async () => ({ pending_actions: [pending] }));
+    const issued = await issuedTurnIdsForProposalRecords([record], rows, read);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('inline carriers verify without a store read, and an empty inline candidate never retries a later carrier', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const read = vi.fn(async () => ({ pending_actions: [pending] }));
+    const issued = await issuedTurnIdsForProposalRecords([record], [answer('later', 5000, [pending]), answer('first', 0, [pending])], read);
+    expect([...issued]).toEqual([[record.revision, 'first']]);
+    const unmatched = await issuedTurnIdsForProposalRecords([record], [answer('later', 5000, [pending]), answer('first', 0, [])], read);
+    expect(proposalFieldsWire([record], HASH, unmatched)!.proposals[0]!.issued_turn_id).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+});
 
 describe('the ONE proposal object (record.ts)', () => {
   it('a held risk projects one field per held link — bound to the op path — with whose each value is, and its missing level', () => {

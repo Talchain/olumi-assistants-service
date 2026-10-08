@@ -77,10 +77,11 @@ import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js'
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
-import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
+import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
+import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
@@ -2036,6 +2037,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
       ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
+    /** Live turns and replays resolve issuance exactly as reload does, from one bounded recent window. */
+    const proposalIssuers = async (records: readonly ProposalRecord[]): Promise<ReadonlyMap<string, string>> => {
+      if (records.length === 0) return new Map();
+      try {
+        const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
+        return await issuedTurnIdsForProposalRecords(records, rows, typeof store.readCommittedTurn === 'function'
+          ? id => store.readCommittedTurn!(scenarioId, id) : undefined);
+      }
+      catch (err) {
+        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: proposal issuing window unreadable');
+        return new Map();
+      }
+    };
     /** A replay returns the bound presentation on today's state, with no model call. */
     /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
     const liveHeldRefs = async (sid: string): Promise<string[]> => {
@@ -2056,9 +2070,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const currentPending = typeof store.readMostRecentPendingActions === 'function'
         ? await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }) : [];
       const currentScope = currentPending.filter(p => p.action.kind === 'reconcile_goal_scope');
+      const priorRecords = (prior.pending_actions ?? []).flatMap(p => {
+        // Rendering keeps the exact original card even when its old lifetime elapsed; current live membership and
+        // the current graph pin below still decide whether this target may be offered at all.
+        const emittedAt = Date.parse(p.emitted_at_iso);
+        const r = proposalRecord(p, read.graph, Number.isFinite(emittedAt) ? emittedAt : Date.now());
+        return r && r.base_graph_hash === read.graphHash ? [r] : [];
+      });
       const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
-        .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso));
-      const replayFields = proposalFieldsWire(replayRecords, read.graphHash);
+        .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso))
+        // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record.
+        .map(r => priorRecords.find(old => old.proposal_id === r.proposal_id) ?? r);
+      const replayIssuers = await proposalIssuers(replayRecords);
+      const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
       /**
        * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
@@ -2759,8 +2783,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const editsApplied = applied.ok === true && applied.mutated === true ? readUserEdits(applied.user_edits) : undefined;
         editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
         const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
+        const refusedBinding = editsForThisCard?.fields.length === 0
+          && (applied.refusal === 'edits_superseded' || applied.refusal === 'superseded' || applied.refusal === 'unknown_proposal');
         const followUp = [editedLinks ? '' : guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
-          editsRefusedThisTurn ? editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
+          editsRefusedThisTurn ? refusedBinding ? PLAIN_APPROVAL_SUPERSEDED
+            : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
         const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
@@ -3913,8 +3940,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredProposal = offeredApprove !== undefined ? proposals.get(typedApprovalOf({ chip: { id: offeredApprove.id } }) as string) : undefined;
     const emittedAtIso = new Date().toISOString();
     // S-D: preserve a stored carrier's revision. Each proposal has its own pending item.
+    const existingApprovalCarrier = offeredProposal !== undefined
+      ? liveHolds.find(h => heldProposalId(h) === offeredProposal.proposal_id) : undefined;
     const approvalCarrier = offeredApprove !== undefined && offeredProposal !== undefined
-      ? liveHolds.find(h => heldProposalId(h) === offeredProposal.proposal_id)
+      ? existingApprovalCarrier
         ?? refreshedHold(proposalPendingAction(offeredProposal, offeredApprove, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso }), Date.now()) : undefined;
     if (approvalCarrier !== undefined && !liveHolds.some(h => h.chip_id === approvalCarrier.chip_id)) {
       liveHolds = [...liveHolds, approvalCarrier];
@@ -4719,6 +4748,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
       'PREMORTEM_WORKSHEET_WITHHELD');
     }
+    const issuedTurnIds = await proposalIssuers(heldRecords);
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),
@@ -4742,7 +4772,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * (`OlumiResponseSchema` is `.strict()`; the UI parser moves an undeclared root key into `__additive__`), bound to
        * this response's `graph_hash`. Absent when nothing is held.
        */
-      ...((): Record<string, unknown> => { const w = proposalFieldsWire(heldRecords, graphHash); return w !== undefined ? { _proposal_fields: w } : {}; })(),
+      ...((): Record<string, unknown> => { const w = proposalFieldsWire(heldRecords, graphHash, issuedTurnIds); return w !== undefined ? { _proposal_fields: w } : {}; })(),
       /**
        * ⭐ RT-1: which selected elements this answer was given, route-v2's `_grounded_selection` shape (DGAI
        * `GroundedOnNotice` reads it). A sidecar like `_not_modelled`; absent when nothing was selected or the turn never
