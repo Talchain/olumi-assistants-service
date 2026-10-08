@@ -93,7 +93,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, isDecisionInputAsk, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
@@ -590,6 +590,29 @@ async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, e
     .slice(0, RECENT_REPLIES_READ)
     .map((t) => t.assistant_message)
     .filter((m): m is string => typeof m === 'string');
+}
+
+/**
+ * ⭐ A7 SAID LAST TURN → MORE DETAIL (DL 58e392 follow-up after RC6; Paul's test 8 Oct: "This model doesn't yet say whether any
+ * option gets there within 12 months." on the face of EVERY Run/Explain reply). When the graph owes A7 and the latest answer
+ * the user read already said it word for word, this reply types it `detail`: still said, under More detail, never removed.
+ * `null` when A7 is not owed, the latest answer did not say it, or the read fails (then it stays where it is).
+ */
+/** A7 typed `detail` (one role per unit: any other typing of the same line is replaced). Pure; unchanged when `a7` is null. */
+export function withA7AsDetail(obligations: readonly FaceObligation[], a7: string | null, text: string): FaceObligation[] {
+  if (a7 === null || !text.includes(a7)) return [...obligations];
+  return [...obligations.filter((o) => o.text !== a7), { role: 'detail', text: a7 }];
+}
+
+async function a7SaidLastTurn(graph: unknown, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string | null> {
+  const a7 = untestedHorizonLine(graph);
+  if (a7 === null) return null;
+  try {
+    const [latest] = await recentAgentReplies(store, scenarioId, exceptTurnId);
+    return typeof latest === 'string' && latest.includes(a7) ? a7 : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -2303,8 +2326,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // live branch it does not mirror (leader gate, a proposal card's profile, a link ask, a held lapse…) would compose a
       // different shape. So the shape rides only when the composed replay IS the stored words the user first saw; any
       // other replay ships the rebuilt text whole, as before 2b-0 (the structural-challenge replay's rule).
+      // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
+      const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, store, scenarioId, turnId);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: replayObligations, graph: state.graph ?? null, profile: 'coaching' });
+        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText)), graph: state.graph ?? null, profile: 'coaching' });
       const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const replayCard = replayRecords[0];
@@ -4633,10 +4658,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
+      const a7Repeat = await a7SaidLastTurn(readbackGraph, store, scenarioId, turnId);
       const composedReply = composeReplyShape({
         text: reply,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
-        obligations,
+        obligations: withA7AsDetail(obligations, a7Repeat, reply),
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }

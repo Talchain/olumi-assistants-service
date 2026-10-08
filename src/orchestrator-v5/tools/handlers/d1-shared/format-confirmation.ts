@@ -5,14 +5,14 @@
  *   - Percentages: no space before "%".  "5%" not "5 %".
  *   - Currency: no space between symbol and number. "£50,000" not "£ 50,000".
  *   - Other units: single space.          "12 months", "800 customers".
- *   - Edge strengths: never raw decimals — always band words via
- *     `edgeBandFromMagnitude` (the ONE edge-strength table, the canvas's own cuts; do not duplicate).
+ *   - Edge strengths: never raw decimals — sizing-aware words through
+ *     `edgeStrengthWords` (the ONE edge-strength table, the canvas's own cuts; do not duplicate).
  */
 
 import {
   NEAR_ZERO_INFLUENCE_THRESHOLD,
 } from '../../../format/influence-bands.js';
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../../../format/edge-strength-words.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/limit-operator-words.js';
 import { sayLimitInFrame } from '../../../agent-lane/limit-frame.js';
@@ -587,6 +587,9 @@ export interface EdgeAdjustmentInput {
   readonly toLabel: string;
   readonly beforeMean: number;
   readonly afterMean: number;
+  /** Internal edge identities carry sizing into the receipt; means remain for legacy direct callers. */
+  readonly beforeEdge?: unknown;
+  readonly afterEdge?: unknown;
   /** Explicit persisted directions are required to describe zero honestly. */
   readonly beforeDirection?: 'positive' | 'negative';
   readonly afterDirection?: 'positive' | 'negative';
@@ -595,15 +598,21 @@ export interface EdgeAdjustmentInput {
 }
 
 /**
- * Decision-language edge adjustment confirmation. Uses `edgeBandFromMagnitude`
+ * Decision-language edge adjustment confirmation. Uses `edgeStrengthWords`
  * for strength and surfaces direction reversal explicitly. Never emits
  * the raw mean.
  */
 export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
-  const beforeBand = describeBandWithDirection(input.beforeMean);
-  const afterBand = describeBandWithDirection(input.afterMean);
+  const beforeBand = edgeStrengthWords(input.beforeEdge ?? {
+    strength: { mean: input.beforeMean },
+    ...(input.beforeUnsized === true ? { sizing: 'placeholder' } : {}),
+  }, 'direction');
+  const afterBand = edgeStrengthWords(input.afterEdge ?? { strength: { mean: input.afterMean } }, 'direction');
+  if (afterBand === 'not sized yet') {
+    return `The link between ${input.fromLabel} and ${input.toLabel} is not sized yet.`;
+  }
   // A placeholder's default is not a size: say what it is now, never "from <the default's band>".
-  if (input.beforeUnsized === true) {
+  if (beforeBand === 'not sized yet') {
     return `Set the link between ${input.fromLabel} and ${input.toLabel} to ${afterBand}; nobody had sized it before.`;
   }
 
@@ -659,7 +668,7 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
   if (beforeBand === afterBand) {
     const link = `Adjusted the link between ${input.fromLabel} and ${input.toLabel}.`;
     // ⚠ THE BAND NOUN DOES NOT READ AS A PREDICATE COMPLEMENT AT NEAR-ZERO.
-    // `describeBandWithDirection` returns the literal 'no material influence'
+    // `edgeStrengthWords` returns the literal 'no material influence'
     // below NEAR_ZERO_INFLUENCE_THRESHOLD, so "its strength is still no
     // material influence" is not English — the same trap
     // `formatEdgeStrengthUnchanged` already special-cases forty lines below,
@@ -699,15 +708,21 @@ export function formatEdgeStrengthUnchanged(input: {
   readonly fromLabel: string;
   readonly toLabel: string;
   readonly mean: number;
+  /** The saved edge, so an approval's post-state sizing governs the receipt. */
+  readonly edge?: unknown;
   /** Science 393023 LICENCE ruling 3: a placeholder's default is not a size, so no band is named for it. */
   readonly unsized?: boolean;
 }): string {
   const link = `The link between ${input.fromLabel} and ${input.toLabel}`;
-  if (input.unsized === true) return `${link} has not been sized yet; nothing was changed.`;
-  if (Math.abs(input.mean) < NEAR_ZERO_INFLUENCE_THRESHOLD) {
+  const band = edgeStrengthWords(input.edge ?? {
+    strength: { mean: input.mean },
+    ...(input.unsized === true ? { sizing: 'placeholder' } : {}),
+  }, 'direction');
+  if (band === 'not sized yet') return `${link} has not been sized yet; nothing was changed.`;
+  if (band === 'no material influence') {
     return `${link} already has no material influence.`;
   }
-  return `${link} is already ${describeBandWithDirection(input.mean)}.`;
+  return `${link} is already ${band}.`;
 }
 
 /**
@@ -729,13 +744,4 @@ export function formatEdgeStrengthConfirmed(input: {
   if (input.sizing === 'olumi_accepted') return acceptedOlumiEstimateSentence(input.fromLabel, input.toLabel);
   const confirmed = `Confirmed the current strength of the link between ${input.fromLabel} and ${input.toLabel}`;
   return input.sizing === 'user' ? `${confirmed} as your judgement.` : `${confirmed}.`;
-}
-
-function describeBandWithDirection(mean: number): string {
-  const abs = Math.abs(mean);
-  if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'no material influence';
-  // ONE word per band, the canvas's (DL D4 row; served s7-d4: this turn said "weak" where the canvas and the rerun line say
-  // "slight"). The enum keeps `weak`; every word a user reads is CANVAS_BAND_WORD's.
-  const band = CANVAS_BAND_WORD[edgeBandFromMagnitude(abs)];
-  return mean < 0 ? `${band} (negative)` : band;
 }
