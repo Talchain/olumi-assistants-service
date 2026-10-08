@@ -524,7 +524,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     // r15 contract re-pin: "cell-sourced marker". The authoritative read records a withheld cell whose
     // cause was not retained; a leader-claim closing alone cannot supply this goal-chance marker.
     readbackCellRows = [{ option_id: 'keep_pro_at_49', main_driver: { kind: 'not_recorded' },
-      cell: { kind: 'withheld', face: 'Olumi can’t yet say its chance of meeting your goal, in this model.',
+      cell: { kind: 'withheld', why: 'Chance not shown yet', face: 'Olumi can’t yet say its chance of meeting your goal, in this model.',
         reasons: [{ code: 'reason_not_recorded', message: null }] } }];
     const { b, turnId } = await typedRun(served.text);
     expect(b._diagnostic_trace.leader_claim_enforced, 'the control: the gate edited this turn').toBe(true);

@@ -47,7 +47,7 @@ const RANGE_CELL = { kind: 'range' as const, display: '20%–60%', detail: { ran
 describe('ONE reply horizon clause: exact held-target and present-number wording', () => {
   it('withheld and none cells restore staging\'s chance-free wording, shared by host and Run warning', () => {
     const graph = graphWith();
-    const chanceCells = [{ kind: 'withheld' as const, face: 'Not shown. The current level is missing.', reasons: [{ code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: 'Not shown. The current level is missing.' }] }, { kind: 'none' as const }];
+    const chanceCells = [{ kind: 'withheld' as const, why: 'Chance not shown yet', face: 'Not shown. The current level is missing.', reasons: [{ code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: 'Not shown. The current level is missing.' }] }, { kind: 'none' as const }];
     const line = "This model doesn't yet say whether any option gets there within 12 months.";
     expect(untestedHorizonLineForCells(graph, chanceCells)).toBe(line);
     expect(decisionInputLines(graph, {
@@ -65,7 +65,7 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
   it('figure/range count owns the chance form, including a mixed withheld cell', () => {
     const figure = { kind: 'figure' as const, display: 'about 40%' };
     const range = RANGE_CELL;
-    const withheld = { kind: 'withheld' as const, face: 'Why this figure is withheld is not recorded.', reasons: [{ code: 'reason_not_recorded', message: null }] };
+    const withheld = { kind: 'withheld' as const, why: 'Chance not shown yet', face: 'Why this figure is withheld is not recorded.', reasons: [{ code: 'reason_not_recorded', message: null }] };
     expect(untestedHorizonLineForCells(graphWith(), [figure, withheld])).toBe(FULL);
     expect(untestedHorizonLineForCells(graphWith(), [range])).toBe(FULL);
     expect(untestedHorizonLineForCells(graphWith(), [figure, range, withheld])).toBe(PLURAL);
