@@ -191,9 +191,10 @@ export function guidedSizingProgress(graph: unknown, run?: unknown): { draft: Gu
   const enrichment = record(r?.enrichment);
   const warning = (Array.isArray(enrichment?.inference_warnings) ? enrichment.inference_warnings : []).map(record)
     .find(w => w?.code === GOAL_FIGURES_PLACEHOLDER_PATH);
-  // A selected Run owns M's option scope, just as it owned N. Never include excluded stored options.
-  const options = r !== undefined ? scoredOptionIdsForRun(run, warning) ?? []
-    : (Array.isArray(nodes) ? nodes.map(record) : []).filter(n => n?.kind === 'option')
+  // A recorded Run scope owns M, including an explicitly empty scope. Legacy Runs
+  // without a recorded scope retain the stored-graph progress used by the inspector.
+  const options = (r !== undefined ? scoredOptionIdsForRun(run, warning) : undefined)
+    ?? (Array.isArray(nodes) ? nodes.map(record) : []).filter(n => n?.kind === 'option')
       .flatMap(n => typeof n?.id === 'string' ? [n.id] : []);
   const evaluations = r?.identity_evaluations ?? enrichment?.identity_evaluations;
   const snapshot = record(r?.input_snapshot);

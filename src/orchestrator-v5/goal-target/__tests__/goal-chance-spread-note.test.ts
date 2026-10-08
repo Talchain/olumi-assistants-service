@@ -218,10 +218,27 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const b = lines.find(l => l.option_id === B)!;
     expect(b.spread_note).toBe(SPREAD_NOTE_WITHOUT_DOWNSIDE);
     expect(b.shortfall_note).toBe(`In its worst 1 in 20 runs of this model, ‘${b.label}’ falls short of your target by £15,000 / month or more.`);
-    expect(b.chance).toBe(`‘${b.label}’: ${b.figure} chance of meeting your goal, in this model, using Olumi's estimates for 2 links (see Check estimates). ${SPREAD_NOTE_WITHOUT_DOWNSIDE} ${b.shortfall_note}`);
+    // r8: both captured Olumi-marked links are validated accounting definitions, which RC4 excludes.
+    expect(b.olumi_estimate_link_count).toBeUndefined();
+    expect(b.chance).toBe(`‘${b.label}’: ${b.figure} chance of meeting your goal, in this model. ${SPREAD_NOTE_WITHOUT_DOWNSIDE} ${b.shortfall_note}`);
     const sq = lines.find(l => l.option_id === SQ)!;
     expect(sq.shortfall_note).toBe(`In this model, ‘${sq.label}’ falls short of your target in almost every run, typically by about £6,000 / month.`);
-    expect(sq.chance).toBe(`‘${sq.label}’: less than 1% chance of meeting your goal, in this model, using Olumi's estimates for 2 links (see Check estimates). ${sq.shortfall_note}`);
+    expect(sq.chance).toBe(`‘${sq.label}’: less than 1% chance of meeting your goal, in this model. ${sq.shortfall_note}`);
+  });
+  it('r8 CONTRAST: two ordinary unaccepted estimates still carry the 2-link label and remove bare narrated chances', () => {
+    const { g, result } = shortfallScreenFixture();
+    for (const edge of g.edges.filter((e: Json) => e.provenance?.magnitude === 'olumi_estimate')) {
+      edge.provenance.definitional = false;
+    }
+    const lines = goalChanceScreenLinesForAgent(result, g, true);
+    for (const line of lines) {
+      expect(line.olumi_estimate_link_count).toBe(2);
+      expect(line.chance).toContain("using Olumi's estimates for 2 links (see Check estimates).");
+    }
+    const bare = 'Raise prices by 10% has a 55% chance of meeting your goal.';
+    const out = withScreenLinesOwed(bare, lines).text;
+    expect(out).not.toContain(bare);
+    for (const line of lines) expect(out).toContain(line.chance);
   });
   it('B19 r3 owed insertion: Agent wording stays and the canonical shortfall unit is appended once', () => {
     const { lines } = shortfallScreenFixture();

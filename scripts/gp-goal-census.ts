@@ -1,12 +1,14 @@
 /**
  * Offline GUIDED PATH census. No network, model, or database calls.
  * Run: node --import tsx scripts/gp-goal-census.ts --base <baseline> --head <reviewed HEAD>
+ *      --root <full corpus> [--root <full corpus> ...] [--capture-root <capture corpus> ...]
  *
  * Replays the actual pinned and working-tree target verdicts and goal-chance
  * licences. Graph-only and already-stripped Run records remain explicit;
  * this script never invents probabilities to manufacture a shown result.
  */
 import { createHash } from 'node:crypto';
+import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
@@ -14,16 +16,20 @@ import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(process.cwd());
+if (process.env.CI) throw new Error('The offline census must run locally, not in CI.');
 const args = process.argv.slice(2);
 const values = new Map<string, string>();
+const roots: { path: string; capturesOnly: boolean }[] = [];
 let checkIdentityOnly = false;
 for (let i = 0; i < args.length; i++) {
   const key = args[i]!;
   if (key === '--check-identity') { checkIdentityOnly = true; continue; }
-  if (!['--base', '--head'].includes(key) || values.has(key) || !args[i + 1] || args[i + 1]!.startsWith('--')) {
-    throw new Error('Usage: gp-goal-census.ts --base <baseline> --head <reviewed HEAD> [--check-identity]');
+  if (!['--base', '--head', '--root', '--capture-root'].includes(key) || values.has(key) || !args[i + 1] || args[i + 1]!.startsWith('--')) {
+    throw new Error('Usage: gp-goal-census.ts --base <baseline> --head <reviewed HEAD> --root <corpus> [--root <corpus> ...] [--capture-root <captures> ...] [--check-identity]');
   }
-  values.set(key, args[++i]!);
+  const value = args[++i]!;
+  if (key === '--root' || key === '--capture-root') roots.push({ path: resolve(value), capturesOnly: key === '--capture-root' });
+  else values.set(key, value);
 }
 if (!values.has('--base') || !values.has('--head')) {
   throw new Error('Both --base and --head are required; the census has no pinned defaults.');
@@ -34,7 +40,6 @@ const BASE = commitOf(values.get('--base')!);
 const EXPECTED_HEAD = commitOf(values.get('--head')!);
 const OUT = join(ROOT, 'GP-CENSUS.md');
 const RAW = join(ROOT, 'GP-CENSUS.json');
-const roots = [ROOT, '/private/tmp/accel-p44/goalreach', '/Users/paulslee/Documents/GitHub/output'];
 type Rec = Record<string, any>;
 type Direction = 'at least' | 'at most' | 'maximise' | 'minimise' | 'other';
 const DIRECTIONS: Direction[] = ['at least', 'at most', 'maximise', 'minimise', 'other'];
@@ -118,12 +123,13 @@ const load = loadavg()[0]!;
 console.log(`Load gate: ${load.toFixed(2)} < 25`);
 if (load >= 25) throw new Error('Load gate failed; census not run.');
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-if (head !== EXPECTED_HEAD) throw new Error(`Expected HEAD ${EXPECTED_HEAD}, got ${head}`);
+assert.equal(head, EXPECTED_HEAD, `Expected HEAD ${EXPECTED_HEAD}, got ${head}`);
 console.log(`Census identities: ${BASE} → ${head} (working tree).`);
 if (checkIdentityOnly) process.exit(0);
+assert.ok(roots.length > 0, 'At least one caller-supplied --root or --capture-root is required; the census has no local path defaults.');
 const sourceTreeSha256 = (): string => {
   const sourceFiles = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'src', 'scripts', 'tools'],
-    { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(Boolean).sort();
+    { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(file => file !== '' && existsSync(join(ROOT, file))).sort();
   const digest = createHash('sha256');
   for (const file of sourceFiles) {
     digest.update(file + '\0');
@@ -165,20 +171,20 @@ function parseStored(text: string): unknown[] {
   if (values.length > 0) return values;
   throw new Error('No valid JSON record or SSE data record found.');
 }
-for (const root of roots) {
+for (const { path: root, capturesOnly } of roots) {
   const inventory = files(root);
   let parsed = 0, selected = 0;
   for (const file of inventory) {
     const text = readFileSync(file, 'utf8');
     // Other output graphs may be needed to bind a separately captured Run by its actual hash.
-    if (root === roots[2] && !text.includes('analysis_result') && !(/"nodes"/.test(text) && /"edges"/.test(text))) continue;
+    if (capturesOnly && !text.includes('analysis_result') && !(/"nodes"/.test(text) && /"edges"/.test(text))) continue;
     selected++;
     try {
       const values = parseStored(text);
       values.forEach((value, i) => documents.push(extract(file + (values.length > 1 ? `#line${i + 1}` : ''), root, value)));
       parsed++;
     } catch (error) {
-      const relevant = root === roots[2] ? text.includes('analysis_result')
+      const relevant = capturesOnly ? text.includes('analysis_result')
         : /"(?:nodes|analysis_result|option_comparison|option_results|probability_of_goal)"/.test(text);
       (relevant ? parseErrors : auxiliaryParseErrors).push({ file, error: String(error) });
     }
@@ -434,7 +440,7 @@ try {
     '| Corpus | JSON/JSONL inventoried | Selected | Parsed |', '|---|---:|---:|---:|',
     ...coverage.map(c => `| ${c.root} | ${c.files} | ${c.selected} | ${c.parsed} |`), '',
     `Found ${allGraphs.length} stored graph occurrences and ${documents.reduce((n, d) => n + d.runs.length, 0)} stored Run occurrences. Canonical graph+Run SHA-256 de-duplicates copies; GP-CENSUS.json retains every occurrence, pairing, verdict, licence and count.`,
-    'Output selects every local JSON/JSONL/SSE file containing analysis_result, plus graph files needed for exact Run binding. Repo and goalreach scan every JSON/JSONL/SSE fixture/capture; dependency/build/cache trees are excluded. Embedded JSON, concatenated JSON and raw/embedded SSE JSON bodies are extracted. Executable TypeScript fixture builders are not stored JSON fixtures.',
+    'Caller-supplied --capture-root corpora select every JSON/JSONL/SSE file containing analysis_result, plus graph files needed for exact Run binding. Caller-supplied --root corpora scan every JSON/JSONL/SSE fixture/capture; dependency/build/cache trees are excluded. Embedded JSON, concatenated JSON and raw/embedded SSE JSON bodies are extracted. Executable TypeScript fixture builders are not stored JSON fixtures.',
     'Runs pair to their graph in the same captured document, by exact captured/recomputed graph hash, or by the named stored -cur.plot-body/-graph fixture pairing. Option identities must agree. Hash-equivalent graph variants must agree on both actual replays. Ambiguous or missing pairs are reported, never matched by labels or guessed from directory proximity.',
     'Licence replay pins the original authoritative option-result source before replacing owned target/licence warnings, uses stored probabilities only, applies the actual placeholder/product/target seams and chance licence, and preserves unrelated captured withholds. Empty stripped current sources never fall back to historical result copies. A removed chance cannot be recovered without a raw stored Run: those cases are licence unavailable, never counted as proven shown or unchanged.',
     "k comes solely from RC4's olumiEstimatesFeedingResult, fed by assembleGuidanceSignals. Current replay uses the same scored-option attribution helper and graph-bound validatedDefinition reader as the stored licence. Values, accepted estimates, off-path links, validated definitions and placeholders never enter current k.",

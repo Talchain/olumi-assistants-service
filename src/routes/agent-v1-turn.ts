@@ -4078,7 +4078,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
     const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,
-      await guidedSizingHistory(store, scenarioId, undefined));
+      guidedDraft === undefined ? [] : await guidedSizingHistory(store, scenarioId, undefined));
     offeredNow.push(...guidedActions);
     const guidedSizing = bindGuidedSizing(guidedDraft, guidedActions, {
       graph_hash: graphHash ?? '',

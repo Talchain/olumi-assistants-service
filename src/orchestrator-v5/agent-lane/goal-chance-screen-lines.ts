@@ -231,15 +231,15 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
     body = narratorCountGuard(body, null).text;
     // Only a complete producer-bound point may narrate these goal chances. The masked canonical
     // sentences retain their bytes; any bare goal figure is removed before the labelled lines are owed.
-    body = body.split(/(\u0000GP_ESTIMATE_POINT_\d+\u0000)/).map(part =>
-      part.startsWith('\u0000GP_ESTIMATE_POINT_') ? part : part.split('\n').map(row => {
+    body = body.split('\u0000').map(part =>
+      part.startsWith('GP_ESTIMATE_POINT_') ? part : part.split('\n').map(row => {
         const sentences = sentencesOf(row);
         const kept = sentences.filter(sentence => {
           const plain = sentence.replace(/[*_`]/g, '');
           return !/\d+(?:\.\d+)?\s*%\s+(?:chance|probability)\b/i.test(plain);
         });
         return kept.length === sentences.length ? row : kept.join(' ');
-      }).join('\n')).join('');
+      }).join('\n')).join('\u0000');
     for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000`).join(chance);
   }
   const hasShortfall = lines.some(l => l.shortfall_note !== undefined);
@@ -277,21 +277,9 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
           return part.replace(chanceOnly, l.chance);
         });
         added += 1;
-      } else {
-        const rows = spreadBody(body).split('\n');
-        const rowAt = rows.findIndex(row => row.includes(l.label) && row.includes(l.figure));
-        if (rowAt >= 0) {
-          body = removeSpread(body, l.spread_note);
-          const cleanRows = body.split('\n');
-          const row = cleanRows[rowAt]!;
-          const figureEnd = spreadBody(row).indexOf(l.figure) + l.figure.length;
-          const stop = spreadBody(row).indexOf('.', figureEnd);
-          const end = stop < 0 ? row.length : stop + 1;
-          cleanRows[rowAt] = `${row.slice(0, end)} ${l.spread_note}${row.slice(end)}`;
-          body = cleanRows.join('\n');
-          added += 1;
-        }
       }
+      // A shorthand figure without its note owes the complete chance/notes unit below.
+      // A row may also contain another option's opaque shortfall unit, so it cannot supply an insertion point.
     }
     if (alreadySaid(spreadBody(body), l)) continue;
     // Move any existing note behind its own chance, including when the Agent gave only the figure.

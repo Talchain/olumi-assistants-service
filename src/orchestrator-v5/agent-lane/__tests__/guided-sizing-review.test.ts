@@ -28,6 +28,19 @@ function storedSize(graph: Json): void {
   delete edge.defaulted;
 }
 describe('GUIDED PATH round 7 reviewed identity and Run scope', () => {
+  it('r8 legacy Run without a recorded option scope keeps stored-graph inspector progress', () => {
+    const { graph } = draw3();
+    storedSize(graph);
+    const legacyRun = { enrichment: { analysis_status: 'computed' } };
+    expect(guidedSizingProgress(graph, legacyRun)?.remaining).toBe(2);
+    expect(guidedSizingProgress(graph, legacyRun)?.progress_line).toBe('2 more to go; with 1 left, Olumi can show a range.');
+  });
+  it('r8 contrast: an explicitly empty recorded Run scope never falls back to stored options', () => {
+    const { graph } = draw3();
+    storedSize(graph);
+    const run = { enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', option_ids: [] }] } };
+    expect(guidedSizingProgress(graph, run)).toBeUndefined();
+  });
   it('P1 M preserves scored option scope when excluded options have two other unsized links', () => {
     const { graph, run } = draw3();
     graph.nodes.push({ id: 'excluded', kind: 'option', label: 'Excluded option', interventions: { extra: { value: 2 } } },

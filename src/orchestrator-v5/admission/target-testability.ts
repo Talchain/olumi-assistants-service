@@ -114,9 +114,10 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
   // Codex r2 P1 (#2816): the factors' units must compose into the TARGET's currency and period (a target edited to
   // another currency keeps the confirmed identity; nothing downstream converts it).
   const goalLabel = typeof goal.label === 'string' ? goal.label : '';
-  // A confirmed product does not fill an absent rate denominator. The unit reader's `confirm` result leaves that
-  // dimensional reading unresolved; deriving today's goal level requires its `proof`, in the target's own unit.
-  return unitsCompose(goal.goal_threshold_unit, goalLabel, levels[0], levels[1]).kind === 'proof';
+  // The user already confirmed this product, including an implicit per-count rate such as £/month × subscribers.
+  // `confirm` is unresolved only BEFORE that Yes (rejected above); after it, both the reader's proof and confirmed
+  // reading derive the level. A different currency, period or explicitly mismatched denominator still returns `no`.
+  return unitsCompose(goal.goal_threshold_unit, goalLabel, levels[0], levels[1]).kind !== 'no';
 }
 
 /** Science §(i) (A): ONE estimate-conversion predicate for case (c) and its guided-list reader.
