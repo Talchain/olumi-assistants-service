@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
 import { narratorCountGuard, olumiEstimatesFeedingResult } from '../olumi-estimates-feeding-result.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
+import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
 import * as rc4 from '../olumi-estimates-feeding-result.js';
 
 type Json = Record<string, any>;
@@ -28,7 +29,8 @@ const result = (): Json => ({ type: 'analysis_result', enrichment: { inference_w
 const estimatesOf = (g: Json) => {
   const signals = assembleGuidanceSignals({ request: 'run_result', graph: g, offeredSpecific: [],
     analysisState: undefined, analysisResult: result(), leaderLicensed: false });
-  return olumiEstimatesFeedingResult({ goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'] });
+  return olumiEstimatesFeedingResult({ validatedDefinitionForLink: validatedDefinitionForGraph(g),
+    goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'] });
 };
 const wanted = (label: string, pct: number, k = 1): string => `‘${label}’: about ${pct}% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'link' : 'links'} (see Check estimates).`;
 

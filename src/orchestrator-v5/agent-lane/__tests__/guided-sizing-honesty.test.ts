@@ -23,6 +23,7 @@ import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chan
 import * as estimateProducer from '../olumi-estimates-feeding-result.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
 import { ProposalStore } from '../proposal.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 
@@ -214,6 +215,7 @@ function estimatesFor(graph: Json) {
   const signals = assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph,
     analysisState: undefined, analysisResult: undefined, leaderLicensed: false, identityEvaluations: captures[0].evaluated });
   return estimateProducer.olumiEstimatesFeedingResult({
+    validatedDefinitionForLink: validatedDefinitionForGraph(graph),
     goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'],
   });
 }
@@ -227,23 +229,22 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     byDoor.inspector = await inspectorDoor(capture, capture.guided);
   });
 
-  it.each(['natural', 'inspector'])('draw-2 through %s: both placeholders and case(c) clear; RC4-backed point says 2 links (requested singular BLOCKED)', door => {
+  it.each(['natural', 'inspector'])('draw-2 through %s: both placeholders and case(c) clear; RC4-backed point counts 1 estimated link, excluding the validated definition', door => {
     const measured = byDoor[door]!;
     expect(measured.attempts.map((a: Json) => a.result)).toEqual(['committed', 'committed'].map(s => door === 'inspector' ? 'mutated' : s));
     expect(measured.placeholder_path).toEqual([]);
     expect(measured.case_c).toEqual([]);
-    // Binding RC4 counts the residual churn estimate AND the captured definitional loss→MRR estimate.
-    // The requested "for 1 link" row is blocked by this unchanged stored provenance; never repair or recount it.
+    // Science RC4: the loss→MRR link is validated arithmetic, so only the residual churn size is estimated.
     expect(estimatesFor(measured.graph).links.map(item => item.id)).toEqual([
-      'pro_plan_price->monthly_churn', 'mrr_lost_to_price_sensitivity->mrr',
+      'pro_plan_price->monthly_churn',
     ]);
     const run = pointWordRun(measured.graph);
     const lines = goalChanceScreenLinesForAgent(run, measured.graph, true);
     expect(lines).toHaveLength(2);
-    expect(lines[0]!.chance).toBe('‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 2 links (see Check estimates).');
+    expect(lines[0]!.chance).toBe('‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 link (see Check estimates).');
     const reply = withScreenLinesOwed('This Run is ready.', lines);
     expect(reply.text).toContain(lines[0]!.chance);
-    expect(reply.text).toContain('using Olumi\'s estimates for 2 links (see Check estimates)');
+    expect(reply.text).toContain('using Olumi\'s estimates for 1 link (see Check estimates)');
   });
 
   it('MUTANT: relaxed case(c), but the narrator gave the unlabelled chance → RED', () => {
@@ -251,7 +252,7 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     const lines = goalChanceScreenLinesForAgent(pointWordRun(graph), graph, true);
     expect(lines).toHaveLength(2);
     const bare = '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.';
-    expect(withScreenLinesOwed(bare, [lines[0]!]).text).toContain('using Olumi\'s estimates for 2 links (see Check estimates)');
+    expect(withScreenLinesOwed(bare, [lines[0]!]).text).toContain('using Olumi\'s estimates for 1 link (see Check estimates)');
   });
 
   it('MUTANT: placeholder with an estimate tag and a natural effect is STILL a placeholder → RED', () => {

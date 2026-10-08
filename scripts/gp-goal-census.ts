@@ -1,5 +1,5 @@
 /**
- * Offline GUIDED PATH round-4 census. No network, model, or database calls.
+ * Offline GUIDED PATH round-5 census. No network, model, or database calls.
  * Run: node --import tsx scripts/gp-goal-census.ts
  *
  * Replays the actual pinned and working-tree target verdicts and goal-chance
@@ -13,7 +13,10 @@ import { loadavg, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const BASE = '183ad4650e9a6dc7f04bb064b0a1c9893a2a9920';
+// Rebased pre-r4: holds the current staging context constant while replaying
+// the Science §(i) amendment against its immediate predecessor.
+const BASE = '2768e2c4af279bc603e37874b3c9fac4f7dfe1f5';
+const EXPECTED_HEAD = 'de40ae3bed7fe39966b7ebb57dc5521d25803916';
 const ROOT = resolve(process.cwd());
 const OUT = join(ROOT, 'GP-CENSUS.md');
 const RAW = join(ROOT, 'GP-CENSUS.json');
@@ -101,7 +104,7 @@ const load = loadavg()[0]!;
 console.log(`Load gate: ${load.toFixed(2)} < 25`);
 if (load >= 25) throw new Error('Load gate failed; census not run.');
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-if (head !== BASE) throw new Error(`Expected HEAD ${BASE}, got ${head}`);
+if (head !== EXPECTED_HEAD) throw new Error(`Expected HEAD ${EXPECTED_HEAD}, got ${head}`);
 const documents: Document[] = [];
 const coverage: Rec[] = [];
 const parseErrors: Rec[] = [];
@@ -382,7 +385,7 @@ try {
   const warnings = [parseErrors.length > 0 ? `${parseErrors.length} files failed JSON parsing; see GP-CENSUS.json.` : null,
     unmatchedRuns.length > 0 ? `${unmatchedRuns.length} stored Run records had no unambiguous identity-bound graph; see GP-CENSUS.json.` : null].filter(Boolean);
   const lines = [
-    '# GUIDED PATH round-4 offline census', '', `Baseline: \`${BASE}\`. Working-tree HEAD: \`${head}\`.`,
+    '# GUIDED PATH round-5 offline census', '', `Baseline: \`${BASE}\`. Working-tree HEAD: \`${head}\`.`,
     `Generated ${new Date().toISOString()}; load gate ${load.toFixed(2)} < 25. No network, LLM, or database access.`, '',
     `Status: **${regression ? 'STOP — shown→withheld regression' : unlabelledFinalPoints.length > 0 ? 'STOP — shown estimate point has no labelled sentence' : warnings.length > 0 ? 'INCOMPLETE — coverage gaps listed below' : 'PASS — no shown→withheld regression'}**.`, '',
     '| Goal direction | Total | Withheld→shown | Shown→withheld | Unchanged | Licence unavailable | k distribution (k:cases) |',

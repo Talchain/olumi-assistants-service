@@ -28,6 +28,7 @@ import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { assembleGuidanceSignals } from './turn-context/guidance-signals.js';
 import { narratorCountGuard, olumiEstimatesFeedingResult } from './olumi-estimates-feeding-result.js';
+import { validatedDefinitionForGraph } from '../goal-target/held-user-links.js';
 import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
@@ -68,6 +69,7 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
     ? assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph: analysedGraph,
       analysisState: undefined, analysisResult: result, leaderLicensed: false }) : undefined;
   const k = signals === undefined ? 0 : olumiEstimatesFeedingResult({
+    validatedDefinitionForLink: validatedDefinitionForGraph(analysedGraph),
     goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'],
   }).links.length;
   const nodes = rec(graph)?.nodes;
