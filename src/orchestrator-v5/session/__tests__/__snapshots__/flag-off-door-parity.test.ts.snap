@@ -1,0 +1,1136 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Addendum 7 flag OFF — full door parity with origin/staging > draft preserves staging RPC arguments, ordered reads and successful commit 1`] = `
+{
+  "durable_turn_count": 1,
+  "outcome": {
+    "commitPerformed": true,
+  },
+  "rpcCalls": [
+    {
+      "args": {
+        "p_assistant_message": null,
+        "p_brief_text": "Compare raising the price to £59 with holding £49.",
+        "p_cas_enforce": true,
+        "p_coaching_state": null,
+        "p_duration_ms": 0,
+        "p_expected_base_known": false,
+        "p_expected_graph_identity_hash": null,
+        "p_fence_generation": null,
+        "p_graph": {
+          "edges": [
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_hold",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_raise",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "fac_price",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "goal_revenue",
+            },
+          ],
+          "nodes": [
+            {
+              "id": "goal_revenue",
+              "kind": "goal",
+              "label": "Revenue",
+            },
+            {
+              "id": "fac_price",
+              "kind": "factor",
+              "label": "Price",
+              "observed_state": {
+                "source": "brief_extraction",
+                "value": 0.49,
+              },
+            },
+            {
+              "id": "opt_hold",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.49,
+                },
+              },
+              "is_baseline": true,
+              "kind": "option",
+              "label": "Hold price",
+            },
+            {
+              "id": "opt_raise",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.59,
+                },
+              },
+              "kind": "option",
+              "label": "Raise price",
+            },
+          ],
+        },
+        "p_handler_facts": [],
+        "p_handler_id": null,
+        "p_incoming_graph_identity_hash": "c5713fdc386182f40ea48d971eb66885c8cc3e9fc213727af4690f9a78fcd531",
+        "p_llm_calls_used": 1,
+        "p_pending_actions": [],
+        "p_request_hash": "sha256:86ae1c7a04db6c0f527ed2136d7e7453",
+        "p_response_emitted": true,
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_turn_class": "direct_answer",
+        "p_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "p_user_message": "Compare raising the price to £59 with holding £49.",
+        "p_version_actor_kind": "unknown",
+        "p_version_analysis_affecting_hash": "6b08b40183f9f830e1a22d4524a6f8fb5e75d2c852f94871550b63db2ee2c740",
+        "p_version_authored_by": null,
+        "p_version_creation_kind": "committed_mutation",
+        "p_version_graph_schema_version": "graph_v3",
+        "p_version_hash_algorithm": "sha256",
+        "p_version_mutation_id": "cf840a2b-3939-5202-a382-590707bbe7d7",
+        "p_version_normaliser_version": "1",
+        "p_version_projection_version": "identity.v1",
+        "p_version_source_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+      "name": "append_turn_atomic_v5",
+    },
+  ],
+  "select_count": 5,
+  "selects": [
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "request_hash",
+      "table": "v5_conversation_turns",
+    },
+  ],
+}
+`;
+
+exports[`Addendum 7 flag OFF — full door parity with origin/staging > edit initial brief read outage then save recovery preserves staging arguments, reads and success 1`] = `
+{
+  "durable_turn_count": 1,
+  "outcome": {
+    "commitPerformed": true,
+    "initialBriefReadFailed": true,
+  },
+  "rpcCalls": [
+    {
+      "args": {
+        "p_assistant_message": "Renamed Price.",
+        "p_brief_text": null,
+        "p_cas_enforce": true,
+        "p_coaching_state": null,
+        "p_duration_ms": 0,
+        "p_expected_base_known": false,
+        "p_expected_graph_identity_hash": null,
+        "p_fence_generation": null,
+        "p_graph": {
+          "edges": [
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_hold",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_raise",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "fac_price",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "goal_revenue",
+            },
+          ],
+          "nodes": [
+            {
+              "id": "goal_revenue",
+              "kind": "goal",
+              "label": "Revenue",
+            },
+            {
+              "id": "fac_price",
+              "kind": "factor",
+              "label": "Price (revised)",
+              "observed_state": {
+                "source": "brief_extraction",
+                "value": 0.49,
+              },
+            },
+            {
+              "id": "opt_hold",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.49,
+                },
+              },
+              "is_baseline": true,
+              "kind": "option",
+              "label": "Hold price",
+            },
+            {
+              "id": "opt_raise",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.59,
+                },
+              },
+              "kind": "option",
+              "label": "Raise price",
+            },
+          ],
+        },
+        "p_handler_facts": [
+          {
+            "action_type": "edit_graph",
+            "handler_id": "edit_graph",
+            "noop": false,
+            "payload": {
+              "fact_type": "edit_graph",
+              "fact_version": 1,
+              "result": {
+                "affected_entities": [
+                  {
+                    "kind": "factor",
+                    "label": "Price",
+                  },
+                ],
+                "edit_kind": "parameter_update",
+                "graph_hash_after": "71de3751af67217b",
+                "graph_hash_before": "68c72f5602acc95e",
+                "impact": "low",
+                "operations_count": 1,
+                "rerun_recommended": false,
+                "safe_summary": "Renamed Price.",
+                "status": "applied",
+              },
+            },
+          },
+        ],
+        "p_handler_id": null,
+        "p_incoming_graph_identity_hash": "9a1b876f15c3f4bced676f815839dc32d37ec2ef5466d82e3789ad822e46d769",
+        "p_llm_calls_used": 1,
+        "p_pending_actions": [],
+        "p_request_hash": "sha256:101cb2161b9f54f8dcadc71df4beedd1",
+        "p_response_emitted": true,
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_turn_class": "direct_answer",
+        "p_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "p_user_message": "Rename Price to Price (revised)",
+        "p_version_actor_kind": "unknown",
+        "p_version_analysis_affecting_hash": "6b08b40183f9f830e1a22d4524a6f8fb5e75d2c852f94871550b63db2ee2c740",
+        "p_version_authored_by": null,
+        "p_version_creation_kind": "committed_mutation",
+        "p_version_graph_schema_version": "graph_v3",
+        "p_version_hash_algorithm": "sha256",
+        "p_version_mutation_id": "cf840a2b-3939-5202-a382-590707bbe7d7",
+        "p_version_normaliser_version": "1",
+        "p_version_projection_version": "identity.v1",
+        "p_version_source_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+      "name": "append_turn_atomic_v5",
+    },
+  ],
+  "select_count": 14,
+  "selects": [
+    {
+      "columns": "id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "turn_id",
+      "options": {
+        "count": "exact",
+        "head": true,
+      },
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, payload, handler_id, noop, created_at, v5_conversation_turn_id, turn:v5_conversation_turns(id, turn_id, scenario_id, user_id, model_version_mutation_id, model_version_created)",
+      "table": "v5_handler_facts",
+    },
+    {
+      "columns": "id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at",
+      "options": {
+        "count": "exact",
+      },
+      "table": "v5_handler_facts",
+    },
+    {
+      "columns": "analysis_invalidated_at",
+      "table": "scenarios",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, coaching_state",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "request_hash",
+      "table": "v5_conversation_turns",
+    },
+  ],
+}
+`;
+
+exports[`Addendum 7 flag OFF — full door parity with origin/staging > edit mismatched client identity preserves staging RPC arguments, reads and success 1`] = `
+{
+  "durable_turn_count": 1,
+  "outcome": {
+    "commitPerformed": true,
+  },
+  "rpcCalls": [
+    {
+      "args": {
+        "p_assistant_message": "Renamed Price.",
+        "p_brief_text": null,
+        "p_cas_enforce": true,
+        "p_coaching_state": null,
+        "p_duration_ms": 0,
+        "p_expected_base_known": false,
+        "p_expected_graph_identity_hash": null,
+        "p_fence_generation": null,
+        "p_graph": {
+          "edges": [
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_hold",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_raise",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "fac_price",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "goal_revenue",
+            },
+          ],
+          "nodes": [
+            {
+              "id": "goal_revenue",
+              "kind": "goal",
+              "label": "Revenue",
+            },
+            {
+              "id": "fac_price",
+              "kind": "factor",
+              "label": "Price (revised)",
+              "observed_state": {
+                "value": 0.2,
+              },
+            },
+            {
+              "id": "opt_hold",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.49,
+                },
+              },
+              "is_baseline": true,
+              "kind": "option",
+              "label": "Hold price",
+            },
+            {
+              "id": "opt_raise",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.59,
+                },
+              },
+              "kind": "option",
+              "label": "Raise price",
+            },
+          ],
+        },
+        "p_handler_facts": [
+          {
+            "action_type": "edit_graph",
+            "handler_id": "edit_graph",
+            "noop": false,
+            "payload": {
+              "fact_type": "edit_graph",
+              "fact_version": 1,
+              "result": {
+                "affected_entities": [
+                  {
+                    "kind": "factor",
+                    "label": "Price",
+                  },
+                ],
+                "edit_kind": "parameter_update",
+                "graph_hash_after": "f7311907ab83c79f",
+                "graph_hash_before": "4bc6e5ce8044583f",
+                "impact": "low",
+                "operations_count": 1,
+                "rerun_recommended": false,
+                "safe_summary": "Renamed Price.",
+                "status": "applied",
+              },
+            },
+          },
+        ],
+        "p_handler_id": null,
+        "p_incoming_graph_identity_hash": "83068702dedd4c05828a8d1b9c82fab60ef94d248c91f496c8c431b73859704a",
+        "p_llm_calls_used": 1,
+        "p_pending_actions": [],
+        "p_request_hash": "sha256:101cb2161b9f54f8dcadc71df4beedd1",
+        "p_response_emitted": true,
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_turn_class": "direct_answer",
+        "p_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "p_user_message": "Rename Price to Price (revised)",
+        "p_version_actor_kind": "unknown",
+        "p_version_analysis_affecting_hash": "e10ed60adb7570df6d1d2da1d568c516405743039afd9562cb6267aee3cfe2ea",
+        "p_version_authored_by": null,
+        "p_version_creation_kind": "committed_mutation",
+        "p_version_graph_schema_version": "graph_v3",
+        "p_version_hash_algorithm": "sha256",
+        "p_version_mutation_id": "cf840a2b-3939-5202-a382-590707bbe7d7",
+        "p_version_normaliser_version": "1",
+        "p_version_projection_version": "identity.v1",
+        "p_version_source_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+      "name": "append_turn_atomic_v5",
+    },
+  ],
+  "select_count": 14,
+  "selects": [
+    {
+      "columns": "id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "turn_id",
+      "options": {
+        "count": "exact",
+        "head": true,
+      },
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, payload, handler_id, noop, created_at, v5_conversation_turn_id, turn:v5_conversation_turns(id, turn_id, scenario_id, user_id, model_version_mutation_id, model_version_created)",
+      "table": "v5_handler_facts",
+    },
+    {
+      "columns": "id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at",
+      "options": {
+        "count": "exact",
+      },
+      "table": "v5_handler_facts",
+    },
+    {
+      "columns": "analysis_invalidated_at",
+      "table": "scenarios",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, coaching_state",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "request_hash",
+      "table": "v5_conversation_turns",
+    },
+  ],
+}
+`;
+
+exports[`Addendum 7 flag OFF — full door parity with origin/staging > register preserves staging RPC arguments, ordered reads and success 1`] = `
+{
+  "durable_turn_count": 1,
+  "outcome": {
+    "registered": true,
+    "statusCode": 200,
+  },
+  "rpcCalls": [
+    {
+      "args": {
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_user_id": null,
+      },
+      "name": "ensure_scenario_exists",
+    },
+    {
+      "args": {
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_turn_id": "graph_registration:296a536e-f679-4a51-b1e1-781e27af0c2a",
+      },
+      "name": "v5_claim_turn_fence",
+    },
+    {
+      "args": {
+        "p_assistant_message": null,
+        "p_brief_text": null,
+        "p_cas_enforce": true,
+        "p_coaching_state": null,
+        "p_duration_ms": 0,
+        "p_expected_base_known": true,
+        "p_expected_graph_identity_hash": "c5713fdc386182f40ea48d971eb66885c8cc3e9fc213727af4690f9a78fcd531",
+        "p_fence_generation": 1,
+        "p_graph": {
+          "edges": [
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_hold",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_raise",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "fac_price",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "goal_revenue",
+            },
+          ],
+          "nodes": [
+            {
+              "id": "goal_revenue",
+              "kind": "goal",
+              "label": "Revenue",
+            },
+            {
+              "id": "fac_price",
+              "kind": "factor",
+              "label": "Price",
+              "observed_state": {
+                "source": "brief_extraction",
+                "value": 0.65,
+              },
+            },
+            {
+              "id": "opt_hold",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.49,
+                },
+              },
+              "is_baseline": true,
+              "kind": "option",
+              "label": "Hold price",
+            },
+            {
+              "id": "opt_raise",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.59,
+                },
+              },
+              "kind": "option",
+              "label": "Raise price",
+            },
+          ],
+        },
+        "p_handler_facts": [],
+        "p_handler_id": null,
+        "p_incoming_graph_identity_hash": "0231caefe80b1ebbae1104354319ad17e1fdcfc6b96ece749c94be59539c47df",
+        "p_llm_calls_used": 0,
+        "p_pending_actions": [],
+        "p_request_hash": "graph_registration:8f325b92ebcc2f56b9710aa4c4478fe009a19117eb8848129487b1ebe1037fd1",
+        "p_response_emitted": false,
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_turn_class": "direct_answer",
+        "p_turn_id": "graph_registration:296a536e-f679-4a51-b1e1-781e27af0c2a",
+        "p_user_message": null,
+        "p_version_actor_kind": "unknown",
+        "p_version_analysis_affecting_hash": "5df43454791e13fc4bc2b555f82907a8eb8c1f86396e67db61144706a4c5075f",
+        "p_version_authored_by": null,
+        "p_version_creation_kind": "committed_mutation",
+        "p_version_graph_schema_version": "graph_v3",
+        "p_version_hash_algorithm": "sha256",
+        "p_version_mutation_id": "1b893f85-c353-5d73-a319-62158e4f5048",
+        "p_version_normaliser_version": "1",
+        "p_version_projection_version": "identity.v1",
+        "p_version_source_turn_id": "graph_registration:296a536e-f679-4a51-b1e1-781e27af0c2a",
+      },
+      "name": "append_turn_atomic_v5",
+    },
+  ],
+  "select_count": 6,
+  "selects": [
+    {
+      "columns": "id",
+      "table": "scenarios",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "request_hash",
+      "table": "v5_conversation_turns",
+    },
+  ],
+}
+`;
+
+exports[`Addendum 7 flag OFF — full door parity with origin/staging > replacement apply preserves staging RPC arguments, ordered reads and verified success 1`] = `
+{
+  "durable_turn_count": 1,
+  "outcome": {
+    "newModelRevision": "0e830d67f1a9d509",
+    "ok": true,
+    "receiptId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  },
+  "rpcCalls": [
+    {
+      "args": {
+        "p_assistant_message": "Updated Raise price",
+        "p_brief_text": null,
+        "p_cas_enforce": true,
+        "p_coaching_state": null,
+        "p_duration_ms": 0,
+        "p_expected_base_known": true,
+        "p_expected_graph_identity_hash": "c5713fdc386182f40ea48d971eb66885c8cc3e9fc213727af4690f9a78fcd531",
+        "p_fence_generation": null,
+        "p_graph": {
+          "edges": [
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_hold",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_raise",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "fac_price",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "goal_revenue",
+            },
+          ],
+          "nodes": [
+            {
+              "id": "goal_revenue",
+              "kind": "goal",
+              "label": "Revenue",
+            },
+            {
+              "id": "fac_price",
+              "kind": "factor",
+              "label": "Price",
+              "observed_state": {
+                "source": "brief_extraction",
+                "value": 0.49,
+              },
+            },
+            {
+              "id": "opt_hold",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.49,
+                },
+              },
+              "is_baseline": true,
+              "kind": "option",
+              "label": "Hold price",
+            },
+            {
+              "id": "opt_raise",
+              "interventions": {
+                "fac_price": {
+                  "source": "user_specified",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.65,
+                },
+              },
+              "kind": "option",
+              "label": "Raise price",
+            },
+          ],
+        },
+        "p_handler_facts": [
+          {
+            "action_type": "edit_graph",
+            "handler_id": "edit_graph",
+            "noop": false,
+            "payload": {
+              "fact_type": "edit_graph",
+              "fact_version": 1,
+              "result": {
+                "affected_entities": [
+                  {
+                    "kind": "option",
+                    "label": "Raise price",
+                  },
+                ],
+                "edit_kind": "option_configuration",
+                "graph_hash_after": "662aee38b205b2c4",
+                "graph_hash_before": "68c72f5602acc95e",
+                "impact": "moderate",
+                "operations_count": 1,
+                "rerun_recommended": false,
+                "safe_summary": "Updated Raise price",
+                "status": "applied",
+              },
+            },
+          },
+        ],
+        "p_handler_id": null,
+        "p_incoming_graph_identity_hash": "da0a70a440b7b8ba63591b354bd6ccb71eceba66f884a058f2521f06a591792b",
+        "p_llm_calls_used": 0,
+        "p_pending_actions": [],
+        "p_request_hash": "c95f901389037c9b66ce1f6231c2ee61d5801a221fb0f69f695fdbbbc3bcb74c",
+        "p_response_emitted": true,
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_turn_class": "direct_answer",
+        "p_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "p_user_message": null,
+        "p_version_actor_kind": "unknown",
+        "p_version_analysis_affecting_hash": "0e830d67f1a9d5097846e5cc2f6495e526a7fe60fe06c39b2608c12fae82f166",
+        "p_version_authored_by": null,
+        "p_version_creation_kind": "committed_mutation",
+        "p_version_graph_schema_version": "graph_v3",
+        "p_version_hash_algorithm": "sha256",
+        "p_version_mutation_id": "cf840a2b-3939-5202-a382-590707bbe7d7",
+        "p_version_normaliser_version": "1",
+        "p_version_projection_version": "identity.v1",
+        "p_version_source_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+      "name": "append_turn_atomic_v5",
+    },
+  ],
+  "select_count": 6,
+  "selects": [
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "request_hash",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message",
+      "table": "v5_conversation_turns",
+    },
+  ],
+}
+`;
+
+exports[`Addendum 7 flag OFF — full door parity with origin/staging > system event commit preserves staging RPC arguments, ordered reads and success 1`] = `
+{
+  "durable_turn_count": 1,
+  "outcome": {
+    "commitPerformed": true,
+    "graphConflict": null,
+  },
+  "rpcCalls": [
+    {
+      "args": {
+        "p_assistant_message": "Updated Price from 0.49 to 0.7. Every option here sets its own value for this factor, so this figure is the baseline they all replace, and changing it will not move the comparison. To change the comparison, set the value each option uses.",
+        "p_brief_text": null,
+        "p_cas_enforce": true,
+        "p_coaching_state": null,
+        "p_duration_ms": 0,
+        "p_expected_base_known": true,
+        "p_expected_graph_identity_hash": "c5713fdc386182f40ea48d971eb66885c8cc3e9fc213727af4690f9a78fcd531",
+        "p_fence_generation": null,
+        "p_graph": {
+          "edges": [
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_hold",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "opt_raise",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "fac_price",
+            },
+            {
+              "effect_direction": "positive",
+              "exists_probability": 1,
+              "from": "fac_price",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.1,
+              },
+              "to": "goal_revenue",
+            },
+          ],
+          "nodes": [
+            {
+              "id": "goal_revenue",
+              "kind": "goal",
+              "label": "Revenue",
+            },
+            {
+              "display_value": "0.7",
+              "id": "fac_price",
+              "kind": "factor",
+              "label": "Price",
+              "observed_state": {
+                "raw_value": 0.7,
+                "source": "user_override",
+                "value": 0.7,
+              },
+              "provenance": "user_set",
+            },
+            {
+              "id": "opt_hold",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.49,
+                },
+              },
+              "is_baseline": true,
+              "kind": "option",
+              "label": "Hold price",
+            },
+            {
+              "id": "opt_raise",
+              "interventions": {
+                "fac_price": {
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "confidence": "high",
+                    "match_type": "exact_id",
+                    "node_id": "fac_price",
+                  },
+                  "value": 0.59,
+                },
+              },
+              "kind": "option",
+              "label": "Raise price",
+            },
+          ],
+        },
+        "p_handler_facts": [
+          {
+            "action_type": "set_factor_value",
+            "handler_id": "set_factor_value",
+            "noop": false,
+            "payload": {
+              "fact_type": "set_factor_value",
+              "fact_version": 1,
+              "result": {
+                "after": {
+                  "raw_value": 0.7,
+                  "value": 0.7,
+                },
+                "before": {
+                  "value": 0.49,
+                },
+                "status": "applied",
+                "target_id": "fac_price",
+              },
+            },
+          },
+        ],
+        "p_handler_id": "set_factor_value",
+        "p_incoming_graph_identity_hash": "944ee436df08a32d2d2e557839e52f7d1e8c5819ab7eee8db0211be6e1f1ca80",
+        "p_llm_calls_used": 0,
+        "p_pending_actions": [],
+        "p_request_hash": "sha256:08c608f282f51abf344732293e3ab697",
+        "p_response_emitted": true,
+        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "p_turn_class": "handler",
+        "p_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "p_user_message": null,
+        "p_version_actor_kind": "unknown",
+        "p_version_analysis_affecting_hash": "1e15129023327716304334178817bdf2a1dc883049ad6bfcf93816859f14d696",
+        "p_version_authored_by": null,
+        "p_version_creation_kind": "committed_mutation",
+        "p_version_graph_schema_version": "graph_v3",
+        "p_version_hash_algorithm": "sha256",
+        "p_version_mutation_id": "cf840a2b-3939-5202-a382-590707bbe7d7",
+        "p_version_normaliser_version": "1",
+        "p_version_projection_version": "identity.v1",
+        "p_version_source_turn_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+      "name": "append_turn_atomic_v5",
+    },
+  ],
+  "select_count": 8,
+  "selects": [
+    {
+      "columns": "graph, brief_text",
+      "table": "scenarios",
+    },
+    {
+      "columns": "analysis_invalidated_at",
+      "table": "scenarios",
+    },
+    {
+      "columns": "id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at",
+      "options": {
+        "count": "exact",
+      },
+      "table": "v5_handler_facts",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "id, pending_actions",
+      "table": "v5_conversation_turns",
+    },
+    {
+      "columns": "request_hash",
+      "table": "v5_conversation_turns",
+    },
+  ],
+}
+`;

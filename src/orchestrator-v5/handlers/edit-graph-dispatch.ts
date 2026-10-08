@@ -35,6 +35,7 @@ import { buildAddRiskClarification } from './edit-templates/add-risk-template.js
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
+import { useAppendV6 } from '../session/supabase-store.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   buildEditGraphHandlerFact,
@@ -150,7 +151,7 @@ import {
   loadPersistedGraphStrict,
   loadPersistedScenarioStateStrict,
   loadRecentConversationTurns,
-  GraphStaleWriteError,
+  loadScenarioBriefText,
 } from '../build-turn-context.js';
 import { projectBriefForEdit } from '../../orchestrator/context/serialise.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -161,7 +162,6 @@ import {
 } from './hold-thread-through.js';
 import { projectConversation } from '../context/context-pack-assembler.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
-import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import { config } from '../../config/index.js';
 import {
@@ -1369,11 +1369,7 @@ export interface DispatchEditGraphParams {
   readonly request: FastifyRequest;
   /** Permissive ingress shape. Adapter inside converts to GraphV3T. */
   readonly graphState: GraphStateIngress;
-  /**
-   * Internal server-read carrier, populated only by route-v2's combined read
-   * when it reloads the edit graph. Never parsed from HTTP or tool arguments.
-   * The graph the provider sees and the expected revision share this snapshot.
-   */
+  /** Internal combined server snapshot, consumed only by the dormant v6 path. */
   readonly persistedEditBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>;
   /** Permissive ingress shape. Adapter inside converts to V2RunResponseEnvelope. */
   readonly analysisState: AnalysisStateIngress | null;
@@ -2331,31 +2327,17 @@ export async function dispatchEditGraph(
   // serialiser (serialiseEditContextForLLMWithMeta, called from edit-graph.ts
   // for edit + repair), so it cannot leak into any other lane.
   let editBriefSlice: ConversationContext['brief'] = null;
-  // Keep graph and revision from the same pre-provider read. A later context
-  // read may improve explanation, but cannot renew this mutation's authority.
   let editBase: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> | undefined;
-  let editBaseError: unknown;
   try {
-    editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
-    editBriefSlice = projectBriefForEdit(editBase.briefText);
-  } catch (err) {
-    editBaseError = err;
-    editBriefSlice = null;
-  }
-  // A client graph cannot borrow the revision of a later server graph. The
-  // existing identity projection also catches cosmetic/provenance divergence;
-  // an analysis hash alone would still permit those fields to be overwritten.
-  // An empty server base permits first-touch adoption; its revision still
-  // protects against a rival write landing before append.
-  if (editBase !== undefined && editBase.graph != null) {
-    const ingressIdentity = computeGraphIdentityHash(graphState)?.value ?? null;
-    const serverIdentity = computeExpectedGraphCasHashes(editBase.graph).expectedGraphIdentityHash;
-    if (serverIdentity !== null && ingressIdentity !== serverIdentity) {
-      throw new GraphStaleWriteError('The model changed; refresh and reconfirm this edit.', {
-        conflict_category: 'revision_conflict',
-        ...(ingressIdentity !== null ? { expected_base_graph_hash: ingressIdentity } : {}),
-      });
+    if (useAppendV6()) {
+      editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
+      editBriefSlice = projectBriefForEdit(editBase.briefText);
+    } else {
+      const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
+      editBriefSlice = projectBriefForEdit(briefText);
     }
+  } catch {
+    editBriefSlice = null; // helper already degrades; belt for test doubles
   }
   const context: ConversationContext = {
     graph: parsedGraph,
@@ -3218,9 +3200,9 @@ export async function dispatchEditGraph(
   // distinguish a genuinely-empty scenario from a transient/degraded read —
   // and committing the ingress fallback on a degraded read would overwrite a
   // rich persisted graph with the lossy client echo (the exact corruption
-  // this fix removes). The pre-provider `loadPersistedScenarioStateStrict`
-  // read binds graph and revision together, returns a null graph ONLY for a
-  // genuinely-empty `scenarios.graph`, and THROWS on a degraded read:
+  // this fix removes). `loadPersistedGraphStrict` returns the graph, returns
+  // null ONLY for a genuinely-empty `scenarios.graph`, and THROWS on a
+  // degraded read:
   //   - graph present  → merge onto it (server-only top-level fields survive).
   //   - null (genuine) → ingress-base fallback: the no-persisted-graph case
   //     (e.g. a client that sent graph_state for a never-persisted scenario);
@@ -3236,7 +3218,7 @@ export async function dispatchEditGraph(
   let persistedPostEditGraph: unknown = graphState;
   // A3 graph CAS observe-mode: expected-base hashes for this dispatch's
   // graph-bearing commit. Derived ONLY from the strict SERVER-SIDE persisted
-  // pre-provider read above — the same trusted base the merge
+  // read below (`loadPersistedGraphStrict`) — the same trusted base the merge
   // uses — NEVER from the request-supplied `graphState` (which is untrusted
   // and may be the graph being written; trusted base rule, see
   // graph-cas-conflict.ts). Stays `undefined` (→ `no_expected`, never a
@@ -3251,8 +3233,16 @@ export async function dispatchEditGraph(
   // (the same fallback rule the persistence merge applies).
   let gmFrameBase: unknown = graphState;
   if (successfulAppliedMutation) {
-    if (editBase === undefined) {
-      const err = editBaseError;
+    let strictBase: unknown;
+    try {
+      if (useAppendV6()) {
+        // A failed brief read does not poison the save: retry the strict read.
+        editBase ??= await loadPersistedScenarioStateStrict(payload.scenario_id);
+        strictBase = editBase.graph;
+      } else {
+        strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+      }
+    } catch (err) {
       log.warn(
         {
           event: 'v5.edit_graph.persist_base_unavailable',
@@ -3269,7 +3259,6 @@ export async function dispatchEditGraph(
         'edit_graph: refusing to persist applied mutation — persisted merge base unavailable (degraded read)',
       );
     }
-    const strictBase = editBase.graph;
     // A3 graph CAS: hash the strict server base for the commit's expected
     // fields — reusing the read this path already performs (no extra I/O).
     // `strictBase` null = genuinely-empty scenarios.graph → expected hashes
@@ -3317,7 +3306,8 @@ export async function dispatchEditGraph(
         source: 'edit_graph',
       },
     );
-    // Check the final merge against the captured CAS base, even with the referee off.
+    // This is the exact stored CAS base used by the write. Recheck after merge:
+    // it may have moved since the tool's earlier read, even with the referee off.
     if (hasNewInterventionRanges(strictBase, persistedPostEditGraph)) {
       throw new Error('A new or changed likely range needs approval on its stored change card. Nothing was written.');
     }
@@ -5803,7 +5793,7 @@ export async function dispatchEditGraph(
       // post-edit appliedGraph on a successful mutation, else undefined → the
       // egress is graph-free too), keeping stored == wire.
       contentGraph: graphForCommit,
-      expectedRevision: editBase?.revision,
+      expectedRevision: useAppendV6() ? editBase?.revision : undefined,
     });
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
     // the commit seam itself may rewrite the response (turn-TTL lapse

@@ -212,34 +212,34 @@ describe('the Agent turn claim decides ownership on the REAL SupabaseSessionStor
     expect(provider.calls).toBe(callsBefore);
   });
 
-  it('a single dispatched revision refusal releases the durable claim — the SAME turn_id runs on a fresh instance', async () => {
+  it('a lone v2/turn revision refusal keeps the durable claim — the SAME turn_id never runs on a fresh instance', async () => {
     let dispatched = 0;
-    let refuseRevision = true;
     const internalTurn: InternalTurn = async (body) => {
       dispatched += 1;
       expect(body).toMatchObject({ scenario_id: SID, stage: 'analyse', chip: { action_type: 'run_analysis' } });
-      if (refuseRevision) return { status: 409, json: { code: 'revision_conflict', expected: 7, current: 8 } };
-      return { status: 200, json: { blocks: [], assistant_text: 'No comparison result.' } };
+      return { status: 409, json: { code: 'revision_conflict', expected: 7, current: 8 } };
     };
     await app.close(); app = await freshApp(internalTurn);
     provider.script = [{ kind: 'tool', name: 'run_analysis', args: '{"reason":"first comparison"}' }];
 
     const refused = await say(app, 'Run it.', T1);
     expect(refused.statusCode).toBe(409);
-    expect(refused.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8, retry_safe: true });
+    expect(refused.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8, retry_safe: false });
     expect(dispatched).toBe(1);
-    expect(table, 'the refused action wrote no turn, and its real-store claim was deleted').toHaveLength(0);
-    expect(await store.readCommittedTurn(SID, `${T1}:claim`)).toBeNull();
+    expect(table, 'even a v2 refusal with no witnessed write must retain its real-store claim').toHaveLength(1);
+    const retainedClaim = await store.readCommittedTurn(SID, `${T1}:claim`);
+    expect(retainedClaim).not.toBeNull();
+    expect(await store.readCommittedTurn(SID, T1)).toBeNull();
 
-    refuseRevision = false;
     await app.close(); app = await freshApp(internalTurn);
-    provider.script = [{ kind: 'tool', name: 'run_analysis', args: '{"reason":"first comparison"}' }, { kind: 'text', text: 'Retry accepted.' }];
     const callsBefore = provider.calls;
     const retry = await say(app, 'Run it.', T1);
-    expect(retry.statusCode).toBe(200);
-    expect(dispatched, 'the SAME outer turn_id must reach its action again').toBe(2);
-    expect(provider.calls).toBeGreaterThan(callsBefore);
-    expect(await store.readCommittedTurn(SID, T1)).not.toBeNull();
+    expect(retry.statusCode).toBe(409);
+    expect(errorOf(retry)).toBe('TURN_OUTCOME_UNKNOWN');
+    expect(dispatched, 'the SAME outer turn_id must never dispatch its action again').toBe(1);
+    expect(provider.calls).toBe(callsBefore);
+    expect(await store.readCommittedTurn(SID, `${T1}:claim`)).toEqual(retainedClaim);
+    expect(await store.readCommittedTurn(SID, T1)).toBeNull();
   });
 
   it('an earlier dispatched step wrote before a revision refusal — retry_safe is false and the SAME turn_id never runs again', async () => {

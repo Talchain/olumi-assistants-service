@@ -160,6 +160,7 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 import { GraphStaleWriteError } from '../orchestrator-v5/build-turn-context.js';
 import { isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
 import type { GraphConflictFailureDetails } from '../orchestrator-v5/graph-conflict-recovery-keys.js';
+import { useAppendV6 } from '../orchestrator-v5/session/supabase-store.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
 // handed to the transport; see the draft_graph branch below).
 import { scheduleAutoRunAfterFreshDraft } from '../orchestrator-v5/handlers/auto-run-after-draft.js';
@@ -4591,22 +4592,43 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       priorTurnsRead === 'unknown' || fenceReadFromShortCircuit === 'unknown';
     const isContinuationScenario =
       hasPriorCommittedTurns || admittedLiveTurnFromShortCircuit || continuationReadUnknown;
-    // ROADMAP 2.308 / System B — ONE route-level strict combined read, shared by
+    // The combined snapshot is used only by the dormant v6 path. OFF keeps
+    // staging's strict graph reader, memo, read order and failure handling.
+    let persistedScenarioStateMemo:
+      | { readonly ok: true; readonly value: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> }
+      | { readonly ok: false; readonly error: unknown }
+      | null = null;
+    const loadPersistedScenarioStateOnce = async (): Promise<Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>> => {
+      if (persistedScenarioStateMemo === null) {
+        try {
+          persistedScenarioStateMemo = {
+            ok: true,
+            value: await loadPersistedScenarioStateStrict(ingress.scenario_id),
+          };
+        } catch (err) {
+          persistedScenarioStateMemo = { ok: false, error: err };
+        }
+      }
+      if (!persistedScenarioStateMemo.ok) throw persistedScenarioStateMemo.error;
+      return persistedScenarioStateMemo.value;
+    };
+    // ROADMAP 2.308 / System B — ONE route-level strict graph read, shared by
     // no-model unstranding, semantic empty-workspace intake, configure-option
     // anchoring, and the edit-lane reload below. TurnExecutor may later perform
     // its own combined context read; this memo governs only these route-level
     // consumers. It caches failure as well as value so they see one canonical
     // fact and cannot retry a failed read into a different answer.
     let persistedGraphMemo:
-      | { readonly ok: true; readonly value: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> }
+      | { readonly ok: true; readonly value: unknown }
       | { readonly ok: false; readonly error: unknown }
       | null = null;
-    const loadPersistedScenarioStateOnce = async (): Promise<Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>> => {
+    const loadPersistedGraphOnce = async (): Promise<unknown> => {
+      if (useAppendV6()) return (await loadPersistedScenarioStateOnce()).graph;
       if (persistedGraphMemo === null) {
         try {
           persistedGraphMemo = {
             ok: true,
-            value: await loadPersistedScenarioStateStrict(ingress.scenario_id),
+            value: await loadPersistedGraphStrict(ingress.scenario_id),
           };
         } catch (err) {
           persistedGraphMemo = { ok: false, error: err };
@@ -4615,8 +4637,6 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
       return persistedGraphMemo.value;
     };
-    const loadPersistedGraphOnce = async (): Promise<unknown> =>
-      (await loadPersistedScenarioStateOnce()).graph;
     // ROADMAP 2.709 invariant 6 — the draft-shortcut UNSTRANDING term. While
     // a draft loss stands (a failure-marked fence row + no committed graph),
     // the loss notice tells the user "send your decision brief again and
@@ -7630,15 +7650,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // falling through to Sonnet (which cannot propose edit_graph).
         let persisted: unknown = null;
         try {
-          // The strict combined reader lets the catch below distinguish
+          // `loadPersistedGraphStrict` (vs the swallowing
+          // `loadPersistedGraph`) lets the catch below distinguish
           // `session_store_failed` from `no_persisted_graph` for
           // telemetry. Both export from build-turn-context.ts so the
           // `getSessionStore` import surface stays bounded to the
           // three sites the state-write-invariant check allows.
           // ROADMAP 2.308 / S1: via the turn-scoped memo, so a turn whose
           // configure-option label anchor already read the graph does not
-          // read it twice. Its revision stays bound to this graph and is
-          // forwarded to the dispatcher; the memo re-throws the original error.
+          // read it twice. Identical semantics — the memo re-throws the
+          // original error.
           persisted = await loadPersistedGraphOnce();
         } catch (err) {
           // Session-store / Supabase failure. Distinct from
@@ -8271,10 +8292,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           request: req,
           graphState: effectiveGraphState!,
-          // Internal carrier only: this comes from the combined server memo,
-          // never from request extensions. A client-supplied graph instead
-          // gets its own identity comparison against a fresh combined read.
-          ...(resolvedGraphState !== null
+          // ON only: graph and revision come from the same server snapshot.
+          // OFF passes exactly staging's dispatcher arguments.
+          ...(useAppendV6() && resolvedGraphState !== null
             ? { persistedEditBase: await loadPersistedScenarioStateOnce() }
             : {}),
           analysisState: extensions.analysisState ?? null,

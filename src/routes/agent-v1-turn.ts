@@ -2576,8 +2576,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `readBackState`), NOT the tool run's own blocks: a run's blocks can describe a
      * graph the user no longer has (independent review of #1760).
      */
-    // Counts every call that could WRITE, except a known revision refusal which
-    // wrote nothing. Earlier writes and unknown outcomes must keep the claim.
+    // Counts every call that could WRITE. Only a single-append door's known
+    // revision refusal proves it wrote nothing; earlier writes and unknown
+    // outcomes must keep the claim.
     let writesDispatched = 0;
     const countingWrite = async <T>(write: () => Promise<T>): Promise<T> => {
       writesDispatched += 1;
@@ -2603,8 +2604,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       const send = async () => promoteRevisionConflictResponse(await readingDispatch(path, body));
-      return path.endsWith('/graph/register') || path === '/orchestrate/v2/turn'
-        ? countingWrite(send) : send();
+      if (path.endsWith('/graph/register')) return countingWrite(send);
+      // A v2 turn can commit through several subdoors before a later refusal.
+      // Its revision 409 cannot prove that the whole dispatched turn wrote nothing.
+      if (path === '/orchestrate/v2/turn') writesDispatched += 1;
+      return send();
     };
     /**
      * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), handed to the build capability. The route

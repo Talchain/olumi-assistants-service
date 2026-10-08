@@ -35,8 +35,20 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import * as editGraphTool from '../../../src/orchestrator/tools/edit-graph.js';
 import { _resetConfigCache } from '../../../src/config/index.js';
-import { SupabaseSessionStore, __setUseAppendV6ForTest } from '../../../src/orchestrator-v5/session/supabase-store.js';
+import { SupabaseSessionStore } from '../../../src/orchestrator-v5/session/supabase-store.js';
+import * as sessionStoreModule from '../../../src/orchestrator-v5/session/supabase-store.js';
 import { GraphStaleWriteError, type SessionTurnWrite } from '../../../src/orchestrator-v5/session/store.js';
+
+// The OFF parity rows also run against an exported origin/staging tree, whose
+// store has no v6 test seam. The explicit ON rows require the current seam.
+function __setUseAppendV6ForTest(enabled: boolean): void {
+  if ('__setUseAppendV6ForTest' in sessionStoreModule) {
+    (sessionStoreModule as unknown as { __setUseAppendV6ForTest(value: boolean): void })
+      .__setUseAppendV6ForTest(enabled);
+  } else if (enabled) {
+    throw new Error('The flag-ON row requires the current v6 store seam');
+  }
+}
 
 const dispatchEditGraphMock = vi.fn();
 
@@ -47,9 +59,9 @@ vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 const claimTurnFenceMock = vi.fn();
 const loadGraphMock = vi.fn();
-const loadGraphAndBriefTextMock = vi.fn(async (scenarioId: string) => ({
-  graph: await loadGraphMock(scenarioId), briefText: null, revision: 8,
-}));
+const loadGraphAndBriefTextMock = vi.fn(async (_scenarioId: string): Promise<{
+  graph: unknown | null; briefText: string | null; revision?: number;
+}> => ({ graph: null, briefText: null, revision: 8 }));
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     ...(claimTurnFenceMock.getMockImplementation() !== undefined
@@ -297,14 +309,12 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
   });
 
   beforeEach(() => {
-    __setUseAppendV6ForTest(true);
+    __setUseAppendV6ForTest(false);
     dispatchEditGraphMock.mockReset();
     appendMock.mockClear();
     loadGraphMock.mockReset();
     loadGraphAndBriefTextMock.mockReset();
-    loadGraphAndBriefTextMock.mockImplementation(async (scenarioId: string) => ({
-      graph: await loadGraphMock(scenarioId), briefText: null, revision: 8,
-    }));
+    loadGraphAndBriefTextMock.mockResolvedValue({ graph: null, briefText: null, revision: 8 });
     telemetryEvents.length = 0;
     logInfoCalls.length = 0;
   });
@@ -330,6 +340,8 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     });
     expect(res.statusCode).toBe(200);
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(loadGraphMock).not.toHaveBeenCalled();
+    expect(dispatchEditGraphMock.mock.calls[0]?.[0]).not.toHaveProperty('persistedEditBase');
     expect(emittedNames()).toContain('v5.edit_graph.graph_state_present');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_reloaded');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_unavailable');
@@ -339,7 +351,12 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
   // ─── Case 2 ────────────────────────────────────────────────────────────
   it('edit intent + graphState absent + persisted graph valid → reloads then dispatches', async () => {
     loadGraphMock.mockResolvedValueOnce(VALID_GRAPH_STATE);
-    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+    dispatchEditGraphMock.mockImplementationOnce(async (args) => {
+      expect(loadGraphMock).toHaveBeenCalledTimes(1);
+      expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
+      expect(args).not.toHaveProperty('persistedEditBase');
+      return makeEditGraphMockResult();
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -374,8 +391,128 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     assertRoutingContractHonoured();
   });
 
+  it.each(['success', 'read_failure'] as const)(
+    'flag OFF parity: route-v2 reload %s matches staging reads, RPC arguments and outcome',
+    async (caseName) => {
+      const reads: Array<{ table: string; columns: string }> = [];
+      const sequence: string[] = [];
+      const writes: SessionTurnWrite[] = [];
+      const mutationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const versionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+      const modelVersion = {
+        mutation_id: mutationId,
+        graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64),
+        hash_algorithm: 'sha256', identity_projection_version: 'identity.v1',
+        identity_normaliser_version: '1', graph_schema_version: 'graph_v3',
+        actor_kind: 'unknown' as const, authored_by: null,
+        creation_kind: 'committed_mutation' as const, source_turn_id: payload({}).turn_id as string,
+      };
+      const receipt = {
+        ...modelVersion, version_id: versionId, version_number: 1,
+        source_version_id: null, parent_version_id: null, root_version_id: versionId,
+        undo_version_id: null, graph: VALID_GRAPH_STATE,
+        event_id: `model_version_created_mutation_${mutationId}`,
+      };
+      const rpc = vi.fn(async (_name: string, _args: Record<string, unknown>) => {
+        sequence.push('rpc');
+        return { data: { turn_row_id: 'parity-turn-row', model_version_receipt: receipt }, error: null };
+      });
+      const client = {
+        rpc,
+        from: (table: string) => {
+          let columns: string | null = null;
+          const query = {
+            select(value: string) {
+              columns = value;
+              reads.push({ table, columns: value });
+              sequence.push(`read:${table}:${value}`);
+              return query;
+            },
+            eq: () => query, limit: () => query, update: () => query,
+            not: () => query, is: () => query,
+            maybeSingle: async () => {
+              if (caseName === 'read_failure') {
+                return { data: null, error: { code: 'XX000', message: 'staging parity read failed' } };
+              }
+              // OFF must ignore a revision that the staging reader never selected.
+              return { data: { graph: VALID_GRAPH_STATE, brief_text: null, revision: 'invalid' }, error: null };
+            },
+            then(resolve: (value: { data: unknown[] | null; error: null }) => unknown) {
+              return Promise.resolve({ data: columns === 'request_hash' ? [] : null, error: null }).then(resolve);
+            },
+          };
+          return query;
+        },
+      };
+      const cache = { invalidateAll: vi.fn() };
+      const publicStore = new SupabaseSessionStore(client as never, cache as never, {
+        defaultReadLimit: 20, graphCasRpc: 'enforce',
+      });
+      claimTurnFenceMock.mockResolvedValue({
+        scenarioId: SCENARIO_ID, turnId: payload({}).turn_id, generation: 1,
+      });
+      loadGraphMock.mockImplementation(async (scenarioId: string) => {
+        sequence.push('loadGraph');
+        return publicStore.loadGraph(scenarioId);
+      });
+      loadGraphAndBriefTextMock.mockImplementation(async (scenarioId: string) => {
+        sequence.push('loadGraphAndBriefText');
+        return publicStore.loadGraphAndBriefText(scenarioId);
+      });
+      dispatchEditGraphMock.mockImplementationOnce(async (args) => {
+        sequence.push('dispatch');
+        const write: SessionTurnWrite = {
+          scenario_id: SCENARIO_ID, turn_id: payload({}).turn_id as string,
+          turn_class: 'direct_answer', handler_id: null, request_hash: 'route-reload-parity',
+          response_emitted: true, llm_calls_used: 0, duration_ms: 1, handler_facts: [],
+          graph: args.graphState, expectedGraphIdentityHash: null, expectedGraphAnalysisHash: null,
+          modelVersion,
+        };
+        writes.push(write);
+        await publicStore.append(write);
+        return makeEditGraphMockResult();
+      });
+      try {
+        const res = await app.inject({
+          method: 'POST', url: '/orchestrate/v2/turn',
+          payload: payload({ message: 'Add opportunity cost of founder time as a risk' }),
+        });
+        // This snapshot is seeded only by the same harness against origin/staging.
+        // It binds full arguments and ordered reads, rather than selected fields.
+        expect({
+          caseName, reads, sequence, rpc: rpc.mock.calls,
+          loadGraphCalls: loadGraphMock.mock.calls,
+          combinedReaderCalls: loadGraphAndBriefTextMock.mock.calls,
+          dispatchedGraph: dispatchEditGraphMock.mock.calls[0]?.[0]?.graphState ?? null,
+          hasPersistedEditBase: dispatchEditGraphMock.mock.calls[0]?.[0]?.persistedEditBase !== undefined,
+          writes: writes.length, status: res.statusCode,
+          recoveryReason: findEvent('v5.edit_graph.graph_state_unavailable')?.reason ?? null,
+          graphReloaded: emittedNames().includes('v5.edit_graph.graph_state_reloaded'),
+          invalidations: cache.invalidateAll.mock.calls,
+        }).toMatchSnapshot();
+        expect(res.statusCode).toBe(200);
+        expect(reads.filter(read => read.table === 'scenarios')).toEqual([
+          { table: 'scenarios', columns: 'graph, brief_text' }, // Strict edit reload.
+          { table: 'scenarios', columns: 'graph, brief_text' }, // Finaliser context.
+        ]);
+        expect(loadGraphMock).toHaveBeenCalledTimes(1);
+        expect(loadGraphAndBriefTextMock).toHaveBeenCalledTimes(1);
+        expect(dispatchEditGraphMock).toHaveBeenCalledTimes(caseName === 'success' ? 1 : 0);
+        expect(rpc).toHaveBeenCalledTimes(caseName === 'success' ? 1 : 0);
+        if (caseName === 'success') {
+          expect(rpc.mock.calls[0]?.[0]).toBe('append_turn_atomic_v5');
+          expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty('p_expected_revision');
+        }
+        assertRoutingContractHonoured();
+      } finally {
+        claimTurnFenceMock.mockReset();
+      }
+    },
+  );
+
   // ─── Case 3a ───────────────────────────────────────────────────────────
-  it('server reload takes graph and revision from one combined read and threads that exact base', async () => {
+  it('flag ON: server reload takes graph and revision from one combined read and threads that exact base', async () => {
+    __setUseAppendV6ForTest(true);
     const base = { graph: VALID_GRAPH_STATE, briefText: null, revision: 8 };
     loadGraphAndBriefTextMock.mockResolvedValueOnce(base);
     loadGraphMock.mockResolvedValue({ nodes: [], edges: [] });
@@ -400,7 +537,8 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     expect(args.persistedEditBase).toBe(base);
   });
 
-  it('empty server at revision 3, rival write at 4 → v6 OLRV1, HTTP 409 revision_conflict and no write', async () => {
+  it('flag ON: empty server at revision 3, rival write at 4 → v6 OLRV1, HTTP 409 revision_conflict and no write', async () => {
+    __setUseAppendV6ForTest(true);
     const clientGraph = {
       nodes: [
         { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
