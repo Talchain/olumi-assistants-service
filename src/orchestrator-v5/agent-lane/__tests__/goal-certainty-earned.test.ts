@@ -33,8 +33,8 @@ describe('accumulation cannot enter the product-ratio or sum-delta break-even re
     const graph = { nodes: [
       { id: 'growth_driver', kind: 'factor', label: 'Growth effort', observed_state: { value: 0.1, raw_value: 1, unit: 'points' } },
       { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { value: 0.75, raw_value: 1500, unit: 'subscribers', source: 'brief_extraction' } },
-      { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, unit: '%' } },
-      { id: 'monthly_inflow', kind: 'factor', label: 'New subscribers per month', observed_state: { value: 0.2, raw_value: 100, unit: 'subscribers per month' } },
+      { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, unit: '%', source: 'user_override' } },
+      { id: 'monthly_inflow', kind: 'factor', label: 'New subscribers per month', observed_state: { value: 0.2, raw_value: 100, unit: 'subscribers per month', source: 'user_override' } },
       { id: 'stock_month_12', kind: 'goal', label: 'Subscribers at month 12', goal_horizon_months: 12, goal_direction: '>', goal_threshold_raw: 1800,
         observed_state: { value: 0.5, raw_value: 2000, unit: 'subscribers', source: 'brief_extraction' },
         nonlinear_identity: { operation, factor_ids: parts, stated_in_brief: true,
@@ -76,9 +76,9 @@ describe('certainty and placeholder readers share accumulation attestation', () 
     { id: 'stock_month_12', kind: 'outcome', label: 'Subscribers at month 12', scale_frame: 1000,
       nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'monthly_churn', 'monthly_inflow'],
         horizon_months: 12, rate_scale: 0.01, stated_in_brief: false } },
-    { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { value: 0.25, raw_value: 250, unit: 'subscribers' } },
-    { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, unit: '%' } },
-    { id: 'monthly_inflow', kind: 'factor', label: 'Monthly inflow', observed_state: { value: 0.1, raw_value: 10, unit: 'subscribers/month' } },
+    { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { value: 0.25, raw_value: 250, unit: 'subscribers', source: 'user_override' } },
+    { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, unit: '%', source: 'user_override' } },
+    { id: 'monthly_inflow', kind: 'factor', label: 'Monthly inflow', observed_state: { value: 0.1, raw_value: 10, unit: 'subscribers/month', source: 'user_override' } },
     { id: 'raise_churn', kind: 'option', label: 'Increase churn', interventions: { monthly_churn: { value: 0.04, raw_value: 4 } } },
   ], edges: [
     ...['stock_today', 'monthly_churn', 'monthly_inflow'].map(from => ({ from, to: 'stock_month_12',

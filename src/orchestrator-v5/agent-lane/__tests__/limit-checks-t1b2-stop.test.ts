@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { sameUnit } from '../same-unit.js';
 import { sizedLinkTest, limitUnitsOf, userStatedLinkUnitsOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { goalChanceLicenceOf } from '../../goal-target/goal-chance-licence.js';
@@ -10,18 +10,27 @@ import { captured, checks, savedFacts, runCarrier, evaluations, edge, goalId, ri
 const units = (s: Rec) => userStatedLinkUnitsOf(s.graph.nodes, s.graph.edges);
 const goalPaths = (s: Rec) => unsizedLeaderGoalPaths(s.graph, s.graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => n.id), evaluations(s));
 
+// #2858: an accumulation carrier attests exact links only over the USER's inputs (identityCanCarryExactLinks).
+const userInputs = ['stock_today', 'monthly_churn', 'monthly_inflow'].map((id) => ({ id, observed_state: { value: 1, source: 'user_override' } }));
+
 describe('L1 r2: user-stated touching units and this Run’s evaluated product', () => {
+  // The replay imports these lazily; cold runtime loading belongs to setup, outside the assertion's 5-second budget.
+  beforeAll(async () => {
+    await import('../runtime/agent-capabilities.js');
+    await import('../proposal.js');
+  });
+
   it('accumulation attestation is bound to stock_at_12 and its month, with a matching-month control', () => {
     const carrier = { id: 'stock_at_12', kind: 'outcome', nonlinear_identity: { operation: 'accumulation',
       factor_ids: ['stock_today', 'monthly_churn', 'monthly_inflow'], horizon_months: 12, rate_scale: 0.01,
       stated_in_brief: false } };
     const row = { node_id: carrier.id, evaluated: true, operation: 'accumulation',
       factor_ids: [...carrier.nonlinear_identity.factor_ids], horizon_months: 12 };
-    expect([...evaluatedIdentityCarriers([carrier], [row])]).toEqual(['stock_at_12']);
-    expect([...evaluatedIdentityCarriers([carrier], [{ ...row, horizon_months: 18 }])]).toEqual([]);
+    expect([...evaluatedIdentityCarriers([carrier, ...userInputs], [row])]).toEqual(['stock_at_12']);
+    expect([...evaluatedIdentityCarriers([carrier, ...userInputs], [{ ...row, horizon_months: 18 }])]).toEqual([]);
     const { horizon_months: _month, ...missingMonth } = row;
-    expect([...evaluatedIdentityCarriers([carrier], [missingMonth])]).toEqual([]);
-    expect([...evaluatedIdentityCarriers([carrier], [{ ...row, node_id: 'another_stock_at_12' }])]).toEqual([]);
+    expect([...evaluatedIdentityCarriers([carrier, ...userInputs], [missingMonth])]).toEqual([]);
+    expect([...evaluatedIdentityCarriers([carrier, ...userInputs], [{ ...row, node_id: 'another_stock_at_12' }])]).toEqual([]);
   });
 
   it('accumulation input order is stock/churn/inflow; a commutative product remains the control', () => {
@@ -30,8 +39,8 @@ describe('L1 r2: user-stated touching units and this Run’s evaluated product',
     const matching = { node_id: 'stock_at_12', evaluated: true, operation: 'accumulation',
       factor_ids: ['stock_today', 'monthly_churn', 'monthly_inflow'], horizon_months: 12 };
     const reordered = { ...matching, factor_ids: ['monthly_churn', 'stock_today', 'monthly_inflow'] };
-    expect([...evaluatedIdentityCarriers([accumulation], [matching])]).toEqual(['stock_at_12']);
-    expect([...evaluatedIdentityCarriers([accumulation], [reordered])]).toEqual([]);
+    expect([...evaluatedIdentityCarriers([accumulation, ...userInputs], [matching])]).toEqual(['stock_at_12']);
+    expect([...evaluatedIdentityCarriers([accumulation, ...userInputs], [reordered])]).toEqual([]);
     const product = { id: 'mrr', nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subscribers'] } };
     expect([...evaluatedIdentityCarriers([product], [{ node_id: 'mrr', evaluated: true, operation: 'product',
       factor_ids: ['subscribers', 'price'] }])]).toEqual(['mrr']);

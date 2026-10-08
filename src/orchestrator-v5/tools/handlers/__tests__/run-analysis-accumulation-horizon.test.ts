@@ -75,9 +75,10 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
       message: "‘Pro subscribers at month 12’ is worked out to month 12, but your deadline is now month 6, so it wasn't used in this run." }]);
   });
 
-  it('CONTROL subscribers_at_12: matching month 12 sends the carrier byte-for-byte and emits no drift warning', async () => {
+  it('CONTROL subscribers_at_12: matching month 12 sends the carrier byte-for-byte except rate_sigma_log and emits no drift warning', async () => {
     const { wire, result } = await run(accumulationGraph(12));
-    expect(node(wire, CARRIER_ID).nonlinear_identity).toEqual(CARRIER);
+    // Both rates in the served fixture are cee_inference: #2862 carries Olumi's spread on the Run wire.
+    expect(node(wire, CARRIER_ID).nonlinear_identity).toEqual({ ...CARRIER, rate_sigma_log: [0.246, 0.246] });
     expect(node(wire, 'mrr').nonlinear_identity).toEqual(PRODUCT);
     expect(driftWarnings(result)).toEqual([]);
     expect(definitionalLinkInUse(accumulationGraph(12), 'monthly_churn', CARRIER_ID, identityRunUseOfResult(result)))
