@@ -21,7 +21,7 @@
  */
 
 import { drawnLinkAdoptionFor } from '../../agent-lane/drawn-link-adoption-context.js';
-import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
+import { isPlaceholderLink, sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { z } from 'zod';
 
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -644,6 +644,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             afterMean: newMean,
             beforeDirection: beforeSnapshot.effect_direction,
             afterDirection: afterSnapshot.effect_direction,
+            beforeUnsized: isPlaceholderLink(rawTargetEdge ?? targetEdge),
           });
       const truthfulSizeNote = unsizedGoalPathNote(graph, parsed.from, parsed.to);
 

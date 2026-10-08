@@ -202,6 +202,10 @@ export function reviewIntentOf(provenance: unknown): unknown {
     : undefined;
 }
 
+/** The projection carrier, compared and carried OPAQUELY (R8-2: only `link-sizing.ts` reads its meaning). */
+const PROJECTION_CARRIER = 'mean_projected';
+const carrierOf = (p: object): Record<string, unknown> => Object.fromEntries(Object.entries(p).filter(([key]) => key === PROJECTION_CARRIER));
+
 /**
  * Full-graph confirmation guard. ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the
  * DL): a confirm never stamps the user's authorship, so it may not change who authored anything. The only permitted
@@ -272,15 +276,15 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
       const approved = sizedByApproval(beforeProvenance, rawBeforeEdge);
       if (!(approvalSizes(rawBeforeEdge) && afterProvenance.magnitude === ESTIMATE_MAGNITUDE
         && afterProvenance.magnitude === approved.magnitude
-        && Object.hasOwn(afterProvenance, 'mean_projected') === Object.hasOwn(approved, 'mean_projected')
-        && isDeepStrictEqual(afterProvenance.mean_projected, approved.mean_projected))) return false;
+        && isDeepStrictEqual(carrierOf(afterProvenance), carrierOf(approved)))) return false;
       if ('magnitude' in beforeProvenance) afterProvenance.magnitude = beforeProvenance.magnitude;
       else delete afterProvenance.magnitude;
       // P03 #2797 + R7: the approved transition drops a projected mean's marker (`sizedByApproval`); only here, and only
       // exactly as checked above. R7: a non-user projected placeholder's canonical magnitude transition also removes its old projection carrier.
       // Admit exactly that paired transition, then restore it for the full-graph check; carrier deletion alone refuses.
-      if ('mean_projected' in beforeProvenance) afterProvenance.mean_projected = structuredClone(beforeProvenance.mean_projected);
-      else delete afterProvenance.mean_projected;
+      // Carried opaquely, as `link-sizing.ts` does (R8-2: only link-sizing READS the marker).
+      for (const key of Object.keys(afterProvenance)) if (key === PROJECTION_CARRIER) delete afterProvenance[key];
+      Object.assign(afterProvenance, structuredClone(carrierOf(beforeProvenance)));
     }
     if ('reviewed_by_user' in beforeProvenance) {
       afterProvenance.reviewed_by_user = structuredClone(beforeProvenance.reviewed_by_user);

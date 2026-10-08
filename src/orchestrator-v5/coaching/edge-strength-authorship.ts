@@ -8,8 +8,8 @@
  * numbers are Olumi's starting assumptions" — and only that: a projected spread alone also
  * sets the flag, so the words never claim the STRENGTH itself was assumed.
  *
- * Strength ownership follows `linkSizing`: a projected user-drawn link is unsized, and a genuine user size is theirs.
- * The legacy unmarked projection fallback still needs a known construction source for its mixed-field words.
+ * Every other or unknown source is `not_olumi_assumed`, even when still stamped defaulted
+ * (a user edit may not clear the flag): unknown provenance never becomes an asserted origin.
  * No graph, or not exactly one link with those endpoints, is `not_tested`.
  *
  * Relation SEMANTICS (definition, approximation, mechanism) is a separate question this
@@ -19,7 +19,6 @@
  */
 import { readRecord } from './fragile-link-challenge.js';
 import { edgeReviewedByUser } from '../../cee/graph-readiness/obligation-provenance.js';
-import { linkSizing, isSizedOnlyByOlumi } from '../../cee/magnitude/link-sizing.js';
 
 export type EdgeAuthorship = 'olumi_assumed' | 'not_olumi_assumed' | 'not_tested';
 
@@ -29,11 +28,8 @@ export const OLUMI_ASSUMED_EDGE_SOURCES: readonly string[] = Object.freeze(['cee
 /** Classify one graph edge record. */
 export function classifyEdgeAuthorship(edge: Record<string, unknown>): Exclude<EdgeAuthorship, 'not_tested'> {
   const source = readRecord(edge.provenance)?.source;
-  const sizing = linkSizing(edge);
   // R11: a confirmed link is still Olumi's size, but the user has given their view of it: it is not asked about again.
-  const assumed = sizing === 'placeholder' || sizing === 'olumi_estimate' || sizing === 'olumi_accepted'
-    || (sizing === 'unmarked' && isSizedOnlyByOlumi(edge) && typeof source === 'string' && OLUMI_ASSUMED_EDGE_SOURCES.includes(source));
-  return assumed && !edgeReviewedByUser(edge)
+  return edge.defaulted === true && !edgeReviewedByUser(edge) && typeof source === 'string' && OLUMI_ASSUMED_EDGE_SOURCES.includes(source)
     ? 'olumi_assumed'
     : 'not_olumi_assumed';
 }
