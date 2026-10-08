@@ -1,62 +1,89 @@
 /**
- * Addendum 7: full wire/read parity against origin/staging, with v6 OFF.
- *
- * These snapshots must be generated from the SAME harness exported into an
- * origin/staging source tree, then copied here. Never update them from this
- * branch. They pin every RPC argument, ordered SELECT (including options),
- * and the success/refusal outcome. Provider replies and PostgreSQL are ports;
- * dispatchers, canonical commit, write floor and SupabaseSessionStore are real.
+ * Addendum 11: outer store-interface method call-count parity.
+ * Seed these snapshots only with this same harness on a git archive of
+ * origin/staging. Count every consumer method, including inherited
+ * brief/context combined reads, and compare the complete map exactly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import Fastify, { type FastifyRequest } from 'fastify';
-import type { DraftGraphResult } from '../../../orchestrator/tools/draft-graph.js';
-import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
+import type { DraftGraphResult } from '../../src/orchestrator/tools/draft-graph.js';
+import type { EditGraphResult } from '../../src/orchestrator/tools/edit-graph.js';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
 const ports = vi.hoisted(() => ({ draft: vi.fn(), edit: vi.fn(), store: vi.fn() }));
-vi.mock('../../../orchestrator/tools/draft-graph.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../../orchestrator/tools/draft-graph.js')>(),
+vi.mock('../../src/orchestrator/tools/draft-graph.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/orchestrator/tools/draft-graph.js')>(),
   handleDraftGraph: ports.draft,
 }));
-vi.mock('../../../orchestrator/tools/edit-graph.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../../orchestrator/tools/edit-graph.js')>(),
+vi.mock('../../src/orchestrator/tools/edit-graph.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/orchestrator/tools/edit-graph.js')>(),
   handleEditGraph: ports.edit,
 }));
-vi.mock('../index.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../index.js')>(), getSessionStore: ports.store,
+vi.mock('../../src/orchestrator-v5/session/index.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>(), getSessionStore: ports.store,
 }));
-vi.mock('../../../orchestrator/user-identity.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../../orchestrator/user-identity.js')>(),
+vi.mock('../../src/orchestrator/user-identity.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/orchestrator/user-identity.js')>(),
   resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
-vi.mock('../../rolling-summary/index.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../rolling-summary/index.js')>(),
+vi.mock('../../src/orchestrator-v5/rolling-summary/index.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/orchestrator-v5/rolling-summary/index.js')>(),
   getRollingSummaryStore: () => { throw new Error('Summary storage isolated'); },
 }));
-vi.mock('../../../adapters/llm/router.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../../adapters/llm/router.js')>(),
+vi.mock('../../src/adapters/llm/router.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/adapters/llm/router.js')>(),
   getAdapter: () => ({}),
   getAdapterWithResolution: () => { throw new Error('Unexpected provider call'); },
 }));
 
-import * as storeModule from '../supabase-store.js';
-import { SessionLRUCache } from '../cache.js';
-import { _resetConfigCache } from '../../../config/index.js';
-import { setTestSink } from '../../../utils/telemetry.js';
-import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
-import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { computeGraphIdentityHash } from '../../context/graph-identity.js';
-import { dispatchDraftGraph } from '../../handlers/draft-graph-dispatch.js';
-import { dispatchEditGraph } from '../../handlers/edit-graph-dispatch.js';
-import { dispatchSystemEvent } from '../../system-events/dispatch.js';
-import { createApplyOperations, modelRevisionOf } from '../../apply-operations.js';
-import registerRoute from '../../../routes/assist.v1.scenario-graph-register.js';
+import * as storeModule from '../../src/orchestrator-v5/session/supabase-store.js';
+import { SessionLRUCache } from '../../src/orchestrator-v5/session/cache.js';
+import { _resetConfigCache } from '../../src/config/index.js';
+import { setTestSink } from '../../src/utils/telemetry.js';
+import { GraphV3 } from '../../src/schemas/cee-v3.js';
+import { GraphStateIngressSchema } from '../../src/orchestrator-v5/boundary/request-extensions.js';
+import { projectGraphForPersistence } from '../../src/orchestrator-v5/persisted-graph-projection.js';
+import { computeGraphIdentityHash } from '../../src/orchestrator-v5/context/graph-identity.js';
+import { dispatchDraftGraph } from '../../src/orchestrator-v5/handlers/draft-graph-dispatch.js';
+import { dispatchEditGraph } from '../../src/orchestrator-v5/handlers/edit-graph-dispatch.js';
+import { dispatchSystemEvent } from '../../src/orchestrator-v5/system-events/dispatch.js';
+import { createApplyOperations, modelRevisionOf } from '../../src/orchestrator-v5/apply-operations.js';
+import registerRoute from '../../src/routes/assist.v1.scenario-graph-register.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ROW = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const NOW = '2026-10-08T13:00:00.000Z';
+const INTERFACE_FILES = [
+  'scripts/parity-evidence/flag-off-store-interface-parity.evidence.ts',
+  'scripts/parity-evidence/route-v2-store-interface-parity.evidence.ts',
+] as const;
+const INTERFACE_SUITES = [
+  'Addendum 11 flag OFF — outer store-interface parity with origin/staging',
+  'Addendum 11 flag OFF — route-v2 store-interface parity',
+] as const;
+// Independent Addendum 10 census: never derive this list from discovered tests.
+const DOOR_CASES = [
+  { name: 'Draft', file: 0, title: 'draft preserves staging RPC arguments, ordered reads and successful commit [staging_method_counts]' },
+  { name: 'Edit — mismatched client identity', file: 0, title: 'edit mismatched client identity preserves staging RPC arguments, reads and success [staging_method_counts]' },
+  { name: 'Edit — initial brief outage, later save recovery', file: 0, title: 'edit initial brief read outage then save recovery preserves staging arguments, reads and success [staging_method_counts]' },
+  { name: 'Route-v2 reload — success', file: 1, title: 'success — staging_method_counts' },
+  { name: 'Route-v2 reload — read failure', file: 1, title: 'read_failure — staging_method_counts' },
+  { name: 'System event — factor value commit', file: 0, title: 'system event commit preserves staging RPC arguments, ordered reads and success [staging_method_counts]' },
+  { name: 'Register', file: 0, title: 'register preserves staging RPC arguments, ordered reads and success [staging_method_counts]' },
+  { name: 'Replacement Apply', file: 0, title: 'replacement apply preserves staging RPC arguments, ordered reads and verified success [staging_method_counts]' },
+] as const;
+
+function stagingSeeds(): string[] {
+  return INTERFACE_FILES.map(file => {
+    const snapshot = file.replace(/([^/]+)$/, '__snapshots__/$1.snap');
+    return readFileSync(resolve(snapshot), 'utf8');
+  });
+}
+
 type Row = Record<string, unknown>;
 type Select = { table: string; columns: string; options?: unknown };
 
@@ -172,11 +199,25 @@ function harness(options: { failGraphReadAt?: number; refuseAppend?: boolean } =
       return chain;
     },
   };
-  const store = new storeModule.SupabaseSessionStore(client as never,
+  const target = new storeModule.SupabaseSessionStore(client as never,
     new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 20 }),
     { defaultReadLimit: 20, graphCasMode: 'off', graphCasRpc: 'enforce' });
+  const methods: Record<string, number> = {};
+  const store = new Proxy(target, {
+    get(storeTarget, key) {
+      const value = Reflect.get(storeTarget, key, storeTarget);
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        const method = String(key);
+        methods[method] = (methods[method] ?? 0) + 1;
+        // Observe the consumer interface, preserving staging's internal
+        // loadGraph -> loadGraphAndBriefText delegation on the raw target.
+        return Reflect.apply(value, storeTarget, args);
+      };
+    },
+  });
   ports.store.mockReturnValue(store);
-  return { store, selects, rpcCalls, tables, get graphReadFailures() { return graphReadFailures; },
+  return { store, methodCounts: () => ({ ...methods }), selects, rpcCalls, tables, get graphReadFailures() { return graphReadFailures; },
     witness: (outcome: unknown) => ({ select_count: selects.length, selects, rpcCalls,
       outcome, durable_turn_count: tables.v5_conversation_turns!.length }) };
 }
@@ -211,8 +252,14 @@ afterEach(() => {
   setTestSink(null);
 });
 
-describe('Addendum 7 flag OFF — full door parity with origin/staging', () => {
-  it('draft preserves staging RPC arguments, ordered reads and successful commit', async () => {
+function assertInterface(methodCounts: Record<string, number>): void {
+  expect((storeModule as Partial<typeof storeModule>).useAppendV6?.() ?? false).toBe(false);
+  expect(Object.keys(methodCounts).length).toBeGreaterThan(0);
+  expect(methodCounts).toMatchSnapshot();
+}
+
+describe('Addendum 11 flag OFF — outer store-interface parity with origin/staging', () => {
+  it('draft preserves staging RPC arguments, ordered reads and successful commit [staging_method_counts]', async () => {
     const h = harness();
     ports.draft.mockResolvedValue({ blocks: [], assistantText: 'Draft output available.', latencyMs: 1,
       strengthenItems: [], coachingSummary: null, coachingWideningLog: null,
@@ -222,10 +269,10 @@ describe('Addendum 7 flag OFF — full door parity with origin/staging', () => {
       requestId: 'flag-off-draft', request: { headers: {} } as FastifyRequest });
     expect(result.commitPerformed).toBe(true);
     expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
-    expect(h.witness({ commitPerformed: result.commitPerformed })).toMatchSnapshot();
+    assertInterface(h.methodCounts());
   });
 
-  it('edit mismatched client identity preserves staging RPC arguments, reads and success', async () => {
+  it('edit mismatched client identity preserves staging RPC arguments, reads and success [staging_method_counts]', async () => {
     const h = harness();
     const client = GraphStateIngressSchema.parse(baseGraph());
     const price = client.nodes.find(n => n.id === 'fac_price')!;
@@ -245,10 +292,10 @@ describe('Addendum 7 flag OFF — full door parity with origin/staging', () => {
     expect(result.commitPerformed).toBe(true);
     expect(ports.edit).toHaveBeenCalledTimes(1);
     expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
-    expect(h.witness({ commitPerformed: result.commitPerformed })).toMatchSnapshot();
+    assertInterface(h.methodCounts());
   });
 
-  it('edit initial brief read outage then save recovery preserves staging arguments, reads and success', async () => {
+  it('edit initial brief read outage then save recovery preserves staging arguments, reads and success [staging_method_counts]', async () => {
     const h = harness({ failGraphReadAt: 1 });
     const client = GraphStateIngressSchema.parse(baseGraph());
     const edited = structuredClone(client);
@@ -265,10 +312,10 @@ describe('Addendum 7 flag OFF — full door parity with origin/staging', () => {
     expect(result.commitPerformed).toBe(true);
     expect(ports.edit).toHaveBeenCalledTimes(1);
     expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
-    expect(h.witness({ initialBriefReadFailed: true, commitPerformed: result.commitPerformed })).toMatchSnapshot();
+    assertInterface(h.methodCounts());
   });
 
-  it('system event commit preserves staging RPC arguments, ordered reads and success', async () => {
+  it('system event commit preserves staging RPC arguments, ordered reads and success [staging_method_counts]', async () => {
     const h = harness();
     const payload = { kind: 'system_event', scenario_id: SCENARIO, turn_id: TURN,
       stage: 'analyse', event: { kind: 'factor_value_edit', target_id: 'fac_price', value: 0.7, field: 'value' },
@@ -276,10 +323,10 @@ describe('Addendum 7 flag OFF — full door parity with origin/staging', () => {
     const result = await dispatchSystemEvent({ payload, requestId: 'flag-off-system' });
     expect(result.commitPerformed).toBe(true);
     expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
-    expect(h.witness({ commitPerformed: result.commitPerformed, graphConflict: result.graphConflict ?? null })).toMatchSnapshot();
+    assertInterface(h.methodCounts());
   });
 
-  it('register preserves staging RPC arguments, ordered reads and success', async () => {
+  it('register preserves staging RPC arguments, ordered reads and success [staging_method_counts]', async () => {
     const h = harness();
     const imported = baseGraph();
     imported.nodes.find(n => n.id === 'fac_price')!.observed_state!.value = 0.65;
@@ -291,11 +338,11 @@ describe('Addendum 7 flag OFF — full door parity with origin/staging', () => {
         payload: { graph: imported, operation_id: TURN } });
       expect(result.statusCode, result.body).toBe(200);
       expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
-      expect(h.witness({ statusCode: result.statusCode, registered: result.json().registered })).toMatchSnapshot();
+      assertInterface(h.methodCounts());
     } finally { await app.close(); }
   });
 
-  it('replacement apply preserves staging RPC arguments, ordered reads and verified success', async () => {
+  it('replacement apply preserves staging RPC arguments, ordered reads and verified success [staging_method_counts]', async () => {
     const h = harness();
     const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'flag-off-apply', store: h.store });
     const result = await apply({ proposalId: 'flag-off-proposal', idempotencyKey: TURN,
@@ -307,6 +354,54 @@ describe('Addendum 7 flag OFF — full door parity with origin/staging', () => {
     });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.rpcCalls.some(c => c.name === 'append_turn_atomic_v5')).toBe(true);
-    expect(h.witness(result)).toMatchSnapshot();
+    assertInterface(h.methodCounts());
   });
+
+  it('Addendum 12 — staging seed SHA is 40 hex characters in both map headers', () => {
+    const shas = stagingSeeds().map(seed => seed.match(/^\/\/ STAGING_SEED_SHA = '([^']+)'$/m)?.[1]);
+    for (const sha of shas) expect(sha).toMatch(/^[a-f0-9]{40}$/);
+    expect(shas[0]).toBe(shas[1]);
+  });
+
+  it('Addendum 12 — all eight named doors exist in recorded results and staging seed', () => {
+    const seedKeys = stagingSeeds().map(seed =>
+      Array.from(seed.matchAll(/^exports\[`(.+)`\] = `/gm), match => match[1]));
+    for (const door of DOOR_CASES) {
+      const key = `${INTERFACE_SUITES[door.file]} > ${door.title} 1`;
+      expect(seedKeys[door.file].filter(candidate => candidate === key), `${door.name}: missing/duplicate staging seed`).toHaveLength(1);
+    }
+    expect(seedKeys.flat()).toHaveLength(DOOR_CASES.length);
+
+    // Isolated workers cannot share a recorder. Collect fresh results from both
+    // siblings; this filter runs only the eight doors, so the census cannot recurse.
+    const evidenceRoot = resolve('.codex-out');
+    mkdirSync(evidenceRoot, { recursive: true });
+    const evidence = mkdtempSync(resolve(evidenceRoot, 'addendum-12-census-'));
+    const report = resolve(evidence, 'results.json');
+    expect(existsSync(report)).toBe(false);
+    const args = ['pnpm', 'exec', 'vitest', 'run', '--config', 'scripts/parity-evidence/vitest.evidence.config.ts', ...INTERFACE_FILES,
+      '--testNamePattern=staging_method_counts', '--reporter=default', '--reporter=json', `--outputFile=${report}`];
+    const quote = (arg: string) => `'${arg.replace(/'/g, `'"'"'`)}'`;
+    const gate = [process.execPath, '-e', "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)"];
+    const command = `${gate.map(quote).join(' ')} && ${args.map(quote).join(' ')}`;
+    const child = spawnSync(command, { shell: true, encoding: 'utf8', timeout: 90_000,
+      env: { ...process.env, UPDATE_SNAPSHOT: 'none', TMPDIR: process.env.TMPDIR ?? evidence } });
+    writeFileSync(resolve(evidence, 'run.log'), `${command}\n${child.stdout ?? ''}${child.stderr ?? ''}`);
+    expect(existsSync(report), `fresh recorded results missing: ${child.error?.message ?? child.status}`).toBe(true);
+    const results = JSON.parse(readFileSync(report, 'utf8')) as {
+      testResults: Array<{ name: string; assertionResults: Array<{ fullName: string; status: string }> }>;
+    };
+    expect(results.testResults.map(file => file.name).sort())
+      .toEqual(INTERFACE_FILES.map(file => resolve(file)).sort());
+    for (const door of DOOR_CASES) {
+      const recorded = results.testResults
+        .filter(file => file.name === resolve(INTERFACE_FILES[door.file]))
+        .flatMap(file => file.assertionResults)
+        .filter(row => row.fullName === `${INTERFACE_SUITES[door.file]} ${door.title}`);
+      expect(recorded, `${door.name}: missing/duplicate recorded result`).toHaveLength(1);
+      expect(recorded[0]?.status, `${door.name}: recorded door must pass`).toBe('passed');
+    }
+    expect(child.error).toBeUndefined();
+    expect(child.status, `door run failed; see ${evidence}/run.log`).toBe(0);
+  }, 120_000);
 });

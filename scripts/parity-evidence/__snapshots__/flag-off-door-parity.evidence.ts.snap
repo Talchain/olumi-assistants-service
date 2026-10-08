@@ -1,4 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+// STAGING_SEED_SHA = '69ff73cf180efb4099c10446197661a33f9777da'
 
 exports[`Addendum 7 flag OFF — full door parity with origin/staging > draft preserves staging RPC arguments, ordered reads and successful commit 1`] = `
 {
@@ -602,13 +603,6 @@ exports[`Addendum 7 flag OFF — full door parity with origin/staging > register
     {
       "args": {
         "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "p_user_id": null,
-      },
-      "name": "ensure_scenario_exists",
-    },
-    {
-      "args": {
-        "p_scenario_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "p_turn_id": "graph_registration:296a536e-f679-4a51-b1e1-781e27af0c2a",
       },
       "name": "v5_claim_turn_fence",
@@ -731,12 +725,8 @@ exports[`Addendum 7 flag OFF — full door parity with origin/staging > register
       "name": "append_turn_atomic_v5",
     },
   ],
-  "select_count": 6,
+  "select_count": 5,
   "selects": [
-    {
-      "columns": "id",
-      "table": "scenarios",
-    },
     {
       "columns": "graph, brief_text",
       "table": "scenarios",

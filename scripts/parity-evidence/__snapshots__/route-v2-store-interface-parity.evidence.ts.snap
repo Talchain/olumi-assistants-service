@@ -1,5 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
-// STAGING_SEED_SHA = '225d7d659883f15597e5ea4823a31fbcaea29304'
+// STAGING_SEED_SHA = '69ff73cf180efb4099c10446197661a33f9777da'
 
 exports[`Addendum 11 flag OFF — route-v2 store-interface parity > read_failure — staging_method_counts 1`] = `
 {

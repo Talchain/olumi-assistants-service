@@ -9,22 +9,22 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { _resetConfigCache } from '../../../src/config/index.js';
-import * as sessionStoreModule from '../../../src/orchestrator-v5/session/supabase-store.js';
-import { SupabaseSessionStore } from '../../../src/orchestrator-v5/session/supabase-store.js';
-import type { SessionTurnWrite } from '../../../src/orchestrator-v5/session/store.js';
+import { _resetConfigCache } from '../../src/config/index.js';
+import * as sessionStoreModule from '../../src/orchestrator-v5/session/supabase-store.js';
+import { SupabaseSessionStore } from '../../src/orchestrator-v5/session/supabase-store.js';
+import type { SessionTurnWrite } from '../../src/orchestrator-v5/session/store.js';
 
 const ports = vi.hoisted(() => ({ getStore: vi.fn(), dispatch: vi.fn() }));
 
-vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
+vi.mock('../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
   dispatchEditGraph: ports.dispatch,
 }));
-vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
+vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: ports.getStore,
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));
-vi.mock('../../../src/adapters/llm/router.js', () => ({
+vi.mock('../../src/adapters/llm/router.js', () => ({
   getAdapter: () => ({
     name: 'test', model: 'test-model',
     chat: async () => ({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } }),
@@ -46,11 +46,11 @@ vi.mock('../../../src/adapters/llm/router.js', () => ({
   }),
   getMaxTokensFromConfig: () => undefined,
 }));
-vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
+vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'test system prompt',
 }));
-vi.mock('../../../src/config/index.js', async importOriginal => {
-  const original = await importOriginal<typeof import('../../../src/config/index.js')>();
+vi.mock('../../src/config/index.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
     ...original,
     config: new Proxy(original.config as object, {
@@ -70,8 +70,8 @@ vi.mock('../../../src/config/index.js', async importOriginal => {
 });
 
 const telemetryEvents: Array<{ name: string; payload: Record<string, unknown> }> = [];
-vi.mock('../../../src/utils/telemetry.js', async importOriginal => {
-  const original = await importOriginal<typeof import('../../../src/utils/telemetry.js')>();
+vi.mock('../../src/utils/telemetry.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../../src/utils/telemetry.js')>();
   return {
     ...original,
     emit: (name: string, payload: Record<string, unknown>) => {
@@ -81,7 +81,7 @@ vi.mock('../../../src/utils/telemetry.js', async importOriginal => {
   };
 });
 
-const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 const VALID_GRAPH_STATE = {
