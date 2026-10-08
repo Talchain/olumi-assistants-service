@@ -60,6 +60,11 @@ export function sayFigureExactly(value: number, unit: string): string | null {
   return sayFigure(value, spoken(value, unit.trim()));
 }
 
+/** Consent must keep every digit, including figures the two-decimal exact formatter cannot say. */
+export function sayFigureWithoutRounding(value: number, unit: string): string {
+  return sayFigureExactly(value, unit) ?? place(String(value), spoken(value, unit.trim()));
+}
+
 /** Percent spelled as a word is said as the sign; a machine unit's underscores are spaces. */
 // "percentage points" is NOT "%": a change in points and a change in percent are different quantities (AIQ on #2247).
 const PERCENT_WORD = /^(?:percent|percentage|pct)\b(?![\s_]+points?\b)/i;

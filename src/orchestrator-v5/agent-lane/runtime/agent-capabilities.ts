@@ -58,7 +58,7 @@ import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
-import { identityReceiptWords, proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
+import { identityReceiptWords, proposeProductIdentity, type IdentityPartLevel, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
@@ -203,7 +203,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -240,7 +240,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
-import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
+import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
@@ -3033,7 +3033,8 @@ export function createAgentCapabilities(
       user_id: ctx.authenticated_user_id,
       base_graph_identity_hash: graphHash,
       operations: [{ op: CONFIRM_IDENTITY_OP, path: card.outcome_id,
-        value: { outcome_id: card.outcome_id, operation: card.operation, factor_ids: [...card.factor_ids], words: card.words } }],
+        value: { outcome_id: card.outcome_id, operation: card.operation, factor_ids: [...card.factor_ids], words: card.words,
+          ...(card.part_levels !== undefined ? { part_levels: card.part_levels } : {}) } }],
       provenance: { authored_by: 'user_stated', basis: card.words },
       validation: { admitted: true, loss_count: 0, refusals: [] },
       public_label: card.words,
@@ -3104,7 +3105,8 @@ export function createAgentCapabilities(
       levels: [],
       // Canonical 5888513620: the token of the words the pressed card SHOWED (checked above), recomputed from the stored proposal.
       identity_confirm: { outcome_id: reading.outcome_id, factor_ids: [...reading.factor_ids], words: reading.words,
-        reading_token: identityConfirmReadingToken({ outcome_id: reading.outcome_id, factor_ids: reading.factor_ids, words: reading.words }) },
+        ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}),
+        reading_token: identityConfirmReadingToken(reading) },
     });
     if (res.status === 'unconfirmed') {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
@@ -3124,7 +3126,12 @@ export function createAgentCapabilities(
       ?.find((n) => n.id === reading.outcome_id)?.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
     const holds = held?.operation === 'product' && held.stated_in_brief === true && Array.isArray(held.factor_ids)
       && held.factor_ids.length === 2 && reading.factor_ids.every((id) => (held.factor_ids as unknown[]).includes(id));
-    if (!holds) {
+    const holdsFigure = (reading.part_levels ?? []).every(part => {
+      const saved = (check?.raw as { nodes?: Array<{ id?: unknown; observed_state?: { raw_value?: unknown; unit?: unknown; source?: unknown } }> } | undefined)?.nodes
+        ?.find(n => n.id === part.part_id)?.observed_state;
+      return saved?.raw_value === part.raw_value && saved.unit === part.unit && saved.source === 'user_override';
+    });
+    if (!holds || !holdsFigure) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'This reading was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
     }
@@ -4006,7 +4013,7 @@ export function createAgentCapabilities(
      * figures, read from the STORED model (`proposeProductIdentity`), held as ONE proposal whose button shows exactly its
      * words. Dry-run through the door first: a card the door would refuse is never offered. Nothing is written here.
      */
-    async proposeIdentity(ctx): Promise<ToolResult> {
+    async proposeIdentity(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) {
@@ -4021,10 +4028,45 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'held_change_waiting',
           detail: 'A suggested change is waiting for your yes. Approve it, or change something first. Nothing was offered.' };
       }
-      const card = proposeProductIdentity(g.raw);
+      let card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
           detail: 'The model holds no reading of the goal for the user to confirm. Nothing was offered; say nothing about one.' };
+      }
+      // A short answer belongs only to a missing part of this reading, and only in THIS typed turn.
+      // `user_text` includes earlier turns; `user_turn_text` comes from the route's typedNow.
+      if (args !== undefined && Object.keys(args).length > 0) {
+        const missing = identityPartsWithoutLevel(g.raw, card.factor_ids);
+        const refuseFigure = (partLabel: string): ToolResult => ({ ok: false, mutated: false, refusal: 'identity_part_figure_not_stated',
+          detail: `Nothing was offered. Ask once, in plain words: ‘What's the number for ‘${partLabel || missing[0]?.label || 'this part'}’ today?’ Never guess, round or invent it.` });
+        if (!Array.isArray(args.parts) || args.parts.length === 0) return refuseFigure('');
+        const partLevels: IdentityPartLevel[] = [];
+        const figureSpans = new Set<number>();
+        for (const entry of args.parts) {
+          const partLabel = typeof entry?.part_label === 'string' ? entry.part_label : '';
+          const resolved = resolveNamed(g, partLabel, () => true);
+          const part = resolved.kind === 'one' ? resolved.node : undefined;
+          const span = part === undefined ? null : figureTheUserWroteForSpan(entry.value, entry.unit, ctx.user_turn_text, {
+            ...scopeIn(g, part.label), exactFigure: true,
+          });
+          if (part === undefined || !missing.some(p => p.id === part.id) || partLevels.some(p => p.part_id === part.id)
+            || typeof entry.value !== 'number' || !Number.isFinite(entry.value) || entry.value <= 0
+            || typeof entry.unit !== 'string' || entry.unit.trim() === ''
+            || span === null || figureSpans.has(span.start)) {
+            return refuseFigure(partLabel);
+          }
+          figureSpans.add(span.start);
+          partLevels.push({ part_id: part.id, raw_value: entry.value, unit: entry.unit });
+        }
+        const labelOf = (id: string): string => { const l = g.nodes.find(n => n.id === id)?.label; return typeof l === 'string' && l.trim() !== '' ? l.trim() : id; };
+        const named = card.factor_ids.map(id => {
+          const level = partLevels.find(p => p.part_id === id);
+          const figure = level === undefined ? ''
+            : sayFigureWithoutRounding(level.raw_value, readUnitParts(level.unit)?.kind === 'count' ? '' : level.unit);
+          return `‘${labelOf(id)}’${level === undefined ? '' : ` (${figure}, your figure)`}`;
+        });
+        card = { ...card, words: `Olumi reads ‘${labelOf(card.outcome_id)}’ as ${named.join(' × ')}. Is that how you work it out?`,
+          part_levels: partLevels };
       }
       if (!identityConfirmBaseIsWritable(g.raw)) {
         return { ok: false, mutated: false, refusal: 'identity_not_writable',
@@ -4032,6 +4074,7 @@ export function createAgentCapabilities(
             + 'cannot be confirmed now and nothing was offered. Say that plainly; never offer a card or ask the user to confirm it.' };
       }
       const dry = applyIdentityConfirmEdit({ persistedGraph: g.raw, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+        part_levels: card.part_levels,
         expected_graph_hash: g.graph_hash, reading_token: identityConfirmReadingToken(card) });
       if (dry.kind === 'refused') {
         const label = g.nodes.find((n) => n.id === card.outcome_id)?.label;

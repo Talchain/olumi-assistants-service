@@ -49,6 +49,12 @@ import { readCount } from './same-unit.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
+/** The qualifiers immediately beside a figure prevent recording it as an exact answer. */
+export function hasApproximateFigureQualifier(before: string, after: string): boolean {
+  return /\b(?:about|around|roughly|approximately|circa)\s*$/i.test(before)
+    || /^(?:[-\s]*ish\b|\s*or so\b)/i.test(after);
+}
+
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
 export function figureTheUserWroteSpan(value: number, unit: unknown, userText: string | null | undefined): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
@@ -480,6 +486,8 @@ export function goalLevelTheUserWrote(
  * factors' nouns ("Hire Two Developers" vs "Developers hired"), so they would make the target's own word ambiguous.
  */
 export interface EntityScope {
+  /** The asked identity figure must be exact, not an approximation such as "300-ish". Other readers keep their rule. */
+  readonly exactFigure?: true;
   readonly target: readonly string[];
   readonly others: readonly string[];
   /**
@@ -670,6 +678,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
+    if (scope.exactFigure === true && hasApproximateFigureQualifier(before, after)) return false;
     const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
     const endAt = after.search(/[.!?;,:\n\u2013\u2014]/);
     const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;
@@ -807,7 +816,7 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
  * fractions), for `figureTheUserWroteFor` ONLY: it then binds clause by clause exactly as its digits would. Served
  * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
  */
-function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
+export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
   return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
     const v = parseCardinalAmount(m[0]);
     return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];

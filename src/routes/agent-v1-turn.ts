@@ -110,7 +110,7 @@ import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/go
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
+import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -3955,15 +3955,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
       readingWaiting: readbackGraph != null && identityCardOfferable(readbackGraph),
     });
-    if (identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
-      const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
+    const partFigures = identityPartFiguresToIssue({ graph: readbackGraph, userText: typedNow,
+      toolCalls: result.tool_calls, mutated: result.mutated,
+      proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, pending: liveHolds });
+    if (partFigures !== undefined || identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
+      const issued = await dispatchTool('propose_identity', JSON.stringify(partFigures ?? {}), toolCtx, capabilities, mode);
       result = {
         ...result,
         tool_calls: [...result.tool_calls, { name: 'propose_identity', ok: issued.ok === true, mutated: false,
           ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
         tool_results: [...result.tool_results, issued],
       };
-      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal, reoffer }, reoffer
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal, reoffer, part_figures: partFigures !== undefined }, partFigures !== undefined
+        ? 'agent-lane: identity card issued by the route from this typed answer’s part figures'
+        : reoffer
         ? 'agent-lane: identity card re-offered by the route (the reading is unconfirmed, nothing else was proposed)'
         : 'agent-lane: identity card issued by the route after the Run');
     }
