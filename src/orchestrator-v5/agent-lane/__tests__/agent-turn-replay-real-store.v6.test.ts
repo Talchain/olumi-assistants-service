@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { SupabaseSessionStore } from '../../session/supabase-store.js';
+import { SupabaseSessionStore, __setUseAppendV6ForTest } from '../../session/supabase-store.js';
 import { SessionLRUCache } from '../../session/cache.js';
 
 type Row = {
@@ -92,28 +92,39 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
-type Step = { kind: 'text'; text?: string } | { kind: 'fail' } | { kind: 'tool'; name: string; args: string };
+type Step = { kind: 'text'; text?: string } | { kind: 'fail' } | { kind: 'tool'; name: string; args: string }
+  | { kind: 'tools'; calls: readonly { name: string; args: string }[] };
 const provider = { calls: 0, script: [] as Step[] };
 const fakeFetch = vi.fn(async () => {
   provider.calls += 1;
   const step = provider.script.shift() ?? { kind: 'text' };
   if (step.kind === 'fail') return new Response('{"error":"boom"}', { status: 500 });
   if (step.kind === 'tool') return new Response(JSON.stringify({ output: [{ type: 'function_call', name: step.name, call_id: `c${provider.calls}`, arguments: step.args }] }), { status: 200 });
+  if (step.kind === 'tools') return new Response(JSON.stringify({ output: step.calls.map((call, i) => ({ type: 'function_call', name: call.name, call_id: `c${provider.calls}-${i}`, arguments: call.args })) }), { status: 200 });
   return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: step.text ?? `Answer ${provider.calls}` }] }] }), { status: 200 });
 });
 
 const SID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const T1 = '0b8c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d';
 
-async function freshApp(): Promise<FastifyInstance> {
+type InternalTurn = (body: Record<string, unknown>) => Promise<{ status: number; json: Record<string, unknown> }>;
+const freshModuleAppendV6Setters = new Set<(value: boolean) => void>();
+async function freshApp(internalTurn?: InternalTurn): Promise<FastifyInstance> {
   vi.resetModules();
   process.env.AGENT_LANE_ENABLED = 'true';
   process.env.AGENT_LANE_PREVIEW = 'false';
+  const freshStoreModule = await import('../../session/supabase-store.js');
+  freshModuleAppendV6Setters.add(freshStoreModule.__setUseAppendV6ForTest);
+  freshStoreModule.__setUseAppendV6ForTest(true);
   const mod = await import('../../../routes/agent-v1-turn.js');
   mod.AGENT_TURN_CLAIM_WAIT.totalMs = 1_500;
   mod.AGENT_TURN_CLAIM_WAIT.everyMs = 20;
   const app = Fastify({ logger: false });
   app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [], edges: [] }, graph_hash: 'h1' }));
+  if (internalTurn !== undefined) app.post('/orchestrate/v2/turn', async (req, reply) => {
+    const result = await internalTurn(req.body as Record<string, unknown>);
+    return reply.code(result.status).send(result.json);
+  });
   await app.register(mod.agentV1TurnRoute);
   await app.ready();
   return app;
@@ -123,14 +134,23 @@ const say = (app: FastifyInstance, message: string, turnId: string) =>
 const textOf = (r: { json: () => unknown }) => String((r.json() as { assistant_text?: string }).assistant_text);
 const errorOf = (r: { json: () => unknown }) => (r.json() as { error?: string }).error;
 
-describe('the Agent turn claim decides ownership on the REAL SupabaseSessionStore', () => {
+describe('v6: the Agent turn claim decides ownership on the REAL SupabaseSessionStore', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
+    __setUseAppendV6ForTest(true);
     table.length = 0; seq = 0; failAnswerFor = null; provider.calls = 0; provider.script = [];
     vi.stubGlobal('fetch', fakeFetch);
     app = await freshApp();
   }, 60_000);
-  afterEach(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  afterEach(async () => {
+    __setUseAppendV6ForTest(false);
+    for (const setAppendV6 of freshModuleAppendV6Setters) setAppendV6(false);
+    freshModuleAppendV6Setters.clear();
+    await app.close();
+    vi.unstubAllGlobals();
+    delete process.env.AGENT_LANE_ENABLED;
+    delete process.env.AGENT_LANE_PREVIEW;
+  });
 
   it('CONTROL: sequential replay — the retry is answered from the durable row, 1 provider call', async () => {
     const first = await say(app, 'What should I consider?', T1);
@@ -191,22 +211,80 @@ describe('the Agent turn claim decides ownership on the REAL SupabaseSessionStor
     expect(errorOf(retry)).toBe('TURN_OUTCOME_UNKNOWN');
     expect(provider.calls).toBe(callsBefore);
   });
-});
 
-describe('claim markers never become conversation history', () => {
-  it('RED: after 25 claim+answer turns, readRecent(20) returns the 20 newest REAL turns and no claim row', async () => {
-    table.length = 0; seq = 0;
-    for (let i = 1; i <= 25; i += 1) {
-      const tid = `t-${String(i).padStart(2, '0')}`;
-      await fakeClient.rpc('append_turn_atomic_v2', { p_scenario_id: SID, p_turn_id: `${tid}:claim`, p_turn_class: 'direct_answer', p_handler_id: null, p_request_hash: `h${i}#claim:n`, p_response_emitted: false, p_llm_calls_used: 0, p_duration_ms: 0 });
-      await fakeClient.rpc('append_turn_atomic_v2', { p_scenario_id: SID, p_turn_id: tid, p_turn_class: 'direct_answer', p_handler_id: null, p_request_hash: `h${i}`, p_response_emitted: true, p_llm_calls_used: 1, p_duration_ms: 1, p_user_message: `q${i}`, p_assistant_message: `a${i}` });
-    }
-    const fresh = new SupabaseSessionStore(fakeClient as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 });
-    const recent = await fresh.readRecent(SID, 20);
-    const ids = recent.map((t) => t.turn_id);
-    expect(ids.some((id) => id.endsWith(':claim'))).toBe(false);
-    expect(ids).toHaveLength(20);
-    expect(new Set(ids)).toEqual(new Set(Array.from({ length: 20 }, (_, k) => `t-${String(k + 6).padStart(2, '0')}`)));
-    expect(await fresh.countTurns!(SID)).toBe(25);
+  it('a lone v2/turn revision refusal keeps the durable claim — the SAME turn_id never runs on a fresh instance', async () => {
+    let dispatched = 0;
+    const internalTurn: InternalTurn = async (body) => {
+      dispatched += 1;
+      expect(body).toMatchObject({ scenario_id: SID, stage: 'analyse', chip: { action_type: 'run_analysis' } });
+      return { status: 409, json: { code: 'revision_conflict', expected: 7, current: 8 } };
+    };
+    await app.close(); app = await freshApp(internalTurn);
+    provider.script = [{ kind: 'tool', name: 'run_analysis', args: '{"reason":"first comparison"}' }];
+
+    const refused = await say(app, 'Run it.', T1);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8, retry_safe: false });
+    expect(dispatched).toBe(1);
+    expect(table, 'even a v2 refusal with no witnessed write must retain its real-store claim').toHaveLength(1);
+    const retainedClaim = await store.readCommittedTurn(SID, `${T1}:claim`);
+    expect(retainedClaim).not.toBeNull();
+    expect(await store.readCommittedTurn(SID, T1)).toBeNull();
+
+    await app.close(); app = await freshApp(internalTurn);
+    const callsBefore = provider.calls;
+    const retry = await say(app, 'Run it.', T1);
+    expect(retry.statusCode).toBe(409);
+    expect(errorOf(retry)).toBe('TURN_OUTCOME_UNKNOWN');
+    expect(dispatched, 'the SAME outer turn_id must never dispatch its action again').toBe(1);
+    expect(provider.calls).toBe(callsBefore);
+    expect(await store.readCommittedTurn(SID, `${T1}:claim`)).toEqual(retainedClaim);
+    expect(await store.readCommittedTurn(SID, T1)).toBeNull();
+  });
+
+  it('an earlier dispatched step wrote before a revision refusal — retry_safe is false and the SAME turn_id never runs again', async () => {
+    const dispatchedTurnIds: string[] = [];
+    const internalTurn: InternalTurn = async (body) => {
+      expect(body).toMatchObject({ scenario_id: SID, stage: 'analyse', chip: { action_type: 'run_analysis' } });
+      const internalTurnId = String(body.turn_id);
+      dispatchedTurnIds.push(internalTurnId);
+      if (dispatchedTurnIds.length === 2) return { status: 409, json: { code: 'revision_conflict', expected: 8, current: 9 } };
+      // The endpoint boundary persists through the production store/RPC path:
+      // a successful earlier step is a durable turn, not a hand-written table row.
+      await store.append({
+        scenario_id: SID, turn_id: internalTurnId, turn_class: 'handler', handler_id: 'run_analysis',
+        request_hash: 'first-analysis-step', response_emitted: true, llm_calls_used: 0,
+        duration_ms: 1, handler_facts: [],
+      });
+      return { status: 200, json: { blocks: [], assistant_text: 'First analysis step recorded.' } };
+    };
+    await app.close(); app = await freshApp(internalTurn);
+    provider.script = [{ kind: 'tools', calls: [
+      { name: 'run_analysis', args: '{"reason":"first comparison"}' },
+      { name: 'run_analysis', args: '{"reason":"second comparison"}' },
+    ] }];
+
+    const refused = await say(app, 'Run both comparisons.', T1);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ code: 'revision_conflict', expected: 8, current: 9, retry_safe: false });
+    expect(dispatchedTurnIds).toHaveLength(2);
+    const firstStep = await store.readCommittedTurn(SID, dispatchedTurnIds[0]!);
+    expect(firstStep).toMatchObject({ request_hash: 'first-analysis-step' });
+    expect(await store.readCommittedTurn(SID, dispatchedTurnIds[1]!)).toBeNull();
+    expect(await store.readCommittedTurn(SID, T1)).toBeNull();
+    const retainedClaim = await store.readCommittedTurn(SID, `${T1}:claim`);
+    expect(retainedClaim).not.toBeNull();
+
+    const callsBefore = provider.calls;
+    await app.close(); app = await freshApp(internalTurn);
+    const retry = await say(app, 'Run both comparisons.', T1);
+    expect(retry.statusCode).toBe(409);
+    expect(errorOf(retry)).toBe('TURN_OUTCOME_UNKNOWN');
+    expect(provider.calls).toBe(callsBefore);
+    expect(dispatchedTurnIds, 'neither step may execute again on a retry').toHaveLength(2);
+    expect(await store.readCommittedTurn(SID, `${T1}:claim`)).toEqual(retainedClaim);
+    expect(await store.readCommittedTurn(SID, dispatchedTurnIds[0]!)).toEqual(firstStep);
+    expect(table).toHaveLength(2);
   });
 });
+

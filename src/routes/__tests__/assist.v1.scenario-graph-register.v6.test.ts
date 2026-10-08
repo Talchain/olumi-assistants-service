@@ -19,7 +19,7 @@ import { installOwnershipHarness } from "../../../tests/utils/ownership-route-ha
 import { readFileSync } from "node:fs";
 
 import Fastify, { type FastifyInstance } from "fastify";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
 const OWNER = "0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b";
@@ -57,7 +57,9 @@ const getScenarioOwner = vi.fn();
 const scenarioExists = vi.fn();
 const readCommittedTurn = vi.fn();
 
-const store = { readMostRecentPendingActions: vi.fn(async () => []), append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
+const store = { readMostRecentPendingActions: vi.fn(async () => []), append, loadGraph,
+  loadGraphAndBriefText: async (scenarioId: string) => ({ graph: await loadGraph(scenarioId), briefText: null, revision: 7 }),
+  ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));
@@ -91,6 +93,7 @@ import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
 import { currentTurnFenceSlot, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
 import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
+import { __setUseAppendV6ForTest } from "../../orchestrator-v5/session/supabase-store.js";
 
 
 
@@ -166,7 +169,11 @@ beforeEach(() => {
   readCommittedTurn.mockResolvedValue(null);
 });
 
+
 describe("register — optional initial brief", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const brief = "Saved example: Customer Data Platform Selection (vendor-selection; captured 2026-07-28). Original brief:\n\nWe need to replace our customer data platform before the current contract renews in March. The shortlist is Segment, RudderStack, or building on our existing Snowflake warehouse with Fivetran. Our constraint is a £120k annual budget and a two-person data team who can't absorb much operational overhead. We also have GDPR obligations that rule out any vendor without EU data residency.";
 
   it("passes the attributed brief and graph through the SAME scenario-bound atomic write", async () => {
@@ -175,6 +182,7 @@ describe("register — optional initial brief", () => {
     expect(res.statusCode).toBe(200);
     expect(append).toHaveBeenCalledTimes(1);
     expect(append.mock.calls[0][0]).toMatchObject({ scenario_id: SCENARIO, briefText: brief });
+    expect(append.mock.calls[0][0].expectedRevision).toBe(7);
     expect(writtenGraph()).toEqual(projectGraphForPersistence(IMPORTED, {}));
     await app.close();
   });
@@ -253,6 +261,9 @@ describe("register — optional initial brief", () => {
 });
 
 describe("register — the acceptance case the P0 walk failed", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("POSITIVE CONTROL: the server graph and the imported graph really do differ, and differ in a way the identity hash SEES", () => {
     // Trap 13. Every assertion below about "the imported graph was stored"
     // is vacuous unless the two graphs are distinguishable in the first place.
@@ -313,6 +324,9 @@ describe("register — the acceptance case the P0 walk failed", () => {
 });
 
 describe("register — the atomic writer, and the trusted CAS base", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("writes through store.append (the only writer that stamps graph_identity_hash atomically)", async () => {
     const app = await buildApp();
     await post(app, SCENARIO, { graph: IMPORTED });
@@ -433,6 +447,9 @@ describe("register — the atomic writer, and the trusted CAS base", () => {
 });
 
 describe("register — 2.467c, the kind/type pair", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("REFUSES a divergent-field file, names the node, and writes NOTHING", async () => {
     const divergent = {
       ...IMPORTED,
@@ -497,6 +514,9 @@ describe("register — 2.467c, the kind/type pair", () => {
 });
 
 describe("register — payload refusals, all before any database work", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it.each([
     ["no graph key", {}, "GRAPH_MISSING"],
     ["graph is an array", { graph: [] }, "GRAPH_MISSING"],
@@ -586,6 +606,9 @@ describe("register — payload refusals, all before any database work", () => {
 });
 
 describe("register — the owner path", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("lets the owner register their own scenario", async () => {
     getScenarioOwner.mockResolvedValue(OWNER);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
@@ -599,6 +622,9 @@ describe("register — the owner path", () => {
 });
 
 describe("register — the rate bucket is DERIVED, and it is a write tier", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("is registered in RATE_BUCKET_REGISTRY as `coach` (fails CLOSED), not `read` (fails OPEN)", () => {
     expect(RATE_BUCKET_REGISTRY.CEE_SCENARIO_GRAPH_REGISTER_RATE_LIMIT_RPM).toBe("coach");
     // Derived, not restated: the route asks the same resolver.
@@ -631,6 +657,9 @@ describe("register — the rate bucket is DERIVED, and it is a write tier", () =
  * behaviour — the store is a double here, as the header of this file says.
  */
 describe("register — the terminal persisted-graph invariant (C3 shared floor)", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   /**
    * The imported graph plus a SECOND node carrying an id the graph already
    * uses. Bound by IDENTITY (the id it duplicates), never by a value predicate
@@ -820,6 +849,9 @@ const VERSIONABLE = {
 };
 
 describe("register — the atomic write carries a model-version carrier", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("RED: a versionable graph supplies a modelVersion", async () => {
     const app = await buildApp();
     const res = await post(app, SCENARIO, { graph: VERSIONABLE });
@@ -890,6 +922,9 @@ describe("register — the atomic write carries a model-version carrier", () => 
  * the reverse of what a 0-edge fixture and `IMPORTED` together suggest.
  */
 describe("register — the carrier describes the STORED graph, and obeys the policy", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const EDGED = JSON.parse(
     readFileSync(
       new URL(
@@ -1000,6 +1035,9 @@ describe("register — the carrier describes the STORED graph, and obeys the pol
  * identity, not its author, and this route is reachable with a service key.
  */
 describe("register — the canonical receipt reaches the caller", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const RECEIPT = {
     mutation_id: "8f7e6d5c-4b3a-4291-8071-6f5e4d3c2b1a",
     version_id: "1a2b3c4d-5e6f-4071-8192-a3b4c5d6e7f8",
@@ -1074,6 +1112,9 @@ describe("register — the canonical receipt reaches the caller", () => {
  * different graph.
  */
 describe("register — a replay-stable construction identity", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const OP = "7b8f0c2e-4d1a-4c3b-9e5f-1a2b3c4d5e6f";
   const OTHER_OP = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a";
   const SID = "8f14e45f-ceea-4f1a-9e6b-2c8d1b3a7e90";
@@ -1162,6 +1203,9 @@ describe("register — a replay-stable construction identity", () => {
  * of the write — not that some fence function was called somewhere.
  */
 describe("register — the write is ordered by the turn fence", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const SID = "3d9c2f1e-7b4a-4c8e-9f0d-1a2b3c4d5e6f";
   const OP = "5b1e9c7a-2d4f-4a6b-8c0e-9f1a2b3c4d5e";
   const claimTurnFence = vi.fn();
@@ -1253,6 +1297,9 @@ describe("register — the write is ordered by the turn fence", () => {
  * nothing (the UI import).
  */
 describe("register — an optional caller expectation makes the write conditional", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const current = () => computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphAnalysisHash!;
 
   it("POSITIVE CONTROL: the base the route reads has a non-null analysis hash, so the cases below are not vacuous", () => {
@@ -1326,6 +1373,9 @@ describe("register — an optional caller expectation makes the write conditiona
  * holding, the test fails loudly rather than passing for the wrong reason.
  */
 describe("register — the IDENTITY expectation catches what the analysis one cannot", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   /** The server's graph after a colleague renamed one node — nothing else. */
   const RENAMED = (() => {
     const g = JSON.parse(JSON.stringify(SERVER_PRE_IMPORT)) as WireGraph;
@@ -1443,6 +1493,9 @@ describe("register — the IDENTITY expectation catches what the analysis one ca
  * These tests therefore bind to the PRODUCER, never to the internal helper.
  */
 describe("register — the identity expectation accepts the shape the WIRE actually carries", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   /** Exactly what the read route puts on the wire for this graph. */
   const wireIdentity = () => computeGraphIdentityHash(SERVER_PRE_IMPORT as never);
 
@@ -1533,6 +1586,9 @@ describe("register — the identity expectation accepts the shape the WIRE actua
  * empty model) was the one guaranteed not to get it.
  */
 describe("register — `null` means 'I expect no graph', and omitting the key still means 'do not check'", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("⛔⛔ THE DEFECT: `null` + a graph that has since appeared is REFUSED, not written", async () => {
     loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
     const app = await buildApp();
@@ -1585,6 +1641,9 @@ describe("register — `null` means 'I expect no graph', and omitting the key st
  * refusal got `undefined` — indistinguishable from "the server has no graph".
  */
 describe("register — a 409 says WHICH expectation failed and carries both pairs", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("an identity refusal still reports the analysis pair", async () => {
     const renamed = JSON.parse(JSON.stringify(SERVER_PRE_IMPORT)) as WireGraph;
     (renamed.nodes as { label?: string }[])[0].label = "renamed";
@@ -1636,6 +1695,9 @@ function wireIdentityOf(g: WireGraph) {
  * the field exists to prevent, and flatly contrary to the refusal's own wording.
  */
 describe("register — an absence assertion does not discard a graph that merely could not be READ", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("⛔⛔ THE DEFECT: `null` against PRESENT-but-unparseable bytes is refused, not written over", async () => {
     // Present and non-null, but fails `GraphStateIngressSchema` — so the identity
     // hash is `null` and the old preflight saw it as "no graph".
@@ -1682,6 +1744,9 @@ describe("register — an absence assertion does not discard a graph that merely
  *       arm, so the retry got a 409 instead of its original receipt.
  */
 describe("register — create-only construction: `null` refuses a real model, not an empty one or its own replay", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const OP = "4f3c2b1a-0d9e-4c8b-a7f6-e5d4c3b2a190";
   const projected = () =>
     projectGraphForPersistence(IMPORTED as never, { scenarioId: SCENARIO, turnClass: "direct_answer", source: "graph_registration" });
@@ -1749,6 +1814,9 @@ describe("register — create-only construction: `null` refuses a real model, no
 });
 
 describe("register — the stored bytes are readable by every strict reader (served 26 Sep 2026, CEE 319dde1)", () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   // The UI's register after a value edit carried `extractionType: null` on the
   // user-set factor. Stored verbatim, the bytes failed `GraphV3`, and every later
   // canvas edit failed closed with 500. The fixture is the SERVED persisted graph.

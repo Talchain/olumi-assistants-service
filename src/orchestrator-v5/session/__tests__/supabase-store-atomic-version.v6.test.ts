@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SupabaseSessionStore } from '../supabase-store.js';
+import { SupabaseSessionStore, __setUseAppendV6ForTest } from '../supabase-store.js';
 import { GraphStaleWriteError, StateCommitFailedError } from '../store.js';
 import type { SessionTurnWrite } from '../store.js';
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
@@ -11,7 +11,9 @@ function captureEvents(): SunkEvent[] {
   setTestSink((event, data) => events.push({ event, data }));
   return events;
 }
-afterEach(() => setTestSink(null));
+afterEach(() => {
+  setTestSink(null);
+});
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -91,6 +93,7 @@ function write(overrides: Partial<SessionTurnWrite> = {}): SessionTurnWrite {
     duration_ms: 1,
     handler_facts: [],
     graph: receipt.graph,
+    expectedRevision: 7,
     modelVersion: {
       mutation_id: MUTATION,
       graph_identity_hash: HASH,
@@ -115,10 +118,10 @@ function storeWith(graphCasRpc?: 'off' | 'shadow' | 'enforce'): SupabaseSessionS
   } as never);
 }
 
-/** The single `append_turn_atomic_v5` argument object of the call under test. */
-function v5Args(): Record<string, unknown> {
-  const call = rpc.mock.calls.find((c) => c[0] === 'append_turn_atomic_v5');
-  expect(call, 'append_turn_atomic_v5 was never called').toBeDefined();
+/** The v6 argument object; its existing v5 hash-CAS contract remains unchanged. */
+function versionedArgs(): Record<string, unknown> {
+  const call = rpc.mock.calls.find((c) => c[0] === 'append_turn_atomic_v6');
+  expect(call, 'append_turn_atomic_v6 was never called').toBeDefined();
   return call![1] as Record<string, unknown>;
 }
 
@@ -127,19 +130,22 @@ beforeEach(() => {
   selectCalls.length = 0;
   maybeSingle.mockResolvedValue({ data: { graph_identity_hash: null }, error: null });
   rpc.mockResolvedValue({
-    data: { turn_row_id: 'turn-row', model_version_receipt: receipt },
+    data: { turn_row_id: 'turn-row', model_version_receipt: receipt, revision: 8 },
     error: null,
   });
 });
 
-describe('SupabaseSessionStore append_turn_atomic_v5', () => {
+describe('SupabaseSessionStore versioned append via v6', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it('uses the trusted null base and returns the canonical internal receipt', async () => {
     const store = storeWith();
 
     const outcome = await store.append(write());
 
     expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v5');
+    expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v6');
     expect(rpc.mock.calls[0]![1]).toMatchObject({
       p_expected_graph_identity_hash: null,
       p_incoming_graph_identity_hash: HASH,
@@ -150,17 +156,17 @@ describe('SupabaseSessionStore append_turn_atomic_v5', () => {
       p_version_mutation_id: MUTATION,
       p_version_actor_kind: 'unknown',
     });
-    expect(outcome).toEqual({ id: 'turn-row', modelVersionReceipt: receipt });
+    expect(outcome).toEqual({ id: 'turn-row', modelVersionReceipt: receipt, revision: 8 });
   });
 
   it('accepts an honest guest/no-op replay with no version receipt', async () => {
     rpc.mockResolvedValue({
-      data: { turn_row_id: 'turn-row', model_version_receipt: null },
+      data: { turn_row_id: 'turn-row', model_version_receipt: null, revision: 8 },
       error: null,
     });
     const store = storeWith();
 
-    await expect(store.append(write())).resolves.toEqual({ id: 'turn-row' });
+    await expect(store.append(write())).resolves.toEqual({ id: 'turn-row', revision: 8 });
     expect(cache.invalidateAll).toHaveBeenCalledWith(SCENARIO);
   });
 });
@@ -179,6 +185,9 @@ describe('SupabaseSessionStore append_turn_atomic_v5', () => {
  * REFUSE this anti-pattern; these tests hold the versioned path to it.
  */
 describe('B1 — the versioned CAS base is never a copy of the value it is compared against', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it('B1: issues NO read of scenarios.graph_identity_hash on the versioned append path', async () => {
     // PRECONDITION PIN: the row genuinely holds a hash, so a re-read WOULD
     // return a non-null value. If the store re-reads, it can only be reading
@@ -210,7 +219,7 @@ describe('B1 — the versioned CAS base is never a copy of the value it is compa
 
     await store.append(write({ expectedGraphIdentityHash: undefined }));
 
-    const args = v5Args();
+    const args = versionedArgs();
     // The honest "this path is not instrumented" sentinel — store.ts:199-201.
     expect(args.p_expected_graph_identity_hash).toBeNull();
     // ...and specifically NOT the pre-write current value.
@@ -230,7 +239,7 @@ describe('B1 — the versioned CAS base is never a copy of the value it is compa
 
     await store.append(write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH }));
 
-    const args = v5Args();
+    const args = versionedArgs();
     expect(args.p_expected_graph_identity_hash).toBe(CALLER_TURN_START_HASH);
     expect(args.p_cas_enforce).toBe(true);
     // The two operands v4 compares are now genuinely different sources, so
@@ -256,7 +265,7 @@ describe('B1 — the versioned CAS base is never a copy of the value it is compa
     await expect(
       store.append(write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH })),
     ).rejects.toBeInstanceOf(GraphStaleWriteError);
-    expect(v5Args().p_expected_graph_identity_hash).toBe(CALLER_TURN_START_HASH);
+    expect(versionedArgs().p_expected_graph_identity_hash).toBe(CALLER_TURN_START_HASH);
   });
 });
 
@@ -268,6 +277,9 @@ describe('B1 — the versioned CAS base is never a copy of the value it is compa
  * refuse"; promoting it to enforce is "a later explicit, Paul-gated step".
  */
 describe('B2 — p_cas_enforce is derived from the RPC mode, both directions', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it("B2: shadow LOGS AND PROCEEDS — p_cas_enforce is false and the append returns", async () => {
     maybeSingle.mockResolvedValue({
       data: { graph_identity_hash: ROW_CURRENT_HASH },
@@ -279,9 +291,9 @@ describe('B2 — p_cas_enforce is derived from the RPC mode, both directions', (
       write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH }),
     );
 
-    expect(v5Args().p_cas_enforce).toBe(false);
+    expect(versionedArgs().p_cas_enforce).toBe(false);
     // Shadow must not refuse: a stale base still commits, exactly as today.
-    expect(outcome).toEqual({ id: 'turn-row', modelVersionReceipt: receipt });
+    expect(outcome).toEqual({ id: 'turn-row', modelVersionReceipt: receipt, revision: 8 });
   });
 
   it('B2: enforce REFUSES — p_cas_enforce is true and OLGC1 becomes a typed refusal', async () => {
@@ -291,7 +303,7 @@ describe('B2 — p_cas_enforce is derived from the RPC mode, both directions', (
     });
     const store = storeWith('enforce');
     await store.append(write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH }));
-    expect(v5Args().p_cas_enforce).toBe(true);
+    expect(versionedArgs().p_cas_enforce).toBe(true);
 
     vi.clearAllMocks();
     selectCalls.length = 0;
@@ -324,7 +336,7 @@ describe('B2 — p_cas_enforce is derived from the RPC mode, both directions', (
   it("B2: 'off' does not enforce", async () => {
     const store = storeWith('off');
     await store.append(write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH }));
-    expect(v5Args().p_cas_enforce).toBe(false);
+    expect(versionedArgs().p_cas_enforce).toBe(false);
   });
 
   it('B2: the three modes are DISCRIMINATED — shadow/off false, enforce true, from one identical write', async () => {
@@ -333,11 +345,11 @@ describe('B2 — p_cas_enforce is derived from the RPC mode, both directions', (
       vi.clearAllMocks();
       selectCalls.length = 0;
       rpc.mockResolvedValue({
-        data: { turn_row_id: 'turn-row', model_version_receipt: receipt },
+        data: { turn_row_id: 'turn-row', model_version_receipt: receipt, revision: 8 },
         error: null,
       });
       await storeWith(mode).append(write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH }));
-      seen.push([mode, v5Args().p_cas_enforce]);
+      seen.push([mode, versionedArgs().p_cas_enforce]);
     }
     // A hardcoded value would make all three identical — this asserts the
     // DISCRIMINATION, which a blind/constant implementation cannot fake.
@@ -357,12 +369,15 @@ describe('B2 — p_cas_enforce is derived from the RPC mode, both directions', (
  * treatment `append_turn_atomic_v4`'s PGRST202 already gets at :1114-1127.
  */
 describe('B3 — an un-migrated database fails closed with an ACTIONABLE message', () => {
-  it('B3: PGRST202 on append_turn_atomic_v5 names migration 20260824200000', async () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
+  it('B3: PGRST202 on append_turn_atomic_v6 names migration 20261008160000', async () => {
     rpc.mockResolvedValue({
       data: null,
       error: {
         code: 'PGRST202',
-        message: 'Could not find the function public.append_turn_atomic_v5 in the schema cache',
+        message: 'Could not find the function public.append_turn_atomic_v6 in the schema cache',
       },
     });
     const store = storeWith('shadow');
@@ -370,7 +385,7 @@ describe('B3 — an un-migrated database fails closed with an ACTIONABLE message
     const err = await store.append(write()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(StateCommitFailedError);
     const message = (err as Error).message;
-    expect(message).toContain('20260824200000');
+    expect(message).toContain('20261008160000');
     expect(message.toLowerCase()).toContain('migration');
   });
 
@@ -383,7 +398,7 @@ describe('B3 — an un-migrated database fails closed with an ACTIONABLE message
 
     await expect(store.append(write())).rejects.toBeInstanceOf(StateCommitFailedError);
     const attempted = rpc.mock.calls.map((c) => c[0] as string);
-    expect(attempted).toEqual(['append_turn_atomic_v5']);
+    expect(attempted).toEqual(['append_turn_atomic_v6']);
     expect(attempted).not.toContain('append_turn_atomic_v4');
     expect(attempted).not.toContain('append_turn_atomic_v3');
     expect(attempted).not.toContain('append_turn_atomic_v2');
@@ -428,24 +443,27 @@ describe('B3 — an un-migrated database fails closed with an ACTIONABLE message
  * fails at least one.
  */
 describe('p_expected_base_known — the caller states whether it KNOWS the base', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it('a KNOWN-ABSENT base (explicit null) is announced as KNOWN', async () => {
     const store = storeWith('enforce');
     await store.append(write({ expectedGraphIdentityHash: null }));
     expect(
-      v5Args().p_expected_base_known,
+      versionedArgs().p_expected_base_known,
       'the caller READ the base and found it absent. Reporting that as ' +
         '"unknown" collapses it into the uninstrumented case, and v5 then ' +
         'delegates to v4 — whose CAS is gated on `expected IS NOT NULL`, so no ' +
         'CAS runs at all and two concurrent writers silently overwrite.',
     ).toBe(true);
-    expect(v5Args().p_expected_graph_identity_hash).toBeNull();
+    expect(versionedArgs().p_expected_graph_identity_hash).toBeNull();
   });
 
   it('an UNINSTRUMENTED path (undefined) is announced as UNKNOWN', async () => {
     const store = storeWith('enforce');
     await store.append(write({}));
     expect(
-      v5Args().p_expected_base_known,
+      versionedArgs().p_expected_base_known,
       'no base was read on this path. Claiming to know it would enforce a CAS ' +
         'against a value nobody measured — the draft path is deliberately ' +
         'un-CAS\'d and must stay that way.',
@@ -457,8 +475,8 @@ describe('p_expected_base_known — the caller states whether it KNOWS the base'
     await store.append(
       write({ expectedGraphIdentityHash: CALLER_TURN_START_HASH }),
     );
-    expect(v5Args().p_expected_base_known).toBe(true);
-    expect(v5Args().p_expected_graph_identity_hash).toBe(CALLER_TURN_START_HASH);
+    expect(versionedArgs().p_expected_base_known).toBe(true);
+    expect(versionedArgs().p_expected_graph_identity_hash).toBe(CALLER_TURN_START_HASH);
   });
 
   it('POSTURE-INDEPENDENT: the announced fact does not change with the CAS mode', async () => {
@@ -469,12 +487,12 @@ describe('p_expected_base_known — the caller states whether it KNOWS the base'
       vi.clearAllMocks();
       selectCalls.length = 0;
       rpc.mockResolvedValue({
-        data: { turn_row_id: 'turn-row', model_version_receipt: receipt },
+        data: { turn_row_id: 'turn-row', model_version_receipt: receipt, revision: 8 },
         error: null,
       });
       await storeWith(mode).append(write({ expectedGraphIdentityHash: null }));
       expect(
-        v5Args().p_expected_base_known,
+        versionedArgs().p_expected_base_known,
         `mode=${mode}: the known-base FACT must not depend on the CAS posture`,
       ).toBe(true);
     }

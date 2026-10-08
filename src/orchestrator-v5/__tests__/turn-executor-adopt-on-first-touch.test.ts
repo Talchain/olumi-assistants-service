@@ -31,8 +31,6 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { _resetConfigCache } from '../../config/index.js';
-import { SupabaseSessionStore, __setUseAppendV6ForTest } from '../session/supabase-store.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -46,8 +44,6 @@ interface AppendWrite {
   graph?: unknown;
   handler_id?: unknown;
   turn_class?: unknown;
-  expectedRevision?: number;
-  modelVersion?: unknown;
 }
 
 const appendCalls: AppendWrite[] = [];
@@ -55,35 +51,25 @@ let currentPersistedGraph: unknown = null;
 let failNextAppend = false;
 // F2 — degraded-read injection. `failGraphAndBriefTextRead` makes the
 // context-build read (loadGraphAndBriefText) throw (a DEGRADED canonical read);
-// `failLoadGraph` makes the strict recovery read throw too.
+// `failLoadGraph` makes the strict reread (loadGraph) at the write chokepoint
+// throw too (the reread ALSO fails → fail-closed).
 let failGraphAndBriefTextRead = false;
 let failLoadGraph = false;
-let combinedReadCalls = 0;
-const graphReadScenarios: string[] = [];
-let requireRevision = false;
-let publicAppendStore: SupabaseSessionStore | null = null;
-const RECOVERY_REVISION = 8;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: AppendWrite) => {
-      if (requireRevision && write.graph != null && write.expectedRevision !== RECOVERY_REVISION) {
-        throw new Error('versioned append refused: missing recovery revision');
-      }
       if (failNextAppend) {
         failNextAppend = false;
         // Mirror supabase-store's StateCommitFailedError surface (the turn's
         // STEP 7 catch maps it to a typed failure envelope; nothing persists).
         throw new Error('append_turn_atomic RPC failed (injected): commit rolled back');
       }
-      const outcome = publicAppendStore
-        ? await publicAppendStore.append(write as Parameters<SupabaseSessionStore['append']>[0])
-        : { id: 'mock-row-id' };
       appendCalls.push(write);
       if (write.graph !== undefined && write.graph !== null) {
         currentPersistedGraph = write.graph;
       }
-      return outcome;
+      return { id: 'mock-row-id' };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -97,26 +83,21 @@ vi.mock('../session/index.js', () => ({
       entries_invalidated: [],
     }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async (scenarioId: string) => {
-      graphReadScenarios.push(scenarioId);
+    loadGraph: async () => {
       if (failLoadGraph) {
         throw new Error('loadGraph failed (injected): strict reread degraded');
       }
-      if (publicAppendStore) return publicAppendStore.loadGraph(scenarioId);
       return currentPersistedGraph;
     },
     loadGraphAndBriefText: async () => {
-      combinedReadCalls += 1;
-      if (failGraphAndBriefTextRead && (combinedReadCalls === 1 || failLoadGraph)) {
+      if (failGraphAndBriefTextRead) {
         // A degraded canonical read at context-build time. build-turn-context
         // catches this → persistedGraph:null + read:{status:'degraded'}.
         throw new Error('loadGraphAndBriefText failed (injected): canonical read degraded');
       }
-      if (publicAppendStore) return publicAppendStore.loadGraphAndBriefText(SCENARIO_ID);
       return {
         graph: currentPersistedGraph,
         briefText: null,
-        revision: RECOVERY_REVISION,
       };
     },
     ensureScenarioExists: async () => ({ user_id: null }),
@@ -187,23 +168,15 @@ function throwingRoutingAdapter() {
 }
 
 beforeEach(() => {
-  __setUseAppendV6ForTest(true);
   setTestSink(() => undefined);
   appendCalls.length = 0;
   currentPersistedGraph = null;
   failNextAppend = false;
   failGraphAndBriefTextRead = false;
   failLoadGraph = false;
-  combinedReadCalls = 0;
-  graphReadScenarios.length = 0;
-  requireRevision = false;
-  publicAppendStore = null;
 });
 
 afterEach(() => {
-  __setUseAppendV6ForTest(false);
-  vi.unstubAllEnvs();
-  _resetConfigCache();
   setTestSink(null);
 });
 
@@ -533,88 +506,5 @@ describe('F2 — degraded canonical read (must not clobber a server model)', () 
     expect(appendCalls[0]!.graph).toBeDefined();
     const committed = appendCalls[0]!.graph as { nodes: unknown[] };
     expect(committed.nodes).toHaveLength((ECHO_GRAPH_STATE.nodes as unknown[]).length);
-  });
-
-  it('degraded first read → combined recovery carries revision 8 → versioned first-touch adoption commits without a 500', async () => {
-    failGraphAndBriefTextRead = true;
-    requireRevision = true;
-
-    const result = await runTurnExecutor(
-      payload('any thoughts on my model?', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb04'),
-      'req-addendum-2-recovery-revision',
-      {
-        routingAdapter: textRoutingAdapter('A few.'),
-        graphState: clone(ECHO_GRAPH_STATE) as never,
-      },
-    );
-
-    expect(result.telemetry.failure_type).toBeNull();
-    expect(result.telemetry.commit_performed).toBe(true);
-    expect(appendCalls).toHaveLength(1);
-    expect(appendCalls[0]!.expectedRevision).toBe(RECOVERY_REVISION);
-    expect(appendCalls[0]!.modelVersion).toBeDefined();
-    expect(combinedReadCalls).toBe(2);
-    expect(graphReadScenarios).toEqual([]);
-    expect((currentPersistedGraph as { nodes: unknown[] }).nodes)
-      .toHaveLength((ECHO_GRAPH_STATE.nodes as unknown[]).length);
-  });
-
-  it('flag OFF: degraded first read recovers and versioned first-touch adoption commits through the public v5 store without a 500', async () => {
-    __setUseAppendV6ForTest(false);
-    vi.stubEnv('OLUMI_ENV', 'staging');
-    vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', 'true');
-    _resetConfigCache();
-    failGraphAndBriefTextRead = true;
-    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
-      expect(name).toBe('append_turn_atomic_v5');
-      expect(args).not.toHaveProperty('p_expected_revision');
-      expect(args.p_graph).toBeDefined();
-      expect(args.p_version_mutation_id).toEqual(expect.any(String));
-      expect(args.p_incoming_graph_identity_hash).toMatch(/^[0-9a-f]{64}$/);
-      expect(args.p_version_analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
-      return { data: { turn_row_id: 'recovery-v5-row', model_version_receipt: null }, error: null };
-    });
-    const scenarioReadColumns: string[] = [];
-    const from = vi.fn((table: string) => {
-      const chain = {
-        select(columns: string) {
-          if (table === 'scenarios') scenarioReadColumns.push(columns);
-          return chain;
-        },
-        eq: () => chain,
-        limit: async () => ({ data: [], error: null }),
-        maybeSingle: async () => ({ data: { graph: null, brief_text: null }, error: null }),
-        update: () => chain,
-        not: () => chain,
-        is: async () => ({ data: null, error: null }),
-      };
-      return chain;
-    });
-    publicAppendStore = new SupabaseSessionStore(
-      { rpc, from } as never,
-      { invalidateAll: vi.fn() } as never,
-      { defaultReadLimit: 20, graphCasRpc: 'enforce' },
-    );
-
-    const result = await runTurnExecutor(
-      payload('any thoughts on my model?', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb05'),
-      'req-addendum-4-recovery-v5',
-      {
-        routingAdapter: textRoutingAdapter('A few.'),
-        graphState: clone(ECHO_GRAPH_STATE) as never,
-      },
-    );
-
-    expect(result.telemetry.failure_type).toBeNull();
-    expect(result.telemetry.commit_performed).toBe(true);
-    expect(appendCalls).toHaveLength(1);
-    expect(appendCalls[0]!.expectedRevision).toBeUndefined();
-    expect(appendCalls[0]!.modelVersion).toBeDefined();
-    expect(combinedReadCalls).toBe(1);
-    expect(graphReadScenarios).toEqual([SCENARIO_ID]);
-    expect(rpc).toHaveBeenCalledOnce();
-    expect(scenarioReadColumns).toEqual(['graph, brief_text']);
-    expect((currentPersistedGraph as { nodes: unknown[] }).nodes)
-      .toHaveLength((ECHO_GRAPH_STATE.nodes as unknown[]).length);
   });
 });

@@ -30,25 +30,9 @@
  *   `dispatchEditGraph` invocation, which together cover the three
  *   permitted outcomes.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import * as editGraphTool from '../../../src/orchestrator/tools/edit-graph.js';
-import { _resetConfigCache } from '../../../src/config/index.js';
-import { SupabaseSessionStore } from '../../../src/orchestrator-v5/session/supabase-store.js';
-import * as sessionStoreModule from '../../../src/orchestrator-v5/session/supabase-store.js';
-import { GraphStaleWriteError, type SessionTurnWrite } from '../../../src/orchestrator-v5/session/store.js';
-
-// The OFF parity rows also run against an exported origin/staging tree, whose
-// store has no v6 test seam. The explicit ON rows require the current seam.
-function __setUseAppendV6ForTest(enabled: boolean): void {
-  if ('__setUseAppendV6ForTest' in sessionStoreModule) {
-    (sessionStoreModule as unknown as { __setUseAppendV6ForTest(value: boolean): void })
-      .__setUseAppendV6ForTest(enabled);
-  } else if (enabled) {
-    throw new Error('The flag-ON row requires the current v6 store seam');
-  }
-}
 
 const dispatchEditGraphMock = vi.fn();
 
@@ -57,15 +41,9 @@ vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
 }));
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
-const claimTurnFenceMock = vi.fn();
 const loadGraphMock = vi.fn();
-const loadGraphAndBriefTextMock = vi.fn(async (_scenarioId: string): Promise<{
-  graph: unknown | null; briefText: string | null; revision?: number;
-}> => ({ graph: null, briefText: null, revision: 8 }));
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
-    ...(claimTurnFenceMock.getMockImplementation() !== undefined
-      ? { claimTurnFence: claimTurnFenceMock } : {}),
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -74,7 +52,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
     storeDraftGraph: async () => undefined,
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: loadGraphAndBriefTextMock,
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
@@ -161,10 +139,6 @@ vi.mock('../../../src/utils/telemetry.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
-// Collect the real dispatcher once; the existing route rows retain their mock.
-const { dispatchEditGraph: dispatchRealEditGraph } = await vi.importActual<
-  typeof import('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js')
->('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js');
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 
@@ -309,27 +283,16 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
   });
 
   beforeEach(() => {
-    __setUseAppendV6ForTest(false);
     dispatchEditGraphMock.mockReset();
     appendMock.mockClear();
     loadGraphMock.mockReset();
-    loadGraphAndBriefTextMock.mockReset();
-    loadGraphAndBriefTextMock.mockResolvedValue({ graph: null, briefText: null, revision: 8 });
     telemetryEvents.length = 0;
     logInfoCalls.length = 0;
   });
 
-  afterEach(() => __setUseAppendV6ForTest(false));
-
   // ─── Case 1 ────────────────────────────────────────────────────────────
   it('edit intent + graphState present on request → dispatches; emits graph_state_present', async () => {
-    dispatchEditGraphMock.mockImplementationOnce(async () => {
-      // The finaliser may read coaching context after dispatch. The edit
-      // reload contract applies before the dispatcher is entered.
-      expect(loadGraphMock).not.toHaveBeenCalled();
-      expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
-      return makeEditGraphMockResult();
-    });
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -341,7 +304,6 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     expect(res.statusCode).toBe(200);
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
     expect(loadGraphMock).not.toHaveBeenCalled();
-    expect(dispatchEditGraphMock.mock.calls[0]?.[0]).not.toHaveProperty('persistedEditBase');
     expect(emittedNames()).toContain('v5.edit_graph.graph_state_present');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_reloaded');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_unavailable');
@@ -351,12 +313,7 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
   // ─── Case 2 ────────────────────────────────────────────────────────────
   it('edit intent + graphState absent + persisted graph valid → reloads then dispatches', async () => {
     loadGraphMock.mockResolvedValueOnce(VALID_GRAPH_STATE);
-    dispatchEditGraphMock.mockImplementationOnce(async (args) => {
-      expect(loadGraphMock).toHaveBeenCalledTimes(1);
-      expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
-      expect(args).not.toHaveProperty('persistedEditBase');
-      return makeEditGraphMockResult();
-    });
+    dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -389,292 +346,6 @@ describe('POST /orchestrate/v2/turn — V5 Phase 2.5 Defect A Part 1 (graph relo
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_present');
     expect(emittedNames()).not.toContain('v5.edit_graph.graph_state_unavailable');
     assertRoutingContractHonoured();
-  });
-
-  it.each(['success', 'read_failure'] as const)(
-    'flag OFF parity: route-v2 reload %s matches staging reads, RPC arguments and outcome',
-    async (caseName) => {
-      const reads: Array<{ table: string; columns: string }> = [];
-      const sequence: string[] = [];
-      const writes: SessionTurnWrite[] = [];
-      const mutationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-      const versionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-      const modelVersion = {
-        mutation_id: mutationId,
-        graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64),
-        hash_algorithm: 'sha256', identity_projection_version: 'identity.v1',
-        identity_normaliser_version: '1', graph_schema_version: 'graph_v3',
-        actor_kind: 'unknown' as const, authored_by: null,
-        creation_kind: 'committed_mutation' as const, source_turn_id: payload({}).turn_id as string,
-      };
-      const receipt = {
-        ...modelVersion, version_id: versionId, version_number: 1,
-        source_version_id: null, parent_version_id: null, root_version_id: versionId,
-        undo_version_id: null, graph: VALID_GRAPH_STATE,
-        event_id: `model_version_created_mutation_${mutationId}`,
-      };
-      const rpc = vi.fn(async (_name: string, _args: Record<string, unknown>) => {
-        sequence.push('rpc');
-        return { data: { turn_row_id: 'parity-turn-row', model_version_receipt: receipt }, error: null };
-      });
-      const client = {
-        rpc,
-        from: (table: string) => {
-          let columns: string | null = null;
-          const query = {
-            select(value: string) {
-              columns = value;
-              reads.push({ table, columns: value });
-              sequence.push(`read:${table}:${value}`);
-              return query;
-            },
-            eq: () => query, limit: () => query, update: () => query,
-            not: () => query, is: () => query,
-            maybeSingle: async () => {
-              if (caseName === 'read_failure') {
-                return { data: null, error: { code: 'XX000', message: 'staging parity read failed' } };
-              }
-              // OFF must ignore a revision that the staging reader never selected.
-              return { data: { graph: VALID_GRAPH_STATE, brief_text: null, revision: 'invalid' }, error: null };
-            },
-            then(resolve: (value: { data: unknown[] | null; error: null }) => unknown) {
-              return Promise.resolve({ data: columns === 'request_hash' ? [] : null, error: null }).then(resolve);
-            },
-          };
-          return query;
-        },
-      };
-      const cache = { invalidateAll: vi.fn() };
-      const publicStore = new SupabaseSessionStore(client as never, cache as never, {
-        defaultReadLimit: 20, graphCasRpc: 'enforce',
-      });
-      claimTurnFenceMock.mockResolvedValue({
-        scenarioId: SCENARIO_ID, turnId: payload({}).turn_id, generation: 1,
-      });
-      loadGraphMock.mockImplementation(async (scenarioId: string) => {
-        sequence.push('loadGraph');
-        return publicStore.loadGraph(scenarioId);
-      });
-      loadGraphAndBriefTextMock.mockImplementation(async (scenarioId: string) => {
-        sequence.push('loadGraphAndBriefText');
-        return publicStore.loadGraphAndBriefText(scenarioId);
-      });
-      dispatchEditGraphMock.mockImplementationOnce(async (args) => {
-        sequence.push('dispatch');
-        const write: SessionTurnWrite = {
-          scenario_id: SCENARIO_ID, turn_id: payload({}).turn_id as string,
-          turn_class: 'direct_answer', handler_id: null, request_hash: 'route-reload-parity',
-          response_emitted: true, llm_calls_used: 0, duration_ms: 1, handler_facts: [],
-          graph: args.graphState, expectedGraphIdentityHash: null, expectedGraphAnalysisHash: null,
-          modelVersion,
-        };
-        writes.push(write);
-        await publicStore.append(write);
-        return makeEditGraphMockResult();
-      });
-      try {
-        const res = await app.inject({
-          method: 'POST', url: '/orchestrate/v2/turn',
-          payload: payload({ message: 'Add opportunity cost of founder time as a risk' }),
-        });
-        // This snapshot is seeded only by the same harness against origin/staging.
-        // It binds full arguments and ordered reads, rather than selected fields.
-        expect({
-          caseName, reads, sequence, rpc: rpc.mock.calls,
-          loadGraphCalls: loadGraphMock.mock.calls,
-          combinedReaderCalls: loadGraphAndBriefTextMock.mock.calls,
-          dispatchedGraph: dispatchEditGraphMock.mock.calls[0]?.[0]?.graphState ?? null,
-          hasPersistedEditBase: dispatchEditGraphMock.mock.calls[0]?.[0]?.persistedEditBase !== undefined,
-          writes: writes.length, status: res.statusCode,
-          recoveryReason: findEvent('v5.edit_graph.graph_state_unavailable')?.reason ?? null,
-          graphReloaded: emittedNames().includes('v5.edit_graph.graph_state_reloaded'),
-          invalidations: cache.invalidateAll.mock.calls,
-        }).toMatchSnapshot();
-        expect(res.statusCode).toBe(200);
-        expect(reads.filter(read => read.table === 'scenarios')).toEqual([
-          { table: 'scenarios', columns: 'graph, brief_text' }, // Strict edit reload.
-          { table: 'scenarios', columns: 'graph, brief_text' }, // Finaliser context.
-        ]);
-        expect(loadGraphMock).toHaveBeenCalledTimes(1);
-        expect(loadGraphAndBriefTextMock).toHaveBeenCalledTimes(1);
-        expect(dispatchEditGraphMock).toHaveBeenCalledTimes(caseName === 'success' ? 1 : 0);
-        expect(rpc).toHaveBeenCalledTimes(caseName === 'success' ? 1 : 0);
-        if (caseName === 'success') {
-          expect(rpc.mock.calls[0]?.[0]).toBe('append_turn_atomic_v5');
-          expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty('p_expected_revision');
-        }
-        assertRoutingContractHonoured();
-      } finally {
-        claimTurnFenceMock.mockReset();
-      }
-    },
-  );
-
-  // ─── Case 3a ───────────────────────────────────────────────────────────
-  it('flag ON: server reload takes graph and revision from one combined read and threads that exact base', async () => {
-    __setUseAppendV6ForTest(true);
-    const base = { graph: VALID_GRAPH_STATE, briefText: null, revision: 8 };
-    loadGraphAndBriefTextMock.mockResolvedValueOnce(base);
-    loadGraphMock.mockResolvedValue({ nodes: [], edges: [] });
-    dispatchEditGraphMock.mockImplementationOnce(async (args) => {
-      // Assert at the edit boundary: later finaliser context reads are not
-      // edit-authority reads and must not obscure this snapshot witness.
-      expect(loadGraphAndBriefTextMock).toHaveBeenCalledTimes(1);
-      expect(loadGraphAndBriefTextMock).toHaveBeenCalledWith(SCENARIO_ID);
-      expect(loadGraphMock).not.toHaveBeenCalled();
-      expect(args.graphState).toEqual(base.graph);
-      expect(args.persistedEditBase).toBe(base);
-      return makeEditGraphMockResult();
-    });
-    const res = await app.inject({
-      method: 'POST', url: '/orchestrate/v2/turn',
-      payload: payload({ message: 'Add opportunity cost of founder time as a risk' }),
-    });
-    expect(res.statusCode).toBe(200);
-    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
-    const args = dispatchEditGraphMock.mock.calls[0]?.[0];
-    expect(args.graphState).toEqual(base.graph);
-    expect(args.persistedEditBase).toBe(base);
-  });
-
-  it('flag ON: empty server at revision 3, rival write at 4 → v6 OLRV1, HTTP 409 revision_conflict and no write', async () => {
-    __setUseAppendV6ForTest(true);
-    const clientGraph = {
-      nodes: [
-        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
-        { id: 'fac_price', kind: 'factor', label: 'Price', observed_state: { value: 10 } },
-      ],
-      edges: [{
-        from: 'fac_price', to: 'goal_revenue',
-        strength: { mean: 0.5, std: 0.1 },
-        exists_probability: 0.9, effect_direction: 'positive' as const,
-      }],
-      goal_node_id: 'goal_revenue',
-    };
-    const editedGraph = {
-      ...clientGraph,
-      nodes: clientGraph.nodes.map(node => node.id === 'fac_price'
-        ? { ...node, observed_state: { value: 11 } } : node),
-    };
-    const rivalGraph = {
-      ...clientGraph,
-      nodes: clientGraph.nodes.map(node => node.id === 'fac_price'
-        ? { ...node, observed_state: { value: 20 } } : node),
-    };
-    const persisted: { graph: unknown | null; revision: number } = { graph: null, revision: 3 };
-    const combinedReads: Array<{ graph: unknown | null; briefText: null; revision: number }> = [];
-    const successfulAppends: SessionTurnWrite[] = [];
-    const cache = { invalidateAll: vi.fn() };
-    let appendError: unknown;
-    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
-      expect(name).toBe('append_turn_atomic_v6');
-      if (args.p_expected_revision !== persisted.revision) {
-        return {
-          data: null,
-          error: {
-            code: 'OLRV1', message: 'append_turn_atomic_v6: revision_conflict',
-            details: JSON.stringify({
-              reason: 'revision_conflict', expected: args.p_expected_revision, current: persisted.revision,
-            }),
-          },
-        };
-      }
-      // A refreshed expectation would wrongly make this write succeed.
-      persisted.graph = args.p_graph;
-      persisted.revision += 1;
-      return { data: { turn_row_id: 'unexpected-write', revision: persisted.revision }, error: null };
-    });
-    const publicStore = new SupabaseSessionStore({ rpc } as never, cache as never, {
-      defaultReadLimit: 20, graphCasRpc: 'enforce',
-    } as never);
-    const editSpy = vi.spyOn(editGraphTool, 'handleEditGraph');
-    vi.stubEnv('OLUMI_ENV', 'staging');
-    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'off');
-    vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'observe');
-    vi.stubEnv('CEE_V5_GRAPH_CAS_RPC', 'enforce');
-    vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', 'true');
-    _resetConfigCache();
-
-    try {
-      claimTurnFenceMock.mockResolvedValue({
-        scenarioId: SCENARIO_ID, turnId: payload({}).turn_id, generation: 1,
-      });
-      loadGraphMock.mockImplementation(async () => persisted.graph);
-      loadGraphAndBriefTextMock.mockImplementation(async () => {
-        const snapshot = { graph: persisted.graph, briefText: null, revision: persisted.revision };
-        combinedReads.push(snapshot);
-        return snapshot;
-      });
-      editSpy.mockImplementationOnce(async () => {
-        expect(combinedReads[0]).toEqual({ graph: null, briefText: null, revision: 3 });
-        // This rival save lands after the edit's empty graph/revision read.
-        persisted.graph = rivalGraph;
-        persisted.revision = 4;
-        return {
-          blocks: [], assistantText: 'Changed Price from 10 to 11.', latencyMs: 1,
-          appliedGraph: editedGraph as unknown as NonNullable<
-            Awaited<ReturnType<typeof editGraphTool.handleEditGraph>>['appliedGraph']
-          >,
-          wasRejected: false,
-          appliedChanges: {
-            summary: 'Changed Price from 10 to 11.',
-            changes: [{ label: 'Price', description: 'Changed value.', element_ref: 'fac_price' }],
-            rerun_recommended: false,
-          },
-          operations: [{ op: 'update_node', path: 'fac_price', value: { observed_state: { value: 11 } } }],
-          operation_meta: [{ impact: 'low', rationale: '' }],
-        };
-      });
-      dispatchEditGraphMock.mockImplementationOnce(dispatchRealEditGraph);
-      appendMock.mockImplementationOnce(async (write: SessionTurnWrite) => {
-        try {
-          const outcome = await publicStore.append(write);
-          successfulAppends.push(write);
-          return outcome;
-        } catch (err) {
-          appendError = err;
-          throw err;
-        }
-      });
-
-      const res = await app.inject({
-        method: 'POST', url: '/orchestrate/v2/turn',
-        // Named free-form edit: no numeric quantity for the deterministic
-        // value-update lane; the provider's semantic edit still versions.
-        payload: payload({ message: 'Adjust the Price assumption', graph_state: clientGraph }),
-      });
-
-      expect(editSpy).toHaveBeenCalledTimes(1);
-      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
-      expect(appendMock).toHaveBeenCalledTimes(1);
-      const write = appendMock.mock.calls[0]![0] as SessionTurnWrite;
-      expect(write).toMatchObject({
-        expectedRevision: 3, expectedGraphIdentityHash: null, expectedGraphAnalysisHash: null,
-        modelVersion: { creation_kind: 'committed_mutation', source_turn_id: payload({}).turn_id },
-      });
-      expect(write.modelVersion!.graph_identity_hash).toMatch(/^[0-9a-f]{64}$/);
-      expect(write.modelVersion!.analysis_affecting_hash).toMatch(/^[0-9a-f]{64}$/);
-      expect(rpc).toHaveBeenCalledTimes(1);
-      expect(rpc).toHaveBeenCalledWith('append_turn_atomic_v6', expect.objectContaining({
-        p_expected_revision: 3, p_expected_base_known: true,
-        p_expected_graph_identity_hash: null,
-      }));
-      expect(appendError).toBeInstanceOf(GraphStaleWriteError);
-      expect(appendError).toMatchObject({ conflict_category: 'revision_conflict', cause: { code: 'OLRV1' } });
-      expect(res.statusCode).toBe(409);
-      expect(res.json()).toMatchObject({ code: 'revision_conflict', expected: 3, current: 4 });
-      expect(successfulAppends).toHaveLength(0);
-      expect(persisted).toEqual({ graph: rivalGraph, revision: 4 });
-      expect(cache.invalidateAll).not.toHaveBeenCalled();
-      assertRoutingContractHonoured({ expectsFinalised200: false });
-    } finally {
-      editSpy.mockRestore();
-      claimTurnFenceMock.mockReset();
-      appendMock.mockReset();
-      appendMock.mockResolvedValue({ id: 'mock-row-id' });
-      vi.unstubAllEnvs();
-      _resetConfigCache();
-    }
   });
 
   // ─── Case 3a ───────────────────────────────────────────────────────────

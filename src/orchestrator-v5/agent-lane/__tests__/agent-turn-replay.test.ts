@@ -17,14 +17,6 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import type { createAgentCapabilities, InternalDispatch } from '../runtime/agent-capabilities.js';
-import type { CommitOptionLevelsInput } from '../../system-events/dispatch.js';
-
-type ProductPorts = NonNullable<Parameters<typeof createAgentCapabilities>[5]>;
-// Exercise the route's real accounting/claim catch without requiring a provider
-// to choose these exact door sequences. Other replay rows use real capabilities.
-let refusedDoorSequence: ((dispatch: InternalDispatch, ports: ProductPorts) => Promise<never>) | undefined;
-const internalCalls: string[] = [];
 
 type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number };
 const rows = new Map<string, Row>();
@@ -44,30 +36,11 @@ const store = {
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
-  releaseTurnClaim: vi.fn(async (_sid: string, turnId: string, claimHash: string) => {
-    if (rows.get(turnId)?.request_hash === claimHash) rows.delete(turnId);
-  }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
-});
-vi.mock('../runtime/agent-capabilities.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../runtime/agent-capabilities.js')>();
-  return { ...actual, createAgentCapabilities: (...args: Parameters<typeof actual.createAgentCapabilities>) => {
-    const capabilities = actual.createAgentCapabilities(...args);
-    return refusedDoorSequence === undefined ? capabilities : {
-      ...capabilities, authoriseChange: async () => refusedDoorSequence!(args[0], args[5]!),
-    };
-  } };
-});
-vi.mock('../../system-events/dispatch.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../system-events/dispatch.js')>();
-  return { ...actual, commitOptionLevelsInProcess: vi.fn(async (input: CommitOptionLevelsInput) => {
-    await store.append({ turn_id: input.turn_id, request_hash: 'option-levels-written', llm_calls_used: 0 });
-    return { status: 'committed', graph_hash: 'h2', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
-  }) };
 });
 
 /** The provider: every call is counted, and the Nth answer is "Answer N". */
@@ -76,10 +49,6 @@ const fakeFetch = vi.fn(async (_url: unknown, init?: { body?: string }) => {
   provider.calls += 1;
   const sent = JSON.parse(String(init?.body ?? '{}')) as { input?: { role?: string }[] };
   provider.userTurnsSeen.push((sent.input ?? []).filter((i) => i.role === 'user').length);
-  if (refusedDoorSequence !== undefined) return new Response(JSON.stringify({ output: [{
-    type: 'function_call', name: 'authorise_change', call_id: 'refused-door',
-    arguments: JSON.stringify({ proposal_id: 'prop_0123456789abcdef0123456789abcdef' }),
-  }] }), { status: 200 });
   const text = `Answer ${provider.calls}`;
   return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }), { status: 200 });
 });
@@ -102,12 +71,6 @@ async function freshApp(): Promise<FastifyInstance> {
   mod.AGENT_TURN_CLAIM_WAIT.everyMs = 20;
   const app = Fastify({ logger: false });
   app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [], edges: [] }, graph_hash: 'h1' }));
-  const revisionRefusal = (path: string) => async (_req: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => {
-    internalCalls.push(path);
-    return reply.code(409).send({ code: 'revision_conflict', expected: 7, current: 8 });
-  };
-  app.post('/assist/v1/scenarios/:id/graph/register', revisionRefusal('/graph/register'));
-  app.post('/orchestrate/v2/turn', revisionRefusal('/orchestrate/v2/turn'));
   await app.register(agentV1TurnRoute);
   await app.ready();
   return app;
@@ -120,7 +83,6 @@ describe('an Agent turn replays by its turn_id', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
     rows.clear(); readFails = false; answerAppendFails = false; provider.calls = 0; provider.userTurnsSeen = [];
-    refusedDoorSequence = undefined; internalCalls.length = 0; store.releaseTurnClaim.mockClear();
     store.append.mockClear(); store.readCommittedTurn.mockClear();
     vi.stubGlobal('fetch', fakeFetch);
     app = await freshApp();
@@ -230,58 +192,5 @@ describe('an Agent turn replays by its turn_id', () => {
     expect(provider.calls).toBe(2);
     expect(store.append).not.toHaveBeenCalled();
     expect(store.readCommittedTurn).not.toHaveBeenCalled();
-  });
-
-  const approve = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-    kind: 'message', scenario_id: SID, turn_id: T1, message: 'Yes, apply that change.',
-  } });
-  const register = async (dispatch: InternalDispatch): Promise<never> => {
-    await dispatch(`/assist/v1/scenarios/${SID}/graph/register`, { turn_id: T2 });
-    throw new Error('revision refusal must escape the dispatch');
-  };
-
-  it('Addendum 6 (a): a lone register revision refusal releases the claim and is retry_safe', async () => {
-    refusedDoorSequence = register;
-    const response = await approve();
-    expect(response.statusCode, response.body).toBe(409);
-    expect(response.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8, retry_safe: true });
-    expect(internalCalls).toEqual(['/graph/register']);
-    expect(store.releaseTurnClaim).toHaveBeenCalledTimes(1);
-    expect(store.releaseTurnClaim).toHaveBeenCalledWith(SID, `${T1}:claim`, expect.any(String));
-    expect(rows.size).toBe(0);
-    expect(provider.calls).toBe(1);
-  });
-
-  it('Addendum 6 (b): commitOptionLevels succeeds before a later register revision refusal, so the claim stays', async () => {
-    refusedDoorSequence = async (dispatch, ports) => {
-      const committed = await ports.commitOptionLevels!({ scenario_id: SID, turn_id: T2, base_graph_hash: 'h1', levels: [], links: [] });
-      expect(committed.status).toBe('committed');
-      return register(dispatch);
-    };
-    const response = await approve();
-    expect(response.statusCode, response.body).toBe(409);
-    expect(response.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8, retry_safe: false });
-    expect(internalCalls).toEqual(['/graph/register']);
-    expect(rows.get(T2)).toMatchObject({ request_hash: 'option-levels-written' });
-    expect(rows.has(`${T1}:claim`)).toBe(true);
-    expect(rows.has(T1)).toBe(false);
-    expect(rows.size).toBe(2);
-    expect(store.releaseTurnClaim).not.toHaveBeenCalled();
-    expect(provider.calls).toBe(1);
-  });
-
-  it('Addendum 6 (c): a lone v2/turn revision refusal keeps the claim and is not retry_safe', async () => {
-    refusedDoorSequence = async (dispatch) => {
-      await dispatch('/orchestrate/v2/turn', { scenario_id: SID, turn_id: T2 });
-      throw new Error('revision refusal must escape the dispatch');
-    };
-    const response = await approve();
-    expect(response.statusCode, response.body).toBe(409);
-    expect(response.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8, retry_safe: false });
-    expect(internalCalls).toEqual(['/orchestrate/v2/turn']);
-    expect(rows.has(`${T1}:claim`)).toBe(true);
-    expect(rows.size).toBe(1);
-    expect(store.releaseTurnClaim).not.toHaveBeenCalled();
-    expect(provider.calls).toBe(1);
   });
 });

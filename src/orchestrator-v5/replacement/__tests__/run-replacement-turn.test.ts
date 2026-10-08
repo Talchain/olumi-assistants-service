@@ -9,15 +9,13 @@
  * fake. No network, no credentials, no spend, no database.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { EMPTY_CONVERSATION_MEMORY, liveItemsOfKind, recordItem } from '../conversation-memory.js';
 import {
   EMPTY_PROPOSAL_STORE,
   MAX_APPLY_ATTEMPTS,
   appliedProposals,
-  authoriseProposal,
-  beginApply,
   needsReconciliation,
   openProposals,
   unresolvedProposals,
@@ -34,16 +32,6 @@ import {
   type ReplacementTurnDeps,
   type ReplacementTurnInput,
 } from '../run-replacement-turn.js';
-import { GraphStaleWriteError } from '../../session/store.js';
-import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
-
-beforeEach(() => {
-  __setUseAppendV6ForTest(true);
-});
-
-afterEach(() => {
-  __setUseAppendV6ForTest(false);
-});
 
 type Reply = { content: ToolResponseBlock[]; stop_reason: 'end_turn' | 'tool_use' | 'max_tokens' };
 
@@ -433,149 +421,6 @@ describe('the three save outcomes stay apart', () => {
     expect(change).toHaveLength(1);
     expect(change[0]?.receipt_id).toBe('receipt-xyz');
   });
-});
-
-describe('a revision refusal requires a fresh offer and agreement', () => {
-  it('legacy unpinned reconciliation stays visibly unresolved while allowing a fresh offer', async () => {
-    const offered = await runReplacementTurn(baseInput(), {
-      chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-      checkpoint: ck, applyOperations: okWrite(),
-    });
-    const id = openProposals(offered.proposals)[0]!.id;
-    let proposals = authoriseProposal(offered.proposals, id, {
-      authorised_in_turn: 'old-consent', authorised_at: '2026-09-20T12:01:00.000Z', current_model_revision: 'rev-1',
-    });
-    proposals = beginApply(proposals, id, {
-      idempotency_key: 'legacy-key', apply_started_at: '2026-09-20T12:01:00.000Z', current_model_revision: 'rev-1',
-    });
-    const result = await runReplacementTurn(baseInput({ proposals, memory: offered.memory,
-      turnId: 'fresh-turn', message: 'Please offer that again.', idFor: (purpose, index) => `fresh-${purpose}-${index}`,
-    }), {
-      checkpoint: ck, applyOperations: async () => ({ ok: false, outcomeUnknown: true,
-        reason: 'The prior save cannot be verified against its original revision.' }),
-      chatWithTools: scripted([call('set_option_effect', {}), say('Please confirm the new offer.')]),
-    });
-    expect(needsReconciliation(result.proposals)).toHaveLength(0);
-    expect(unresolvedProposals(result.proposals)).toHaveLength(1);
-    expect(unresolvedProposals(result.proposals)[0]?.last_apply_failure).toBeUndefined();
-    expect(openProposals(result.proposals)).toHaveLength(1);
-    expect(result.applied).toHaveLength(0);
-    const write = vi.fn(okWrite());
-    const attemptedRevival = await runReplacementTurn(baseInput({ ...reload(result),
-      turnId: 'old-agreement-turn', message: 'yes go ahead',
-    }), {
-      checkpoint: ck, applyOperations: write,
-      chatWithTools: scripted([
-        call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }), say('ok'),
-      ]),
-    });
-    expect(write).not.toHaveBeenCalled();
-    expect(attemptedRevival.applied).toHaveLength(0);
-  });
-
-  it.each([
-    { path: 'accept', v6: true }, { path: 'reconcile', v6: true },
-    { path: 'accept', v6: false }, { path: 'reconcile', v6: false },
-  ] as const)(
-    'durably clears a refused $path with v6=$v6 and never retries it on an unrelated turn, even when the analysis hash is unchanged',
-    async ({ path, v6 }) => {
-      __setUseAppendV6ForTest(v6);
-      const offered = await runReplacementTurn(baseInput({ turnId: 'offer-turn' }), {
-        chatWithTools: scripted([call('set_option_effect', {}), say('shall I?')]),
-        checkpoint: ck, applyOperations: okWrite(),
-      });
-      const id = openProposals(offered.proposals)[0]!.id;
-      let proposals = offered.proposals;
-      if (path === 'reconcile') {
-        proposals = authoriseProposal(proposals, id, {
-          authorised_in_turn: 'earlier-agreement', authorised_at: '2026-09-20T12:01:00.000Z',
-          current_model_revision: 'rev-1',
-        });
-        proposals = beginApply(proposals, id, {
-          idempotency_key: 'earlier-key', apply_started_at: '2026-09-20T12:01:00.000Z',
-          current_model_revision: 'rev-1',
-        });
-      }
-      let durable = reload({ memory: offered.memory, proposals });
-      const checkpoint = vi.fn(async (state: { memory: ConversationMemory; proposals: ProposalStore }) => {
-        durable = reload(state);
-      });
-      const conflict = new GraphStaleWriteError('stale revision', {
-        conflict_category: 'revision_conflict',
-        cause: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) },
-      });
-      const refusedWrite = vi.fn<ApplyOperations>().mockRejectedValue(conflict);
-      await expect(runReplacementTurn(
-        baseInput({
-          turnId: 'refused-turn', message: path === 'accept' ? 'yes go ahead' : 'an ordinary question',
-          memory: durable.memory, proposals: durable.proposals,
-        }),
-        {
-          chatWithTools: scripted(path === 'accept' ? [
-            call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }),
-            say('never reached'),
-          ] : [say('never reached')]),
-          checkpoint, applyOperations: refusedWrite,
-        },
-      )).rejects.toBe(conflict);
-      expect(refusedWrite).toHaveBeenCalledTimes(1);
-      expect(typeof refusedWrite.mock.calls[0]?.[0].beforeAppend).toBe(v6 ? 'function' : 'undefined');
-
-      // The caller gets a typed 409, so no normal turn result is saved. The
-      // checkpoint itself must persist the refusal before that error escapes.
-      expect(needsReconciliation(durable.proposals)).toHaveLength(0);
-      expect(openProposals(durable.proposals)).toHaveLength(0);
-      expect(durable.proposals.proposals.find((p) => p.id === id)?.last_apply_failure?.reason)
-        .toBe('revision_conflict');
-
-      const healthy = vi.fn(okWrite('fresh-receipt'));
-      const next = await runReplacementTurn(
-        baseInput({ turnId: 'unrelated-turn', message: 'What evidence should we gather?', ...durable }),
-        { chatWithTools: scripted([say('Gather the churn evidence.')]), checkpoint, applyOperations: healthy },
-      );
-      expect(healthy).not.toHaveBeenCalled();
-      expect(next.applied).toHaveLength(0);
-      expect(next.mustReconcile).toHaveLength(0);
-
-      // Even a new "yes" cannot revive the rejected offer. The current
-      // analysis hash deliberately remains rev-1 despite DB revision 7 → 8.
-      const oldAccept = await runReplacementTurn(
-        baseInput({ turnId: 'old-agreement-turn', message: 'yes go ahead', ...reload(next) }),
-        {
-          chatWithTools: scripted([
-            call(ACCEPT_TOOL_NAME, { proposal_id: id, user_agreement_quote: 'yes go ahead' }), say('ok'),
-          ]),
-          checkpoint, applyOperations: healthy,
-        },
-      );
-      expect(healthy).not.toHaveBeenCalled();
-      expect(oldAccept.applied).toHaveLength(0);
-
-      const fresh = await runReplacementTurn(
-        baseInput({
-          turnId: 'fresh-offer-turn', ...reload(oldAccept),
-          idFor: (purpose, index) => `fresh-${purpose}-${index}`,
-        }),
-        {
-          chatWithTools: scripted([call('set_option_effect', {}), say('Please confirm this refreshed offer.')]),
-          checkpoint, applyOperations: healthy,
-        },
-      );
-      expect(healthy).not.toHaveBeenCalled();
-      const freshId = openProposals(fresh.proposals)[0]!.id;
-      const confirmed = await runReplacementTurn(
-        baseInput({ turnId: 'fresh-agreement-turn', message: 'yes go ahead', ...reload(fresh) }),
-        {
-          chatWithTools: scripted([
-            call(ACCEPT_TOOL_NAME, { proposal_id: freshId, user_agreement_quote: 'yes go ahead' }), say('saved'),
-          ]),
-          checkpoint, applyOperations: healthy,
-        },
-      );
-      expect(healthy).toHaveBeenCalledTimes(1);
-      expect(confirmed.applied).toEqual([{ proposalId: freshId, receiptId: 'fresh-receipt' }]);
-    },
-  );
 });
 
 describe('read-only is stated, not discovered', () => {

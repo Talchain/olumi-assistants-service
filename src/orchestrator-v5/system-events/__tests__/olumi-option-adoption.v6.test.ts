@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const mocks = vi.hoisted(() => ({
   loadPersistedGraphStrict: vi.fn(),
+  loadPersistedScenarioStateStrict: vi.fn(),
   loadMostRecentPendingActionsIntegrityStrict: vi.fn(),
   commitDirectAnswer: vi.fn(),
 }));
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../build-turn-context.js')>()),
   loadPersistedGraphStrict: mocks.loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict: mocks.loadPersistedScenarioStateStrict,
   loadMostRecentPendingActionsIntegrityStrict: mocks.loadMostRecentPendingActionsIntegrityStrict,
 }));
 vi.mock('../../commit.js', async (importOriginal) => ({
@@ -24,6 +26,8 @@ import { modelVersionMutationReceiptFromResponse, toModelVersionMutationReceiptV
 import { applyOlumiOptionAdoption, commitOlumiOptionAdoptionInProcess } from '../olumi-option-adoption.js';
 import { TurnFenceRejectedError } from '../../session/turn-fence.js';
 import { runFencedInProcessWrite } from '../../../orchestrator/turn-fence-prehandler.js';
+import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
+
 
 const graph = () => ({
   nodes: [
@@ -54,6 +58,9 @@ const input = (g: ReturnType<typeof graph>) => {
 };
 
 describe('pressing an Olumi option into the comparison', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it('changes participation and freshness while preserving identity, edges, and Olumi levels', () => {
     const before = graph();
     const snapshot = structuredClone(before);
@@ -98,8 +105,12 @@ describe('pressing an Olumi option into the comparison', () => {
 });
 
 describe('adoption commit receipt projection', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   beforeEach(() => {
     mocks.loadPersistedGraphStrict.mockReset();
+    mocks.loadPersistedScenarioStateStrict.mockReset();
     mocks.loadMostRecentPendingActionsIntegrityStrict.mockReset();
     mocks.commitDirectAnswer.mockReset();
   });
@@ -134,9 +145,19 @@ describe('adoption commit receipt projection', () => {
       event_id: 'model_version_created_mutation_cb1dd25d-36c3-4beb-aadf-5a016b2bce25',
     };
     const publicReceipt = toModelVersionMutationReceiptV1(scenarioId, atomicReceipt);
-    mocks.loadPersistedGraphStrict.mockResolvedValueOnce(before).mockResolvedValueOnce(applied.graph);
-    mocks.loadMostRecentPendingActionsIntegrityStrict.mockResolvedValue([]);
-    mocks.commitDirectAnswer.mockResolvedValue({
+    let currentRevision = 23;
+    mocks.loadPersistedScenarioStateStrict.mockImplementation(async () => ({ graph: before, briefText: null, revision: currentRevision }));
+    mocks.loadPersistedGraphStrict.mockResolvedValueOnce(applied.graph);
+    mocks.loadMostRecentPendingActionsIntegrityStrict.mockImplementation(async () => {
+      // Advance the row after its graph/revision snapshot, before commit.
+      currentRevision = 24;
+      return [];
+    });
+    mocks.commitDirectAnswer.mockImplementation(async (_response, metadata) => {
+      // The rival changes only the revision; the hash checks cannot detect it.
+      expect(currentRevision).toBe(24);
+      expect(metadata.expectedRevision).toBe(23);
+      return {
       graphPersisted: true,
       thisAttemptWrote: true,
       persistedAnalysisGraphHash: applied.graph_hash,
@@ -145,12 +166,15 @@ describe('adoption commit receipt projection', () => {
         response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'frame',
         ...(attached ? { model_version_receipt: publicReceipt } : {}),
       },
+      };
     });
 
     const result = await commitOlumiOptionAdoptionInProcess({
       scenario_id: scenarioId, turn_id: 'adopt-turn', ...request,
     }, 'test-request');
     expect(result.status).toBe('committed');
+    expect(currentRevision).toBe(24);
+    expect(mocks.loadPersistedScenarioStateStrict).toHaveBeenCalledOnce();
     expect(result).not.toHaveProperty('model_version_receipt.version_number');
     if (attached) {
       expect(result).toHaveProperty('model_version_receipt.sequence', 2);
@@ -170,6 +194,9 @@ describe('adoption commit receipt projection', () => {
  * Agent reports as "nothing changed" (`agent-capabilities.ts`, the `res.status !== 'committed'` branch, `mutated: false`).
  */
 describe('B8: a turn-fence verdict through the real adoption door', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
   const STALE = { status: 'stale' as const };
   const REFUSED = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
@@ -177,12 +204,14 @@ describe('B8: a turn-fence verdict through the real adoption door', () => {
     new TurnFenceRejectedError(`fence ${verdict}`, { verdict, generation: 7, maxGeneration: 8 } as never);
   beforeEach(() => {
     mocks.loadPersistedGraphStrict.mockReset();
+    mocks.loadPersistedScenarioStateStrict.mockReset();
     mocks.loadMostRecentPendingActionsIntegrityStrict.mockReset();
     mocks.commitDirectAnswer.mockReset();
   });
   const arm = (verdict: Parameters<typeof refusal>[0]) => {
     const before = graph();
     mocks.loadPersistedGraphStrict.mockResolvedValue(before);
+    mocks.loadPersistedScenarioStateStrict.mockResolvedValue({ graph: before, briefText: null, revision: 23 });
     mocks.loadMostRecentPendingActionsIntegrityStrict.mockResolvedValue([]);
     mocks.commitDirectAnswer.mockRejectedValue(refusal(verdict));
     return { scenario_id: SCENARIO, turn_id: 'adopt-turn', ...input(before) };
@@ -208,9 +237,9 @@ describe('B8: a turn-fence verdict through the real adoption door', () => {
   it('CONTROL: an ordinary commit failure is still "unconfirmed" (only fence verdicts changed)', async () => {
     const before = graph();
     mocks.loadPersistedGraphStrict.mockResolvedValue(before);
+    mocks.loadPersistedScenarioStateStrict.mockResolvedValue({ graph: before, briefText: null, revision: 23 });
     mocks.loadMostRecentPendingActionsIntegrityStrict.mockResolvedValue([]);
     mocks.commitDirectAnswer.mockRejectedValue(new Error('network'));
     expect(await commitOlumiOptionAdoptionInProcess({ scenario_id: SCENARIO, turn_id: 'adopt-turn', ...input(before) }, 'test-request')).toEqual({ status: 'unconfirmed' });
   });
 });
-

@@ -18,6 +18,7 @@ import type { PendingAction } from '../../session/pending-action.js';
 import { applyOptionInterventionEdit, executeOptionInterventionBatch, executeOptionInterventionEdit } from '../option-intervention-edit.js';
 import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapPostimageIsScoped } from '../../agent-lane/unmodelled-mechanisms.js';
 import { runWithApprovedLevelAdoption } from '../../agent-lane/approved-adoption-context.js';
+import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -94,13 +95,24 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
   pendings?: readonly PendingAction[];
   /** The atomic version receipt this append reports, derived from the write. */
   receiptFor?: (write: SessionTurnWrite) => AtomicCommittedModelVersionReceipt | undefined;
+  /** A rival write after the initial snapshot, before this transaction appends. */
+  rivalRevisionAfterSnapshot?: number;
 } = {}) {
   let graphJson = JSON.stringify(initial);
   let concurrentGraphJson: string | undefined;
   let loads = 0;
+  let revision = 31;
   const attempts: SessionTurnWrite[] = [];
   const rows = new Map<string, { id: string; json: string }>();
   const fresh = (): SessionStore => createMockSessionStore({
+    loadGraphAndBriefText: async scenarioId => {
+      expect(scenarioId).toBe(SCENARIO_ID);
+      loads += 1;
+      if (loads === options.failLoadAt) throw new Error('canonical read unavailable');
+      const state = { graph: JSON.parse(graphJson), briefText: null, revision };
+      if (options.rivalRevisionAfterSnapshot !== undefined) revision = options.rivalRevisionAfterSnapshot;
+      return state;
+    },
     loadGraph: async scenarioId => {
       expect(scenarioId).toBe(SCENARIO_ID);
       loads += 1;
@@ -171,6 +183,7 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
     durableRows: () => [...rows.values()].map(row => JSON.parse(row.json) as SessionTurnWrite),
     durableGraph: () => JSON.parse(graphJson) as ReturnType<typeof canonicalGraph>,
     loadCount: () => loads,
+    currentRevision: () => revision,
     stageConcurrentGraphOnDuplicate: (graph: unknown) => { concurrentGraphJson = JSON.stringify(graph); },
   };
 }
@@ -195,6 +208,19 @@ afterEach(() => {
 });
 
 describe('option-intervention transaction — real commit, serialized store boundary', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
+  it('carries the original snapshot revision through a rival write with unchanged graph hashes', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before, { rivalRevisionAfterSnapshot: 32 });
+    const result = await executeOptionInterventionEdit(inputFor(before), persistence.fresh());
+    expect(result.kind).toBe('committed');
+    expect(persistence.currentRevision()).toBe(32);
+    expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.attempts[0]).toHaveProperty('expectedRevision', 31);
+  });
+
   it('commits the exact target, canonical options mirror and edit fact; cold reload retains every unrelated field', async () => {
     const before = canonicalGraph();
     const pristine = clone(before);
@@ -649,6 +675,9 @@ describe('option-intervention transaction — real commit, serialized store boun
  * that class (CLAUDE.md trap 22). These cases supply it.
  */
 describe('an existing intervention persisted WITHOUT target_match', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   /** The restored entry verbatim, minus the value under test. */
   function persistedByBriefExtraction(value: number) {
     return { value, source: 'brief_extraction', display_value: `Very high (${value})` };
@@ -772,6 +801,9 @@ function interventionsOfOption(graph: { nodes: ReadonlyArray<{ id: string }> }):
  * dropping it. Only the committed object can show that.
  */
 describe('a no-target entry keeps its unrelated metadata through commit', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   /**
    * ⚠ `reasoning` IS NOT IN HERE, AND MY FIRST VERSION HAD IT WRONG.
    *
@@ -854,6 +886,9 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
  * the durable bytes on a cold store, not from the candidate.
  */
 describe('option-intervention transaction — an adopted Olumi level keeps Olumi\u2019s stamp', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const adoption = (over: Partial<{ scenarioId: string; optionId: string; factorId: string; modelValue: number }> = {}) => ({
     scenarioId: SCENARIO_ID, proposalId: 'prop_adopted', optionId: 'option', factorId: 'factor', modelValue: 0.3, ...over,
   });
@@ -905,6 +940,9 @@ describe('option-intervention transaction — an adopted Olumi level keeps Olumi
 });
 
 describe('a level brings its link — the real commit (DL #70 5847137399: ONE atomic commit)', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   it('RED: an unlinked option gets its link AND its level in ONE durable row, ONE fact and ONE read-back, and says so', async () => {
     const before = clone(canonicalGraph());
     before.edges = before.edges.filter(e => !(e.from === 'option' && e.to === 'other_factor'));
@@ -931,6 +969,9 @@ describe('a level brings its link — the real commit (DL #70 5847137399: ONE at
 });
 
 describe('ONE user operation → ONE atomic commit, for a WHOLE approved batch (ChatGPT #70 5847200462, BF5\'s two levels)', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   function unlinkedOtherFactor() {
     const g = clone(canonicalGraph());
     g.edges = g.edges.filter(e => !(e.from === 'option' && e.to === 'other_factor'));
@@ -1007,6 +1048,9 @@ describe('ONE user operation → ONE atomic commit, for a WHOLE approved batch (
  * `olumi_placeholder`; his 09:25 approval left them placeholders, and "Olumi hasn't sized…" repeated three Runs.
  */
 describe('L4: an approved link set sizes a placeholder (real door, real writer, cold reload)', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const PLACEHOLDER = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
   function withPlaceholder(mean: number) {
     const g = clone(canonicalGraph());
@@ -1055,6 +1099,9 @@ describe('L4: an approved link set sizes a placeholder (real door, real writer, 
 // Rows2–3: extend the existing serialized store and canonical commit controls;
 // no PostgreSQL/auth/HTTP/provider or independent approval-authority claim.
 describe('approved option gaps use the existing atomic level door', () => {
+  beforeEach(() => __setUseAppendV6ForTest(true));
+  afterEach(() => __setUseAppendV6ForTest(false));
+
   const GAP = 'a stated effect without a supported mapping';
   function withStoredGap(where: 'both' | 'node' | 'mirror' = 'both') {
     const graph = clone(canonicalGraph()) as ReturnType<typeof canonicalGraph> & { options?: Record<string, unknown>[] };
@@ -1198,10 +1245,12 @@ describe('approved option gaps use the existing atomic level door', () => {
 
   it('a node-only clear with a stale mirror readback is unverified', async () => {
     const before = withStoredGap(); const persistence = jsonStore(before); const facade = persistence.fresh();
-    const load = facade.loadGraph.bind(facade); let reads = 0;
+    const load = facade.loadGraph.bind(facade);
     facade.loadGraph = async scenario => {
-      const graph = await load(scenario) as ReturnType<typeof withStoredGap>; reads += 1;
-      if (reads > 1) graph.options!.find(o => o.id === 'option')!.unresolved_targets = [GAP];
+      const graph = await load(scenario) as ReturnType<typeof withStoredGap>;
+      // The initial authority is now the combined graph/revision read. Corrupt
+      // only a readback after a durable append, independent of read counts.
+      if (persistence.durableRows().length > 0) graph.options!.find(o => o.id === 'option')!.unresolved_targets = [GAP];
       return graph;
     };
     expect(await executeOptionInterventionBatch(request(before, clear), facade))
