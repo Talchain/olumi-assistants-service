@@ -23,6 +23,8 @@ export interface OlumiEstimates {
 export function olumiEstimatesFeedingResult(input: {
   goalPathFactors: readonly GoalPathFactor[];
   goalPathLinks: readonly GoalPathLink[];
+  /** Graph-bound reader of the real validatedDefinition predicate; keeps this census pure. */
+  validatedDefinitionForLink?: (linkId: string) => string | undefined;
   /** Distinct, on-goal-path option settings; observed-state authorship cannot stand in for these. */
   optionSettings?: readonly {
     id: string;
@@ -62,7 +64,7 @@ export function olumiEstimatesFeedingResult(input: {
     // This is the existing signal producer's linkSizing(edge) result, never a second sizing rule.
     if (l.link_sizing === 'olumi_accepted') accepted += 1;
     if (l.link_sizing === 'placeholder') placeholderLinks += 1;
-    if (l.link_sizing === 'olumi_estimate') {
+    if (l.link_sizing === 'olumi_estimate' && input.validatedDefinitionForLink?.(l.link_id) === undefined) {
       links.push({ kind: 'link', id: l.link_id, label: `${l.from_label} → ${l.to_label}`, goal_distance: l.goal_distance });
     }
   }
@@ -108,7 +110,8 @@ const TENS = new Set(['twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 
 const UNITS = new Set(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']);
 const COUNT_KINDS = new Set([
   'value', 'values', 'figure', 'figures', 'input', 'inputs', 'assumption', 'assumptions',
-  'estimate', 'estimates', 'number', 'numbers', 'link', 'links', 'size', 'sizes', 'strength', 'strengths',
+  'estimate', 'estimates', 'number', 'numbers', 'link', 'links', 'relationship', 'relationships',
+  'size', 'sizes', 'strength', 'strengths',
 ]);
 const FILLERS = new Set(['of', 'the', 'olumi', 's', 'its', 'their', 'own', 'underlying', 'estimated', 'starting', 'these', 'those']);
 const CONJUNCTIONS = new Set(['and', 'but', 'while', 'whereas']);

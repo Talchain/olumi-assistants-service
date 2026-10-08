@@ -18,7 +18,7 @@ import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 import { sameUnit, unitsCompose } from '../agent-lane/reconciling-product.js';
-import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
+import { linkEffectConversionFrames, linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
 import { edgeStrengthWords } from '../format/edge-strength-words.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
@@ -26,6 +26,7 @@ import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
 import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.js';
+import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -68,9 +69,9 @@ export type TargetTestability =
  * - (1) INTO the goal: every link from a node an option moves carries a `natural_effect` whose `amount_unit` is the
  *   goal's unit (R3 5914500931: "strong" is unitless, so it converts nothing), OR the goal's identity is confirmed
  *   (its operands are exact);
- * - (2) ON the path: no link is sized only by Olumi (an `olumi_*` magnitude the user did not state). Served m1 after
- *   the identity card's Yes rested on Olumi's price → churn guess (AIQ 5914435183: `exploratory` until the user sizes
- *   it). A structural link nobody sized carries no guess and is not a failure here.
+ * - (2) ON the path: a placeholder or an Olumi size that cannot convert still fails. Science §(i)'s 8 Oct amendment
+ *   admits a current natural estimate in its ends' units; the downstream path/identity carries it into goal units.
+ *   Every other precondition remains. A structural link nobody sized carries no guess and is not a failure here.
  * A confirmed identity's ISL rules are checked by the Run, so that pass stays listed as unchecked.
  */
 function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown): boolean {
@@ -94,6 +95,15 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** The scored identity wins; legacy graphs with exactly one goal remain unambiguous. */
+export function scoredGoalIdOf(graph: unknown, scoredGoalId?: unknown): string | undefined {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return undefined;
+  const goals = graph.nodes.filter((n): n is Rec & { id: string } => isRec(n) && n.kind === 'goal' && typeof n.id === 'string');
+  const id = scoredGoalId ?? graph.goal_node_id;
+  if (id !== undefined) return typeof id === 'string' && goals.some(n => n.id === id) ? id : undefined;
+  return goals.length === 1 ? goals[0]!.id : undefined;
+}
+
 /**
  * GOAL-REACH 3b, Science §(i) 1 (8 Oct): once the user has CONFIRMED the goal's product identity (the identity card's
  * Yes: `stated_in_brief: true`) and both factors carry today's level, the goal's level today is DERIVED from them — PLoT
@@ -114,6 +124,59 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
   // another currency keeps the confirmed identity; nothing downstream converts it).
   const goalLabel = typeof goal.label === 'string' ? goal.label : '';
   return unitsCompose(goal.goal_threshold_unit, goalLabel, levels[0], levels[1]).kind !== 'no';
+}
+
+// A current natural effect converts this one causal link in the writer's end frames.
+function locallyConvertingNaturalEffect(edge: unknown, graph: unknown): boolean {
+  if (!isRec(edge) || !isRec(graph) || !Array.isArray(graph.nodes)
+    || typeof edge.from !== 'string' || typeof edge.to !== 'string') return false;
+  const natural = isRec(edge.provenance) && isRec(edge.provenance.natural_effect) ? edge.provenance.natural_effect : undefined;
+  const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
+  if (natural === undefined || !finite(natural.amount) || !finite(natural.per_source_change)
+    || natural.per_source_change === 0 || !finite(mean) || natural.strength_mean !== mean) return false;
+  const ends = linkEffectEndUnits(graph, edge.from, edge.to);
+  if (ends === null || !statedInOneOf(natural.amount_unit, [...ends.target.own, ends.target.adopted])
+    || !statedInOneOf(natural.per_source_change_unit, [...ends.source.own, ends.source.adopted])) return false;
+  const frames = linkEffectConversionFrames(graph, edge.from, edge.to);
+  if (frames === null) return false;
+  const beta = convertLinkEffect(natural.amount, natural.per_source_change, frames.target, frames.source);
+  // naturalEffectOf persists BOTH amount and per to six significant figures, while strength_mean keeps beta.
+  // Each rounding has <=5e-6 relative error; their ratio differs by <=1e-5 of the larger coefficient.
+  return beta !== null && Math.abs(mean) <= 1 && Math.abs(beta - mean) <= 1e-5 * Math.max(Math.abs(beta), Math.abs(mean));
+}
+
+/** Science §(i) (A): a local conversion licenses an Olumi estimate only on a converting route to the scored goal.
+ * Follow readable conversion frames or the existing exact identity operands. Each downstream link keeps its OWN
+ * case-(c) size check: removing this estimate's block never licenses a placeholder farther along the route.
+ */
+export function convertingOlumiEstimate(edge: unknown, graph: unknown, goalId: unknown, identityEvaluations?: readonly unknown[]): boolean {
+  if (!isRec(edge) || linkSizing(edge) !== 'olumi_estimate' || !locallyConvertingNaturalEffect(edge, graph)
+    || !isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return false;
+  const nodes = graph.nodes.filter(isRec);
+  const goal = nodes.find(n => n.kind === 'goal' && n.id === goalId);
+  if (goal === undefined) return false;
+  const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit
+    : isRec(goal.observed_state) && typeof goal.observed_state.unit === 'string' ? goal.observed_state.unit : undefined;
+  if (edge.to === goal.id) return sizedInGoalUnit(edge, goalUnit, graph);
+  const edges = graph.edges.filter(isRec);
+  const exact = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const seen = new Set([edge.to]);
+  for (const from of seen) for (const next of edges) {
+    const to = byId.get(next.to);
+    if (next.from !== from || to === undefined || to.kind === 'option' || to.kind === 'decision') continue;
+    const identityOperand = exact.has(next);
+    const frames = typeof next.from === 'string' && typeof next.to === 'string'
+      ? linkEffectConversionFrames(graph, next.from, next.to) : null;
+    if (!identityOperand && (frames === null || convertLinkEffect(1, 1, frames.target, frames.source) === null)) continue;
+    if (next.to === goal.id) {
+      const ends = typeof next.from === 'string' && typeof next.to === 'string'
+        ? linkEffectEndUnits(graph, next.from, next.to) : null;
+      if (identityOperand || (goalUnit !== undefined && ends !== null
+        && statedInOneOf(goalUnit, [...ends.target.own, ends.target.adopted]))) return true;
+    } else seen.add(next.to);
+  }
+  return false;
 }
 
 /** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
@@ -167,7 +230,7 @@ export function untestableGoalTargetRowId(input: unknown, identityEvaluations?: 
  * edges carry no causal size. Callers supply seeds: P5's option nodes, or the licence's actual moved factors.
  * No target, unit, sizing or intervention-level judgement is made by this walk.
  */
-export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[]): {
+export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[], scoredGoalId?: unknown): {
   reached: Set<unknown>;
   paths: Array<{ option_id: string; links: Record<string, unknown>[] }>;
   exactLinks: Set<Record<string, unknown>>;
@@ -175,10 +238,10 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.map(n => [n.id, n] as const));
-  const goal = nodes.find(n => n.kind === 'goal');
+  const goalId = scoredGoalIdOf(graph, scoredGoalId);
   const ids = optionIds;
   const walkable = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
-  const toGoal = new Set<unknown>(goal === undefined ? [] : [goal.id]);
+  const toGoal = new Set<unknown>(goalId === undefined ? [] : [goalId]);
   for (let grew = true; grew;) {
     grew = false;
     for (const e of edges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
@@ -203,8 +266,9 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   return { reached, paths, exactLinks };
 }
 
-/** Stable endpoint de-duplication, ordered by shortest distance of the target from the goal. */
-export function goalOrderedLinks(graph: unknown, links: readonly { from: string; to: string }[]): Array<{ from: string; to: string }> {
+/** Stable endpoint de-duplication, ordered by shortest distance of the target from the goal.
+ * Guided replies retain the warning's input order for ties; other callers keep their existing graph-edge tie rule. */
+export function goalOrderedLinks(graph: unknown, links: readonly { from: string; to: string }[], warningOrderTies = false): Array<{ from: string; to: string }> {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const distance = new Map<unknown, number>(nodes.filter(n => n.kind === 'goal').map(n => [n.id, 0]));
@@ -219,7 +283,7 @@ export function goalOrderedLinks(graph: unknown, links: readonly { from: string;
   }
   return [...new Map(links.map(l => [JSON.stringify([l.from, l.to]), { from: l.from, to: l.to }])).values()]
     .sort((a, b) => (distance.get(a.to) ?? Infinity) - (distance.get(b.to) ?? Infinity)
-      || edges.findIndex(e => e.from === a.from && e.to === a.to) - edges.findIndex(e => e.from === b.from && e.to === b.to));
+      || (warningOrderTies ? 0 : edges.findIndex(e => e.from === a.from && e.to === a.to) - edges.findIndex(e => e.from === b.from && e.to === b.to)));
 }
 
 export function targetTestabilityOf(
@@ -230,10 +294,12 @@ export function targetTestabilityOf(
    * d5 ruling for #2644). Omitted (before a Run) = none attested: only a confirmed identity counts.
    */
   identityEvaluations?: readonly unknown[],
+  scoredGoalId?: unknown,
 ): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
-  const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && typeof n.id === 'string');
+  const selectedGoalId = scoredGoalIdOf(graph, scoredGoalId);
+  const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && n.id === selectedGoalId);
   if (goal === undefined) return { kind: 'no_goal' };
   const goalId = goal.id as string;
   const stated = statedGoalTargetOf(graph, goal);
@@ -273,7 +339,7 @@ export function targetTestabilityOf(
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
     const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     const optionIds = nodes.filter(n => n.kind === 'option' && typeof n.id === 'string').map(n => n.id as string);
-    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])));
+    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])), identityEvaluations, goalId);
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
@@ -291,7 +357,7 @@ export function targetTestabilityOf(
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
     const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
-      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf));
+      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph, goalId, identityEvaluations));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     // ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's sizes on both sides of a level-less mediator size the path (M's
@@ -448,6 +514,18 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
 }
 
 /**
+ * DL guided-path composition: a multi-placeholder reply asks ONLY the missing level before its ONE sizing list.
+ * Read the level cases through the existing word producer, so both the ordinary and unit-qualified questions stay
+ * byte-identical; case (c)'s separate link clause/question never enters this carrier.
+ */
+export function targetLevelOnlyQuestion(graph: unknown, verdict: TargetTestability): string | null {
+  if (verdict.kind !== 'not_testable') return null;
+  const failures = verdict.failures.filter(f => f.case === 'a' || f.case === 'd');
+  if (failures.length === 0) return null;
+  return untestableTargetParts(graph, { ...verdict, failures })?.question ?? null;
+}
+
+/**
  * AIQ's words (#77 5912882031) for a `not_testable` verdict, composed from {@link untestableTargetParts}. `null` otherwise.
  */
 const TARGET_TESTABLE_SENTENCE_CAP = 388;
@@ -515,12 +593,13 @@ export function untestableTargetTail(graph: unknown, verdict: TargetTestability,
  */
 export function targetNotTestableWarning(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string; first_ask?: { kind: 'link'; from: string; to: string } } | null {
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string; level_only_say?: string; first_ask?: { kind: 'link'; from: string; to: string } } | null {
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
   const said = targetWarningSentence(graph, verdict);
   const message = said !== null && said.length <= TARGET_TESTABLE_SENTENCE_CAP ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
   // RT-10 B′ R2: what the reply says about the target, from the same parts (`untestableTargetTail`).
   const tail = untestableTargetTail(graph, verdict);
+  const levelOnly = targetLevelOnlyQuestion(graph, verdict);
   // ⭐ Near tie (DL #87, 6 Oct): the link the `say` asks for, typed by id, so the panel names the SAME next step as the chat
   // (as `GOAL_FIGURES_PLACEHOLDER_PATH`'s `first_ask`). Only when the words ask exactly that link; never otherwise.
   const parts = tail === null ? null : untestableTargetParts(graph, verdict);
@@ -531,5 +610,6 @@ export function targetNotTestableWarning(
   const ends = sayAsks === null || parts?.askedIn == null ? null : linkEffectEndUnits(graph, sayAsks.from, sayAsks.to);
   const asked = sayAsks !== null && ends !== null && statedInOneOf(parts!.askedIn, [...ends.target.own, ends.target.adopted]) ? sayAsks : null;
   return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds], ...(tail !== null ? { say: tail } : {}),
+    ...(levelOnly !== null ? { level_only_say: levelOnly } : {}),
     ...(asked !== null ? { first_ask: { kind: 'link' as const, from: asked.from, to: asked.to } } : {}) };
 }

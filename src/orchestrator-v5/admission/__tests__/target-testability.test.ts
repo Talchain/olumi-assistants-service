@@ -179,12 +179,11 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
       expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(guardAnalysisParticipation(g, { goalNodeId: 'mrr' }).graph));
     }
   });
-  it('RED: m1 as served → not testable, (c), naming the price', () => {
+  it('§(i): m1 as served keeps its churn placeholder; the converting price estimate clears (c)', () => {
     const v = targetTestabilityOf(M1);
-    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
+    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
       link: { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' }, links: [
       { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' },
-      { from: 'pro_plan_price', to: 'monthly_churn_rate' },
     ] }]);
     // RE-PINNED, RT-10 B′ R2: the verdict no longer caps the mode — m1 is admitted as it is without its target.
     expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe(resolveAnalysisAdmission(withoutTarget(M1)).permitted_analysis_mode);

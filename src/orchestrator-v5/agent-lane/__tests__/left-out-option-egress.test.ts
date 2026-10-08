@@ -122,7 +122,7 @@ describe('Q6 egress carriers', () => {
     expect(route).toContain('withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {');
     expect(route).toContain('withLeftOutOptionCorrectionAtEgress(driverEditedView, {');
     expect(route).toContain('withLeftOutOptionCorrectionAtEgress(driverEdited, {');
-    expect(route.indexOf('const gatedReplay = withLeftOutOptionCorrectionAtEgress(')).toBeLessThan(route.indexOf('return withShapeOnlyIfItDerives(gatedReplay);'));
+    expect(route.indexOf('const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(')).toBeLessThan(route.indexOf('return withShapeOnlyIfItDerives(gatedReplay);'));
   });
 });
 

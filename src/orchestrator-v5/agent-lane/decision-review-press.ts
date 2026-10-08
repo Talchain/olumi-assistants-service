@@ -31,8 +31,9 @@ import { claimPermissionsFrom } from './first-analysis.js';
 import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { placeholderZeroFactorIds } from '../coaching/unvalued-driver-card.js';
-import { goalChanceWithheldForAgent, withoutAskedQuestion } from './goal-chance-withheld.js';
+import { goalChanceWithheldForAgent, RANGE_OPENING, withoutAskedQuestion } from './goal-chance-withheld.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
+import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
 import { agentNoLeaderSentence } from './withheld-leader-fail-closed.js';
@@ -223,6 +224,9 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
     const said = withoutAskedQuestion(survivesReplyEditors(withheldSay, graph, analysisReady) ? withheldSay
       : str(goalChanceWithheldForAgent(withoutWarningWords(analysisResult), graph)?.say) ?? withheldSay, read.recentReplies ?? []);
     if (said.trim() !== '') lines.push(said);
+  } else if (Object.keys(goalChanceFactsForAgent(analysisResult, graph, true).goal_chance_range_display ?? {}).length > 0) {
+    // A range remains a finding to review when converting estimates have cleared the old target withhold.
+    lines.push(RANGE_OPENING);
   }
 
   // F5: the most sensitive link of the stored graph the Run carries; never names an option. The test is never promised in

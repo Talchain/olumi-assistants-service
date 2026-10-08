@@ -29,19 +29,22 @@ const SIZE_QUESTION = 'How sure are you of that size?';
 // RC6 keeps the first screen unit intact and drops only the later copy of its question.
 const SCREEN_T1B_SAID_ONCE = SCREEN_T1B.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
 let analysisResult: Json = READ.analysis_result;
+let forwardedText = 'ok';
+let recentRows: Json[] = [];
+let hashTurn: (message: string) => string;
 
-const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
+const rows = new Map<string, Json>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string }) => {
+  append: vi.fn(async (w: Json) => {
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
-    const row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash };
+    const row = { ...w, assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` };
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
-  readRecent: vi.fn(async () => []),
+  readRecent: vi.fn(async () => recentRows),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
 };
@@ -68,10 +71,11 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
-    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const { agentV1TurnRoute, agentTurnRequestHash } = await import('../../../routes/agent-v1-turn.js');
+    hashTurn = message => agentTurnRequestHash(SCENARIO, null, message);
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
-      response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
+      response_version: 2, assistant_text: forwardedText, suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [analysisResult], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
@@ -82,15 +86,16 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
+  beforeEach(() => { rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
-  const turn = async (outputs: Record<string, unknown>[][], message: string): Promise<Body> => {
+  const turn = async (outputs: Record<string, unknown>[][], message: string, sessionId?: string): Promise<Body> => {
     seq += 1;
     callModelOutputs = outputs;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message, turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`,
+      ...(sessionId === undefined ? {} : { agent_session_id: sessionId }),
     } });
     expect(r.statusCode, r.body).toBe(200);
     const b = r.json() as Body;
@@ -100,6 +105,20 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   const run = (reply: string) => [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }], say(reply)];
   const count = (text: string, s: string): number => text.split(s).length - 1;
+  const estimateScreenLine = () => {
+    READ = structuredClone(READ_T1B);
+    READ.graph.nodes.find((n: Json) => n.id === 'raise_prices_10').label = 'Raise to £59';
+    READ.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
+    analysisResult = structuredClone(READ.analysis_result);
+    analysisResult.enrichment.inference_warnings = [{
+      code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance of meeting your goal is licensed on this Run.',
+      form: 'each', option_ids: ['raise_prices_10'], pct_by_option: { raise_prices_10: 67 },
+      target: { comparator: 'at_least', value: 126000, unit: '£/month' }, olumi_estimate_link_count: 1,
+      goal_node_id: 'monthly_recurring_revenue', goal_label: 'Monthly recurring revenue',
+      option_labels_by_option: { raise_prices_10: 'Raise to £59' },
+    }];
+    return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
+  };
   const shortfallScreenLine = () => {
     READ = structuredClone(READ_T1B);
     READ.analysis_state.leader_claim = { permitted: true };
@@ -121,6 +140,108 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(lines[0]!.shortfall_note).toBeDefined();
     return lines[0]!;
   };
+
+  it('GP review P1: zero added lines still applies cleaned narration and removes a fabricated link count', async () => {
+    shortfallScreenLine();
+    analysisResult.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    const line = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
+    expect(line.olumi_estimate_link_count).toBe(1);
+    const canonical = [line.chance, line.depends].filter(Boolean).join(' ');
+    const narration = `${canonical} Olumi's estimates feed 99 links.`;
+    const cleaned = withScreenLinesOwed(narration, [line]);
+    expect(cleaned.added).toBe(0);
+    expect(cleaned.text).not.toContain('99 links');
+    const b = await turn(run(narration), 'Run it');
+    expect(b.assistant_text).not.toContain('99 links');
+    expect(b.assistant_text).toContain(line.chance);
+  });
+
+  it.each(['run', 'follow-up', 'added=0'] as const)('r10 %s: qualified points are labelled on wire, storage and replay', async kind => {
+    const line = estimateScreenLine();
+    const bare = kind === 'follow-up' ? 'The recorded chance for Raise to £59 is 67%.' : '‘Raise to £59’: about 67% in this model.';
+    const unrelated = 'The chance of supplier failure is 10%. The chance of supplier failure is 67%.';
+    const narration = `${bare} ${unrelated}${kind === 'added=0' ? `\n${line.chance}` : ''}`;
+    const outputs = kind === 'follow-up' ? [say(narration)] : run(narration);
+    const message = kind === 'follow-up' ? 'What was the recorded chance for Raise to £59?' : 'Run it';
+    const b = await turn(outputs, message);
+    const assertLabelled = (text: string) => {
+      expect(text).not.toContain(bare);
+      expect(count(text, line.chance), text).toBe(1);
+      expect(text).toContain(unrelated);
+    };
+    assertLabelled(b.assistant_text);
+    const saved = [...rows.values()].find(r => r.assistant_message === b.assistant_text);
+    expect(saved, 'the exact labelled wire text is the durable answer').toBeDefined();
+    assertLabelled(saved!.assistant_message);
+    // Even a historical ordinary answer with the old bare sentence crosses the current licence boundary on replay.
+    if (kind === 'follow-up') saved!.assistant_message = narration;
+    const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message, turn_id: saved!.turn_id,
+    } });
+    expect(replay.statusCode, replay.body).toBe(200);
+    const replayed = replay.json() as Body;
+    expect(replayed._agent.replayed).toBe(true);
+    assertLabelled(replayed.assistant_text);
+  });
+
+  it('r11: a forwarded assistant reply crosses the same current-Run boundary', async () => {
+    const line = estimateScreenLine();
+    const unrelated = 'The chance of supplier failure is 10%.';
+    forwardedText = `Raise to £59: 67%. ${unrelated}`;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'system_event', scenario_id: SCENARIO, event: { kind: 'structural_rename', target_id: 'raise_prices_10', label: 'Raise to £59' },
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().assistant_text).toBe(`${line.chance} ${unrelated}`);
+  });
+
+  it('r13: a user-authored competitor sentence survives live egress, storage and same-id replay', async () => {
+    const line = estimateScreenLine();
+    const risk = 'Raise to £59: there is a 67% chance a competitor launches first.';
+    const message = `Keep this risk in our reasoning. ${risk} We can revisit it next quarter.`;
+    const narration = `You said: “${risk}”\n${line.chance}`;
+    const b = await turn([say(narration)], message);
+    expect(b.assistant_text).toContain(risk);
+    const saved = [...rows.values()].find(r => r.assistant_message === b.assistant_text)!;
+    expect(saved.assistant_message).toContain(risk);
+    const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message, turn_id: saved.turn_id,
+    } });
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json().assistant_text).toContain(risk);
+  });
+
+  it.each(['live', 'replay'] as const)('r13 cold %s: an earlier durable user sentence survives an assistant echo after restart', async mode => {
+    const line = estimateScreenLine();
+    const risk = 'Raise to £59: there is a 67% chance a competitor launches first.';
+    const earlierMessage = `Keep this risk in our reasoning. ${risk} We can revisit it next quarter.`;
+    const earlier = { id: 'r13-user-risk', turn_id: 'a13d0000-0000-4000-8000-000000000001', request_hash: hashTurn(earlierMessage),
+      user_message: earlierMessage, assistant_message: 'Recorded your risk.', llm_calls_used: 1,
+      created_at: '2026-10-08T10:00:00.000Z' };
+    const message = 'Review the risk we recorded earlier.';
+    const narration = `You said: “${risk}”\n${line.chance}`;
+    // A unique session starts with no in-process typedWords. Only actual durable user_message rows own the risk.
+    const sessionId = `r13-cold-${mode}`;
+    recentRows = [earlier];
+    if (mode === 'live') {
+      const b = await turn([say(narration)], message, sessionId);
+      expect(b.assistant_text).toContain(risk);
+      expect([...rows.values()].find(r => r.assistant_message === b.assistant_text)!.assistant_message).toContain(risk);
+    } else {
+      const turnId = 'a13d0000-0000-4000-8000-000000000002';
+      const prior = { id: 'r13-prior-followup', turn_id: turnId, request_hash: hashTurn(message),
+        user_message: message, assistant_message: narration, llm_calls_used: 1, created_at: '2026-10-08T10:01:00.000Z' };
+      rows.set(turnId, prior); recentRows = [prior, earlier];
+      const providerCalls = vi.mocked(fetch).mock.calls.length;
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message, turn_id: turnId, agent_session_id: sessionId,
+      } });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()._agent.replayed).toBe(true);
+      expect(vi.mocked(fetch).mock.calls.length, 'a cold replay makes no provider call').toBe(providerCalls);
+      expect(response.json().assistant_text).toContain(risk);
+    }
+  });
 
   it('fixture control: the served readback carries a range record and withholds the leader on a current Run', () => {
     expect(READ.analysis_result.enrichment.inference_warnings.map((w: Json) => w.code)).toContain('GOAL_CHANCE_RANGE');

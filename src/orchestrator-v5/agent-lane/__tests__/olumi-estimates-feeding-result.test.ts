@@ -1,5 +1,8 @@
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
+import draw2 from './fixtures/guided-sizing-draw2.json';
+import paulGraph from './fixtures/goal-reach-paul-graph-632b92b9.json';
+import { endsOfGraph, validatedDefinition, validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
 import {
   narratorCountGuard, olumiEstimatesFeedingResult, sayOlumiEstimates,
 } from '../olumi-estimates-feeding-result.js';
@@ -24,6 +27,49 @@ const paul = () => ({
 });
 const census = (count: number) => olumiEstimatesFeedingResult({
   goalPathFactors: Array.from({ length: count }, (_, i) => factor(`f-${i}`)), goalPathLinks: [],
+});
+
+describe('RC4 round 6: stored definitions are arithmetic, not estimated sizes', () => {
+  it.each([
+    { name: 'draw-2', graph: draw2.graph, id: 'mrr_lost_to_price_sensitivity->mrr', unit: '£/month' },
+    { name: 'Paul', graph: paulGraph, id: 'pro_plan_price->monthly_churn_rate', unit: undefined },
+    { name: 'Paul', graph: paulGraph, id: 'monthly_churn_rate->mrr_lost_to_price_driven_churn', unit: undefined },
+    { name: 'Paul', graph: paulGraph, id: 'mrr_lost_to_price_driven_churn->mrr', unit: '£/month' },
+  ])('$name $id: validatedDefinition returns $unit', ({ graph, id, unit }) => {
+    const edge = graph.edges.find(e => `${e.from}->${e.to}` === id);
+    expect(edge, `captured link ${id}`).toBeDefined();
+    expect(validatedDefinition(edge, endsOfGraph(graph)(edge))).toBe(unit);
+    const signals = assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph,
+      analysisState: undefined, analysisResult: undefined, leaderLicensed: false });
+    const pathLink = signals['model.goal_path_links'].find(l => l.link_id === id);
+    expect(pathLink, `captured goal-path link ${id}`).toBeDefined();
+    expect(pathLink!.link_sizing).toBe('olumi_estimate');
+    const e = olumiEstimatesFeedingResult({ validatedDefinitionForLink: validatedDefinitionForGraph(graph), goalPathFactors: [], goalPathLinks: [pathLink!] });
+    expect(e.links.map(l => l.id)).toEqual(unit === undefined ? [id] : []);
+    expect(e.count).toBe(unit === undefined ? 1 : 0);
+  });
+
+  it.each([
+    { name: 'draw-2', graph: draw2.graph, before: 2, ids: ['pro_plan_price->monthly_churn'] },
+    { name: 'Paul', graph: paulGraph, before: 3,
+      ids: ['pro_plan_price->monthly_churn_rate', 'monthly_churn_rate->mrr_lost_to_price_driven_churn'] },
+  ])('$name: k $before → estimated sizes only', ({ graph, before, ids }) => {
+    const signals = assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph,
+      analysisState: undefined, analysisResult: undefined, leaderLicensed: false });
+    const input = { validatedDefinitionForLink: validatedDefinitionForGraph(graph), goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'] };
+    expect(input.goalPathLinks.filter(l => l.link_sizing === 'olumi_estimate')).toHaveLength(before);
+    expect(olumiEstimatesFeedingResult(input).links.map(l => l.id)).toEqual(ids);
+  });
+
+  it('MUTANT: a definitional link counted → RED', () => {
+    const graph = draw2.graph;
+    const id = 'mrr_lost_to_price_sensitivity->mrr';
+    const edge = graph.edges.find(e => `${e.from}->${e.to}` === id)!;
+    expect(validatedDefinition(edge, endsOfGraph(graph)(edge))).toBe('£/month');
+    const e = olumiEstimatesFeedingResult({ validatedDefinitionForLink: validatedDefinitionForGraph(graph), goalPathFactors: [], goalPathLinks: [link(id)] });
+    expect(e.links).toEqual([]);
+    expect(e.count).toBe(0);
+  });
 });
 
 describe('RC4: the one census of Olumi estimates feeding this result', () => {
@@ -254,9 +300,14 @@ describe('RC4: narrator count egress guard', () => {
     expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
   });
 
+  it.each([1, 2])('R16 K_WORDS: a narrated %i-relationship attribution still needs the producer', k => {
+    const sentence = `Raise to £59: about 67% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates).`;
+    expect(narratorCountGuard(sentence, null)).toEqual({ text: '', removed: [sentence] });
+  });
+
   it.each([
-    'values', 'figures', 'inputs', 'assumptions', 'estimates', 'numbers', 'links', 'sizes', 'strengths',
-    'value', 'figure', 'input', 'assumption', 'estimate', 'number', 'link', 'size', 'strength', 'link sizes',
+    'values', 'figures', 'inputs', 'assumptions', 'estimates', 'numbers', 'links', 'relationships', 'sizes', 'strengths',
+    'value', 'figure', 'input', 'assumption', 'estimate', 'number', 'link', 'relationship', 'size', 'strength', 'link sizes',
   ])('digits and %s work with Olumi before or after the count', noun => {
     for (const sentence of [`Olumi supplied 6 ${noun}.`, `6 ${noun} came from Olumi.`]) {
       expect(narratorCountGuard(sentence, census(9))).toEqual({ text: '', removed: [sentence] });

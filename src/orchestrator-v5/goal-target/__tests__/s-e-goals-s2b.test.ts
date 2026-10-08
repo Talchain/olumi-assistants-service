@@ -376,7 +376,7 @@ describe('R2 identity-bound regression rows', () => {
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
     expect(w.rows).toHaveLength(1); expect(w.commits).toHaveLength(2);
   });
-  it('P2-7 shows Olumi estimates on added-capacity chance lines, absent on carry-on', async () => {
+  it('P2-7 names capacity estimates only on added-capacity lines and labels every point with RC4’s model link count', async () => {
     const c = { ...candidate(), unknowns: ['What evidence supports the productivity assumption?', 'Lead time is an Olumi estimate.'] };
     const r = await build(c, true);
     expect(r.open_questions).toContain('What evidence supports the productivity assumption?');
@@ -394,8 +394,14 @@ describe('R2 identity-bound regression rows', () => {
     ] }, write.mutatedGraph, 'event_goal');
     const lines = goalChanceScreenLinesForAgent({ enrichment: withGoalChanceLicence(raw, write.mutatedGraph, 'event_goal') }, write.mutatedGraph, true);
     expect(lines.find(l => l.option_id === 'event_option_2')?.chance).toContain("using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month)");
-    expect(lines.find(l => l.option_id === 'event_option_1')?.chance).toContain("Olumi's estimates");
-    expect(lines.find(l => l.option_id === 'event_option_3')?.chance).not.toContain("Olumi's estimates");
+    expect(lines.find(l => l.option_id === 'event_option_1')?.chance).toContain("using Olumi's estimates of hiring time (3–5 months) and the new team's pace (7% of the feature launch a month)");
+    const carry = lines.find(l => l.option_id === 'event_option_3')?.chance;
+    expect(carry).not.toContain('hiring time');
+    expect(carry).not.toContain("new team's pace");
+    // The Tech lead's existing P40 range keeps its named estimates; only the two licensed POINTS carry k.
+    for (const optionId of ['event_option_2', 'event_option_3']) expect(lines.find(l => l.option_id === optionId)?.chance)
+      .toContain(", using Olumi's estimates for 2 relationships (see Check estimates).");
+    expect(lines.find(l => l.option_id === 'event_option_1')?.chance).not.toContain('(see Check estimates)');
   });
   it('WORDS share range names the deliverable and date in screen and chat', () => {
     const graph = { nodes: [{ id: 'o', kind: 'option', label: 'Carry on as now' },
