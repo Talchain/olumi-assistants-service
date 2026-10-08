@@ -286,15 +286,20 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
       message: 'Not shown. Raise needs a testable target.' };
     const bothWithheld = { ...licence, withheld_option_ids: ['raise', 'keep'], pct_by_option: {} };
     const input = args([bothWithheld, target]);
+    // #2879: a licence with no licensed point is emitted only to carry zero-spread reasons, so the no-reason case uses
+    // a licence the producer does emit: a third option holds a licensed point.
+    const withLicensedHold = (): Json => {
+      const held = args([{ ...bothWithheld, option_ids: ['raise', 'keep', 'hold'], pct_by_option: { hold: 40 } }, target]);
+      held.graph = { ...graph, nodes: [...graph.nodes, { id: 'hold', kind: 'option', label: 'Hold' }] };
+      held.currentResult.enrichment.option_comparison.push({ option_id: 'hold' });
+      return held;
+    };
     const line = 'Not shown yet: needs month-by-month changes';
     for (const carrier of [{ keep: { reason: 'zero_spread', side: 'falls_short', line } }, {}]) {
-      const view = projectWithReasonCarrier(input, carrier);
+      const view = projectWithReasonCarrier(Object.hasOwn(carrier, 'keep') ? input : withLicensedHold(), carrier);
       expect(cell(view, 'raise')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why: target.message });
-      expect(JSON.stringify(cell(view, 'keep'))).not.toContain(target.message);
-      // #2879 (buddy r1): a licence with no licensed point attests only its named zero-spread reasons, so with none
-      // recorded for Keep its cell is `none`, never a generic withhold and never Raise's words.
-      expect(cell(view, 'keep')).toEqual(Object.hasOwn(carrier, 'keep')
-        ? expect.objectContaining({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why: line }) : { kind: 'none' });
+      expect(cell(view, 'keep')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN,
+        why: Object.hasOwn(carrier, 'keep') ? line : `‘Keep’: ${OPTION_CHANCE_WITHHELD}` });
     }
   });
 
