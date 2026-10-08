@@ -1,5 +1,7 @@
 /** DL B3 086e4624, served 81b77b9f: event-prompt selection is the admission authority. No external I/O. */
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { log } from '../../../utils/telemetry.js';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
@@ -167,6 +169,24 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       expect(info).toHaveBeenCalledWith({ event: 'cee.event_by_date.fallback_kept', missing_piece: 'it needs how much capacity each option adds' },
         'cee.event_by_date.fallback_kept');
     } finally { info.mockRestore(); }
+  });
+
+  /** Census r3 B3-d2 (recorded drafter output): the event construction is 36 links, over the cap of 30, on Olumi's own scaffolding. */
+  const B3_D2 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'event-b3-d2-20261008.json'), 'utf8')) as { brief: string; output_text: string };
+  it('B3-d2: an event construction over the size cap keeps the reachable ordinary model, as base built it (DL ruling B)', async () => {
+    const { result, registrations } = await built(JSON.parse(B3_D2.output_text) as CandidateModel, B3_D2.brief);
+    expect(result).toMatchObject({ ok: true, mutated: true });
+    expect(registrations).toHaveLength(1);
+    // Base staging 94b2554d registered this exact graph (census r3, graph_sha prefix).
+    expect(createHash('sha256').update(JSON.stringify(registrations[0])).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
+    expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
+  });
+
+  it('CONTRAST: over the cap with an ordinary model that cannot reach the goal, the event construction takes today\'s size path', async () => {
+    const c = { ...(JSON.parse(B3_D2.output_text) as CandidateModel), links: [] };
+    const { result, registrations } = await built(c, B3_D2.brief);
+    expect(result).toMatchObject({ ok: false, refusal: 'model_too_large' });
+    expect(registrations).toHaveLength(0);
   });
 
   it('B3 flagged Platform completion uses event capacity paths despite the scoped-token mismatch', () => {

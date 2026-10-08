@@ -1585,7 +1585,20 @@ export async function buildModelFromBrief(
       (c: CandidateModel) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] as const;
     const result = admitCandidateModel(...args, construction);
     const refusal = eventByDateRefusalOf(result);
-    if (refusal === null) return result;
+    if (refusal === null) {
+      // An event construction over the size cap keeps the ordinary model when that reaches the goal: the same rule as a
+      // failed slice. The cap is met by Olumi's own option x capacity scaffolding, not the draft (census r3 B3-d2: 36 links).
+      if (draftedTeamPartOf(result) === null) return result;
+      const size = assessConstructionSize(result);
+      if (size.within || size.user_material_exceeds_limit) return result;
+      try {
+        const ordinary = admitOrdinaryCandidateModel(...args);
+        if (admittedReachesGoal(ordinary)) return ordinary;
+      } catch {
+        // No ordinary model: the size gate below decides, as before.
+      }
+      return result;
+    }
     try {
       const ordinary = admitOrdinaryCandidateModel(...args);
       eventFallbackRefusals.set(ordinary, refusal);
