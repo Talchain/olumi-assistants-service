@@ -72,4 +72,33 @@ describe('factor_value_edit — RC5 goal coherence on the mutated success path',
     expect(result.mutatedGraph).toMatchObject(result.graph);
     expect(result.handlerFacts.some((fact) => fact.fact_type === 'set_factor_value')).toBe(true);
   });
+
+  it("Paul's served shape through the real door: unconfirmed reading, two causal parents, and an edge-marked definitional addend", async () => {
+    const graph = persistedGraph() as { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+    const goal = graph.nodes.find((n) => n.id === 'mrr')!;
+    // A LISTED addend can't be used here: the mutation merge drops an identity that carries `addends` (reported as a row).
+    goal.nonlinear_identity = { operation: 'product', factor_ids: ['pro_plan_price', SUBSCRIBERS_ID], stated_in_brief: false };
+    graph.nodes.push(
+      { id: 'release', kind: 'factor', label: 'Next Pro feature release timing', observed_state: { value: 0.25, raw_value: 3, unit: 'months from now', source: 'cee_inference' } },
+      { id: 'backlash', kind: 'factor', label: 'MRR lost to pricing backlash', observed_state: { value: 0, raw_value: 0, unit: '£/month', source: 'cee_inference' } },
+      { id: 'other_mrr', kind: 'factor', label: 'Other MRR', observed_state: { value: 0.05, raw_value: 1000, unit: '£/month', source: 'brief_extraction' } },
+    );
+    graph.edges.push(
+      { from: 'release', to: 'mrr', strength: { mean: -0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' },
+      { from: 'backlash', to: 'mrr', strength: { mean: -0.8, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' },
+      { from: 'other_mrr', to: 'mrr', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'cee_hypothesis', definitional: true } },
+    );
+    const event: Extract<SystemEventTurnPayload['event'], { kind: 'factor_value_edit' }> = {
+      kind: 'factor_value_edit', target_id: SUBSCRIBERS_ID, field: 'value', value: 0.4, raw_value: 8000, unit: 'subscribers', intent: 'set',
+    };
+    const payload: SystemEventTurnPayload = {
+      kind: 'system_event', scenario_id: '11111111-1111-4111-8111-111111111111', turn_id: '77777777-7777-4777-8777-777777777778', stage: 'analyse', event,
+    };
+    const result = await applyFactorValueEdit({ payload, event, requestId: 'req-goal-coherence-paul', persistedGraph: graph, priorFacts: [] });
+    expect(result.kind).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    // £49 × 8,000 + £1,000 (the edge-marked definitional addend) = £393,000; the two causal parents are ignored.
+    expect(result.response.assistant_text).toContain("At £49 × 8,000 + £1,000, MRR today would be about £390,000, about 20 times your £20,000 target, so the goal would already be met, if MRR = Pro plan price × Pro paying subscribers (Olumi's reading).");
+  });
 });
+
