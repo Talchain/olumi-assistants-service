@@ -33,6 +33,9 @@ const COUNT_HEADS = new Set(['subscriber', 'customer', 'user', 'account', 'clien
   'lead', 'trial', 'signup', 'sign-up', 'visitor', 'ticket', 'store', 'site', 'pod', 'pitch', 'contract', 'project', 'booking',
   'patient', 'student', 'shipment', 'installation']);
 
+/** A per-period tail on a count unit: "/month", "per month", "a year", "/wk"… */
+const PER_PERIOD = /(\/\s*|\bper\s+|\ba\s+|\beach\s+)(day|week|wk|month|mo|quarter|year|yr|annum)\b/i;
+
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
 function isCountUnit(unit: string): boolean {
@@ -69,6 +72,9 @@ export function conventionClassOf(label: string, unit: string | null | undefined
   if (readCurrencyUnitWithQualifiers(unit).kind === 'currency' || isMoneyPerUnit(unit)) {
     return NON_NEGATIVE_MONEY.test(label) ? 'non_negative_level' : undefined;
   }
+  // ⛔ Science §(v)(2): a count PER PERIOD ("subscribers per month") is a FLOW. What it adds to a stock depends on how many
+  // periods it runs, so its links into a stock stay unsized until the accumulation identity exists: never re-framed here.
+  if (PER_PERIOD.test(unit)) return undefined;
   return isCountUnit(unit) ? 'non_negative_level' : undefined;
 }
 
@@ -149,4 +155,69 @@ export function olumiSignedSize(
   const sign = link.direction === 'positive' ? 1 : link.direction === 'negative' ? -1 : 0;
   if (sign === 0 || Math.sign(amount / per) === sign) return keep;
   return { amount: sign * Math.abs(amount), per: Math.abs(per), resolved: true };
+}
+
+export interface SizedLinkReach { readonly from: string; readonly to: string; /** |amount ÷ per| */ readonly r: number }
+export interface RescuedLink { readonly from: string; readonly to: string; readonly reframed: readonly string[]; readonly frames: { readonly from?: number; readonly to?: number } }
+
+/**
+ * ⭐ RESCUE-ONLY (DL "B"; Science accepted with "the rescue frame is the deterministic formula only, never a search"). Each
+ * end of a link is either TODAY's frame or the formula's `convention` frame; nothing in between is ever tried.
+ *  1. For each sized link that is not representable today (β = r × source frame ÷ target frame > 1), take the first of
+ *     [the source's formula frame, the target's, both] that makes it representable.
+ *  2. NO HARM: with every chosen frame in place, a frame is dropped wherever a link that was representable today stops
+ *     being so, or a link whose other end has no known frame would read a larger β (a wider source, a narrower target).
+ *     Repeated until nothing changes; it only ever removes, so it ends.
+ * Returns the factors re-framed and the links that are representable only because of them. Pure.
+ */
+export function rescueConventionFrames(
+  links: readonly SizedLinkReach[],
+  today: (label: string) => number | undefined,
+  convention: ReadonlyMap<string, number>,
+): { applied: string[]; rescued: RescuedLink[] } {
+  const ok = (x: number | undefined): x is number => finite(x) && x > 0;
+  const beta = (l: SizedLinkReach, frame: (x: string) => number | undefined): number | undefined => {
+    const a = frame(l.from); const b = frame(l.to);
+    return ok(a) && ok(b) ? (l.r * a) / b : undefined;
+  };
+  const applied = new Set<string>();
+  for (const l of links) {
+    const was = beta(l, today);
+    if (was === undefined || was <= 1) continue;
+    for (const ends of [[l.from], [l.to], [l.from, l.to]]) {
+      if (!ends.every((e) => convention.has(e))) continue;
+      const b = beta(l, (x) => (ends.includes(x) ? convention.get(x) : today(x)));
+      if (b !== undefined && b <= 1) { ends.forEach((e) => applied.add(e)); break; }
+    }
+  }
+  const final = (x: string): number | undefined => (applied.has(x) ? convention.get(x) : today(x));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const l of links) {
+      const touched = [l.from, l.to].filter((e) => applied.has(e));
+      if (touched.length === 0) continue;
+      const was = beta(l, today); const now = beta(l, final);
+      let harmed: boolean;
+      if (was !== undefined) harmed = was <= 1 && (now === undefined || now > 1);
+      else {
+        // The other end has no known frame: the re-framed end must not raise β (a source may only narrow, a target only widen).
+        harmed = touched.some((e) => {
+          const before = today(e); const after = convention.get(e);
+          if (!ok(before) || !ok(after)) return true;
+          return e === l.from ? after > before : after < before;
+        });
+      }
+      if (harmed) { touched.forEach((e) => applied.delete(e)); changed = true; }
+    }
+  }
+  const rescued: RescuedLink[] = [];
+  for (const l of links) {
+    const was = beta(l, today); const now = beta(l, final);
+    if (was === undefined || was <= 1 || now === undefined || now > 1) continue;
+    const reframed = [l.from, l.to].filter((e) => applied.has(e));
+    if (reframed.length === 0) continue;
+    rescued.push({ from: l.from, to: l.to, reframed, frames: {
+      ...(applied.has(l.from) ? { from: convention.get(l.from)! } : {}), ...(applied.has(l.to) ? { to: convention.get(l.to)! } : {}) } });
+  }
+  return { applied: [...applied], rescued };
 }

@@ -57,7 +57,7 @@ import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, 
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, olumiSignedSize, type ConventionClass } from './convention-frame.js';
+import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, olumiSignedSize, rescueConventionFrames } from './convention-frame.js';
 import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
@@ -3226,11 +3226,15 @@ function admitOnce(
     for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
   }
   /**
-   * ⭐ OLUMI'S CONVENTION FRAME (Science §(s) + §(u); `convention-frame.ts`). A ceiling the USER wrote wins; otherwise a
-   * bounded rate or a non-negative level the model knows today is framed by the convention instead of the drafter's own
-   * guess, widened over every option setting and user constraint on it, and said once (below, with `defaultedFrames`).
+   * ⭐ OLUMI'S CONVENTION FRAME, RESCUE-ONLY (Science §(s) + §(u) + §(v); DL "B", Science accepted 8 Oct; `convention-
+   * frame.ts`). A bounded rate or a non-negative level gets the convention's DETERMINISTIC frame instead of the drafter's
+   * own guess ONLY where that turns a sized link from not representable (|β| > 1 on the frames it has today) into
+   * representable — never a search for a frame that passes: each end is either today's frame or the formula's. Nothing
+   * else moves, so every draft without such a link is byte-identical to before. A ceiling the USER wrote wins; a rate the
+   * user constrained keeps today's frame. Every rescued link is logged by id, and each re-framed factor is said once.
    */
-  const conventionFrames: { label: string; unit: string; frame: number; drafted: number | null; level: number; cls: ConventionClass; widened_by?: number }[] = [];
+  type Candidate = { label: string; unit: string; frame: number; drafted: number | null; widened_by?: number };
+  const candidates = new Map<string, Candidate>();
   for (const f of model.factors) {
     // Science §(v)(1): an Olumi-ESTIMATED level is framed by the same convention (it stays labelled as Olumi's), and the
     // frame also covers that level's own spread.
@@ -3251,36 +3255,28 @@ function admitOnce(
     ];
     const c = conventionFrameFor({ label: f.label, unit: f.unit, level, settings,
       ...(f.baseline_known ? {} : { spread_upper: estimatedSpreadUpper(level) }) });
-    if (c === undefined) continue;
-    capByLabel.set(f.label, c.frame);
-    conventionFrames.push({ label: f.label, unit: f.unit as string, frame: c.frame, drafted: f.plausible_max ?? null, level, cls: c.cls,
+    if (c === undefined || c.frame === capByLabel.get(f.label)) continue;
+    candidates.set(f.label, { label: f.label, unit: f.unit as string, frame: c.frame, drafted: f.plausible_max ?? null,
       ...(c.widened_by !== undefined ? { widened_by: c.widened_by } : {}) });
   }
-  /**
-   * ⭐ SCIENCE §(s)(b) "NEVER BINDS" FOR A PROJECTION (#2842 review P1-1/P1-9). A sized link INTO a convention-framed
-   * factor projects across the SOURCE's whole frame (the span β is read on): |amount ÷ per| × source frame. Where that
-   * reach exceeds the ceiling (|β| > 1) the ceiling widens to (level + reach) ÷ 0.8, so Olumi's convention never turns a size that
-   * fitted the drafter's range into `not_representable` (the hiring draft's £100,000 per engineer over 0–10 engineers
-   * against a 0–£800,000 salary frame). One pass, after every convention frame is set, so a source's own frame is final.
-   */
-  for (const cf of conventionFrames) {
-    let reach = 0;
-    for (const l of model.links) {
-      if (l.to !== cf.label || typeof l.effect_amount !== 'number' || typeof l.effect_per_source_change !== 'number'
-        || !Number.isFinite(l.effect_amount) || !Number.isFinite(l.effect_per_source_change) || l.effect_per_source_change === 0) continue;
-      const sourceFrame = capByLabel.get(l.from) ?? model.factors.find((x) => x.label === l.from)?.plausible_max;
-      if (typeof sourceFrame !== 'number' || !Number.isFinite(sourceFrame) || sourceFrame <= 0) continue;
-      reach = Math.max(reach, Math.abs(l.effect_amount / l.effect_per_source_change) * sourceFrame);
-    }
-    // Only where the convention itself would make the size unrepresentable (reach above the ceiling, |β| > 1): Science's
-    // own known answer (0.15 pp per £1 over £0–98 = 14.7 pp into a 0–15 pp churn, β 0.98) stays exactly as ruled.
-    if (!(reach > cf.frame)) continue;
-    const projected = cf.level + reach;
-    const widened = cf.cls === 'bounded_rate' ? Math.min(100, projected / 0.8) : projected / 0.8;
-    if (!(widened > cf.frame)) continue;
-    cf.frame = Number(widened.toPrecision(12));
-    cf.widened_by = Number(projected.toPrecision(12));
-    capByLabel.set(cf.label, cf.frame);
+  const sizedLinks = model.links.flatMap((l) => (typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
+    && Number.isFinite(l.effect_amount) && Number.isFinite(l.effect_per_source_change) && l.effect_amount !== 0 && l.effect_per_source_change !== 0
+    && (l.direction === 'positive' || l.direction === 'negative')
+    ? [{ from: l.from, to: l.to, r: Math.abs(l.effect_amount / l.effect_per_source_change) }] : []));
+  // Today's frame of a link end: a factor's drafted range, or an outcome's or risk's (the goal's is not known here, so a
+  // link into it can be rescued only by narrowing its source).
+  const rangeOf = (label: string): number | undefined => {
+    const c = capByLabel.get(label);
+    if (c !== undefined) return c;
+    const x = [...model.outcomes, ...model.risks].find((n) => n.label === label)?.plausible_max;
+    return typeof x === 'number' && Number.isFinite(x) && x > 1 ? x : undefined;
+  };
+  const rescue = rescueConventionFrames(sizedLinks, rangeOf, new Map([...candidates].map(([k, v]) => [k, v.frame])));
+  const conventionFrames: Candidate[] = [];
+  for (const label of rescue.applied) {
+    const cf = candidates.get(label)!;
+    capByLabel.set(label, cf.frame);
+    conventionFrames.push(cf);
   }
   /**
    * ⛔ A LEVEL ABOVE THE STATED RANGE WIDENS THE RANGE; IT IS NEVER KEPT RAW BESIDE NORMALISED
@@ -3777,6 +3773,16 @@ function admitOnce(
     } as RepairEntry);
   }
 
+  for (const l of rescue.rescued) {
+    loss.push({
+      field_path: `edges[${ids.get(l.from) ?? l.from}::${ids.get(l.to) ?? l.to}].convention_frame_rescue`,
+      before: null,
+      after: { frames: l.frames },
+      reason: 'Olumi\'s drafted size for this link did not fit the ranges its two ends had; read on Olumi\'s standard '
+        + 'range for ' + l.reframed.map((x) => `"${x}"`).join(' and ') + ' it does, so it is kept as Olumi\'s estimate.',
+      severity: 'info',
+    } as RepairEntry);
+  }
   for (const c of conventionFrames) {
     loss.push({
       field_path: `nodes[${ids.get(c.label) ?? c.label}].observed_state.cap`,
