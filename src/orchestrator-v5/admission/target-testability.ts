@@ -94,6 +94,23 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/**
+ * GOAL-REACH 3b, Science §(i) 1 (8 Oct): once the user has CONFIRMED the goal's product identity (the identity card's
+ * Yes: `stated_in_brief: true`) and both factors carry today's level, the goal's level today is DERIVED from them — PLoT
+ * measures from it (GOAL_LEVEL_FROM_IDENTITY_INPUTS, labelled by whose figures they are) — so it is not missing (P1).
+ * An unconfirmed (Olumi-read) identity never counts: confirming it is the user's step (build 1).
+ */
+function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolean {
+  const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
+  if (identity?.operation !== 'product' || identity.stated_in_brief !== true || !Array.isArray(identity.factor_ids)
+    || identity.factor_ids.length !== 2) return false;
+  return identity.factor_ids.every((id) => {
+    const n = nodes.find((x) => isRec(x) && x.id === id) as Rec | undefined;
+    const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
+    return os !== undefined && finite(os.raw_value);
+  });
+}
+
 /** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
 const ownLimitRow = goalOwnLimitRow;
 
@@ -225,7 +242,7 @@ export function targetTestabilityOf(
   const today = isRec(goal.observed_state) ? goal.observed_state : undefined;
   // P1 — today's level where the frame requires it (`limitNeedsTodaysLevel`), as science reads it
   // (`observed_state.baseline`, the schema-v3 goal limb's condition). Never derived from the target.
-  const hasToday = today !== undefined && finite(today.baseline);
+  const hasToday = (today !== undefined && finite(today.baseline)) || confirmedProductHasLevels(graph.nodes, goal);
   if (limitNeedsTodaysLevel(effectiveFrame) && !hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
   // P2 — a level target normalises strictly inside (0, 1) (ISL clips at the edges). Change frames normalise elsewhere.
   if (levelFrame && finite(goal.goal_threshold) && !(goal.goal_threshold > 0 && goal.goal_threshold < 1)) {

@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { isOlumiSideThreshold, thresholdReasonOf, THRESHOLD_REASONS } from '../../compose/claim-safety-cage.js';
 import { goalNotCheckedLine, THRESHOLD_REST_STANDS } from '../break-even.js';
+import { goalLevelAskOf } from '../current-level-answer.js';
 
 type Rec = Record<string, any>;
 const DIR = new URL('./fixtures/plot-threshold-444/', import.meta.url);
@@ -104,5 +105,28 @@ describe('GOAL-REACH 3b — Science §(g) words, one sentence per reason', () =>
       'goal_node_missing', 'goal_values_outside_normalised_domain', 'non_finite_conversion_input', 'unknown'].sort());
     expect(side('root_goal', 'root_intercept')).toBe(true);
     expect(side('root_goal', 'unknown')).toBe(true);
+  });
+
+  it('Codex r1 P2-6: a goal whose target is not a stated amount stays null with a carried reason, as staging does', () => {
+    const normalisedOnly = { id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold: 0.8 };
+    expect(goalNotCheckedLine(graphOf(normalisedOnly), result('missing_goal_baseline'))).toBeNull();
+  });
+});
+
+describe('GOAL-REACH 3b — the current-level ask is only offered when its answer can force the card', () => {
+  it('RED: a stated target amount + missing_goal_baseline → the ask, in the goal\'s unit', () => {
+    expect(goalLevelAskOf(graphOf(), result('missing_goal_baseline'))?.question).toBe(
+      'To show each option\'s chance of reaching your MRR target, I first need today\u2019s level of \u2018MRR\u2019. What is it, in £/month?');
+  });
+  it('Codex r1 P1-4: no anchored target (only a normalised one) → no ask (the answer path could not read its unit)', () => {
+    expect(goalLevelAskOf(graphOf({ id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold: 0.8, goal_threshold_unit: '£/month' }), result('missing_goal_baseline'))).toBeNull();
+  });
+  it('Codex r1 P2-5: a question over the pending ask\'s 400 characters → no ask; CONTROL: a long-but-fitting label still asks', () => {
+    expect(goalLevelAskOf(graphOf(goal({ label: 'M'.repeat(166) })), result('missing_goal_baseline'))).toBeNull();
+    expect(goalLevelAskOf(graphOf(goal({ label: 'M'.repeat(120) })), result('missing_goal_baseline'))?.question.length).toBeLessThanOrEqual(400);
+  });
+  it('an Olumi-side reason, or a goal that already has a stated level, asks nothing', () => {
+    expect(goalLevelAskOf(graphOf(), result('goal_values_outside_normalised_domain'))).toBeNull();
+    expect(goalLevelAskOf(graphOf(goal({ observed_state: { raw_value: 14700, unit: '£/month' } })), result('missing_goal_baseline'))).toBeNull();
   });
 });

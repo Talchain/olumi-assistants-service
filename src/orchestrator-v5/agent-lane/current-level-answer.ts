@@ -6,6 +6,7 @@ import { readStatedGoalLevel } from './goal-current-level.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { thresholdReasonOf } from '../compose/claim-safety-cage.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
+import { targetTestabilityOf } from '../admission/target-testability.js';
 
 export const CURRENT_LEVEL_TOOL = 'propose_goal_current_level';
 type Ask = PendingAction & { action: Extract<PendingAction['action'], { kind: 'elicit_goal_current_level' }> };
@@ -32,14 +33,23 @@ export function goalLevelAskOf(graph: unknown, analysisResult: unknown): { goal:
   const enrichment = rec(result?.enrichment) ?? result;
   const carried = thresholdReasonOf(enrichment);
   const refusedForLevel = carried !== null && (carried.reason === 'missing_goal_baseline' || (carried.reason === 'root_goal' && carried.root_case === 'root_value_source'));
-  const untestable = records(enrichment?.inference_warnings).some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  // Only when the missing piece IS today's level (P1, the one authority): a level derived from a confirmed identity's
+  // levelled inputs (Science §(i) 1), or a withhold for link sizes alone (P5), asks nothing.
+  const verdict = targetTestabilityOf(graph);
+  const untestable = records(enrichment?.inference_warnings).some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)
+    && verdict.kind === 'not_testable' && verdict.failures.some((f) => f.precondition === 'P1');
   if (!refusedForLevel && !untestable) return null;
   const goals = records(rec(graph)?.nodes).filter((n) => n.kind === 'goal');
   const goal = goals.length === 1 ? goals[0]! : undefined;
   if (goal === undefined || typeof goal.label !== 'string' || goal.label.trim() === '' || typeof rec(goal.observed_state)?.raw_value === 'number') return null;
+  // Codex r1 P1-4 (#2816): the answer path reads the unit from the goal's ANCHORED target (goalInState), so without one
+  // the ask's unit and the answer's would disagree and the answer could never force the card: no ask, no offer.
+  if (typeof goal.goal_threshold_raw !== 'number' || !Number.isFinite(goal.goal_threshold_raw)) return null;
   const held = rec(goal.observed_state)?.unit ?? goal.goal_threshold_unit;
   const unit = isChangeOwnPercent({ frame: goal.goal_threshold_frame, unit: held, metric: goal.label, value: goal.goal_threshold_raw }) || typeof held !== 'string' ? undefined : held;
   const question = `To show each option's chance of reaching your ${goal.label} target, I first need today\u2019s level of \u2018${goal.label}\u2019. What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
+  // Codex r1 P2-5: the pending ask holds at most 400 characters; a longer question could be offered but never persisted.
+  if (question.length > 400) return null;
   return { goal, unit, question };
 }
 

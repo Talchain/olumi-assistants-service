@@ -308,6 +308,13 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
       expect(forced.mock.results.map(r => r.value)).toContain(CURRENT_LEVEL_TOOL);
     } finally { forced.mockRestore(); }
   });
+  it('Codex r1 P1-3: while a held change waits (the identity card), a set_current_level press persists NO ask', async () => {
+    setThresholdRefused('missing_goal_baseline');
+    const card = await press('act:confirm_reading', 'Check how Olumi works out the goal.');
+    expect(card.suggested_actions.some((a: { id: string }) => a.id.startsWith('agent-approve-proposal:')), 'a live held card first').toBe(true);
+    await press('act:set_current_level', 'Tell Olumi where the goal stands today.');
+    expect(elicitAsks()).toEqual([]); expect(modelCalls).toBe(0);
+  });
   it('CONTROL: an Olumi-side reason (outside the normalised domain) offers no set_current_level and persists no ask', async () => {
     setThresholdRefused('goal_values_outside_normalised_domain');
     expect(offersOf((await reload()).action_bar).filter(o => o.action_id === 'set_current_level')).toEqual([]);

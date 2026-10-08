@@ -26,6 +26,7 @@ import { actionFactsOf, type ActionRead } from '../state.js';
 import { actionBarOf } from '../rank.js';
 import { withShareByDateChanceGate } from '../../../goal-target/goal-chance-range.js';
 import { readFileSync } from 'node:fs';
+import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { isOlumiSideThreshold, thresholdReasonOf, THRESHOLD_REASONS } from '../../../compose/claim-safety-cage.js';
 
 type Rec = Record<string, any>;
@@ -58,6 +59,9 @@ export const KNOWN_GAPS = new Set<string>([
   // GOAL-REACH 3b (Science §(g)): user-side threshold reasons whose control is not a bar action yet.
   // "Show what ‘{option}’ changes": PLoT's detail names no option, and no setting-removal writer exists (UNVERIFIED).
   'THRESHOLD:goal_pinned_by_intervention',
+  // §(g) "a target stated as an amount": every goal door refuses a CHANGE-framed target (`goal_is_a_change`:
+  // propose_goal_target, goal_target_edit, add-constraint), so Set target would be INERT here (Codex r1, #2816).
+  'THRESHOLD:change_rel_base_zero',
 ]);
 
 const paul = (): Graph => structuredClone(paulStored) as Graph;
@@ -239,7 +243,7 @@ const THRESHOLD_INVENTORY: Readonly<Record<string, readonly string[]>> = {
   epsilon_breaks_status_quo_reference: [],
   auto_scaled_noise_breaks_status_quo_reference: [],
   change_rel_raw_range_missing: [],
-  change_rel_base_zero: ['set_goal'],
+  change_rel_base_zero: [],
   absent_reason: [],
 };
 const offerIds = (f: Fixture): string[] => { const b = actionBarOf(actionFactsOf(readOf(f))); return [...b.priority, ...b.standard, ...b.more].filter(o => o.enabled).map(o => o.action_id as string).sort(); };
@@ -264,9 +268,9 @@ describe('GOAL-REACH 3b — GOAL_THRESHOLD_NOT_CONVERTIBLE reason → recovery c
     }
   });
 
-  it('change_rel_base_zero offers the target as an amount; CONTROL: the same goal without the refusal does not', () => {
-    expect(offerIds(thresholdFixture('change_rel_base_zero'))).toContain('set_goal');
-    expect(offerIds(thresholdFixture('change_rel_base_zero', false))).not.toContain('set_goal');
+  it('change_rel_base_zero offers NO inert Set target (every goal door refuses a change target); the gap is named', () => {
+    expect(offerIds(thresholdFixture('change_rel_base_zero')).filter(id => id === 'set_goal')).toEqual(offerIds(thresholdFixture('change_rel_base_zero', false)).filter(id => id === 'set_goal'));
+    expect(KNOWN_GAPS.has('THRESHOLD:change_rel_base_zero')).toBe(true);
   });
 
   it('the Olumi-side defect is logged on the Run path by the one predicate (wiring row)', () => {
@@ -282,11 +286,23 @@ describe('GOAL-REACH 3b — Paul\'s served post-Yes Run (P44 draw 2, 53e2ddbd)',
     expect(served.analysis_result.enrichment.inference_warnings.map((w: Rec) => w.code)).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
     expect(served.served_action_ids).not.toContain('set_current_level');
   });
-  it('RED: the same served state now carries one enabled set_current_level asking for today\'s MRR', () => {
-    const bar = actionBarOf(actionFactsOf({ scenarioId: served.scenario_id, graph: served.graph, graphHash: served.graph_hash,
-      analysisState: served.analysis_state, analysisResult: served.analysis_result, analysisReady: served.analysis_ready }));
-    const offers = [...bar.priority, ...bar.standard, ...bar.more].filter(o => o.action_id === 'set_current_level');
-    expect(offers).toHaveLength(1);
-    expect(offers[0]!.enabled).toBe(true);
+  const preconditionsOf = (graph: Rec): string[] => { const v = targetTestabilityOf(graph); return v.kind === 'not_testable' ? v.failures.map(f => f.precondition) : []; };
+  const barOf = (graph: Rec) => { const bar = actionBarOf(actionFactsOf({ scenarioId: served.scenario_id, graph, graphHash: served.graph_hash,
+    analysisState: served.analysis_state, analysisResult: served.analysis_result, analysisReady: served.analysis_ready }));
+    return [...bar.priority, ...bar.standard, ...bar.more].filter(o => o.enabled && o.action_id === 'set_current_level'); };
+  it('Science §(i) 1 RED: after the Yes, today\'s MRR is DERIVED (£49 × 250): no P1, so no current-level ask; P5 (3 unsized links) still withholds', () => {
+    expect(targetTestabilityOf(served.graph).kind).toBe('not_testable');
+    const pre = preconditionsOf(served.graph);
+    expect(pre).not.toContain('P1');
+    expect(pre).toContain('P5');
+    expect(barOf(served.graph)).toEqual([]);
+  });
+  it('Science §(i) 1 MUTANT pair: the same served graph with the identity UNCONFIRMED, or a factor with no level → P1 stays and the ask is offered', () => {
+    const unconfirmed = structuredClone(served.graph); goalOf(unconfirmed).nonlinear_identity.stated_in_brief = false;
+    expect(preconditionsOf(unconfirmed)).toContain('P1');
+    expect(barOf(unconfirmed)).toHaveLength(1);
+    const levelless = structuredClone(served.graph); levelless.nodes.find((n: Rec) => n.id === 'paying_pro_subscribers').observed_state = null;
+    expect(preconditionsOf(levelless)).toContain('P1');
+    expect(barOf(levelless)).toHaveLength(1);
   });
 });

@@ -35,7 +35,6 @@ import { identityConfirmBaseIsWritable } from '../../system-events/editable-grap
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { scopeIssueBlocks } from '../goal-scope.js';
-import { thresholdReasonOf, type ThresholdReason } from '../../compose/claim-safety-cage.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
 
 type Rec = Record<string, unknown>;
@@ -80,8 +79,6 @@ export interface ActionFacts {
   readonly goalLabel: string;
   /** The same product proposer and dry-run door as propose_identity; null means its Yes cannot be offered. */
   readonly identityReading: { readonly goalLabel: string; readonly a: string; readonly b: string } | null;
-  /** GOAL-REACH 3b: the carried reason the current Run's goal chance was refused for (PLoT #444), or null. */
-  readonly thresholdReason: ThresholdReason | null;
   /** GOAL-REACH 3b: the current-level question when the Run was refused for want of it (`goalLevelAskOf`), or null. */
   readonly currentLevelQuestion: string | null;
   readonly goalKind: GoalKind | null;
@@ -162,7 +159,6 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     approvalWaiting: approvalWaitingOf(read.pending ?? [], read.graphHash),
     runStale: rec(rec(read.analysisState)?.run_state)?.kind === 'complete_stale',
     runAdmissible: typeof ready?.may_run === 'boolean' ? ready.may_run : ready?.status === 'ready',
-    thresholdReason: runKey !== null ? thresholdReasonOf(rec(read.analysisResult)?.enrichment) : null,
     currentLevelQuestion: runKey !== null ? goalLevelAskOf(read.graph, read.analysisResult)?.question ?? null : null,
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', identityReading: null, goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,

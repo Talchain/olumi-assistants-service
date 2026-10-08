@@ -2979,6 +2979,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // GOAL-REACH 3b (Science §(g) carve-out): a goal-chance refusal with no user action is an Olumi defect, logged by its
     // closed reason (no labels, no figures) so it can be counted and fixed; it is never offered a control.
     const thresholdReason = thresholdReasonOf(response);
+    if (thresholdReason !== null) {
+      log.info(
+        { event: 'run_analysis.goal_threshold_reason', request_id: invocation.requestId, scenario_id: args.scenario_id,
+          reason: thresholdReason.reason, root_case: thresholdReason.root_case },
+        'PLoT refused the goal chance; its carried reason (closed code), counted per Run',
+      );
+    }
     if (thresholdReason !== null && isOlumiSideThreshold(thresholdReason)) {
       log.warn(
         { event: 'run_analysis.goal_threshold_olumi_side', request_id: invocation.requestId, scenario_id: args.scenario_id,

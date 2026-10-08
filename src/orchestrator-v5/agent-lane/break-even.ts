@@ -256,13 +256,13 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   ];
   if (!codes.includes('GOAL_THRESHOLD_NOT_CONVERTIBLE')) return null;
   const goal = (((graph as { nodes?: unknown } | null)?.nodes ?? []) as Node[]).find((n) => n.kind === 'goal');
-  // GOAL-REACH 3b: PLoT #444 carries ISL's reason; with it, the cause is SAID, per Science §(g). Without it (a pre-#444
-  // payload), the lines below are unchanged.
-  const carried = thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment);
-  if (carried !== null) return goal === undefined ? null : thresholdReasonSentence(carried, goal, graph);
   const raw = goal?.goal_threshold_raw;
   const unit = typeof goal?.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
   if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
+  // GOAL-REACH 3b: PLoT #444 carries ISL's reason; with it, the cause is SAID, per Science §(g). Without it (a pre-#444
+  // payload), the lines below are unchanged.
+  const carried = thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment);
+  if (carried !== null) return thresholdReasonSentence(carried, goal, graph);
   const label = goal.label ?? goal.id;
   // R&C B1 (#2071): ISL mints this code for seven reasons, and "no current figure" is only one of them. The cause is said
   // ONLY when the graph itself shows it — the goal carries no current figure at all; otherwise the target is named with

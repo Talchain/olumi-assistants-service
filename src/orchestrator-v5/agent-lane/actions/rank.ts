@@ -74,7 +74,6 @@ export const WHY_NOW = {
   frame_brief: 'See what your brief has and what it is missing.',
   set_deadline: 'Your goal has no date yet, so no chance of meeting it can be worked out.',
   set_goal: 'Your goal has no target yet, so no chance of meeting it can be worked out.',
-  set_goal_amount: 'A percentage of zero is still zero: a target stated as an amount would work.',
   set_current_level: 'Olumi needs where your goal stands today to show each option\'s chance.',
   more_risks_W6: 'Your model has at most one risk.',
   more_risks: 'Find risks you haven’t considered yet.',
@@ -170,9 +169,6 @@ function drafts(f: ActionFacts): Draft[] {
     if (f.currentLevelQuestion !== null && !f.approvalWaiting) {
       // GOAL-REACH 3b, Science §(g): missing_goal_baseline (or a levelless root goal) → the user's own current level.
       out.push(draft(f, 'set_current_level', { enabled: true, why_now: WHY_NOW.set_current_level }, 1));
-    } else if (f.thresholdReason?.reason === 'change_rel_base_zero' && !f.approvalWaiting && standing !== 'set_goal') {
-      // GOAL-REACH 3b, Science §(g): a % change from a zero level can't be tested; the control is the target as an amount.
-      out.push(draft(f, 'set_goal', { enabled: true, why_now: WHY_NOW.set_goal_amount }, 1));
     }
     if (f.risksAvailability !== 'omit') {
       const risks = rc('RC-WIDEN', r => r.target === 'risks');
