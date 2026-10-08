@@ -104,6 +104,8 @@ type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_tra
 let script: ((body: Record<string, unknown>) => unknown)[] = [];
 /** The construction response goes through the real builder, without spending a scripted conversation reply. */
 let constructionCandidate: Record<string, unknown> | undefined;
+/** #2854 draft-time widening: when set, the served route's widening request is answered from the graph it was sent. */
+let wideningAnswer: ((graph: { nodes: { id: string; kind: string; label: string }[] }) => unknown) | undefined;
 let openAiCalls = 0;
 const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(args) }] });
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
@@ -155,6 +157,11 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
       openAiCalls += 1;
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      // Both widening passes open with widen-draft's DRAFT_WIDENING_PREAMBLE (not imported: it reorders this file's mocks).
+      if (wideningAnswer !== undefined && String(body['instructions'] ?? '').startsWith("This is Olumi's own check of a first draft;")) {
+        const sent = JSON.parse(String(body['input'])) as { graph: { nodes: { id: string; kind: string; label: string }[] } };
+        return new Response(JSON.stringify(say(JSON.stringify(wideningAnswer(sent.graph)))), { status: 200 });
+      }
       if (constructionCandidate !== undefined
         && (body['text'] as { format?: { type?: string } } | undefined)?.format?.type === 'json_schema') {
         return new Response(JSON.stringify(say(JSON.stringify(constructionCandidate))), { status: 200 });
@@ -167,7 +174,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.useRealTimers(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
+  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; wideningAnswer = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     // Issuance allows 2 seconds of clock skew; separate public turns so the preceding answer cannot be the issuer.
@@ -190,7 +197,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const THIN_BUTTON = 'Suggest up to 3 more risks, including one against ‘Raise to £59’';
   const CONSTRUCTION_BRIEF = 'Raise Pro £49 → £59 to reach £20,000 Total MRR within 12 months. One risk is customer churn.';
   /** A real constructor candidate: one user-proposed option, a declared baseline, and unquantified risks. */
-  const thinConstruction = async (riskCount: number, prepare?: () => void, brief = CONSTRUCTION_BRIEF) => {
+  const thinConstruction = async (riskCount: number, prepare?: () => void, brief = CONSTRUCTION_BRIEF, expectRisks = riskCount) => {
     constructionCandidate = {
       goal: { kind: null, deliverable: null, metric: 'Total MRR', operator: '>=', target_stated: true, value: 20000,
         unit: 'GBP', horizon_months: 12, provenance: 'explicit', frame: 'level', baseline_known: false,
@@ -211,7 +218,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     prepare?.();
     const t = await turn({ message: brief });
     expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true, mutated: true }));
-    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(riskCount);
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(expectRisks);
     expect(graphNow().nodes.find((node) => node.label === 'Raise to £59')).toMatchObject({ kind: 'option', provenance: 'from_brief' });
     return t;
   };
@@ -563,6 +570,22 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const t = await thinConstruction(3);
     expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
   }, 120_000);
+
+  it('#2854 served-500 row: a construction turn whose draft is WIDENED (an Olumi risk with draft_widening and no relies_on) completes 200 through the real route and names it', async () => {
+    const t = await thinConstruction(1, () => {
+      wideningAnswer = (graph) => {
+        const id = (kind: string, label: string) => graph.nodes.find((n) => n.kind === kind && n.label === label)!.id;
+        return { risk_suggestions: [{ label: 'Feature release slips', category: 'timing', mechanism: 'relies_on',
+          hits_id: id('option', 'Raise to £59'), through_id: id('factor', 'Pro plan price'), through_direction: 'positive',
+          affects_id: graph.nodes.find((n) => n.kind === 'goal')!.id, direction: 'negative',
+          relies_on: 'shipping the feature release with the new price', watch_for: 'the release date moves later' }] };
+      };
+    }, undefined, 2);
+    const widened = graphNow().nodes.filter((n) => (n as { draft_widening?: { provenance?: string } }).draft_widening?.provenance === 'ai_suggested_widen');
+    expect(widened.map((n) => n.label), 'control: the route really widened this draft').toEqual(['Feature release slips']);
+    expect((widened[0] as { relies_on?: unknown }).relies_on).toBeUndefined();
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
+  });
 
   it('P05b-8c CONTRAST: a non-construction turn on the one-risk graph has no relabelled risks press', async () => {
     await thinConstruction(1);
