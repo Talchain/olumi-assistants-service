@@ -8,7 +8,10 @@ import { readDriverInfluenceScore } from '../../orchestrator/context/driver-infl
 // Structured construction uses unregistered Responses-only budget ids (gpt-5.6-terra), not an extraction
 // assignment resolver. Use the registered OpenAI extraction model without changing the legacy env default.
 export const AGENT_LANE_ENRICH_MODEL = 'gpt-4.1-2025-04-14';
-export const AGENT_FACTOR_REVIEW_TIMEOUT_MS = 5_000;
+// 8 Oct (Render 11:00–13:12Z): 19 completed reviews took 2.1–4.6 s (latency tracks output tokens, 266–571); 7 of 26
+// (27%) stopped at the old 5 s cap, dropping every enrichment for that Run. 8 s adds ≤3 s only on those Runs, whose turns
+// already spend 26–81 s in the Run tool. A capped call logs `cee.extraction.cap_reached` at info.
+export const AGENT_FACTOR_REVIEW_TIMEOUT_MS = 8_000;
 
 /** Rank through the shared authoritative influence-score rule; elasticity never ranks drivers. */
 export function factorReviewSensitivity(value: unknown): FactorSensitivityInputT[] {
