@@ -1020,7 +1020,7 @@ export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went
 /** Request 1 ran, but the readback cannot confirm a current result: Olumi's own line, live and on replay (#2470). */
 export const RUN_RESULT_UNVERIFIED_TEXT = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
 
-export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
+export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }, modelChangedThisTurn = false): string {
   if (ran.ran === true) {
     return 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
   }
@@ -1032,7 +1032,18 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
     ? ran.refusal
     : typeof ran.status === 'string' && ran.status !== '' && ran.status !== 'unknown' ? ran.status : '';
   const why = code !== '' ? ` (${code.replace(/_/g, ' ')})` : '';
-  return `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+  return modelChangedThisTurn
+    ? `The analysis didn’t run this time${why}. Your model was updated this turn — ask me what changed and what the analysis still needs.`
+    : `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+}
+
+/**
+ * A withheld call consumed no proposal and moved nothing: it is not an authorisation, and counting one (it has no proposal
+ * id) would strand the proposal it named without its chip. ONE filter for the chip and for the fallback words that describe
+ * it (Codex r1 on #2820: unfiltered, the fallback said "could not settle" beside the chip it offered).
+ */
+function callsThatCanConsumeProposals<C extends { readonly refusal?: string }>(calls: readonly C[]): C[] {
+  return calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
 }
 
 /** The turn fields the hop-limit and cut-short answers read (`AgentTurnResult`'s own shape). */
@@ -1050,14 +1061,13 @@ type FallbackTurn = {
  * held-change sentence. A model change is still said.
  */
 function heldCardText(result: FallbackTurn): string | null {
-  const offered = proposalsAwaitingApproval(result.tool_calls.map((c) => ({ name: c.name, ok: c.ok === true, mutated: c.mutated === true,
+  const offered = proposalsAwaitingApproval(callsThatCanConsumeProposals(result.tool_calls).map((c) => ({ name: c.name, ok: c.ok === true, mutated: c.mutated === true,
     ...(c.proposal_id !== undefined ? { proposal_id: c.proposal_id } : {}), ...(c.refusal !== undefined ? { refusal: c.refusal } : {}) })));
   if (offered.size !== 1) return null;
   const [proposalId, tool] = [...offered.entries()][0]!;
   const held = result.tool_results.find((r) => r !== null && typeof r === 'object' && (r as { proposal_id?: unknown }).proposal_id === proposalId);
   if (held === undefined) return null;
-  const said = composeHeldResultReply(tool, held) ?? heldChangeSentence((held as { public_label?: unknown }).public_label);
-  return result.mutated ? `Your model was updated. ${said}` : said;
+  return composeHeldResultReply(tool, held) ?? heldChangeSentence((held as { public_label?: unknown }).public_label);
 }
 
 /**
@@ -1068,11 +1078,14 @@ function heldCardText(result: FallbackTurn): string | null {
 export function unfinishedAnswerText(result: FallbackTurn): string {
   for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
     if (result.tool_calls[i]!.name === 'run_analysis') {
-      return interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>);
+      // Codex r1 on #2820: a turn that saved something before its run never says "Nothing in the model was changed".
+      const ran = interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>, result.mutated);
+      const heldAfterRun = heldCardText(result);
+      return heldAfterRun === null ? ran : `${ran}\n\n${heldAfterRun}`;
     }
   }
   const held = heldCardText(result);
-  if (held !== null) return held;
+  if (held !== null) return result.mutated ? `Your model was updated. ${held}` : held;
   return result.mutated
     ? 'Your model was updated, but my reply ran too long and was cut short, so I have not shown it. Ask me what changed.'
     : 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.';
@@ -1086,7 +1099,7 @@ export function unfinishedAnswerText(result: FallbackTurn): string {
  */
 export function hopLimitText(result: FallbackTurn): string {
   const held = heldCardText(result);
-  if (held !== null) return held;
+  if (held !== null) return result.mutated ? `Your model was updated. ${held}` : held;
   if (result.mutated) return 'Your model was updated, but I could not finish the rest within this turn. Ask me what changed.';
   const last = [...result.tool_results].reverse().find((r): r is Record<string, unknown> =>
     r !== null && typeof r === 'object' && (r as Record<string, unknown>).ok === false);
@@ -3867,9 +3880,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
       return chip !== undefined ? [chip, AMEND_CHIP] : [];
     })();
-    // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
-    // counting one (it has no proposal id) would strand the proposal it named without its chip.
-    const approvalCalls = result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
+    const approvalCalls = callsThatCanConsumeProposals(result.tool_calls);
     // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
     const approvals = approvalChipsFor(
       approvalCalls,

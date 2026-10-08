@@ -51,9 +51,32 @@ it('CONTROL: with no held card the hop limit keeps its honest served sentence', 
   expect(hopLimitText({ tool_calls: [refusedCall], tool_results: [REFUSED], mutated: false })).toBe(SERVED_FALLBACK);
 });
 
-it('CONTROL: a run’s own sentence still wins on a cut-short answer', () => {
+it('a run’s own sentence still comes FIRST on a cut-short answer; the card it ships with is described after it', () => {
   const t = unfinishedAnswerText({ tool_calls: [heldCall, { name: 'run_analysis', ok: false, mutated: false }],
     tool_results: [HELD, { ok: false, mutated: false, refusal: 'not_ready' }], mutated: false });
-  expect(t).not.toMatch(/prepared this change/);
-  expect(t).toMatch(/analysis/i);
+  expect(t).toBe(`The analysis didn’t run this time (not ready). Nothing in the model was changed — ask me what it still needs.\n\n${TYPED}`);
+});
+
+describe('Codex r1 on #2820', () => {
+  it('P1-1 RED: approvals withheld on a chip turn consume nothing, so the held card is still described (the chip’s own filter)', () => {
+    const withheld = { name: 'authorise_change', ok: false, mutated: false, refusal: 'withheld_on_chip_turn' };
+    const t = hopLimitText({ tool_calls: [heldCall, withheld, withheld, withheld, withheld, withheld],
+      tool_results: [HELD, ...Array.from({ length: 5 }, () => ({ ok: false, mutated: false, refusal: 'withheld_on_chip_turn' }))], mutated: false });
+    expect(t).toBe(TYPED);
+  });
+
+  it('P1-3 RED: a cut-short turn that saved before its refused run never says "Nothing in the model was changed"; a held card follows', () => {
+    const run = { name: 'run_analysis', ok: false, mutated: false };
+    const ranText = unfinishedAnswerText({ tool_calls: [{ name: 'authorise_change', ok: true, mutated: true, proposal_id: 'a' }, heldCall, run],
+      tool_results: [{ ok: true, mutated: true }, HELD, { ok: false, mutated: false, refusal: 'run_not_requested' }], mutated: true });
+    expect(ranText).not.toMatch(/Nothing in the model was changed/);
+    expect(ranText).toBe('The analysis didn’t run this time (run not requested). Your model was updated this turn — ask me what changed and what the analysis still needs.'
+      + `\n\n${TYPED}`);
+  });
+
+  it('CONTROL: an unchanged turn keeps today’s run sentence byte for byte', () => {
+    expect(unfinishedAnswerText({ tool_calls: [{ name: 'run_analysis', ok: false, mutated: false }],
+      tool_results: [{ ok: false, mutated: false, refusal: 'run_not_requested' }], mutated: false }))
+      .toBe('The analysis didn’t run this time (run not requested). Nothing in the model was changed — ask me what it still needs.');
+  });
 });
