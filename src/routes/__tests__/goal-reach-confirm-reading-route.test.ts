@@ -50,7 +50,7 @@ import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b';
 const AT = '2026-10-08T08:00:00.000Z';
 const READY = { status: 'ready', may_run: true };
-const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’. Is that how you work it out?';
+const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?';
 const hashOf = (graph: unknown) => computeAnalysisAffectingGraphHash(graph as never)!;
 let app: FastifyInstance;
 let serial = 0;
@@ -149,14 +149,12 @@ beforeEach(async () => {
       graph_hash: hashOf(source.graph), blocks: [source.analysis.analysis_result],
       analysis_ready: READY, analysis_state: source.analysis.analysis_state };
   });
-  const route = process.env.GOAL_REACH_ROUTE_CANDIDATE === '1'
-    ? await import('../../../.p45/goal-reach-agent-v1-turn.candidate.ts')
-    : await import('../agent-v1-turn.js');
+  const route = await import('../agent-v1-turn.js');
   await app.register(route.agentV1TurnRoute); await app.ready();
 });
 afterEach(async () => { await app?.close(); vi.unstubAllGlobals(); for (const p of agentProposals.outstanding(scenario, OWNER)) agentProposals.discard(p.proposal_id); });
 type Offer = { action_id: string; enabled: boolean; press_id: string; offer_key: string; user_line: string; why_now?: string };
-type Bar = { priority: Offer[]; standard: Offer[]; more: Offer[] };
+type Bar = { readonly priority: readonly Offer[]; readonly standard: readonly Offer[]; readonly more: readonly Offer[] };
 const offersOf = (bar: Bar) => [...bar.priority, ...bar.standard, ...bar.more];
 async function reload(): Promise<Record<string, any>> {
   const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${scenario}/graph`, payload: { include_conversation_turns: true } });

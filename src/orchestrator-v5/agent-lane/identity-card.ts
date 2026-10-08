@@ -16,6 +16,8 @@
  */
 import type { IdentityProposal } from './identity-proposal.js';
 import type { StructuredProposal } from './proposal.js';
+import type { PendingAction } from '../session/pending-action.js';
+import { agentProposalOf, isHeldProposal } from './proposal-object/record.js';
 
 /** The proposal operation that carries a reading to confirm. `path` is the goal's id. */
 export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
@@ -117,6 +119,16 @@ export function identityCardToReoffer(p: {
  */
 export function identityAutoIssueAllowed(p: { readonly issue: boolean; readonly reoffer: boolean; readonly heldWaiting: boolean }): boolean {
   return (p.issue || p.reoffer) && !p.heldWaiting;
+}
+
+/**
+ * ⛔ THE ONE HELD-CHANGE PREDICATE AT IDENTITY ISSUANCE (DL #2802 P1; the third finding in this class): every door that
+ * issues the identity card — the Agent's tool call, a Run's hint, the re-offer and the bar's confirm_reading press — goes
+ * through the propose_identity capability, which asks this. True while any held change OTHER than an identity card waits
+ * for its yes: path-only supersession would discard it before either is decided.
+ */
+export function heldChangeBlocksIdentity(pending: readonly PendingAction[]): boolean {
+  return pending.some(p => isHeldProposal(p) && !(agentProposalOf(p)?.operations ?? []).some(o => o.op === CONFIRM_IDENTITY_OP));
 }
 
 type IdentityRefusalCode = 'reading_not_confirmed' | 'superseded' | 'not_admissible' | 'carrier_conflict' | 'already_carried' | string;

@@ -5,7 +5,7 @@ import { unconfirmedGoalProductFor } from '../../tools/handlers/unconfirmed-goal
 import { actionFactsOf } from '../actions/state.js';
 import { actionBarOf } from '../actions/rank.js';
 import { decidePress } from '../actions/handlers.js';
-import { IDENTITY_ISSUED_FALLBACK, identityApproveMessage, identityAutoIssueAllowed, identityIssuedText, readingOfIdentityApproval } from '../identity-card.js';
+import { IDENTITY_ISSUED_FALLBACK, heldChangeBlocksIdentity, identityApproveMessage, identityAutoIssueAllowed, identityIssuedText, readingOfIdentityApproval } from '../identity-card.js';
 
 type Graph = { nodes: Record<string, any>[]; edges: Record<string, any>[] };
 const PAUL = JSON.parse(readFileSync(new URL('./fixtures/goal-reach-paul-graph-632b92b9.json', import.meta.url), 'utf8')) as Graph;
@@ -13,7 +13,7 @@ const graph = (edit: (g: Graph) => void = () => {}) => { const g = structuredClo
 const node = (g: Graph, id: string) => g.nodes.find(n => n.id === id)!;
 const offers = (g: Graph) => { const b = actionBarOf(actionFactsOf({ scenarioId: 'goal-reach', graph: g })); return [...b.priority, ...b.standard, ...b.more]; };
 const confirm = (g: Graph) => offers(g).filter(o => o.action_id === 'confirm_reading');
-const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’. Is that how you work it out?';
+const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?';
 const withCurrent = (current: number) => graph(g => {
   // Science's known answer is the earlier 300, not the final stored fixture's 8,000.
   node(g, 'pro_paying_subscribers').observed_state = { unit: 'subscribers', raw_value: 300, value: 0.15, source: 'cee_inference' };
@@ -92,7 +92,7 @@ describe('GOAL-REACH build 1 stored reading', () => {
       const price = node(g, 'pro_plan_price'); const goal = node(g, 'mrr');
       if (change === 'no_path' || change === 'path_only') g.edges = g.edges.filter(e => e.from !== 'pro_paying_subscribers');
       // Science §(e) Q1.2 binds the goal's own parents, tighter than spec condition 2's any path.
-      if (change === 'path_only') g.edges.push({ from: 'pro_paying_subscribers', to: 'risk_feature_release_slips' });
+      if (change === 'path_only') g.edges.push({ from: 'pro_paying_subscribers', to: 'monthly_churn_rate' });
       if (change === 'bidirected') g.edges.find(e => e.from === 'pro_paying_subscribers' && e.to === 'mrr')!.edge_type = 'bidirected';
       if (change === 'excluded') price.analysis_participation = 'retained_excluded';
       if (change === 'unknown_unit') price.observed_state.unit = '?';
@@ -101,7 +101,7 @@ describe('GOAL-REACH build 1 stored reading', () => {
       if (change === 'scope_conflict') goal.goal_scope = { modelled: 'Total MRR', alternative: 'Pro MRR', extent: 'total', stated_in_brief: true, source: { quote: 'Our MRR includes other plans' }, component: { label: 'Pro MRR', rate_id: 'pro_plan_price', count_id: 'pro_paying_subscribers', basis: 'unknown', source: { quote: 'Pro plan price and subscribers' } } };
       if (change === 'two_goals') g.nodes.push({ id: 'another_goal', kind: 'goal', label: 'Another' });
       if (change === 'long_words') price.label = 'p'.repeat(401);
-      if (change === 'second_reading') node(g, 'risk_feature_release_slips').nonlinear_identity = { operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false };
+      if (change === 'second_reading') node(g, 'mrr_lost_to_price_driven_churn').nonlinear_identity = { operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false };
       if (change === 'nonfactor') price.kind = 'outcome';
     });
     expect(proposeProductIdentity(g)).toBeNull();
@@ -113,7 +113,7 @@ describe('GOAL-REACH build 1 stored reading', () => {
   });
   it('stored order stays intact when the count precedes the rate', () => {
     const g = graph(g => { node(g, 'mrr').nonlinear_identity.factor_ids.reverse(); });
-    expect(proposeProductIdentity(g)).toMatchObject({ factor_ids: ['pro_paying_subscribers', 'pro_plan_price'], words: 'Olumi reads ‘MRR’ as ‘Pro paying subscribers’ × ‘Pro plan price’. Is that how you work it out?' });
+    expect(proposeProductIdentity(g)).toMatchObject({ factor_ids: ['pro_paying_subscribers', 'pro_plan_price'], words: 'Olumi reads ‘MRR’ as ‘Pro paying subscribers’ × ‘Pro plan price’, less ‘MRR lost to price-driven churn’. Is that how you work it out?' });
   });
   it('Science §(e) accepts the existing implicit per-count money-rate confirmation form', () => {
     const g = graph(g => { node(g, 'pro_plan_price').observed_state.unit = '£/month'; });
@@ -176,6 +176,49 @@ describe('GOAL-REACH build 1 stored reading', () => {
     });
     expect(proposeProductIdentity(add(true))).toMatchObject({ words: WORDS });
     expect(proposeProductIdentity(add(false))).toBeNull(); // control: an active second carrier is a second reading
+  });
+
+  it('Science §(e) add. 2: Paul\'s STORED end state (user-added "Feature release slips" straight into MRR, not definitional) → no card; Run-1 shape → the card with the addend', () => {
+    const END = JSON.parse(readFileSync(new URL('./fixtures/goal-reach-paul-graph-632b92b9-end.json', import.meta.url), 'utf8')) as Graph;
+    expect(proposeProductIdentity(END)).toBeNull();
+    expect(proposeProductIdentity(PAUL)?.words).toBe(WORDS);
+  });
+  it('Science §(e) add. 2 mutant guard: the words never ask "price × subscribers" alone while the model subtracts a definitional addend', () => {
+    expect(proposeProductIdentity(PAUL)!.words).toContain(', less ‘MRR lost to price-driven churn’');
+    const noAddend = graph(g => { g.edges = g.edges.filter(e => !(e.from === 'mrr_lost_to_price_driven_churn' && e.to === 'mrr')); });
+    expect(proposeProductIdentity(noAddend)!.words).not.toContain('less');
+  });
+  it('Science §(e) add. 2: the same risk WITHOUT definitional provenance (or user-authored) vetoes', () => {
+    expect(proposeProductIdentity(graph(g => { const e = g.edges.find(e => e.from === 'mrr_lost_to_price_driven_churn' && e.to === 'mrr')!; e.provenance = { source: 'cee_hypothesis' }; }))).toBeNull();
+    expect(proposeProductIdentity(graph(g => { node(g, 'mrr_lost_to_price_driven_churn').provenance = 'from_brief'; }))).toBeNull();
+  });
+
+  it('DL #2802 P1 (class): ONE held-change predicate at issuance — a held non-identity change blocks the identity card; the identity card itself does not', async () => {
+    const { createProposal } = await import('../proposal.js');
+    const { proposalPendingAction } = await import('../durable-proposal.js');
+    const SID = '00000000-0000-4000-8000-0000000000aa';
+    const held = (op: 'set_factor_value' | 'confirm_identity') => {
+      const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin',
+        operations: [op === 'set_factor_value'
+          ? { op, path: 'pro_paying_subscribers', value: { value: 300, unit: 'subscribers', authored_by: 'model_proposed' } }
+          : { op, path: 'mrr', value: { outcome_id: 'mrr', operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS } }],
+        provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: op });
+      return proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: 'Yes', message: 'Yes.' }, { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+    };
+    expect(heldChangeBlocksIdentity([held('set_factor_value')])).toBe(true);
+    expect(heldChangeBlocksIdentity([held('confirm_identity')])).toBe(false);
+    expect(heldChangeBlocksIdentity([held('confirm_identity'), held('set_factor_value')])).toBe(true);
+    expect(heldChangeBlocksIdentity([])).toBe(false);
+  });
+
+  it.each(['percent', '%', 'per cent', 'percentage points', 'pp'])('DL #2802 P0: "£/month" × "%s" is a share, never a count → no reading, no offer', unit => {
+    // The DL's shape: a rate with NO denominator ("£/month") — only the count reader can refuse it.
+    const g = graph(g => { node(g, 'pro_plan_price').observed_state.unit = '£/month'; node(g, 'pro_paying_subscribers').observed_state.unit = unit; });
+    expect(proposeProductIdentity(g)).toBeNull();
+    expect(confirm(g)).toHaveLength(0);
+  });
+  it.each(['subscribers', 'subscriber', 'paying subscribers'])('DL #2802 P0 control: "%s" is a count → the reading', unit => {
+    expect(proposeProductIdentity(graph(g => { node(g, 'pro_plan_price').observed_state.unit = '£/month'; node(g, 'pro_paying_subscribers').observed_state.unit = unit; }))).not.toBeNull();
   });
 });
 

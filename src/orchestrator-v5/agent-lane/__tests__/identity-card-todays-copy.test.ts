@@ -41,19 +41,22 @@ describe('an operand holding an EXACT copy of the user’s figure is read at tod
     expect(proposeProductIdentity(g((x) => { node(x, 'paying_subscribers_at_12_months').observed_state.raw_value = 1450; }))).toBeNull();
   });
 
-  it('CONTROL (P0 PARTNER 5906385868 row D): the 1,500 cause is Olumi’s too — nothing is the user’s today — no card', () => {
-    expect(proposeProductIdentity(g((x) => { node(x, 'current_paying_subscribers').observed_state.source = 'cee_inference'; }))).toBeNull();
+  it('CONTROL (P0 PARTNER 5906385868 row D): the 1,500 cause is Olumi’s too — nothing is the user’s today — the card asks the reading alone (Science §(e) add.)', () => {
+    { const card = proposeProductIdentity(g((x) => { node(x, 'current_paying_subscribers').observed_state.source = 'cee_inference'; })); // Science §(e) addendum (8 Oct): SUPERSEDED — the card asks the reading alone
+    expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Paying subscribers at 12 months’. Is that how you work it out?'); expect(card?.words).not.toMatch(/Today|your/); }
   });
 
-  it('CONTROL (P0 PARTNER 5906503452 row E; AIQ 5906521706): the same 1,500 in “customers” is not an exact copy — no card', () => {
-    expect(proposeProductIdentity(g((x) => { node(x, 'paying_subscribers_at_12_months').observed_state.unit = 'customers'; }))).toBeNull();
+  it('CONTROL (P0 PARTNER 5906503452 row E; AIQ 5906521706): the same 1,500 in “customers” is not an exact copy — no today sentence; the card asks the reading alone (Science §(e) add.)', () => {
+    { const card = proposeProductIdentity(g((x) => { node(x, 'paying_subscribers_at_12_months').observed_state.unit = 'customers'; })); // Science §(e) addendum (8 Oct): SUPERSEDED — the card asks the reading alone
+    expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Paying subscribers at 12 months’. Is that how you work it out?'); expect(card?.words).not.toMatch(/Today|your/); }
   });
 
   it('CONTROL (row E’s pair): “subscriber” (singular) is the same unit as the user’s “subscribers” — the card', () => {
     expect(proposeProductIdentity(g((x) => { node(x, 'paying_subscribers_at_12_months').observed_state.unit = 'subscriber'; }))).not.toBeNull();
   });
 
-  it('CONTROL: two user-levelled causes (which is today’s?) — no card', () => {
-    expect(proposeProductIdentity(g((x) => { node(x, 'monthly_new_subscribers').observed_state.source = 'brief_extraction'; }))).toBeNull();
+  it('CONTROL: two user-levelled causes (which is today’s?) — no today sentence; the card asks the reading alone (Science §(e) add.)', () => {
+    { const card = proposeProductIdentity(g((x) => { node(x, 'monthly_new_subscribers').observed_state.source = 'brief_extraction'; })); // Science §(e) addendum (8 Oct): SUPERSEDED — the card asks the reading alone
+    expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Paying subscribers at 12 months’. Is that how you work it out?'); expect(card?.words).not.toMatch(/Today|your/); }
   });
 });

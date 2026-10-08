@@ -19,7 +19,7 @@ import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/pro
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 import { sayFigure } from './say-figure.js';
-import { readCount, readMoney, readMoneyTotal } from './same-unit.js';
+import { readCount, readMoney, readMoneyTotal, readUnitParts } from './same-unit.js';
 
 export { periodIn, readMoneyTotal, sameUnit } from './same-unit.js';
 
@@ -42,7 +42,8 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
   let confirm: Composition = NO;
   for (const [m, c] of [[a, b], [b, a]] as const) {
     const money = readMoney(m.unit, '');
-    const count = readCount(c.unit);
+    // DL #2802 P0: the FULL reader decides it is a count; readCount alone takes 'percent'/'pp' as nouns (sameUnit needs that).
+    const count = readUnitParts(c.unit)?.kind === 'count' ? readCount(c.unit) : null;
     if (money === null || count === null) continue;
     if (money.code !== goal.code || money.period !== goal.period) continue;
     // AIQ 5886967509: the DENOMINATOR is the dimensional proof. A rate with none ("GBP/month") could be summed as easily

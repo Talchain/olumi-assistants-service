@@ -75,7 +75,7 @@ function row1(propose: Proposer): void {
   const card = propose(graph());
   expect(card, 'row 1: Paul stored reading is reachable').not.toBeNull();
   expect(card?.factor_ids).toEqual(['pro_plan_price', 'pro_paying_subscribers']);
-  expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’. Is that how you work it out?');
+  expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?');
 }
 
 function row3(propose: Proposer): void {
