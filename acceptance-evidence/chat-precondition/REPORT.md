@@ -126,3 +126,10 @@ No deployment or served-product fix is claimed by this working-tree implementati
 - **Rows (P2):** `raw-stamp-arg` drives the exposed `propose_new_risk` with a raw `relies_on` and expects no stamp. `empty-lease` keeps `no_affects` before any read.
 - **Mutants (P2):** the runner script is not committed (no repo convention). Hand mutants on committed e17cf545: gate always true → only `unrelated` RED; stamp skipped → `p44-r5` + 5 lease rows RED, with paired controls GREEN.
 - 22/22 seam rows. Neighbours: widen-risks-seam + agent-event-risk-door-seam 37/37; proposal-reply-new-risk 6/6; proposal-reply-one-call + widen-risks 82/82.
+
+## r2 (author, after Codex review r2 at 6fc02bc5, VERDICT FAIL: 4 P2, no P0/P1; buddy cap reached)
+- **P2-1:** a precondition composes deterministically unless the model sets `whole_request:false`; with an explicit false, narration answers the rest. Row `not-whole-request`.
+- **P2-2:** the figure check ignores the discarded links, so figures carried only by them go to narration. Row `dropped-link-figures`.
+- **P2-3:** the stem rule is back to a shared four letters between CONTENT words (price/pricing), with function words still excluded on both sides. Row `pricing-stem`. Known permissive case accepted under the DL ruling: "Plant room fire" ~ "plan". The disclosed card is the safeguard.
+- **P2-4 (accepted, not changed):** if the user's turn asks a question, narration answers it. The card always carries the Science disclosure.
+- 25/25; the 3 new rows are RED at 6fc02bc5. Neighbours: 37/37 and 38/38.

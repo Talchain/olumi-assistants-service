@@ -21,12 +21,12 @@ const FILLER_WORDS = new Set([
 const letters = (word: string): number => Array.from(word).length;
 const contentWordsOf = (text: string): string[] => (text.toLowerCase().match(/[\p{L}]+/gu) ?? [])
   .filter((word) => letters(word) >= 4 && !FILLER_WORDS.has(word));
-/** Same word, one an inflection of the other ("slip"/"slips"), or a shared stem of at least five letters. */
+/** A shared four-letter stem between CONTENT words ("price"/"pricing", "slip"/"slips"); function words never count. */
 const sameStem = (a: string, b: string): boolean => {
   const [x, y] = [Array.from(a), Array.from(b)];
   let shared = 0;
   while (shared < x.length && shared < y.length && x[shared] === y[shared]) shared += 1;
-  return shared === Math.min(x.length, y.length) || shared >= 5;
+  return shared >= 4;
 };
 
 /**

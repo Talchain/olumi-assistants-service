@@ -407,6 +407,29 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
   }, 120_000);
 
+  it('chat-precondition-pricing-stem: “Pricing rollout delayed” is corroborated by “price” (four-letter stem)', async () => {
+    seed();
+    const label = 'Pricing rollout delayed';
+    const { approve } = await offer({ label, relies_on_option: OPTION_LABEL, affects: [], caused_by: [], whole_request: true },
+      'Add a risk: Pricing rollout delayed — the £59 price rise cannot go live until billing supports the new pricing.');
+    expect(approve.detail).toBe(`‘${label}’: ‘${OPTION_LABEL}’ relies on this not happening. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.`);
+    await approveOffer(approve);
+    expect(riskNow(label).relies_on).toEqual({ option_id: OPTION_ID });
+  }, 120_000);
+
+  it('chat-precondition-not-whole-request: an explicit whole_request:false leaves the other request to narration', async () => {
+    seed();
+    await offer({ ...preconditionArgs(), whole_request: false }, `${P44_MESSAGE} Also explain why Keep current Pro price is the baseline.`);
+    expect(openAiCalls, 'narration answers the rest of the request').toBe(2);
+  }, 120_000);
+
+  it('chat-precondition-dropped-link-figures: figures only in discarded links are not counted as carried', async () => {
+    seed();
+    await offer({ ...preconditionArgs(), affects: [{ target_label: 'MRR lower by 10% within 6 months', direction: 'negative' }] },
+      'Add a risk: Feature release slips — if it slips, MRR will be lower by 10% within 6 months.');
+    expect(openAiCalls, 'the uncarried 10% / 6 months go to narration, not a reply that drops them').toBe(2);
+  }, 120_000);
+
   it('chat-precondition-raw-stamp-arg: a model-authored relies_on on the exposed tool is ignored', async () => {
     seed();
     const { approve } = await offer({ ...ordinaryArgs(), relies_on: { option_id: OPTION_ID } });

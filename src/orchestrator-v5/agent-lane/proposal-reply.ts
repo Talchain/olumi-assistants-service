@@ -432,9 +432,10 @@ export function userFiguresTheCallLeaves(args: unknown, userMessage: string): st
 
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
-  // RC3 (a′): a precondition's disclosure is never left to narration (Codex #2823 r1), so it composes without that word.
+  // RC3 (a′): a precondition composes unless the model said the call is NOT the whole request (Codex #2823 r1/r2).
   const precondition = tool === 'propose_new_risk' && recordOf(recordOf(recordOf(result)?.risk)?.relies_on) !== undefined;
-  if (recordOf(args)?.whole_request !== true && !precondition) return null;
+  const whole = recordOf(args)?.whole_request;
+  if (precondition ? whole === false : whole !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
   return composeRecoveredProposalReply(tool, args, result, userMessage);
 }
@@ -448,8 +449,10 @@ export function composeRecoveredProposalReply(tool: string, args: unknown, resul
   const precondition = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.relies_on) : undefined;
   const hasLikelihood = likelihood?.basis === 'user' && nonEmpty(likelihood.quote);
   const hasPrecondition = precondition !== undefined && nonEmpty(precondition.option_label);
+  // A precondition's links were discarded by the host: their words can't count as carrying the user's figures (Codex #2823 r2).
+  const kept = hasPrecondition ? { ...(recordOf(args) ?? {}), affects: [], caused_by: [] } : args;
   const carried = hasLikelihood || hasPrecondition ? {
-    args,
+    args: kept,
     ...(hasLikelihood ? { event_risk_statement: likelihood!.quote } : {}),
     ...(hasPrecondition ? { relies_on_option: precondition!.option_label } : {}),
   } : args;
