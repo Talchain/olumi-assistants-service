@@ -130,7 +130,8 @@ function drafts(f: ActionFacts): Draft[] {
   const out: Draft[] = [];
   const needsRun = { enabled: false as const, disabled_reason: DISABLED.needs_current_analysis };
 
-  if (f.identityReading != null) {
+  // Codex r2 P1: while another held change waits for its yes, the press would supersede it (path-only); answer that first.
+  if (f.identityReading != null && !f.approvalWaiting) {
     const prefix = "Olumi can't show the chance until you check how it reads ‘";
     const suffix = '’.';
     const maxLabel = 90 - prefix.length - suffix.length;

@@ -160,5 +160,22 @@ describe('GOAL-REACH build 1 stored reading', () => {
     expect(proposeProductIdentity(g('Monthly recurring revenue'))).not.toBeNull();
     expect(proposeProductIdentity(g('Annual recurring revenue'))).toBeNull();
   });
+
+  it('Codex r2 P1: no confirm_reading while another held change waits (its press would supersede it); offered again once settled', () => {
+    const facts = actionFactsOf({ scenarioId: 'goal-reach', graph: PAUL });
+    const ids = (f: typeof facts) => { const b = actionBarOf(f); return [...b.priority, ...b.standard, ...b.more].map(o => o.action_id); };
+    expect(ids({ ...facts, approvalWaiting: true })).not.toContain('confirm_reading');
+    expect(decidePress({ id: 'act:confirm_reading' }, { ...facts, approvalWaiting: true })).toMatchObject({ kind: 'reply' });
+    expect(ids(facts)).toContain('confirm_reading');
+  });
+  it('Codex r2 P2: a retained_excluded product carrier on the goal path is not a competing reading', () => {
+    const add = (excluded: boolean) => graph(g => {
+      g.nodes.push({ id: 'old_carrier', kind: 'factor', label: 'Old carrier', nonlinear_identity: { operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false },
+        ...(excluded ? { analysis_participation: 'retained_excluded' } : {}) });
+      g.edges.push({ from: 'old_carrier', to: 'mrr' });
+    });
+    expect(proposeProductIdentity(add(true))).toMatchObject({ words: WORDS });
+    expect(proposeProductIdentity(add(false))).toBeNull(); // control: an active second carrier is a second reading
+  });
 });
 

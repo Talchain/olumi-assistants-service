@@ -122,7 +122,8 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     }
     return false;
   };
-  if (nodes.some(n => n !== goal && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'product'
+  // Codex r2 P2: a carrier kept out of the calculation (retained_excluded) is not a competing reading the Run sees.
+  if (nodes.some(n => n !== goal && n.analysis_participation !== 'retained_excluded' && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'product'
     && typeof n.id === 'string' && reachesGoal(n.id))) return null;
   const [a, b] = parts as [Rec, Rec];
   const level = (n: Rec) => ({ unit: isRec(n.observed_state) ? text(n.observed_state.unit) : undefined, label: String(n.id) });
