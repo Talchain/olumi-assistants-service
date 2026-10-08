@@ -119,6 +119,35 @@
       "enabled": true,
       "why_now": "See the Olumi estimates feeding this result.",
       "offer_key": "cbeea79decf31897"
+    },
+    {
+      "action_id": "bias_check",
+      "label": "Bias check",
+      "icon": "ScanSearch",
+      "group": "method",
+      "press_id": "act:bias_check",
+      "user_line": "Where could a common reasoning pattern bite in this model?",
+      "enabled": true,
+      "why_now": "See where common reasoning patterns could bite in this model.",
+      "offer_key": "a2525c4a4c4c69be"
     }
-  ]
+  ],
+  "bias_risk": {
+    "v": 1,
+    "items": [
+      {
+        "claim_id": "DSK-B-001",
+        "name": "Anchoring",
+        "why": "Olumi’s starting figure for ‘Enterprise prospect signing likelihood’ could pull later estimates towards it.",
+        "action_id": "bias_anchoring",
+        "press_id": "act:bias_anchoring",
+        "offer_key": "a7161271d00a3ec5",
+        "science": {
+          "claim_id": "DSK-B-001",
+          "claim_title": "Anchoring and insufficient adjustment",
+          "evidence_strength": "strong"
+        }
+      }
+    ]
+  }
 }

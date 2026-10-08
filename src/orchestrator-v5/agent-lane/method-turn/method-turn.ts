@@ -31,7 +31,7 @@ import { linkStrengthsCardArgs, type LinkStrengthsCardArgs } from '../strengthen
 import type { GuidanceSignals as SelectorSignals, GuidanceState, MethodInputs, PolicyId } from '../guidance/index.js';
 import type { GuidanceRecord } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
-import { methodScienceContext, type MethodScienceContext, type SuppliedItem } from '../science/method-science-context.js';
+import { methodScienceContext, type GoalHorizon, type MethodScienceContext, type SuppliedItem } from '../science/method-science-context.js';
 import {
   assembleGuidanceSignals,
   type GuidanceSignalInputs,
@@ -267,6 +267,24 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
 
 const quote = (label: string): string => `‘${label}’`;
 
+/** RC's example opening assumes a year; the served directive carries the goal's approved horizon instead (P02, 7 Oct). */
+const CONTRACT_HORIZON = 'It is a year later and';
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** The horizon in plain words: '31 March 2027', or '6 months'. Calendar arithmetic only; no time zone, no locale. */
+export function horizonWords(h: GoalHorizon): string {
+  if ('deadline' in h) {
+    const [y, m, d] = h.deadline.split('-').map(Number);
+    return `${d} ${MONTHS[m - 1]} ${y}`;
+  }
+  return `${h.months} month${h.months === 1 ? '' : 's'}`;
+}
+
+function horizonOpening(h: GoalHorizon | null): string {
+  if (h === null) return 'Imagine';
+  return 'deadline' in h ? `It is ${horizonWords(h)} and` : `It is ${horizonWords(h)} later and`;
+}
+
 function choosePlan(choices: readonly string[], labels: Readonly<Record<string, string>>): ChoosePlanTurn | null {
   const buttons: SuggestedAction[] = [];
   for (const id of choices) {
@@ -313,7 +331,10 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
             : []),
         ]
       : []),
-    `Shape: ${CONTRACT.body.replaceAll(quote('Switch to GCP'), plan)}`,
+    `Shape: ${CONTRACT.body.replaceAll(quote('Switch to GCP'), plan).replace(CONTRACT_HORIZON, horizonOpening(ctx.horizon ?? null))}`,
+    ctx.horizon !== undefined
+      ? `The goal's horizon, as the user set it, is ${horizonWords(ctx.horizon)}. Set every story at that horizon; never assume another.`
+      : 'No approved deadline is held for the goal: use only a period the user stated, and invent none.',
     `Format: ${CONTRACT.format}`,
     'Each story rests on at least one of these items from the user’s model, highest priority first. Name the item in '
       + 'its own words; for a link, name both ends:',
@@ -343,7 +364,8 @@ function checkInputsOf(ctx: RunMethodTurn['context'], graph: unknown): MethodInp
     ...(ctx.decision_level === true ? { decision_level: true } : { plan_label: ctx.plan?.label }),
     current_option_labels: ctx.current_option_labels,
     supplied_items: ctx.supplied_items.map(({ id, labels }) => ({ id, labels })),
-    model_labels: modelLabelsOf(graph),
+    // A deadline's date is the user's own figure, masked like a label (a month count is a duration, already exempt).
+    model_labels: ctx.horizon !== undefined && 'deadline' in ctx.horizon ? [...modelLabelsOf(graph), horizonWords(ctx.horizon)] : modelLabelsOf(graph),
   };
 }
 
@@ -352,21 +374,56 @@ function storyOnlyDecision(ctx: RunMethodTurn['context']): boolean {
   return ctx.decision_story_only === true;
 }
 
+/** A story's three server-owned parts: the failure way, then 'Watch for:', then 'Mitigate:'. */
+export type StoryParts = readonly [failure: string, watch: string, mitigate: string];
+
 /** Qualitative, kind-correct stories: a risk materialises; only an intervention is called a lever. */
-function failureStory(item: SuppliedItem, goal: string): string {
+function failureParts(item: SuppliedItem, goal: string): StoryParts {
   if (item.lever_option_labels !== undefined) {
-    return `The effect of ${itemPhrase(item)} fell short of what ${goal} needed. Watch for: early results diverging from the expected effect. Mitigate: test this lever with a small group before expanding.`;
+    return [`The effect of ${itemPhrase(item)} fell short of what ${goal} needed.`, 'early results diverging from the expected effect.', 'test this lever with a small group before expanding.'];
   }
   if (item.kind === 'link') {
-    return `The relationship between ${item.labels.map(quote).join(' and ')} differed from the model, undermining progress towards ${goal}. Watch for: the observed relationship diverging from the model. Mitigate: check this relationship before relying on it.`;
+    return [`The relationship between ${item.labels.map(quote).join(' and ')} differed from the model, undermining progress towards ${goal}.`, 'the observed relationship diverging from the model.', 'check this relationship before relying on it.'];
   }
   if (item.kind === 'risk') {
-    return `${itemPhrase(item)} materialised and undermined progress towards ${goal}. Watch for: early signs of this risk. Mitigate: prepare a response before committing further.`;
+    return [`${itemPhrase(item)} materialised and undermined progress towards ${goal}.`, 'early signs of this risk.', 'prepare a response before committing further.'];
   }
   if (item.kind === 'limit') {
-    return `${itemPhrase(item)} was breached, undermining progress towards ${goal}. Watch for: approaching this limit. Mitigate: set a checkpoint before committing further.`;
+    return [`${itemPhrase(item)} was breached, undermining progress towards ${goal}.`, 'approaching this limit.', 'set a checkpoint before committing further.'];
   }
-  return `${itemPhrase(item)} differed from the model, undermining progress towards ${goal}. Watch for: observations diverging from the model. Mitigate: check this assumption before relying on it.`;
+  return [`${itemPhrase(item)} differed from the model, undermining progress towards ${goal}.`, 'observations diverging from the model.', 'check this assumption before relying on it.'];
+}
+
+/** The ONE story layout: the server owns the markers, whoever wrote the parts. */
+export function storyText(parts: StoryParts): string {
+  return `${parts[0]} Watch for: ${parts[1]} Mitigate: ${parts[2]}`;
+}
+
+const goalPhrase = (ctx: RunMethodTurn['context']) => ctx.goal_label === null ? 'the goal' : quote(ctx.goal_label);
+
+/** The server-built story for one supplied item, as sent and as the worksheet recognises it. */
+export function serverStoryParts(item: SuppliedItem, ctx: RunMethodTurn['context']): StoryParts {
+  return failureParts(item, goalPhrase(ctx));
+}
+
+function failureStory(item: SuppliedItem, goal: string): string {
+  return storyText(failureParts(item, goal));
+}
+
+/**
+ * A story's three parts: before the first "Watch for:", between it and the next "Mitigate:", and after that; each part
+ * trimmed and non-empty, markers optionally bolded (served a2-2, 7 Oct). Linear marker search: the earlier lazy
+ * `^([\s\S]+?)\s*Watch for:` regex took 3.1 s on a story with 20k spaces after its marker.
+ */
+export function storyParts(story: string): StoryParts | null {
+  const watch = /(?:\*\*)?Watch for:(?:\*\*)?/u.exec(story);
+  if (!watch) return null;
+  const afterWatch = watch.index + watch[0].length;
+  const mitigate = /(?:\*\*)?Mitigate:(?:\*\*)?/u.exec(story.slice(afterWatch));
+  if (!mitigate) return null;
+  const parts = [story.slice(0, watch.index), story.slice(afterWatch, afterWatch + mitigate.index), story.slice(afterWatch + mitigate.index + mitigate[0].length)]
+    .map(part => part.trim());
+  return parts.every(part => part !== '') ? [parts[0], parts[1], parts[2]] : null;
 }
 
 export function fallbackReply(ctx: RunMethodTurn['context']): string {
@@ -375,7 +432,7 @@ export function fallbackReply(ctx: RunMethodTurn['context']): string {
     // Prefer a different option's lever for the second story; never infer a leader from the item order.
     const second = ctx.supplied_items.find(item => item !== first && item.lever_option_labels?.some(label =>
       !first.lever_option_labels?.includes(label))) ?? ctx.supplied_items[1] ?? first;
-    const goal = ctx.goal_label === null ? 'the goal' : quote(ctx.goal_label);
+    const goal = goalPhrase(ctx);
     return [
       'Imagine this decision has gone badly. Two failure stories to test:',
       `1. ${failureStory(first, goal)}`,
@@ -389,15 +446,104 @@ export function fallbackReply(ctx: RunMethodTurn['context']): string {
 }
 
 export interface SettledMethodTurn {
-  /** What is sent: the draft when every post-check passed, else RC's deterministic fallback. Never a repaired draft. */
+  /**
+   * What is sent: the draft when every post-check passed; else the draft's passing stories in the server's layout with
+   * each refused story replaced by the server-built story for an unused item; else RC's deterministic fallback.
+   * Never a repaired sentence: a story is kept whole or replaced whole.
+   */
   readonly reply: string;
+  /** True when what is sent passed every post-check (the draft, or the composed reply re-checked). */
   readonly passed: boolean;
+  /** The draft's failed checks, kept when a composed reply is sent so the refusal stays measurable. */
   readonly failed: readonly string[];
+  /** The 1-based story numbers that are server-built; absent when no story is (a draft sent as written, or RC's fallback). */
+  readonly server_stories?: readonly number[];
   /**
    * The ONE item the turn's change card acts on (`action_target`): on a pass, the story target with the lowest supplied
    * index; on the fallback, the first supplied item, which is the one the fallback names.
    */
   readonly target: SuppliedItem;
+}
+
+/** Story numbers and story bodies, by RC's own numbered-line rule (the checker's split). */
+function numberedStories(reply: string): { lead: string[]; stories: string[]; blindspot: string | null } {
+  const lead: string[] = [];
+  const stories: string[] = [];
+  let blindspot: string | null = null;
+  let current: string | undefined;
+  for (const line of reply.split(/\r?\n/u)) {
+    if (/^\s*[1-9]\.\s/u.test(line)) { if (current !== undefined) stories.push(current); current = line.replace(/^\s*[1-9]\.\s/u, ''); }
+    else if (/^\s*(?:\*\*)?Outside the model:/u.test(line)) {
+      if (current !== undefined) stories.push(current);
+      current = undefined;
+      blindspot ??= line.trim().replace(/^(?:\*\*)?Outside the model:(?:\*\*)?\s*/u, '');
+    } else if (current !== undefined) current += `\n${line}`;
+    else if (stories.length === 0) lead.push(line);
+  }
+  if (current !== undefined) stories.push(current);
+  return { lead, stories: stories.map(story => story.trim()), blindspot };
+}
+
+function compose(ctx: RunMethodTurn['context'], stories: readonly string[], blindspot: string): string {
+  const subject = ctx.plan === null ? 'this decision' : quote(ctx.plan.label);
+  const opening = ctx.horizon !== undefined
+    ? `Imagine it is ${'deadline' in ctx.horizon ? horizonWords(ctx.horizon) : `${horizonWords(ctx.horizon)} from now`} and ${subject} has gone badly.`
+    : `Imagine ${subject} has gone badly.`;
+  return [`${opening} Failure stories to test:`, ...stories.map((story, i) => `${i + 1}. ${story}`), `Outside the model: ${blindspot}`].join('\n');
+}
+
+const SERVER_BLINDSPOT = (ctx: RunMethodTurn['context']) =>
+  `what else could have blindsided ${ctx.plan === null ? 'this decision' : quote(ctx.plan.label)}?`;
+
+/**
+ * Per-story settle (P02; SB-METHOD-HANDLERS-DESIGN §3): each story is checked ALONE by the same checker, on a probe that
+ * repeats it under the server's own frame and question, so RC's rules are applied once and never restated. A passing
+ * story is kept whole in the server's layout; a refused one is replaced by the server-built story for the next unused
+ * supplied item (a decision prefers an item whose option is unambiguous, so the worksheet can bind it). The composed
+ * reply is re-checked as a whole before it is sent. Zero passing stories keep RC's fallback exactly.
+ */
+function composedSettle(turn: RunMethodTurn, draft: string, failed: readonly string[]): SettledMethodTurn | null {
+  const ctx = turn.context;
+  const decisionStories = storyOnlyDecision(ctx);
+  const { stories, blindspot } = numberedStories(draft);
+  const probe = (story: string, question: string) =>
+    checkMethodTurn(METHOD, compose(ctx, [story, story], question), turn.check_inputs, decisionStories);
+  const serverQuestion = SERVER_BLINDSPOT(ctx);
+  const kept: { story: string; target: string | null }[] = stories.slice(0, 3).map((raw) => {
+    const parts = storyParts(raw);
+    if (parts === null) return { story: '', target: null };
+    const story = storyText(parts);
+    const check = probe(story, serverQuestion);
+    return check.pass ? { story, target: check.targets[0] ?? null } : { story: '', target: null };
+  });
+  if (!kept.some(k => k.target !== null)) return null;
+  const used = new Set(kept.flatMap(k => k.target === null ? [] : [k.target]));
+  const bindable = (item: SuppliedItem) => item.kind !== 'limit'
+    && (ctx.decision_level !== true || (item.lever_option_labels?.length ?? 0) <= 1);
+  const nextItem = (): SuppliedItem | undefined => {
+    const unused = ctx.supplied_items.filter(item => !used.has(item.id));
+    const item = unused.find(bindable) ?? unused[0];
+    if (item !== undefined) used.add(item.id);
+    return item;
+  };
+  const serverStories: number[] = [];
+  const out: string[] = [];
+  for (const k of [...kept, ...Array.from({ length: Math.max(0, 2 - kept.length) }, () => ({ story: '', target: null }))]) {
+    if (k.target !== null) { out.push(k.story); continue; }
+    const item = nextItem();
+    if (item === undefined) continue;
+    out.push(storyText(serverStoryParts(item, ctx)));
+    serverStories.push(out.length);
+  }
+  for (const question of blindspot !== null && blindspot.endsWith('?') ? [blindspot, serverQuestion] : [serverQuestion]) {
+    const reply = compose(ctx, out, question);
+    const check = checkMethodTurn(METHOD, reply, turn.check_inputs, decisionStories);
+    if (!check.pass) continue;
+    const indices = check.targets.map((id) => ctx.supplied_items.findIndex((item) => item.id === id));
+    if (indices.length === 0 || indices.some((i) => i < 0)) continue;
+    return { reply, passed: true, failed, ...(serverStories.length > 0 ? { server_stories: serverStories } : {}), target: ctx.supplied_items[Math.min(...indices)] };
+  }
+  return null;
 }
 
 export function settleMethodTurn(turn: RunMethodTurn, draft: string): SettledMethodTurn {
@@ -411,10 +557,14 @@ export function settleMethodTurn(turn: RunMethodTurn, draft: string): SettledMet
     // The checker throws on contract drift; an unchecked draft is never sent.
     return fallback(['CHECKER_UNAVAILABLE']);
   }
-  if (!check.pass) return fallback(check.failed);
   const indices = check.targets.map((id) => items.findIndex((item) => item.id === id));
-  if (indices.length === 0 || indices.some((i) => i < 0)) return fallback(['PM-GROUNDED']);
-  return { reply: draft, passed: true, failed: [], target: items[Math.min(...indices)] };
+  const failed = check.pass && (indices.length === 0 || indices.some((i) => i < 0)) ? ['PM-GROUNDED'] : check.failed;
+  if (failed.length === 0) return { reply: draft, passed: true, failed: [], target: items[Math.min(...indices)] };
+  try {
+    return composedSettle(turn, draft, failed) ?? fallback(failed);
+  } catch {
+    return fallback(failed);
+  }
 }
 
 /** The pre-mortem card's basis (provenance, never shown as the user's words). */
@@ -458,6 +608,8 @@ export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: str
     const edge = edges.find((e) => `${String(e.from)}->${String(e.to)}` === target.id);
     const link = typeof edge?.from === 'string' && typeof edge.to === 'string' ? linkTargetOf(graph, edge.from, edge.to) : null;
     if (link === null || labelOf(link.from_id) === null || labelOf(link.to_id) === null) return null;
+    // Science 393023 LICENCE ruling 3: a placeholder has no band, so no card proposes its default prior as an estimate.
+    if (link.band === undefined) return null;
     return { tool: 'propose_link_strengths', args: linkStrengthsCardArgs(link, rationale) };
   }
   if (target.kind === 'factor') {

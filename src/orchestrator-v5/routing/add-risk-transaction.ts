@@ -29,6 +29,7 @@ import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
 import { hypothesisEdgeValue, reachesGoal, sameLabel, type AddOptionGraphView } from './add-option-transaction.js';
+import { readReliesOnRisk } from './relies-on-risk.js';
 
 /** One link of the new risk: EXACTLY one end is named — the other end is the new risk itself. */
 const RiskLinkSchema = z
@@ -89,7 +90,7 @@ const THREATENED_BY_A_RISK: ReadonlySet<string> = new Set(['outcome', 'goal']);
 /**
  * Build the atomic add-risk batch against the current graph, or a classified refusal. A refusal builds nothing.
  */
-export function buildAddRiskTransaction(params: unknown, graph: AddOptionGraphView | null): AddRiskBuildResult {
+export function buildAddRiskTransaction(params: unknown, graph: AddOptionGraphView | null, reliesOn?: unknown): AddRiskBuildResult {
   if (graph === null) return fail('no_graph');
   const parsed = AddRiskParamsSchema.safeParse(params);
   if (!parsed.success) return fail('parameters_invalid');
@@ -110,6 +111,17 @@ export function buildAddRiskTransaction(params: unknown, graph: AddOptionGraphVi
     for (let k = 2; graph.nodes.some((n) => n.id === riskId); k += 1) riskId = `${base}_${k}`;
   }
 
+  // RC3 (a′): only the host-bound widen press or verified chat option-label lease can supply this third argument.
+  // The stamp itself is never a tool parameter or a model-authored member of the risk.
+  if (reliesOn !== undefined) {
+    const stamp = readReliesOnRisk(reliesOn);
+    if (stamp === undefined || links.length !== 0
+      || graph.nodes.filter((n) => n.id === stamp.option_id).length !== 1
+      || !graph.nodes.some((n) => n.id === stamp.option_id && n.kind === 'option')) return fail('parameters_invalid');
+    return { matched: true, proposal: { riskId, riskLabel: label, links: [], operations: [
+      { op: 'add_node', path: riskId, value: { id: riskId, kind: 'risk', label, relies_on: stamp } },
+    ] } };
+  }
   if (links.length === 0) return fail('no_links');
   const kindOf = new Map(graph.nodes.map((n) => [n.id, n.kind] as const));
   const resolved: { from: string; to: string; effect_direction: 'positive' | 'negative' }[] = [];

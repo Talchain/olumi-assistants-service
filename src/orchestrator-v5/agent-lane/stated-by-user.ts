@@ -394,6 +394,9 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   const attestation = attestHorizon(brief, goal);
   if (goal === null || goal === undefined || goals.length !== 1) return { nodes: [...nodes], held: none, horizon: attestation };
   const node = goals[0] as N & { readonly goal_threshold_raw?: unknown; readonly goal_threshold_unit?: unknown; readonly goal_threshold_frame?: unknown };
+  if ((node as { threshold_source?: unknown }).threshold_source === 'definitional') {
+    return { nodes: [...nodes], held: { target: false, direction: true, horizon: false }, horizon: attestation };
+  }
   const raw = node.goal_threshold_raw;
   // R1 S4-core: a CHANGE target is stored as the contract's figure (a fraction r for `change_rel`, a signed c for
   // `change_abs`) and the brief writes it as the user said it: "cut it by 15%" is 15 in "%", "by 2 points" is 2 in the
@@ -915,15 +918,21 @@ const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:plea
  * The one reading both `bandTheUserWrote` and `comparatorTheUserWrote` apply, so the two cannot drift.
  */
 type Reading = { readonly said: 'asked' } | { readonly said: 'denied' } | { readonly said: 'affirmed'; readonly clauseBefore: string };
+const sentenceBeforeAt = (turnText: string, index: number): string => {
+  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
+  return turnText.slice(start, index);
+};
+/** The same clause boundary for affirmation and for a comparator's own written figure. */
+const clauseBeforeAt = (turnText: string, index: number): string =>
+  sentenceBeforeAt(turnText, index).replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
 function readingAt(turnText: string, index: number): Reading {
   // The sentence the words sit in, and the part of their clause before them (a clause restarts after , ; : a dash, or "but").
-  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
   const endAt = turnText.slice(index).search(/[.!?\n]/);
   const sentenceEnd = endAt < 0 ? '' : turnText.charAt(index + endAt);
-  const sentenceBefore = turnText.slice(start, index);
+  const sentenceBefore = sentenceBeforeAt(turnText, index);
   if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) return { said: 'asked' };
   // "anything but strong" denies it: read as a negator, never as a clause break.
-  const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
+  const clauseBefore = clauseBeforeAt(turnText, index);
   if (NEGATOR.test(clauseBefore)) return { said: 'denied' };
   return { said: 'affirmed', clauseBefore };
 }
@@ -999,31 +1008,59 @@ export function holdsABandWord(words: unknown): boolean {
 }
 
 /**
- * The same rule for a goal's success target: WHICH WAY it binds \u2014 at least, or at most \u2014 is recorded as the user's
+ * The same rule for a goal's success target: its comparator, including strictness, is recorded as the user's
  * only when the user SAID it, in THIS turn's own typed words (`user_turn_text`). The goal-target writer stamps the
  * target as the user's (`threshold_source: 'user'`), so a direction the Agent picked and the user only approved would
  * read as the user's own.
  *
- * - The phrases, whole words only: "at least", "minimum", "no less than", "more than", "over", "above" \u2192 at least;
- *   "at most", "no more than", "under", "below", "less than", "maximum", "cap" \u2192 at most. "no less than" and
+ * - The phrases, whole words only: "at least", "minimum", "no less than" \u2192 at least; "more than", "over", "above"
+ *   \u2192 above; "at most", "no more than", "maximum", "cap" \u2192 at most; "under", "below", "less than" \u2192 below. "no less than" and
  *   "no more than" are read whole, never as a negated "less than" / "more than".
+ * - A strict phrase completed with "or equal to", or a figure followed by "or less / more" (and their direction
+ *   synonyms), is inclusive. Read the whole completion before its strict fragment; a suffix needs a stated figure.
+ *   Beside a prefix comparator, the suffix must belong to that comparator's own figure and clause, never a repeat of
+ *   the same value elsewhere ("under 4%. Last year, 4% or more of cancellations …").
  * - ASKED ("Is at least \u00a360k realistic?") says nothing; DENIED anywhere in the turn ("not at least", "must not fall
  *   below") or BOTH directions in one turn \u2192 null. Every miss makes the Agent ask which the user means.
- * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" reads once as
- *   at least; "under" beside "over" reads as both, and the Agent asks.
+ * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" holds two
+ *   different comparators; "under" beside "over" reads as both, and the Agent asks.
  */
-const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
-const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap']);
+const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|(?:less|fewer|lower|below|under|more|higher|above|over)(?:\s+than)?\s+or\s+equal\s+to|or\s+(?:less|fewer|lower|below|under|more|higher|above|over)|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
+const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'maximum', 'cap']);
+const INCLUSIVE_CEILING_WORDS: ReadonlySet<string> = new Set(['less', 'fewer', 'lower', 'below', 'under']);
+const BELOW_WORDS: ReadonlySet<string> = new Set(['less than', 'under', 'below']);
+const ABOVE_WORDS: ReadonlySet<string> = new Set(['more than', 'over', 'above']);
+type StatedComparator = 'at_least' | 'at_most' | 'above' | 'below';
 
-/** At least / at most, as the user said it in `turnText`; null when not said, asked, denied, or said both ways. */
-export function comparatorTheUserWrote(turnText: string | null | undefined): 'at_least' | 'at_most' | null {
+/** The comparator as the user said it, including strictness; null when not said, asked, denied, or contradictory. */
+export function comparatorTheUserWrote(turnText: string | null | undefined): StatedComparator | null {
   if (typeof turnText !== 'string') return null;
-  const said = new Set<'at_least' | 'at_most'>();
-  for (const m of turnText.matchAll(COMPARATOR_WORDS)) {
-    const reading = readingAt(turnText, m.index);
+  const said = new Set<StatedComparator>();
+  const figures = findStatedAmounts(turnText);
+  const comparators = [...turnText.matchAll(COMPARATOR_WORDS)].map((match) => ({
+    match, words: match[1]!.toLowerCase().replace(/\s+/g, ' '),
+  }));
+  const prefixes = comparators.filter(({ match, words }) => !words.startsWith('or ')
+    && readingAt(turnText, match.index).said === 'affirmed');
+  const prefixFigureIds = new Set(prefixes.flatMap(({ match }) => {
+    const figure = figures.find((amount) => amount.index >= match.index + match[0].length
+      && amount.index - clauseBeforeAt(turnText, amount.index).length <= match.index);
+    return figure === undefined ? [] : [figure.index];
+  }));
+  for (const { match: m, words } of comparators) {
+    const suffix = words.startsWith('or ');
+    const figure = suffix ? figures.find((amount) => {
+      const end = amount.index + amount.matchedText.length;
+      return end <= m.index && /^\s*$/.test(turnText.slice(end, m.index));
+    }) : undefined;
+    if (suffix && (figure === undefined || (prefixes.length > 0 && !prefixFigureIds.has(figure.index)))) continue;
+    const reading = readingAt(turnText, figure?.index ?? m.index);
     if (reading.said === 'asked') continue;
     if (reading.said === 'denied') return null;
-    said.add(AT_MOST_WORDS.has(m[1]!.toLowerCase().replace(/\s+/g, ' ')) ? 'at_most' : 'at_least');
+    const completed = suffix ? words.slice(3) : words.endsWith(' or equal to') ? words.split(' ')[0]! : null;
+    said.add(completed !== null ? INCLUSIVE_CEILING_WORDS.has(completed) ? 'at_most' : 'at_least'
+      : AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+      : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
   }
   return said.size === 1 ? [...said][0]! : null;
 }

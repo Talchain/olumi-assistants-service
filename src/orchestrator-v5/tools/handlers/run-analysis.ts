@@ -56,6 +56,7 @@ import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURE
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -123,7 +124,7 @@ import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
 import { leaderLicenceShadow, summaryNamesLeader } from '../../compose/leader-licence-shadow.js';
 import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
 import { config } from '../../../config/index.js';
-import { hasReducedSamplesDisclosure, withoutDirectionUnattestedOnHeldFloor } from '../../compose/claim-safety-cage.js';
+import { hasReducedSamplesDisclosure, isOlumiSideThreshold, thresholdReasonOf, withoutDirectionUnattestedOnHeldFloor } from '../../compose/claim-safety-cage.js';
 // P0 (analysis-500 diagnosis §8 FIX A) — DERIVED from the composer's copy table,
 // so a code added there stops tripping the unknown-code wire with nothing else
 // to update (trap 12: derive, never mirror).
@@ -206,7 +207,9 @@ import {
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
-import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { sentGoalThresholdOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
+import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
 import { scopeTargetNotTestableWithRanges } from '../../goal-target/scope-target-not-testable.js';
@@ -504,6 +507,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // next-step + review chip), NOT the generic retryable scenario_read_failed
       // (which would read as an infra 500). No PLoT call, no run_analysis fact.
       if (readError instanceof AnalysisNotReadyError) {
+        // The canonical reader can refuse the missing team level before returning a Run snapshot.
+        // Keep that barrier, while naming the missing range from the graph it already assessed.
+        const shareChanceBlocked = shareChanceRunBlock(readError.graph);
+        if (shareChanceBlocked !== null) {
+          throw new HandlerInvocationFailedError('The deadline chance needs a usable stated range and date', {
+            cause_kind: 'analysis_not_ready', retryable: false,
+            details: { handler_id: 'run_analysis', scenario_id: args.scenario_id,
+              reason_code: shareChanceBlocked.reason_code, next_step: shareChanceBlocked.words },
+            cause: readError,
+          });
+        }
         const verdict = readError.verdict;
         const groupedQuestions = readError.graph === undefined ? [] : groupedGoalPathLinks(readError.graph).map((link) =>
           `${link.source_label} → ${link.target_label}: ${link.question}`);
@@ -574,6 +588,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           cause: readError,
         },
       );
+    }
+
+    const shareChanceBlocked = shareChanceRunBlock(snapshot.rawPersistedGraph ?? snapshot.graph);
+    if (shareChanceBlocked !== null) {
+      throw new HandlerInvocationFailedError('The deadline chance needs a usable stated range and date', {
+        cause_kind: 'analysis_not_ready', retryable: false,
+        details: { handler_id: 'run_analysis', scenario_id: args.scenario_id,
+          reason_code: shareChanceBlocked.reason_code, next_step: shareChanceBlocked.words },
+      });
     }
 
     // --- 2.5. options_not_configured guard --------------------------------
@@ -811,7 +834,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         },
       );
     }
-    const graphForAnalysis = participation.graph;
+    // RC3 a′: an option-bound precondition stays on the canvas, but is absent from the calculation until the engine
+    // can apply it to that option alone. Identity + zero incidence + no named limit is the SAME readiness predicate.
+    // PLoT cannot return a driver, sensitivity or worth-checking row for a risk it never receives. Project BEFORE the
+    // remaining compute readers; the snapshot and persisted graph (including the stamp) are untouched.
+    const graphForAnalysis = withoutPreconditionRisks(participation.graph, snapshot.graph);
 
     // --- 3. ONE request-level scale projection, on the FINAL option set -----
     // ROUND 4: the projection runs HERE — after the scaffold, immediately
@@ -1124,7 +1151,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const plotPayload: Record<string, unknown> = {
-      graph: heldWireGraph,
+      graph: withShareByDateFrame(heldWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -2144,6 +2171,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // ⭐ A7 AS A TYPED FACT (DL 0df0e1, beat 2): a held deadline no duration limit scores is untested, and the Run says so
     // on the carrier a consumer reads, in A7's own sentence (`decision-input-ask.ts`, the one rule the chat line uses too).
+    response = withShareByDateChanceGate(response, snapshot.rawPersistedGraph ?? snapshot.graph, snapshot.goal_node_id);
     response = withUntestedHorizonWarning(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -2319,6 +2347,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       graphForAnalysis,
       snapshot.goal_constraints ?? (snapshot.rawPersistedGraph as { goal_constraints?: unknown } | undefined)?.goal_constraints,
       finalWireOptions,
+      snapshot.goal_node_id,
     );
     if (strictThresholdPins.size > 0) {
       log.info(
@@ -2773,8 +2802,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ D3 step 2 (DL 0df0e1 #87 6006078553; d5; c6): the goal chance's OWN licence, decided here and stored with the Run
     // (`goal-chance-licence.ts`): one `info` record the UI renders by identity. After the certainty decision, so an exact
     // 0 or 1 counts only where this Run earned it.
-    response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, (optionId, p) =>
-      goalCertainty.recorded && goalCertainty.decisions.some((d) => d.option_id === optionId && d.probability_of_goal === p && d.earned));
+    const earnedGoalChance = (optionId: string, p: 0 | 1): boolean =>
+      goalCertainty.recorded && goalCertainty.decisions.some((d) => d.option_id === optionId && d.probability_of_goal === p && d.earned);
+    // ISL src/services/robustness_analyzer_v2.py:1053-1055,1090, read at 3cfadcfc:
+    // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
+    // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
+    response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis);
@@ -2947,6 +2981,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Record the caller's internal cause before the single owned projection/validation boundary.
     if (withheldBecauseUnsizedPath !== undefined) {
       response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
+    }
+    // GOAL-REACH 3b (Science §(g) carve-out): a goal-chance refusal with no user action is an Olumi defect, logged by its
+    // closed reason (no labels, no figures) so it can be counted and fixed; it is never offered a control.
+    const thresholdReason = thresholdReasonOf(response);
+    if (thresholdReason !== null) {
+      log.info(
+        { event: 'run_analysis.goal_threshold_reason', request_id: invocation.requestId, scenario_id: args.scenario_id,
+          reason: thresholdReason.reason, root_case: thresholdReason.root_case },
+        'PLoT refused the goal chance; its carried reason (closed code), counted per Run',
+      );
+    }
+    if (thresholdReason !== null && isOlumiSideThreshold(thresholdReason)) {
+      log.warn(
+        { event: 'run_analysis.goal_threshold_olumi_side', request_id: invocation.requestId, scenario_id: args.scenario_id,
+          reason: thresholdReason.reason, root_case: thresholdReason.root_case },
+        'PLoT refused the goal chance for an Olumi-side reason (Science §(g) defect row)',
+      );
     }
     // Option C: compute in-process before the existing fact commit; no callback and no brief carry.
     const factorEnrichments = await agentFactorEnrichments(snapshot.rawPersistedGraph ?? snapshot.graph,

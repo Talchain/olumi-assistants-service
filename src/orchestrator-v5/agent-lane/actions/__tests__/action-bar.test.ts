@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../__tests__/licence-test-graphs.js';
 /**
  * ⭐ S-B — the registry, the ranker and the press dispatcher, pure (lane ACTION-BAR-CEE; ACTION-SYSTEM-DRAFT §C/§D/§E;
  * github-a2 contract amendments 1–11 + v1.1). The route rows (every press typed, reload === live, stale offers, double
@@ -27,6 +28,8 @@ import { computeProposalId } from '../../proposal.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone keeps the independent nothing-in-scope controls.
+const legacyD3 = () => legacyDoorGraph(D3.graph);
 const SCENARIO = '7d2e3f40-5b6c-4d7e-8f90-a1b2c3d4e5f6';
 const AT = '2026-10-07T12:00:00.000Z';
 const PARTICIPATION = [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }];
@@ -54,9 +57,9 @@ describe('the registry: ONE dispatch table, total', () => {
   it('every action has its handler (tsc enforces the Record; this row pins the names)', () => {
     expect(Object.keys(HANDLERS).sort()).toEqual([...ACTION_IDS].sort());
   });
-  it('slices 1 + 2a + 2b are exactly the twelve typed actions', () => {
-    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates']);
-    for (const held of ['set_target', 'outside_view', 'trade_offs', 'bias_check', 'anchoring']) {
+  it('slices 1 + 2a + 2b + 3 + GOAL-REACH are exactly the fifteen typed actions (GOAL-REACH 3b adds set_current_level)', () => {
+    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates', 'bias_check', 'confirm_reading', 'set_current_level']);
+    for (const held of ['set_target', 'outside_view', 'trade_offs', 'anchoring']) {
       expect((ACTION_IDS as readonly string[]).includes(held), held).toBe(false);
     }
   });
@@ -67,7 +70,7 @@ describe('the registry: ONE dispatch table, total', () => {
     }));
     expect(fixed).toEqual({ review: 'agent-next-review-decision', what_changes: 'agent-next-what-would-change', strengthen: 'agent-next-strengthen',
       pre_mortem: 'agent-next-pre-mortem', more_options: 'agent-next-widen',
-      frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id, bias_anchoring: 'act:bias_anchoring', check_estimates: 'act:check_estimates' });
+      frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id, bias_anchoring: 'act:bias_anchoring', check_estimates: 'act:check_estimates', bias_check: 'act:bias_check', confirm_reading: 'act:confirm_reading', set_current_level: 'act:set_current_level' });
     for (const [id, press] of Object.entries(fixed)) expect(actionOfPress(press, ACTION_REGISTRY[id as keyof typeof ACTION_REGISTRY].user_line)).toBe(id);
     // SR-5: WIDEN's risks chip id is shared with the pre-mortem worksheet's "Add this as a risk" (its own message), which
     // must stay an ordinary Agent turn: the id alone is never More risks.
@@ -102,7 +105,7 @@ describe('the registry: ONE dispatch table, total', () => {
 
 describe('the ranker: same read → byte-identical bar; a changed revision → a different state_key', () => {
   const reads: [string, ActionRead][] = [
-    ['pre-run D1', preRun(D1.graph)], ['withheld D1', ran(D1.graph, WITHHELD)], ['licensed D3', ran(D3.graph, { permitted: true, separation: 'separated' })],
+    ['pre-run D1', preRun(D1.graph)], ['withheld D1', ran(D1.graph, WITHHELD)], ['licensed D3', ran(legacyD3(), { permitted: true, separation: 'separated' })],
     ['unreadable', { scenarioId: SCENARIO, graph: { nodes: 'x' } }],
   ];
   it.each(reads)('%s: two derivations from independent copies are byte-identical', (_name, read) => {
@@ -148,7 +151,7 @@ describe('the ranker: same read → byte-identical bar; a changed revision → a
 
 describe('the layout contract (github-a2 amendments 3–4; §E.2)', () => {
   const states: [string, ActionRead][] = [
-    ['pre-run D1', preRun(D1.graph)], ['withheld D1 (S1 card)', ran(D1.graph, WITHHELD)], ['licensed D3 (no S1 link)', ran(D3.graph, { permitted: true, separation: 'separated' })],
+    ['pre-run D1', preRun(D1.graph)], ['withheld D1 (S1 card)', ran(D1.graph, WITHHELD)], ['licensed D3 (no S1 link)', ran(legacyD3(), { permitted: true, separation: 'separated' })],
     ['no graph', { scenarioId: SCENARIO, graph: null }],
   ];
   it.each(states)('%s: priority holds no standard id; (action, target) is unique; every offer is complete', (_n, read) => {
@@ -175,7 +178,7 @@ describe('the layout contract (github-a2 amendments 3–4; §E.2)', () => {
   });
   it('Strengthen is S1 only: enabled with the S1 card (D1); NOT offered on a bound Run with no unsized link (D3)', () => {
     expect(offers(bar(ran(D1.graph, WITHHELD))).find((o) => o.action_id === 'strengthen')?.enabled).toBe(true);
-    expect(offers(bar(ran(D3.graph, { permitted: true, separation: 'separated' }))).some((o) => o.action_id === 'strengthen')).toBe(false);
+    expect(offers(bar(ran(legacyD3(), { permitted: true, separation: 'separated' }))).some((o) => o.action_id === 'strengthen')).toBe(false);
   });
   it('no goal → Pre-mortem and More options are disabled with a reason the user can act on', () => {
     const g = structuredClone(D3.graph) as G;
@@ -250,7 +253,7 @@ describe('the press dispatcher: re-derived on the CURRENT state (amendment 6)', 
       reply: { reason: 'needs_current_analysis', text: 'I can’t strengthen the model yet: it needs a current analysis first.', exits: [{ kind: 'run' }] } });
   });
   it('Strengthen on a bound Run with nothing in S1 scope → typed reply, with other offers as exits', () => {
-    const d = decidePress({ id: 'agent-next-strengthen' }, actionFactsOf(ran(D3.graph, { permitted: true, separation: 'separated' })));
+    const d = decidePress({ id: 'agent-next-strengthen' }, actionFactsOf(ran(legacyD3(), { permitted: true, separation: 'separated' })));
     expect(d.kind).toBe('reply');
     if (d.kind !== 'reply') return;
     expect(d.reply.reason).toBe('nothing_in_scope');
@@ -279,6 +282,11 @@ describe('the press dispatcher: re-derived on the CURRENT state (amendment 6)', 
   });
 });
 
+it('Science 393023: as-served D3 none → Strengthen enabled and its press routes', () => {
+  const read = ran(D3.graph, { permitted: true, separation: 'separated' });
+  expect(offers(bar(read)).find(o => o.action_id === 'strengthen')?.enabled).toBe(true);
+  expect(decidePress({ id: 'agent-next-strengthen' }, actionFactsOf(read)).kind).toBe('route');
+});
 
 const gapGraph = (chance = true): G => ({ nodes: [
   { id: 'goal', kind: 'goal', label: 'Launch on time', observed_state: { unit: chance ? '% likelihood of on-time launch' : 'features' } },
@@ -525,17 +533,19 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
     ].join('\n');
     expect(anchoring).toMatchObject({ kind: 'reply', reply: { text: expected, outcome: 'ran', exits: [] } });
     expect(estimates).toMatchObject({ kind: 'reply', reply: { outcome: 'ran', exits: [], text: [
-      "Olumi's estimates that this result rests on:",
-      "- ‘Far’: 25%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Near’: 15%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Extra’: 10%. That's Olumi's estimate, not a measured figure.",
-      "If you have your own figure for any of these, tell me and I'll propose it for you to approve.",
+      'Olumi supplied 3 of the figures behind this result: 3 values.',
+      'For example:',
+      'Near (value)',
+      'Extra (value)',
+      'Far (value)',
+      "1 you accepted from Olumi's suggestions.",
     ].join('\n') } });
     for (const d of [anchoring, estimates]) {
       if (d.kind !== 'reply') throw new Error('expected typed reply');
       expect(d.reply.text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
-      expect(d.reply.text.split('\n').filter(l => l.startsWith('- '))).toHaveLength(3);
     }
+    if (anchoring.kind !== 'reply') throw new Error('expected typed reply');
+    expect(anchoring.reply.text.split('\n').filter(l => l.startsWith('- '))).toHaveLength(3);
   });
   it.each(['frame', 'analyse', 'decide', 'review', null] as const)('canonical stage %s gates exactly one anchoring receipt badge, absent for check_estimates', stage => {
     const facts = { ...actionFactsOf(read()), canonicalStage: stage };
@@ -543,7 +553,8 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
       const d = decidePress({ id: `act:${id}` }, facts);
       if (d.kind !== 'reply') throw new Error('expected typed reply');
       const receipt = actionReceiptOf(d.press, facts.revision, 'ran', undefined, d.reply.science);
-      const expected = id === 'bias_anchoring' && (stage === 'frame' || stage === 'analyse');
+      // Science 393023: a compared Run (≥2 options) reads 'decide'; DSK-B-001 applies there too (decide→evaluate).
+      const expected = id === 'bias_anchoring' && (stage === 'frame' || stage === 'analyse' || stage === 'decide');
       expect(receipt.science).toEqual(expected ? resolveDskClaimProvenance('DSK-B-001') : undefined);
       expect(JSON.stringify(receipt).match(/DSK-B-001/g)?.length ?? 0).toBe(expected ? 1 : 0);
     }
@@ -551,9 +562,14 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
   it('offers are enabled only with points, always in more; check_estimates also needs a bound Run; both keys bind changed Runs', () => {
     const r = read(); const facts = actionFactsOf(r); const b = actionBarOf(facts);
     for (const id of ['bias_anchoring', 'check_estimates'] as const) expect(b.more.find(o => o.action_id === id)).toMatchObject({ enabled: true });
-    const pre = bar(preRun(estimateGraph()));
-    expect(pre.more.some(o => o.action_id === 'bias_anchoring')).toBe(true);
-    expect(offers(pre).some(o => o.action_id === 'check_estimates')).toBe(false);
+    // DL on #2766: both speak of "this result", so a pre-Run bar offers neither; a stale press says it needs a Run.
+    const preFacts = actionFactsOf(preRun(estimateGraph()));
+    const pre = actionBarOf(preFacts);
+    expect(estimatePointsOf(preFacts).length, 'precondition: the model has Olumi estimates').toBeGreaterThan(0);
+    for (const id of ['bias_anchoring', 'check_estimates'] as const) {
+      expect(offers(pre).some(o => o.action_id === id), id).toBe(false);
+      expect(decidePress({ id: `act:${id}` }, preFacts)).toMatchObject({ kind: 'reply', reply: { reason: 'needs_current_analysis', exits: [{ kind: 'run' }] } });
+    }
     const later = actionFactsOf({ ...r, analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-07T13:00:00.000Z' } } });
     for (const id of ['bias_anchoring', 'check_estimates'] as const) expect(offerKeyOf(later, id)).not.toBe(offerKeyOf(facts, id));
     const empty = actionFactsOf(preRun({ nodes: [], edges: [] }));
@@ -561,5 +577,46 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
     expect(decidePress({ id: 'act:bias_anchoring', parameters: { offer_key: '0123456789abcdef' } }, empty)).toMatchObject({ kind: 'reply', reply: {
       text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [],
     } });
+  });
+});
+
+describe('P45 slice 3: Bias check is a standing typed model check', () => {
+  it('Bias check is enabled only in more on each readable captured state, never priority or standard', () => {
+    for (const read of [preRun(D1.graph), ran(D1.graph, WITHHELD), ran(D3.graph, { permitted: true, separation: 'separated' })]) {
+      const b = bar(read);
+      expect(b.more.find(o => o.action_id === 'bias_check')).toMatchObject({
+        label: 'Bias check', icon: 'ScanSearch', group: 'method', press_id: 'act:bias_check', enabled: true,
+        user_line: 'Where could a common reasoning pattern bite in this model?',
+        why_now: 'See where common reasoning patterns could bite in this model.',
+      });
+      expect(ids(b.priority)).not.toContain('bias_check');
+      expect(ids(b.standard)).not.toContain('bias_check');
+      expect(b.more.at(-1)?.action_id, 'the lowest tier is appended last').toBe('bias_check');
+    }
+    expect(ids(offers(bar({ scenarioId: SCENARIO, graph: null })))).not.toContain('bias_check');
+  });
+  it('act:bias_check with fired patterns is a typed reply with a ran outcome and no science receipt field', () => {
+    const facts = actionFactsOf(ran(estimateGraph(), WITHHELD));
+    const b = actionBarOf(facts);
+    expect(b.bias_risk?.items.length, 'precondition: the model has a fired pattern').toBeGreaterThan(0);
+    const d = decidePress({ id: 'act:bias_check' }, facts, b);
+    expect(d).toMatchObject({ kind: 'reply', press: { action: 'bias_check' }, reply: { outcome: 'ran' } });
+    if (d.kind !== 'reply') return;
+    expect(d.reply.text).toMatch(/^Checked: Narrow framing, Anchoring\./);
+    expect(d.reply.science).toBeUndefined();
+    expect(actionReceiptOf(d.press, facts.revision, d.reply.outcome!, undefined, d.reply.science))
+      .toMatchObject({ action_id: 'bias_check', outcome: 'ran' });
+    expect(d.reply.text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);
+  });
+  it('act:bias_check with nothing checkable (no goal, no Run) is a typed ran reply that says so, never "none fire"', () => {
+    const facts = actionFactsOf(preRun({ nodes: [], edges: [] }));
+    const b = actionBarOf(facts);
+    expect(b.bias_risk, 'precondition: no trigger fires').toBeUndefined();
+    expect(decidePress({ id: 'act:bias_check' }, facts, b)).toMatchObject({
+      kind: 'reply', press: { action: 'bias_check' }, reply: {
+        outcome: 'ran', exits: [],
+        text: 'Not checked yet: Narrow framing, because the model needs a goal first.\nNot checked yet: Anchoring, because it needs a current analysis first.',
+      },
+    });
   });
 });

@@ -57,9 +57,9 @@ const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown
   const raw = row ? (jsonbOrder(JSON.parse(JSON.stringify(row.pending_actions))) as unknown[]) : [];
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
-let tick = 0;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  readExistingScenario: vi.fn(async (sid: string) => ({ userId: null, graph: graphOf.get(sid) ?? null, briefText: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => {
     const row = rows.get(`${sid}:${turnId}`);
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
@@ -71,13 +71,12 @@ const store = {
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
-      tick += 1;
       rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash,
         assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
         handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
-        created_at: new Date(Date.UTC(2026, 8, 27, 0, 0, tick)).toISOString() });
+        created_at: new Date().toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) {
         graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
@@ -169,21 +168,23 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     vi.resetModules();
     const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
-    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const { default: scenarioGraphRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async (req) => {
-      const id = (req.params as { id: string }).id;
-      const g = graphOf.get(id) ?? null;
-      return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
-    });
+    await app.register(scenarioGraphRoute);
     await app.register(ceeOrchestratorRouteV2);
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 600_000);
-  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; atFloorRead = undefined; });
+  afterAll(async () => { await app?.close(); vi.useRealTimers(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => {
+    // App emission and DB row times share a clock. Only Date is fake; network/server timers stay real.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-08T12:00:00.000Z'));
+    nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; atFloorRead = undefined; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
+    // Separate user turns beyond the resolver's 2 s app/DB skew allowance.
+    vi.setSystemTime(Date.now() + 10_000);
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     return r.json() as Body;
@@ -201,7 +202,7 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
   };
   const newRisk = () => graphNow().nodes.find((x) => x.kind === 'risk' && x.label === 'Competitive response');
   const RISK_MSG = 'Add a competitive response risk: a price rise could provoke competitors, which lowers revenue.';
-  const proposeRisk = (args: Record<string, unknown> = {}, message = RISK_MSG) => {
+  const proposeRisk = (args: Record<string, unknown> = {}, message = RISK_MSG, payload: Record<string, unknown> = {}) => {
     script = [
       () => fnCall('propose_new_risk', {
         label: 'Competitive response',
@@ -212,12 +213,12 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
       }),
       () => say('I would add the risk "Competitive response", driven by Price and lowering Revenue. Shall I add it?'),
     ];
-    return turn({ message });
+    return turn({ message, ...payload });
   };
 
   type Field = { field_id: string; kind: string; from_id: string; to_id: string; from_label: string; to_label: string; direction: string;
     current: { band: string; source: string }; allowed_bands: string[]; editable: boolean };
-  type Proposal = { proposal_id: string; revision: string; digest: string; approve_action: Chip; decline_action: Chip; fields: Field[]; missing: { node_id: string; label: string; kind: string; what: string }[] };
+  type Proposal = { proposal_id: string; revision: string; digest: string; issued_turn_id: string | null; approve_action: Chip; decline_action: Chip; fields: Field[]; missing: { node_id: string; label: string; kind: string; what: string }[] };
   type Fields = { version: number; graph_hash: string; proposals: Proposal[] };
   /** The carrier's own id: the stored revision a panel names. */
   const revisionOf = (pa: unknown): string => (pa as { id: string }).id;
@@ -536,4 +537,394 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
       expect(t.assistant_text, t.assistant_text).toContain(`The held change to add the risk '${label}' was set aside because only three changes can wait at once`);
     }
   }, 240_000);
+
+  it('RED (DL 7 Oct, Canvas capture #2614): the PROPOSING turn already offers "Not now" beside approve and "Change something first"; pressing it there sets the proposal aside', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeRisk();
+    const approve = approveChipOf(t1)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const ids = t1.suggested_actions.map((c) => c.id);
+    expect(ids.slice(ids.indexOf(approve.id), ids.indexOf(approve.id) + 3), JSON.stringify(ids))
+      .toEqual([approve.id, 'agent-amend-proposal', `agent-decline-proposal:${ref}`]);
+    expect(t1.suggested_actions.find((c) => c.id === `agent-decline-proposal:${ref}`)).toEqual(expect.objectContaining({ label: 'Not now', message: 'Not now.' }));
+    const before = bytes();
+    const t2 = await turn({ message: 'Not now.', source: 'chip', chip: { id: `agent-decline-proposal:${ref}` } });
+    expect(t2.assistant_text, t2.assistant_text).toContain("Set aside: the risk 'Competitive response'. Nothing in the model changed.");
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+  it('R-refused-gmh: stale Submit re-offers the exact held risk approve, Change and Not now controls', async () => {
+    graphOf.set(SCENARIO, seedGraph()); const b = await proposeRisk(); const approve = approveChipOf(b)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length); const shown = shownOf(b, ref);
+    const before = bytes();
+    const r = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id },
+      proposal_edits: { proposal_id: ref, revision: shown.revision, digest: 'stale', graph_hash: await hashNow(),
+        fields: [{ field_id: shown.fields[0]!.field_id, band: 'very_strong' }] } });
+    expect(bytes()).toBe(before);
+    expect(r._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false }));
+    expect(r.suggested_actions).toContainEqual(shown.approve_action);
+    expect(r.suggested_actions).toContainEqual(shown.decline_action);
+    expect(r.suggested_actions).toContainEqual(expect.objectContaining({ id: 'agent-amend-proposal', label: 'Change something first' }));
+  }, 120_000);
+
+  it('R-lapse-gmh-control: the held risk model-change lapse sentence stays byte-identical', async () => {
+    graphOf.set(SCENARIO, seedGraph()); await proposeRisk();
+    const held = (await heldOnLatestRow())[0]!;
+    const node = held.action.inline_patch!.operations!.find(o => o.op === 'add_node')!.value as { label: string };
+    const g = graphNow(); graphOf.set(SCENARIO, { ...g, nodes: g.nodes.filter(n => n.id !== 'goal_x'), edges: g.edges.filter(e => e.to !== 'goal_x') });
+    const r = await turn({ message: 'Explain what is waiting.' });
+    expect(r.assistant_text).toContain(`The held change to add the risk '${node.label}' no longer fits the model as it now stands, so it has lapsed; say the word if you still want it.`);
+  }, 120_000);
+
+  const P53_STALE_CARD = 'Nothing changed. That card is out of date: the change it shows has been replaced. Use the newest card for it.';
+  const binding = (fields: Fields, proposal: Proposal) => ({ proposal_id: proposal.proposal_id, revision: proposal.revision,
+    digest: proposal.digest, graph_hash: fields.graph_hash, fields: [] });
+  const press = (proposal: Proposal) => ({ message: proposal.approve_action.message, source: 'chip', chip: { id: proposal.approve_action.id } });
+  const reload = async (): Promise<{ proposal_fields: Fields; conversation_turns: { turn_id: string }[] }> => {
+    const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    return r.json() as { proposal_fields: Fields; conversation_turns: { turn_id: string }[] };
+  };
+
+  it('P53-gmh-1 RED: an older 10–30% card cannot approve the newer 40–60% hold with the same id, words and graph; digest is checked before the writer door', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const oldTurn = randomUUID();
+    const oldMessage = `${RISK_MSG} It may happen 10–30% in the next 6 months.`;
+    const old = await proposeRisk({ caused_by: [] }, oldMessage, { turn_id: oldTurn });
+    const oldFields = fieldsOf(old)!;
+    const oldCard = oldFields.proposals[0]!;
+    expect(oldCard.issued_turn_id).toBe(oldTurn);
+    expect(oldCard.approve_action.detail).toContain('10–30%');
+    const fresh = await proposeRisk({ caused_by: [] }, `${RISK_MSG} It may happen 40–60% in the next 6 months.`);
+    const freshTurn = latestRow()!.turn_id;
+    const freshFields = fieldsOf(fresh)!;
+    const freshCard = shownOf(fresh, oldCard.proposal_id);
+    // Target-keyed handles and words intentionally remain the same on supersession; the card keeps its own revision.
+    expect(freshCard.proposal_id).toBe(oldCard.proposal_id);
+    expect(freshCard.revision).not.toBe(oldCard.revision);
+    expect(freshCard.approve_action.id).toBe(oldCard.approve_action.id);
+    expect(freshCard.approve_action.message).toBe(oldCard.approve_action.message);
+    expect(freshFields.graph_hash).toBe(oldFields.graph_hash);
+    expect(freshCard.issued_turn_id).toBe(freshTurn);
+    expect(freshCard.approve_action.detail).toContain('40–60%');
+    expect(freshCard.digest).not.toBe(oldCard.digest);
+    // A warm replay retains the old rendered offer. It must carry that old offer's consent binding to the real door.
+    const replay = await turn({ turn_id: oldTurn, message: oldMessage });
+    expect(shownOf(replay, oldCard.proposal_id).issued_turn_id).toBe(oldTurn);
+    expect(shownOf(replay, oldCard.proposal_id).digest).toBe(oldCard.digest);
+    expect(shownOf(replay, oldCard.proposal_id).approve_action.detail).toBe(oldCard.approve_action.detail);
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const writerRows = () => [...rows.values()].filter(row => row.scenario_id === SCENARIO && !row.request_hash.startsWith('agent_turn:')).length;
+    const writerRowsBefore = writerRows();
+    const r = await turn({ ...press(oldCard), proposal_edits: binding(oldFields, oldCard) });
+    expect(r._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false })]);
+    expect(r.assistant_text).toBe(P53_STALE_CARD);
+    expect(bytes(), 'the older card writes no graph bytes').toBe(before);
+    expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore, 'zero graph-bearing writes').toBe(0);
+    expect(writerRows(), 'the old revision refuses before dispatching any writer door').toBe(writerRowsBefore);
+    expect(shownOf(r, oldCard.proposal_id).digest, 'the newer hold stays available').toBe(freshCard.digest);
+    // Independently bind the rendered words: even a caller that substitutes the CURRENT revision cannot authorise
+    // what the older card showed. This isolates digest validation from revision/hash guards and its writer defence.
+    const digestOnly = await turn({ ...press(oldCard), proposal_edits: { ...binding(freshFields, freshCard), digest: oldCard.digest } });
+    expect(digestOnly._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false })]);
+    expect(digestOnly.assistant_text).toBe(P53_STALE_CARD);
+    expect(bytes()).toBe(before);
+    expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore).toBe(0);
+    expect(writerRows(), 'the confirmHeld digest check refuses before dispatching any writer door').toBe(writerRowsBefore);
+    // The empty-fields wording is the same when it is the graph binding, rather than the revision or digest, that expired.
+    const graphOnly = await turn({ ...press(freshCard), proposal_edits: { ...binding(freshFields, freshCard), graph_hash: `${freshFields.graph_hash}-older` } });
+    expect(graphOnly._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false })]);
+    expect(graphOnly.assistant_text).toBe(P53_STALE_CARD);
+    expect(bytes()).toBe(before);
+    expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore).toBe(0);
+    expect(writerRows()).toBe(writerRowsBefore);
+    // The replacement can also change its public copy. The old card's genuine displayed words must not mask its
+    // stale revision with an "approval required" / edit-values refusal before the bound record is checked.
+    const carrierRow = latestRow()!;
+    carrierRow.pending_actions = carrierRow.pending_actions.map(raw => {
+      const pending = raw as Record<string, unknown>;
+      return pending.id !== freshCard.revision ? raw : { ...pending,
+        action: { ...(pending.action as Record<string, unknown>), public_message: 'Approve adding the updated Competitive response risk.' } };
+    });
+    const obsoleteWords = await turn({ ...press(oldCard), proposal_edits: binding(oldFields, oldCard) });
+    expect(obsoleteWords._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false, refusal: 'edits_superseded' })]);
+    expect(obsoleteWords.assistant_text).toBe(P53_STALE_CARD);
+    expect(bytes()).toBe(before);
+    expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore).toBe(0);
+    expect(writerRows()).toBe(writerRowsBefore);
+  }, 180_000);
+
+  it('P53-gmh-1b RED: the writer preserves the exact empty-binding refusal for revision, digest and graph mismatches', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const offer = await proposeRisk();
+    const fields = fieldsOf(offer)!; const card = fields.proposals[0]!;
+    const before = bytes(); const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    for (const key of ['revision', 'digest', 'graph_hash'] as const) {
+      const refused = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', turn_class: 'frame', source: 'chip',
+        message: card.approve_action.message,
+        chip: { id: card.proposal_id, parameters: { proposal_edits: { ...binding(fields, card), [key]: 'an-older-card' } } },
+      } });
+      expect(refused.statusCode, refused.body.slice(0, 400)).toBe(200);
+      expect(refused.json().assistant_text, key).toBe(P53_STALE_CARD);
+      expect(bytes(), key).toBe(before);
+      expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore, key).toBe(0);
+    }
+  }, 120_000);
+
+  it('P53-gmh-2 RED: current empty-fields binding commits with byte-equal plain-approve reply, graph and receipts', async () => {
+    const approveTwin = async (bound: boolean) => {
+      graphOf.set(SCENARIO, seedGraph());
+      const b = await proposeRisk({ caused_by: [] }, `${RISK_MSG} It may happen 40–60% in the next 6 months.`);
+      const f = fieldsOf(b)!; const p = f.proposals[0]!;
+      const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+      const r = await turn({ ...press(p), ...(bound ? { proposal_edits: binding(f, p) } : {}) });
+      expect(r._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+      expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore).toBe(1);
+      expect(await heldOnLatestRow()).toEqual([]);
+      expect(r.assistant_text).not.toMatch(/You set|Left as Olumi/);
+      const receipts = [...rows.values()].filter(row => row.scenario_id === SCENARIO).flatMap(row => row.handler_facts);
+      return { reply: r.assistant_text, graph: bytes(), receipts,
+        calls: r._agent.tool_calls.map(({ proposal_id: _proposalId, ...call }) => call) };
+    };
+    const bound = await approveTwin(true);
+    nextScenario();
+    const plain = await approveTwin(false);
+    expect(bound.reply).toBe(plain.reply);
+    expect(bound.graph).toBe(plain.graph);
+    expect(bound.receipts).toEqual(plain.receipts);
+    expect(bound.calls).toEqual(plain.calls);
+  }, 180_000);
+
+  it('P53-gmh-3 RED: latest-turn replay and reload bind the later hold by id, then its empty-fields approve commits', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const first = await proposeRisk();
+    const firstTurn = latestRow()!.turn_id;
+    const latest = await proposeOption();
+    const latestTurn = latestRow()!.turn_id;
+    const latestCard = fieldsOf(latest)!.proposals.find(p => p.proposal_id !== fieldsOf(first)!.proposals[0]!.proposal_id)!;
+    const callsBefore = openAiCalls;
+    const replay = await turn({ turn_id: latestTurn, message: 'Also add an option: test £54 at release.' });
+    expect(openAiCalls).toBe(callsBefore);
+    expect(replay.assistant_text).toBe(latest.assistant_text);
+    expect(shownOf(replay, latestCard.proposal_id).issued_turn_id).toBe(latestTurn);
+    expect(shownOf(replay, fieldsOf(first)!.proposals[0]!.proposal_id).issued_turn_id).toBe(firstTurn);
+    const restored = await reload();
+    expect(restored.proposal_fields.proposals.map(p => p.proposal_id)).toEqual(fieldsOf(latest)!.proposals.map(p => p.proposal_id));
+    const restoredCard = restored.proposal_fields.proposals.find(p => p.proposal_id === latestCard.proposal_id)!;
+    expect(restoredCard.issued_turn_id).toBe(latestTurn);
+    expect(restoredCard.digest).toBe(latestCard.digest);
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const r = await turn({ ...press(restoredCard), proposal_edits: binding(restored.proposal_fields, restoredCard) });
+    expect(r._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: latestCard.proposal_id })]);
+    expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore).toBe(1);
+    expect(graphNow().nodes.some(node => node.label === 'Test £54 at release')).toBe(true);
+    expect((await heldOnLatestRow()).map(p => p.chip_id)).toEqual([fieldsOf(first)!.proposals[0]!.proposal_id]);
+  }, 180_000);
+
+  it('P53-gmh-4 RED: graph read preserves hold order and binds each revision to its earliest issuing answer, unmatched to null', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const first = await proposeRisk(); const firstTurn = latestRow()!.turn_id; const firstCard = fieldsOf(first)!.proposals[0]!;
+    const second = await proposeOption(); const secondTurn = latestRow()!.turn_id;
+    const secondCard = fieldsOf(second)!.proposals.find(p => p.proposal_id !== firstCard.proposal_id)!;
+    // A later answer carries both revisions again. The binding must remain with the earlier issuing rows.
+    script = [() => say('Both changes are still waiting for your approval.')];
+    await turn({ message: 'What is waiting?' });
+    const latestTurn = latestRow()!.turn_id;
+    expect(latestTurn).not.toBe(firstTurn); expect(latestTurn).not.toBe(secondTurn);
+    const persisted = await parsedPending(latestRow(), SCENARIO);
+    const orphan = { ...(persisted[0] as Record<string, unknown>), id: randomUUID(), chip_id: 'gmh_000000000001' };
+    // An imported/older hold can be read from the pending carrier without a conversation row that issued it.
+    // A claim marker is not an issuing answer, even if it happens to contain that carrier.
+    const claimTurn = `${randomUUID()}:claim`;
+    await store.append({ scenario_id: SCENARIO, turn_id: claimTurn, request_hash: 'agent_turn:claim-fixture',
+      pending_actions: [orphan] });
+    const originalRawRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async () => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === SCENARIO));
+    store.readMostRecentPendingActions.mockImplementationOnce(async () => [...persisted, orphan]);
+    try {
+      const restored = await reload();
+      expect(restored.proposal_fields.proposals.map(p => p.proposal_id)).toEqual([firstCard.proposal_id, secondCard.proposal_id, 'gmh_000000000001']);
+      expect(restored.proposal_fields.proposals.map(p => [p.proposal_id, p.issued_turn_id])).toEqual([
+        [firstCard.proposal_id, firstTurn], [secondCard.proposal_id, secondTurn], ['gmh_000000000001', null],
+      ]);
+      expect(restored.conversation_turns.map(row => row.turn_id)).toContain(firstTurn);
+      expect(restored.conversation_turns.map(row => row.turn_id)).toContain(secondTurn);
+      expect(restored.conversation_turns.map(row => row.turn_id)).not.toContain(claimTurn);
+    } finally { store.readRecent.mockImplementation(originalRawRecent); }
+    // Production readRecent carries conversation metadata/text, but omits pending_actions. The graph reader must
+    // recover each carrier through the existing exact-turn read rather than losing the issuing reply on reload.
+    const compactHistory = [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === SCENARIO && !row.turn_id.endsWith(':claim'))
+      .map(({ pending_actions: _pending, ...row }) => row);
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async () => compactHistory as Row[]);
+    const committedReadsBefore = store.readCommittedTurn.mock.calls.length;
+    try {
+      const withoutInlineCarriers = await reload();
+      expect(withoutInlineCarriers.proposal_fields.proposals.map(p => [p.proposal_id, p.issued_turn_id])).toEqual([
+        [firstCard.proposal_id, firstTurn], [secondCard.proposal_id, secondTurn],
+      ]);
+      const committedReads = store.readCommittedTurn.mock.calls.slice(committedReadsBefore);
+      expect(committedReads.length, 'at most one candidate and one predecessor read per hold').toBeLessThanOrEqual(4);
+      expect(committedReads.map(([, turnId]) => turnId)).toEqual([firstTurn, secondTurn, firstTurn]);
+    } finally { store.readRecent.mockImplementation(originalRecent); }
+    // Live carry-forward agrees with reload and never moves an older hold to the newest reply.
+    expect(shownOf(second, firstCard.proposal_id).issued_turn_id).toBe(firstTurn);
+    expect(shownOf(second, secondCard.proposal_id).issued_turn_id).toBe(secondTurn);
+  }, 180_000);
+
+  it('P53-gmh-4b RED: a hold emitted before the loaded window binds to null with zero extra store reads', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const first = await proposeRisk();
+    const firstRow = latestRow()!;
+    const firstCard = fieldsOf(first)!.proposals[0]!;
+    // Model a hold carried beyond the 200-row window without 205 model turns.
+    for (let index = 1; index <= 205; index += 1) {
+      const turnId = randomUUID();
+      const key = `${SCENARIO}:${turnId}`;
+      rows.set(key, { ...firstRow, id: `carried-${index}`, turn_id: turnId,
+        created_at: new Date(Date.parse(firstRow.created_at) + index * 1000).toISOString(),
+        user_message: `Continue the shared reasoning ${index}.`, assistant_message: 'That change is still waiting.',
+        pending_actions: JSON.parse(JSON.stringify(firstRow.pending_actions)) as unknown[] });
+      order.push(key);
+    }
+    const ownRows = () => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === SCENARIO && !row.turn_id.endsWith(':claim'));
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    const countTurns = vi.fn(async () => ownRows().length);
+    Object.assign(store, { countTurns });
+    // Production history omits the carriers, so zero exact-row reads cannot be an inline-row shortcut.
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => ownRows()
+      .filter(row => row.scenario_id === sid).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const recentReadsBefore = store.readRecent.mock.calls.length;
+    const committedReadsBefore = store.readCommittedTurn.mock.calls.length;
+    try {
+      const restored = await reload();
+      expect(restored.proposal_fields.proposals.map(p => [p.proposal_id, p.issued_turn_id]))
+        .toEqual([[firstCard.proposal_id, null]]);
+      expect(restored.proposal_fields.proposals[0]!.digest).toBe(firstCard.digest);
+      // The graph's existing context read plus its 200-row conversation read; issuance adds neither history reads
+      // nor exact-row reads, even when countTurns is available and the loaded window is full.
+      expect(store.readRecent.mock.calls.slice(recentReadsBefore)).toEqual([[SCENARIO], [SCENARIO, 200]]);
+      expect(store.readCommittedTurn.mock.calls.slice(committedReadsBefore)).toEqual([]);
+      expect(countTurns).not.toHaveBeenCalled();
+      expect(restored.conversation_turns.map(row => row.turn_id)).not.toContain(firstRow.turn_id);
+      expect(bytes()).toBe(before);
+      expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore).toBe(0);
+    } finally {
+      delete (store as typeof store & { countTurns?: typeof countTurns }).countTurns;
+      store.readRecent.mockImplementation(originalRecent);
+    }
+  }, 120_000);
+
+  it('P53-gmh-4c RED: issuer outside a full loaded window cannot bind to the oldest carry-forward row within +1 s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const first = await proposeRisk();
+    const issuer = latestRow()!;
+    const card = fieldsOf(first)!.proposals[0]!;
+    // All 200 retained answers still carry the revision. Their oldest row is only one second after emission:
+    // proximity is not proof of issuance when the preceding answer has fallen outside the loaded window.
+    for (let index = 0; index < 200; index += 1) {
+      const turnId = randomUUID();
+      const key = `${SCENARIO}:${turnId}`;
+      rows.set(key, { ...issuer, id: `near-carried-${index}`, turn_id: turnId,
+        created_at: new Date(Date.parse(issuer.created_at) + 1000 + index * 10).toISOString(),
+        user_message: `Continue the shared reasoning ${index}.`, assistant_message: 'That change is still waiting.',
+        pending_actions: structuredClone(issuer.pending_actions) });
+      order.push(key);
+    }
+    const ownRows = () => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === SCENARIO && !row.turn_id.endsWith(':claim'));
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => ownRows()
+      .filter(row => row.scenario_id === sid).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    const recentReadsBefore = store.readRecent.mock.calls.length;
+    const before = bytes();
+    try {
+      const restored = await reload();
+      expect(store.readRecent.mock.calls.slice(recentReadsBefore)).toContainEqual([SCENARIO, 200]);
+      expect(restored.conversation_turns).toHaveLength(50);
+      expect(restored.conversation_turns.map(row => row.turn_id)).not.toContain(issuer.turn_id);
+      expect(restored.proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: null }),
+      ]);
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore).length).toBeLessThanOrEqual(2);
+      expect(bytes()).toBe(before);
+    } finally { store.readRecent.mockImplementation(originalRecent); }
+  }, 120_000);
+
+  it('P53-gmh-4d CONTROL: complete history binds the issuer as the first conversation row', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const offered = await proposeRisk();
+    const issuer = latestRow()!;
+    const card = fieldsOf(offered)!.proposals[0]!;
+    expect(card.issued_turn_id).toBe(issuer.turn_id);
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => [...order].reverse().map(key => rows.get(key)!)
+      .filter(row => row.scenario_id === sid && !row.turn_id.endsWith(':claim')).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    try {
+      const restored = await reload();
+      expect(restored.conversation_turns.map(row => row.turn_id)).toEqual([issuer.turn_id]);
+      expect(restored.proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: issuer.turn_id }),
+      ]);
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore)).toEqual([[SCENARIO, issuer.turn_id]]);
+    } finally { store.readRecent.mockImplementation(originalRecent); }
+  }, 120_000);
+
+  it('P53-gmh-4e RED: a loaded chronological predecessor carrying the revision prevents a later row from issuing it', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const offered = await proposeRisk();
+    const predecessor = latestRow()!;
+    const card = fieldsOf(offered)!.proposals[0]!;
+    const emittedAt = Date.parse(predecessor.created_at);
+    // App/DB skew leaves the earlier carrier before the candidate threshold. The later answer cannot take
+    // ownership merely because it is the first answer inside that threshold: its predecessor already carries it.
+    predecessor.created_at = new Date(emittedAt - 3000).toISOString();
+    const turnId = randomUUID();
+    const key = `${SCENARIO}:${turnId}`;
+    rows.set(key, { ...predecessor, id: 'near-carried-predecessor', turn_id: turnId,
+      created_at: new Date(emittedAt + 1000).toISOString(),
+      user_message: 'Continue the reasoning.', assistant_message: 'That change is still waiting.',
+      pending_actions: structuredClone(predecessor.pending_actions) });
+    order.push(key);
+    const originalRecent = store.readRecent.getMockImplementation()!;
+    store.readRecent.mockImplementation(async (sid: string, limit?: number) => [...order].reverse().map(rowKey => rows.get(rowKey)!)
+      .filter(row => row.scenario_id === sid && !row.turn_id.endsWith(':claim')).slice(0, limit)
+      .map(({ pending_actions: _pending, ...row }) => row as Row));
+    const readsBefore = store.readCommittedTurn.mock.calls.length;
+    try {
+      const restored = await reload();
+      expect(restored.proposal_fields.proposals).toEqual([
+        expect.objectContaining({ proposal_id: card.proposal_id, revision: card.revision, digest: card.digest, issued_turn_id: null }),
+      ]);
+      expect(store.readCommittedTurn.mock.calls.slice(readsBefore)).toEqual([[SCENARIO, turnId], [SCENARIO, predecessor.turn_id]]);
+    } finally { store.readRecent.mockImplementation(originalRecent); }
+  }, 120_000);
+
+  it('P53-gmh-5 RED: assigning a different issuing reply leaves the displayed proposal digest unchanged', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await proposeRisk();
+    const { proposalRecord, proposalFieldsWire } = await import('../proposal-object/record.js');
+    const pending = await parsedPending(latestRow(), SCENARIO) as import('../../session/pending-action.js').PendingAction[];
+    const record = proposalRecord(pending[0]!, graphNow())!;
+    const hash = await hashNow();
+    const first = proposalFieldsWire([record], hash, new Map([[record.revision, 'reply-first']]))!;
+    const second = proposalFieldsWire([record], hash, new Map([[record.revision, 'reply-second']]))!;
+    expect(first.proposals[0]!.issued_turn_id).toBe('reply-first');
+    expect(second.proposals[0]!.issued_turn_id).toBe('reply-second');
+    expect(first.proposals[0]!.digest).toBe(record.digest);
+    expect(second.proposals[0]!.digest).toBe(record.digest);
+  }, 120_000);
+
 });

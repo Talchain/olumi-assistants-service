@@ -1,3 +1,4 @@
+import { assertShareByDatePreserved } from './goal-target/share-by-date-carrier.js';
 import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
 /**
  * V5 commit stage — slice B.
@@ -1218,7 +1219,7 @@ async function refBaseFor(metadata: CommitMetadata, store: Pick<SessionStore, 'l
     return (await store.loadGraph(metadata.scenario_id)) ?? null;
   } catch (err) {
     log.warn({ event: 'v5.commit.ref_base_read_failed', scenario_id: metadata.scenario_id, err: err instanceof Error ? err.message : String(err) },
-      'stable refs: the graph this write replaces could not be read; no refs are assigned on this write (rule 6)');
+      'stable refs: the graph this write replaces could not be read; no refs are assigned on this write (rule 6); a write carrying a share_by_date carrier is refused');
     return undefined;
   }
 }
@@ -1270,12 +1271,14 @@ export async function commitDirectAnswer(
       : metadata.priorPendingActions ?? [];
     assertNoPendingScopeAmendment(metadata.graph, baseForWrite, priorForScope);
   }
+  if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, metadata.graph);
   const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
   }), baseForWrite).graph;
+  if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,

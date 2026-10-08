@@ -6,6 +6,7 @@ import { analysisResultForAgent } from './decision-sensitivity.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from './limit-checks.js';
 import { runExplanationChip } from './run-explanation.js';
 import { runToolOutputLicensesLeader } from './licensed-run-view.js';
+import { runOptionSetForCopy, type RecordedRunOptionSet, type StoredOptionParticipation } from '../tools/handlers/option-participation.js';
 
 export interface SavedRunContextFactsRead {
   readonly graph_hash?: string;
@@ -14,6 +15,10 @@ export interface SavedRunContextFactsRead {
   readonly raw?: unknown;
   /** The selected Run's existing evaluated-product carrier, bound by the canonical read. */
   readonly identity_evaluated?: ReadonlySet<string>;
+  /** This selected Run's recorded carrier, already read through the canonical participation reader. */
+  readonly option_participation?: StoredOptionParticipation;
+  /** Projected from the SAME selected fact by the canonical graph read; no snapshot rides in analysis_result. */
+  readonly run_option_set?: RecordedRunOptionSet;
   readonly limit_verdicts?: StoredLimitVerdicts;
   readonly constraint_verdict_state?: unknown;
   readonly leader_limit_risks?: readonly unknown[] | null;
@@ -34,7 +39,9 @@ export function savedRunContextFacts(
   const projected = analysisResultForAgent(read.analysis_result, undefined, true, read.raw) as Record<string, unknown>;
   const verdict = asVerdictState(read.constraint_verdict_state);
   const checks = !runToolOutputLicensesLeader({ claim_permissions: permissions })
-    ? limitChecksForAgent(read.raw, read.limit_verdicts, read.identity_evaluated) : undefined;
+    ? limitChecksForAgent(read.raw, read.limit_verdicts, read.identity_evaluated,
+      new Set((read.run_option_set ?? runOptionSetForCopy(undefined, read.option_participation, read.raw)).leftOut
+        .map(o => o.option_id))) : undefined;
   return {
     selected_run_reference: selected.id,
     ...(projected.goal_chance_driver_availability !== undefined

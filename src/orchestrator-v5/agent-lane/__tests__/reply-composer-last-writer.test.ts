@@ -22,7 +22,8 @@ const REGISTRATION = "app.post('/agent/v1/turn'";
 const TEXT_WRITERS = [
   'withDisclosures(', 'withWriteOutcome(', 'withB3LinesAtRest(', 'withBreakEvenAnswer(', 'withScreenLinesOwed(',
   'withA7AfterGate(', 'enforceAgentLaneLeaderClaimsAtWire(', 'enforceLeaderLicenceAtFinalEgress(',
-  'withoutDriverAbsenceClaimsAtEgress(', 'withoutProposalIds(', 'composeDirectAnswerResponse(', 'textAtRest(',
+  'withoutDriverAbsenceClaimsAtEgress(', 'withLeftOutOptionCorrectionAtEgress(',
+  'withoutProposalIds(', 'composeDirectAnswerResponse(', 'textAtRest(',
 ];
 
 const afterComposer = (src: string): string => {
@@ -38,8 +39,20 @@ const textWrites = (slice: string): string[] => [
 ];
 
 describe('the reply composer is the ONE last writer of `assistant_text` on the Agent route', () => {
-  it('1. exactly one composer call', () => {
-    expect(ROUTE.split('composeReplyShape(').length - 1).toBe(1);
+  // ⭐ 2b-0 (DL APPROVE #2783): the current-Run REPLAY applies the SAME composer to the same typed parts, and its shape
+  // rides only when the composed text equals the stored words and still derives the text after the final gates
+  // (`withShapeOnlyIfItDerives`). Exactly these two named sites; any third is a second shaping mechanism.
+  const REPLAY_CALL = ': composeReplyShape({ text: withoutProposalIds(replayText), obligations: withA7AsDetail(replayObligations, replayA7,';
+  it('1. exactly two composer calls: the live one and the parity-proven replay', () => {
+    expect(ROUTE.split('composeReplyShape(').length - 1).toBe(2);
+    expect(ROUTE).toContain(CALL);
+    expect(ROUTE).toContain(REPLAY_CALL);
+    expect(ROUTE).toContain('&& composedCandidate.text === prior.assistant_message ? composedCandidate : null;');
+    expect(ROUTE).toContain('return withShapeOnlyIfItDerives(gatedReplay);');
+  });
+  it('1-MUTANT (in memory): a third composer call is caught', () => {
+    const mutant = ROUTE.replace(CALL, `const extra = composeReplyShape({ text: '' });\n    ${CALL}`);
+    expect(mutant.split('composeReplyShape(').length - 1).not.toBe(2);
   });
 
   it('2. after it, the only text write is the composer’s own, and no text writer runs', () => {
@@ -62,7 +75,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     expect(textWrites(afterComposer(mutant))).not.toEqual(['assistant_text: composedReply.text']);
   });
 
-  it('3. `_answer_shape` is attached at exactly ONE site across the route and agent-lane (the composer’s)', () => {
+  it('3. `_answer_shape` is attached at exactly the two composer sites across the route and agent-lane', () => {
     const files = (dir: string): string[] => readdirSync(dir).flatMap((f) => {
       const p = join(dir, f);
       if (statSync(p).isDirectory()) return f === '__tests__' ? [] : files(p);
@@ -72,6 +85,6 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     const sources = [...files(lane).map((p) => readFileSync(p, 'utf8')), ROUTE];
     // An attach is `_answer_shape: <value>`; a drop is a destructuring alias (`_answer_shape: _stale`).
     const attaches = sources.flatMap((src) => [...src.matchAll(/\b_answer_shape\s*:\s*(?!_)([A-Za-z][\w.]{0,60})/g)].map((m) => m[1]));
-    expect(attaches).toEqual(['composedReply.shape']);
+    expect(attaches).toEqual(['replayComposed.shape', 'composedReply.shape']);
   });
 });

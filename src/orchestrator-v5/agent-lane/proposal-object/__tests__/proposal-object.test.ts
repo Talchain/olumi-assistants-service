@@ -3,7 +3,7 @@
  * inflight/lane-edit-panel-DESIGN.md). Pure rows; the route-level journey is `held-proposal-user-in-control-seam.test.ts`.
  * Fixtures are the add-risk door's REAL batch shape (`add-risk-transaction.ts` + `hypothesisEdgeValue`).
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { findForbiddenPhraseHit } from '../../../compose/forbidden-user-facing-phrases.js';
@@ -12,7 +12,7 @@ import { hypothesisEdgeValue } from '../../../routing/add-option-transaction.js'
 import { tryShortConfirmResume } from '../../../routing/deterministic-short-confirm.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { amendHeldOperations, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../amend.js';
-import { FIELD_CLASS_BY_OP, declinedProposalOf, heldChangeName, productHoldRecord, proposalFieldsWire } from '../record.js';
+import { FIELD_CLASS_BY_OP, declinedProposalOf, heldChangeName, issuedTurnIdsForProposalRecords, proposalIssuances, productHoldRecord, proposalFieldsWire, proposalRecord, type ProposalIssuingRow } from '../record.js';
 import { PROPOSAL_IDLE_TTL_MS, reconcileHeldProposals, refreshedHold } from '../lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../reply.js';
 
@@ -55,6 +55,167 @@ const hold = (over: Partial<PendingAction> & { ops?: unknown[]; ref?: string } =
 const TO_GOAL = 'link_strength:risk_competitive_response::goal_x';
 const FROM_PRICE = 'link_strength:fac_price::risk_competitive_response';
 
+describe('P53 bounded issuing-answer lookup', () => {
+  const emittedMs = Date.parse(hold().emitted_at_iso);
+  const answer = (turnId: string, offsetMs: number, pending?: readonly unknown[]): ProposalIssuingRow => ({
+    turn_id: turnId, created_at: new Date(emittedMs + offsetMs).toISOString(),
+    request_hash: `agent_turn:${turnId}`, user_message: 'Continue the shared reasoning.', assistant_message: 'The change is held.',
+    ...(pending === undefined ? {} : { pending_actions: pending }),
+  });
+
+  it('P53-r2-a: full microseconds order the issuer before a carry row whose turn id sorts first', async () => {
+    const pending = hold({ emitted_at_iso: '2026-10-08T00:45:38.000000Z' });
+    const record = proposalRecord(pending, graph)!;
+    const rows = [
+      { ...answer('a-carry', 0, [pending]), created_at: '2026-10-08T00:45:38.000900Z' },
+      { ...answer('z-issuer', 0, [pending]), created_at: '2026-10-08 00:45:38.000100+00' },
+      { ...answer('predecessor', 0, []), created_at: '2026-10-08T00:45:35.999999Z' },
+    ];
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBe('z-issuer');
+  });
+
+  it('P53-r2-b: the oldest carry within +1 s stays unknown when the loaded window is full', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const rows = [answer('later-carry', 2000, [pending]), answer('oldest-carry', 1000, [pending])];
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, rows.length);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+  });
+
+  it('P53-r2-c: identical full timestamps in PostgreSQL and ISO forms are ambiguous', async () => {
+    const pending = hold({ emitted_at_iso: '2026-10-08T00:45:38.445629Z' });
+    const record = proposalRecord(pending, graph)!;
+    const rows = [
+      { ...answer('a-carry', 0, [pending]), created_at: '2026-10-08T00:45:38.445629Z' },
+      { ...answer('z-issuer', 0, [pending]), created_at: '2026-10-08 00:45:38.445629+00' },
+    ];
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+  });
+
+  it('P53-r2-d: complete history binds an issuer that is its first public answer', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const rows = [answer('later-carry', 1000, [pending]), answer('first-issuer', 0, [pending])];
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBe('first-issuer');
+  });
+
+  it('the inclusive skew cutoff preserves emission microseconds', async () => {
+    const pending = hold({ emitted_at_iso: '2026-10-08T00:45:38.000100Z' });
+    const record = proposalRecord(pending, graph)!;
+    const rows = [
+      { ...answer('issuer', 0, [pending]), created_at: '2026-10-08 00:45:36.000100+00' },
+      { ...answer('predecessor', 0, []), created_at: '2026-10-08T00:45:36.000099Z' },
+    ];
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBe('issuer');
+  });
+
+  it('a tied predecessor cannot prove issuance even when the candidate timestamp is unique', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const rows = [answer('candidate', 0), answer('a-predecessor', -3000, [pending]), answer('z-predecessor', -3000, [])];
+    const read = vi.fn(async () => ({ pending_actions: [pending] }));
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200, read);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('completeness counts raw loaded rows including claims and internal turns', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const rows = [answer('issuer', 0, [pending]), answer('claim:claim', 1000),
+      { ...answer('internal', -3000), request_hash: 'sha256:internal' }];
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, rows.length);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+  });
+
+  it.each(['carrying', 'missing row', 'missing carriers', 'failed read', 'not carrying'] as const)(
+    'a %s predecessor is verified with at most two reads in a full window', async state => {
+      const pending = hold(); const record = proposalRecord(pending, graph)!;
+      const rows = [answer('candidate', 0), answer('predecessor', -3000)];
+      const read = vi.fn(async (turnId: string) => {
+        if (turnId === 'candidate') return { pending_actions: [pending] };
+        if (state === 'failed read') throw new Error('Predecessor unavailable');
+        if (state === 'missing row') return null;
+        if (state === 'missing carriers') return {};
+        return { pending_actions: state === 'carrying' ? [pending] : [] };
+      });
+      const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, rows.length, read);
+      expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id)
+        .toBe(state === 'not carrying' ? 'candidate' : null);
+      expect(read.mock.calls).toEqual([['candidate'], ['predecessor']]);
+    },
+  );
+
+  it('the inclusive 2 s skew boundary proves the earliest public answer starts the carry run, with two reads and the same digest', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const rows = [answer('later', 1000), answer('skew-boundary', -2000), answer('too-early', -2001),
+      answer('claim:claim', -1500), { ...answer('internal', -1750), request_hash: 'sha256:internal' }];
+    const read = vi.fn(async (turnId: string) => ({ pending_actions: turnId === 'too-early' ? [] : [pending] }));
+    const before = JSON.stringify({ record, rows });
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200, read);
+    expect([...issued]).toEqual([[record.revision, 'skew-boundary']]);
+    expect(read.mock.calls).toEqual([['skew-boundary'], ['too-early']]);
+    const bound = proposalFieldsWire([record], HASH, issued)!;
+    expect(bound.proposals[0]!.issued_turn_id).toBe('skew-boundary');
+    expect(bound.proposals[0]!.digest).toBe(record.digest);
+    expect({ ...bound.proposals[0], issued_turn_id: null }).toEqual(proposalFieldsWire([record], HASH)!.proposals[0]);
+    expect(JSON.stringify({ record, rows })).toBe(before);
+  });
+
+  it('a candidate carrying another revision stays unknown, even when a later answer has the requested hold', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const other = hold({ id: '22222222-2222-4222-8222-222222222222' });
+    const read = vi.fn(async (turnId: string) => ({ pending_actions: turnId === 'first' ? [other] : [pending] }));
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), [answer('later', 5000), answer('first', 0)], 200, read);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+    expect(read.mock.calls).toEqual([['first']]);
+  });
+
+  it('one failed candidate read leaves only that hold unknown and verifies the other hold once', async () => {
+    const first = hold();
+    const second = hold({ id: '22222222-2222-4222-8222-222222222222', ref: 'gmh_bbbbbbbbbbbb',
+      emitted_at_iso: new Date(emittedMs + 10_000).toISOString() });
+    const records = [proposalRecord(first, graph)!, proposalRecord(second, graph)!];
+    const read = vi.fn(async (turnId: string) => {
+      if (turnId === 'first') throw new Error('Exact row unavailable');
+      return { pending_actions: [first, second] };
+    });
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances(records, [first, second]),
+      [answer('later', 20_000), answer('second', 10_000), answer('second-predecessor', 7000, [first]), answer('first', 0)], 200, read);
+    expect(proposalFieldsWire(records, HASH, issued)!.proposals.map(p => [p.revision, p.issued_turn_id]))
+      .toEqual([[first.id, null], [second.id, 'second']]);
+    expect(read.mock.calls).toEqual([['first'], ['second']]);
+  });
+
+  it.each([
+    ['invalid emission', 'not-a-date', [answer('first', 0)]],
+    ['undated rows', hold().emitted_at_iso, [{ ...answer('first', 0), created_at: undefined }]],
+    ['mixed undated history', hold().emitted_at_iso, [answer('first', 0), { ...answer('unknown', -3000), created_at: undefined }]],
+    ['invalid row date', hold().emitted_at_iso, [{ ...answer('first', 0), created_at: 'not-a-date' }]],
+    ['invalid calendar date', hold().emitted_at_iso, [{ ...answer('first', 0), created_at: '2026-02-30T00:00:00.000Z' }]],
+    ['no row at the cutoff', new Date(emittedMs + 10_000).toISOString(), [answer('first', 0)]],
+    ['hold before the window', hold().emitted_at_iso, [answer('carried', 2001)]],
+    ['only a claim row', hold().emitted_at_iso, [answer('claim:claim', 0)]],
+    ['no public text', hold().emitted_at_iso, [{ ...answer('first', 0), user_message: null, assistant_message: null }]],
+  ] as const)('%s stays unknown with zero verification reads', async (_reason, emittedAt, rows) => {
+    const pending = hold({ emitted_at_iso: emittedAt }); const record = proposalRecord(pending, graph)!;
+    const read = vi.fn(async () => ({ pending_actions: [pending] }));
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200, read);
+    expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('inline carriers verify without a store read, and an empty inline candidate never retries a later carrier', async () => {
+    const pending = hold(); const record = proposalRecord(pending, graph)!;
+    const read = vi.fn(async () => ({ pending_actions: [pending] }));
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), [answer('later', 5000, [pending]), answer('first', 0, [pending])], 200, read);
+    expect([...issued]).toEqual([[record.revision, 'first']]);
+    const unmatched = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), [answer('later', 5000, [pending]), answer('first', 0, [])], 200, read);
+    expect(proposalFieldsWire([record], HASH, unmatched)!.proposals[0]!.issued_turn_id).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+});
+
 describe('the ONE proposal object (record.ts)', () => {
   it('a held risk projects one field per held link — bound to the op path — with whose each value is, and its missing level', () => {
     const r = productHoldRecord(hold(), graph)!;
@@ -88,7 +249,8 @@ describe('the ONE proposal object (record.ts)', () => {
 
   it('every op either dialect holds is classified (a new op is a compile error until it is)', () => {
     expect(FIELD_CLASS_BY_OP.add_edge).toBe('link_strength');
-    expect(Object.values(FIELD_CLASS_BY_OP).filter((v) => v === 'link_strength')).toHaveLength(1);
+    // S2 also classifies the Agent's set_link_strength while keeping the original add_edge check.
+    expect(Object.values(FIELD_CLASS_BY_OP).filter((v) => v === 'link_strength')).toHaveLength(2);
   });
 
   it('RED (Codex r1 P1 on #2743): the digest binds what the panel SHOWS: a rename under the same analysis hash changes it; the same model and hold keep it', () => {
@@ -111,7 +273,7 @@ describe('the ONE proposal object (record.ts)', () => {
   });
 
   it('names the change in the user’s words, and reads only the typed decline press', () => {
-    expect(heldChangeName(hold())).toBe("the risk 'Competitive response'");
+    expect(heldChangeName(hold())).toBe("The held change to add the risk 'Competitive response'");
     expect(declinedProposalOf('agent-decline-proposal:gmh_aaaaaaaaaaaa')).toBe('gmh_aaaaaaaaaaaa');
     expect(declinedProposalOf('agent-decline-proposal:prop_1234')).toBeUndefined();
     expect(declinedProposalOf('Not now.')).toBeUndefined();
@@ -236,7 +398,7 @@ describe('the words (reply.ts) and the conventional bare-confirm window', () => 
       + 'You set how strongly "Price" affects "Demand": slight; Olumi\'s estimate was moderate. '
       + 'Left as Olumi\'s placeholder: "Price" → "Competitive response".');
     for (const t of [text, heldDeclineSentence("the risk 'X'"), editsRefusedSentence('stale'), editsRefusedSentence('refused'),
-      ...(['model_changed', 'idle', 'over_cap', 'gone'] as const).map((r) => heldLapseSentence("the risk 'X'", r))]) {
+      ...(['model_changed', 'idle', 'over_cap', 'gone', 'superseded'] as const).map((r) => heldLapseSentence("The held change to add the risk 'X'", r))]) {
       expect(findForbiddenPhraseHit(t), t).toBeNull();
       expect(t, t).not.toMatch(/—|\b(best|winner|recommend|leader|ahead|beats)\b/i);
     }
@@ -257,4 +419,123 @@ describe('the words (reply.ts) and the conventional bare-confirm window', () => 
     const legacy = tryShortConfirmResume({ message: 'yes', pendingActions: [unmarked], currentTurnIndex: 3, nowMs: now });
     expect(legacy.matched && legacy.dispatch === 'pending_action' ? legacy.pending.chip_id : undefined).toBe('gmh_aaaaaaaaaaaa');
   });
+});
+
+
+describe('S-D slice 2 Agent envelope and typed amendment', () => {
+  const fixture = async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin',
+      operations: [
+        { op: 'set_factor_value', path: 'fac_hours', value: { value: 10, unit: 'hours', cap: 40, declared_scale: 'unit_interval', basis: 'assumption', authored_by: 'model_proposed' } },
+        { op: 'set_factor_value', path: 'fac_cost', value: { value: 200, unit: 'GBP', cap: 1000, authored_by: 'model_proposed', extra: { retained: true } } },
+        { op: 'set_factor_value', path: 'fac_own', value: { value: 3, unit: '%', authored_by: 'user_stated' } },
+      ], provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Starting assumptions' });
+    const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Use these assumptions.' },
+      { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+    const g = { nodes: [{ id: 'fac_hours', label: 'Hours' }, { id: 'fac_cost', label: 'Cost' }, { id: 'fac_own', label: 'Own', observed_state: { value: 3 } }], edges: [] };
+    return { p, carrier, g, record: agentProposalRecord(carrier, g)! };
+  };
+  it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
+    expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
+    expect(FIELD_CLASS_BY_OP.set_link_strength).toBe('link_strength');
+  });
+  it('RED Agent record reads native figures, units, caps, scale, missing flag and per-value provenance', async () => {
+    const { p, carrier, record } = await fixture();
+    expect(record).toMatchObject({ proposal_id: p.proposal_id, revision: carrier.id, dialect: 'agent',
+      decline_action: { id: `agent-decline-proposal:${p.proposal_id}`, label: 'Not now', message: 'Not now.' } });
+    expect(record.operations).toBe((carrier.action as unknown as { inline_patch: { agent_proposal: { operations: unknown } } }).inline_patch.agent_proposal.operations);
+    expect(record.fields[0]).toMatchObject({ current: { value: 10, unit: 'hours', source: 'estimate' }, cap: 40, declared_scale: 'unit_interval', filled_missing: true, editable: true });
+    expect(record.fields[2]).toMatchObject({ current: { source: 'yours' }, editable: false, filled_missing: false });
+  });
+  it('RED amendment changes one typed op and leaves the other byte for byte with its own author', async () => {
+    const { amendAgentProposal } = await import('../amend.js'); const { p, record } = await fixture();
+    const r = amendAgentProposal(record, p, [{ field_id: 'factor_value:fac_hours', value: 12 }]);
+    expect(r.ok).toBe(true); if (!r.ok) return;
+    expect(r.proposal.proposal_id).not.toBe(p.proposal_id);
+    expect(r.proposal.provenance.basis).toBe(`edited_from:${p.proposal_id}`);
+    expect(r.proposal.operations[0]).toEqual({ ...p.operations[0], value: { ...(p.operations[0]!.value as object), value: 12, authored_by: 'user_stated' } });
+    expect(r.proposal.operations[1]).toBe(p.operations[1]); expect(JSON.stringify(r.proposal.operations[1])).toBe(JSON.stringify(p.operations[1]));
+    expect(readUserEdits(r.userEdits)).toEqual(r.userEdits);
+    const receipt = userEditsReceipt(r.userEdits);
+    expect(receipt).toContain('You set "Hours" to 12 hours; Olumi\'s estimate was 10 hours.');
+    expect(receipt).toContain('Left as Olumi\'s estimate: "Cost" (£200).');
+    expect(findForbiddenPhraseHit(receipt)).toBeNull(); expect(receipt).not.toContain('\u2014');
+  });
+  it('RED digest covers a label, figure, units and approve words', async () => {
+    const { agentProposalRecord } = await import('../record.js'); const { p, carrier, g, record } = await fixture();
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    expect(agentProposalRecord(carrier, { ...g, nodes: [{ id: 'fac_hours', label: 'Renamed' }, ...g.nodes.slice(1)] })!.digest).not.toBe(record.digest);
+    const c = { ...carrier, action: { ...carrier.action, public_message: 'Other approve words.' } } as PendingAction;
+    expect(agentProposalRecord(c, g)!.digest).not.toBe(record.digest);
+    for (const patch of [{ value: 11 }, { unit: 'days' }]) {
+      const changed = createProposal({ ...p, operations: p.operations.map((o, i) => i === 0 ? { ...o, value: { ...(o.value as object), ...patch } } : o) });
+      const changedCarrier = { ...proposalPendingAction(changed, { ...record.approve_action, id: `agent-approve-proposal:${changed.proposal_id}` },
+        { scenario_id: SID, emitted_at_iso: carrier.emitted_at_iso }), id: carrier.id };
+      const projected = agentProposalRecord(changedCarrier, g)!;
+      expect(projected.proposal_id).toBe(changed.proposal_id);
+      expect(projected.revision).toBe(record.revision);
+      expect(projected.fields[0]!.current).toMatchObject(patch);
+      expect(projected.digest).not.toBe(record.digest);
+    }
+  });
+  it.each([-1, 41, NaN, Infinity])('RED native value bounds refuse %s before any amendment', async value => {
+    const { amendAgentProposal } = await import('../amend.js'); const { p, record } = await fixture();
+    expect(amendAgentProposal(record, p, [{ field_id: 'factor_value:fac_hours', value }])).toEqual({ ok: false, reason: 'value_not_allowed' });
+  });
+  it('RED validated prop decline ids and bounded whitespace regex timing', async () => {
+    const { p } = await fixture(); expect(declinedProposalOf(`agent-decline-proposal:${p.proposal_id}`)).toBe(p.proposal_id);
+    expect(declinedProposalOf('agent-decline-proposal:prop_bad')).toBeUndefined();
+    const start = performance.now(); declinedProposalOf(`agent-decline-proposal:${' '.repeat(20_000)}`);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+  it('RED Agent lifecycle never re-pins, says model and idle lapses, and refreshes each live item', async () => {
+    const { carrier, g } = await fixture(); const nowMs = Date.now();
+    const base = { atStart: [carrier], latest: [carrier], approved: new Set<string>(), declined: new Set<string>(), graph: g,
+      graphHash: 'pin', scenarioId: SID, requestId: 'request', nowMs };
+    const kept = reconcileHeldProposals(base); expect(kept.carried).toHaveLength(1);
+    expect(Date.parse(kept.carried[0]!.expires_at_iso)).toBe(nowMs + PROPOSAL_IDLE_TTL_MS);
+    const moved = reconcileHeldProposals({ ...base, graphHash: 'new pin' });
+    expect(moved.carried).toEqual([]); expect(moved.lapsed).toEqual([{ hold: carrier, reason: 'model_changed' }]);
+    const idle = { ...carrier, expires_at_iso: new Date(nowMs - 1).toISOString() };
+    expect(reconcileHeldProposals({ ...base, latest: [idle] }).lapsed[0]?.reason).toBe('idle');
+  });
+  it('applied Agent carriers disappear silently before pin or idle checks, including a missing latest carrier', async () => {
+    const { ProposalStore } = await import('../../proposal.js');
+    const { p, carrier, g } = await fixture(); const nowMs = Date.now();
+    const proposals = new ProposalStore(); proposals.put(p); proposals.markApplied(p.proposal_id);
+    const base = { atStart: [carrier], approved: new Set<string>(), declined: new Set<string>(), graph: g,
+      graphHash: 'own approval moved the pin', scenarioId: SID, requestId: 'request', nowMs,
+      isApplied: (id: string) => proposals.isApplied(id) };
+    for (const latest of [[carrier], [{ ...carrier, expires_at_iso: new Date(nowMs - 1).toISOString() }], []]) {
+      expect(reconcileHeldProposals({ ...base, latest })).toEqual({ carried: [], lapsed: [] });
+    }
+    expect(proposals.authorise({ proposal_id: p.proposal_id, scenario_id: SID, authenticated_user_id: null,
+      current_graph_identity_hash: base.graphHash }).status).toBe('already_applied');
+  });
+
+  it('RED bounds preserve a declared signed domain and do not invent a lower bound for unscaled figures', async () => {
+    const { factorValueAllowed } = await import('../amend.js'); const { record } = await fixture();
+    const f = record.fields[0]!; if (f.kind !== 'factor_value') throw new Error('Expected a factor field');
+    expect(factorValueAllowed({ ...f, declared_scale: { min: -40, max: 40 } }, -12)).toBe(true);
+    expect(factorValueAllowed({ ...f, cap: undefined, declared_scale: undefined }, -12)).toBe(true);
+    expect(factorValueAllowed({ ...f, declared_scale: { min: -40, max: 40 } }, -41)).toBe(false);
+  });
+
+  it('R-keep-marker: an amended keep retains its keep predicate and hashes the original basis', async () => {
+    const { p, record } = await fixture();
+    const { createProposal, computeProposalId } = await import('../../proposal.js');
+    const { KEEP_PROPOSAL_BASIS, isKeepProposal } = await import('../../approval-chips.js');
+    const { amendAgentProposal } = await import('../amend.js');
+    const keep = createProposal({ ...p, provenance: { authored_by: 'model_proposed', basis: KEEP_PROPOSAL_BASIS } });
+    const edited = amendAgentProposal(record, keep, [{ field_id: 'factor_value:fac_hours', value: 12 }]);
+    expect(edited.ok).toBe(true); if (!edited.ok) return;
+    expect(edited.proposal.provenance).toMatchObject({ original_basis: KEEP_PROPOSAL_BASIS });
+    expect(isKeepProposal(edited.proposal)).toBe(true);
+    expect(computeProposalId({ ...edited.proposal, provenance: { ...edited.proposal.provenance, original_basis: 'changed' } })).not.toBe(edited.proposal.proposal_id);
+  });
+
 });

@@ -402,7 +402,8 @@ export function admitCandidateLinks(
         : DEFAULT_EXISTS_PROBABILITY,
       effect_direction: link.direction,
       provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance),
-        ...(!authored ? { mean_projected: true as const } : { magnitude: 'olumi_estimate' as const }),
+        // An authored spread keeps frame-defaulted-links' existing eligibility.
+        ...(!authored ? { mean_projected: true as const, ...(!stdAuthored ? { magnitude: 'olumi_placeholder' as const } : {}) } : { magnitude: 'olumi_estimate' as const }),
       },
     };
 

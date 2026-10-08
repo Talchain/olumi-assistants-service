@@ -94,7 +94,11 @@ export interface AgentToolContext {
   readonly request_id: string;
   /** RT-1 selection, resolved from the REQUEST against canonical state, never tool args or model output. */
   readonly grounded_selection?: { readonly element_ids: readonly string[]; readonly unresolved: 'none' | 'not_in_model' | 'could_not_check' };
+  /** The drawn tuple resolved by the host press, never model output. */
+  readonly drawn_link?: { readonly press_id: string; readonly from: string; readonly to: string };
   readonly grounded_links?: readonly { readonly from: string; readonly to: string }[];
+  /** RC3: bound only by a re-minted widen Add press, outside every model-authored tool argument. */
+  readonly widen_relies_on?: { readonly option_id: string };
   /**
    * The user's own words in this conversation (its user messages, this turn's last), bound by the route — never
    * from model output. A figure is recorded as the user's only when it is written here (`stated-by-user.ts`);
@@ -191,7 +195,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Propose ONE change to the model. This does NOT change anything: it records an exact ' +
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
       'Use the labels exactly as get_canonical_state returned them. ' +
-      'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
+      'On a host-bound drawn_link press ONLY, propose your own band, direction and one-line reason for that exact pair, shown as Olumi\u2019s estimate. For every other turn, the link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
       'if they described it in their own words ("very high"), give your reading in `strength` and their exact phrase in `from_words`, and show it; ' +
       'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
@@ -200,8 +204,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       direction: { type: 'string', enum: ['positive', 'negative'] },
       strength: {
         type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'],
-        description: 'The band the user said for this link in THIS message, in their own words \u2014 or your reading of their own words, given with `from_words`. Never your own guess.',
+        description: 'The band the user said for this link in THIS message, in their own words \u2014 or your reading of their own words, given with `from_words`. Only for the host-bound drawn_link pair, your own Olumi estimate is allowed.',
       },
+      reason: { type: 'string', maxLength: 140, description: 'For a host-bound drawn link: one short plain line explaining your estimate, with no figures.' },
       from_words: FROM_WORDS,
       rationale: { type: 'string', description: 'Why this link matters, in the user’s terms.' },
     }, ['from_label', 'to_label', 'direction', 'rationale']),
@@ -487,6 +492,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
   {
+    type: 'function', name: 'propose_team_time',
+    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Read the duration from THIS user message only and express it as low_months and high_months; convert weeks or years to months (weeks may be rounded to two decimals here; the server keeps the exact conversion). A single time (about 8 months means both 8) is kept only as the most likely time; the chance remains withheld until the user gives a range. Never use recruitment time, a historical duration or an earlier message. This prepares a card; authorise_change writes it only after approval.',
+    parameters: obj({ low_months: { type: 'number', exclusiveMinimum: 0 }, high_months: { type: 'number', exclusiveMinimum: 0 } }, ['low_months', 'high_months']),
+  },
+  {
     type: 'function',
     name: 'propose_goal_deadline',
     description:
@@ -528,12 +538,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'prepares ONE complete change and returns its id, which you keep for authorise_change: show the user the risk, what it '
       + 'threatens and what drives it, never the id, before asking them to approve. ' + RISK_LINKS_RULE + ' How strongly each '
       + 'link acts is not known yet: Olumi records a placeholder strength, not an estimate \u2014 say so. Use the labels exactly as the '
-      + 'CURRENT MODEL STATE gives them.',
+      + 'CURRENT MODEL STATE gives them. For a precondition or timing dependency ONLY, set relies_on_option to the option\'s '
+      + 'exact label when the user\'s words or brief say that option depends on the event happening or not (e.g. a price rise '
+      + 'launched with the next feature release). Then leave affects and caused_by empty: it is kept without links and left '
+      + 'out of the Run, with that option\'s omission disclosed for the user to approve.',
     parameters: obj({
       label: { type: 'string', description: 'The risk in the user\u2019s own words (e.g. "Competitive response").' },
+      relies_on_option: { type: 'string', description: 'Optional precondition lease: the exact label of the non-baseline option that depends on this event happening or not, as stated by the user or brief. Never an id. Leave affects and caused_by empty.' },
       affects: {
         type: 'array',
-        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one. Never a factor.',
+        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one for an ordinary risk; [] for relies_on_option. Never a factor.',
         items: obj({
           target_label: { type: 'string', description: 'The goal or an outcome, exactly as the CURRENT MODEL STATE labels it.' },
           direction: { type: 'string', enum: ['positive', 'negative'], description: 'negative when the risk lowers it (the usual case); from the user\u2019s words, never a guess.' },
@@ -805,7 +819,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -851,6 +865,7 @@ export interface AgentCapabilities {
     strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
     from_words?: string;
+    reason?: string;
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a change THIS turn proposed, withdrawn before the reply (`approval-chips.ts` WITHDRAW_PROPOSAL). */
@@ -881,15 +896,19 @@ export interface AgentCapabilities {
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
   }): Promise<ToolResult>;
-  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
-  /** S-E GOALS: the user's stated deadline as a date on the goal (`goal_horizon.deadline`), proposed for approval. */
+  /** S-E GOALS: the user's current-team duration, proposed for approval. */
+  proposeTeamTime?(ctx: AgentToolContext, args: { low_months: number; high_months: number }): Promise<ToolResult>;
+  /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
   proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
     label: string; rationale: string;
+    /** The host resolves and verifies this label; the model never supplies the node's relies_on stamp. */
+    relies_on_option?: string;
     affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
     caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
   }): Promise<ToolResult>;
@@ -911,7 +930,7 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
+    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
@@ -939,6 +958,11 @@ export interface AgentCapabilities {
   proposeIdentity?(ctx: AgentToolContext): Promise<ToolResult>;
   /** C5: the Agent's own provisional view on a withheld turn (`../provisional-view.ts`). Optional: absent ⇒ refused plainly. */
   giveProvisionalView?(ctx: AgentToolContext, args: { view: string; reasoning: string; confirm_step: string }): Promise<ToolResult>;
+  /**
+   * Whether a search control quoting this query would reach the user on this turn (the final egress gate's own chip
+   * rule, read by the route from its readback). Absent ⇒ every sendable query is accepted, as before.
+   */
+  researchControlShowable?(ctx: AgentToolContext, query: string): Promise<boolean>;
 }
 
 export async function dispatchTool(
@@ -1004,6 +1028,8 @@ export async function dispatchTool(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_team_time':
+      return caps.proposeTeamTime !== undefined ? caps.proposeTeamTime(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_goal_deadline':
       return caps.proposeGoalDeadline !== undefined
         ? caps.proposeGoalDeadline(ctx, args as never)
@@ -1043,12 +1069,27 @@ export async function dispatchTool(
     case 'offer_public_research': {
       // Pure: nothing is searched here. The route turns the query into the one control that can send it.
       const query = sendableQuery(args.query);
-      return query === null
-        ? { ok: false, mutated: false, refusal: 'query_not_sendable',
-          detail: 'That query cannot be offered: write it as one line of at most 200 characters. Nothing was searched.' }
-        : { ok: true, mutated: false, offered_query: query,
-          detail: 'The user now sees a control that searches the web for exactly this query. Nothing has been searched yet: '
-            + 'tell them what the search would look for and that it runs only if they press it.' };
+      if (query === null) {
+        return { ok: false, mutated: false, refusal: 'query_not_sendable',
+          detail: 'That query cannot be offered: write it as one line of at most 200 characters. Nothing was searched.' };
+      }
+      // ⭐ ACCEPTED ⇒ ON THE WIRE. The answer below tells the model the user sees a control, so it is given only when the
+      // control will survive the final egress gate. A query that gate would remove is refused here, with the way out.
+      // A read that throws refuses the offer (fail closed): a control that may not arrive is never promised.
+      let showable = true;
+      if (caps.researchControlShowable !== undefined) {
+        try { showable = (await caps.researchControlShowable(ctx, query)) === true; } catch { showable = false; }
+      }
+      if (!showable) {
+        return { ok: false, mutated: false, refusal: 'query_cannot_be_shown',
+          detail: 'That query cannot be shown as a control here: it reads as putting one option ahead of another, and this '
+            + 'analysis names no leading option. The user sees NO control and nothing was searched. Either offer ONE '
+            + 'neutral public question that names no option as better, or tell the user that no search is on offer. '
+            + 'Never say a control is there.' };
+      }
+      return { ok: true, mutated: false, offered_query: query,
+        detail: 'The user now sees a control that searches the web for exactly this query. Nothing has been searched yet: '
+          + 'tell them what the search would look for and that it runs only if they press it.' };
     }
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.

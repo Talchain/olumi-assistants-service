@@ -436,11 +436,14 @@ export function transformNodeToV3(
     //    stamping it shifts that goal's sample base from 0.0 to B. The shift
     //    is UNIFORM ACROSS OPTIONS — it moves every option's samples by the
     //    same constant — so comparative verdicts (which option leads, by how
-    //    much) are unchanged. Goal PROBABILITY is unaffected for a different
-    //    reason: a root goal is refused outright at :3182 (`root_goal`,
-    //    "takes its base from observed_state.value, so its samples are not in
-    //    the non-root change-from-origin frame"), so no probability is
-    //    rendered either way. What DOES change is the absolute level of a root
+    //    much) are unchanged. Goal PROBABILITY: ISL no longer refuses every root
+    //    goal. It refuses one (`GOAL_THRESHOLD_NOT_CONVERTIBLE`, reason
+    //    `root_goal`) only with no measured level (`root_value_source`) or a
+    //    non-zero intercept (`root_intercept`); a root goal with a level and a
+    //    zero intercept is scored on the identity path (Science research, ISL
+    //    82842bb8). So stamping B can let a goal probability render that was
+    //    refused before; that effect is not analysed here (GOAL-REACH 3b,
+    //    flagged to Science). What DOES change is the absolute level of a root
     //    goal's reported samples and `GOAL_NODE_ROOT_STATIC.base_value` —
     //    arguably more correct (0.0 was a placeholder for "no observed
     //    value"), but a change, and named here so it is not mistaken for a
@@ -1122,7 +1125,8 @@ export function transformEdgeToV3(
   const edgeId = `${edge.from}->${edge.to}`;
   // V4 fields take precedence, fallback to legacy for backwards compatibility
   const rawStrength = edge.strength_mean ?? edge.weight ?? DEFAULT_STRENGTH_MEAN;
-  if (edge.strength_mean === undefined && edge.weight === undefined) {
+  const meanDefaulted = edge.strength_mean === undefined && edge.weight === undefined;
+  if (meanDefaulted) {
     defaults.push({ edge_id: edgeId, field: "strength_mean", default_value: DEFAULT_STRENGTH_MEAN, reason: "no LLM value" });
   }
 
@@ -1207,8 +1211,15 @@ export function transformEdgeToV3(
 
   // Extract provenance — prefer structured edge.provenance, fall back to
   // edge.provenance_source (flat enum from Anthropic structured outputs).
-  const provenance = extractProvenanceForV3(edge.provenance)
+  const extracted = extractProvenanceForV3(edge.provenance)
     ?? (edge.provenance_source ? { source: mapToV3ProvenanceSource(edge.provenance_source) } : undefined);
+  // Science 393023 LICENCE (b), 7 Oct 20:48Z: a size nobody stated (no mean AND no spread) is this door's default, so the
+  // edge carries `defaulted: true` AND the tag. A stated spread is kept untagged, exactly as before (buddy r2 P1: the tag
+  // would let the frame fallback overwrite it). A bare 0.5 (no `defaulted`) is never read as a placeholder.
+  const placeholderDefault = meanDefaulted && edge.strength_std === undefined;
+  const provenance = placeholderDefault
+    ? { ...(extracted ?? { source: "cee_hypothesis" as const }), magnitude: "olumi_placeholder" as const }
+    : extracted;
 
   return {
     edge: {
@@ -1226,7 +1237,7 @@ export function transformEdgeToV3(
       // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
       ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
       // F5: Preserve enrichment defaulted flag through V3 transform
-      ...((edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
+      ...(placeholderDefault ? { defaulted: true } : (edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
       // Preserve validation pipeline metadata (two-pass parameter review)
       ...((edge as any).validation != null ? { validation: (edge as any).validation } : {}),
     },
@@ -1263,7 +1274,7 @@ function mapToV3ProvenanceSource(source: string): V3ProvenanceSource {
  */
 function extractProvenanceForV3(
   prov?: string | ProvenanceObject
-): { source: V3ProvenanceSource; reasoning?: string } | undefined {
+): { source: V3ProvenanceSource; reasoning?: string; magnitude?: "olumi_placeholder" } | undefined {
   if (!prov) return undefined;
 
   if (typeof prov === "string") {
@@ -1273,6 +1284,8 @@ function extractProvenanceForV3(
   return {
     source: mapToV3ProvenanceSource(prov.source),
     reasoning: prov.quote,
+    // Science 393023 LICENCE (b): a default door's tag survives the transform (the enricher writes it).
+    ...(prov.magnitude === "olumi_placeholder" ? { magnitude: "olumi_placeholder" as const } : {}),
   };
 }
 

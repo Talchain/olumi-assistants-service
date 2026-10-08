@@ -15,15 +15,16 @@ import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity
  * P5, a quantified path from an option into the goal's own unit, is MODEL GENERATION's `sizeLink` question and is not
  * checked here yet. Words: AIQ #77 5912882031. Pure and total.
  */
-import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
+import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
-import { sameUnit } from '../agent-lane/reconciling-product.js';
+import { sameUnit, unitsCompose } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
 import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.js';
 
 /** R3's preconditions (#77 5912916965). */
@@ -92,6 +93,28 @@ function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown):
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * GOAL-REACH 3b, Science §(i) 1 (8 Oct): once the user has CONFIRMED the goal's product identity (the identity card's
+ * Yes: `stated_in_brief: true`) and both factors carry today's level, the goal's level today is DERIVED from them — PLoT
+ * measures from it (GOAL_LEVEL_FROM_IDENTITY_INPUTS, labelled by whose figures they are) — so it is not missing (P1).
+ * An unconfirmed (Olumi-read) identity never counts: confirming it is the user's step (build 1).
+ */
+function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolean {
+  const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
+  if (identity?.operation !== 'product' || identity.stated_in_brief !== true || !Array.isArray(identity.factor_ids)
+    || identity.factor_ids.length !== 2) return false;
+  const levels = identity.factor_ids.map((id) => {
+    const n = nodes.find((x) => isRec(x) && x.id === id) as Rec | undefined;
+    const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
+    return os !== undefined && finite(os.raw_value) ? { unit: os.unit, label: String(id) } : undefined;
+  });
+  if (levels[0] === undefined || levels[1] === undefined) return false;
+  // Codex r2 P1 (#2816): the factors' units must compose into the TARGET's currency and period (a target edited to
+  // another currency keeps the confirmed identity; nothing downstream converts it).
+  const goalLabel = typeof goal.label === 'string' ? goal.label : '';
+  return unitsCompose(goal.goal_threshold_unit, goalLabel, levels[0], levels[1]).kind !== 'no';
+}
 
 /** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
 const ownLimitRow = goalOwnLimitRow;
@@ -215,14 +238,18 @@ export function targetTestabilityOf(
   const goalId = goal.id as string;
   const stated = statedGoalTargetOf(graph, goal);
   if (stated === null) return { kind: 'no_target', goal_id: goalId };
-  const levelFrame = (stated.frame ?? 'level') === 'level';
+  // S2a's forecast is sent in delta only after the pure-sum attestation.
+  const share = shareByDateGoalOf(input);
+  const effectiveFrame = share?.goal.id === goalId ? 'delta' : stated.frame;
+  const levelFrame = (effectiveFrame ?? 'level') === 'level';
 
   const failures: TargetTestabilityFailure[] = [];
   const today = isRec(goal.observed_state) ? goal.observed_state : undefined;
   // P1 — today's level where the frame requires it (`limitNeedsTodaysLevel`), as science reads it
   // (`observed_state.baseline`, the schema-v3 goal limb's condition). Never derived from the target.
-  const hasToday = today !== undefined && finite(today.baseline);
-  if (limitNeedsTodaysLevel(stated.frame) && !hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
+  // Codex r2 P1 (#2816): the derived level is a LEVEL frame's only; ISL's relative-change resolver still needs the base.
+  const hasToday = (today !== undefined && finite(today.baseline)) || (levelFrame && confirmedProductHasLevels(graph.nodes, goal));
+  if (limitNeedsTodaysLevel(effectiveFrame) && !hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
   // P2 — a level target normalises strictly inside (0, 1) (ISL clips at the edges). Change frames normalise elsewhere.
   if (levelFrame && finite(goal.goal_threshold) && !(goal.goal_threshold > 0 && goal.goal_threshold < 1)) {
     failures.push({ precondition: 'P2', case: 'd', code: 'threshold_off_scale' });
@@ -387,7 +414,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     const mean = isRec(edge?.strength) ? edge.strength.mean : undefined;
     // The band edit's own stamp (`adjust-edge-strength.ts`): `source: 'user_specified'` + `provenance_display: 'user_set'`, and
     // no stated size. A link the user only DREW carries the source but not the display, so it is never "set as" a band.
-    const userBand = isRec(edge?.provenance) && edge.provenance.source === 'user_specified' && edge?.provenance_display === 'user_set'
+    const userBand = linkSizing(edge) === 'user' && isRec(edge?.provenance) && edge?.provenance_display === 'user_set'
       && edge.provenance.magnitude !== 'user_stated' && edge.provenance.natural_effect === undefined;
     return userBand && typeof mean === 'number' && Number.isFinite(mean) ? CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(mean))] : null;
   })();

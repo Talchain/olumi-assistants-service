@@ -322,7 +322,11 @@ describe('S6–S7: the actual Agent route owns the durable reconciliation and co
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: script.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Ready.' }] }] }), { status: 200 })));
     await h.startAgentProcess();
     const reply = await h.agentTurn(scopeWithdrawalWords('mrr'));
-    expect(reply._agent).toMatchObject({ tool_calls: [{ name: 'withdraw_proposal', ok: true }] });
+    // GOAL-REACH #2802: the goal still carries Olumi's unconfirmed reading, so the route's existing re-offer may attach the
+    // identity card (it writes nothing) after the withdrawal; the withdrawal is the turn's own call.
+    const calls = (reply._agent as { tool_calls: { name: string; ok?: boolean; mutated?: boolean }[] }).tool_calls;
+    expect(calls[0]).toMatchObject({ name: 'withdraw_proposal', ok: true });
+    expect(calls.slice(1).every(c => c.name === 'propose_identity' && c.mutated !== true)).toBe(true);
     expect(h.row.pending.some(p => p.action.kind === 'reconcile_goal_scope')).toBe(false);
     expect(h.row.writes).toHaveLength(0); expect(count(h.row.graph)).toBe(300);
     h.restart(); expect((await h.read()).json).not.toHaveProperty('goal_scope_reconciliation');

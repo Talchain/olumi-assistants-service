@@ -99,15 +99,15 @@
       "offer_key": "524f6501fd806533"
     },
     {
-      "action_id": "bias_anchoring",
-      "label": "Anchoring",
-      "icon": "Anchor",
+      "action_id": "bias_check",
+      "label": "Bias check",
+      "icon": "ScanSearch",
       "group": "method",
-      "press_id": "act:bias_anchoring",
-      "user_line": "Walk me through where a first number could be pulling my estimates.",
+      "press_id": "act:bias_check",
+      "user_line": "Where could a common reasoning pattern bite in this model?",
       "enabled": true,
-      "why_now": "Test Olumi’s figures against your own evidence.",
-      "offer_key": "665d59f6b8824852"
+      "why_now": "See where common reasoning patterns could bite in this model.",
+      "offer_key": "a2525c4a4c4c69be"
     }
   ]
 }

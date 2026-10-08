@@ -658,6 +658,18 @@ export const NodeV3 = z.object({
    * (`eventRiskIngressIssues`) refuses it (422). Absent ⇒ today's risk node, byte-identically.
    */
   event_risk: EventRiskV1.optional().catch(undefined),
+  /**
+   * RC3 (a′): server-authored identity of the option whose precondition this risk describes.
+   * `inertRiskBranch` reads a valid stamp with an existing option and NO incident edges to leave
+   * it out of readiness (`graph-structure-validator`), admission's ledger (`admit-model`), the
+   * Agent's `structural-facts` and `decision-input-ask`, and the `run-analysis` wire projection.
+   * `routing/relies-on-risk` re-checks held/apply/card operations; `agent-capabilities` discloses
+   * it in canonical context; `context/graph-hash` binds its analysis-inclusion meaning.
+   * The risk stays on the shared model; option-conditional effects are not yet computed.
+   * Declared here so persistence writers, re-parses and `loadScenarioSnapshotForRunAnalysis`
+   * retain the stamp. Malformed on read degrades to absence, so the unstamped orphan still blocks.
+   */
+  relies_on: z.object({ option_id: z.string().regex(CANONICAL_ID_REGEX) }).strict().optional().catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 

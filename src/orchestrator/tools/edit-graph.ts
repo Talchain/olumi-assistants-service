@@ -88,7 +88,7 @@ import {
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
 import { userTypedStoredFigure } from "../../orchestrator-v5/agent-lane/figure-scope.js";
-import { hasInterventionRangeWrite, stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
+import { hasInterventionRangeWrite, hasReliesOnRiskWrite, stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
 import { getSessionStore } from "../../orchestrator-v5/session/index.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
@@ -3095,6 +3095,13 @@ export async function handleEditGraph(
     }
     operations = pipelineOwnedStrip.operations;
 
+    // Adds have already lost model-authored stamps above. Updates must refuse
+    // them before any local or PLoT apply, even with Graph Management off.
+    if (hasReliesOnRiskWrite(operations)) {
+      return buildRejectionResult('A precondition risk needs its dedicated proposal and approval; nothing was changed.',
+        operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+    }
+
     // Populate old_value for undo data capture (before PLoT submission)
     operations = populateOldValues(
       operations,
@@ -3296,6 +3303,18 @@ export async function handleEditGraph(
       candidateGraph = applyPatchOperations(context.graph as GraphV3T, opsToApply);
     } catch (applyErr) {
       if (applyErr instanceof PatchApplyError) {
+        if (applyErr.code === 'PRECONDITION_RISK_LINKED') {
+          validationOutcome = 'patch_apply_error';
+          setViolationCodes([applyErr.code]);
+          recoveryPathChosen = 'patch_rejection_envelope';
+          branchTaken = 'rejection';
+          branchReason = 'precondition_risk_linked';
+          failureBranch = 'patch_apply_error';
+          failureCode = applyErr.code;
+          failureMessage = applyErr.message;
+          return { blocks: [], assistantText: applyErr.message, latencyMs: Date.now() - startTime,
+            appliedGraph: null, wasRejected: true, diagnostics: diagnostics() };
+        }
         if (intentCategory !== 'structural') {
           consecutiveNarrowStructuralFailures++;
           validationOutcome = 'patch_apply_error';

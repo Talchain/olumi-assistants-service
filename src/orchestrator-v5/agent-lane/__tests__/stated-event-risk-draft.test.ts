@@ -1,5 +1,6 @@
 /** event_risk.v1 slice 2c — DRAFT door. */
 import { describe, expect, it, vi } from 'vitest';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 
 vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
@@ -194,18 +195,13 @@ describe('event_risk.v1 slice 2c', () => {
     ['digits', (n: number) => `${'9'.repeat(n)} ${STATED}`],
     ['spaces', (n: number) => `Our key developer ${' '.repeat(n)}might leave, maybe 10–30% in the next 6 months.`],
     ['sentence-near-matches', (n: number) => `${'10- within. Key developer leaves! '.repeat(Math.ceil(n / 32)).slice(0, n)}. ${STATED}`],
-  ])('2c-LINEAR TIME-%s: 5k to 20k, min of 5 runs, ratio < 8', (_id, make) => {
+  ])('2c-LINEAR TIME-%s: 5k to 40k, min of 7 calibrated batches, ratio < 22', (_id, make) => {
     const input = graph();
-    const cost = (n: number) => {
-      const text = make(n);
-      // A valid final statement ensures every shape reaches the new word matcher too.
-      expect(dev(holdStatedEventRisks(input.nodes, input.edges, text)).event_risk).toEqual(BLOCK);
-      return Math.min(...Array.from({ length: 5 }, () => {
-        const start = performance.now();
-        holdStatedEventRisks(input.nodes, input.edges, text);
-        return performance.now() - start;
-      }));
-    };
-    expect(cost(20000) / cost(5000)).toBeLessThan(8);
+    const [small, large] = [make(5000), make(40000)];
+    // A valid final statement ensures every shape reaches the new word matcher too.
+    for (const text of [small, large]) expect(dev(holdStatedEventRisks(input.nodes, input.edges, text)).event_risk).toEqual(BLOCK);
+    const m = scalingRatio(() => holdStatedEventRisks(input.nodes, input.edges, small), () => holdStatedEventRisks(input.nodes, input.edges, large));
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });

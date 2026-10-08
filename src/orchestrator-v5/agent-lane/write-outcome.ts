@@ -26,7 +26,7 @@
  */
 
 import type { ToolResult } from './runtime/agent-tools.js';
-import { proposalsAwaitingApproval } from './approval-chips.js';
+import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
@@ -232,6 +232,8 @@ function partsLine(r: ToolResult): string | null {
     const versions = versionPhrase(versionsOf(p));
     // A keep changes no figure: what was saved is the user's acceptance of Olumi's estimate (#2436).
     if (p.ok === true && p.part === 'values' && p.kept === true) {
+      // A mixed keep's S-D receipt already states each edited and accepted figure.
+      if (Array.isArray(r.user_edits) && r.user_edits.length > 0) return '';
       return rec === 1 ? `Recorded that you accept Olumi\u2019s estimate${versions}.` : `Recorded that you accept Olumi\u2019s ${rec ?? ''} estimates${versions}.`.replace('  ', ' ');
     }
     if (p.ok === true) return `Saved ${rec !== null && req !== null ? `${rec} of ${req} ` : ''}${many}${versions}.`;
@@ -254,7 +256,7 @@ function partsLine(r: ToolResult): string | null {
   if (r.ok !== true && r.refusal === 'partially_applied' && parts.every((p) => p.part !== 'option_levels') && parts.some((p) => p.part === 'values')) {
     bits.push('Not saved: option levels (stopped before they were written).');
   }
-  return bits.join(' ');
+  return bits.filter((b) => b !== '').join(' ');
 }
 
 /**
@@ -326,8 +328,10 @@ function openQuestionsLine(r: ToolResult): string {
   const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
-  const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
-  const rest = qs.length - OPEN_QUESTIONS_SHOWN;
+  const next = typeof r.displayed_next_question === 'string' ? r.displayed_next_question : null;
+  const shownCount = next === null ? OPEN_QUESTIONS_SHOWN : 1;
+  const shown = (next === null ? qs.slice(0, shownCount) : [next]).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const rest = qs.length - shownCount;
   // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
   // names the omitted items even if an earlier sentence is dropped; the disclosure lists all (`_agent.open_questions`).
   const more = rest > 0 ? ` ${rest} more question${rest === 1 ? ' remains' : 's remain'} unresolved.` : '';
@@ -346,11 +350,14 @@ export function openQuestionsForReply(r: ToolResult | undefined): string[] {
 }
 
 /**
+ * ⛔ THE SAVE INDICATOR OWNS "SAVED" (P50, Paul's audit #14; DGAI #2609): a build line never says the model was saved or
+ * its version. What remains is what approval changes, plus the build's own disclosures.
+ *
  * ⛔ A SAVED BUILD MUST NOT READ AS SAVED FIGURES (Paul's test on served `d5d5839`, #69 5832088673).
  * The reply said "These are starting assumptions, not measurements. Shall I record them?" and Olumi
  * then said "The model was saved as version 1." The build really was saved; the figures were not —
  * but the line read as if they had been recorded before he agreed. So when the SAME turn leaves a
- * proposal awaiting approval after the build, the line says what was saved and what was not.
+ * proposal awaiting approval after the build, the line says what approval changes.
  *
  * Derived from the turn's own tool results by the approve chip's own rule (`proposalsAwaitingApproval`),
  * never from the model's prose. An authorisation refused before it named any proposal (a call withheld
@@ -372,23 +379,26 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
 
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+  // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
+  // The narrating call's approval never reached the store, so the held change still awaits the user's yes — unless the
+  // turn then withdrew it (Codex #2781 r4 P2): the words follow the approve chip's own rule (`pending`), never the refusal.
+  // It speaks for that change only (r5 P2): an earlier approval this turn may have saved, so no turn-wide "nothing changed";
+  // a withdrawn change has no line of its own.
+  if (name === 'authorise_change' && r.ok === false && r.refusal === NOT_ON_NARRATION) {
+    return pending !== null ? 'The change above is waiting for your approval.' : '';
+  }
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
     if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
     if (r.ok === true && r.mutated === true) {
-      const at = typeof v === 'number' ? ` as version ${v}` : '';
-      const saved = pending === null
-        ? `The model was saved${at}.`
-        // ⛔ MG sweep (#70 5851155478 b, DL 5851162511 item 3): "The figures above are not recorded until you approve
-        // them" was FALSE on Paul's path — Olumi's 300 subscribers and 7% churn were already saved and run on. Say what
-        // is saved (Olumi's estimates, beside the user's own figures) and what approval changes (they become the user's
-        // starting assumptions) — true whether a proposed figure is already in the model or not yet.
-        : `I saved the model I drafted${at}. ${pending === 'figures'
-          // F3 (DL 5851710093): the goal clause outranks this line, so it says the same two truths in fewer words.
-          ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
-          : 'What I proposed above is not made until you approve it.'}`;
-      return `${saved}${leftOutLine(r)}${contextFactorsLine(r)}${openQuestionsLine(r)}`;
+      // MG sweep (#70 5851155478 b; DL 5851162511 item 3): say what approval changes (Olumi's estimates become the user's
+      // starting assumptions), true whether a proposed figure is already in the model or not. F3 (DL 5851710093): short.
+      const approval = pending === null ? '' : pending === 'figures'
+        ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
+        : 'What I proposed above is not made until you approve it.';
+      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r)]
+        .map((line) => line.trim()).filter((line) => line !== '').join(' ');
     }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
     if (unconfirmed !== undefined) return unconfirmed;
@@ -481,7 +491,7 @@ export function narrateWriteOutcome(
   const pending = awaitingApproval(toolCalls, toolResults);
   const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
   const status = lines.length > 0
-    ? lines.join(' ')
+    ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
   return { text: out, status, stripped };
 }

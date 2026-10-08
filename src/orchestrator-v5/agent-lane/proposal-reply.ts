@@ -20,6 +20,8 @@ import { formatFactorValue } from '../compose/format-factor-value.js';
 import { sayFigureExactly, twoStateLevelWords } from './say-figure.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
+import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
+import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from './held-risk-notes.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -38,7 +40,7 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
 ]);
 /** Every key `proposeNewRisk` returns on success (agent-capabilities.ts): every disclosure is typed in `risk`. */
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
-  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'likelihood', 'note',
+  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'likelihood', 'note', 'dropped_drivers',
 ]);
 /**
  * Every key `proposeOptionInterventions` returns on a clean success. Its disclosures (`not_the_users_figure`,
@@ -154,16 +156,36 @@ function newRiskReply(r: Rec): string | null {
   if (subject === undefined || risk === undefined || !nonEmpty(risk.label)) return null;
   const threatens = phrases(risk.threatens);
   const drivenBy = phrases(risk.driven_by ?? []);
-  if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
-  // event_risk.v1 slice 2a: the door's grounded occurrence, distinct from placeholder impact.
+  // Validate before either branch: a precondition may retain the same host-grounded user occurrence as an ordinary risk.
   const likelihood = recordOf(risk.likelihood);
   if (risk.likelihood !== undefined && (likelihood === undefined || likelihood.basis !== 'user'
     || typeof likelihood.p_low_pct !== 'number' || typeof likelihood.p_high_pct !== 'number'
     || typeof likelihood.horizon_months !== 'number' || !nonEmpty(likelihood.quote))) return null;
-  const causeNote = "I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen.";
+  const likelihoodLines = likelihood === undefined ? []
+    : [`It may happen (about ${likelihood.p_low_pct}${likelihood.p_low_pct === likelihood.p_high_pct ? '' : `–${likelihood.p_high_pct}`}% within ${likelihood.horizon_months} months), as you said.`];
+  const precondition = recordOf(risk.relies_on);
+  if (risk.relies_on !== undefined) {
+    if (precondition === undefined || !nonEmpty(precondition.option_id) || !nonEmpty(precondition.option_label)
+      || threatens === null || threatens.length !== 0 || drivenBy === null || drivenBy.length !== 0
+      || (risk.links_dropped !== undefined && risk.links_dropped !== true) || risk.likelihood !== undefined) return null;
+    return reply(subject, [
+      reliesOnRiskLine(risk.label, precondition.option_label),
+      ...(risk.links_dropped === true ? [`It is kept without links because it is a precondition of ${q(precondition.option_label)}.`] : []),
+    ], question(r.public_label));
+  }
+  if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
+  // event_risk.v1 slice 2a: the door's grounded occurrence, distinct from placeholder impact.
+  const causeNote = HELD_RISK_CAUSE_NOTE;
+  const droppedDrivers = r.dropped_drivers === undefined ? []
+    : Array.isArray(r.dropped_drivers) && r.dropped_drivers.every(nonEmpty) ? r.dropped_drivers as string[] : null;
+  if (droppedDrivers === null) return null;
+  const droppedNote = `I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.`;
+  const windowNote = HELD_RISK_WINDOW_NOTE;
   return reply(subject, [
-    ...(likelihood !== undefined ? [`It may happen (about ${likelihood.p_low_pct}${likelihood.p_low_pct === likelihood.p_high_pct ? '' : `–${likelihood.p_high_pct}`}% within ${likelihood.horizon_months} months), as you said.`] : []),
+    ...likelihoodLines,
     ...(typeof r.note === 'string' && r.note.includes(causeNote) ? [causeNote] : []),
+    ...(droppedDrivers.length > 0 && typeof r.note === 'string' && r.note.includes(droppedNote) ? [droppedNote] : []),
+    ...(typeof r.note === 'string' && r.note.includes(windowNote) ? [windowNote] : []),
     `It threatens ${threatens.join(' and ')}.`,
     ...(drivenBy.length > 0 ? [`It is driven by ${drivenBy.join(' and ')}.`] : []),
     'How strongly it acts is not known yet: Olumi uses a placeholder strength for each link, not an estimate, for you to correct.',
@@ -230,15 +252,20 @@ function linkStrengthReply(r: Rec): string | null {
  */
 /** F1b's sizing classes (`LinkSizing`, link-sizing.ts): what a link's `was.sizing` may hold. */
 const LINK_SIZINGS: ReadonlySet<string> = new Set<LinkSizing>(['user', 'placeholder', 'olumi_accepted', 'olumi_estimate', 'unmarked']);
-/** `proposeLinkStrengths`' own two literals for whose a strength is (agent-capabilities.ts `links[].whose`). */
-const LINK_WHOSE: ReadonlySet<string> = new Set(['yours', 'Olumi\u2019s estimate']);
+/** `proposeLinkStrengths`' own literals for whose a strength is; a first estimate never implies a prior size. */
+const REVIEW_ONLY_LINK = 'review only; nobody has sized this link';
+const UNSIZED_LINK_CHANGE = 'placeholder prior changed; nobody has sized this link';
+const LINK_WHOSE: ReadonlySet<string> = new Set(['yours', 'Olumi\u2019s estimate', 'Olumi\u2019s first estimate for a link nobody had sized', REVIEW_ONLY_LINK, UNSIZED_LINK_CHANGE]);
 
 function linkSetReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label) || !Array.isArray(r.links) || r.links.length === 0) return null;
   const links = r.links.map(recordOf);
   // Whose each strength is, as the capability types it: anything else is untyped and keeps the second call (DL on #2475).
   if (links.some((l) => l === undefined || !LINK_WHOSE.has(l.whose as string))) return null;
-  const olumis = links.filter((l) => l!.whose !== 'yours').length;
+  const olumis = links.filter((l) => l!.whose === 'Olumi\u2019s estimate').length;
+  const firstEstimates = links.filter((l) => l!.whose === 'Olumi\u2019s first estimate for a link nobody had sized');
+  const reviewOnly = links.filter((l) => l!.whose === REVIEW_ONLY_LINK);
+  const unsizedChanges = links.filter((l) => l!.whose === UNSIZED_LINK_CHANGE);
   /**
    * ⭐ A LINK OLUMI HAD ALREADY ESTIMATED IS RE-SIZED, NOT SIZED (AI HARNESS #2475; CODEX_CLI_OVERFLOW + DL CR 5937945418 on
    * R3 DEFECT 2): read from the capability's typed `whose`, `keeps_current_strength` and `was.sizing` (F1b's `linkSizing`),
@@ -248,12 +275,30 @@ function linkSetReply(r: Rec): string | null {
   for (const l of links) {
     const was = recordOf(l!.was);
     if (was === undefined || !LINK_SIZINGS.has(was.sizing as string) || typeof l!.keeps_current_strength !== 'boolean') return null;
+    // B1: the capability previewed the canonical review writer and read its class with linkSizing. Only a retained
+    // placeholder can carry the bounded review literal; it neither offers a size nor earns authorship on approval.
+    if (l!.whose === REVIEW_ONLY_LINK) {
+      if (was.sizing !== 'placeholder' || l!.keeps_current_strength !== true || l!.sizing_after_approval !== 'placeholder') return null;
+      continue;
+    }
+    if (l!.whose === UNSIZED_LINK_CHANGE) {
+      if (was.sizing !== 'placeholder' || l!.keeps_current_strength !== false || l!.sizing_after_approval !== 'placeholder') return null;
+      continue;
+    }
+    if (l!.sizing_after_approval === 'placeholder') return null;
+    // Science 393023 LICENCE ruling 3: a first-estimate attribution is valid only for an unsized prior, and vice versa.
+    if ((l!.whose === 'Olumi\u2019s first estimate for a link nobody had sized')
+      !== (l!.whose !== 'yours' && was.sizing === 'placeholder')) return null;
     if (l!.whose === 'yours' || l!.keeps_current_strength || (was.sizing !== 'olumi_estimate' && was.sizing !== 'olumi_accepted')) continue;
     if (!nonEmpty(l!.from) || !nonEmpty(l!.to) || !nonEmpty(was.band)) return null;
     replaced.push(`${q(l!.from.trim())} \u2192 ${q(l!.to.trim())} (${was.band.trim()})`);
   }
   return reply(subjectOf(r.public_label), [
     ...(olumis > 0 ? ['Olumi\u2019s estimates stay marked as Olumi\u2019s, never as your own: approving applies them.'] : []),
+    ...(firstEstimates.length > 0 ? ['For links nobody had sized, this offers Olumi\u2019s first estimate: approving records it as Olumi\u2019s, never as your own.'] : []),
+    ...(firstEstimates.some((l) => l!.keeps_current_strength) ? ['Where the strength is kept as it is, approving records only your review, never authorship.'] : []),
+    ...(reviewOnly.length > 0 ? ['These links aren\u2019t sized in the model yet: approving records only your review and keeps their strength as it is.'] : []),
+    ...(unsizedChanges.length > 0 ? ['These links aren\u2019t sized in the model yet: approving changes the stored placeholder strength and records your review.'] : []),
     ...(replaced.length === 1 ? [`${replaced[0]} already held Olumi\u2019s estimate: this replaces that estimate.`]
       : replaced.length > 1 ? [`These links already held Olumi\u2019s estimate, which this replaces: ${replaced.join('; ')}.`] : []),
   ], question(undefined));
@@ -387,14 +432,37 @@ export function userFiguresTheCallLeaves(args: unknown, userMessage: string): st
 
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
-  if (recordOf(args)?.whole_request !== true) return null;
+  // RC3 (a′): a precondition composes unless the model said the call is NOT the whole request (Codex #2823 r1/r2).
+  const precondition = tool === 'propose_new_risk' && recordOf(recordOf(recordOf(result)?.risk)?.relies_on) !== undefined;
+  const whole = recordOf(args)?.whole_request;
+  if (precondition ? whole === false : whole !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
+  return composeRecoveredProposalReply(tool, args, result, userMessage);
+}
+
+/** Recovery drops conversational gates, but must not ignore or re-ask a figure the user already gave. */
+export function composeRecoveredProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   const r = recordOf(result);
   // event_risk.v1 slice 2a: this door deterministically carries these user words outside the LLM arguments.
   const likelihood = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;
-  const carried = likelihood?.basis === 'user' && nonEmpty(likelihood.quote)
-    ? { args, event_risk_statement: likelihood.quote } : args;
+  // RC3 (a′): a precondition press names its option by label ("Raise Pro price to £59"); the stamp carries that label.
+  const precondition = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.relies_on) : undefined;
+  const hasLikelihood = likelihood?.basis === 'user' && nonEmpty(likelihood.quote);
+  const hasPrecondition = precondition !== undefined && nonEmpty(precondition.option_label);
+  // A precondition's links were discarded by the host: their words can't count as carrying the user's figures (Codex #2823 r2).
+  const kept = hasPrecondition ? { ...(recordOf(args) ?? {}), affects: [], caused_by: [] } : args;
+  const carried = hasLikelihood || hasPrecondition ? {
+    args: kept,
+    ...(hasLikelihood ? { event_risk_statement: likelihood!.quote } : {}),
+    ...(hasPrecondition ? { relies_on_option: precondition!.option_label } : {}),
+  } : args;
   if (userFiguresTheCallLeaves(carried, userMessage).length > 0) return null;
+  return composeHeldResultReply(tool, result);
+}
+
+/** ⭐ P44 (a) / Codex #2781 r5: typed held-result disclosures, independent of conversational gates. */
+export function composeHeldResultReply(tool: string, result: unknown): string | null {
+  const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
     : tool === 'propose_link_strengths' ? LINK_SET_KEYS : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_new_factor' ? NEW_FACTOR_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS

@@ -9,7 +9,8 @@ const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const held = (chip: string): PendingAction => ({ id: chip, scenario_id: SCENARIO, chip_id: chip,
   action: { kind: 'run_analysis' }, preconditions: {}, expires_at_turn_count: 12,
   emitted_at_iso: '2026-10-07T00:00:00Z', expires_at_iso: '2026-10-08T00:00:00Z' });
-const hold = held('hold-a'), arrival = held('hold-b');
+// The arrival was minted after the hold (S-D slice 2 orders held items oldest first within the row).
+const hold = held('hold-a'), arrival: PendingAction = { ...held('hold-b'), emitted_at_iso: '2026-10-07T00:00:01Z' };
 const scope: PendingAction = { ...held('scope'), action: { kind: 'reconcile_goal_scope', goal_id: 'g', goal_label: 'MRR',
   expected: 'scope', question: 'Which scope?', operands: [], derivations: [] } };
 const answer = (pending: readonly PendingAction[]): SessionTurnWrite => ({ scenario_id: SCENARIO, turn_id: 'answer',
@@ -48,6 +49,18 @@ function setup(initial: readonly PendingAction[], moves: readonly (readonly Pend
 afterEach(() => vi.restoreAllMocks());
 
 describe('S-D.1b conditional answer floor', () => {
+  it('S-D slice 2 x S-D.1b: the held reconciliation callback runs on EVERY attempt and only the last attempt is written', async () => {
+    const s = setup([hold], [[]]);
+    const seen: string[][] = [];
+    const run = (write: SessionTurnWrite) => appendCheckedGraphWrite({ store: s.store, write, writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set([hold.chip_id]),
+        onReconciled: (w) => { seen.push((w.pending_actions ?? []).map(p => p.chip_id)); return { ...w, assistantMessage: `attempt ${seen.length}` }; } } });
+    expect(await run(answer([hold]))).toEqual({ id: 'answer-row' });
+    expect(seen, 'attempt 1 saw the hold; attempt 2 (after the decline landed) did not').toEqual([['hold-a'], []]);
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]?.assistantMessage).toBe('attempt 2');
+  });
+
   it('Not now between read and append: retry never resurrects the declined hold', async () => {
     const s = setup([hold], [[]]);
     expect(await s.run(answer([hold]))).toEqual({ id: 'answer-row' });

@@ -19,6 +19,7 @@ import type { SelectedRow } from '../guidance/index.js';
 import { structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
 import { ACTION_IDS, ACTION_REGISTRY, STANDARD_ACTIONS, type ActionGroup, type ActionId } from './registry.js';
 import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
+import { biasRiskOf, type BiasRiskV1 } from './bias-triggers.js';
 
 export type ItemRef =
   | { readonly kind: 'option' | 'factor' | 'risk' | 'outcome' | 'goal'; readonly id: string }
@@ -45,6 +46,8 @@ export interface ActionBarV1 {
   readonly priority: readonly ActionOffer[];
   readonly standard: readonly ActionOffer[];
   readonly more: readonly ActionOffer[];
+  /** P45: the standing one-line bias-risk row; every item presses an offer on this same bar. Absent when none fires. */
+  readonly bias_risk?: BiasRiskV1;
 }
 
 export const PRIORITY_MAX = 2;
@@ -52,6 +55,8 @@ export const MORE_MAX = 20;
 /** RC priorities P1–P3 are the actionable ones a pill may carry (P4/P5 stay in the menu). */
 const PILL_TIER_MAX = 3;
 const GENERIC_TIER = 9;
+/** Menu-only and last: a full More menu drops the bias check before any existing offer. */
+const BIAS_CHECK_TIER = GENERIC_TIER + 1;
 
 export const WHY_NOW = {
   review: 'Lists what this result rests on before you rely on it.',
@@ -69,10 +74,12 @@ export const WHY_NOW = {
   frame_brief: 'See what your brief has and what it is missing.',
   set_deadline: 'Your goal has no date yet, so no chance of meeting it can be worked out.',
   set_goal: 'Your goal has no target yet, so no chance of meeting it can be worked out.',
+  set_current_level: 'Olumi needs where your goal stands today to show each option\'s chance.',
   more_risks_W6: 'Your model has at most one risk.',
   more_risks: 'Find risks you haven’t considered yet.',
   bias_anchoring: 'Test Olumi’s figures against your own evidence.',
   check_estimates: 'See the Olumi estimates feeding this result.',
+  bias_check: 'See where common reasoning patterns could bite in this model.',
   test_link: 'This result is most sensitive to one link: see what happens without it.',
 } as const;
 
@@ -80,6 +87,7 @@ export const DISABLED = {
   needs_current_analysis: 'Needs a current analysis.',
   needs_goal: 'Needs a goal in the model first.',
   needs_option: 'Needs at least one option in the model.',
+  already_waiting: 'Waiting for your yes on the suggested change. Approve it, or change something first.',
 } as const;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -124,6 +132,16 @@ function drafts(f: ActionFacts): Draft[] {
   const out: Draft[] = [];
   const needsRun = { enabled: false as const, disabled_reason: DISABLED.needs_current_analysis };
 
+  // Codex r2 P1: while another held change waits for its yes, the press would supersede it (path-only); answer that first.
+  if (f.identityReading != null && !f.approvalWaiting) {
+    const prefix = "Olumi can't show the chance until you check how it reads ‘";
+    const suffix = '’.';
+    const maxLabel = 90 - prefix.length - suffix.length;
+    const label = f.identityReading.goalLabel.length <= maxLabel ? f.identityReading.goalLabel
+      : `${f.identityReading.goalLabel.slice(0, maxLabel - 1)}…`;
+    out.push(draft(f, 'confirm_reading', { enabled: true, why_now: `${prefix}${label}${suffix}` }, 1));
+  }
+
   out.push(draft(f, 'review', f.runBound ? { enabled: true, why_now: WHY_NOW.review } : needsRun, GENERIC_TIER));
 
   const whatChanges = rc('RC-WHAT-CHANGES');
@@ -148,6 +166,10 @@ function drafts(f: ActionFacts): Draft[] {
     if (standing === 'set_goal' || standing === 'set_deadline') {
       out.push(draft(f, standing, { enabled: true, why_now: WHY_NOW[standing] }, 0));
     }
+    if (f.currentLevelQuestion !== null && !f.approvalWaiting) {
+      // GOAL-REACH 3b, Science §(g): missing_goal_baseline (or a levelless root goal) → the user's own current level.
+      out.push(draft(f, 'set_current_level', { enabled: true, why_now: WHY_NOW.set_current_level }, 1));
+    }
     if (f.risksAvailability !== 'omit') {
       const risks = rc('RC-WIDEN', r => r.target === 'risks');
       out.push(draft(f, 'more_risks', f.risksAvailability === 'run'
@@ -155,9 +177,13 @@ function drafts(f: ActionFacts): Draft[] {
         : { enabled: false, disabled_reason: DISABLED.needs_goal },
       risks !== undefined ? tierOfPriority(risks) : GENERIC_TIER));
     }
-    if (estimatePointsOf(f).length > 0) {
+    // Both estimate actions speak of "this result" and are run_dependent in the registry: offered only on a bound Run (DL on #2766).
+    if (f.runBound && estimatePointsOf(f).length > 0) {
       out.push(draft(f, 'bias_anchoring', { enabled: true, why_now: WHY_NOW.bias_anchoring }, GENERIC_TIER));
-      if (f.runBound) out.push(draft(f, 'check_estimates', { enabled: true, why_now: WHY_NOW.check_estimates }, GENERIC_TIER));
+    }
+    if (f.runBound && f.olumiEstimates !== null
+      && f.olumiEstimates.count + f.olumiEstimates.accepted + f.olumiEstimates.placeholderLinks > 0) {
+      out.push(draft(f, 'check_estimates', { enabled: true, why_now: WHY_NOW.check_estimates }, GENERIC_TIER));
     }
     const premortem = rc('RC-PREMORTEM');
     const date = f.deadline === null ? null : sayDate(f.deadline);
@@ -167,7 +193,8 @@ function drafts(f: ActionFacts): Draft[] {
     out.push(draft(f, 'pre_mortem',
       !f.goalPresent ? { enabled: false, disabled_reason: DISABLED.needs_goal }
         : f.ownOptionCount < 1 ? { enabled: false, disabled_reason: DISABLED.needs_option }
-          : { enabled: true, why_now: WHY_NOW.pre_mortem },
+          : f.approvalWaiting ? { enabled: false, disabled_reason: DISABLED.already_waiting }
+            : { enabled: true, why_now: WHY_NOW.pre_mortem },
       premortem !== undefined ? tierOfPriority(premortem) : GENERIC_TIER, userLine !== undefined ? { user_line: userLine } : {}));
 
     const widen = rc('RC-WIDEN', (r) => r.target === 'options');
@@ -180,6 +207,9 @@ function drafts(f: ActionFacts): Draft[] {
   if (f.testLink !== null) {
     const target: ItemRef = { kind: 'link', from_id: f.testLink.from_id, to_id: f.testLink.to_id };
     out.push(draft(f, 'test_link', { enabled: true, why_now: WHY_NOW.test_link }, PILL_TIER_MAX, { target, press_id: structuralChallengePressId(f.testLink) }));
+  }
+  if (f.readable) {
+    out.push(draft(f, 'bias_check', { enabled: true, why_now: WHY_NOW.bias_check }, BIAS_CHECK_TIER));
   }
   return out;
 }
@@ -197,7 +227,9 @@ export function actionBarOf(f: ActionFacts): ActionBarV1 {
   const priority = standing !== undefined && !f.approvalWaiting && !f.runStale ? [standing]
     : others.filter(d => d.offer.enabled && d.tier > 0 && d.tier <= PILL_TIER_MAX).slice(0, PRIORITY_MAX);
   const more = others.filter((d) => !priority.includes(d)).slice(0, MORE_MAX);
-  return { v: 1, state_key: f.stateKey, revision: f.revision, priority: priority.map((d) => d.offer), standard, more: more.map((d) => d.offer) };
+  const bar = { v: 1 as const, state_key: f.stateKey, revision: f.revision, priority: priority.map((d) => d.offer), standard, more: more.map((d) => d.offer) };
+  const biasRisk = biasRiskOf(f, [...bar.priority, ...bar.standard, ...bar.more], f.optionFrame);
+  return biasRisk !== undefined ? { ...bar, bias_risk: biasRisk } : bar;
 }
 
 const sameTarget = (a: ItemRef | undefined, b: ItemRef | undefined): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);

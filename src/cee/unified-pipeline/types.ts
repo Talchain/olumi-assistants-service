@@ -107,17 +107,20 @@ export interface UnifiedPipelineOpts {
 // ---------------------------------------------------------------------------
 
 /**
- * Mid-flight progress, derived from the draft adapter's ALREADY-EXISTING token
- * accumulator (`acc` in adapters/llm/anthropic.ts) — the same character stream
- * the runaway detector and `time_to_edges_ms` are computed from. Carries node
- * LABELS ONLY: no strengths, no rationales, no coaching, no claims.
+ * Draft progress comes from the adapter's token accumulator (`acc` in
+ * adapters/llm/anthropic.ts). Agent phases mark real dispatches after the build.
+ * Carries node labels only: no strengths, rationales, coaching or claims.
  */
 export interface PipelineProgressEvent {
   kind: "PROGRESS";
-  /** Node labels seen in the partial draft so far, in stream order. */
+  /** Node labels in stream order; always [] for the two agent-only phases. */
   labels: string[];
-  /** Which region of the draft the accumulator has reached. */
-  phase: "nodes" | "edges";
+  /**
+   * ⭐ P44 S2 — nodes/edges describe the draft accumulator. Agent-lane only:
+   * first_analysis marks the automatic analysis dispatch; writing marks the
+   * reply provider call being sent after a fresh build. Both always use [].
+   */
+  phase: "nodes" | "edges" | "first_analysis" | "writing";
   elapsed_ms: number;
 }
 

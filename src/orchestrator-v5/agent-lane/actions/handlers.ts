@@ -17,12 +17,14 @@ import { ACTION_PRESS_PREFIX, ACTION_REGISTRY, actionOfPress, isUnknownActionPre
 import { actionBarOf, currentOfferFor, DISABLED, type ActionBarV1, type ActionOffer, type ItemRef } from './rank.js';
 import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
 import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
+import { biasBadgeApplies, biasCheckReply } from './bias-triggers.js';
 import { resolveDskClaimProvenance, type DskClaimProvenance } from '../../compose/dsk-claim-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { composeGoalTargetQuestion } from '../../goal-target/decide-goal-target-ask.js';
 import { parseStructuralChallengePress } from '../method-turn/structural-challenge-turn.js';
+import { sayOlumiEstimates } from '../olumi-estimates-feeding-result.js';
 
-export type ActionRoute = 'decision_review' | 'what_changes' | 'strengthen_s1' | 'method_turn' | 'widen_turn' | 'structural_challenge' | 'typed_reply';
+export type ActionRoute = 'decision_review' | 'what_changes' | 'strengthen_s1' | 'method_turn' | 'widen_turn' | 'structural_challenge' | 'typed_reply' | 'propose_identity';
 export interface ActionHandler {
   /** The existing typed route path that answers this press. */
   readonly route: ActionRoute;
@@ -30,6 +32,8 @@ export interface ActionHandler {
 }
 
 export const HANDLERS: Readonly<Record<ActionId, ActionHandler>> = {
+  confirm_reading: { route: 'propose_identity', gate: 'offer' },
+  set_current_level: { route: 'typed_reply', gate: 'offer' },
   review: { route: 'decision_review', gate: 'offer' },
   what_changes: { route: 'what_changes', gate: 'own' },
   strengthen: { route: 'strengthen_s1', gate: 'offer' },
@@ -42,6 +46,7 @@ export const HANDLERS: Readonly<Record<ActionId, ActionHandler>> = {
   more_risks: { route: 'widen_turn', gate: 'own' },
   bias_anchoring: { route: 'typed_reply', gate: 'offer' },
   check_estimates: { route: 'typed_reply', gate: 'offer' },
+  bias_check: { route: 'typed_reply', gate: 'offer' },
 };
 
 /** A working way on from a "can't yet": another current offer, the Run, or the existing "what it still needs" turn. */
@@ -98,6 +103,8 @@ function otherOffers(bar: ActionBarV1, not: ActionId | null, max: number): Actio
 }
 
 const CANT_YET: Record<ActionId, string> = {
+  confirm_reading: 'I can’t confirm a reading yet',
+  set_current_level: 'I can’t ask for the current level yet',
   review: 'I can’t review this decision yet',
   what_changes: 'I can’t say what would change this yet',
   strengthen: 'I can’t strengthen the model yet',
@@ -110,14 +117,22 @@ const CANT_YET: Record<ActionId, string> = {
   more_risks: 'I can’t suggest risks yet',
   bias_anchoring: 'I can’t check anchoring yet',
   check_estimates: 'I can’t show the estimates yet',
+  bias_check: 'I can’t run a bias check yet',
 };
 const BECAUSE: Record<keyof typeof DISABLED, string> = {
   needs_current_analysis: 'it needs a current analysis first.',
   needs_goal: 'the model needs a goal first.',
   needs_option: 'the model needs at least one option first.',
+  already_waiting: 'a suggested change is waiting for your yes. Approve it, or change something first.',
 };
 
 function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
+  // Unknown census needs a current readable Run; it never claims a known zero.
+  if ((action === 'check_estimates' && (f.olumiEstimates === null || (!f.runBound
+    && f.olumiEstimates.count + f.olumiEstimates.accepted + f.olumiEstimates.placeholderLinks > 0)))
+    || (action === 'bias_anchoring' && !f.runBound && estimatePointsOf(f).length > 0)) {
+    return { text: `${CANT_YET[action]}: ${BECAUSE.needs_current_analysis}`, reason: 'needs_current_analysis', exits: runExits(f) };
+  }
   if (action === 'bias_anchoring') return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const reasonKey = (Object.keys(DISABLED) as (keyof typeof DISABLED)[]).find((k) => DISABLED[k] === offer?.disabled_reason);
   if (reasonKey !== undefined) {
@@ -134,16 +149,14 @@ function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFact
 
 /** Science 393023's exact bytes. Shown-first user figures await Science's wording and never enter these replies. */
 function estimateReply(action: 'bias_anchoring' | 'check_estimates', f: ActionFacts): ActionTypedReply {
-  const points = estimatePointsOf(f).filter(p => p.via !== 'shown_first');
   if (action === 'check_estimates') {
-    // TODO lane-edit-panel.md: replace this list with the S-D panel fields when EDIT-PANEL ships its builder.
-    return { text: ["Olumi's estimates that this result rests on:",
-      ...points.map(p => `- ‘${p.label}’: ${p.figure}. That's Olumi's estimate, not a measured figure.`),
-      "If you have your own figure for any of these, tell me and I'll propose it for you to approve."].join('\n'), exits: [], outcome: 'ran' };
+    return f.olumiEstimates === null ? cantYet(action, undefined, f, actionBarOf(f))
+      : { text: sayOlumiEstimates(f.olumiEstimates).join('\n'), exits: [], outcome: 'ran' };
   }
+  const points = estimatePointsOf(f).filter(p => p.via !== 'shown_first');
   if (points.length === 0) return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const stage = f.canonicalStage === null ? null : mapStageToDecisionStage(f.canonicalStage);
-  const science = stage === 'frame' || stage === 'evaluate' ? resolveDskClaimProvenance('DSK-B-001') : null;
+  const science = biasBadgeApplies('DSK-B-001', stage) ? resolveDskClaimProvenance('DSK-B-001') : null;
   return { text: ["A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
     ...points.map(p => `- Olumi put ‘${p.label}’ at ${p.figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
     'Which of these would you check first?'].join('\n'), exits: [], outcome: 'ran', ...(science !== null ? { science } : {}) };
@@ -153,6 +166,8 @@ function estimateReply(action: 'bias_anchoring' | 'check_estimates', f: ActionFa
 function gapReply(action: ActionId, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
   if (action === 'set_deadline') return { text: chanceGoalDeadlineAsk(f.goalLabel), exits: [], outcome: 'ran' };
   if (action === 'set_goal') return { text: composeGoalTargetQuestion(), exits: [], outcome: 'ran' };
+  // GOAL-REACH 3b: the exact words the answer path persists as its ask (one source: goalLevelAskOf).
+  if (action === 'set_current_level' && f.currentLevelQuestion !== null) return { text: f.currentLevelQuestion, exits: [], outcome: 'ran' };
   const goalWords = f.goalLabel !== '' ? `‘${f.goalLabel}’` : 'your goal';
   const elements: { name: string; present: boolean; question: string; action?: ActionId }[] = [
     { name: 'goal', present: f.goalPresent, question: 'What are you trying to achieve with this decision?' },
@@ -191,7 +206,13 @@ export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = ac
   }
   const handler = HANDLERS[press.action];
   const offer = currentOfferFor(bar, press.action, press.target);
-  if (handler.route === 'typed_reply' && offer?.enabled === true) return { kind: 'reply', press, reply: press.action === 'bias_anchoring' || press.action === 'check_estimates' ? estimateReply(press.action, f) : gapReply(press.action, f, bar) };
+  if (handler.route === 'typed_reply' && offer?.enabled === true) {
+    if (press.action === 'bias_check') {
+      const reply = biasCheckReply(f, [...bar.priority, ...bar.standard, ...bar.more]);
+      return { kind: 'reply', press, reply: { text: reply.text, exits: reply.exits.map(offer => ({ kind: 'offer' as const, offer })), outcome: 'ran' } };
+    }
+    return { kind: 'reply', press, reply: press.action === 'bias_anchoring' || press.action === 'check_estimates' ? estimateReply(press.action, f) : gapReply(press.action, f, bar) };
+  }
   if (handler.gate === 'own' || offer?.enabled === true) return { kind: 'route', press, handler, offer };
   return { kind: 'reply', press, reply: cantYet(press.action, offer, f, bar) };
 }

@@ -131,19 +131,24 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
 
   it('RED (PR Review @ fe509477; AIQ 5885833834; Canonical 5885850080): a press for a proposal with no ISSUED card on offer writes nothing, even with its exact id and reading', async () => {
     const sid = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a5d';
+    let lastText = '';
     const offer = async (said: string, args: Json) => {
       script.push({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: 'p', arguments: JSON.stringify(args) }] });
       const b = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: sid, message: said } })).json() as
-        { suggested_actions: { id: string; message: string; detail?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
+        { assistant_text: string; suggested_actions: { id: string; message: string; detail?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
+      lastText = b.assistant_text;
       const id = b._agent.tool_calls.find((c) => c.name === 'propose_link_effect' && c.ok)?.proposal_id;
       expect(typeof id === 'string' ? 'prop' : JSON.stringify(b._agent.tool_calls)).toBe('prop');
       return b.suggested_actions.find((c) => c.id === `agent-approve-proposal:${id}`)!;
     };
     const p1 = await offer(SAID, ARGS);
+    expect(lastText, 'control: the first offer replaces nothing').not.toContain('was replaced by the newer card');
     // The user states another figure: P2's card is now the one on offer. P1 is still stored and would execute.
     const p2 = await offer('Actually, every £1 on the Pro price loses us about 40 paying subscribers.',
       { ...ARGS, amount: -40, quote: 'every £1 on the Pro price loses us about 40 paying subscribers' });
     expect(p2.id).not.toBe(p1.id);
+    // DL 7 Oct (f48e3e67): the replaced P1 is SAID, never silently dropped.
+    expect(lastText).toContain('was replaced by the newer card for the same change; nothing in the model changed.');
     const press = async (c: { id: string; message: string }) => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: sid, message: c.message, source: 'chip', chip: { id: c.id },
     } })).json() as { _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };

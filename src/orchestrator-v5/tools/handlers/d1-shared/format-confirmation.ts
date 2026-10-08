@@ -590,6 +590,8 @@ export interface EdgeAdjustmentInput {
   /** Explicit persisted directions are required to describe zero honestly. */
   readonly beforeDirection?: 'positive' | 'negative';
   readonly afterDirection?: 'positive' | 'negative';
+  /** Science 393023 LICENCE ruling 3: the link was a placeholder (nobody sized it), so its prior band is never named. */
+  readonly beforeUnsized?: boolean;
 }
 
 /**
@@ -600,6 +602,10 @@ export interface EdgeAdjustmentInput {
 export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
   const beforeBand = describeBandWithDirection(input.beforeMean);
   const afterBand = describeBandWithDirection(input.afterMean);
+  // A placeholder's default is not a size: say what it is now, never "from <the default's band>".
+  if (input.beforeUnsized === true) {
+    return `Set the link between ${input.fromLabel} and ${input.toLabel} to ${afterBand}; nobody had sized it before.`;
+  }
 
   const beforeDirection =
     input.beforeDirection ?? (input.beforeMean < 0 ? 'negative' : 'positive');
@@ -693,8 +699,11 @@ export function formatEdgeStrengthUnchanged(input: {
   readonly fromLabel: string;
   readonly toLabel: string;
   readonly mean: number;
+  /** Science 393023 LICENCE ruling 3: a placeholder's default is not a size, so no band is named for it. */
+  readonly unsized?: boolean;
 }): string {
   const link = `The link between ${input.fromLabel} and ${input.toLabel}`;
+  if (input.unsized === true) return `${link} has not been sized yet; nothing was changed.`;
   if (Math.abs(input.mean) < NEAR_ZERO_INFLUENCE_THRESHOLD) {
     return `${link} already has no material influence.`;
   }
