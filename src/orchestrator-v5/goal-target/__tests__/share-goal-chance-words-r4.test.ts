@@ -129,7 +129,13 @@ describe('r6 L1-LAUNCHING-WORDS closed grammar', () => {
     const candidate: CandidateModel = {
       goal: { kind: 'event_by_date', metric, deliverable, value: null, operator: '>=',
         unit: `% of ${deliverable}`, horizon_months: null, provenance: 'inferred' },
-      options: [{ label: 'Carry on', provenance: 'ai_proposed', is_status_quo: true }],
+      options: [
+        { label: 'Carry on', provenance: 'ai_proposed', is_status_quo: true },
+        // Exercise the wording of a build with usable capacity, while retaining its status quo.
+        { label: 'Add delivery capacity', provenance: 'ai_proposed', added_capacity: {
+          monthly_share_pct: 10, lead_months_low: 1, lead_months_high: 2,
+        } },
+      ],
       factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [],
     };
     let registeredDeliverable: string | undefined;
