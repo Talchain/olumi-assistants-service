@@ -23,3 +23,4 @@ import	src/routes/agent-v1-turn.ts	import { getSessionStore } from '../orchestra
 import	src/routes/agent-v1-turn.ts	import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';	type-only import (added #1687, 22 Sep 2026)
 import	src/routes/assist.v1.scenario-graph.ts	import type { AnswerOffersRead } from '../orchestrator-v5/session/store.js';	type-only import (added 6 Oct 2026, X4)
 import	src/routes/scenario-graph-analysis-read.ts	import { getSessionStore } from '../orchestrator-v5/session/index.js';	analysis read route resolves the store (added 20 Aug 2026, 2.1271)
+import	src/plugins/scenario-ownership.ts	import { getSessionStore } from '../orchestrator-v5/session/index.js';	the ONE scenario-ownership admission hook (CEE #2863, OWN-ISO Phase 2) resolves the store for READ-ONLY owner/existence/membership reads and the memoised guest CREATE moved out of the per-route preflights (added 8 Oct 2026)
