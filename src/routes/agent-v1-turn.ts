@@ -110,6 +110,7 @@ import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAge
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
+import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -641,7 +642,8 @@ function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
 }
 
 /** Persisted draft-widening provenance, not a risk's label or generic AI origin, owns Run disclosures. */
-function widenedRunWordsOf(graph: unknown): { widenedRiskNote?: string; widenedRiskMarker?: string } {
+function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[]): { widenedRiskNote?: string; widenedRiskMarker?: string } {
+  if (!chanceShownFor(cells)) return {};
   const nodes = (graph as { readonly nodes?: readonly GraphV3T['nodes'][number][] } | null | undefined)?.nodes;
   const addedRisks = Array.isArray(nodes) ? nodes.filter(node => node?.kind === 'risk'
     && node.draft_widening?.provenance === 'ai_suggested_widen') : [];
@@ -651,7 +653,7 @@ function widenedRunWordsOf(graph: unknown): { widenedRiskNote?: string; widenedR
 }
 
 /** The final scenario read owns the UI's cells; missing authority never licenses a substitute projection. */
-function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly CanonicalAnalysisCell[] {
+function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly OptionChanceCell[] {
   const view = read.canonicalAnalysisView as { schema?: unknown; source?: unknown; options?: unknown } | null | undefined;
   const options = view?.options;
   const valid = view?.schema === 'canonical_analysis_view.v1' && view.source === 'stored_run_facts'
@@ -678,7 +680,8 @@ function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scena
           && typeof (reason as { code?: unknown }).code === 'string'
           && ((reason as { message?: unknown }).message === null || typeof (reason as { message?: unknown }).message === 'string'));
     });
-  if (valid) return (options as { cell: CanonicalAnalysisCell }[]).map(row => row.cell);
+  if (valid) return (options as { option_id: string; cell: CanonicalAnalysisCell }[])
+    .map(row => ({ ...row.cell, option_id: row.option_id }));
   log.warn({ event: 'agent_lane.canonical_analysis_view_unavailable', scenario_id: scenarioId },
     'agent-lane: final scenario read has no valid canonical analysis cells');
   return [];
@@ -2452,7 +2455,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
-          ...widenedRunWordsOf(state.graph),
+          ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
@@ -4875,8 +4878,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
-        ? widenedRunWordsOf(readbackGraph) : {};
-      const widenNote = runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts));
+        ? widenedRunWordsOf(readbackGraph, chanceCells) : {};
+      const widenNote = chanceShownFor(chanceCells)
+        ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
       // The build keeps its Draft receipt after H even when it also ran. Bind that Run's marker beside its chance.
       const firstRunRiskMarker = faceContract === 'draft' && screenLines.length > 0
         ? runWidenWords.widenedRiskMarker : undefined;
