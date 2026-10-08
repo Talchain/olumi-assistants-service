@@ -1,0 +1,36 @@
+{
+  "head": "77c7fedaf82d0c0a26302035a1287a8115cc747d",
+  "branch": "dl/b2-per-option-target-withhold",
+  "changed_ts_files": [
+    "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "src/orchestrator-v5/agent-lane/admit-model.ts",
+    "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts",
+    "src/orchestrator-v5/agent-lane/goal-level-in-goal-units.ts",
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts",
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+    "src/orchestrator-v5/tools/handlers/run-analysis.ts",
+    "src/orchestrator/context/option-result-source.ts"
+  ],
+  "source_sha256": {
+    "src/orchestrator-v5/admission/identity-evaluations.ts": "5f06d6225fe7a73b0a6abc9497e4ebdb991c126112b587b4a1772696b2021e09",
+    "src/orchestrator-v5/agent-lane/admit-model.ts": "d259c2ff9da4eb7130ccb7115d2456ebb29be54d4b1fcdb0e94d94f2bee1042d",
+    "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts": "6776996556f95c266dd1d580b2cde2fb51a3849837c4188ada4186cd43b0be9a",
+    "src/orchestrator-v5/agent-lane/goal-level-in-goal-units.ts": "ed0c5975bdd8692c54c61c6dac1c3d08fe1671f8fc5fc6f8c08e9ddecdca4f68",
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts": "19a5be5cbd3704731c0ba1ef0f8813361e7196c1f107d2c3253f055a06f91a2e",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts": "77c58d7e48403208121b841a53ef927225b3b494bb811463a49e3f166f9c5874",
+    "src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts": "6fe7bea4cff081eee406e5911d4d57eaaae81042d5972dd248173f134800d84d",
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts": "b0074409ce39bc921c746ded99a1b43c44fc0d93885fbc67243e0919a33d54ac",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts": "fe750979277046172425292c023f903dd2fad57c1b3ae54a2cfbac8a7f686985",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts": "f992de1b7cdc23a63e9e0f148500c3968d790bb02b8acdf720f1d73cbd2345f7",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts": "24a0bce1c2874132e82d256250cadbcded1787ea9bd8f39a76443c5589fb83b2",
+    "src/orchestrator-v5/tools/handlers/run-analysis.ts": "6404aacd3321ba1d204f4f85ac4a3b2044087bb172b6f6b75924abd45732718e",
+    "src/orchestrator/context/option-result-source.ts": "d6df146a8f39d7406bb8ef99aa66dc4cc6097ea49ffefd430c4f9a730b6a3f71"
+  },
+  "supabase_changes": false,
+  "tracked_deletions": false
+}

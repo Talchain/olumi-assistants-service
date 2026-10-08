@@ -1,0 +1,36 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (6 tests | 1 failed) 379ms
+     × B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances 159ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances
+AssertionError: expected [] to deeply equal [ 'raise', 'keep' ]
+
+- Expected
++ Received
+
+- [
+-   "raise",
+-   "keep",
+- ]
++ []
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:66:65
+     64|       .toMatchObject({ low_pct: 40, high_pct: 51 });
+     65|     const final = scopeTargetNotTestableWithRanges(withGoalChanceLicen…
+     66|     expect(Object.keys(goalChanceDisplayForAgent(final) ?? {})).toEqua…
+       |                                                                 ^
+     67|     expect(JSON.stringify(final)).not.toContain('needs nothing more of…
+     68|     expect(final.option_comparison.map((r: Rec) => r.win_probability))…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 15 passed (16)
+   Start at  16:32:00
+   Duration  12.88s (transform 7.18s, setup 435ms, import 11.50s, tests 514ms, environment 1ms)
+

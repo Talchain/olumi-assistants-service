@@ -50,13 +50,18 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     expect(wire.assistant_text.includes('how likely any option is to')).toBeTruthy();
   });
 
-  it(`${name}: target ids exclude ranges and retain every withheld option (RED at base)`, () => {
-    expect(warning(scoped())!.option_ids).toEqual(remaining);
-    expect(warning(scoped())!.option_ids.every((id: string) => !rangeIds.includes(id))).toBeTruthy();
+  it(`${name}: target ids exclude ranges and clean options; a testable historical warning keeps its remaining scope`, () => {
+    const target = warning(scoped());
+    if (name === 'unseen-1') {
+      expect(target).toBeUndefined();
+    } else {
+      expect(target!.option_ids).toEqual(remaining);
+      expect(target!.option_ids.every((id: string) => !rangeIds.includes(id))).toBeTruthy();
+    }
   });
 
   it(`${name}: say names only W’s options with a failing link, keeping their links and ask (RED at base)`, () => {
-    const say: string = warning(scoped())!.say;
+    const say: string = warning(scoped())?.say ?? '';
     // The captured estimates now convert: their old case-(c) ask must be absent.
     expect(say).toBe('');
     expect(!say.includes('any option')).toBeTruthy();
@@ -66,12 +71,17 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     expect(say).not.toContain(question);
   });
 
-  it(`${name}: panel message stays byte-identical to the base producer`, () => {
-    expect(warning(scoped())!.message).toBe(warning(envelope)!.message);
+  it(`${name}: a retained historical panel message stays byte-identical; clean options have no target message`, () => {
+    const target = warning(scoped());
+    if (name === 'unseen-1') expect(target).toBeUndefined();
+    else expect(target!.message).toBe(warning(envelope)!.message);
     const missingLabel = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === linkedIds[0] ? { ...n, label: undefined } : n) };
     const out = scopeTargetNotTestableWithRanges(envelope, missingLabel);
-    expect(warning(out)!.message).toBe(warning(envelope)!.message);
-    expect(warning(out)!.say).toBe('');
+    if (name === 'unseen-1') expect(warning(out)).toBeUndefined();
+    else {
+      expect(warning(out)!.message).toBe(warning(envelope)!.message);
+      expect(warning(out)!.say).toBe('');
+    }
   });
 
   it(`${name}: served Challenge with the capture's analysis_ready retains the range opening`, () => {
@@ -165,15 +175,18 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     expect(!goalChanceWithheldForAgent({ enrichment: out }, graph)?.say.includes('how likely')).toBeTruthy();
   });
 
-  it(`${name}: licensed point also excluded, withheld point stays (RED at base)`, () => {
+  it(`${name}: licensed point also excluded; an unlicensed clean option adds no target withhold`, () => {
     const points = { ...envelope, inference_warnings: [...warnings(envelope), {
       code: GOAL_CHANCE_LICENSED, severity: 'info', form: 'each', message: 'Point licence control.',
       option_ids: optionIds(envelope), pct_by_option: { [remaining[0]!]: 45 }, withheld_option_ids: [remaining[1]!],
     }] };
     const out = scopeTargetNotTestableWithRanges(points, graph);
-    expect(warning(out)!.option_ids).toEqual([remaining[1]]);
-    expect(warning(out)!.say).toBe('');
-    expect(!warning(out)!.say.includes(`‘${labels.get(remaining[0]!)}’`)).toBeTruthy();
+    if (name === 'unseen-1') expect(warning(out)).toBeUndefined();
+    else {
+      expect(warning(out)!.option_ids).toEqual([remaining[1]]);
+      expect(warning(out)!.say).toBe('');
+      expect(!warning(out)!.say.includes(`‘${labels.get(remaining[0]!)}’`)).toBeTruthy();
+    }
     const allPoints = { ...points, inference_warnings: warnings(points).map(w => w.code === GOAL_CHANCE_LICENSED ? {
       ...w, pct_by_option: Object.fromEntries(remaining.map(id => [id, 45])), withheld_option_ids: undefined,
     } : w) };
@@ -206,23 +219,29 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     const narrow = { ...envelope, inference_warnings: warnings(envelope).map(w => w.code === TARGET
       ? { ...w, option_ids: [linkedIds[0]] } : w) };
     const out = scopeTargetNotTestableWithRanges(narrow, graph);
-    expect(warning(out)!.option_ids).toEqual([linkedIds[0]]);
-    expect(warning(out)!.say).toBe('');
-    expect(warning(out)!.say).not.toContain(`‘${labels.get(baselineId)}’`);
+    if (name === 'unseen-1') expect(warning(out)).toBeUndefined();
+    else {
+      expect(warning(out)!.option_ids).toEqual([linkedIds[0]]);
+      expect(warning(out)!.say).toBe('');
+      expect(warning(out)!.say).not.toContain(`‘${labels.get(baselineId)}’`);
+    }
     const empty = { ...envelope, inference_warnings: warnings(envelope).map(w => w.code === TARGET
       ? { ...w, option_ids: rangeIds } : w) };
     expect(warning(scopeTargetNotTestableWithRanges(empty, graph))).toBeUndefined();
   });
 
-  it(`${name}: status-quo-only W has no failing link and no withheld sentence; ranges remain`, () => {
+  it(`${name}: status-quo-only W has no failing link or target sentence; ranges remain`, () => {
     expect(baselineId).toBe('carry_on_as_now');
     const onlyBaseline = { ...envelope, inference_warnings: warnings(envelope).map(w => w.code === TARGET
       ? { ...w, option_ids: [baselineId] } : w) };
     const out = scopeTargetNotTestableWithRanges(onlyBaseline, graph);
-    expect(warning(out)!.option_ids).toEqual([baselineId]);
-    expect(warning(out)!.say).toBe('');
-    expect(warning(out)!.first_ask).toBeUndefined();
-    expect(warning(out)!.message).toBe(warning(envelope)!.message);
+    if (name === 'unseen-1') expect(warning(out)).toBeUndefined();
+    else {
+      expect(warning(out)!.option_ids).toEqual([baselineId]);
+      expect(warning(out)!.say).toBe('');
+      expect(warning(out)!.first_ask).toBeUndefined();
+      expect(warning(out)!.message).toBe(warning(envelope)!.message);
+    }
     expect(goalChanceWithheldForAgent({ enrichment: out }, graph)?.say ?? '').not.toContain("I can't yet say how likely");
     const targetAlone = { ...out, inference_warnings: warnings(out).filter(w => w.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') };
     expect(goalChanceWithheldForAgent({ enrichment: targetAlone }, graph)).toBeUndefined();
@@ -230,20 +249,21 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
       .toEqual(goalChanceFactsForAgent(envelope, graph, true).goal_chance_range_display);
   });
 
-  it(`${name}: two W options with failing links each keep their own reason and ask`, () => {
+  it(`${name}: moving a baseline onto a converting path invents no target failure`, () => {
     const range = warning(envelope, GOAL_CHANCE_RANGE)!;
     const otherLink = range.range_by_option[rangeIds[0]!];
     const movedGraph = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === baselineId
       ? { ...n, interventions: { [otherLink.from]: 1 } } : n) };
     const out = scopeTargetNotTestableWithRanges(envelope, movedGraph);
-    const say: string = warning(out)!.say;
+    if (name === 'unseen-1') expect(warning(out)).toBeUndefined();
+    const say: string = warning(out)?.say ?? '';
     const movedEdge = movedGraph.edges.find((edge: Rec) => edge.from === otherLink.from && edge.to === otherLink.to);
     expect(convertingOlumiEstimate(movedEdge, movedGraph, scoredGoalIdOf(movedGraph))).toBe(true);
     expect(say).toBe('');
     expect(say).not.toContain(expectedSay);
   });
 
-  it(`${name}: a shared failing link stays on W’s path and the ask follows the first retained link`, () => {
+  it(`${name}: a shared converting link invents no target failure or ask`, () => {
     const range = warning(envelope, GOAL_CHANCE_RANGE)!;
     const rangedLink = range.range_by_option[rangeIds[0]!];
     const sharedGraph = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === remaining.find(id =>
@@ -252,8 +272,11 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     const out = scopeTargetNotTestableWithRanges(envelope, sharedGraph);
     const sharedEdge = sharedGraph.edges.find((edge: Rec) => edge.from === rangedLink.from && edge.to === rangedLink.to);
     expect(convertingOlumiEstimate(sharedEdge, sharedGraph, scoredGoalIdOf(sharedGraph))).toBe(true);
-    expect(warning(out)!.say).toBe('');
-    expect(warning(out)!.first_ask).toBeUndefined();
+    if (name === 'unseen-1') expect(warning(out)).toBeUndefined();
+    else {
+      expect(warning(out)!.say).toBe('');
+      expect(warning(out)!.first_ask).toBeUndefined();
+    }
   });
 
   it.each(['placeholder', 'non-converting estimate'])(`${name}: amendment (A) CONTRAST: %s still keeps W's complete link reason and ask`, (kind) => {
@@ -272,6 +295,9 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     }
     expect(changed).toBe(name === 'unseen-1' ? 3 : 1);
     const out = scopeTargetNotTestableWithRanges(envelope, refused);
+    expect(warning(out)!.option_ids).toEqual(linkedIds);
+    expect(Object.keys(warning(out)!.per_option)).toEqual(linkedIds);
+    expect(warning(out)!.option_ids).not.toContain(baselineId);
     expect(warning(out)!.say).toBe(expectedSay);
     expect(warning(out)!.say.endsWith(question)).toBe(true);
     expect(warning(out)!.per_option[linkedIds[0]!].message).toContain(name === 'unseen-1'
@@ -329,5 +355,5 @@ it('20k whitespace copy path runs below 50 ms (no new regex)', () => {
   const elapsed = performance.now() - start;
   console.log(`S4b 20k whitespace: ${elapsed.toFixed(3)} ms; new regex: none`);
   expect(elapsed < 50).toBeTruthy();
-  expect(warning(out)!.say).toBeDefined();
+  expect(warning(out)).toBeUndefined();
 });

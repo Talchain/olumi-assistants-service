@@ -1,0 +1,30 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 25ms
+     × the Agent target-only note keeps the partial option scope and permits clean options' licences 23ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > the Agent target-only note keeps the partial option scope and permits clean options' licences
+AssertionError: expected 'I can\'t yet say how likely any optio…' not to contain 'any option'
+
+Expected: "any option"
+Received: "I can't yet say how likely any option is to keep Goal at or above £800: I need a size for the links from middle to Goal, from a to middle and from u to a. Roughly how much Goal in £ does a change in middle bring?"
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:168:30
+    166|       expect(agent?.note).not.toContain('EVERY option');
+    167|       expect(agent?.note).toContain('Other options');
+    168|       expect(agent?.say).not.toContain('any option');
+       |                              ^
+    169|     }
+    170|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:45:58
+   Duration  4.79s (transform 3.41s, setup 140ms, import 4.49s, tests 25ms, environment 0ms)
+
