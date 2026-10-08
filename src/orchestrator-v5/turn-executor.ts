@@ -91,12 +91,15 @@ import {
 import {
   buildTurnContext,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
   GraphStaleWriteError,
   type CanonicalGraphReadState,
   type SelectionHonesty,
 } from './build-turn-context.js';
 import { TurnFenceRejectedError } from './session/turn-fence.js';
 import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
+import { readRevisionConflictDetails } from './graph-revision-conflict.js';
+import { useAppendV6 } from './append-v6-flag.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -1336,7 +1339,10 @@ export async function runTurnExecutor(
   // that was re-resolved still yields a correct expected base (present) or a
   // legitimately-null expected (proven-absent first write) — never a stale null
   // from `context.persistedGraph` (which stays null on a degraded read).
-  let resolvedCanonicalGraphForCommit: { readonly graph: unknown | null } | undefined;
+  let resolvedCanonicalGraphForCommit: {
+    readonly graph: unknown | null;
+    readonly revision?: number;
+  } | undefined;
   // ── ROADMAP 2.301 secondary fix — HOISTED conflict capture ─────────────
   // The diagnosis (diagnosis-commit-path-2026-08-03.md §4) measured the
   // walk's 500-vs-409 split: 23 commit catch sites, and exactly ONE (the
@@ -1819,6 +1825,10 @@ export async function runTurnExecutor(
       const commitMeta = zeroSelectionProjection.applied
         ? { ...meta, pending_actions: [] }
         : meta;
+      const { expectedRevision: _callSiteExpectedRevision, ...commitMetaWithoutRevision } = commitMeta;
+      const expectedRevision = resolvedCanonicalGraphForCommit
+        ? resolvedCanonicalGraphForCommit.revision
+        : context.persistedRevision;
       result = await commitDirectAnswer(
         zeroSelectionProjection.response,
         {
@@ -1840,9 +1850,10 @@ export async function runTurnExecutor(
           // meta) to exclude the proposal they just consumed / rejected, so it
           // can never carry forward and reappear as a zombie.
           priorPendingActions: context.most_recent_pending_actions ?? [],
-          ...commitMeta,
-          // Revision is bound to this turn's server snapshot, never a commit-time reread.
-          ...(context.persistedRevision !== undefined ? { expectedRevision: context.persistedRevision } : {}),
+          ...commitMetaWithoutRevision,
+          // A degraded-read recovery supplies graph and revision together;
+          // otherwise retain the original turn snapshot's revision.
+          ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           // ⭐⭐ GATE 1 — deliberately AFTER `...commitMeta`, unlike the two
           // injections above it. Those are DEFAULTS a call site may override;
           // this is a GUARANTEE. All ~36 executor commit sites funnel through
@@ -14546,13 +14557,20 @@ export async function runTurnExecutor(
         let hasServerModel: boolean;
         let readUnknown = false;
         let degradedRereadGraph: unknown | null | undefined;
+        let canonicalRevision = context.persistedRevision;
         if (canonicalRead.status === 'ok_present') {
           hasServerModel = graphHasNodes(canonicalRead.graph);
         } else if (canonicalRead.status === 'ok_absent') {
           hasServerModel = false;
         } else {
           try {
-            degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+            if (useAppendV6()) {
+              const recoveryBase = await loadPersistedScenarioStateStrict(context.session_id);
+              degradedRereadGraph = recoveryBase.graph;
+              canonicalRevision = recoveryBase.revision;
+            } else {
+              degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+            }
             hasServerModel = graphHasNodes(degradedRereadGraph);
             log.warn(
               {
@@ -14587,6 +14605,7 @@ export async function runTurnExecutor(
         // expected base is needed).
         if (!readUnknown) {
           resolvedCanonicalGraphForCommit = {
+            revision: canonicalRevision,
             graph:
               canonicalRead.status === 'ok_present'
                 ? canonicalRead.graph
@@ -15417,6 +15436,7 @@ export async function runTurnExecutor(
             recovery_action: 'refresh_and_reconfirm',
             conflict_category: error.conflict_category,
             expected_base_graph_hash: error.expected_base_graph_hash ?? null,
+            ...readRevisionConflictDetails(error),
           } satisfies GraphConflictFailureDetails,
           recoveryCtx(),
         );
@@ -16548,6 +16568,7 @@ export async function runTurnExecutor(
             recovery_action: 'refresh_and_reconfirm',
             conflict_category: conflict.conflict_category,
             expected_base_graph_hash: conflict.expected_base_graph_hash ?? null,
+            ...readRevisionConflictDetails(conflict),
           } satisfies GraphConflictFailureDetails,
           recoveryCtx(),
         );

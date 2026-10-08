@@ -369,6 +369,8 @@ export interface CommitResult {
   readonly response: OlumiResponse;
   readonly performed: true;
   readonly persisted_row_id: string;
+  /** Scenario revision returned by the versioned atomic append, including replay. */
+  readonly revision?: number;
   readonly modelVersionReceipt: AtomicCommittedModelVersionReceipt | null;
   /**
    * True when CommitMetadata.graph was provided and the append RESOLVED. False
@@ -2159,6 +2161,7 @@ export async function commitDirectAnswer(
   // applied state. Hand back the authoritative reread instead (or null).
   const replayGraph = replayReread === null ? null : replayReread.graph;
   return {
+    ...(appendOutcome.revision !== undefined ? { revision: appendOutcome.revision } : {}),
     persistedAnalysisGraphHash:
       replayReread === null
         ? persistedAnalysisGraphHash
