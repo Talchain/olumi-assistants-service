@@ -171,6 +171,9 @@ import { createProposal, ProposalStore, type ProposalInterpretation, type Propos
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
+import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
+import type { PatchOperation } from '../../../orchestrator/types.js';
+import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -203,6 +206,10 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
+import { meetsLimit } from '../limit-operator-words.js';
+import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
+import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
@@ -221,6 +228,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { productHoldRecord } from '../proposal-object/record.js';
 import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
+import { PLAIN_APPROVAL_SUPERSEDED } from '../proposal-object/reply.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -970,6 +978,8 @@ interface GraphRead {
     analysis_participation?: unknown;
     /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
     option_status?: unknown;
+    /** RC3: persisted server-authored option precondition. Inclusion is resolved over the whole graph. */
+    relies_on?: unknown;
     goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
@@ -985,6 +995,7 @@ interface GraphRead {
     from: string;
     to: string;
     origin?: unknown;
+    edge_type?: unknown;
     /** Whose link it is and how strong: read by the model context (C33) and the link-strength proposal and its write check. */
     provenance?: unknown;
     strength?: unknown;
@@ -1211,6 +1222,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           // them made the Agent reconstruct from the prompt what canonical state
           // already knew.
           const os = (n.observed_state ?? {}) as Record<string, unknown>;
+          const precondition = n.kind === 'risk' ? readReliesOnRisk(n.relies_on) : undefined;
           const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
           const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
           // Value provenance is a DIFFERENT fact from entity provenance: who put
@@ -1234,6 +1246,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             label: n.label,
             ...(n.description !== undefined ? { full_label: n.description } : {}),
             kind: n.kind,
+            ...(precondition === undefined ? {} : { relies_on: precondition }),
             // A value only when one is actually stored. Absence is reported as
             // unknown rather than as a zero.
             value: num(os.value) ? os.value : null,
@@ -1267,15 +1280,24 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * ⭐ (B) WHAT THE AGENT NEEDS TO EXPLAIN THE MODEL HONESTLY — the goal as the user stated it, the limits they
  * set, whose each link is, and the ONE readiness verdict (C33 5838970895; ChatGPT 5839692762 B).
  *
- * Every value is a stored carrier passed through, never re-derived: the goal target through the ONE trio
+ * Figures are stored carriers passed through: the goal target through the ONE trio
  * reader (`pickGoalThresholdTrio`, raw figure only — never the normalised `goal_threshold`, which is the
  * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
- * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
+ * provenance as stored. Today's limit fact uses the same predicate and proven frame as analysis.
+ * Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
 export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
+  const preconditions = preconditionRiskIds(g.nodes, g.edges, limitNodeIdsOf(g.raw));
+  const leftOut = g.nodes.filter((n) => preconditions.has(n.id)).flatMap((risk) => {
+    const stamp = readReliesOnRisk(risk.relies_on);
+    if (stamp === undefined) return [];
+    return [{ id: risk.id, label: risk.label, relies_on: stamp,
+      reason: reliesOnRiskLine(risk.label, labelOf.get(stamp.option_id)!),
+      use: "Kept for discussion. Never a driver, sensitivity or worth-checking row, and never cite it as a reason for a goal chance: the Run leaves it out." }];
+  });
   const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
     const trio = pickGoalThresholdTrio(n as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
     const frame = (n as { goal_threshold_frame?: unknown }).goal_threshold_frame;
@@ -1314,11 +1336,18 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     .map((c) => {
       // ⭐ A2: the limit as the user STATED it ("less than 4%"), from `operator_as_stated` beside the held `operator`
       // (`statedOperatorOf`: only its strict twin, never a contradicting stamp). `operator` stays the held one: it is
-      // the key `propose_limit_change` names the row by. The engine's "<=" differs only for a level pinned exactly at
-      // the threshold (`admit-constraint.ts` header: disclosed, not modelled).
+      // the key `propose_limit_change` names the row by. Strict ties are read by the shared predicate below.
       const stated = statedOperatorOf(c);
       const unit = str(c.unit) ? (c.unit.startsWith('%') ? c.unit : ` ${c.unit}`) : '';
+      const node = g.nodes.find((n) => n.id === c.node_id);
+      const decision = node === undefined ? undefined : levelLimitNodeDecision(g.raw, c, node as Record<string, unknown>,
+        str(g.raw.goal_node_id) ? g.raw.goal_node_id : undefined);
+      const today = node?.observed_state?.stated_role === 'constraint' || isRetainedExcluded(node) ? undefined : decision?.engineReadLevel;
+      const threshold = c.value_frame === 'level' && node !== undefined
+        ? thresholdOnNodeLevel(g.raw, c, node as Record<string, unknown>, c.value as number) : undefined;
       return {
+        ...(str(c.node_id) ? { node_id: c.node_id } : {}),
+        ...(str(c.constraint_id) ? { constraint_id: c.constraint_id } : {}),
         // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
         // own label only when that node is absent — so the card and the Agent say the same words for one limit.
         on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
@@ -1335,6 +1364,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
           words: LIMIT_OPERATOR_WORDS, figure: (v) => `${String(v)}${unit}`,
         }) } : {}),
         ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
+        ...(stated === undefined || !num(today) || threshold === undefined ? {} : {
+          today_within_limit: meetsLimit(today, stated, threshold),
+          today_within_limit_instruction: 'Quote this computed fact about today in this model; do no arithmetic. true means today meets the limit; false means it does not; at_threshold means today is at the strict threshold and does not meet the limit.',
+        }),
       };
     });
   /**
@@ -1387,6 +1420,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
     links,
+    ...(leftOut.length === 0 ? {} : { left_out_of_run: leftOut }),
     readiness: readinessViewOf(g.raw),
     ...(earlierAnalysisOf(g.analysis_state, g.analysis_ready) ?? {}),
   };
@@ -1915,7 +1949,11 @@ function riskUnreachableWhy(g: Pick<GraphRead, 'nodes'>, risk: string, links: re
 const FACTOR_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for the link, not an estimate';
 
 /** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
-const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
+const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most', below: 'below', above: 'above' } as const;
+type TargetDirection = keyof typeof DIRECTION_WORDS;
+const TARGET_OPERATOR = { at_least: '>=', at_most: '<=', below: '<', above: '>' } as const;
+const inclusiveTargetDirection = (type: TargetDirection): 'at_least' | 'at_most' =>
+  type === 'below' || type === 'at_most' ? 'at_most' : 'at_least';
 /**
  * A goal target's or a limit's figure as the user writes it ("£20,000 over 6 months", "£100,000 per month", "5%"): the
  * lane's one figure formatter (DL #72 5866282787: "20000 £ over 6 months" reached a consent subject). A figure it cannot
@@ -1930,13 +1968,14 @@ const targetFigure = (value: number, unit: string): string =>
  * figure, for both directions; for at least it also stamps the goal's own `goal_threshold_raw` (what the Agent's
  * `target` and the UI read). Both must hold exactly what was approved.
  */
-function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: 'at_least' | 'at_most'; raw_value: number }): boolean {
-  const operator = v.constraint_type === 'at_least' ? '>=' : '<=';
+function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: TargetDirection; raw_value: number }): boolean {
+  const type = inclusiveTargetDirection(v.constraint_type);
+  const operator = type === 'at_least' ? '>=' : '<=';
   const rows = (Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
     .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown } => c !== null && typeof c === 'object')
     .filter((c) => c.node_id === goalId && c.operator === operator);
-  if (rows.length !== 1 || rows[0]!.value !== v.raw_value) return false;
-  if (v.constraint_type === 'at_most') return true;
+  if (rows.length !== 1 || rows[0]!.value !== v.raw_value || statedOperatorOf(rows[0]!) !== TARGET_OPERATOR[v.constraint_type]) return false;
+  if (type === 'at_most') return true;
   const goal = (Array.isArray(raw.nodes) ? raw.nodes : []).find((n) => (n as { id?: unknown } | null)?.id === goalId) as { goal_threshold_raw?: unknown } | undefined;
   return goal?.goal_threshold_raw === v.raw_value;
 }
@@ -2238,7 +2277,7 @@ export function createAgentCapabilities(
         detail: 'That change is no longer waiting (it expired, or the model changed since it was offered), so nothing was applied. Offer to prepare it again.' };
     }
     const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
-    if (ctx.typed_approval_words !== copy.message) {
+    if (ctx.proposal_edits === undefined && ctx.typed_approval_words !== copy.message) {
       return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
         detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
     }
@@ -2256,19 +2295,33 @@ export function createAgentCapabilities(
       if (edits.proposal_id !== ref || edits.revision !== hold.id || edits.graph_hash !== hold.preconditions.graph_hash
         || edits.graph_hash !== before.graph_hash) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
       }
       const record = productHoldRecord(hold, before);
       if (record !== undefined && record.digest !== edits.digest) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. What this change shows has changed since these values were set.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. What this change shows has changed since these values were set.' };
       }
-      const amended = record === undefined ? undefined : amendHeldOperations(record, edits.fields);
-      if (amended === undefined || !amended.ok) {
+      if (record === undefined) {
         return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
           detail: 'Nothing changed. Those values do not belong to this waiting change.' };
       }
-      userEdits = amended.userEdits;
+      // Check the card binding before its words: a replaced card can also have a newer approval message.
+      if (ctx.typed_approval_words !== copy.message) {
+        return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
+          detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
+      }
+      // Empty fields bind the displayed card only; they generate no amendments or edit receipts.
+      if (edits.fields.length > 0) {
+        const amended = amendHeldOperations(record, edits.fields);
+        if (!amended.ok) {
+          return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
+            detail: 'Nothing changed. Those values do not belong to this waiting change.' };
+        }
+        userEdits = amended.userEdits;
+      }
     }
     const r = await dispatch('/orchestrate/v2/turn', {
       kind: 'message',
@@ -2314,6 +2367,9 @@ export function createAgentCapabilities(
     const verified = applied && after !== null && typeof r.json.graph_hash === 'string' && r.json.graph_hash === after.graph_hash
       && after.graph_hash !== before.graph_hash && !stillHeld && holdsAll(after);
     if (!verified) {
+      if (!applied && edits?.fields.length === 0 && r.json.assistant_text === PLAIN_APPROVAL_SUPERSEDED) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref, detail: PLAIN_APPROVAL_SUPERSEDED };
+      }
       return applied
         ? { ok: false, mutated: true, refusal: 'not_verified', proposal_id: ref,
           detail: 'The change was saved, but the model changed again straight afterwards, so what it now holds could not be confirmed. Read the model again before saying what it holds.' }
@@ -4296,8 +4352,9 @@ export function createAgentCapabilities(
        * direction is the alternative button, and the user's click is the authorship. No word list over the user's wording.
        */
       const said = comparatorTheUserWrote(ctx.user_turn_text);
-      const type: 'at_least' | 'at_most' = said ?? typed;
-      const directionIsADecision = said !== typed;
+      const type: TargetDirection = said ?? typed;
+      const inclusiveType = inclusiveTargetDirection(type);
+      const directionIsADecision = said === null || inclusiveType !== typed;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // Exactly ONE goal: the event is id-addressed, and choosing between two goals would be a guess.
@@ -4329,7 +4386,7 @@ export function createAgentCapabilities(
             + 'Tell the user plainly, and never offer a level target in its place.' };
       }
       // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
-      if (type === 'at_least' && !(value > 0)) {
+      if (inclusiveType === 'at_least' && !(value > 0)) {
         return { ok: false, mutated: false, refusal: 'target_not_positive',
           detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Tell the user that, in those words.` };
       }
@@ -4398,7 +4455,7 @@ export function createAgentCapabilities(
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       // ⭐ D3 step 1 (Science #87 6006079049 (1)): ONE target per goal — approving retires the goal's other own target row
       // (`add-constraint.ts`), so the card names what it replaces, in the row's own words and units.
-      const chosenOperator = type === 'at_most' ? '<=' : '>=';
+      const chosenOperator = inclusiveType === 'at_most' ? '<=' : '>=';
       const replaced = ((g.raw as { goal_constraints?: unknown }).goal_constraints as Array<Record<string, unknown>> | undefined ?? [])
         .filter((c) => c !== null && typeof c === 'object' && c.node_id === goal.id && (c.deadline_metadata === undefined || c.deadline_metadata === null)
           && (c.value_frame === undefined || c.value_frame === 'level')
@@ -4433,7 +4490,7 @@ export function createAgentCapabilities(
         ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
         // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
         // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
-        ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
+        ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: inclusiveType === 'at_least' ? 'at_most' : 'at_least' } } : {}),
         note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
@@ -5852,12 +5909,15 @@ export function createAgentCapabilities(
 
       if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
         const op = ops[0]!;
-        const v = op.value as { constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string };
+        const v = op.value as { constraint_type: TargetDirection; raw_value: number; unit: string };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
-        const res = await dispatch('/orchestrate/v2/turn', {
+        const write = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
-          event: { kind: 'goal_target_edit', goal_node_id: op.path, constraint_type: v.constraint_type, raw_value: v.raw_value, unit: v.unit, base_graph_hash: decision.proposal.base_graph_identity_hash },
+          event: { kind: 'goal_target_edit', goal_node_id: op.path, constraint_type: inclusiveTargetDirection(v.constraint_type), raw_value: v.raw_value, unit: v.unit, base_graph_hash: decision.proposal.base_graph_identity_hash },
         });
+        // The approved card's strict comparator rides only this exact in-process write, never a wire field.
+        const res = await runWithStatedGoalOperator({ scenario_id: ctx.scenario_id, goal_node_id: op.path,
+          turn_id: operationId, operator: TARGET_OPERATOR[v.constraint_type] }, write);
         // The writer's stale-base gate: the model moved between this approval's read and the write. Nothing written.
         if (res.status === 409) {
           return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
@@ -8198,12 +8258,20 @@ export function createAgentCapabilities(
       }
       const affects = Array.isArray(args?.affects) ? args.affects : [];
       const causedBy = Array.isArray(args?.caused_by) ? args.caused_by : [];
-      if (affects.length === 0) {
+      const precondition = ctx.widen_relies_on === undefined ? undefined : readReliesOnRisk(ctx.widen_relies_on);
+      if (ctx.widen_relies_on !== undefined && (precondition === undefined || affects.length !== 0 || causedBy.length !== 0)) {
+        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'Nothing was prepared: this option precondition must have no links.' };
+      }
+      if (affects.length === 0 && precondition === undefined) {
         return { ok: false, mutated: false, refusal: 'no_affects',
           detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const preconditionOption = precondition === undefined ? undefined : g.nodes.find((n) => n.id === precondition.option_id && n.kind === 'option');
+      if (precondition !== undefined && preconditionOption === undefined) {
+        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'The option this risk relies on is no longer in the model. Nothing was prepared.' };
+      }
       if (g.nodes.some((n) => norm(n.label) === norm(label))) {
         return { ok: false, mutated: false, refusal: 'risk_exists',
           detail: `The model already has something called "${label}", so nothing was prepared. Describe it from the model instead of adding it again.` };
@@ -8236,7 +8304,7 @@ export function createAgentCapabilities(
       }
       // Only the user's turn may author the likelihood or name its drivers.
       const userText = ctx.user_turn_text ?? ctx.user_text ?? '';
-      const stated = readStatedEventRisk(userText);
+      const stated = precondition === undefined ? readStatedEventRisk(userText) : undefined;
       const driverLabels = stated === undefined ? [] : causedBy.map((c) => {
         const asked = String(c?.factor_label ?? '');
         const resolved = resolveNamed(g, asked, (node) => node.kind === 'factor');
@@ -8265,7 +8333,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
       }
       // The door's own builder, run here purely: a spec it would refuse is never sent.
-      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never });
+      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never }, precondition);
       if (!built.matched) {
         const why = built.reason === 'kind_pair_not_allowed'
           ? ` ${RISK_LINKS_RULE}`
@@ -8283,6 +8351,7 @@ export function createAgentCapabilities(
         base_graph_hash: g.graph_hash,
         risk: { id: riskId, label },
         links,
+        ...(precondition === undefined ? {} : { relies_on: precondition }),
         ...(eventRisk !== undefined ? { user_event_risk: eventRisk } : {}),
       });
       if (res.status === 'stale') {
@@ -8297,6 +8366,9 @@ export function createAgentCapabilities(
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
           heldOk = (eventRisk === undefined || (hold !== undefined && isDeepStrictEqual((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_EVENT_RISK_KEY], { risk_id: riskId, ...eventRisk })))
             && ops.some((o) => o.op === 'add_node' && o.path === riskId)
+            && (precondition === undefined || (reliesOnRefereeOperations(ops as PatchOperation[], g) !== undefined
+              && ops.some((o) => o.op === 'add_node' && o.path === riskId
+                && isDeepStrictEqual((o.value as Record<string, unknown>)?.relies_on, precondition))))
             && built.proposal.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`));
         } catch {
           heldOk = false;
@@ -8319,13 +8391,16 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         risk: {
           label,
+          ...(precondition === undefined ? {} : { relies_on: { option_id: precondition.option_id, option_label: preconditionOption!.label } }),
           ...(eventRisk !== undefined ? { likelihood: { p_low_pct: eventRisk.event_risk.occurrence.p_low * 100, p_high_pct: eventRisk.event_risk.occurrence.p_high * 100, horizon_months: eventRisk.event_risk.horizon.months, basis: 'user', quote: eventRisk.quote } } : {}),
           threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
           how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
         },
         ...(droppedDrivers.length > 0 ? { dropped_drivers: droppedDrivers } : {}),
-        note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
+        note: precondition !== undefined
+          ? "Nothing has changed yet. This risk stays on the model with no links. The Run leaves it out because it cannot yet apply the risk to that option alone; that option's chance does not include it yet."
+          : 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
           + (stated !== undefined && riskCauses.length > 0 ? ' ' + HELD_RISK_CAUSE_NOTE : '')
           + (droppedDrivers.length > 0 ? ` I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.` : '')

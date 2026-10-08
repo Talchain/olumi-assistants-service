@@ -22,7 +22,8 @@ import { createHash } from 'node:crypto';
 
 import type { StrengthBand } from '@talchain/schemas/boundary';
 
-import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
+import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../../session/pending-action.js';
+import { conversationAsSeen } from '../../session/conversation-as-seen.js';
 import { GM_HELD_HANDLER_ID, buildGmHeldPublicCopy } from '../../handlers/edit-graph-referee-gate.js';
 import { describeChangeset } from '../../handlers/describe-changeset.js';
 import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMember } from '../../routing/add-option-transaction.js';
@@ -31,6 +32,7 @@ import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromMagnitude, strengthBandFromEdgeBan
 import type { InfluenceBand } from '../../format/influence-bands.js';
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../routing/stated-event-risk.js';
 import { eventRiskCardLine } from '../stated-event-risk-draft.js';
+import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
 import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -127,6 +129,7 @@ export interface ProposalRecord<F extends ProposalField = ProposalField> {
    * that revision, so two panels can never approve each other's values (Codex P0 on the design).
    */
   readonly revision: string;
+  /** Carrier time for bounded issuance lookup only; excluded from the displayed digest and wire. */
   /**
    * What the panel SHOWED, bound: the card's words, every field (its ends, their labels, direction, value and whose it
    * is) and the missing data, hashed. Edits name it and the door re-derives it from the stored hold on the stored model,
@@ -234,6 +237,8 @@ function missingOf(pa: PendingAction, ops: readonly HeldOp[]): MissingDatum[] {
     if (o.op !== 'add_node' || !isRec(o.value)) continue;
     const { id, label, kind } = o.value as { id?: unknown; label?: unknown; kind?: unknown };
     if (typeof id !== 'string' || typeof label !== 'string' || (kind !== 'risk' && kind !== 'factor')) continue;
+    // A held precondition has no Run level to resolve: the card discloses its option-bound omission below.
+    if (kind === 'risk' && readReliesOnRisk((o.value as Rec).relies_on) !== undefined) continue;
     const observed = (o.value as Rec)['observed_state'];
     if (isRec(observed) && typeof observed['value'] === 'number') continue;
     if (recorded.has(id)) continue;
@@ -259,6 +264,10 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
   const eventRisk = readUserEventRiskMember(patch[GM_HELD_USER_EVENT_RISK_KEY]);
   if (eventRisk !== undefined) {
     const line = eventRiskCardLine(eventRisk.event_risk);
+    detail = detail !== undefined ? `${detail}\n${line}` : line;
+  }
+  // This reader rebuilds card detail on reload; the dispatch-only detail would otherwise disappear.
+  for (const line of heldReliesOnRiskLines(ops as PatchOperation[], graph)) {
     detail = detail !== undefined ? `${detail}\n${line}` : line;
   }
   return { id: `${APPROVE_PREFIX}${pa.chip_id}`, label, message, ...(detail !== undefined ? { detail } : {}) };
@@ -380,6 +389,103 @@ export function heldChangeName(pa: PendingAction): string | undefined {
   return agentProposalOf(pa) !== undefined ? `The held change "${name.replace(/\.$/, '')}"` : `The held change to add ${name}`;
 }
 
+/** The existing conversation rows needed to locate the answer that first carried a held revision. */
+export interface ProposalIssuingRow {
+  readonly turn_id: string;
+  readonly created_at?: string;
+  readonly request_hash?: string | null;
+  readonly user_message?: string | null;
+  readonly assistant_message?: string | null;
+  readonly pending_actions?: readonly unknown[];
+}
+
+/** PostgreSQL and ISO instants, padded to UTC microseconds. Date only shifts whole seconds; it never orders fractions. */
+function proposalRowTimestamp(value: string | undefined, shiftSeconds = 0): string | undefined {
+  const parts = value?.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/);
+  if (parts === undefined || parts === null) return undefined;
+  const localTime = `${parts[1]}T${parts[2]}`;
+  const localSeconds = Date.parse(`${localTime}Z`);
+  if (!Number.isFinite(localSeconds) || new Date(localSeconds).toISOString().slice(0, 19) !== localTime) return undefined;
+  const zone = parts[4]!.length === 3 ? `${parts[4]}:00` : parts[4]!;
+  const wholeSeconds = Date.parse(`${localTime}${zone}`);
+  if (!Number.isFinite(wholeSeconds)) return undefined;
+  return `${new Date(wholeSeconds + shiftSeconds * 1000).toISOString().slice(0, 19)}.${(parts[3] ?? '').padEnd(6, '0')}Z`;
+}
+
+/**
+ * P53: use only the loaded window. The earliest public answer at/after emission (allowing 2 s app/DB clock skew)
+ * is the ONE candidate for a revision. It must carry that revision and its chronological predecessor must not:
+ * at most two exact-row reads, never scan onward. Without a predecessor, only a complete raw window proves issuance.
+ * Tied timestamps, a hold predating this window and unverifiable rows stay unknown. Claim markers and conversation
+ * the user did not see never issue cards. Neither graph nor stored conversation changes.
+ */
+/** Each record's revision with the emission time of the held action that carries it; a record without one is skipped. */
+export function proposalIssuances(records: readonly ProposalRecord[], pending: readonly PendingAction[]): readonly ProposalIssuance[] {
+  return records.flatMap((r) => {
+    const pa = pending.find((p) => p.id === r.revision);
+    return pa === undefined ? [] : [{ revision: r.revision, emitted_at_iso: pa.emitted_at_iso }];
+  });
+}
+
+/** What locating an issuing answer needs; deliberately NOT part of the record (its shape and digest stay as shown). */
+export interface ProposalIssuance { readonly revision: string; readonly emitted_at_iso: string }
+
+export async function issuedTurnIdsForProposalRecords(
+  records: readonly ProposalIssuance[],
+  rows: readonly ProposalIssuingRow[],
+  windowSize: number,
+  readCommittedTurn?: (turnId: string) => Promise<{ readonly pending_actions?: readonly unknown[] } | null>,
+): Promise<ReadonlyMap<string, string>> {
+  const issued = new Map<string, string>();
+  if (records.length === 0) return issued;
+  const datedRows = rows.flatMap(row => {
+    const at = proposalRowTimestamp(row.created_at);
+    return at === undefined ? [] : [at];
+  });
+  if (datedRows.length === 0) return issued;
+  const windowStart = datedRows.sort()[0]!;
+  const earliestEmission = proposalRowTimestamp(windowStart, -2)!;
+  const chronological = [...conversationAsSeen(rows)].reverse()
+    .filter(row => !row.turn_id.endsWith(':claim')
+      && (typeof row.user_message === 'string' || typeof row.assistant_message === 'string'))
+    .map(row => ({ row, at: proposalRowTimestamp(row.created_at) }));
+  // An undated public row makes its place in the carry run unverifiable.
+  if (chronological.some(row => row.at === undefined)) return issued;
+  chronological.sort((a, b) => {
+    const at = a.at!; const bt = b.at!;
+    return (at < bt ? -1 : at > bt ? 1 : 0) || a.row.turn_id.localeCompare(b.row.turn_id);
+  });
+  const timestampCounts = new Map<string, number>();
+  for (const { at } of chronological) {
+    if (at !== undefined) timestampCounts.set(at, (timestampCounts.get(at) ?? 0) + 1);
+  }
+  const carriesRevision = async (row: ProposalIssuingRow, revision: string): Promise<boolean | undefined> => {
+    let pendingActions = row.pending_actions;
+    if (pendingActions === undefined) {
+      try { pendingActions = (await readCommittedTurn?.(row.turn_id))?.pending_actions; }
+      catch { return undefined; }
+    }
+    if (pendingActions === undefined) return undefined;
+    return pendingActions.some(raw => parsePendingAction(raw)?.id === revision);
+  };
+  for (const record of records) {
+    const emittedAt = proposalRowTimestamp(record.emitted_at_iso);
+    if (emittedAt === undefined || emittedAt < earliestEmission) continue;
+    const cutoff = proposalRowTimestamp(emittedAt, -2)!;
+    const index = chronological.findIndex(candidate => candidate.at !== undefined && candidate.at >= cutoff);
+    const candidate = chronological[index];
+    if (candidate === undefined || timestampCounts.get(candidate.at!) !== 1) continue;
+    const predecessor = chronological[index - 1];
+    if (predecessor !== undefined && timestampCounts.get(predecessor.at!) !== 1) continue;
+    if (await carriesRevision(candidate.row, record.revision) !== true) continue;
+    if (predecessor === undefined) {
+      if (!(rows.length < windowSize)) continue;
+    } else if (await carriesRevision(predecessor.row, record.revision) !== false) continue;
+    issued.set(record.revision, candidate.row.turn_id);
+  }
+  return issued;
+}
+
 /** ⭐ THE WIRE (design §4): `_proposal_fields` on a turn, `proposal_fields` on the graph read. Absent when none is held. */
 export interface ProposalFieldsWire {
   readonly version: 1;
@@ -388,6 +494,7 @@ export interface ProposalFieldsWire {
     readonly proposal_id: string;
     readonly revision: string;
     readonly digest: string;
+    readonly issued_turn_id: string | null;
     readonly approve_action: CardAction;
     readonly decline_action: CardAction;
     readonly fields: readonly ProposalField[];
@@ -396,7 +503,11 @@ export interface ProposalFieldsWire {
 }
 
 /** Only records pinned to `graphHash` are projected: the values shown are the values on the model the user sees. */
-export function proposalFieldsWire(records: readonly ProposalRecord[], graphHash: string | undefined): ProposalFieldsWire | undefined {
+export function proposalFieldsWire(
+  records: readonly ProposalRecord[],
+  graphHash: string | undefined,
+  issuedTurnIds: ReadonlyMap<string, string> = new Map(),
+): ProposalFieldsWire | undefined {
   if (graphHash === undefined || graphHash === '') return undefined;
   const pinned = records.filter((r) => r.base_graph_hash === graphHash);
   if (pinned.length === 0) return undefined;
@@ -405,6 +516,8 @@ export function proposalFieldsWire(records: readonly ProposalRecord[], graphHash
     graph_hash: graphHash,
     proposals: pinned.map((r) => ({
       proposal_id: r.proposal_id, revision: r.revision, digest: r.digest, approve_action: r.approve_action, decline_action: r.decline_action,
+      // Wire-only context: issuing a card never changes the digest of what that card showed.
+      issued_turn_id: issuedTurnIds.get(r.revision) ?? null,
       fields: r.fields, missing: r.missing,
     })),
   };

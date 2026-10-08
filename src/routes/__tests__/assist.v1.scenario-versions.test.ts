@@ -1401,6 +1401,31 @@ describe("POST /versions/restore — C8 persisted-graph invariants", () => {
     });
   }
 
+  // FIX-r1 RED at 8fb1959: both an ordinary restore and the explicitly admitted return leg wrote this linked risk.
+  it.each([false, true])('rc3-restore-linked-precondition: refused before RPC, return leg=%s', async (returnLeg) => {
+    const current = structuredClone(STORED_VERSION_GRAPH);
+    const linked = {
+      ...current,
+      nodes: [...current.nodes, { id: 'risk_release', kind: 'risk', label: 'Feature release slips', relies_on: { option_id: 'n1' } }],
+      edges: [...current.edges, { from: 'risk_release', to: 'n2', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' }],
+    };
+    const before = JSON.stringify(current);
+    loadGraph.mockResolvedValue(current);
+    getVersion.mockResolvedValue({ status: 'ok', value: { ...summary({ provenance: 'pre_restore' }), graph: linked } });
+    if (returnLeg) getCurrentVersion.mockResolvedValue({ status: 'ok', value: restoreHead(VERSION_A, current) });
+    const app = await buildApp();
+    try {
+      const res = await post(app, '/versions/restore', { version_id: VERSION_A });
+      expect(res.statusCode, res.body).toBe(422);
+      expect(res.json().details.code).toBe('PRECONDITION_RISK_LINKED');
+      expect(res.json().message).toBe("‘Feature release slips’ is tied to ‘Take the job’ and left out of the Run; this model can't link it yet.");
+      expect(restoreVersionAtomic).not.toHaveBeenCalled();
+      expect(JSON.stringify(current)).toBe(before);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("RETURN LEG — the door opens BOTH ways, and the SAME bytes are still refused when it is not a return leg", async () => {
     // ── OUTWARD LEG: corrupt working graph, restore a CLEAN version ──
     loadGraph.mockResolvedValue(CORRUPT_GRAPH);

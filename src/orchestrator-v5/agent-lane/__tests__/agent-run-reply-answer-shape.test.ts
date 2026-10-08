@@ -338,6 +338,20 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(ownWordsLeadTexts([ownA, ownC].join('\n'), raise, split)).toEqual([ownA]);
   });
 
+  it('RC6 quote fold (Science #2787 P1-A, non-B19 form): the screen’s chance units in STRAIGHT quotes after a share still lead; no canonical copy is added', async () => {
+    hostRunFixture();
+    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    const share = 'In this model, 71% of runs supported ‘Raise Pro to £59 at release’.';
+    const straight = screen.map((l) => [l.chance, l.depends].filter(Boolean).join(' ').replace(/[‘’]/g, "'"));
+    const narrated = [share, ...straight].join('\n\n');
+    for (const l of screen) expect(narrated, 'control: no curly-quoted chance').not.toContain(l.chance);
+    const { b } = await typedRun(narrated);
+    expect(b._answer_shape, b.assistant_text).toBeDefined();
+    expect(b._answer_shape!.headline.startsWith(screen[0]!.chance.replace(/[‘’]/g, "'")), b._answer_shape!.headline).toBe(true);
+    expect(b._answer_shape!.headline).not.toContain(share);
+    for (const l of screen) expect(b.assistant_text, 'no canonical copy beside the Agent’s').not.toContain(l.chance);
+  });
+
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
     hostRunFixture();
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
