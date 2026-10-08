@@ -251,54 +251,66 @@ describe('B19 stored Agent licence — exact template and licensed option identi
   });
 });
 
-describe('B19 r2 complete option labels — prefix options keep their own chance and notes', () => {
-  const prefixLines = (): GoalChanceScreenLine[] => ['Raise', 'Raise prices'].map((label, i) => {
+describe('B19 r3 canonical shortfall lines — Agent wording is preserved', () => {
+  const screenLines = (labels = ['Raise prices', 'Expand service']): GoalChanceScreenLine[] => labels.map((label, i) => {
     const spread_note = SPREAD_NOTE_WITHOUT_DOWNSIDE;
     const shortfall_note = `In its worst 1 in 20 runs of this model, ‘${label}’ falls short of your target by £${i === 0 ? '15,000' : '16,000'} / month or more.`;
     return {
-      option_id: i === 0 ? 'raise' : 'raise_prices', label, figure: 'about 46%', depends: '',
+      option_id: `option_${i}`, label, figure: 'about 46%', depends: '', spread_note, shortfall_note,
       chance: `‘${label}’: about 46% chance of meeting your goal, in this model. ${spread_note} ${shortfall_note}`,
-      spread_note, shortfall_note,
     };
   });
-  const reply = 'Raise prices: about 46%.';
-
-  it('B19 r2 RED: Raise prices does not pay Raise’s own chance, spread or shortfall', () => {
-    const lines = prefixLines();
-    const [raise, raisePrices] = lines;
+  const appendOnce = (reply: string, lines: GoalChanceScreenLine[]): void => {
     const completed = withScreenLinesOwed(reply, lines);
-    // The Agent's longer-label row receives only its own notes; the shorter option still owes its full unit.
-    expect(completed).toEqual({
-      text: `${reply} ${raisePrices!.spread_note} ${raisePrices!.shortfall_note}\n\n${raise!.chance}`,
-      added: 2,
-    });
-  });
-
-  it('B19 r2 RED: completing equal-figure prefix options twice is byte-identical', () => {
-    const lines = prefixLines();
-    const once = withScreenLinesOwed(reply, lines);
-    const twice = withScreenLinesOwed(once.text, lines);
-    expect(twice).toEqual({ text: once.text, added: 0 });
-  });
-
-  it('B19 r2 RED: canonical chance wording inside EnRaise does not pay the complete Raise label', () => {
-    const line: GoalChanceScreenLine = {
-      option_id: 'raise', label: 'Raise', figure: 'about 46%', depends: '',
-      chance: '‘Raise’: about 46% chance of meeting your goal, in this model.',
-    };
-    const embedded = 'EnRaise: about 46% chance of meeting your goal, in this model.';
-    expect(withScreenLinesOwed(embedded, [line])).toEqual({ text: `${embedded}\n\n${line.chance}`, added: 1 });
-  });
-
-  it('B19 r2 RED: a quote-delimited Raise cannot also pay the longer Raise prices label', () => {
-    const lines = prefixLines();
-    const [raise, raisePrices] = lines;
-    const quoted = '‘Raise’ prices: about 46%.';
-    const completed = withScreenLinesOwed(quoted, lines);
-    expect(completed).toEqual({
-      text: `${quoted} ${raise!.spread_note} ${raise!.shortfall_note}\n\n${raisePrices!.chance}`,
-      added: 2,
-    });
+    expect(completed).toEqual({ text: `${reply}\n\n${lines.map(l => l.chance).join(' ')}`, added: lines.length });
+    for (const l of lines) expect(completed.text.split(l.chance)).toHaveLength(2);
     expect(withScreenLinesOwed(completed.text, lines)).toEqual({ text: completed.text, added: 0 });
+  };
+
+  it('row 1 shared sentence: equal figures never re-bind either option’s notes', () => {
+    appendOnce('Raise prices has about 46% and Expand service has about 46%.', screenLines());
+  });
+  it('row 2 figure-before-label: the canonical shortfall line is appended once', () => {
+    appendOnce('The chance of meeting your goal is about 46% for ‘Raise prices’.', screenLines().slice(0, 1));
+  });
+  it.each([
+    ['longer label', 'Raise prices: about 46%.'],
+    ['quote-delimited shorter label', '‘Raise’ prices: about 46%.'],
+    ['embedded label', 'EnRaise: about 46% chance of meeting your goal, in this model.'],
+  ])('row 3 prefix: %s pays neither canonical line', (_name, reply) => {
+    appendOnce(reply, screenLines(['Raise', 'Raise prices']));
+  });
+  it.each([0, 1])('row 3 prefix: option %s’s complete canonical line pays only itself', paid => {
+    const lines = screenLines(['Raise', 'Raise prices']);
+    const reply = lines[paid]!.chance;
+    const owed = lines[1 - paid]!.chance;
+    const completed = withScreenLinesOwed(reply, lines);
+    expect(completed).toEqual({ text: `${reply}\n\n${owed}`, added: 1 });
+    for (const l of lines) expect(completed.text.split(l.chance)).toHaveLength(2);
+    expect(withScreenLinesOwed(completed.text, lines)).toEqual({ text: completed.text, added: 0 });
+  });
+  it('row 4 straight quotes: the complete canonical line counts as already said', () => {
+    const lines = screenLines().slice(0, 1);
+    const reply = lines[0]!.chance.replace(/[‘’]/g, "'");
+    expect(withScreenLinesOwed(reply, lines)).toEqual({ text: reply, added: 0 });
+  });
+  it.each([
+    ['emphasis', (line: string) => line.replace('Raise prices', '**Raise prices**')],
+    ['case', (line: string) => line.replace('about 46%', 'About 46%')],
+    ['spacing', (line: string) => line.replace(': about', ':  about')],
+    ['split line', (line: string) => line.replace('. Its', '.\nIts')],
+  ])('quote folding alone: %s changes do not pay the canonical line', (_name, change) => {
+    const lines = screenLines().slice(0, 1);
+    appendOnce(change(lines[0]!.chance), lines);
+  });
+  it('a complete canonical line plus an extra Agent note stays byte-identical', () => {
+    const lines = screenLines().slice(0, 1);
+    const reply = `${lines[0]!.chance}\n${lines[0]!.shortfall_note}`;
+    expect(withScreenLinesOwed(reply, lines)).toEqual({ text: reply, added: 0 });
+  });
+  it('preserves Agent spacing and a driver sentence while appending the owed canonical line', () => {
+    const lines = screenLines().slice(0, 1);
+    lines[0] = { ...lines[0]!, depends: 'It depends most on customer response.' };
+    appendOnce(`Raise prices  has about 46%.\n\n${lines[0]!.depends}`, lines);
   });
 });

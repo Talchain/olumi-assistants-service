@@ -210,7 +210,8 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
       [B]: `In its worst 1 in 20 runs of this model, ‘${label(B)}’ falls short of your target by £15,000 / month or more.`,
       [SQ]: `In this model, ‘${label(SQ)}’ falls short of your target in almost every run, typically by about £6,000 / month.`,
     };
-    return { g, result, lines: goalChanceScreenLinesForAgent(result, g, true) };
+    // These authored downstream rows isolate chance/note ownership from the separately tested driver carriage.
+    return { g, result, lines: goalChanceScreenLinesForAgent(result, g, true).map(l => ({ ...l, depends: '' })) };
   };
   it('B19 screen order: chance, spread, then shortfall; the less-than-1% line uses its own exact template', () => {
     const { lines } = shortfallScreenFixture();
@@ -222,18 +223,18 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(sq.shortfall_note).toBe(`In this model, ‘${sq.label}’ falls short of your target in almost every run, typically by about £6,000 / month.`);
     expect(sq.chance).toBe(`‘${sq.label}’: less than 1% chance of meeting your goal, in this model. ${sq.shortfall_note}`);
   });
-  it('B19 owed insertion: an Agent-written figure gains the spread + shortfall unit exactly once', () => {
+  it('B19 r3 owed insertion: Agent wording stays and the canonical shortfall unit is appended once', () => {
     const { lines } = shortfallScreenFixture();
     const b = lines.find(l => l.option_id === B)!;
     const phrased = `${b.label}: ${b.figure}.`;
     const completed = withScreenLinesOwed(phrased, [b]);
-    expect(completed).toEqual({ text: `${phrased} ${b.spread_note} ${b.shortfall_note}`, added: 1 });
-    expect(completed.text.split(b.figure)).toHaveLength(2);
+    expect(completed).toEqual({ text: `${phrased}\n\n${b.chance}`, added: 1 });
+    expect(completed.text.split(b.figure)).toHaveLength(3);
     expect(completed.text.split(b.spread_note!)).toHaveLength(2);
     expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
     expect(withScreenLinesOwed(completed.text, [b])).toEqual({ text: completed.text, added: 0 });
   });
-  it.each(['split', 'orphan', 'reversed', 'separated', 'duplicate'] as const)('B19 owed movement: %s notes become one complete ordered unit', mode => {
+  it.each(['split', 'orphan', 'reversed', 'separated', 'duplicate'] as const)('B19 r3 existing %s notes stay; only a missing canonical unit is appended', mode => {
     const { lines } = shortfallScreenFixture();
     const b = lines.find(l => l.option_id === B)!;
     const chanceOnly = `‘${b.label}’: ${b.figure} chance of meeting your goal, in this model.`;
@@ -243,10 +244,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
           : mode === 'separated' ? `${chanceOnly} Another point. ${b.spread_note} ${b.shortfall_note}`
             : `${b.chance}\n${b.shortfall_note}`;
     const completed = withScreenLinesOwed(text, [b]);
-    expect(completed.text).toContain(b.chance);
-    expect(completed.text.split(b.figure)).toHaveLength(2);
-    expect(completed.text.split(b.spread_note!)).toHaveLength(2);
-    expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
+    expect(completed).toEqual(mode === 'duplicate' ? { text, added: 0 } : { text: `${text}\n\n${b.chance}`, added: 1 });
     expect(withScreenLinesOwed(completed.text, [b])).toEqual({ text: completed.text, added: 0 });
   });
   it('B19 shared spread words: adding another option’s shortfall never strips the first option’s unit', () => {
@@ -257,7 +255,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
       shortfall_note: b.shortfall_note!.split(b.label).join(label) };
     const base = (l: typeof b): string => `‘${l.label}’: ${l.figure} chance of meeting your goal, in this model.`;
     const completed = withScreenLinesOwed(`${base(b)} ${base(other)}`, [b, other]);
-    expect(completed.text).toBe(`${b.chance} ${other.chance}`);
+    expect(completed).toEqual({ text: `${base(b)} ${base(other)}\n\n${b.chance} ${other.chance}`, added: 2 });
     expect(completed.text.split(SPREAD_NOTE_WITHOUT_DOWNSIDE)).toHaveLength(3);
     expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
     expect(completed.text.split(other.shortfall_note)).toHaveLength(2);
@@ -290,6 +288,15 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(completed.text.split(b.spread_note!)).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [b, spreadOnly])).toEqual({ text: completed.text, added: 0 });
   });
+  it('B19 r3 mixed units: a spread-only sentence never inserts its note inside a canonical shortfall line', () => {
+    const { b, spreadOnly } = sharedSpreadLines();
+    const own = `${spreadOnly.label}: ${spreadOnly.figure}`;
+    const text = `${own} ${b.chance}`;
+    const completed = withScreenLinesOwed(text, [b, spreadOnly]);
+    expect(completed).toEqual({ text: `${text} ${spreadOnly.spread_note}`, added: 1 });
+    expect(completed.text.split(b.chance)).toHaveLength(2);
+    expect(withScreenLinesOwed(completed.text, [b, spreadOnly])).toEqual({ text: completed.text, added: 0 });
+  });
   it('B19 R1 spread-only positive control: two already-complete options sharing a row stay byte-identical', () => {
     const { b, spreadOnly } = sharedSpreadLines();
     const text = `${b.chance} ${spreadOnly.chance}`;
@@ -302,33 +309,33 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
       : `${base} Another point. ${spreadOnly.spread_note}`;
     expect(withScreenLinesOwed(text, [spreadOnly])).toEqual({ text, added: 0 });
   });
-  it('B19 R1 semicolon clauses: each option gets its own notes and the second call adds zero', () => {
+  it('B19 r3 semicolon clauses: Agent words stay and each canonical line is appended once', () => {
     const { b, other } = sharedSpreadLines();
     const first = `${b.label}: ${b.figure};`;
     const second = `${other.label}: ${other.figure}.`;
     const completed = withScreenLinesOwed(`${first} ${second}`, [b, other]);
-    const text = `${first} ${b.spread_note} ${b.shortfall_note} ${second} ${other.spread_note} ${other.shortfall_note}`;
+    const text = `${first} ${second}\n\n${b.chance} ${other.chance}`;
     expect(completed).toEqual({ text, added: 2 });
     expect(withScreenLinesOwed(text, [b, other])).toEqual({ text, added: 0 });
   });
-  it('B19 R1 period-clause positive control: each option gets adjacent notes exactly once', () => {
+  it('B19 r3 period clauses: Agent words stay and each canonical line is appended once', () => {
     const { b, other } = sharedSpreadLines();
     const first = `${b.label}: ${b.figure}.`;
     const second = `${other.label}: ${other.figure}.`;
     const completed = withScreenLinesOwed(`${first} ${second}`, [b, other]);
-    const text = `${first} ${b.spread_note} ${b.shortfall_note} ${second} ${other.spread_note} ${other.shortfall_note}`;
+    const text = `${first} ${second}\n\n${b.chance} ${other.chance}`;
     expect(completed).toEqual({ text, added: 2 });
     expect(withScreenLinesOwed(text, [b, other])).toEqual({ text, added: 0 });
   });
-  it.each(['same row', 'standalone row'] as const)('B19 R1 duplicate spread on %s is removed beside a complete unit', placement => {
+  it.each(['same row', 'standalone row'] as const)('B19 r3 duplicate Agent spread on %s stays beside complete canonical units', placement => {
     const { b, other } = sharedSpreadLines();
     const separator = placement === 'same row' ? ' ' : '\n';
     const text = `${b.chance}${separator}${b.spread_note}\n${other.chance}`;
     const completed = withScreenLinesOwed(text, [b, other]);
-    expect(completed.added).toBe(1);
+    expect(completed).toEqual({ text, added: 0 });
     expect(completed.text).toContain(b.chance);
     expect(completed.text).toContain(other.chance);
-    expect(completed.text.split(b.spread_note!)).toHaveLength(3);
+    expect(completed.text.split(b.spread_note!)).toHaveLength(4);
     expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
     expect(completed.text.split(other.shortfall_note)).toHaveLength(2);
     expect(withScreenLinesOwed(completed.text, [b, other])).toEqual({ text: completed.text, added: 0 });
@@ -338,12 +345,12 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const text = `${b.chance} ${other.chance}`;
     expect(withScreenLinesOwed(text, [b, other])).toEqual({ text, added: 0 });
   });
-  it('B19 R1 duplicate spread-only note is removed once while the complete chance stays present', () => {
+  it('B19 r3 spread-only compatibility: staging leaves an already-said canonical chance and duplicate note unchanged', () => {
     const { spreadOnly } = sharedSpreadLines();
-    const completed = withScreenLinesOwed(`${spreadOnly.chance} ${spreadOnly.spread_note}`, [spreadOnly]);
-    expect(completed.added).toBe(1);
-    expect(completed.text).toContain(spreadOnly.chance);
-    expect(completed.text.split(spreadOnly.spread_note!)).toHaveLength(2);
+    const text = `${spreadOnly.chance} ${spreadOnly.spread_note}`;
+    const completed = withScreenLinesOwed(text, [spreadOnly]);
+    expect(completed).toEqual({ text, added: 0 });
+    expect(completed.text.split(spreadOnly.spread_note!)).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [spreadOnly])).toEqual({ text: completed.text, added: 0 });
   });
   it('B19 R1 straight-quote complete unit is recognized without inserting a second copy', () => {
@@ -351,23 +358,22 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const text = b.chance.replace(/[‘’]/g, "'");
     expect(withScreenLinesOwed(text, [b])).toEqual({ text, added: 0 });
   });
-  it('B19 R1 straight-quote split notes move by their matched source spans without leaving a second shortfall', () => {
+  it('B19 r3 straight-quote split notes stay while the canonical shortfall line is appended', () => {
     const { b } = sharedSpreadLines();
     const chanceOnly = b.chance.slice(0, -(b.spread_note!.length + b.shortfall_note!.length + 1)).trimEnd();
     const text = `${chanceOnly.replace(/[‘’]/g, "'")}\n${b.spread_note}\n${b.shortfall_note!.replace(/[‘’]/g, "'")}`;
     const completed = withScreenLinesOwed(text, [b]);
-    expect(completed.added).toBe(1);
-    expect(completed.text).toContain(`${chanceOnly.replace(/[‘’]/g, "'")} ${b.spread_note} ${b.shortfall_note}`);
-    expect(completed.text.split('In its worst 1 in 20 runs of this model')).toHaveLength(2);
+    expect(completed).toEqual({ text: `${text}\n\n${b.chance}`, added: 1 });
+    expect(completed.text.split('In its worst 1 in 20 runs of this model')).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [b])).toEqual({ text: completed.text, added: 0 });
   });
-  it('B19 R1 curly-quote split-note positive control also moves exactly one shortfall', () => {
+  it('B19 r3 curly-quote split notes stay while the canonical shortfall line is appended', () => {
     const { b } = sharedSpreadLines();
     const chanceOnly = b.chance.slice(0, -(b.spread_note!.length + b.shortfall_note!.length + 1)).trimEnd();
-    const completed = withScreenLinesOwed(`${chanceOnly}\n${b.spread_note}\n${b.shortfall_note}`, [b]);
-    expect(completed.added).toBe(1);
-    expect(completed.text).toContain(b.chance);
-    expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
+    const text = `${chanceOnly}\n${b.spread_note}\n${b.shortfall_note}`;
+    const completed = withScreenLinesOwed(text, [b]);
+    expect(completed).toEqual({ text: `${text}\n\n${b.chance}`, added: 1 });
+    expect(completed.text.split(b.shortfall_note!)).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [b])).toEqual({ text: completed.text, added: 0 });
   });
   it('B19 orphaned label: another option’s same figure cannot count as this option’s chance', () => {
@@ -375,11 +381,13 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const b = lines.find(l => l.option_id === B)!;
     const otherLabel = g.nodes.find((n: Json) => n.id === A).label as string;
     const otherChance = `${otherLabel}: ${b.figure}.`;
-    const completed = withScreenLinesOwed(`${otherChance} ${b.spread_note} ${b.shortfall_note}`, [{ ...b, depends: '' }]);
+    const text = `${otherChance} ${b.spread_note} ${b.shortfall_note}`;
+    const completed = withScreenLinesOwed(text, [{ ...b, depends: '' }]);
+    expect(completed).toEqual({ text: `${text}\n\n${b.chance}`, added: 1 });
     expect(completed.text).toContain(otherChance);
     expect(completed.text).toContain(`\n\n${b.chance}`);
-    expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
-    expect(completed.text.split(b.spread_note!)).toHaveLength(2);
+    expect(completed.text.split(b.shortfall_note!)).toHaveLength(3);
+    expect(completed.text.split(b.spread_note!)).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [{ ...b, depends: '' }])).toEqual({ text: completed.text, added: 0 });
   });
   it.each([B, SQ])('B19 label guard: %s’s structurally valid shortfall is dropped when its label differs from the graph', id => {
