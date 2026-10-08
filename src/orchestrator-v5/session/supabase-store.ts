@@ -1,6 +1,8 @@
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
 import type { LegacyAnalysisEditFacts } from '../types/handler-fact.js';
+import { useAppendV6 } from '../append-v6-flag.js';
+export { USE_APPEND_V6, useAppendV6, __setUseAppendV6ForTest } from '../append-v6-flag.js';
 /**
  * Supabase-backed SessionStore implementation (slice B).
  *
@@ -207,10 +209,6 @@ function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
 // migration ships first; see 20260609120000_v5_conversation_content.sql).
 const V5_CONVERSATION_TURN_COLUMNS =
   'id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message';
-
-// Phase 2(c) ships inert. Change by code only after the Paul-gated step 3
-// migration/cutover; the same constant gates the new column read and RPC.
-export const USE_APPEND_V6 = false;
 
 function isScenarioRevision(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -1569,7 +1567,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_version_creation_kind: version.creation_kind,
       p_version_source_turn_id: version.source_turn_id,
     };
-    const { data, error } = USE_APPEND_V6
+    const { data, error } = useAppendV6()
       ? await this.callAppendTurnAtomicV6(write, rpcArgs)
       : await this.client.rpc('append_turn_atomic_v5', rpcArgs);
 
@@ -1613,7 +1611,7 @@ export class SupabaseSessionStore implements SessionStore {
       // the only thing left to get right is telling the operator why, exactly
       // as `append_turn_atomic_v4`'s PGRST202 does at :1114-1127.
       if (errCode(error) === 'PGRST202') {
-        if (USE_APPEND_V6) {
+        if (useAppendV6()) {
           throw new StateCommitFailedError(
             'append_turn_atomic_v6 is not present in this database (PGRST202). ' +
               'Phase 2(c) requires migration 20261008160000_phase2_c_scenario_revision ' +
@@ -1638,7 +1636,7 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     const parsed = parseAtomicVersionedAppend(data);
-    if (USE_APPEND_V6 && !isScenarioRevision(data?.revision)) {
+    if (useAppendV6() && !isScenarioRevision(data?.revision)) {
       throw new StateCommitFailedError('append_turn_atomic_v6 returned an invalid scenario revision');
     }
     if (generation !== null) {
@@ -1646,7 +1644,7 @@ export class SupabaseSessionStore implements SessionStore {
     }
     this.cache.invalidateAll(write.scenario_id);
     await this.resolveDraftLossAfterGraphCommit(write);
-    return USE_APPEND_V6 ? { ...parsed, revision: data.revision } : parsed;
+    return useAppendV6() ? { ...parsed, revision: data.revision } : parsed;
   }
 
   /** Fresh-turn revision CAS on the new path; never refresh the expected value here. */
@@ -1663,6 +1661,8 @@ export class SupabaseSessionStore implements SessionStore {
     // Classify the v6-only refusal before the shared fence, OLGC1 and generic
     // handlers in appendAtomicVersioned; all other RPC errors pass through.
     if (errCode(result.error) === 'OLRV1') {
+      // One line per refusal so the post-flip conflict rate can be read per scenario/handler (de, 8 Oct pricing).
+      log.warn({ event: 'graph_revision_conflict', scenario_id: write.scenario_id, turn_id: write.turn_id, handler_id: write.handler_id, expected_revision: write.expectedRevision }, 'append_turn_atomic_v6 refused a stale revision');
       throw new GraphStaleWriteError(
         `append_turn_atomic_v6 rejected a stale revision for scenario ${write.scenario_id}; refresh and reconfirm.`,
         {
@@ -2661,7 +2661,7 @@ export class SupabaseSessionStore implements SessionStore {
     readonly briefText: string | null;
     readonly revision?: number;
   }> {
-    return this.readGraphAndBriefText(scenarioId, USE_APPEND_V6);
+    return this.readGraphAndBriefText(scenarioId, useAppendV6());
   }
 
   private async readGraphAndBriefText(scenarioId: string, includeRevision: boolean): Promise<{

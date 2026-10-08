@@ -34,6 +34,8 @@ import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { isRevisionConflict } from '../graph-revision-conflict.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   buildEditGraphHandlerFact,
@@ -147,6 +149,7 @@ import {
   buildTurnContext,
   loadMostRecentPendingActions,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
   loadRecentConversationTurns,
   loadScenarioBriefText,
 } from '../build-turn-context.js';
@@ -1366,6 +1369,8 @@ export interface DispatchEditGraphParams {
   readonly request: FastifyRequest;
   /** Permissive ingress shape. Adapter inside converts to GraphV3T. */
   readonly graphState: GraphStateIngress;
+  /** Internal combined server snapshot, consumed only by the dormant v6 path. */
+  readonly persistedEditBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>;
   /** Permissive ingress shape. Adapter inside converts to V2RunResponseEnvelope. */
   readonly analysisState: AnalysisStateIngress | null;
   /**
@@ -2322,9 +2327,15 @@ export async function dispatchEditGraph(
   // serialiser (serialiseEditContextForLLMWithMeta, called from edit-graph.ts
   // for edit + repair), so it cannot leak into any other lane.
   let editBriefSlice: ConversationContext['brief'] = null;
+  let editBase: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> | undefined;
   try {
-    const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
-    editBriefSlice = projectBriefForEdit(briefText);
+    if (useAppendV6()) {
+      editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
+      editBriefSlice = projectBriefForEdit(editBase.briefText);
+    } else {
+      const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
+      editBriefSlice = projectBriefForEdit(briefText);
+    }
   } catch {
     editBriefSlice = null; // helper already degrades; belt for test doubles
   }
@@ -3224,7 +3235,13 @@ export async function dispatchEditGraph(
   if (successfulAppliedMutation) {
     let strictBase: unknown;
     try {
-      strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+      if (useAppendV6()) {
+        // A failed brief read does not poison the save: retry the strict read.
+        editBase ??= await loadPersistedScenarioStateStrict(payload.scenario_id);
+        strictBase = editBase.graph;
+      } else {
+        strictBase = await loadPersistedGraphStrict(payload.scenario_id);
+      }
     } catch (err) {
       log.warn(
         {
@@ -5705,6 +5722,7 @@ export async function dispatchEditGraph(
       turnId: payload.turn_id,
       site: 'edit_graph_dispatch',
     });
+    const expectedRevision = useAppendV6() ? editBase?.revision : undefined;
     const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -5776,6 +5794,7 @@ export async function dispatchEditGraph(
       // post-edit appliedGraph on a successful mutation, else undefined → the
       // egress is graph-free too), keeping stored == wire.
       contentGraph: graphForCommit,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
     });
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
     // the commit seam itself may rewrite the response (turn-TTL lapse
@@ -5846,6 +5865,7 @@ export async function dispatchEditGraph(
       ...(editLlmCall ? { editLlmCall } : {}),
     };
   } catch (err) {
+    if (isRevisionConflict(err)) throw err;
     log.error(
       {
         request_id: requestId,
