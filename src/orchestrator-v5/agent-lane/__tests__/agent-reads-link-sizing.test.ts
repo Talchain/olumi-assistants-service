@@ -184,11 +184,11 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     const words = `${fromLabel} is strong`;
     const userText = named || singular ? words : 'Offer a strength for this link';
     const context = { ...ctx, user_text: userText, user_turn_text: userText };
-    const link = { from_label: fromLabel, to_label: toLabel, strength: 'strong' as const,
+    const link = { from_label: fromLabel, to_label: toLabel, strength: 'strong' as const, rationale: userText,
       ...(named ? { from_words: words } : {}) };
     const args = singular ? link : { links: [link], whole_request: true };
     const result = singular ? await caps.proposeLinkStrength!(context, link)
-      : await caps.proposeLinkStrengths!(context, { links: [link] });
+      : await caps.proposeLinkStrengths!(context, { links: [link], rationale: userText });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     const proposal = store.get(String(result.proposal_id))!;
     // Same-band approval stays a review at 0.5; these rows change words only, never author or magnitude.
