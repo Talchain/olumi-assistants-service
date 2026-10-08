@@ -125,11 +125,11 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   // Codex r2 P2: a carrier kept out of the calculation (retained_excluded) is not a competing reading the Run sees.
   if (nodes.some(n => n !== goal && n.analysis_participation !== 'retained_excluded' && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'product'
     && typeof n.id === 'string' && reachesGoal(n.id))) return null;
-  // Science §(e) addendum 2: every OTHER direct parent of the goal is part of what the Run computes. A user-authored or
-  // non-definitional risk or factor straight into the goal means the goal is not this product: null. Addendum 3 + DL
-  // (8 Oct): ISL adds an addend's signed VALUE, so a levelless drafter-made definitional addend executes as 0 and the
-  // card asks only what is computed (no "less …"); a levelled one is withheld until build 2 words ISL's executed sign.
+  // Science §(e) addendum 2: every OTHER direct parent of the goal is part of what the Run computes. A drafter-made
+  // definitional addend (edge provenance.definitional, node not the user's) joins the reading's words; anything else — a
+  // user-authored or non-definitional risk or factor straight into the goal — means the goal is not this product: null.
   const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
+  const addends: string[] = [];
   for (const e of edges) {
     if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') continue;
     const n = byId.get(e.from);
@@ -137,7 +137,9 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     const prov = isRec(e.provenance) ? e.provenance : undefined;
     const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
     if (prov?.definitional !== true || userAuthored) return null;
-    if (n.observed_state !== undefined && n.observed_state !== null) return null;
+    const mean = isRec(e.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
+    const negative = e.effect_direction === 'negative' || (mean !== undefined && mean < 0);
+    addends.push(`${negative ? 'less' : 'plus'} ‘${text(n.label) ?? String(n.id)}’`);
   }
   const [a, b] = parts as [Rec, Rec];
   const level = (n: Rec) => ({ unit: isRec(n.observed_state) ? text(n.observed_state.unit) : undefined, label: String(n.id) });
@@ -162,7 +164,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     if (operands[0] === null || operands[1] === null || !Number.isFinite(operands[0]!.value * operands[1]!.value)
       || reading(goal, goalLabel, current, operands[0]!, operands[1]!) === null) return null;
   }
-  const words = `Olumi reads ‘${goalLabel}’ as ‘${text(a.label) ?? ids[0]}’ × ‘${text(b.label) ?? ids[1]}’. Is that how you work it out?`;
+  const words = `Olumi reads ‘${goalLabel}’ as ‘${text(a.label) ?? ids[0]}’ × ‘${text(b.label) ?? ids[1]}’${addends.map(x => `, ${x}`).join('')}. Is that how you work it out?`;
   if (words.length > CARD_WORDS_MAX) return null;
   return { outcome_id: goalId, operation: 'product', factor_ids: [ids[0]!, ids[1]!], words };
 }

@@ -12,7 +12,7 @@ import type { IdentityProposal } from '../identity-proposal.js';
 
 type Json = Record<string, any>;
 type Proposer = (graph: unknown) => IdentityProposal | null;
-type Mutation = 'drop_condition_3' | 'drop_condition_4' | 'drop_stored_branch' | 'edge_sign_addend' | 'drop_levelled_withhold';
+type Mutation = 'drop_condition_3' | 'drop_condition_4' | 'drop_stored_branch';
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/goal-reach-paul-graph-632b92b9.json', import.meta.url), 'utf8')) as Json;
 const sourcePath = fileURLToPath(new URL('../identity-proposal.ts', import.meta.url));
 const source = () => readFileSync(sourcePath, 'utf8');
@@ -35,13 +35,6 @@ function mutate(value: string, mutation: Mutation): string {
   }
   // These narrow anchors remove only the newly added stored-reading guards,
   // leaving the old goal/carrier branches and their reconciliation untouched.
-  // DL (b′): re-add the edge-sign "less" clause for a levelless addend ISL executes as 0.
-  if (mutation === 'edge_sign_addend') {
-    return replaceOnce(value, "’. Is that how you work it out?`;", "’, less ‘MRR lost to price-driven churn’. Is that how you work it out?`;");
-  }
-  if (mutation === 'drop_levelled_withhold') {
-    return replaceOnce(value, 'if (n.observed_state !== undefined && n.observed_state !== null) return null;', '');
-  }
   if (mutation === 'drop_condition_3') {
     return replaceOnce(value,
       "if (readMoneyTotal(goalUnit, goalLabel) === null || unitsCompose(goalUnit, goalLabel, level(a), level(b)).kind === 'no') return null;", '');
@@ -82,18 +75,7 @@ function row1(propose: Proposer): void {
   const card = propose(graph());
   expect(card, 'row 1: Paul stored reading is reachable').not.toBeNull();
   expect(card?.factor_ids).toEqual(['pro_plan_price', 'pro_paying_subscribers']);
-  expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’. Is that how you work it out?');
-}
-
-function rowLevelless(propose: Proposer): void {
-  expect(propose(graph())?.words, 'levelless addend executes as 0: the card asks only price × subscribers')
-    .toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’. Is that how you work it out?');
-}
-
-function rowLevelled(propose: Proposer): void {
-  const g = graph();
-  node(g, 'mrr_lost_to_price_driven_churn').observed_state = { unit: '£/month', raw_value: 1000, value: 0.025, source: 'cee_inference' };
-  expect(propose(g), 'levelled addend: no card until build 2 reads the executed sign').toBeNull();
+  expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?');
 }
 
 function row3(propose: Proposer): void {
@@ -152,18 +134,6 @@ describe('GOAL-REACH mutants (in-memory source transformations)', () => {
     row4(await compiledProposer());
     const mutant = await compiledProposer('drop_condition_4');
     killed('drop condition 4 → row 4 RED', () => row4(mutant));
-  });
-
-  it('edge-sign "less" on a levelless addend → levelless row RED', async () => {
-    rowLevelless(await compiledProposer());
-    const mutant = await compiledProposer('edge_sign_addend');
-    killed('edge-sign addend → levelless row RED', () => rowLevelless(mutant));
-  });
-
-  it('drop the levelled-addend withhold → levelled row RED', async () => {
-    rowLevelled(await compiledProposer());
-    const mutant = await compiledProposer('drop_levelled_withhold');
-    killed('drop levelled withhold → levelled row RED', () => rowLevelled(mutant));
   });
 
   it('drop stored branch → rows 1 and 2 RED', async () => {
