@@ -267,7 +267,10 @@ describe('R5: unit-class conversions (design §4)', () => {
 
 describe('#2842 rescue: the D8 size Olumi\'s formula frame CAN hold is admitted on it and said', () => {
   it('"+£1 → +1 pt" on Olumi\'s £0–98 (twice the £49 level) is β 0.98: admitted as Olumi\'s estimate, the frame disclosed', async () => {
-    const { graph } = await register(saas({ amount: 1, per: 1, by: 'ai_proposed' }));
+    const wire = saas({ amount: 1, per: 1, by: 'ai_proposed' }) as { links: Record<string, unknown>[] };
+    // A rescue needs Olumi's one-line basis (Science §(u) condition 3).
+    wire.links = wire.links.map((l) => (l.from === 'Pro plan price' && l.to === 'Monthly churn' ? { ...l, basis: 'a higher price pushes more customers to cancel' } : l));
+    const { graph } = await register(wire as unknown as Record<string, unknown>);
     const price = edge(graph, 'pro_plan_price', CHURN);
     expect(price.provenance?.magnitude).toBe('olumi_estimate');
     expect(price.strength.mean).toBeCloseTo(0.98, 9);
