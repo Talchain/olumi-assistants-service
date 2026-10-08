@@ -4,7 +4,8 @@
  * The PL's beat-2 wording separates "no option reaches the target" from "the deadline is untested". Until now the second
  * existed only as chat text (the host's A7 line), so no surface beside the chat could say it without re-deriving A7. The
  * Run now carries it as ONE `info` inference warning, `GOAL_HORIZON_NOT_TESTED`, in A7's own sentence, from A7's own rule
- * (`untestedHorizonLine`, `decision-input-ask.ts`): the goal holds the brief's deadline and no duration limit scores it.
+ * (`untestedHorizonLine`, `decision-input-ask.ts`): the full sentence for held months, else the short present-number
+ * basis beside the Run's chance. The chat host still says A7 only when held months have no scored duration limit.
  *
  * THE PATH: R3's served m1 graph (goal "MRR", `goal_horizon_months: 12`, one % limit) through the REAL loader and the REAL
  * handler; the PLoT client returns the served run body. Rung: TESTED (in-process), not a wire witness.
@@ -25,6 +26,8 @@ import {
   withUntestedHorizonWarning,
 } from '../../../agent-lane/decision-input-ask.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { goalKindOf } from '../../../goal-target/goal-kind.js';
+import { teamShareMoments } from '../../../goal-target/event-by-date-share.js';
 
 type Json = Record<string, any>;
 const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run-20260930.json', import.meta.url), 'utf8')) as {
@@ -33,6 +36,7 @@ const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run
 const SCENARIO = 'c8108752-0000-4000-8000-0000000000a7';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const A7_12 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.";
+const A7_SHORT = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
 
 async function runOn(graph: Json, body: Json = M1.plot_body): Promise<Json> {
   const store = {
@@ -90,6 +94,32 @@ const sizedRoute = (): Json => {
 const withDurationLimit = (g: Json): Json => ({
   ...g, goal_constraints: [...(g.goal_constraints ?? []), { constraint_id: 'k-months', node_id: 'mrr', unit: 'months', operator: '<=', value: 12 }],
 });
+const withoutHeldMonths = (): Json => {
+  const g = clone(M1.graph);
+  for (const n of g.nodes as Json[]) if (n.kind === 'goal') delete n.goal_horizon_months;
+  return g;
+};
+
+/** A held pure share sum, recognized by its parts rather than a claimed goal-kind flag. */
+const shareByDateGraph = (): Json => {
+  const unit = '% of launch', deadline = '2027-04-07', team = teamShareMoments(6, 6, 10);
+  return { nodes: [
+    { id: 'launch_share', kind: 'goal', label: 'Launch share', goal_horizon: { deadline },
+      goal_threshold_frame: 'level', goal_threshold_raw: 100, goal_threshold_cap: 100,
+      goal_threshold_unit: unit, goal_direction: '>=' },
+    { id: 'team_share', kind: 'factor', label: 'Team launch share', observed_state: {
+      value: team.mean, std: team.sd, unit, cap: 100, source: 'user_override',
+      stated_time: { quantity: 'months_to_finish', low: 6, high: 10, unit: 'months', deadline, reference_date: '2026-10-07' },
+    } },
+    { id: 'status_quo', kind: 'option', label: 'Carry on', is_baseline: true, interventions: {} },
+  ], edges: [
+    { from: 'team_share', to: 'launch_share', exists_probability: 1, strength: { mean: 1, std: 0.01 }, effect_direction: 'positive',
+      provenance: { source: 'cee_hypothesis', definitional: true, natural_effect: {
+        amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
+        strength_mean: 1, strength_mean_frame: 'edge_strength',
+      } } },
+  ] };
+};
 
 describe('A7 is one rule: the chat line and the Run warning say the same sentence', () => {
   it('PRECONDITION: the served goal holds the brief\'s 12 months and no limit is a duration', () => {
@@ -125,16 +155,33 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
     expect(horizonWarnings(result).map((w) => w.message)).toEqual([A7_12]);
   });
 
-  it('CONTROL: a duration limit scores the deadline → no horizon warning, and the chat says no A7 either', async () => {
+  it('a duration limit scores the deadline → Run keeps only the short basis and chat says no A7', async () => {
     const g = withDurationLimit(M1.graph);
-    expect(horizonWarnings(await runOn(g))).toEqual([]);
+    expect(horizonWarnings(await runOn(g)).map((w) => w.message)).toEqual([A7_SHORT]);
     expect(untestedHorizonLine(g)).toBeNull();
   });
 
-  it('CONTROL: no held deadline → no horizon warning', async () => {
-    const g = clone(M1.graph);
-    for (const n of g.nodes as Json[]) if (n.kind === 'goal') delete n.goal_horizon_months;
-    expect(horizonWarnings(await runOn(g))).toEqual([]);
+  it('R3 no-months Run warning carries the SHORT form byte-exact', async () => {
+    const w = horizonWarnings(await runOn(withoutHeldMonths()));
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_SHORT, node_ids: ['mrr'] });
+  });
+
+  it('R3 no-months draft chat A7 host owes no horizon line', () => {
+    const g = withoutHeldMonths();
+    expect(untestedHorizonLine(g)).toBeNull();
+    expect(decisionInputLines(g, {
+      restingText: 'A sketch.', questionsToggle: false, awaitingApproval: false, builtOrRan: true,
+    }).filter((line) => line.startsWith("This chance uses the model's numbers as they are today"))).toEqual([]);
+  });
+
+  it('R3 share_by_date owes no GOAL_HORIZON_NOT_TESTED warning', () => {
+    const g = shareByDateGraph();
+    expect(goalKindOf(g)).toBe('share_by_date');
+    expect(untestedHorizonLine(g, { besideChance: true })).toBeNull();
+    const envelope = { inference_warnings: [] };
+    expect(withUntestedHorizonWarning(envelope, g)).toBe(envelope);
+    expect(horizonWarnings(envelope)).toEqual([]);
   });
 });
 
@@ -153,7 +200,7 @@ describe('withUntestedHorizonWarning withholds nothing', () => {
     const once = withUntestedHorizonWarning(clone(envelope), M1.graph);
     expect(withUntestedHorizonWarning(once, M1.graph)).toBe(once);
     const limited = clone(envelope);
-    expect(withUntestedHorizonWarning(limited, withDurationLimit(M1.graph))).toBe(limited);
+    expect((withUntestedHorizonWarning(limited, withDurationLimit(M1.graph)) as Json).inference_warnings.at(-1)?.message).toBe(A7_SHORT);
     const twoGoals = { ...M1.graph, nodes: [...M1.graph.nodes, { id: 'mrr2', kind: 'goal', label: 'MRR 2', goal_horizon_months: 6 }] };
     expect(withUntestedHorizonWarning(limited, twoGoals)).toBe(limited);
   });

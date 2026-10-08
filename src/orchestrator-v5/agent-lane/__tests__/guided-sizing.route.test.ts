@@ -8,6 +8,9 @@ import { ActionSchema } from '@talchain/schemas/boundary';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { targetNotTestableWarning, targetTestabilityOf } from '../../admission/target-testability.js';
+import { deriveAnswerTextFromShape } from '../../routing/answer-shape.js';
+import { guidedSizingForRun, guidedSizingReplyText } from '../guided-sizing.js';
+import { thresholdReasonLine, THRESHOLD_REST_STANDS } from '../break-even.js';
 
 type Json = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
@@ -15,6 +18,7 @@ let SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c44';
 const CODE = 'GOAL_FIGURES_PLACEHOLDER_PATH';
 const WORDS = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘Monthly churn’, so any figure would be a guess. Give a rough strength for each to see the chance.";
 const PROGRESS = '2 more to go.';
+const GUIDED_WITHOUT_INVITE = WORDS.replace(' Give a rough strength for each to see the chance.', '');
 const LEVEL_ASK = "What's today's level of MRR?";
 const PAIRS = [
   ['monthly_churn', 'paying_pro_subscribers'],
@@ -38,6 +42,10 @@ const linkDoorEntries: Json[] = [];
 let runCalls = 0;
 let omitGraphHash = false;
 let graphHashOverride: string | undefined;
+// One row carries a REAL sizing commit's receipt beside its subsequent fixture Run. The actual capability,
+// sizing/progress readers and reply composer still run unchanged; only that result's receipt transport is joined.
+let carrySizingReceiptOnRun = false;
+let actualSizingReceipt: Json | undefined;
 // DGAI's pinned @talchain/schemas 0.81.0 boundary rejects an extra key on ANY action.
 // ActionSchema and ActionType are byte-identical in P02's 0.81.0 and CEE's 0.82.0 installs.
 const WireAction = ActionSchema;
@@ -77,10 +85,23 @@ vi.mock('../runtime/agent-capabilities.js', async (original) => {
   return { ...actual, createAgentCapabilities: (...input: Parameters<typeof actual.createAgentCapabilities>) => {
     const capabilities = actual.createAgentCapabilities(...input);
     const proposeLinkEffect = capabilities.proposeLinkEffect!;
+    const authoriseChange = capabilities.authoriseChange;
+    const runAnalysis = capabilities.runAnalysis;
     return { ...capabilities, proposeLinkEffect: async (...args: Parameters<typeof proposeLinkEffect>) => {
       linkDoorEntries.push({ grounded_selection: args[0].grounded_selection, grounded_links: args[0].grounded_links,
         user_turn_text: args[0].user_turn_text, from_label: args[1].from_label, to_label: args[1].to_label });
       return proposeLinkEffect(...args);
+    }, authoriseChange: async (...args: Parameters<typeof authoriseChange>) => {
+      const approved = await authoriseChange(...args);
+      if (approved.guided_sizing_commit === true) actualSizingReceipt = approved;
+      return approved;
+    }, runAnalysis: async (...args: Parameters<typeof runAnalysis>) => {
+      const ran = await runAnalysis(...args);
+      return !carrySizingReceiptOnRun || actualSizingReceipt === undefined ? ran : { ...ran,
+        guided_sizing_commit: actualSizingReceipt.guided_sizing_commit,
+        guided_sizing_run_key: actualSizingReceipt.guided_sizing_run_key,
+        guided_sizing_run_result: actualSizingReceipt.guided_sizing_run_result,
+      };
     } };
   } };
 });
@@ -120,6 +141,7 @@ function fixture(three = true): void {
 
 describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
   let app: FastifyInstance;
+  let info: ReturnType<typeof vi.spyOn>;
   const say = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Here is the reading for your approval.' }] }] };
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
@@ -130,6 +152,8 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
+    const { log } = await import('../../../utils/telemetry.js');
+    info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     const read = () => ({ graph, ...(!omitGraphHash ? { graph_hash: graphHashOverride ?? computeAnalysisAffectingGraphHash(graph as never) } : {}),
@@ -146,13 +170,14 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     await app.ready();
   }, 60_000);
   afterAll(async () => {
-    await app.close(); vi.unstubAllGlobals();
+    await app.close(); vi.unstubAllGlobals(); info.mockRestore();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => {
     // The real process proposal store survives requests; independent rows own distinct scenarios.
     SCENARIO = randomUUID();
     fixture(); rows.clear(); pending.clear(); recent = []; scripts.length = 0; modelBodies.length = 0; doorCalls.length = 0; linkDoorEntries.length = 0; runCalls = 0; omitGraphHash = false; graphHashOverride = undefined;
+    carrySizingReceiptOnRun = false; actualSizingReceipt = undefined; info.mockClear();
   });
   const turn = async (message: string, extra: Json = {}): Promise<Json> => {
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -164,6 +189,32 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     return body;
   };
   const run = (extra: Json = {}) => turn('Run analysis', { source: 'chip_click', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra });
+
+  const withThresholdReason = (reason: string): string => {
+    const captured = JSON.parse(readFileSync(new URL(`./fixtures/plot-threshold-444/${reason}.json`, import.meta.url), 'utf8')) as Json;
+    result.enrichment.inference_warnings.push(...captured.inference_warnings
+      .filter((warning: Json) => warning.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE'));
+    const words = thresholdReasonLine(graph, result);
+    expect(words, 'the real threshold producer must supply the competing reasonLine').not.toBeNull();
+    return words!;
+  };
+  const assertGuidedFace = (body: Json, guided: string): string => {
+    const shapeLog = info.mock.calls.map(([entry]) => entry as Json)
+      .filter(entry => entry.event === 'agent_lane.reply_shaped').at(-1);
+    expect(body._answer_shape, JSON.stringify(shapeLog)).toBeDefined();
+    const face = [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
+    expect(body._answer_shape.headline).toBe(guided);
+    expect(face.split(guided)).toHaveLength(2);
+    expect(body.assistant_text.split(guided)).toHaveLength(2);
+    expect(face).not.toContain('?');
+    expect(wirePresses(body)).not.toHaveLength(0);
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape));
+    const words = face.trim().split(/\s+/u).filter(Boolean).length;
+    expect(words <= 80 || shapeLog?.face_over_word_budget === true,
+      `face has ${words} words; mandatory overflow must be logged`).toBe(true);
+    expect(shapeLog).toMatchObject({ face_words: words });
+    return face;
+  };
 
   it('DRAW-2 three-placeholder variant: exact words, unchanged level ask, 3 directness-ordered identity presses and root hook', async () => {
     const body = await run();
@@ -249,6 +300,45 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(body.assistant_text).toContain(WORDS);
     expect(body.assistant_text).not.toContain("What's today's level");
     expect(body.guided_sizing.links).toHaveLength(3);
+  });
+
+  it('R3 GP identity guard: a suppressed invitation cannot promote alternate guided prose, including replay', async () => {
+    const reason = withThresholdReason('missing_goal_baseline');
+    const producerGuided = guidedSizingReplyText(guidedSizingForRun(result, graph)).guided;
+    expect(producerGuided).toBe(WORDS);
+    const turnId = randomUUID();
+    const first = await run({ turn_id: turnId });
+    expect(first._answer_shape).toBeDefined();
+    expect(first.assistant_text).not.toContain(producerGuided!);
+    expect(first.assistant_text.split(GUIDED_WITHOUT_INVITE)).toHaveLength(2);
+    expect(first._answer_shape.headline).toBe(reason.replace(THRESHOLD_REST_STANDS, ''));
+    expect(first.assistant_text).toBe(deriveAnswerTextFromShape(first._answer_shape));
+    expect(wirePresses(first).map(action => action.id)).toEqual(ORDERED_PAIRS.map(pair => pressId(...pair)));
+    const calls = runCalls;
+    const replay = await run({ turn_id: turnId });
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(replay._answer_shape).toEqual(first._answer_shape);
+    expect(replay.guided_sizing).toEqual(first.guided_sizing);
+    expect(wirePresses(replay)).toEqual(wirePresses(first));
+    expect(runCalls).toBe(calls);
+  });
+
+  it('R3 GP guided-only Run: the exact invitation stays on the face despite a reasonLine, including replay', async () => {
+    graph.nodes.find((node: Json) => node.id === 'mrr').observed_state = { value: 9800, raw_value: 9800, unit: '£/month' };
+    result.enrichment.inference_warnings = result.enrichment.inference_warnings
+      .filter((warning: Json) => warning.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+    const reason = withThresholdReason('goal_values_outside_normalised_domain');
+    const turnId = randomUUID();
+    const first = await run({ turn_id: turnId });
+    assertGuidedFace(first, WORDS);
+    expect(first._answer_shape.detail).toContain(reason);
+    expect(first.guided_sizing.links).toHaveLength(3);
+    const calls = runCalls;
+    const replay = await run({ turn_id: turnId });
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(replay._answer_shape).toEqual(first._answer_shape);
+    expect(wirePresses(replay)).toEqual(wirePresses(first));
+    expect(runCalls).toBe(calls);
   });
 
   it('stored edge ids reach the inspector parameters and hook presses unchanged', async () => {
@@ -460,6 +550,27 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(doorCalls[writesBefore].link_effect).toMatchObject({ from, to });
     return approved;
   };
+
+  it('R3 GP Run with sizing progress: guided text leads and the real two-more receipt stays in detail', async () => {
+    graph.nodes.find((node: Json) => node.id === 'mrr').observed_state = { value: 9800, raw_value: 9800, unit: '£/month' };
+    result.enrichment.inference_warnings = result.enrichment.inference_warnings
+      .filter((warning: Json) => warning.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+    const reason = withThresholdReason('goal_values_outside_normalised_domain');
+    await sizeThroughDoor('pro_plan_price', 'monthly_churn', 'Pro plan price', 'Monthly churn',
+      0.03, 'percentage points', '£/month', 'Every £1 per month increase in Pro plan price increases Monthly churn by 0.03 percentage points.');
+    expect(actualSizingReceipt?.guided_sizing_commit).toBe(true);
+    carrySizingReceiptOnRun = true;
+    const guided = guidedSizingReplyText(guidedSizingForRun(result, graph)).guided;
+    expect(guided).not.toBeNull();
+    const body = await run();
+    const face = assertGuidedFace(body, guided!);
+    expect(body.guided_sizing.progress_line).toBe(PROGRESS);
+    expect(body._answer_shape.detail).toContain(PROGRESS);
+    expect(face).not.toContain(PROGRESS);
+    expect(body.assistant_text.split(PROGRESS)).toHaveLength(2);
+    expect(body._answer_shape.detail).toContain(reason);
+    expect(doorCalls).toHaveLength(1);
+  });
 
   it('P02 chip.id + literal message alone reaches real propose_link_effect with the exact duplicate-label edge and records no figure', async () => {
     for (const id of PAIRS[0]) {

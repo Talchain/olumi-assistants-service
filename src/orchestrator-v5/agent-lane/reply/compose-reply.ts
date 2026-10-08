@@ -81,6 +81,8 @@ export interface FaceObligation {
   readonly companionOf?: string;
   /** B15: a typed screen goal-chance finding leads when present; its evidence rank is unchanged. */
   readonly lead?: true;
+  /** This finding and its typed presses already carry the visible next step. */
+  readonly ownsNextStep?: true;
 }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
@@ -704,8 +706,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // sentence) all remain in detail. This is question identity supplied by the route, never a prose classifier.
 
   const controlAsk = (u: Unit): boolean => controlQuestions.some((question) => foldQuotes(u.text).includes(foldQuotes(question)));
+  const nextStepFinding = !faceContract ? undefined : units.find((u) => !controlAsk(u)
+    && present.some((o) => o.lead === true && o.ownsNextStep === true && u.text === o.text));
   const selectedAsk = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
-  const ask = selectedAsk !== undefined && controlAsk(selectedAsk) ? undefined : selectedAsk;
+  const ask = nextStepFinding !== undefined || (selectedAsk !== undefined && controlAsk(selectedAsk)) ? undefined : selectedAsk;
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
   const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u)));
@@ -721,7 +725,8 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // B15 (DL, 7 Oct): the first PRESENT screen goal-chance finding in text order leads, by identity alone.
   // `present` retains the marker even when overlapping obligations bind as one larger atomic unit. The unit must BE that
   // finding (exact text): a bullet that carries it beside other sentences (a run share) never leads (Codex r1 P1 #2783).
-  const goalChanceHeadline = units.find((u) => !controlAsk(u) && present.some((o) => o.lead === true && u.text === o.text));
+  const goalChanceHeadline = nextStepFinding
+    ?? units.find((u) => !controlAsk(u) && present.some((o) => o.lead === true && u.text === o.text));
   // A unit that carries a lead finding beside other words never leads by ANY selector (Codex r2 P2 #2783).
   const mixedLead = (u: Unit): boolean => present.some((o) => o.lead === true && u.text !== o.text && u.text.includes(o.text));
   const headline = goalChanceHeadline ?? hostHeadline ?? leadIn

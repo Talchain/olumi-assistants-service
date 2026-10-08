@@ -77,15 +77,17 @@ describe('ONE reply horizon clause: exact held-target and present-number wording
     expect(untestedHorizonLine(graph, { besideChance: true })).toBe(SHORT);
   });
 
-  it('draft without a chance and no held months owes no short form or Run warning', () => {
+  it('no held months leaves draft chat silent while the Run warning carries the short form', () => {
     const graph = graphWith({ goal_horizon_months: undefined });
     const context = { restingText: 'Draft ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false };
     expect(decisionInputLines(graph, context)).toEqual([]);
     const envelope = { inference_warnings: [] };
-    expect(withUntestedHorizonWarning(envelope, graph)).toBe(envelope);
+    expect(withUntestedHorizonWarning(envelope, graph).inference_warnings).toEqual([
+      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: SHORT, node_ids: ['goal'] },
+    ]);
   });
 
-  it('chat A7 and Run warning keep the held-month trigger and inherit the exact full line', () => {
+  it('chat A7 and Run warning inherit the exact full line when months are held', () => {
     const graph = graphWith();
     expect(decisionInputLines(graph, { restingText: 'Draft ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false })).toEqual([FULL]);
     expect(withUntestedHorizonWarning({ inference_warnings: [] }, graph).inference_warnings).toEqual([

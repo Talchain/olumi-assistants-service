@@ -227,11 +227,12 @@ export const GOAL_HORIZON_NOT_TESTED = 'GOAL_HORIZON_NOT_TESTED';
  * ⭐ A7 AS A TYPED FACT ON THE RUN (DL 0df0e1, beat 2). The PL's beat-2 wording separates "no option reaches the target"
  * from "the deadline is untested", and until now the second existed only as chat text, so no surface beside the chat
  * could say it without re-deriving A7. Appends ONE `info` warning to the envelope's `inference_warnings` (the carrier
- * every withheld-figure reader already keys on by code) when `untestedHorizonLine` holds: A7's sentence verbatim, and the
- * goal's id. It withholds nothing and moves no figure. An envelope already carrying the code is returned as is. Pure.
+ * every withheld-figure reader already keys on by code): the full held-month sentence, else the short present-number
+ * form beside the Run's chance, and the goal's id. Event-by-date chances owe neither form. It withholds nothing and
+ * moves no figure. An envelope already carrying the code is returned as is. Pure.
  */
 export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown): E {
-  const line = untestedHorizonLine(graph);
+  const line = untestedHorizonLine(graph, { besideChance: true });
   if (line === null || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const env = envelope as Rec;
   const existing: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];

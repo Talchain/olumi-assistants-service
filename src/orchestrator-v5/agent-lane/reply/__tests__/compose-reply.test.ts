@@ -1146,6 +1146,31 @@ describe('ONE reply contract: R4 licensed Run order, budget demotion and R5 type
     expect(c.shape!.detail).toBe(context);
   });
 
+  it('guided Run finding leads beside a shown chance, owns N, and leaves progress and other asks in detail', () => {
+    const guided = "The chance isn't shown yet: the model doesn't yet say how strongly ‘A’ affects ‘B’, so any figure would be a guess. Give a rough strength for it to see the chance.";
+    const reason = 'The goal target needs a starting level.';
+    const progress = '2 more to go.';
+    const chance = shortChances[0]!;
+    const text = [chance, reason, guided, progress, context, ask].join('\n\n');
+    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
+      { role: 'withheld_reason', text: reason },
+      { role: 'withheld_reason', text: guided, lead: true, ownsNextStep: true },
+      { role: 'host', text: progress },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.headline).toBe(guided);
+    expect(c.shape!.bullets).toEqual([chance]);
+    expect(c.shape!.detail).toContain(progress);
+    expect(c.shape!.detail).toContain(reason);
+    expect(c.shape!.detail).toContain(ask);
+    expect(c.measure!.face_words).toBeLessThanOrEqual(80);
+    expect(c.text.split(guided)).toHaveLength(2);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceKept(text, c.text);
+  });
+
   it('R4 separate typed chance note: its own companion stays adjacent; a companion of another chance goes to detail', () => {
     const chance = shortChances[0]!;
     const ownNote = 'This depends on subscriber retention after launch.';

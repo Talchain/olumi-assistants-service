@@ -2302,7 +2302,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           }
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
           const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
-          let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);
+          // The live post-gate goal-chance producer appends its say after the ordinary decision lines.
+          let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow.filter(line => line !== say), ...lines,
+            ...(typeof say === 'string' && say.trim() !== '' ? [say] : [])]);
           const breakEvenNow = (state.analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
             ? (state.scopeOpen ? null : breakEvenFor(state.graph, state.identityEvaluated)) : null;
           if (breakEvenNow !== null) rebuilt = withBreakEvenAnswer(rebuilt, breakEvenNow, { afterIdentityAsk: false });
@@ -2312,13 +2314,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
           rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
-          const withheldReplayFinding = screenNow.length === 0 ? (reasonNow === null ? say : sentencesOf(reasonNow)[0]) : null;
+          const guidedReplayFinding = replayGuidedText !== null && replayText.includes(replayGuidedText) ? replayGuidedText : null;
+          const withheldReplayFinding = guidedReplayFinding
+            ?? (screenNow.length === 0 ? (reasonNow === null ? say : sentencesOf(reasonNow)[0]) : null);
           replayObligations = [
             ...(typeof withheldReplayFinding === 'string' && withheldReplayFinding !== ''
-              ? [{ role: 'withheld_reason' as const, text: withheldReplayFinding, lead: true as const }] : []),
+              ? [{ role: 'withheld_reason' as const, text: withheldReplayFinding, lead: true as const,
+                ...(guidedReplayFinding === null ? {} : { ownsNextStep: true as const }) }] : []),
             { role: 'host', text: RUN_RESULT_READY_TEXT },
             ...(typeof say === 'string' && say.trim() !== '' ? [say, ...sentencesOf(say)].map((text): FaceObligation => ({ role: 'withheld_reason', text })) : []),
-            ...[askNow, ...lines].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
+            // Mirror live typing: a combined goal-chance say may carry the level ask beside guided sizing.
+            ...[askNow, ...lines, say].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
             ...indexNow.map((text): FaceObligation => ({ role: 'host', text })),
             ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !indexNow.includes(l) && !l.includes('?'))]
               .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text): FaceObligation => ({ role: 'evidence', text })),
@@ -4765,11 +4771,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const closingSubjects = closingReason === undefined || closingReason === WITHHELD_GOAL_PATH_UNSIZED
         || closingReason === WITHHELD_SEPARATION_UNAVAILABLE || closingReason === WITHHELD_LEADER_CAUSE_UNRECORDED
         ? coHold?.subjects : undefined;
-      const withheldRunFinding = screenLines.length === 0 && (fastPath === 'run' || explainsCurrentRun)
+      // The scoped guided producer is both the withheld finding and the next step; its presses own that step.
+      const guidedRunFinding = faceContract === 'run' && guidedReplyText.guided !== null && reply.includes(guidedReplyText.guided)
+        ? guidedReplyText.guided : undefined;
+      const withheldRunFinding = guidedRunFinding ?? (screenLines.length === 0 && (fastPath === 'run' || explainsCurrentRun)
         ? [reasonLine === null ? null : sentencesOf(reasonLine)[0], goalChanceOwed, coHold?.why, leaderGateClosing].find((line): line is string =>
-          typeof line === 'string' && line !== '' && reply.includes(line)) : undefined;
+          typeof line === 'string' && line !== '' && reply.includes(line)) : undefined);
       const obligations: FaceObligation[] = [
-        ...(withheldRunFinding === undefined ? [] : [{ role: 'withheld_reason' as const, text: withheldRunFinding, lead: true as const }]),
+        ...(withheldRunFinding === undefined ? [] : [{ role: 'withheld_reason' as const, text: withheldRunFinding, lead: true as const,
+          ...(guidedRunFinding === undefined ? {} : { ownsNextStep: true as const }) }]),
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
         ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
         ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
@@ -4810,7 +4820,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // the ask; the rest may sit under More detail (R1).
         // A host line that carries the open-questions segment is typed up to it: the segment has its own place (detail,
         // DGAI's questions toggle), and a part spanning it could not be located as one unit.
-        ...[...(uninterpretedRun ? [RUN_RESULT_READY_TEXT, ...decisionLines] : []), ...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
+        ...[...(uninterpretedRun ? [RUN_RESULT_READY_TEXT, ...decisionLines] : []), ...owed.filter((l) => l !== goalChanceOwed), guidedReplyText.progress, narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
           .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
           .filter((l): l is string => typeof l === 'string' && l !== '')
           .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
