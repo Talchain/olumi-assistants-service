@@ -463,3 +463,38 @@ describe('RC5b buddy r1: every definitional contribution counts; unreadable figu
   });
 });
 
+describe('RC5b buddy r2', () => {
+  const defEdge = (graph: Graph, from: string, negative: boolean) => {
+    const edge = graph.edges.find((e) => e.from === from) as Record<string, unknown>;
+    edge.provenance = { source: 'cee_hypothesis', definitional: true };
+    edge.effect_direction = negative ? 'negative' : 'positive';
+    edge.strength = { mean: negative ? -1 : 1, std: 0.01 };
+  };
+
+  it('a negative figure on a POSITIVE definitional edge keeps its sign: £392,000 − £300,000 = £92,000, silent', () => {
+    const graph = paulsShape(8_000, true);
+    level(graph, 'backlash').raw_value = -300_000;
+    defEdge(graph, 'backlash', false);
+    expect(goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toBeNull();
+  });
+
+  it('a levelless definitional addend never borrows a cause\'s figure: skipped, asks at £392,000', () => {
+    const graph = paulsShape(8_000, true);
+    delete node(graph, 'backlash').observed_state;
+    defEdge(graph, 'backlash', true);
+    graph.nodes.push({ id: 'cause', kind: 'factor', label: 'Competitor launch', observed_state: { raw_value: 300_000, value: 0.3, unit: '£/month', source: 'user_edited' } } as unknown as Node);
+    graph.edges.push({ from: 'cause', to: 'backlash', strength: { mean: 0.01, std: 0.01 }, effect_direction: 'positive' } as never);
+    expect(goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toMatchObject({ implied: 392_000 });
+  });
+
+  it('editing a definitional addend can cross the threshold and asks about that figure', () => {
+    const graph = paulsShape(4_000, true);
+    level(graph, 'backlash').raw_value = 100_000;
+    node(graph, 'backlash').label = 'Other MRR';
+    defEdge(graph, 'backlash', false);
+    const result = goalCoherenceAsk(graph, { nodeId: 'backlash', previousRaw: 1_000 });
+    expect(result).toMatchObject({ implied: 296_000 });
+    expect(result?.text).toContain('Is £100,000 your Other MRR');
+  });
+});
+

@@ -28,6 +28,8 @@ interface Product {
   readonly clause: string;
   /** Levelled definitional addends, said in order after the product ("+ £500", "− £1,000"). */
   readonly addendFigures: readonly string[];
+  /** Every definitional addend id (listed or edge-marked): an edit to one moves today's level too. */
+  readonly contributorIds: readonly string[];
 }
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -109,7 +111,10 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   for (const [id, edgeSign] of contributions) {
     const addend = byId.get(id);
     if (addend === undefined) return null;
-    const level = levelFor(graph, addend);
+    // An addend's level is its OWN stated figure: never the today reader's one-cause fallback (buddy r2 P1).
+    const own = isRec(addend.observed_state) ? addend.observed_state : undefined;
+    const ownUnit = words(own?.unit);
+    const level: Level | null = own !== undefined && finite(own.raw_value) && ownUnit !== null ? { node: addend, raw: own.raw_value, unit: ownUnit } : null;
     if (level === null) {
       // Levelless = skipped (Science). A stated figure whose unit can't be read is NOT levelless: fail closed (buddy r1 P1).
       const os = isRec(addend.observed_state) ? addend.observed_state : undefined;
@@ -117,8 +122,8 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
       continue;
     }
     if (!inUnit(level.unit, String(addend.label), unit, label)) return null;
-    // A listed addend is added signed, as ISL adds it; an edge-marked one takes the edge's sign on its magnitude.
-    const signed = edgeSign === 0 ? level.raw : edgeSign * Math.abs(level.raw);
+    // A listed addend is added signed, as ISL adds it; an edge-marked one is its signed figure times the edge's sign (buddy r2 P1).
+    const signed = edgeSign === 0 ? level.raw : edgeSign * level.raw;
     addendSum += signed;
     if (signed !== 0) addendFigures.push(`${signed < 0 ? '−' : '+'} ${sayFigureAsWritten(Math.abs(signed), readMoney(level.unit, String(addend.label))?.code ?? '')}`);
   }
@@ -126,7 +131,7 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   const unconfirmed = identity.stated_in_brief === false;
   if (!finite(implied) || implied < 0 || (unconfirmed && !reconciles(graph, node, implied, unit))) return null;
   return {
-    parts: [rate, count], implied, unconfirmed, addendFigures,
+    parts: [rate, count], implied, unconfirmed, addendFigures, contributorIds: contributions.map(([id]) => id),
     clause: `${label} = ${String(rate.node.label)} × ${String(count.node.label)} (Olumi's reading)`,
   };
 }
@@ -176,7 +181,8 @@ export function goalCoherenceAsk(input: unknown, edited: { nodeId: string; previ
 
   if (identity?.operation === 'product') {
     product = productFor(graph, goal, parents, byId, goalUnit);
-    if (product === null || !product.parts.some((p) => p.node.id === edited.nodeId)) return null;
+    // An edit to an operand OR a definitional addend moves today's level (buddy r2 P2).
+    if (product === null || (!product.parts.some((p) => p.node.id === edited.nodeId) && !product.contributorIds.includes(edited.nodeId))) return null;
     implied = product.implied;
     expression = [product.parts.map(figure).join(' × '), ...product.addendFigures].join(' ');
   } else {
