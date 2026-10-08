@@ -1,0 +1,45 @@
+FIX2b is implemented in `/private/tmp/accel-er-offer-cee` on `dl/event-risk-precondition-offer`. HEAD remains `8223aee150f7db58315cad0ff63ea81f9c954250`. No commit, push, deployment, remote database call or migration was performed.
+
+The new choice RPC migration, rollback and `choice-answer-migration.test.ts` are deleted. `append_agent_choice_if_latest`, its selector and the widened silent-SHA256 store admission are removed. Decline and option consent both call the existing `appendIfLatest` / `append_agent_answer_if_latest` path from base `b31021623cfb13c43d395e9e0dbf1e6751c4a482`.
+
+`git diff --stat b31021623cfb13c43d395e9e0dbf1e6751c4a482 -- supabase/` is empty. `git status --short -- supabase/` is also empty, and all three deleted files are absent. The status check covers untracked files that the requested diff command alone would miss.
+
+Choice writes set the generic `allowUnconditionalFallback: false` policy. A missing latest-row identity, missing conditional store capability, missing existing RPC (`PGRST202` / `42883`) or the first `latest_moved` refuses the transition. There is no consent retry or unconditional fallback. Ordinary Agent answers keep the existing retry and legacy-fallback behavior. Failed option consent also skips the outer answer append, so neither the inner replacement nor an outer consent-bearing answer is written; the pre-existing claim remains. Both refusal paths retain marked holds, suppress ordinary approval/cards and re-show the current readable choices through the existing reply composer.
+
+Only revision-bound option replacement rows mint `agent_turn:held_choice:<digest>` hashes, including their `choice_binding` in the digest. This meets the existing SQL's `agent_turn:%` admission without changing SQL or broadening store authority. Their user/assistant text remains NULL through the existing `runAsAgentSubturn` floor. Other hold hashes are unchanged. Durable history and restore already omit NULL-text rows before their caps; recent-reply selection now does the same before its 20-answer cap. A silent consent row carries no guidance or answer offers. The latest-offer reader can therefore return NULL between inner consent and outer answer; a successful replacement retains a live hold, which already suppresses Run offers, and proposal/choice reload reads the durable hold independently.
+
+Every remaining session-store change relative to the required base:
+
+| File | Remaining change | Reason |
+| --- | --- | --- |
+| `src/orchestrator-v5/session/store.ts` | `ConditionalAppendOptions.allowUnconditionalFallback?: boolean` and its comment | Tell the existing conditional append to refuse missing-RPC fallback for consent, while preserving default behavior |
+| `src/orchestrator-v5/session/store.ts` | `appendIfLatest` documentation | Describe the existing capability and consent refusal accurately |
+| `src/orchestrator-v5/session/supabase-store.ts` | Two-line `StateCommitFailedError` branch before the existing missing-RPC fallback | Prevent a missing conditional RPC from causing an unconditional consent write |
+
+There are no other remaining changes in those two files. The conditional RPC name, admission predicate and ordinary fallback implementation are identical to base.
+
+The original FIX2 safeguards remain in place: P1-2 marker creation inside the durable hold append; P1-1 shared `gm-held-execute` writer gate; P1-3 revision/digest-bound option and decline presses; P1-4 overlength fallback; P2-5 current-revision replay; P2-6 combined reload; P2-7 decline wording from the card; and composer routing. Entire choice/press helpers, capabilities/tools, shared writer gate, turn executor and combined-reload files are byte-identical to the tree received for FIX2b. The commit binding callback changes only its fallback-policy name. Source snapshot review confirms marker creation, replay and the composer implementation are unchanged.
+
+| Required batch | Tests passed | Evidence |
+| --- | ---: | --- |
+| Chat seam + reply-composer-last-writer | 83 | [Log](/private/tmp/offer-fix2b-evidence/fix2/fix2b-green-chat-composer.log) |
+| Offer unit + x4 answer reload | 36 | [Log](/private/tmp/offer-fix2b-evidence/fix2/fix2b-green-offer-reload.log) |
+| Conditional-answer-store | 25 | [Log](/private/tmp/offer-fix2b-evidence/fix2/fix2b-green-conditional.log) |
+| Widen risks + RC3 incident-edge seam | 21 | [Log](/private/tmp/offer-fix2b-evidence/fix2/fix2b-green-rc3-1.log) |
+| RC3 left-out + real-commit Run invariance | 16 | [Log](/private/tmp/offer-fix2b-evidence/fix2/fix2b-green-rc3-2.log) |
+| GM held apply + multi-option confirmation | 29 | [Log](/private/tmp/offer-fix2b-evidence/fix2/fix2b-green-gm.log) |
+| **Total** | **210** | All passed |
+
+The six FIX2b fault rows cover option/decline x unavailable capability/first CAS conflict/missing RPC. They assert no ordinary approval/card, original revision/digest and durable marker retained, choices re-shown, no inner option-consent or outer answer row, and unchanged graph. Successful option consent also asserts the admitted hash and NULL conversation columns. Store tests require only the existing RPC and reject bare SHA256 conditional writes even with fallback disabled. Missing-RPC fallback tests for ordinary answers remain intact. [Final refusal-row recheck](/private/tmp/offer-fix2b-evidence/fix2/fix2b-refusal-final.log).
+
+The shared writer-gate mutant still produces exactly two RED failures, P1-1 and P1-2, with the Agent/edge guards retained. It was restored byte-for-byte in `finally`; before/after SHA256 values match. [Mutant log](/private/tmp/offer-fix2b-evidence/fix2/fix2b-mutant-writer-gate.log), [restoration hashes](/private/tmp/offer-fix2b-evidence/fix2/fix2b-mutants.json).
+
+All 12 non-trigger control projections remain byte-identical to the original RED capture, including reply, chips, card/operations/fields/missing data, receipt and saved graph. Both control files hash to `e88e2c6e02c27f1aff649b21f6e2e639773fe21dff4ca0903fb0bfc3b2aa5840`. [Comparison](/private/tmp/offer-fix2b-evidence/fix2/fix2b-control-comparison.json), [current capture](/private/tmp/offer-fix2b-evidence/fix2/controls-fix2b.json).
+
+[Source typecheck](/private/tmp/offer-fix2b-evidence/fix2/fix2b-typecheck.log), [changed-file lint](/private/tmp/offer-fix2b-evidence/fix2/fix2b-lint.log), and `git diff --check` pass. Before every test invocation, the exact gate `node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)"` passed. Each test run used at most two files, one worker, `--no-file-parallelism`, `--configLoader runner`, and `/dev/null` stdin. [Commands, loads and results](/private/tmp/offer-fix2b-evidence/fix2/fix2b-runs.json). The initial local validation found a mislocated hash edit and changed non-commit refusal wording; both were corrected before the successful full run. Its log is retained as historical failure evidence.
+
+Accepted residual race: the floor reads row N, then the existing conditional RPC acquires its advisory lock and compares the latest row with N. Movement visible at that comparison returns `latest_moved` without inserting a consent row, and this client refuses immediately. Competing conditional writers share that lock. An ordinary non-conditional writer does not acquire it and can insert row X after the comparison but before the conditional delegate inserts the choice row, including while the delegate waits for its scenario-row lock. The choice can then carry stale pending state, and an arrival/decline can be lost from the newest carrier. Transaction-start `NOW()` timestamps and ties also mean insert/commit order need not equal the reader's latest-row order. CAS refuses movement already visible at its check; it cannot detect this later interleaving. A later DL-approved migration could lock the scenario before checking latest, coordinate the append window with existing writers, and advance new consent-row timestamps beyond the locked prior row while leaving replay timestamps and receipts unchanged. This FIX2b deliberately adds no migration and does not claim that stronger guarantee.
+
+This is local semantic replay with mocked storage/RPC outcomes and zero live LLM calls. It does not witness database transaction execution or deployed acceptance. The six served P44 draws and stored-runner corpus retain their earlier provenance limit: minimal tool arguments reconstructed from captured cards/briefs. The accepted lexical-trigger limit (shared stems can miss paraphrases or over-trigger unrelated risks) is unchanged.
+
+`.fix2-evidence/` was moved out of the repository to `/private/tmp/offer-fix2b-evidence/fix2/`, including all original logs/scripts and the new FIX2b evidence. The exact requested destination is `/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/status/evidence/chat-precondition/offer-evidence/fix2/`. Creating it failed with `Operation not permitted` under this session's restricted writable roots. Delivery to that destination is the sole unfinished brief step; the evidence is complete and staged outside the repository. [Final source manifest](/private/tmp/offer-fix2b-evidence/fix2/fix2b-manifest.json).

@@ -543,6 +543,8 @@ export class SupabaseSessionStore implements SessionStore {
     });
     if (error) {
       if (isMissingAppendFunction(error)) {
+        if (options.allowUnconditionalFallback === false) throw new StateCommitFailedError('The choice requires the conditional answer RPC.',
+          { cause: error, rpc_code: errCode(error) });
         if (!conditionalAppendMissingLogged) {
           conditionalAppendMissingLogged = true;
           log.warn({ event: 'v5.agent_answer.conditional_rpc_missing', rpc_code: errCode(error) },

@@ -194,6 +194,10 @@ export interface CheckedGraphAppendParams {
   readonly baseGraphForInvariants?: unknown;
   /** Free-form origin label for logs (`handler_id`, or a route name). */
   readonly source?: string | undefined;
+  /** Choice release is a consent transition: no unconditional answer fallback may clear its marker. */
+  readonly allowUnconditionalFallback?: boolean;
+  /** Consent names the row that offered the choices, not a later row retaining the same hold. */
+  readonly expectedLatestRowId?: string;
   /** Only successful, user-authorised scope withdrawals may retire this durable issue. */
   readonly withdrawnGoalScopeChipIds?: readonly string[];
   /**
@@ -397,6 +401,9 @@ export async function appendCheckedGraphWrite(
     if (typeof store.readMostRecentPendingActions === 'function') {
       const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict',
         ...(params.heldProposals !== undefined ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
+      if (params.expectedLatestRowId !== undefined && expectedLatestRowId !== params.expectedLatestRowId) {
+        throw new Error('The model changed since these choices were offered.');
+      }
       if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
       let supplied = write.pending_actions ?? [];
       // Per attempt: what did not fit is said from THIS read's reconciliation only (S-D slice 2 x S-D.1b).
@@ -455,9 +462,14 @@ export async function appendCheckedGraphWrite(
     // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
     // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
     const storedWrite = withoutAgentSubturnText(write);
-    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
-    const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
+    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') {
+      if (params.allowUnconditionalFallback === false) throw new Error('The choice could not be recorded against the current held revision.');
+      return await store.append(storedWrite);
+    }
+    const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId,
+      ...(params.allowUnconditionalFallback === false ? { allowUnconditionalFallback: false } : {}) });
     if (!('status' in outcome)) return outcome;
+    if (params.allowUnconditionalFallback === false) throw new Error('The held choice changed before it could be recorded.');
     if (attempt === 2) {
       log.warn({ event: 'v5.agent_answer.latest_moved_exhausted', scenario_id: write.scenario_id, source, attempts: 3 },
         '[persist] latest row moved on all three conditional attempts; rereading once more and appending the answer unconditionally');

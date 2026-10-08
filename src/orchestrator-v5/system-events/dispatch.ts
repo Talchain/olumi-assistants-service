@@ -1,3 +1,5 @@
+import { hasRiskPreconditionChoice, withRiskPreconditionChoice } from '../agent-lane/chat-risk-precondition-choice.js';
+import { proposalRecord } from '../agent-lane/proposal-object/record.js';
 import type { ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
@@ -3475,6 +3477,12 @@ export type HoldAddRiskInput = {
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
   readonly risk: { readonly id?: string; readonly label: string };
+  /** Server-owned timing choice, stored atomically with this ordinary hold. */
+  readonly precondition_choice?: { readonly line: string; readonly turn_id?: string };
+  /** An option press may replace only the exact CURRENT marked ordinary revision. */
+  readonly choice_binding?: { readonly proposal_id: string; readonly revision: string; readonly digest: string };
+  /** Host-owned latest answer row that offered the choice. Retained through the conditional commit floor. */
+  readonly choice_expected_latest_row_id?: string;
   /** RC3: server-owned option identity from the widen press or verified chat label lease, never a model-authored stamp. */
   readonly relies_on?: { readonly option_id: string };
   /** event_risk.v1 slice 2a: CEE-held user words, outside producer operations. */
@@ -3521,6 +3529,12 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   if (currentHash === null) return { status: 'refused', reason: 'no_graph_hash' };
   // The model moved since the proposal was built: nothing is held against a model the user did not see.
   if (currentHash !== input.base_graph_hash) return { status: 'stale' };
+  if (input.choice_binding !== undefined) {
+    const binding = input.choice_binding;
+    const current = priorPendings.find(p => p.chip_id === binding.proposal_id && hasRiskPreconditionChoice(p));
+    const record = current === undefined ? undefined : proposalRecord(current, persistedGraph);
+    if (record === undefined || record.revision !== binding.revision || record.digest !== binding.digest) return { status: 'stale' };
+  }
 
   // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
   let freshness: FrameFreshness = 'unknown';
@@ -3547,14 +3561,21 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     log.info({ ...logBase, reason: outcome.reason, governing: outcome.governing }, 'add-risk hold — refused; nothing held');
     return { status: 'refused', reason: outcome.reason };
   }
+  // No crash/answer-append window: marker and ordinary hold share this one durable append.
+  const pendingActions = input.precondition_choice === undefined ? outcome.pendingActions
+    : outcome.pendingActions.map(hold => withRiskPreconditionChoice(hold, persistedGraph, [],
+      input.precondition_choice!.line, input.precondition_choice!.turn_id ?? input.turn_id));
   // Honest supersession, as the add-option hold says it (route-v2): appended BEFORE the commit so stored == offered.
   const notice = buildHeldSupersessionNotice(outcome.pendingActions[0]!, priorPendings, Date.now());
   const response: OlumiResponse = notice === null
     ? outcome.response
     : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
-  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+  // The host's option consent uses the existing Agent conditional-answer contract; every other hold keeps its hash.
+  // Its internal conversation text is still removed by runAsAgentSubturn at the shared persistence floor.
+  const requestHash = `${input.choice_binding === undefined ? 'sha256:' : 'agent_turn:held_choice:'}${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash,
     ...(input.relies_on !== undefined ? { relies_on: input.relies_on } : {}),
+    ...(input.choice_binding !== undefined ? { choice_binding: input.choice_binding } : {}),
     ...(input.user_event_risk !== undefined ? { user_event_risk: input.user_event_risk } : {}) })).digest('hex').slice(0, 32)}`;
   try {
     await commitDirectAnswer(response, {
@@ -3566,7 +3587,12 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
       handler_facts: [],
-      pending_actions: [...outcome.pendingActions],
+      pending_actions: [...pendingActions],
+      ...(input.choice_binding === undefined ? {} : {
+        heldChoiceTransition: { ...input.choice_binding,
+          ...(input.choice_expected_latest_row_id === undefined ? {} : { expected_latest_row_id: input.choice_expected_latest_row_id }) },
+        baseGraphForInvariants: persistedGraph,
+      }),
       // Prior live holds are carried, never silently wiped (the same-target one is retired by the carry-forward).
       priorPendingActions: priorPendings,
       coaching_state: null,

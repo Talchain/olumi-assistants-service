@@ -307,6 +307,7 @@ import {
 import { appendLapseNotice, threadHoldsThroughMutatingCommit } from './handlers/hold-thread-through.js';
 import { PatchOperationsArraySchema } from '../orchestrator/patch-validation.js';
 import { productHoldRecord } from './agent-lane/proposal-object/record.js';
+import { hasRiskPreconditionChoice, riskPreconditionChoiceActions, riskPreconditionChoiceLine } from './agent-lane/chat-risk-precondition-choice.js';
 import { amendHeldOperations, parseProposalEdits } from './agent-lane/proposal-object/amend.js';
 import { PLAIN_APPROVAL_SUPERSEDED } from './agent-lane/proposal-object/reply.js';
 import {
@@ -3911,6 +3912,8 @@ export async function runTurnExecutor(
         overrides?: {
           readonly assistantText?: string;
           readonly consumedPendingRefs?: readonly string[];
+          readonly suggestedActions?: readonly SuggestedAction[];
+          readonly pendingActions?: readonly PendingAction[];
         },
       ): Promise<TurnExecutorRunResult> => {
         plainApprovalBindingSuperseded = decisionStatus === 'superseded'
@@ -3926,7 +3929,7 @@ export async function runTurnExecutor(
           answerKind: 'functional',
           assistant_text: recoveryAssistantText,
           stage: context.stage,
-          suggested_actions: [],
+          suggested_actions: overrides?.suggestedActions ?? [],
         });
         sonnetTextForLog = recoveryResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -3945,6 +3948,9 @@ export async function runTurnExecutor(
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
+            ...(overrides?.pendingActions !== undefined
+              ? { pending_actions: [...overrides.pendingActions] }
+              : {}),
             ...(overrides?.consumedPendingRefs !== undefined
               ? { consumedPendingRefs: [...overrides.consumedPendingRefs] }
               : {}),
@@ -3972,6 +3978,20 @@ export async function runTurnExecutor(
           );
         }
         return finalizeRun();
+      };
+      /** Choice refusal preserves the exact durable hold; it is not a spent confirmation. */
+      const commitRiskPreconditionChoiceRecovery = (
+        holds: readonly PendingAction[],
+        graph: unknown,
+      ): Promise<TurnExecutorRunResult> => {
+        const marked = holds.filter(hasRiskPreconditionChoice);
+        const lines = marked.map(riskPreconditionChoiceLine).filter((line) => line.length > 0);
+        return commitProposedChangeRecovery('invalid', 'gm_held_execute_choice_required', {
+          assistantText: [...new Set(lines)].join('\n\n')
+            || 'Nothing changed. Choose how this risk relates to your options before approving the change.',
+          suggestedActions: marked.flatMap((hold) => riskPreconditionChoiceActions(hold, graph)),
+          pendingActions: holds,
+        });
       };
       /**
        * Regenerate a readiness plan against the current persisted graph. This
@@ -4666,6 +4686,7 @@ export async function runTurnExecutor(
           }
         }
         const outcome = executeGmHeldResume({
+          heldPending,
           operations: heldOperations,
           ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
           // A new switch's today-0 lands in this same apply (Canonical #70 5854919806 item 1).
@@ -4686,6 +4707,9 @@ export async function runTurnExecutor(
           turnId: context.request_id,
           requestId,
         });
+        if (outcome.status === 'choice_required') {
+          return commitRiskPreconditionChoiceRecovery([heldPending], gmBaseGraph);
+        }
         if (outcome.status !== 'executed') {
           log.warn(
             {
@@ -4962,6 +4986,7 @@ export async function runTurnExecutor(
           const stepToday = reads[i]!.gradedToday;
           const stepUserToday = reads[i]!.userToday;
           const outcome = executeGmHeldResume({
+            heldPending: holds[i]!,
             operations: reads[i]!.operations,
             ...(stepCap !== undefined ? { envelopeCap: stepCap } : {}),
             ...(stepSwitches !== undefined ? { switchFactorIds: stepSwitches } : {}),
@@ -4978,6 +5003,10 @@ export async function runTurnExecutor(
             turnId: context.request_id,
             requestId,
           });
+          if (outcome.status === 'choice_required') {
+            // Earlier steps have only computed candidates: no graph or hold is committed before the whole chain ends.
+            return commitRiskPreconditionChoiceRecovery(holds, gmBaseGraph);
+          }
           if (outcome.status !== 'executed') {
             log.warn(
               {

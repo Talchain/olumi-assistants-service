@@ -225,7 +225,7 @@ const seedRiskChoice = async () => {
     riskAddPressFor({ label: 'Feature release slips', mechanism: 'relies_on', hits: { id: node.id, label: node.label, kind: 'option' } }));
   const marked = withRiskPreconditionChoice(hold, graph, optionPresses, CHOICE_LINE, CHOICE_TURN);
   const choices = riskPreconditionChoiceActions(marked, graph);
-  expect(choices.map(action => action.label)).toEqual(['Add to ‘Raise Pro price to £59’', 'Add to ‘Raise Pro price to £54’', 'It lowers MRR for every option']);
+  expect(choices.map(action => action.label)).toEqual(['Add to ‘Raise Pro price to £59’', 'Add to ‘Raise Pro price to £54’', 'It lowers ‘MRR’ for every option']);
   // The real production parser rehydrates the marker after the JSONB serialization boundary.
   latest = [parsePendingAction(JSON.parse(JSON.stringify(marked)))!];
   port.readExistingScenario.mockResolvedValue({ userId: OWNER, graph, briefText: 'Launch the change with the next Pro feature release.', analysisInvalidatedAt: null });

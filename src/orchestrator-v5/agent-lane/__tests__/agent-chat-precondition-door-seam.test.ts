@@ -12,6 +12,7 @@ let SCENARIO = '';
 const nextScenario = () => { n += 1; SCENARIO = `7b1e2d3c-4b5a-4f6e-9d7c-8b9a0e1f3d${String(n).padStart(2, '0')}`; };
 
 type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
+type Write = { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] };
 const rows = new Map<string, Row>();
 const order: string[] = [];
 const graphOf = new Map<string, unknown>();
@@ -34,9 +35,14 @@ const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
 let tick = 0;
-let pendingReadHook: ((options: { onLatestRowId?: unknown } | undefined) => void) | undefined;
+let pendingReadHook: ((options: { onLatestRowId?: unknown } | undefined) => void | Promise<void>) | undefined;
+let failAnswerTurnId: string | undefined;
+let failedAnswerAppends = 0;
+let conditionalMovesRemaining = 0;
+let conditionalAppendAttempts = 0;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  scenarioExists: vi.fn(async (sid: string) => graphOf.has(sid)),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => {
     const row = rows.get(`${sid}:${turnId}`);
     if (row === undefined) return null;
@@ -44,10 +50,25 @@ const store = {
     return { ...committed, pending_actions: await parsedPending(row, sid) };
   }),
   readMostRecentPendingActions: vi.fn(async (sid: string, options?: { onLatestRowId?: unknown }) => {
-    pendingReadHook?.(options);
+    await pendingReadHook?.(options);
+    if (typeof options?.onLatestRowId === 'function') options.onLatestRowId(latestRow(sid)?.id ?? null);
     return parsedPending(latestRow(sid), sid);
   }),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
+  appendIfLatest: vi.fn(async (w: Write, options: { expectedLatestRowId: string | null }): Promise<{ id: string } | { status: 'latest_moved' }> => {
+    conditionalAppendAttempts += 1;
+    if (conditionalMovesRemaining > 0) {
+      conditionalMovesRemaining -= 1;
+      await store.append({ scenario_id: w.scenario_id, turn_id: randomUUID(), request_hash: 'sha256:fix2-concurrent-floor',
+        pending_actions: structuredClone(latestRow(w.scenario_id)?.pending_actions ?? []) });
+    }
+    if ((latestRow(w.scenario_id)?.id ?? null) !== options.expectedLatestRowId) return { status: 'latest_moved' };
+    return store.append(w);
+  }),
+  append: vi.fn(async (w: Write) => {
+    if (w.turn_id === failAnswerTurnId && w.request_hash.startsWith('agent_turn:')) {
+      failedAnswerAppends += 1;
+      throw new Error('FIX2-P1-2 injected outer Agent answer append failure after durable inner hold');
+    }
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
       tick += 1;
@@ -142,7 +163,9 @@ const toolOutputIn = (body: Record<string, unknown>): Record<string, unknown> =>
 
 describe('chat precondition — real /agent/v1/turn door', () => {
   let app: FastifyInstance;
+  let reloadApp: FastifyInstance;
   const startApp = async () => {
+    await reloadApp?.close();
     vi.resetModules();
     const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
@@ -157,6 +180,10 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     await app.register(ceeOrchestratorRouteV2);
     await app.register(agentV1TurnRoute);
     await app.ready();
+    const { default: scenarioGraphRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    reloadApp = Fastify({ logger: false });
+    await reloadApp.register(scenarioGraphRoute);
+    await reloadApp.ready();
   };
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
@@ -170,8 +197,8 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     process.env.AGENT_LANE_PREVIEW = 'false';
     await startApp();
   }, 600_000);
-  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; graphReadHook = undefined; pendingReadHook = undefined; });
+  afterAll(async () => { await app?.close(); await reloadApp?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; graphReadHook = undefined; pendingReadHook = undefined; failAnswerTurnId = undefined; failedAnswerAppends = 0; conditionalMovesRemaining = 0; conditionalAppendAttempts = 0; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body & { _proposal_fields?: { proposals: { approve_action: Chip; missing: unknown[] }[] } }> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
@@ -216,7 +243,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
   };
 
   const declineChoiceOf = (response: Body) => {
-    const press = response.suggested_actions.find((c) => c.label === 'It lowers MRR for every option');
+    const press = response.suggested_actions.find((c) => c.label === 'It lowers ‘MRR’ for every option');
     expect(press, JSON.stringify(response.suggested_actions)).toBeDefined();
     return press!;
   };
@@ -227,6 +254,442 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     return proposalRecord(holds[0] as never, graphNow())!;
   };
 
+  const reload = async () => {
+    const r = await reloadApp.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: { include_conversation_turns: true } });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    return r.json() as { conversation_turns?: { turn_id: string; suggested_actions?: Chip[] }[];
+      proposal_fields?: { proposals: { approve_action: Chip }[] }; held_proposal_offers?: { approve_action: Chip }[] };
+  };
+  const approveAtSharedRoute = async (record: Awaited<ReturnType<typeof hiddenCard>>) => {
+    const { makeMessagePayload } = await import('../../__tests__/fixtures.js');
+    const r = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: makeMessagePayload({
+      scenario_id: SCENARIO, turn_id: randomUUID(), message: record.approve_action.message,
+      source: 'chip', chip: { id: record.proposal_id },
+    } as never) });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    return r.json() as { assistant_text: string; suggested_actions: Chip[] };
+  };
+  const expectNoOrdinaryReloadCard = (body: Awaited<ReturnType<typeof reload>>) => {
+    expect(body.proposal_fields?.proposals ?? []).toEqual([]);
+    expect(body.held_proposal_offers ?? []).toEqual([]);
+    expect((body.conversation_turns ?? []).flatMap(t => t.suggested_actions ?? [])
+      .some(c => c.id.startsWith('agent-approve-proposal:gmh_') || c.id.startsWith('gmh_'))).toBe(false);
+  };
+
+  it('FIX2-P1-1 RED: after the trigger, the held card’s exact approval message to /orchestrate/v2/turn with source chip + chip id gmh + a fresh turn id is refused, writes nothing and re-shows choices', async () => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const record = await hiddenCard();
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const callsBefore = openAiCalls;
+    const refused = await approveAtSharedRoute(record);
+    expect(bytes(), 'the shared held writer must refuse before committing risk→MRR').toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    expect(openAiCalls).toBe(callsBefore);
+    expect(refused.suggested_actions).toEqual(response.suggested_actions);
+    expect(refused.assistant_text).toContain(PRECONDITION_OFFER_LINE);
+  }, 120_000);
+
+  it('FIX2-P1-2 RED: the inner hold commit succeeds and the outer answer append fails; reload shows no ordinary approval and direct approve is refused', async () => {
+    seed();
+    const triggerTurn = randomUUID();
+    failAnswerTurnId = triggerTurn;
+    const { response } = await offer(ordinaryArgs(), P44_MESSAGE, { turn_id: triggerTurn });
+    failAnswerTurnId = undefined;
+    expect(failedAnswerAppends, 'failure injected at the outer answer, after the real inner hold commit').toBe(1);
+    expect(rows.has(`${SCENARIO}:${triggerTurn}`)).toBe(false);
+    const record = await hiddenCard();
+    expect(record.proposal_id).toMatch(/^gmh_/);
+    const durableHolds = await heldOnLatestRow();
+    expect(durableHolds).toHaveLength(1);
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const cold = await reload();
+    expectNoOrdinaryReloadCard(cold);
+    const refused = await approveAtSharedRoute(record);
+    expect(bytes(), 'a direct shared-writer approve after the failed answer must not bypass the choice').toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    expect(refused.suggested_actions.map(c => c.message)).toEqual(response.suggested_actions.map(c => c.message));
+  }, 120_000);
+
+  it('FIX2-P1-3 RED: choose £54, replay the original £59 press with a fresh turn id; replay is refused and the saved £54 approval stamps £54 only', async () => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const old59 = pressForOption(response);
+    const chosen54 = await pressPrecondition(pressForOption(response, 'Raise Pro price to £54'));
+    const saved54 = approveChipOf(chosen54)!;
+    const consentRows = [...rows.values()].filter(row => row.scenario_id === SCENARIO && row.request_hash.startsWith('agent_turn:held_choice:'));
+    expect(consentRows).toHaveLength(1);
+    expect(consentRows[0]).toMatchObject({ user_message: null, assistant_message: null, handler_id: null, turn_class: 'direct_answer' });
+    const current54 = await hiddenCard();
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const refused = await pressPrecondition(old59);
+    const { RISK_PRECONDITION_CHOICE_REFUSED_REPLY } = await import('../chat-risk-precondition-choice.js');
+    expect(refused.assistant_text).toBe(RISK_PRECONDITION_CHOICE_REFUSED_REPLY);
+    expect(refused._agent.tool_calls).toEqual([]);
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect((await hiddenCard()).revision).toBe(current54.revision);
+    expect((await hiddenCard()).digest).toBe(current54.digest);
+    expect(bytes()).toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    await approveOffer(saved54);
+    expect(riskNow().relies_on).toEqual({ option_id: 'raise_pro_price_to_54' });
+    expect(graphNow().edges.filter(e => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
+  }, 120_000);
+
+  it('FIX2-P1-3-not-now RED: Not now retires the original option presses; replay with a fresh turn id is refused', async () => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const old59 = pressForOption(response);
+    const record = await hiddenCard();
+    await turn({ message: record.decline_action.message, source: 'chip', chip: { id: record.decline_action.id } });
+    expect(await heldOnLatestRow()).toEqual([]);
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const refused = await pressPrecondition(old59);
+    const { RISK_PRECONDITION_CHOICE_REFUSED_REPLY } = await import('../chat-risk-precondition-choice.js');
+    expect(refused.assistant_text).toBe(RISK_PRECONDITION_CHOICE_REFUSED_REPLY);
+    expect(refused._agent.tool_calls).toEqual([]);
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+  }, 120_000);
+
+  it('FIX2-P1-3-overlap RED: a £54 choice arriving after £59 resolves but before its conditional hold append cannot be replaced; saved £54 approval stamps £54', async () => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const ordinaryPending = structuredClone(latestRow()!.pending_actions);
+    const old59 = pressForOption(response);
+    const chosen54 = await pressPrecondition(pressForOption(response, 'Raise Pro price to £54'));
+    const saved54 = approveChipOf(chosen54)!;
+    const pending54 = structuredClone(latestRow()!.pending_actions);
+    const current54 = await hiddenCard();
+    // £59 first resolves against the original marked hold. The conditional floor's next authoritative read
+    // observes another request's £54 replacement, carrying the same stable proposal id with a new revision/digest.
+    latestRow()!.pending_actions = ordinaryPending;
+    let raced = false;
+    pendingReadHook = (options) => {
+      if (raced || options?.onLatestRowId === undefined) return;
+      raced = true;
+      const prior = latestRow()!;
+      const concurrentTurn = randomUUID();
+      const key = `${SCENARIO}:${concurrentTurn}`;
+      rows.set(key, { ...prior, id: `row-${rows.size + 1}`, turn_id: concurrentTurn,
+        request_hash: 'sha256:fix2-concurrent-option', assistant_message: null, user_message: null, pending_actions: pending54 });
+      order.push(key);
+    };
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const refused = await pressPrecondition(old59);
+    pendingReadHook = undefined;
+    expect(raced, 'the competing choice arrived at the conditional append floor').toBe(true);
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect(refused._agent.tool_calls.some(call => call.ok)).toBe(false);
+    expect((await hiddenCard()).revision).toBe(current54.revision);
+    expect((await hiddenCard()).digest).toBe(current54.digest);
+    expect(bytes()).toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    await approveOffer(saved54);
+    expect(riskNow().relies_on).toEqual({ option_id: 'raise_pro_price_to_54' });
+    expect(graphNow().edges.filter(edge => edge.from === RISK_ID || edge.to === RISK_ID)).toEqual([]);
+  }, 120_000);
+
+  it('FIX2-P1-4 RED: risk label Feature release slips plus delay repeated 80 times cannot expose ordinary approval; the decline press is present', async () => {
+    seed();
+    const label = 'Feature release slips ' + 'delay '.repeat(80);
+    const before = bytes();
+    const { response } = await offer(ordinaryArgs(label), `Add a risk: ${label} — MRR will be lower.`);
+    expect(approveChipOf(response), 'option assembly cannot fail open to the ordinary approval').toBeUndefined();
+    expect(response._proposal_fields).toBeUndefined();
+    expect(response.suggested_actions.some(c => c.id.startsWith('agent-risk-mrr-choice:'))).toBe(true);
+    expect(response.assistant_text).toMatch(/options couldn[’']t be listed|options could not be listed/i);
+    expect(bytes()).toBe(before);
+    const ordinary = await hiddenCard();
+    const refused = await approveAtSharedRoute(ordinary);
+    expect(bytes()).toBe(before);
+    expect(refused.suggested_actions.some(c => c.id.startsWith('gmh_') || c.id.startsWith('agent-approve-proposal:gmh_'))).toBe(false);
+  }, 120_000);
+
+  it('FIX2-P2-5 RED: trigger T, choose £59, retry T; replay selects the current RC3 revision and exposes no hidden ordinary chip or proposal fields', async () => {
+    seed();
+    const triggerTurn = randomUUID();
+    const { response } = await offer(ordinaryArgs(), P44_MESSAGE, { turn_id: triggerTurn });
+    const ordinary = await hiddenCard();
+    const rc3 = await pressPrecondition(pressForOption(response));
+    const current = await hiddenCard();
+    const callsBefore = openAiCalls;
+    const replay = await turn({ turn_id: triggerTurn, message: P44_MESSAGE });
+    expect(openAiCalls).toBe(callsBefore);
+    expect(replay.suggested_actions.some(c => c.message === ordinary.approve_action.message)).toBe(false);
+    expect(replay._proposal_fields?.proposals.some(p => p.approve_action.message === ordinary.approve_action.message) ?? false).toBe(false);
+    expect(approveChipOf(replay)).toEqual(approveChipOf(rc3));
+    expect(replay._proposal_fields?.proposals).toContainEqual(expect.objectContaining({ revision: current.revision, digest: current.digest }));
+  }, 120_000);
+
+  it('FIX2-P2-6 RED: two matching risks in one turn reload both choice sets', async () => {
+    seed();
+    const triggerTurn = randomUUID();
+    const otherRisk = 'Pro feature outage';
+    // The Agent loop refuses a second proposing call via ONE_CHANGE_PER_APPROVAL. Exercise the reload contract
+    // for a durable answer carrying several holds via the real producers, rather than weakening that loop guard.
+    const { holdAddRiskInProcess } = await import('../../system-events/dispatch.js');
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const { riskAddPressFor } = await import('../method-turn/widen-turn.js');
+    const { withRiskPreconditionChoice, riskPreconditionChoiceActions } = await import('../chat-risk-precondition-choice.js');
+    const { proposalRecord } = await import('../proposal-object/record.js');
+    for (const [index, label] of [RISK_LABEL, otherRisk].entries()) {
+      const held = await holdAddRiskInProcess({ scenario_id: SCENARIO, turn_id: randomUUID(),
+        base_graph_hash: computeAnalysisAffectingGraphHash(graphNow() as never)!,
+        risk: { id: index === 0 ? RISK_ID : 'risk_pro_feature_outage', label },
+        links: [{ to_id: 'mrr', effect_direction: 'negative' }] }, `fix2-two-held-${index}`);
+      expect(held.status).toBe('held');
+    }
+    const pending = await store.readMostRecentPendingActions(SCENARIO);
+    const marked = pending.map(raw => {
+      const hold = raw as Parameters<typeof withRiskPreconditionChoice>[0];
+      const record = proposalRecord(hold, graphNow());
+      if (record === undefined) return hold;
+      const label = (record.operations.find(op => op.op === 'add_node')!.value as { label: string }).label;
+      const actions = [
+        { id: OPTION_ID, label: OPTION_LABEL }, { id: 'raise_pro_price_to_54', label: 'Raise Pro price to £54' },
+      ].map(option => riskAddPressFor({ label, mechanism: 'relies_on', hits: { ...option, kind: 'option' } }));
+      return withRiskPreconditionChoice(hold, graphNow(), actions, PRECONDITION_OFFER_LINE.replace(RISK_LABEL, label), triggerTurn);
+    });
+    const actions = marked.flatMap(hold => riskPreconditionChoiceActions(hold, graphNow()));
+    expect(actions.filter(c => c.id.startsWith('agent-widen-add:'))).toHaveLength(4);
+    expect(actions.filter(c => c.id.startsWith('agent-risk-mrr-choice:'))).toHaveLength(2);
+    await store.append({ scenario_id: SCENARIO, turn_id: triggerTurn, request_hash: 'agent_turn:fix2-two-risk-answer',
+      userMessage: 'Add risks: Feature release slips and Pro feature outage; each lowers MRR.',
+      assistantMessage: PRECONDITION_OFFER_LINE, pending_actions: marked });
+    const cold = await reload();
+    expectNoOrdinaryReloadCard(cold);
+    const restored = cold.conversation_turns?.find(t => t.turn_id === triggerTurn)?.suggested_actions;
+    expect(restored).toEqual(actions);
+  }, 120_000);
+
+  it('FIX2-P2-7 RED: a matching risk that raises Monthly churn uses its own claim for decline words', async () => {
+    const graph = plainGraph();
+    graph.nodes.find(node => node.id === 'monthly_churn')!.kind = 'outcome';
+    seed(graph);
+    const { response } = await offer({ label: RISK_LABEL, affects: [{ target_label: 'Monthly churn', direction: 'positive' }], caused_by: [] },
+      'Add a risk: Feature release slips — Monthly churn will rise.');
+    const decline = response.suggested_actions.find(c => c.id.startsWith('agent-risk-mrr-choice:'));
+    expect(decline).toMatchObject({ label: 'It raises ‘Monthly churn’ for every option', message: 'It raises ‘Monthly churn’ for every option' });
+    const ordinary = await hiddenCard();
+    const reoffered = await pressPrecondition(decline!);
+    expect(approveChipOf(reoffered)).toEqual(ordinary.approve_action);
+    await approveOffer(approveChipOf(reoffered)!);
+    expect(graphNow().edges).toContainEqual(expect.objectContaining({ from: RISK_ID, to: 'monthly_churn', effect_direction: 'positive' }));
+  }, 120_000);
+
+  it.each((['decline', 'option'] as const).flatMap(choice =>
+    (['unavailable', 'conflict', 'rpc-missing'] as const).map(shape => ({ choice, shape }))))('FIX2b-CAS-$choice-$shape: refuse without a transition write and re-show the current choices', async ({ choice: choiceKind, shape }) => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const ordinary = await hiddenCard();
+    const choice = choiceKind === 'decline' ? declineChoiceOf(response) : pressForOption(response);
+    const before = bytes();
+    const declineTurn = randomUUID();
+    const optionalStore: { appendIfLatest?: typeof store.appendIfLatest } = store;
+    const originalCas = store.appendIfLatest;
+    const attemptsBefore = conditionalAppendAttempts;
+    if (shape === 'unavailable') optionalStore.appendIfLatest = undefined;
+    else if (shape === 'conflict') conditionalMovesRemaining = 1;
+    else originalCas.mockImplementationOnce(async () => {
+      conditionalAppendAttempts += 1;
+      const { StateCommitFailedError } = await import('../../session/store.js');
+      throw new StateCommitFailedError('The existing conditional answer RPC is unavailable.', { rpc_code: 'PGRST202' });
+    });
+    let refused: Awaited<ReturnType<typeof turn>>;
+    try {
+      refused = await turn({ turn_id: declineTurn, message: choice.message, source: 'chip', chip: { id: choice.id } });
+    } finally {
+      optionalStore.appendIfLatest = originalCas;
+      conditionalMovesRemaining = 0;
+    }
+    expect((refused!._agent as { durability?: string }).durability).toBe('not_recorded');
+    expect(rows.has(`${SCENARIO}:${declineTurn}`), 'no unguarded fallback answer may clear the marker').toBe(false);
+    expect([...rows.values()].filter(row => row.scenario_id === SCENARIO
+      && row.request_hash.startsWith('agent_turn:held_choice:')), 'no inner option consent row may be written').toEqual([]);
+    expect(conditionalAppendAttempts - attemptsBefore).toBe(shape === 'unavailable' ? 0 : 1);
+    expect(approveChipOf(refused!)).toBeUndefined();
+    expect(refused!._proposal_fields).toBeUndefined();
+    expect(refused!.suggested_actions).toEqual(response.suggested_actions);
+    const { hasRiskPreconditionChoice } = await import('../chat-risk-precondition-choice.js');
+    expect((await heldOnLatestRow()).every(hold => hasRiskPreconditionChoice(hold as never))).toBe(true);
+    const stillHeld = await hiddenCard();
+    expect(stillHeld.revision).toBe(ordinary.revision);
+    expect(stillHeld.digest).toBe(ordinary.digest);
+    expect(bytes()).toBe(before);
+    const direct = await approveAtSharedRoute(stillHeld);
+    expect(direct.suggested_actions).toEqual(response.suggested_actions);
+    expect(bytes()).toBe(before);
+  }, 120_000);
+
+  const FIX2C_REFUSAL = 'Nothing changed: the model changed since these choices were offered. Try again.';
+  it.each(['option', 'decline'] as const)('FIX2c-before-press-$choice RED: trigger, ordinary non-conditional append preserving the marked hold, then old press refuses; re-shown current choices work on retry', async choiceKind => {
+    seed();
+    const triggerTurn = randomUUID();
+    const { response } = await offer(ordinaryArgs(), P44_MESSAGE, { turn_id: triggerTurn });
+    const ordinary = await hiddenCard();
+    const choice = choiceKind === 'decline' ? declineChoiceOf(response) : pressForOption(response);
+    const concurrentTurn = randomUUID();
+    const pending = structuredClone(latestRow()!.pending_actions);
+    await store.append({ scenario_id: SCENARIO, turn_id: concurrentTurn, request_hash: 'sha256:fix2c-ordinary-pre-press',
+      userMessage: 'Keep thinking about the feature release.', assistantMessage: 'The release assumption is still open.', pending_actions: pending });
+    expect(latestRow()!.turn_id).toBe(concurrentTurn);
+    expect(latestRow()!.pending_actions).toEqual(pending);
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const refused = await pressPrecondition(choice);
+    expect([...rows.values()].filter(row => row.scenario_id === SCENARIO && row.request_hash.startsWith('agent_turn:held_choice:'))).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    expect(riskNow()).toBeUndefined();
+    expect((await hiddenCard()).revision).toBe(ordinary.revision);
+    expect((await hiddenCard()).digest).toBe(ordinary.digest);
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect(refused._proposal_fields).toBeUndefined();
+    expect(refused.suggested_actions).toEqual(response.suggested_actions);
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
+    const replay = await turn({ turn_id: triggerTurn, message: P44_MESSAGE });
+    expect(replay.suggested_actions).toEqual(refused.suggested_actions);
+    expect(approveChipOf(replay)).toBeUndefined();
+    expect(replay._proposal_fields).toBeUndefined();
+    const retried = await pressPrecondition(choiceKind === 'decline' ? declineChoiceOf(refused) : pressForOption(refused));
+    expect(approveChipOf(retried)).toBeDefined();
+    await approveOffer(approveChipOf(retried)!);
+    expect(choiceKind === 'option' ? riskNow().relies_on : riskNow().relies_on === undefined).toEqual(choiceKind === 'option' ? { option_id: OPTION_ID } : true);
+  }, 120_000);
+  it.each(['option', 'decline'] as const)('FIX2c-concurrent-write-$choice RED: an ordinary non-conditional append moves the latest row before choice CAS; consent refuses with the disclosed words and current choices', async choiceKind => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const ordinary = await hiddenCard();
+    const choice = choiceKind === 'decline' ? declineChoiceOf(response) : pressForOption(response);
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const pressTurn = randomUUID();
+    const concurrentTurn = randomUUID();
+    const originalCas = store.appendIfLatest.getMockImplementation()!;
+    const attemptsBefore = conditionalAppendAttempts;
+    let expectedRow: string | null | undefined;
+    store.appendIfLatest.mockImplementationOnce(async (write, options) => {
+      expectedRow = options.expectedLatestRowId;
+      // An ordinary writer, not a competing consent/CAS request. Preserve the marked hold and graph:
+      // the only changed state is the authoritative newest conversation row after the floor read.
+      await store.append({ scenario_id: SCENARIO, turn_id: concurrentTurn, request_hash: 'sha256:fix2c-ordinary-concurrent-turn',
+        userMessage: 'Keep thinking about the feature release.', assistantMessage: 'The release assumption is still open.',
+        pending_actions: structuredClone(latestRow()!.pending_actions) });
+      return originalCas(write, options);
+    });
+    const refused = await turn({ turn_id: pressTurn, message: choice.message, source: 'chip', chip: { id: choice.id } });
+    expect(rows.get(`${SCENARIO}:${concurrentTurn}`)?.request_hash).toBe('sha256:fix2c-ordinary-concurrent-turn');
+    expect(latestRow()!.id).not.toBe(expectedRow);
+    expect(conditionalAppendAttempts - attemptsBefore).toBe(1);
+    expect(rows.has(`${SCENARIO}:${pressTurn}`), 'no outer consent-bearing answer is written').toBe(false);
+    expect([...rows.values()].filter(row => row.scenario_id === SCENARIO && row.request_hash.startsWith('agent_turn:held_choice:'))).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    expect(riskNow()).toBeUndefined();
+    expect((await hiddenCard()).revision).toBe(ordinary.revision);
+    expect((await hiddenCard()).digest).toBe(ordinary.digest);
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect(refused._proposal_fields).toBeUndefined();
+    expect(refused.suggested_actions).toEqual(response.suggested_actions);
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
+  }, 120_000);
+
+  it.each(['option', 'decline'] as const)('FIX2c-floor-write-%s: an ordinary append after press resolution and before the floor read preserves the marker but cannot acquire new consent authority', async choiceKind => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const choice = choiceKind === 'decline' ? declineChoiceOf(response) : pressForOption(response);
+    const ordinary = await hiddenCard();
+    const concurrentTurn = randomUUID();
+    let floorReads = 0;
+    pendingReadHook = async options => {
+      if (options?.onLatestRowId === undefined || ++floorReads !== 2) return;
+      await store.append({ scenario_id: SCENARIO, turn_id: concurrentTurn, request_hash: 'sha256:fix2c-before-floor',
+        userMessage: 'Keep that assumption open.', assistantMessage: 'It is still open.', pending_actions: structuredClone(latestRow()!.pending_actions) });
+    };
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const pressTurn = randomUUID();
+    const attemptsBefore = conditionalAppendAttempts;
+    const refused = await turn({ turn_id: pressTurn, message: choice.message, source: 'chip', chip: { id: choice.id } });
+    pendingReadHook = undefined;
+    expect(rows.has(`${SCENARIO}:${concurrentTurn}`)).toBe(true);
+    expect(rows.has(`${SCENARIO}:${pressTurn}`)).toBe(false);
+    expect(conditionalAppendAttempts).toBe(attemptsBefore);
+    expect([...rows.values()].filter(row => row.scenario_id === SCENARIO && row.request_hash.startsWith('agent_turn:held_choice:'))).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    expect((await hiddenCard()).revision).toBe(ordinary.revision);
+    expect((await hiddenCard()).digest).toBe(ordinary.digest);
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect(refused._proposal_fields).toBeUndefined();
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
+    expect(refused.suggested_actions).toEqual(response.suggested_actions);
+  }, 120_000);
+
+  it.each(['option', 'decline'] as const)('FIX2c-current-graph-%s RED: an ordinary graph-bearing append before press eligibility must re-show choices on the current graph, preserving the marked hold', async choiceKind => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const choice = choiceKind === 'decline' ? declineChoiceOf(response) : pressForOption(response);
+    const graph = structuredClone(graphNow());
+    const currentOptionLabel = 'Raise Pro price to £59 after reconsideration';
+    graph.nodes.find(node => node.id === OPTION_ID)!.label = currentOptionLabel;
+    let concurrentTurn: string | undefined;
+    pendingReadHook = async options => {
+      if (options?.onLatestRowId === undefined || concurrentTurn !== undefined) return;
+      concurrentTurn = randomUUID();
+      await store.append({ scenario_id: SCENARIO, turn_id: concurrentTurn, request_hash: 'sha256:fix2c-current-graph',
+        userMessage: 'Rename that option.', assistantMessage: 'The option was renamed.', graph,
+        pending_actions: structuredClone(latestRow()!.pending_actions) });
+    };
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const refused = await pressPrecondition(choice);
+    pendingReadHook = undefined;
+    expect(concurrentTurn).toBeDefined();
+    expect(bytes()).toBe(JSON.stringify(jsonbOrder(graph)));
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore + 1);
+    expect(riskNow()).toBeUndefined();
+    expect([...rows.values()].filter(row => row.scenario_id === SCENARIO && row.request_hash.startsWith('agent_turn:held_choice:'))).toEqual([]);
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect(refused._proposal_fields).toBeUndefined();
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
+    expect(refused.suggested_actions.map(c => c.message)).toEqual([
+      preconditionPressMessage(currentOptionLabel), preconditionPressMessage('Raise Pro price to £54'), 'It lowers ‘MRR’ for every option',
+    ]);
+  }, 120_000);
+
+  it.each((['option', 'decline'] as const).flatMap(choice =>
+    (['changed-marked', 'unmarked', 'absent'] as const).map(state => ({ choice, state }))))('FIX2c-stale-$choice-$state RED: trigger, ordinary latest-row append, then old press refuses; only current marked choices return', async ({ choice: choiceKind, state }) => {
+    seed();
+    const { response } = await offer(ordinaryArgs());
+    const choice = choiceKind === 'decline' ? declineChoiceOf(response) : pressForOption(response);
+    const { withRiskPreconditionChoice, withoutRiskPreconditionChoice, riskPreconditionChoiceActions } = await import('../chat-risk-precondition-choice.js');
+    const current = (await store.readMostRecentPendingActions(SCENARIO))[0] as Parameters<typeof withRiskPreconditionChoice>[0];
+    const next = state === 'absent' ? [] : state === 'unmarked' ? [withoutRiskPreconditionChoice(current)]
+      : [withRiskPreconditionChoice({ ...current, id: randomUUID() }, graphNow(), [], PRECONDITION_OFFER_LINE)];
+    const concurrentTurn = randomUUID();
+    await store.append({ scenario_id: SCENARIO, turn_id: concurrentTurn, request_hash: 'sha256:fix2c-ordinary-before-press',
+      userMessage: 'Revisit that held change.', assistantMessage: 'The held change was revisited.', pending_actions: next });
+    const before = bytes();
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    const refused = await pressPrecondition(choice);
+    expect([...rows.values()].filter(row => row.scenario_id === SCENARIO && row.request_hash.startsWith('agent_turn:held_choice:'))).toEqual([]);
+    expect(bytes()).toBe(before);
+    expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
+    expect(riskNow()).toBeUndefined();
+    expect(approveChipOf(refused)).toBeUndefined();
+    expect(refused._proposal_fields).toBeUndefined();
+    expect(refused.suggested_actions).toEqual(state === 'changed-marked' ? riskPreconditionChoiceActions(next[0]!, graphNow()) : []);
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
+  }, 120_000);
+
   it('FIX1-a RED: trigger holds the ordinary proposal but shows only the exact question and three ordered choices', async () => {
     seed();
     const before = bytes();
@@ -235,7 +698,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     expect(response._proposal_fields, 'no ordinary proposal card before a choice').toBeUndefined();
     expect(response.assistant_text).toBe('Your brief launches the change with the next Pro feature release, so ‘Feature release slips’ may be something one option relies on, rather than a threat to MRR for every option. Which is it?');
     expect(response.suggested_actions.map((c) => c.message)).toEqual([
-      preconditionPressMessage(OPTION_LABEL), preconditionPressMessage('Raise Pro price to £54'), 'It lowers MRR for every option',
+      preconditionPressMessage(OPTION_LABEL), preconditionPressMessage('Raise Pro price to £54'), 'It lowers ‘MRR’ for every option',
     ]);
     const record = await hiddenCard();
     const decline = declineChoiceOf(response);
@@ -298,7 +761,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     const writesBefore = graphWrites.get(SCENARIO) ?? 0;
     const refused = await pressPrecondition(press);
     expect(refused._agent.tool_calls).toEqual([]);
-    expect(refused.assistant_text).toContain('Nothing in the model changed.');
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
     expect(approveChipOf(refused)).toBeUndefined();
     expect(refused._proposal_fields).toBeUndefined();
     expect(bytes()).toBe(before);
@@ -327,7 +790,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     const refused = await pressPrecondition(declineChoiceOf(response));
     pendingReadHook = undefined;
     expect(raced).toBe(true);
-    expect(refused.assistant_text).toContain('Nothing in the model changed.');
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
     expect(refused.suggested_actions.some(c => c.message === ordinary.approve_action.message)).toBe(false);
     expect((await hiddenCard()).digest).toBe(rc3Record.digest);
     expect(bytes()).toBe(before);
@@ -361,7 +824,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
       seed(structuredClone(control.graph), control.brief);
       const offered = await offer(control.args, control.message);
       expect(preconditionPressesOf(offered.response)).toEqual([]);
-      expect(offered.response.suggested_actions.some(c => c.label === 'It lowers MRR for every option')).toBe(false);
+      expect(offered.response.suggested_actions.some(c => c.label === 'It lowers ‘MRR’ for every option')).toBe(false);
       const card = await hiddenCard();
       const receipt = await approveOffer(offered.approve);
       // Random carrier revisions/digests, provider timings and issuance ids are not user-content bytes.
@@ -408,7 +871,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     const replay = await turn({ turn_id: turnId, message: P44_MESSAGE });
     expect(openAiCalls).toBe(callsBefore);
     expect(replay.suggested_actions.map((c) => c.message)).toEqual([
-      preconditionPressMessage(OPTION_LABEL), preconditionPressMessage('Raise Pro price to £54'), 'It lowers MRR for every option',
+      preconditionPressMessage(OPTION_LABEL), preconditionPressMessage('Raise Pro price to £54'), 'It lowers ‘MRR’ for every option',
     ]);
     expect(replay.suggested_actions).toEqual(response.suggested_actions);
     expect(replay.assistant_text).toBe(response.assistant_text);
@@ -609,7 +1072,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     const writesBefore = graphWrites.get(SCENARIO) ?? 0;
     const refused = await pressPrecondition(pressed);
     expect(refused._agent.tool_calls, 'terminal refusal; no fallthrough to the model or RC3 door').toEqual([]);
-    expect(refused.assistant_text).toContain('I couldn’t prepare that risk as a change, so nothing was added.');
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
     expect(bytes()).toBe(before);
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
     expect((await heldOnLatestRow()).flatMap((pending) => pending.action.inline_patch?.operations ?? [])
@@ -662,7 +1125,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     expect(refused._agent.tool_calls).toEqual([expect.objectContaining({
       name: 'propose_new_risk', ok: false, mutated: false, refusal: 'invalid_precondition',
     })]);
-    expect(refused.assistant_text).toContain('I couldn’t prepare that risk as a change, so nothing was added.');
+    expect(refused.assistant_text).toBe(FIX2C_REFUSAL);
     expect(bytes(), 'the writer preserves the concurrent baseline change and adds nothing').toBe(changedBytes);
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(writesBefore);
     expect(riskNow()).toBeUndefined();
@@ -690,7 +1153,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
         if (row.expected_precondition_offer_count > 0) {
           expect(approveChipOf(response)).toBeUndefined();
           expect(response._proposal_fields).toBeUndefined();
-          expect(response.suggested_actions.at(-1)?.label).toBe('It lowers MRR for every option');
+          expect(response.suggested_actions.at(-1)?.label).toBe('It lowers ‘MRR’ for every option');
           expect(response.assistant_text).toContain(PRECONDITION_OFFER_LINE);
           expect(presses.map((chip) => chip.label)).toEqual(row.graph.nodes
             .filter((node) => node.kind === 'option' && node.is_baseline !== true && (node.data as { is_baseline?: boolean } | undefined)?.is_baseline !== true)
@@ -774,7 +1237,7 @@ describe('chat precondition — real /agent/v1/turn door', () => {
   // then compare the same card/write as before FIX1. Non-trigger and valid-lease rows take their unchanged path.
   const offerAndChooseOrdinary = async (...args: Parameters<typeof offer>) => {
     const offered = await offer(...args);
-    const choice = offered.response.suggested_actions.find(c => c.label === 'It lowers MRR for every option');
+    const choice = offered.response.suggested_actions.find(c => c.label === 'It lowers ‘MRR’ for every option');
     if (choice === undefined) return offered;
     expect(approveChipOf(offered.response)).toBeUndefined();
     const response = await pressPrecondition(choice);

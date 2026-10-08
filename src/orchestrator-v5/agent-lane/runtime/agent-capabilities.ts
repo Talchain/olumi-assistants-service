@@ -2292,7 +2292,7 @@ export function createAgentCapabilities(
     // Check the latest durable hold here too: a guessed approval id cannot bypass the withheld card.
     if (hasRiskPreconditionChoice(hold)) {
       return { ok: false, mutated: false, refusal: 'precondition_choice_required', proposal_id: ref,
-        detail: 'Nothing changed. Choose the option that relies on this risk, or choose that it lowers MRR for every option, before approving the change.' };
+        detail: 'Nothing changed. Choose the option that relies on this risk, or choose the held change’s claim, before approving the change.' };
     }
     const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
     if (ctx.proposal_edits === undefined && ctx.typed_approval_words !== copy.message) {
@@ -8438,6 +8438,13 @@ export function createAgentCapabilities(
           detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const riskId = built.proposal.riskId;
+      const preconditionOffers = precondition === undefined ? chatRiskPreconditionOffersFor(label, g, g.brief_text) : [];
+      const timing = preconditionOffers.length > 0 ? chatRiskPreconditionTimingFor(label, g, g.brief_text) : undefined;
+      const threatenedLabels = [...new Set(built.proposal.links.filter((l) => l.from === riskId)
+        .map((l) => String(g.nodes.find((n) => n.id === l.to)?.label ?? l.to)))];
+      const preconditionLine = timing === undefined ? undefined
+        : `${timing.source === 'brief' ? 'Your brief launches' : 'The model’s framing times'} the change ${timing.phrase}, `
+          + `so ‘${label}’ may be something one option relies on, rather than a threat to ${threatenedLabels.join(' and ')} for every option. Which is it?`;
       const res = await opts.holdAddRisk({
         scenario_id: ctx.scenario_id,
         // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
@@ -8446,6 +8453,9 @@ export function createAgentCapabilities(
         risk: { id: riskId, label },
         links,
         ...(precondition === undefined ? {} : { relies_on: precondition }),
+        ...(ctx.widen_choice_binding === undefined ? {} : { choice_binding: ctx.widen_choice_binding }),
+        ...(preconditionLine === undefined ? {} : { precondition_choice: { line: preconditionLine,
+          ...(ctx.precondition_choice_turn_id === undefined ? {} : { turn_id: ctx.precondition_choice_turn_id }) } }),
         ...(eventRisk !== undefined ? { user_event_risk: eventRisk } : {}),
       });
       if (res.status === 'stale') {
@@ -8476,11 +8486,7 @@ export function createAgentCapabilities(
       }
       const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
       const effect = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises it' : 'lowers it');
-      // An unleased call keeps its ordinary card. The host only offers the ambiguity in the STORED context;
-      // choosing an option still goes through the existing host-bound RC3 press, hold and approval.
-      const preconditionOffers = precondition === undefined ? chatRiskPreconditionOffersFor(label, g, g.brief_text) : [];
-      const timing = preconditionOffers.length > 0 ? chatRiskPreconditionTimingFor(label, g, g.brief_text) : undefined;
-      const threatenedLabels = [...new Set(built.proposal.links.filter((l) => l.from === riskId).map((l) => labelOfId(l.to)))];
+      // A timing ambiguity is already durably marked by the hold writer; the answer only displays its choices.
       return {
         ok: true, mutated: false,
         proposal_id: ref,
@@ -8490,8 +8496,7 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         ...(timing === undefined ? {} : {
           precondition_offers: preconditionOffers,
-          precondition_offer_line: `${timing.source === 'brief' ? 'Your brief launches' : 'The model’s framing times'} the change ${timing.phrase}, `
-            + `so ‘${label}’ may be something one option relies on, rather than a threat to ${threatenedLabels.join(' and ')} for every option. Which is it?`,
+          precondition_offer_line: preconditionLine,
         }),
         risk: {
           label,

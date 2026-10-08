@@ -62,6 +62,8 @@ export interface PendingActionReadOptions {
 export interface ConditionalAppendOptions {
   /** Only final, non-graph Agent answers. null asserts that no prior row exists. */
   readonly expectedLatestRowId: string | null;
+  /** Default legacy fallback is forbidden for held-choice consent if the existing conditional RPC is unavailable. */
+  readonly allowUnconditionalFallback?: boolean;
 }
 
 /** The conditional RPC inserted nothing; the floor must reread and reconcile. */
@@ -309,9 +311,9 @@ export interface AnswerOffersRead {
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
   /**
-   * S-D.1b: the Agent answer row, appended ONLY if the latest row is still `options.expectedLatestRowId`. A SEPARATE,
-   * optional capability (never an overload of `append`), so no other store, test double or caller changes; a store
-   * without it is appended unconditionally by the floor, exactly as before.
+   * S-D.1b: an Agent answer, appended ONLY if the latest row is still
+   * `options.expectedLatestRowId`. Ordinary answers retain the optional-capability fallback; choice consent refuses
+   * when this capability or its existing conditional RPC is unavailable.
    */
   appendIfLatest?(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome>;
   /** Uncached latest-answer offers only; absent/malformed/unavailable reads are null. */

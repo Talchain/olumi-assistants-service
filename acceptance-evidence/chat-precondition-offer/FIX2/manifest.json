@@ -1,0 +1,100 @@
+{
+  "base": "b31021623cfb13c43d395e9e0dbf1e6751c4a482",
+  "head": "8223aee150f7db58315cad0ff63ea81f9c954250",
+  "branch": "dl/event-risk-precondition-offer",
+  "tests": {
+    "fix2b-green-chat-composer": 83,
+    "fix2b-green-offer-reload": 36,
+    "fix2b-green-conditional": 25,
+    "fix2b-green-rc3-1": 21,
+    "fix2b-green-rc3-2": 16,
+    "fix2b-green-gm": 29
+  },
+  "total_passed": 210,
+  "final_refusal_recheck": {
+    "passed": 6,
+    "result": {
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "src/orchestrator-v5/agent-lane/__tests__/agent-chat-precondition-door-seam.test.ts",
+        "--configLoader",
+        "runner",
+        "--maxWorkers=1",
+        "--no-file-parallelism",
+        "-t",
+        "FIX2b-CAS"
+      ],
+      "load_gate": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\"",
+      "load1_before": 17.72216796875,
+      "stdin": "/dev/null",
+      "exit_code": 0
+    }
+  },
+  "source_files_sha256": {
+    "src/orchestrator-v5/agent-lane/__tests__/agent-chat-precondition-door-seam.test.ts": "d75bbac7df7d38262598f840c8da3950ea8ab0ca3d88d29fee8ec857a9052841",
+    "src/orchestrator-v5/agent-lane/chat-risk-precondition-choice.ts": "74739049d2614d10a07e166c1182b3c648f65639bbce650d77497c43eeaa2608",
+    "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": "145553e5d83fc8d21fdc0e038f9560516b9518c4270f809e0c34f1ce1deddfc1",
+    "src/orchestrator-v5/agent-lane/proposal-reply.ts": "4fd7cd07d494db44a3679c9cd2bbca3ded8f95cc09fa941d9d819476e0cc68ee",
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "a7d9388b121fbf4d78f68110af7b55f896fe20e361262f8a7dd6504074d650a5",
+    "src/orchestrator-v5/agent-lane/runtime/agent-tools.ts": "4d18364fa6c3a2723c4e1b3035bdaf8bf91401f2e5125cefcce3e0018e402e35",
+    "src/orchestrator-v5/commit.ts": "0fc66f90bac7b43fc1b8a46e119e5707c0a9b577adcaa65ca1272e15be1e5094",
+    "src/orchestrator-v5/handlers/gm-held-execute.ts": "c3c50a76491f4deebd102e54eea795d6454731fac1c4013df49856b8e44d6490",
+    "src/orchestrator-v5/persist-graph-write.ts": "f39bd67850abd40481f4c3c5d59fddd372d465139dd6fa7a9a7609ad7403c5ac",
+    "src/orchestrator-v5/routing/__tests__/chat-risk-precondition-offer.test.ts": "f0349f708aae7e96a7fa1529f449eb8acddf7302411327c0bc4831b3e16af214",
+    "src/orchestrator-v5/routing/chat-risk-precondition.ts": "94b2721577f804ad1ba9da8bd95bb87dc71a76c3040e3792bfd78761b205b65a",
+    "src/orchestrator-v5/session/__tests__/conditional-answer-store.test.ts": "7feb789354308a302212666cdf86fb47a3de8c3fb248355eaff107b364b73005",
+    "src/orchestrator-v5/session/store.ts": "a41cbd141e77bef63daf4eaa0d0ae9bc54022092c23c1d08bf309360dac528fa",
+    "src/orchestrator-v5/session/supabase-store.ts": "1108b7d4335945777871bc469fddea08ca2ae2e1f9aae8a59a633a05692ea7a9",
+    "src/orchestrator-v5/system-events/dispatch.ts": "41fdf7fa4a415ecf71eda59b303300e1035b70db386082f1e8c4229103eff385",
+    "src/orchestrator-v5/turn-executor.ts": "1f3b9f9197b4b16dc10deacc09c74c7f4607abbc128466587475e898b390c9d5",
+    "src/routes/__tests__/x4-answer-offers-reload.test.ts": "9f7a75ba47480424a9a615476799ca2f9bd20ccd2fa53ff152811a6f6e7bc0b2",
+    "src/routes/agent-v1-turn.ts": "3793bc21fd9aa700ce6a0e15105dfdef313e6a82d3dbe7dd6962594734811f2d",
+    "src/routes/assist.v1.scenario-graph.ts": "1a87021832ab00d625fb2cad54bc3b4519dbfadf3a39a4627abbdc3ecf9190c4"
+  },
+  "source_diff_sha256": "c75fe28b41e780d784288da72508ccd9b14276f298c1085f0f807cef8b4d874f",
+  "deleted": [
+    "src/orchestrator-v5/session/__tests__/choice-answer-migration.test.ts",
+    "supabase/migrations/20261008110000_agent_choice_conditional_append.sql",
+    "supabase/migrations/rollback/20261008110000_agent_choice_conditional_append_rollback.sql.do-not-apply"
+  ],
+  "supabase_diff_stat_empty": true,
+  "supabase_status_empty": true,
+  "new_choice_rpc_removed": true,
+  "choice_uses_existing_rpc": "append_agent_answer_if_latest",
+  "first_conflict": "refuse_no_retry",
+  "fallback_policy": "allowUnconditionalFallback:false for choice consent only",
+  "composer_guard_unchanged": true,
+  "controls": {
+    "byte_identical": true,
+    "controls": 12,
+    "baseline_sha256": "e88e2c6e02c27f1aff649b21f6e2e639773fe21dff4ca0903fb0bfc3b2aa5840",
+    "current_sha256": "e88e2c6e02c27f1aff649b21f6e2e639773fe21dff4ca0903fb0bfc3b2aa5840"
+  },
+  "mutants": {
+    "writer_gate": {
+      "baseline_sha256": "c3c50a76491f4deebd102e54eea795d6454731fac1c4013df49856b8e44d6490",
+      "restored_sha256": "c3c50a76491f4deebd102e54eea795d6454731fac1c4013df49856b8e44d6490",
+      "exit_code": 1,
+      "rows": [
+        "FIX2-P1-1",
+        "FIX2-P1-2"
+      ],
+      "edge_guards": "retained"
+    }
+  },
+  "validation": {
+    "source_typecheck": 0,
+    "changed_file_lint": 0,
+    "final_test_edit_lint": 0,
+    "git_diff_check": 0
+  },
+  "commit_push_deploy": "none",
+  "database_execution": "not_run",
+  "evidence_directory": "/private/tmp/offer-fix2b-evidence/fix2",
+  "requested_evidence_directory": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/status/evidence/chat-precondition/offer-evidence/fix2/",
+  "requested_evidence_move": "blocked: Operation not permitted; evidence moved out of repository into permitted tmp root",
+  "fix2_evidence_in_repo": false
+}

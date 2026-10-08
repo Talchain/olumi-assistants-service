@@ -380,14 +380,19 @@ async function readConversationTurns(
     // The risk ambiguity is a choice about a held change, rather than a next step for a Run. Its own durable
     // carrier keeps the exact presses (including RC3's identity-bound ids) outside the plain-text offers envelope.
     // Restore them only on the answer that first offered this still-held choice; no ordinary card is armed yet.
+    const choiceSets = new Map<number, SuggestedAction[]>();
     for (const hold of authority.latest) {
       if (hold.scenario_id !== scenarioId || !hasRiskPreconditionChoice(hold)) continue;
       const turnId = riskPreconditionChoiceTurnId(hold);
       const index = turns.findIndex(turn => turn.turn_id === turnId);
       if (index < 0) continue;
       const actions = riskPreconditionChoiceActions(hold, authority.graph);
-      if (actions.length > 0) turns[index] = { ...turns[index]!, suggested_actions: actions };
+      if (actions.length > 0) {
+        const restored = choiceSets.get(index) ?? [];
+        choiceSets.set(index, [...restored, ...actions]);
+      }
     }
+    for (const [index, actions] of choiceSets) turns[index] = { ...turns[index]!, suggested_actions: actions };
     return { turns, heldOffers, proposalRows: rows };
   } catch (err) {
     log.warn(

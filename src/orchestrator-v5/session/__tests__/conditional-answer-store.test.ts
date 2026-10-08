@@ -71,6 +71,40 @@ describe('S-D.1b conditional Agent answer store', () => {
     expect(warn.mock.calls.length).toBe(code === 'PGRST202' ? 1 : 0);
   });
 
+  it.each(['PGRST202', '42883'])('choice consent requires conditional RPC (%s): no legacy append on absence', async code => {
+    for (const mode of ['plain', 'guidance', 'offers']) {
+      const s = setup();
+      s.rpc.mockResolvedValueOnce({ data: null, error: { code, message: 'function missing' } });
+      await expect(s.fresh().appendIfLatest(write(mode), {
+        expectedLatestRowId: 'floor-row', allowUnconditionalFallback: false,
+      })).rejects.toBeInstanceOf(StateCommitFailedError);
+      expect(s.rpc).toHaveBeenCalledExactlyOnceWith(RPC, expect.objectContaining({
+        p_expected_latest_row_id: 'floor-row', p_scenario_id: SCENARIO,
+      }));
+      expect(s.evict).not.toHaveBeenCalled();
+      expect(s.from).not.toHaveBeenCalled();
+    }
+  });
+
+  it('silent option consent meets the existing conditional answer contract and keeps its UUID receipt', async () => {
+    const s = setup();
+    const held = { ...write(), request_hash: `agent_turn:held_choice:${'a'.repeat(32)}`, userMessage: null, assistantMessage: null };
+    s.rpc.mockResolvedValueOnce({ data: 'answer-row', error: null });
+    expect(await s.fresh().appendIfLatest(held, { expectedLatestRowId: 'floor-row', allowUnconditionalFallback: false }))
+      .toEqual({ id: 'answer-row' });
+    expect(s.rpc).toHaveBeenCalledExactlyOnceWith(RPC, expect.objectContaining({
+      p_request_hash: held.request_hash, p_expected_latest_row_id: 'floor-row', p_user_message: null, p_assistant_message: null,
+    }));
+    expect(s.evict).toHaveBeenCalledExactlyOnceWith(SCENARIO);
+  });
+
+  it.each([true, false])('a silent SHA256 hold never takes conditional authority (fallback %s)', async fallback => {
+    const s = setup();
+    const held = { ...write(), request_hash: `sha256:${'a'.repeat(32)}`, userMessage: null, assistantMessage: null };
+    await expect(s.fresh().appendIfLatest(held, { expectedLatestRowId: 'floor-row', allowUnconditionalFallback: fallback })).rejects.toBeInstanceOf(StateCommitFailedError);
+    expect(s.rpc).not.toHaveBeenCalled();
+  });
+
   it('latest_moved returns the typed no-write outcome, no delegate and no cache eviction', async () => {
     const s = setup();
     s.rpc.mockResolvedValueOnce({ data: { status: 'latest_moved' }, error: null });

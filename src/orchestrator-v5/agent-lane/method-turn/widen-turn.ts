@@ -37,7 +37,8 @@ import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { chanceGoalDeadlineAsk, goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
-import { chatRiskPreconditionOptionsFor } from '../../routing/chat-risk-precondition.js';
+import type { PendingAction } from '../../session/pending-action.js';
+import { riskPreconditionOptionCallFor } from '../chat-risk-precondition-choice.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -1036,11 +1037,11 @@ function riskAddMessage(s: RiskAddPressInput): string {
 const addPressId = (message: string, ids: readonly string[], mechanism: RiskSuggestion['mechanism']): string =>
   `${WIDEN_ADD_PREFIX}${createHash('sha256').update(JSON.stringify([message, ...ids, mechanism]), 'utf8').digest('hex').slice(0, 16)}`;
 
-export function riskAddPressFor(s: RiskAddPressInput): SuggestedAction {
+export function riskAddPressFor(s: RiskAddPressInput, binding?: { proposal_id: string; revision: string; digest: string }): SuggestedAction {
   const message = riskAddMessage(s);
   // Preserve every existing More risks id; chat's option-only offer binds just the identity it actually uses.
   const ids = 'through' in s ? [s.hits.id, s.through.id, s.affects.id] : [s.hits.id];
-  return { id: addPressId(message, ids, s.mechanism),
+  return { id: addPressId(message, binding === undefined ? ids : [...ids, binding.proposal_id, binding.revision, binding.digest], s.mechanism),
     label: 'through' in s ? `Add ${quote(s.label)}` : `Add to ${quote(s.hits.label)}`, message };
 }
 
@@ -1050,6 +1051,7 @@ export function isWidenAddPressId(id: unknown): boolean {
 
 export type WidenAddCall = {
   readonly tool: 'propose_new_risk';
+  readonly choice_binding?: { readonly proposal_id: string; readonly revision: string; readonly digest: string };
   /** Server-only marker, re-minted from graph identities. Never copied into the model's tool args. */
   readonly relies_on?: { readonly option_id: string; readonly option_label: string };
   readonly args: {
@@ -1075,26 +1077,13 @@ const RISK_MECHANISMS = ['drives', 'relies_on'] as const;
  * one of them is byte-identical in message AND id (the id binds the node ids, Codex r1 P1). Then the attachment is
  * re-checked: the option still changes the factor, or (shared) no option in scope does.
  */
-export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodReadback): WidenAddCall | null {
+export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodReadback, holds: readonly PendingAction[] = []): WidenAddCall | null {
   if (!isWidenAddPressId(chipId) || typeof message !== 'string' || message.length > 600) return null;
   const m = message.trim();
   if (!m.startsWith(ADD_PREFIX_WORDS)) return null;
-  // Reconstruct option-only offers before More risks' factor/goal gate. Strip a KNOWN suffix rather than parsing
-  // curly quotes inside the user's risk/option labels; only current, unique, non-baseline ids can mint the same press.
-  for (const option of chatRiskPreconditionOptionsFor(rb.graph)) {
-    const hits = { id: option.option_id, label: option.option_label, kind: 'option' as const };
-    const suffix = riskAddMessage({ label: '', mechanism: 'relies_on', hits }).slice(ADD_PREFIX_WORDS.length);
-    if (!m.endsWith(suffix)) continue;
-    const label = m.slice(ADD_PREFIX_WORDS.length, m.length - suffix.length);
-    if (label.trim() === '') continue;
-    const minted = riskAddPressFor({ label, mechanism: 'relies_on', hits });
-    if (minted.message !== m || minted.id !== chipId) continue;
-    return {
-      tool: 'propose_new_risk', relies_on: { option_id: option.option_id, option_label: option.option_label },
-      args: { label, affects: [], caused_by: [],
-        rationale: 'The user chose this option precondition from the timing ambiguity in the stored context.', whole_request: true },
-    };
-  }
+  // Chat choices require a CURRENT marked hold. More risks below keeps its existing binding and bytes.
+  const choice = riskPreconditionOptionCallFor(chipId, m, holds, rb.graph);
+  if (choice !== null) return choice;
   const end = m.indexOf('’', ADD_PREFIX_WORDS.length);
   const label = end < 0 ? '' : m.slice(ADD_PREFIX_WORDS.length, end);
   if (label === '' || label.length > 60) return null;
