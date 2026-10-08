@@ -3198,7 +3198,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
       const call = widenAddCallOf(pressedChipId, message, rb);
-      const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode);
+      const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args),
+        call.relies_on === undefined ? toolCtx : { ...toolCtx, widen_relies_on: { option_id: call.relies_on.option_id } }, capabilities, mode);
       const held = issued?.ok === true && typeof issued.proposal_id === 'string';
       // A held card is NEVER worded as a refusal: the door's own reply, else what is held (served sc-plus-1 defect).
       const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? riskHeldReply(call!) : RISK_ADD_REFUSED_REPLY;

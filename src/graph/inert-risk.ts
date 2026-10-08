@@ -12,26 +12,76 @@
  * In the set: a RISK with at least one cause drawn into it and no outgoing directed edge, that no option acts on (no
  * option → it edge) and no limit names; and any other node EVERY outgoing edge of which ends in the set (an exogenous
  * cause drawn only into that risk) — never a lever (an option or a controllable factor), a node an option acts on, a
- * limited node, a decision or the goal. A risk with NO edge at all states nothing and stays an orphan, as before (the
+ * limited node, a decision or the goal. A risk with NO edge at all stays an orphan unless CEE stamped it `relies_on` an
+ * existing option: that option's precondition cannot yet be modelled on that option alone (RC3 a′). The identity stamp,
+ * zero incidence (including bidirected edges), and absence of a named limit are ALL required. The same predicate is
+ * read by readiness, the edit/apply structural referee, structural facts, the host's disclosure and the Run projection.
+ * An unstamped zero-edge risk stays an orphan, as before (the
  * dual-draft guard G12 refuses an enrichment that adds one: `cee/dual-draft/guards.ts`). Any other dead end is still
- * refused. Pure; `edges` are directed.
+ * refused. Pure; K3's cause/path logic reads directed edges only.
  */
+import { CANONICAL_ID_REGEX } from '../cee/utils/id-normalizer.js';
+
+type RiskNodeLike = {
+  readonly id: string;
+  readonly kind?: unknown;
+  readonly category?: unknown;
+  readonly relies_on?: unknown;
+};
+type RiskEdgeLike = { readonly from: string; readonly to: string; readonly edge_type?: unknown };
+
+/** RC3 a′: identity-keyed server stamp, never an exemption inferred from dead-end shape. */
+export function preconditionRiskIds(
+  nodes: readonly RiskNodeLike[],
+  edges: readonly RiskEdgeLike[],
+  limitNodeIds: Iterable<string>,
+): Set<string> {
+  const counts = new Map<string, number>();
+  for (const n of nodes) counts.set(n.id, (counts.get(n.id) ?? 0) + 1);
+  const options = new Set(nodes.filter((n) => n.kind === 'option' && counts.get(n.id) === 1).map((n) => n.id));
+  const touched = new Set(edges.flatMap((e) => [e.from, e.to]));
+  const limits = new Set(limitNodeIds);
+  return new Set(nodes.filter((n) => {
+    const stamp = n.relies_on;
+    if (n.kind !== 'risk' || counts.get(n.id) !== 1 || !CANONICAL_ID_REGEX.test(n.id)
+      || stamp === null || typeof stamp !== 'object' || Array.isArray(stamp) || Object.keys(stamp).length !== 1
+      || touched.has(n.id) || limits.has(n.id)) return false;
+    const optionId = (stamp as { option_id?: unknown }).option_id;
+    return typeof optionId === 'string' && CANONICAL_ID_REGEX.test(optionId) && options.has(optionId);
+  }).map((n) => n.id));
+}
+
+/** Compute-only projection. Eligibility is read from the saved model, before another wire projection drops edges/options. */
+export function withoutPreconditionRisks<T>(graph: T, identityGraph: unknown = graph): T {
+  if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return graph;
+  if (identityGraph === null || typeof identityGraph !== 'object' || Array.isArray(identityGraph)) return graph;
+  const g = graph as { nodes?: readonly RiskNodeLike[] };
+  const identity = identityGraph as { nodes?: readonly RiskNodeLike[]; edges?: readonly RiskEdgeLike[]; goal_constraints?: readonly { node_id?: unknown }[] };
+  if (!Array.isArray(g.nodes) || !Array.isArray(identity.nodes) || !Array.isArray(identity.edges)) return graph;
+  const limits = (identity.goal_constraints ?? []).flatMap((c) => typeof c.node_id === 'string' ? [c.node_id] : []);
+  const leftOut = preconditionRiskIds(identity.nodes, identity.edges, limits);
+  return leftOut.size === 0 ? graph : { ...graph, nodes: g.nodes.filter((n) => !leftOut.has(n.id)) };
+}
+
 export function inertRiskBranch(
-  nodes: readonly { readonly id: string; readonly kind?: unknown; readonly category?: unknown }[],
-  edges: readonly { readonly from: string; readonly to: string }[],
+  nodes: readonly RiskNodeLike[],
+  edges: readonly RiskEdgeLike[],
   limitNodeIds: Iterable<string>,
 ): Set<string> {
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const limits = new Set(limitNodeIds);
-  const actedOn = new Set(edges.filter((e) => byId.get(e.from)?.kind === 'option').map((e) => e.to));
+  const directed = edges.filter((e) => e.edge_type !== 'bidirected');
+  const actedOn = new Set(directed.filter((e) => byId.get(e.from)?.kind === 'option').map((e) => e.to));
   const onward = new Map<string, string[]>();
-  for (const e of edges) onward.set(e.from, [...(onward.get(e.from) ?? []), e.to]);
+  for (const e of directed) onward.set(e.from, [...(onward.get(e.from) ?? []), e.to]);
   const free = (id: string): boolean => !actedOn.has(id) && !limits.has(id);
-  const hasCause = new Set(edges.map((e) => e.to));
+  const hasCause = new Set(directed.map((e) => e.to));
   const branch = new Set(nodes
-    .filter((n) => n.kind === 'risk' && hasCause.has(n.id) && (onward.get(n.id) ?? []).length === 0 && free(n.id))
+    .filter((n) => n.kind === 'risk' && n.relies_on === undefined && hasCause.has(n.id) && (onward.get(n.id) ?? []).length === 0 && free(n.id))
     .map((n) => n.id));
+  for (const id of preconditionRiskIds(nodes, edges, limits)) branch.add(id);
   const mayJoin = (n: (typeof nodes)[number]): boolean => n.kind !== 'option' && n.kind !== 'decision' && n.kind !== 'goal'
+    && !(n.kind === 'risk' && n.relies_on !== undefined)
     && !(n.kind === 'factor' && n.category === 'controllable') && free(n.id);
   for (let grew = branch.size > 0; grew;) {
     grew = false;

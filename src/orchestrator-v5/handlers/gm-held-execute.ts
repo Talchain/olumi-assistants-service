@@ -40,6 +40,7 @@
  */
 
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk, type UserEventRisk } from '../routing/stated-event-risk.js';
+import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
@@ -714,11 +715,14 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // ValidatedPatchOperation (Zod output) is structurally assignable to the
   // pipeline's PatchOperation — a plain widening copy, no unsafe cast.
   const operations: PatchOperation[] = [...input.operations];
+  // Re-check the stamp and zero-edge invariant against THIS graph before the normal producer-field referee.
+  const refereeOperations = reliesOnRefereeOperations(operations, input.currentGraph);
+  if (refereeOperations === undefined) return { status: 'apply_failed', reason: 'apply_error' };
 
   // ── 2. Re-referee (defence-in-depth; redacted telemetry re-emitted) ──
   const decision = evaluateEditGraphMutations({
     mode: 'live',
-    operations,
+    operations: refereeOperations,
     currentGraph: input.currentGraph,
     currentGraphHash: input.currentGraphHash,
     // The caller verified the pin === the current hash, so the batch is

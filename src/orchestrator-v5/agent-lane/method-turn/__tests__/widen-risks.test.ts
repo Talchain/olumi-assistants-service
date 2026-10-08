@@ -141,8 +141,8 @@ describe('S-C risks reply: the named method, what each hits, nothing added, ONE 
     expect(settled.reply.split('\n')).toEqual([
       'Three risks you haven’t mapped yet.',
       'I checked what each option relies on and how that could fail, across people, timing, cost, dependencies and outside events (assumption-based planning).',
-      '- ‘Hire Two Developers’ relies on filling both developer roles quickly. Risk: ‘Recruitment delay’ (timing): if it fails, it would lower ‘Feature Delivery Capacity’. In this model it affects every option alike for now, so it doesn\'t change the comparison yet. Watch for: no accepted offer by week 4.',
-      '- ‘Hire a Tech Lead’ relies on a Tech Lead removing the main delivery blocker. Risk: ‘Wrong bottleneck’ (dependency): if it fails, it would lower ‘meet our next feature-launch deadline’. In this model it affects every option alike for now, so it doesn\'t change the comparison yet. Watch for: delays persist after the Tech Lead starts.',
+      '- ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.',
+      '- ‘Wrong bottleneck’: ‘Hire a Tech Lead’ relies on a Tech Lead removing the main delivery blocker. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.',
       '- ‘Hire Two Developers’ relies on new developers joining without slowing the team. Risk: ‘Coordination drag’ (people), through ‘Developer Hires’. Watch for: senior time spent on onboarding.',
       'Possible risks, not established facts. Nothing is added until you choose one and approve the change.',
       'What is the deadline for "meet our next feature-launch deadline"? A date or a time from now is fine, for example "6 months"; I\'ll propose it as your deadline.',
@@ -161,12 +161,13 @@ describe('S-C risks reply: the named method, what each hits, nothing added, ONE 
 describe('S-C Add press: bound to its message AND the node ids; re-checked on the model as it is now', () => {
   const v1 = fixture('v1');
   const first = () => riskGate(turnOn(v1), TURN2).kept[0]!;
-  it('AP-1: the timing press round-trips to ONE propose_new_risk call naming the risk and what it hurts, without a driver', () => {
+  it('AP-1: the timing press round-trips to ONE propose_new_risk call with a server-only option stamp and no links', () => {
     const r = first();
-    expect(r.press.message).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: ‘Hire Two Developers’ relies on this not happening; if it happens, it would lower ‘Feature Delivery Capacity’.');
-    expect(widenAddCallOf(r.press.id, r.press.message, { graph: v1 })).toEqual({ tool: 'propose_new_risk', args: {
+    expect(r.press.message).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: v1 })).toEqual({ tool: 'propose_new_risk',
+      relies_on: { option_id: 'hire_two_developers', option_label: 'Hire Two Developers' }, args: {
       label: 'Recruitment delay', rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
-      affects: [{ target_label: 'Feature Delivery Capacity', direction: 'negative' }],
+      affects: [],
       caused_by: [],
       whole_request: true,
     } });
@@ -207,7 +208,7 @@ describe('S-C Add press: bound to its message AND the node ids; re-checked on th
   it('AP-5 (Codex r2 P1): an option name with its own ’ still round-trips — the press is reconstructed, never parsed', () => {
     const g = { ...v1, nodes: (v1.nodes as Record<string, unknown>[]).map((n) => (n.id === 'hire_two_developers' ? { ...n, label: 'Don’t outsource hiring' } : n)) };
     const r = riskGate(turnOn(g), [TURN2[0]]).kept[0]!;
-    expect(r.press.message).toBe('Add the risk ‘Recruitment delay’ to ‘Don’t outsource hiring’: ‘Don’t outsource hiring’ relies on this not happening; if it happens, it would lower ‘Feature Delivery Capacity’.');
+    expect(r.press.message).toBe('Add the risk ‘Recruitment delay’ to ‘Don’t outsource hiring’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
     expect(widenAddCallOf(r.press.id, r.press.message, { graph: g })?.args.label).toBe('Recruitment delay');
   });
   it('AP-6 (Codex r2 P2): Suggest and Add read ONE option scope — a risk shared because the only mover is out of the comparison still adds', () => {
@@ -297,7 +298,7 @@ describe('S-C regex scaling (preamble: 5k→20k, 3 shapes, < 8×, min of 7 calib
   }
 });
 
-describe('EVENT-RISK RC3: a precondition never invents a factor → risk driver', () => {
+describe('EVENT-RISK RC3 (a′): a precondition stays on the model with zero links and is left out of the Run', () => {
   const graph = {
     nodes: [
       { id: 'keep_49', kind: 'option', label: 'Keep £49', is_baseline: true, interventions: { pro_plan_price: { value: 49 } } },
@@ -330,9 +331,11 @@ describe('EVENT-RISK RC3: a precondition never invents a factor → risk driver'
     expect(gate.kept).toHaveLength(1);
     const r = gate.kept[0]!;
     expect(r).toMatchObject({ mechanism: 'relies_on' });
-    expect(r.press.message).toBe('Add the risk ‘Payment provider fails’ to ‘Raise Pro price to £59’: ‘Raise Pro price to £59’ relies on this not happening; if it happens, it would lower ‘MRR’.');
+    expect(r.press.message).toBe('Add the risk ‘Payment provider fails’ to ‘Raise Pro price to £59’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
     expect(r.press.message).not.toContain('driven by');
-    expect(widenAddCallOf(r.press.id, r.press.message, { graph })?.args.caused_by).toEqual([]);
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph })).toMatchObject({
+      relies_on: { option_id: 'raise_59', option_label: 'Raise Pro price to £59' }, args: { caused_by: [], affects: [] },
+    });
   });
 
   it('rc3-missing-mechanism: an otherwise grounded cost risk fails closed to a precondition', () => {
@@ -371,6 +374,10 @@ describe('EVENT-RISK RC3: a precondition never invents a factor → risk driver'
       label: 'Price-driven churn', rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
       affects: [{ target_label: 'MRR', direction: 'negative' }], caused_by: [{ factor_label: 'Pro plan price', direction: 'positive' }], whole_request: true,
     } });
+    expect(settleRisksTurn(turnOn(graph), appendix([priceRisk])).reply.split('\n')[2])
+      .toBe('- ‘Raise Pro price to £59’ relies on customers accepting the higher price. Risk: ‘Price-driven churn’ (cost), through ‘Pro plan price’. Watch for: cancellations after the price rise.');
+    const call = widenAddCallOf(r.press.id, r.press.message, { graph })!;
+    expect(riskHeldReply(call)).toBe('I’ve prepared this change: add the risk ‘Price-driven churn’, driven by more ‘Pro plan price’; it would lower ‘MRR’. How strongly is not known yet. Nothing is added until you approve it.');
   });
 
   it('rc3-press-id-binds-mechanism: a drives id cannot replay the relies_on message, or the reverse', () => {
@@ -388,16 +395,14 @@ describe('EVENT-RISK RC3: a precondition never invents a factor → risk driver'
     expect(widenAddCallOf(relies.id, relies.message, { graph })?.args.caused_by).toEqual([]);
   });
 
-  it('rc3-relies-on-door-links: RK-DOOR validates only risk → goal, without a factor → risk link (M2)', () => {
+  it('rc3-relies-on-door-links: RK-DOOR validates a server-stamped risk with zero links (M2)', () => {
     const builder = vi.spyOn(riskTransaction, 'buildAddRiskTransaction');
     try {
       // Missing mechanism already passes the old schema, so this isolates RK-DOOR's links on the unmodified code.
       const { mechanism: _mechanism, ...missing } = priceRisk;
       expect(riskGate(turnOn(graph), [missing]).kept).toHaveLength(1);
       expect(builder).toHaveBeenCalledTimes(1);
-      expect(builder).toHaveBeenCalledWith({ risk: { label: 'Price-driven churn' }, links: [
-        { to_id: 'mrr', effect_direction: 'negative' },
-      ] }, expect.anything());
+      expect(builder).toHaveBeenCalledWith({ risk: { label: 'Price-driven churn' }, links: [] }, expect.anything(), { option_id: 'raise_59' });
     } finally {
       builder.mockRestore();
     }
@@ -434,36 +439,50 @@ describe('EVENT-RISK RC3: a precondition never invents a factor → risk driver'
     expect(widenAddCallOf(fresh.press.id, fresh.press.message, { graph: rewired })?.args.caused_by).toEqual([]);
   });
 
-  it('rc3-relies-on-bullet-honesty: a timing dependency states its effect on every option and the unchanged comparison', () => {
+  it('rc3-paul-known-answer-words: a timing dependency names the one option whose chance leaves it out (M1)', () => {
     const settled = settleRisksTurn(turnOn(graph), appendix([{ ...priceRisk, label: 'Feature release slips', category: 'timing',
-      through_direction: 'negative', relies_on: 'the feature release enabling the planned price increase', watch_for: 'release date moves' }]));
+      through_direction: 'negative', relies_on: 'the feature release', watch_for: 'release date moves' }]));
     expect(settled.gate.kept).toHaveLength(1);
-    expect(settled.reply.split('\n')[2]).toBe('- ‘Raise Pro price to £59’ relies on the feature release enabling the planned price increase. Risk: ‘Feature release slips’ (timing): if it fails, it would lower ‘MRR’. In this model it affects every option alike for now, so it doesn\'t change the comparison yet. Watch for: release date moves.');
+    const r = settled.gate.kept[0]!;
+    expect(r.mechanism).toBe('relies_on');
+    expect(r.press.message).toBe('Add the risk ‘Feature release slips’ to ‘Raise Pro price to £59’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
+    const call = widenAddCallOf(r.press.id, r.press.message, { graph });
+    expect(call).toEqual({ tool: 'propose_new_risk', relies_on: { option_id: 'raise_59', option_label: 'Raise Pro price to £59' }, args: {
+      label: 'Feature release slips', rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
+      caused_by: [], affects: [], whole_request: true,
+    } });
+    expect(call?.args).not.toHaveProperty('relies_on');
+    expect(settled.reply.split('\n')[2]).toBe('- ‘Feature release slips’: ‘Raise Pro price to £59’ relies on the feature release. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.');
     expect(settled.reply).not.toContain('through ‘Pro plan price’');
+    expect(settled.reply).not.toContain('affects every option alike');
+    expect(settled.reply).not.toContain('doesn\'t change the comparison');
   });
 
-  it('rc3-relies-on-positive-shared: a shared precondition names every option and honestly says raise', () => {
+  it('rc3-shared-precondition: a shared relies_on item is refused because it has no option identity to stamp', () => {
     const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
       through_direction: 'negative', mechanism: 'relies_on', affects_id: 'feature_delivery_capacity', direction: 'positive',
       relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
     const settled = settleRisksTurn(turnOn(fixture('v1')), appendix([shared]));
-    expect(settled.gate.kept).toHaveLength(1);
-    const r = settled.gate.kept[0]!;
-    expect(r.press.message).toBe('Add the risk ‘Team attrition’ for every option: if it happens, it would raise ‘Feature Delivery Capacity’.');
-    const oppositeThrough = riskGate(turnOn(fixture('v1')), [{ ...shared, through_direction: 'positive' }]).kept[0]!;
-    expect(oppositeThrough.press).toEqual(r.press);
-    expect(widenAddCallOf(r.press.id, r.press.message, { graph: fixture('v1') })?.args).toMatchObject({
-      caused_by: [], affects: [{ target_label: 'Feature Delivery Capacity', direction: 'positive' }],
-    });
-    expect(settled.reply.split('\n')[2]).toBe('- Every option relies on the current team staying intact. Risk: ‘Team attrition’ (outside events): if it fails, it would raise ‘Feature Delivery Capacity’. In this model it affects every option alike for now, so it doesn\'t change the comparison yet. Watch for: a resignation before launch.');
+    expect(settled.gate.kept).toEqual([]);
+    expect(settled.gate.dropped).toEqual([{ index: 0, failed: ['RK-SHARED-PRECONDITION'] }]);
+    expect(settled.offered).toBe(0);
+    expect(settled.actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
+    expect(riskGate(turnOn(fixture('v1')), [{ ...shared, through_direction: 'positive' }]).dropped)
+      .toEqual([{ index: 0, failed: ['RK-SHARED-PRECONDITION'] }]);
+    const minted = riskAddPressFor({ label: shared.label, mechanism: 'relies_on',
+      hits: { id: shared.hits_id, label: 'Existing Engineering Team Size', kind: 'factor' },
+      through: { id: shared.through_id, label: 'Existing Engineering Team Size', direction: 'negative' },
+      affects: { id: shared.affects_id, label: 'Feature Delivery Capacity', direction: 'positive' } });
+    expect(widenAddCallOf(minted.id, minted.message, { graph: fixture('v1') })).toBeNull();
   });
 
-  it.each(['negative', 'positive'] as const)('rc3-held-reply-no-driver: caused_by [] says %s without inventing a driver', (direction) => {
-    const call = { tool: 'propose_new_risk' as const, args: { label: 'Feature release slips', rationale: 'The user chose to add this risk.',
-      caused_by: [], affects: [{ target_label: 'MRR', direction }], whole_request: true as const } };
+  it('rc3-held-reply-no-driver: a server-stamped risk says why the Run leaves it out, with zero links', () => {
+    const call = { tool: 'propose_new_risk' as const, relies_on: { option_id: 'raise_59', option_label: 'Raise Pro price to £59' },
+      args: { label: 'Feature release slips', rationale: 'The user chose to add this risk.', caused_by: [], affects: [], whole_request: true as const } };
     expect(() => riskHeldReply(call)).not.toThrow();
     const reply = riskHeldReply(call);
-    expect(reply).toBe(`I’ve prepared this change: add the risk ‘Feature release slips’; if it happens, it would ${direction === 'negative' ? 'lower' : 'raise'} ‘MRR’. How strongly is not known yet. Nothing is added until you approve it.`);
+    expect(reply).toBe('I’ve prepared this change: add the risk ‘Feature release slips’ to ‘Raise Pro price to £59’. The Run leaves it out because this model can\'t yet apply that risk to that option alone, so that option\'s chance doesn\'t include it yet. Nothing is added until you approve it.');
     expect(reply).not.toContain('driven by');
+    expect(reply).not.toContain('affects every option alike');
   });
 });

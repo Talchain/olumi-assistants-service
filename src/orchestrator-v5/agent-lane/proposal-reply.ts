@@ -20,6 +20,7 @@ import { formatFactorValue } from '../compose/format-factor-value.js';
 import { sayFigureExactly, twoStateLevelWords } from './say-figure.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
+import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -154,6 +155,12 @@ function newRiskReply(r: Rec): string | null {
   if (subject === undefined || risk === undefined || !nonEmpty(risk.label)) return null;
   const threatens = phrases(risk.threatens);
   const drivenBy = phrases(risk.driven_by ?? []);
+  const precondition = recordOf(risk.relies_on);
+  if (risk.relies_on !== undefined) {
+    if (precondition === undefined || !nonEmpty(precondition.option_id) || !nonEmpty(precondition.option_label)
+      || threatens === null || threatens.length !== 0 || drivenBy === null || drivenBy.length !== 0) return null;
+    return reply(subject, [reliesOnRiskLine(risk.label, precondition.option_label)], question(r.public_label));
+  }
   if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
   // event_risk.v1 slice 2a: the door's grounded occurrence, distinct from placeholder impact.
   const likelihood = recordOf(risk.likelihood);
@@ -399,8 +406,11 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   const r = recordOf(result);
   // event_risk.v1 slice 2a: this door deterministically carries these user words outside the LLM arguments.
   const likelihood = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;
+  // RC3 (a′): a precondition press names its option by label ("Raise Pro price to £59"); the stamp carries that label.
+  const precondition = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.relies_on) : undefined;
   const carried = likelihood?.basis === 'user' && nonEmpty(likelihood.quote)
-    ? { args, event_risk_statement: likelihood.quote } : args;
+    ? { args, event_risk_statement: likelihood.quote }
+    : precondition !== undefined && nonEmpty(precondition.option_label) ? { args, relies_on_option: precondition.option_label } : args;
   if (userFiguresTheCallLeaves(carried, userMessage).length > 0) return null;
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS

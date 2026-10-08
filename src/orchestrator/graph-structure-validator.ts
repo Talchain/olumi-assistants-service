@@ -80,7 +80,7 @@
  */
 
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
-import { inertRiskBranch } from '../graph/inert-risk.js';
+import { inertRiskBranch, preconditionRiskIds } from '../graph/inert-risk.js';
 import type { GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
@@ -376,13 +376,14 @@ export function validateGraphStructure(
   graph: GraphV3T,
   // ⭐ K3 (`graph/inert-risk.ts`): READINESS ONLY (`analysis-ready-helper.ts`) leaves an inert risk out of the Run rather
   // than refusing it. The chat-edit gate (`edit-graph.ts`) does not pass it: an edit that dead-ends a risk is still refused,
-  // exactly as before (DL condition 2 on lease #85 5945974225).
+  // exactly as before (DL condition 2 on lease #85 5945974225). RC3 a′'s server-stamped precondition is exempt on BOTH
+  // gates: zero edges is its authorised representation, not a dead-ending edit.
   opts: { readonly leaveOutInertRisks?: boolean } = {},
 ): StructuralValidationResult {
   const violations: StructuralViolation[] = [];
   const leftOut = opts.leaveOutInertRisks === true
-    ? inertRiskBranch(graph.nodes, graph.edges.filter(isDirected), limitIdsOf(graph))
-    : new Set<string>();
+    ? inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph))
+    : preconditionRiskIds(graph.nodes, graph.edges, limitIdsOf(graph));
 
   checkRequiredNodeKinds(graph, violations);
   // No size check. Absolute graph size is `graphCaps`' question, not this

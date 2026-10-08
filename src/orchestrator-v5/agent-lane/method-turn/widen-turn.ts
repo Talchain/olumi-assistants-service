@@ -871,6 +871,8 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
       + '"affects_id": the id of the goal or an outcome the risk would hurt; "direction": '
       + '"negative" when the risk lowers it, "positive" when it raises it; "relies_on": what the option relies on, 12 words or '
       + 'fewer, starting with a verb or noun (e.g. "filling both roles quickly"); "watch_for": the early sign, 8 words or fewer}.',
+    'A "relies_on" risk must name one option: shared preconditions cannot be applied yet and will be refused. '
+      + 'It stays on the model with no links and is left out of the Run until the model can apply it to that option alone.',
     `The goal: ${JSON.stringify({ id: String(goal.id), label: goalLabel })}.`,
     `Goal and outcomes (affects_id): ${JSON.stringify(destinations)}.`,
     `The user's options and the factors each one changes: ${JSON.stringify(options.map((o) => ({ id: o.id, label: o.label,
@@ -907,8 +909,8 @@ export interface RiskGateResult {
  * RC-WIDEN's checks for target risks, BY IDENTITY, before anything is offered. Clauses: RK-SCHEMA · RK-NO-DUP (a new
  * name: no node and no earlier item has it) · RK-HITS (a user option, never the status quo, or a factor) · RK-THROUGH
  * (a factor that option really changes, uniquely named) · RK-AFFECTS (the goal or an outcome, uniquely named) ·
- * RK-DISTINCT (one per category) · RK-WORDS (no figure, no banned word, no question, quotable) · RK-DOOR (the door's own
- * builder accepts it, run purely) · RK-COUNT (at most three kept).
+ * RK-SHARED-PRECONDITION (a precondition names one option) · RK-DISTINCT (one per category) · RK-WORDS (no figure, no
+ * banned word, no question, quotable) · RK-DOOR (the door's own builder accepts it, run purely) · RK-COUNT (at most three kept).
  */
 export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGateResult {
   const g = turn.graph;
@@ -940,6 +942,7 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
     const shared = option === undefined && hitNode?.kind === 'factor' && !turn.options.some((o) => o.changes.includes(c.hits_id));
     const hitsKind = option !== undefined ? 'option' : shared ? 'factor' : null;
     if (hitsKind === null) failed.push('RK-HITS');
+    if (shared && mechanism === 'relies_on') failed.push('RK-SHARED-PRECONDITION');
     const through = byId.get(c.through_id);
     const throughLabel = through?.kind === 'factor' ? uniqueLabel(through) : null;
     if (throughLabel === null || (hitsKind === 'option' && !option!.changes.includes(c.through_id))
@@ -954,10 +957,11 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
       || bannedAfterMasking(c.label, []) || bannedAfterMasking(c.relies_on, allLabels, true)
       || bannedAfterMasking(c.watch_for, allLabels, true)) failed.push('RK-WORDS');
     if (failed.length === 0) {
-      const built = buildAddRiskTransaction({ risk: { label: c.label }, links: [
-        ...(mechanism === 'drives' ? [{ from_id: c.through_id, effect_direction: c.through_direction }] : []),
+      const built = buildAddRiskTransaction({ risk: { label: c.label }, links: mechanism === 'drives' ? [
+        { from_id: c.through_id, effect_direction: c.through_direction },
         { to_id: c.affects_id, effect_direction: c.direction },
-      ] }, { nodes: g.nodes as never, edges: g.edges as never });
+      ] : [] }, { nodes: g.nodes as never, edges: g.edges as never },
+      mechanism === 'relies_on' ? { option_id: c.hits_id } : undefined);
       if (!built.matched) failed.push('RK-DOOR');
     }
     if (failed.length === 0 && kept.length >= RISK_MAX_ITEMS) failed.push('RK-COUNT');
@@ -979,9 +983,8 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
 function riskAddMessage(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects' | 'mechanism'>): string {
   const target = s.hits.kind === 'option' ? `to ${quote(s.hits.label)}` : 'for every option';
   if (s.mechanism === 'relies_on') {
-    return `Add the risk ${quote(s.label)} ${target}: `
-      + (s.hits.kind === 'option' ? `${quote(s.hits.label)} relies on this not happening; ` : '')
-      + `if it happens, it would ${s.affects.direction === 'negative' ? 'lower' : 'raise'} ${quote(s.affects.label)}.`;
+    return `Add the risk ${quote(s.label)} to ${quote(s.hits.label)}: that option relies on this not happening. `
+      + 'The Run leaves it out until it can apply to that option alone.';
   }
   return `Add the risk ${quote(s.label)} ${target}: driven by ${s.through.direction === 'positive' ? 'more' : 'less'} ${quote(s.through.label)}, `
     + `it would ${s.affects.direction === 'negative' ? 'lower' : 'raise'} ${quote(s.affects.label)}.`;
@@ -1002,13 +1005,18 @@ export function isWidenAddPressId(id: unknown): boolean {
   return typeof id === 'string' && /^agent-widen-add:[0-9a-f]{16}$/u.test(id);
 }
 
-export type WidenAddCall = { readonly tool: 'propose_new_risk'; readonly args: {
-  label: string; rationale: string;
-  /** The press IS the whole request (server-owned): the door's own typed reply composes it (`composeProposalReply`). */
-  whole_request: true;
-  affects: { target_label: string; direction: 'positive' | 'negative' }[];
-  caused_by: { factor_label: string; direction: 'positive' | 'negative' }[];
-} };
+export type WidenAddCall = {
+  readonly tool: 'propose_new_risk';
+  /** Server-only marker, re-minted from graph identities. Never copied into the model's tool args. */
+  readonly relies_on?: { readonly option_id: string; readonly option_label: string };
+  readonly args: {
+    label: string; rationale: string;
+    /** The press IS the whole request (server-owned): the door's own typed reply composes it (`composeProposalReply`). */
+    whole_request: true;
+    affects: { target_label: string; direction: 'positive' | 'negative' }[];
+    caused_by: { factor_label: string; direction: 'positive' | 'negative' }[];
+  };
+};
 
 const ADD_PREFIX_WORDS = 'Add the risk ‘';
 const DIRECTIONS = ['positive', 'negative'] as const;
@@ -1045,6 +1053,8 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
       if (option !== null ? !option.changes.includes(fid) : turn.options.some((o) => o.changes.includes(fid))) continue;
       for (const a of destinations) {
         for (const mechanism of RISK_MECHANISMS) {
+          // There is no option identity to stamp on a shared precondition: the gate refuses it too.
+          if (mechanism === 'relies_on' && option === null) continue;
           // A precondition has no driver direction: mint it once, using a canonical unused value.
           for (const td of mechanism === 'drives' ? DIRECTIONS : ['positive'] as const) {
             for (const ad of DIRECTIONS) {
@@ -1056,13 +1066,17 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
               };
               // Words first (cheap), then the id over the node ids and mechanism.
               if (riskAddMessage(minted) !== m || riskAddPressFor(minted).id !== chipId) continue;
-              return { tool: 'propose_new_risk', args: {
-                label,
-                affects: [{ target_label: labelOf(a)!, direction: ad }],
-                caused_by: mechanism === 'drives' ? [{ factor_label: labelOf(f)!, direction: td }] : [],
-                rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
-                whole_request: true,
-              } };
+              return {
+                tool: 'propose_new_risk',
+                ...(mechanism === 'relies_on' ? { relies_on: { option_id: option!.id, option_label: option!.label } } : {}),
+                args: {
+                  label,
+                  affects: mechanism === 'drives' ? [{ target_label: labelOf(a)!, direction: ad }] : [],
+                  caused_by: mechanism === 'drives' ? [{ factor_label: labelOf(f)!, direction: td }] : [],
+                  rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
+                  whole_request: true,
+                },
+              };
             }
           }
         }
@@ -1078,6 +1092,11 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
  */
 export function riskHeldReply(call: WidenAddCall): string {
   const a = call.args;
+  if (call.relies_on !== undefined) {
+    return `I’ve prepared this change: add the risk ${quote(a.label)} to ${quote(call.relies_on.option_label)}. `
+      + "The Run leaves it out because this model can't yet apply that risk to that option alone, so that option's chance doesn't include it yet. "
+      + 'Nothing is added until you approve it.';
+  }
   if (a.caused_by.length === 0) {
     return `I’ve prepared this change: add the risk ${quote(a.label)}; if it happens, it would `
       + `${a.affects[0]!.direction === 'negative' ? 'lower' : 'raise'} ${quote(a.affects[0]!.target_label)}. `
@@ -1116,11 +1135,10 @@ export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): Settled
   if (gate.kept.length === 0) {
     return { reply: risksFallbackReply(turn), offered: 0, actions: [TALK_IT_THROUGH_CHIP], gate };
   }
-  // Preconditions affect every option alike in this model; only drivers name a causal through factor.
+  // Preconditions stay in the model but outside the Run; only drivers name a causal through factor.
   const lines = gate.kept.map((r) => r.mechanism === 'relies_on'
-    ? `- ${r.shared ? 'Every option' : quote(r.hits.label)} relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}): `
-      + `if it fails, it would ${r.affects.direction === 'negative' ? 'lower' : 'raise'} ${quote(r.affects.label)}. `
-      + `In this model it affects every option alike for now, so it doesn't change the comparison yet. Watch for: ${r.watch_for}.`
+    ? `- ${quote(r.label)}: ${quote(r.hits.label)} relies on ${r.relies_on}. `
+      + "This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet."
     : r.shared
     ? `- Every option relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}; it affects every option alike. Watch for: ${r.watch_for}.`
     : `- ${quote(r.hits.label)} relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}. Watch for: ${r.watch_for}.`);

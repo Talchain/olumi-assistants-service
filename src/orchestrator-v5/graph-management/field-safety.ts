@@ -217,6 +217,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'proposed_by',
   'option_status',
   'analysis_participation',
+  // RC3: only a server-validated widen press may leave an option precondition out of the Run.
+  'relies_on',
 ];
 
 /**

@@ -3,7 +3,7 @@
  *   "Suggest risks" press → ONE tool-less model call → the identity gate → a deterministic reply (method, what each hits,
  *   one gap question) + one Add per item + Something else, NOTHING stored → Add → NO model call → the existing add-risk
  *   door holds ONE card → the existing approve → the risk is in the model with its validated links (RC3: timing and
- *   dependency risks threaten the outcome without inventing a factor driver).
+ *   dependency risks stay on the canvas, stamped to one option, with zero links and left out of the Run).
  * The model is Paul's served v1 (scenario 6582edbc, CEE 7e3f8fb2), reconstructed from its run fact; the risk names are the
  * ones served as prose on turn #2 ("None has been added", no Add buttons).
  *
@@ -160,7 +160,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const approveChipOf = (b: Body) => b.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
   /** The hold the Agent's LATEST answer row carries — what the next turn (and route-v2's confirm) will read. */
   const heldOnLatestRow = async () => {
-    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; expires_at_turn_count: number; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string }[] } } }[];
+    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; expires_at_turn_count: number; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string; value?: unknown }[] } } }[];
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
 
@@ -201,7 +201,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(addChips(t1).map((c) => c.label), JSON.stringify(t1.suggested_actions)).toEqual(['Add ‘Recruitment delay’', 'Add ‘Wrong bottleneck’', 'Add ‘Coordination drag’']);
     expect(t1.suggested_actions.map((c) => c.id).slice(3)).toEqual(['agent-widen-something-else']);
     expect(t1.assistant_text).toContain('(assumption-based planning)');
-    expect(t1.assistant_text).toContain('- ‘Hire Two Developers’ relies on filling both developer roles quickly. Risk: ‘Recruitment delay’ (timing): if it fails, it would lower ‘Feature Delivery Capacity’. In this model it affects every option alike for now, so it doesn\'t change the comparison yet. Watch for: no accepted offer by week 4.');
+    expect(t1.assistant_text).toContain("- ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
     expect((t1 as unknown as { model_gap?: { kind: string } }).model_gap?.kind, 'the typed gap rides the wire').toBe('deadline_missing');
     expect(t1.assistant_text).not.toContain('<risk_suggestions>');
     expect(t1.assistant_text.trim().split('\n').at(-1)).toBe(S1_ASK);
@@ -210,12 +210,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(nodeLabels(), 'nothing is written by the suggestion').toEqual(before);
   }, 120_000);
 
-  it('SR-2: Add → NO model call → ONE held card through the add-risk door → approve → timing risk threatens the outcome without an invented driver', async () => {
+  it('SR-2: Add → NO model call → ONE held card → approve → stamped timing risk has zero edges', async () => {
     paulV1();
     script = [() => candidates(TURN2)];
     const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
     const add = addChips(t1)[0]!;
-    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: ‘Hire Two Developers’ relies on this not happening; if it happens, it would lower ‘Feature Delivery Capacity’.');
+    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
     const before = nodeLabels();
     const calls = openAiCalls;
     const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
@@ -230,13 +230,15 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const held = await heldOnLatestRow();
     expect(held).toHaveLength(1);
     const ops = held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`);
-    expect(ops).toEqual(['add_node risk_recruitment_delay', 'add_edge risk_recruitment_delay::feature_delivery_capacity']);
+    expect(ops).toEqual(['add_node risk_recruitment_delay']);
+    expect(held[0]!.action.inline_patch!.operations![0]!.value).toMatchObject({ relies_on: { option_id: 'hire_two_developers' } });
     expect(nodeLabels(), 'nothing is written before the approval').toEqual(before);
     await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     const g = graphNow();
     expect(g.nodes.some((x) => x.id === 'risk_recruitment_delay' && x.kind === 'risk' && x.label === 'Recruitment delay')).toBe(true);
     expect(g.edges.filter((e) => e.to === 'risk_recruitment_delay').map((e) => e.from), 'RC3: hiring is not the cause of its timing precondition failing').toEqual([]);
-    expect(g.edges.filter((e) => e.from === 'risk_recruitment_delay').map((e) => e.to)).toEqual(['feature_delivery_capacity']);
+    expect(g.edges.filter((e) => e.from === 'risk_recruitment_delay').map((e) => e.to)).toEqual([]);
+    expect(g.nodes.find((x) => x.id === 'risk_recruitment_delay')).toMatchObject({ relies_on: { option_id: 'hire_two_developers' } });
   }, 120_000);
 
   it('SR-3 RED: the canvas "+" Risk press (ask:risks) reaches the SAME door', async () => {
@@ -459,7 +461,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     affects_id: 'mrr', direction: 'negative', relies_on: 'the feature release enabling the planned price increase', watch_for: 'release date moves',
   };
 
-  it('rc3-paul-known-answer: timing overrides model drives; Add → no model → hold → approve stores only risk → MRR', async () => {
+  it('rc3-paul-known-answer: timing overrides model drives; Add → no model → hold → approve stores stamped zero-edge risk', async () => {
     const { assembleGuidanceSignals } = await import('../turn-context/guidance-signals.js');
     const { riskGate, risksTurnFromSignals } = await import('../method-turn/widen-turn.js');
     graphOf.set(SCENARIO, structuredClone(RC3_PRICING));
@@ -481,9 +483,10 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const adds = addChips(t1);
     expect(adds).toHaveLength(1);
     const add = adds[0]!;
-    expect(add.message).toBe('Add the risk ‘Feature release slips’ to ‘Raise Pro price to £59’: ‘Raise Pro price to £59’ relies on this not happening; if it happens, it would lower ‘MRR’.');
+    expect(add.message).toBe('Add the risk ‘Feature release slips’ to ‘Raise Pro price to £59’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
     expect(add.message).not.toContain('driven by');
-    expect(t1.assistant_text).toContain('In this model it affects every option alike for now, so it doesn\'t change the comparison yet.');
+    expect(t1.assistant_text).toContain("- ‘Feature release slips’: ‘Raise Pro price to £59’ relies on the feature release enabling the planned price increase. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
+    expect(t1.assistant_text).not.toContain('affects every option alike');
     expect(nodeLabels(), 'suggesting writes nothing').toEqual(before);
     const calls = openAiCalls;
     const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
@@ -491,20 +494,27 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t2._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_risk', true]]);
     expect(t2.assistant_text).toContain('I’ve prepared this change');
     expect(t2.assistant_text).not.toContain('driven by');
+    const leftOutLine = "‘Feature release slips’: ‘Raise Pro price to £59’ relies on this not happening. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.";
+    expect(t2.assistant_text).toBe([
+      "I’ve prepared this change: add risk 'Feature release slips'.", leftOutLine, 'Approve this change?',
+    ].join('\n\n'));
+    const cards = (t2 as unknown as { _proposal_fields?: { proposals: { approve_action: { detail?: string }; missing: unknown[] }[] } })._proposal_fields?.proposals ?? [];
+    expect(cards[0]?.approve_action.detail).toContain(leftOutLine);
+    expect(cards[0]?.missing).toEqual([]);
     const approve = approveChipOf(t2);
     expect(approve?.id, JSON.stringify(t2.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
     const held = await heldOnLatestRow();
     expect(held).toHaveLength(1);
-    expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`), 'the relies_on door holds no factor → risk change')
-      .toEqual(['add_node risk_feature_release_slips', 'add_edge risk_feature_release_slips::mrr']);
+    expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`), 'the relies_on door holds no edge at all')
+      .toEqual(['add_node risk_feature_release_slips']);
+    expect(held[0]!.action.inline_patch!.operations![0]!.value).toEqual({ id: 'risk_feature_release_slips', kind: 'risk', label: 'Feature release slips', relies_on: { option_id: 'raise_59' } });
     expect(nodeLabels(), 'holding writes nothing').toEqual(before);
     await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     const g = graphNow();
     expect(g.nodes.some((x) => x.id === 'risk_feature_release_slips' && x.kind === 'risk' && x.label === 'Feature release slips')).toBe(true);
     expect(g.edges.some((e) => e.from === 'pro_plan_price' && e.to === 'risk_feature_release_slips'), 'no invented price → release-slip driver').toBe(false);
-    expect(g.edges.filter((e) => e.from === 'risk_feature_release_slips')).toHaveLength(1);
-    expect(g.edges.find((e) => e.from === 'risk_feature_release_slips' && e.to === 'mrr'))
-      .toMatchObject({ from: 'risk_feature_release_slips', to: 'mrr', effect_direction: 'negative', strength: { mean: -0.5 } });
+    expect(g.nodes.find((x) => x.id === 'risk_feature_release_slips')).toMatchObject({ relies_on: { option_id: 'raise_59' } });
+    expect(g.edges.filter((e) => e.from === 'risk_feature_release_slips' || e.to === 'risk_feature_release_slips'), 'M2: no incoming OR outgoing edge').toEqual([]);
   }, 120_000);
 
   it('rc3-drives-control: explicit cost/drives keeps the exact old Add wording and stores price → risk → MRR', async () => {
@@ -541,6 +551,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     const g = graphNow();
     expect(g.nodes.some((x) => x.id === 'risk_price_driven_churn' && x.kind === 'risk' && x.label === 'Price-driven churn')).toBe(true);
+    expect(g.nodes.find((x) => x.id === 'risk_price_driven_churn')).not.toHaveProperty('relies_on');
     expect(g.edges.filter((e) => e.to === 'risk_price_driven_churn').map((e) => e.from)).toEqual(['pro_plan_price']);
     expect(g.edges.find((e) => e.from === 'pro_plan_price' && e.to === 'risk_price_driven_churn'))
       .toMatchObject({ effect_direction: 'positive', strength: { mean: 0.5 } });
