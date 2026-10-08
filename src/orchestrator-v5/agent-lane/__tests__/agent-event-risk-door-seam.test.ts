@@ -183,8 +183,8 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
   const newRisk = () => graphNow().nodes.find((x) => x.kind === 'risk' && x.label === 'Competitive response');
-  const EVENT_MSG = 'Add a competitive response risk that lowers revenue, maybe 10–30% in the next 6 months.';
-  const NAMED_DRIVER_MSG = 'Add a competitive response risk that lowers revenue because our price goes up, maybe 10–30% in the next 6 months.';
+  const EVENT_MSG = 'Add a competitive response risk that lowers revenue, chance is 10–30% in the next 6 months.';
+  const NAMED_DRIVER_MSG = 'Add a competitive response risk that lowers revenue because our price goes up, chance is 10–30% in the next 6 months.';
   const EVENT = { version: 1, occurrence: { p_low: 0.1, p_high: 0.3, basis: 'user', meaning: 'at_least_once_within_horizon' }, horizon: { months: 6 } };
   const quote = '10–30% in the next 6 months';
   const offer = async (message: string, caused = false, driverLabel = 'Price') => {
@@ -248,6 +248,75 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
     expect(approve.detail ?? '').not.toContain('It may happen');
   }, 120_000);
 
+  it.each([
+    {
+      kind: 'impact',
+      message: 'Add a risk: churn spike could cut MRR by 10% within 6 months',
+      label: 'Churn spike',
+      target: 'MRR',
+      expectedEvent: undefined,
+      likelihoodLine: undefined,
+    },
+    {
+      kind: 'uncued-shorthand',
+      message: 'Add a competitive response risk that lowers revenue, 10–30% in the next 6 months.',
+      label: 'Competitive response',
+      target: 'Revenue',
+      expectedEvent: undefined,
+      likelihoodLine: undefined,
+    },
+    {
+      kind: 'corpus-likelihood',
+      // Verbatim from corpus-served-169.json.
+      // DL ruling 8 Oct: explicit likelihood words only
+      message: 'Add a risk: a competitor might cut its prices, maybe 15 - 25% in the next 3 months. If that happens, monthly recurring revenue would drop.',
+      label: 'Competitor cuts prices',
+      target: 'Monthly recurring revenue',
+      expectedEvent: undefined,
+      likelihoodLine: undefined,
+    },
+  ])('impact-pct-door-$kind: the user card and committed risk preserve the meaning of the percentage', async ({ message, label, target, expectedEvent, likelihoodLine }) => {
+    const graph = seedGraph();
+    graph.nodes.find((node) => node.id === 'goal_x')!.label = target;
+    graph.goal_constraints!.find((constraint) => constraint.node_id === 'goal_x')!.label = target;
+    graphOf.set(SCENARIO, graph);
+    const before = bytes();
+    let result: Record<string, unknown> = {};
+    // The model supplies an ordinary risk proposal. Production must derive any likelihood from the user's text.
+    script = [
+      () => fnCall('propose_new_risk', {
+        label, affects: [{ target_label: target, direction: 'negative' }], caused_by: [], rationale: 'The user asked for it.',
+      }),
+      (body) => { result = toolOutputIn(body); return say('Shall I add the risk?'); },
+    ];
+    const response = await turn({ message }) as Body & { _proposal_fields?: { proposals: { approve_action: Chip }[] } };
+    expect(response._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'propose_new_risk', ok: true }));
+    const approve = approveChipOf(response)!;
+    expect(approve).toBeDefined();
+    const card = response._proposal_fields!.proposals.find((proposal) => proposal.approve_action.id === approve.id)!.approve_action;
+    expect(card.detail).toBe(approve.detail);
+    const likelihood = (result.risk as Record<string, unknown>).likelihood;
+    if (expectedEvent === undefined) {
+      expect(card.detail ?? '').not.toContain('It may happen');
+      expect(likelihood).toBeUndefined();
+    } else {
+      expect(card.detail!.split('\n').filter((line) => line.startsWith('It may happen'))).toEqual([likelihoodLine]);
+      expect(likelihood).toMatchObject({ p_low_pct: 15, p_high_pct: 25, horizon_months: 3, basis: 'user' });
+    }
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    const patch = held[0]!.action.inline_patch! as Record<string, unknown>;
+    expect(patch.user_event_risk).toEqual(expectedEvent === undefined ? undefined : expect.objectContaining({ event_risk: expectedEvent }));
+    expect(bytes()).toBe(before);
+    const writesBefore = graphWrites.get(SCENARIO) ?? 0;
+    await approveOffer(approve);
+    expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore).toBe(1);
+    const committedRisk = graphNow().nodes.find((node) => node.kind === 'risk' && node.label === label)!;
+    expect(committedRisk).toBeDefined();
+    expect(committedRisk.event_risk).toEqual(expectedEvent);
+    if (expectedEvent === undefined) expect(committedRisk).not.toHaveProperty('event_risk');
+  }, 120_000);
+
   it('2a-door-control: no likelihood commits the byte-identical ordinary risk and default link', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const { result, approve } = await offer('Add a competitive response risk that lowers revenue.');
@@ -279,7 +348,7 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it('said-door-inferred-driver: the user likelihood wins over a driver the model inferred', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const message = "There's a risk of a competitive response. I'd put it at about 15–25% within 3 months. Add it.";
+    const message = "There's a risk of a competitive response. The chance is about 15–25% within 3 months. Add it.";
     const note = "I left out 'Price' as a driver: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.";
     const { result, approve } = await offer(message, true);
     expect(approve.detail!.split('\n').at(-1)).toBe('It may happen: about 15–25% within 3 months, as you said.');
@@ -299,7 +368,7 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it.each(['Price', 'fac_price'])('said-door-named-driver-%s: naming the driver preserves the ordinary risk and cause note', async (driverLabel) => {
     graphOf.set(SCENARIO, seedGraph());
-    const message = "There's a risk of a competitive response because our price goes up. I'd put it at about 15–25% within 3 months. Add it.";
+    const message = "There's a risk of a competitive response because our price goes up. The chance is about 15–25% within 3 months. Add it.";
     const note = HELD_RISK_CAUSE_NOTE;
     const { result, approve } = await offer(message, true, driverLabel);
     expect(result.note).toContain(note);
@@ -319,10 +388,11 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
   }, 120_000);
 
   it.each([
-    ['spaced-range', '15 - 25% in the next 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
-    ['between', 'between 15 and 25 percent within 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
-    ['year', 'about 20% within a year', 0.2, 0.2, 12, 'about 20% within 12 months'],
-    ['n-percent', '20 percent within 6 months', 0.2, 0.2, 6, 'about 20% within 6 months'],
+    // Synthetic parser-shape controls state likelihood explicitly; bare percentages fail closed.
+    ['spaced-range', 'a 15 - 25% chance in the next 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
+    ['between', 'between 15 and 25 percent chance within 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
+    ['year', 'about 20% chance within a year', 0.2, 0.2, 12, 'about 20% within 12 months'],
+    ['n-percent', 'a 20 percent chance within 6 months', 0.2, 0.2, 6, 'about 20% within 6 months'],
     ['one-in-five', '1 in 5 chance within 6 months', 0.2, 0.2, 6, 'about 20% within 6 months'],
   ] as const)('said-door-paraphrase-%s: the chip and committed event state the user likelihood', async (_id, likelihood, low, high, months, words) => {
     graphOf.set(SCENARIO, seedGraph());
@@ -345,7 +415,7 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it('said-door-no-window: an ordinary risk asks for the missing time window', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const message = 'Competitive response could lower revenue, maybe about 20%, add it.';
+    const message = 'Competitive response could lower revenue, about 20% chance, add it.';
     const note = HELD_RISK_WINDOW_NOTE;
     const { result, approve } = await offer(message);
     expect((result.risk as Record<string, unknown>).likelihood).toBeUndefined();
@@ -368,8 +438,8 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
       links: [{ to_id: 'goal_x', effect_direction: 'negative' as const }] };
     const turnA = randomUUID();
     const turnB = randomUUID();
-    const blockA = readStatedEventRisk('10–30% within 6 months')!;
-    const blockB = readStatedEventRisk('20–40% within 6 months')!;
+    const blockA = readStatedEventRisk('a 10–30% chance within 6 months')!;
+    const blockB = readStatedEventRisk('a 20–40% chance within 6 months')!;
     expect(await holdAddRiskInProcess({ ...input, turn_id: turnA, user_event_risk: blockA }, '2a-hash-a')).toMatchObject({ status: 'held' });
     expect(await holdAddRiskInProcess({ ...input, turn_id: turnB, user_event_risk: blockB }, '2a-hash-b')).toMatchObject({ status: 'held' });
     expect(rows.get(`${SCENARIO}:${turnA}`)!.request_hash).not.toBe(rows.get(`${SCENARIO}:${turnB}`)!.request_hash);

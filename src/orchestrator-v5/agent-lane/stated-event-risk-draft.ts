@@ -1,10 +1,7 @@
 /** event_risk.v1 slice 2c: hold only an unambiguous occurrence stated in the brief. */
-import { readStatedEventRisk } from '../routing/stated-event-risk.js';
+import { readStatedEventRiskWithBindingSpan, splitStatedLikelihoodClauses } from '../routing/stated-event-risk.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 
-// Single-character sentence boundaries; a decimal point is not a boundary. Both regexes
-// have bounded lookarounds/tokens and no nested repetition or overlapping alternatives.
-const SENTENCE_END = /[.!?](?=\s|$)|[\r\n]/u;
 const WORD = /(?<![\p{L}\p{N}])[\p{L}\p{N}]{1,100}(?![\p{L}\p{N}])/gu;
 const words = (text: string): string[] => [...text.toLowerCase().matchAll(WORD)]
   .map((m) => m[0].replace(/s$/, ''));
@@ -20,15 +17,20 @@ export function holdStatedEventRisks<
 } {
   const risks = nodes.filter((n) => n.kind === 'risk' && typeof n.label === 'string')
     .map((node) => ({ node, names: words(node.label as string) }));
-  const claims = new Map<string, Array<NonNullable<ReturnType<typeof readStatedEventRisk>>>>();
-  for (const sentence of brief.split(SENTENCE_END)) {
-    const stated = readStatedEventRisk(sentence);
+  const claims = new Map<string, Array<NonNullable<ReturnType<typeof readStatedEventRiskWithBindingSpan>>>>();
+  for (const clause of splitStatedLikelihoodClauses(brief)) {
+    const stated = readStatedEventRiskWithBindingSpan(clause);
     if (stated === undefined) continue;
-    const named = new Set(words(sentence));
+    const named = new Set(words(stated.binding_span));
     // Stricter than nearest-word binding: EVERY label word must be written in this
-    // sentence, and exactly one risk may match. No figure/likelihood on a node is read.
+    // reader-exposed likelihood clause, and exactly one risk may match. The reader
+    // keeps comma-attached event context but excludes names across a semicolon.
+    // No figure/likelihood on a node is read.
     const matches = risks.filter((r) => r.names.length > 0 && r.names.every((w) => named.has(w)));
-    if (matches.length !== 1) continue;
+    // Another risk named anywhere in the clause makes the binding ambiguous ("Supplier fails, unlike Release slips, has…").
+    const inClause = new Set(words(stated.clause_text));
+    const clauseMatches = risks.filter((r) => r.names.length > 0 && r.names.every((w) => inClause.has(w)));
+    if (matches.length !== 1 || clauseMatches.length !== 1) continue;
     const id = matches[0]!.node.id;
     const previous = claims.get(id) ?? [];
     previous.push(stated);
