@@ -83,6 +83,58 @@ function unconfirmedProduct(node: Rec): readonly string[] | null {
   return i.factor_ids.every((f) => typeof f === 'string') ? (i.factor_ids as string[]) : null;
 }
 
+/** A definitional addend of the goal's reading, in the card's words ("less ‘MRR lost to churn’"); `figured` when it has a level. */
+function termOf(n: Rec, e: Rec): { words: string; label: string; figured: boolean } {
+  const mean = isRec(e.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
+  const negative = e.effect_direction === 'negative' || (mean !== undefined && mean < 0);
+  const label = text(n.label) ?? String(n.id);
+  const raw = isRec(n.observed_state) ? n.observed_state.raw_value : undefined;
+  return { words: `${negative ? 'less' : 'plus'} ‘${label}’`, label, figured: typeof raw === 'number' && Number.isFinite(raw) };
+}
+
+/**
+ * ⭐ ONE PRODUCER (Science goals §(i), 8 Oct, served 7f9fe459): the stored product reading's definitional "less"/"plus"
+ * terms, exactly as the card says them. The stored identity carries the product only; the term is a separate definitional
+ * edge into the goal, so the level its inputs give (49 × 250 = £12,250) is BEFORE the term. The card, the confirmation
+ * receipt, the break-even line and the Run's level warning all read this, so they never disagree.
+ */
+export function readingTermsOf(graph: unknown): { words: string; label: string; figured: boolean }[] {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const goals = nodes.filter(n => n.kind === 'goal');
+  const goal = goals.length === 1 ? goals[0]! : undefined;
+  const i = goal?.nonlinear_identity;
+  if (goal === undefined || !isRec(i) || i.operation !== 'product' || !Array.isArray(i.factor_ids)) return [];
+  const ids = i.factor_ids.filter((f): f is string => typeof f === 'string');
+  const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
+  return edges.flatMap((e) => {
+    if (e.to !== goal.id || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') return [];
+    if (!isRec(e.provenance) || e.provenance.definitional !== true) return [];
+    const n = byId.get(e.from);
+    if (n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded') return [];
+    return [termOf(n, e)];
+  });
+}
+
+/** Science §(i) (2): ", before ‘C’, which has no figure yet" after a level its inputs give; '' when every term has a figure. */
+export function levelBeforeTermsTail(graph: unknown): string {
+  const open = readingTermsOf(graph).filter(t => !t.figured).map(t => `‘${t.label}’`);
+  if (open.length === 0) return '';
+  return open.length === 1 ? `, before ${open[0]}, which has no figure yet`
+    : `, before ${open.slice(0, -1).join(', ')} and ${open[open.length - 1]}, which have no figures yet`;
+}
+
+/** Science §(i) (3): the receipt names the reading's terms exactly as the card did (", less ‘C’"); '' when there are none. */
+export function readingTermsWords(graph: unknown): string {
+  return readingTermsOf(graph).map(t => `, ${t.words}`).join('');
+}
+
+/** The confirmation receipt, read back from the stored graph: Science §(i) (3) names its terms as the card did. */
+export function identityReceiptWords(goalLabel: string, rate: string, count: string, graph: unknown): string {
+  return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}"${readingTermsWords(graph)}. Any earlier result is now out of date; `
+    + 'run the analysis again to see it calculated that way.';
+}
+
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
   return proposeOnGoal(graph) ?? proposeOnCarrier(graph) ?? proposeOnStoredReading(graph);
 }
@@ -174,9 +226,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     const prov = isRec(e.provenance) ? e.provenance : undefined;
     const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
     if (prov?.definitional !== true || userAuthored) return null;
-    const mean = isRec(e.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
-    const negative = e.effect_direction === 'negative' || (mean !== undefined && mean < 0);
-    addends.push(`${negative ? 'less' : 'plus'} ‘${text(n.label) ?? String(n.id)}’`);
+    addends.push(termOf(n, e).words);
   }
   const [a, b] = parts as [Rec, Rec];
   const level = (n: Rec) => ({ unit: (isRec(n.observed_state) ? text(n.observed_state.unit) : undefined) ?? labelCountUnit(n), label: String(n.id) });

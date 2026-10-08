@@ -56,7 +56,7 @@ import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
-import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
+import { identityReceiptWords, proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
@@ -3098,8 +3098,7 @@ export function createAgentCapabilities(
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
-      follow_up: `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}". Any earlier result is now out of date; `
-        + 'run the analysis again to see it calculated that way.',
+      follow_up: identityReceiptWords(goalLabel, rate, count, check?.raw),
     };
   };
 
