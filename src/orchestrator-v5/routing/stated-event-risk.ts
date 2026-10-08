@@ -10,7 +10,7 @@ const GAP = String.raw`[ \t]{1,8}`;
 const NUMBER = String.raw`[+-]?\d{1,6}(?:\.\d{1,6})?`;
 const PERCENT = String.raw`(?:%|percent\b)`;
 // "1 in N" is a likelihood only with its cue: "a 1 in 5 chance" / "1 in 5 odds", or "probability (of) 1 in 5" closing
-// the clause. Without a cue, "version 1 in 5 days" or "1 in 2 trillion" are not occurrence statements (Codex r2).
+// the clause. Without a cue, "version 1 in 5 days" or a denominator with a size word after it are not occurrence statements (Codex r2).
 const ODDS = String.raw`(?:1|one)${GAP}in${GAP}\d{1,12}(?!\d|[.,]\d)`;
 const ONE_IN = String.raw`${ODDS}${GAP}(?:chance|odds)\b|(?:chance|odds|probability|likelihood)${GAP}(?:(?:of|is)${GAP})?(?:about${GAP})?${ODDS}(?=${SPACE}(?:[.,;:!?)]|$|(?:within|in|over|during|and)\b(?!${SPACE}\d)))`;
 const PROBABILITY = new RegExp(
