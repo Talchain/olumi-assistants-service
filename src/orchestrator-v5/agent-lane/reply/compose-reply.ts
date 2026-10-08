@@ -16,8 +16,9 @@
  *     where the panel moves it to its own toggle.
  *   · Carried as the existing `_answer_shape` sidecar, with `assistant_text := deriveAnswerTextFromShape(shape)` (the
  *     identity tie). No schemas change: the sidecar already rides the additive extensions (DGAI `answerShape.ts`).
- *   · NEVER BY DELETING MEANING. Sentences are MOVED, never removed, rewritten or cut. A runtime invariant compares the
- *     sentence multiset of the input and of the derived text; any difference ships the input whole (fail closed).
+ *   · NEVER BY DELETING MEANING. RC6 removes only whole sentences already carried by another sentence (equal copies keep
+ *     the first). The invariant compares the derived multiset with the input minus exactly those recorded copies;
+ *     any other difference ships the input whole (fail closed). The Open Questions segment is untouched.
  *   · TYPED RESPONSE PROFILES (DL, AIE line review 6037446159 item 5), chosen deterministically by the TURN KIND:
  *       - `coaching` (an ordinary converse / Explain / Run / research reply): the face construct below;
  *       - `method_step` (a method press: pre-mortem): ONE structured prompt under the RC method contract; never reshaped
@@ -31,18 +32,23 @@
  *     present but not locatable as one unit, or more obligations than the face holds, keeps the reply whole.
  *   · FACE BUDGET (AIE #87 6037293086 §5): ≤ {@link REPLY_FACE_WORD_BUDGET} words, one move, one ask. A reply that fits
  *     it whole with at most one question is ALREADY IN SHAPE: returned byte-identical, no sidecar.
- *   · NEVER DELETES A CHALLENGE (AIE §7): nothing is removed; a challenge the face cannot hold sits under More detail.
+ *   · NEVER DELETES A CHALLENGE (AIE §7): a challenge the face cannot hold sits under More detail; only said copies go.
  *
  * Pure and deterministic: no model, no I/O. The route logs {@link ReplyComposition.measure} on every turn, so each
  * model's compliance with the prompt half ({@link REPLY_SHAPE_INSTRUCTION}) is a count, not an impression.
  *
- * Regexes: bounded runs only; every unbounded `.*` is a single class over one line (linear). Timing rows:
+ * Regexes use disjoint single-character runs over one line (linear). Timing rows:
  * `__tests__/compose-reply.test.ts`.
  */
 import { z } from 'zod';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
+
+/** Straight and curly quotes as one glyph each, length-preserving (offsets in the folded text are offsets in the original). */
+export function foldQuotes(text: string): string {
+  return text.replace(/[‘’‚‛′]/g, "'").replace(/[“”„‟″]/g, '"');
+}
 
 /** The face holds the headline plus at most this many bullets (Paul's "three bullets as a construct"). */
 export const REPLY_FACE_MAX_BULLETS = 3;
@@ -126,10 +132,12 @@ export interface ReplyMeasure {
   readonly face_over_cap: boolean;
   readonly face_over_word_budget: boolean;
   readonly open_questions_segment: boolean;
+  /** RC6: exact dropped sentence occurrences, in input order (not a set). */
+  readonly said_once_dropped: string[];
 }
 
 export interface ReplyComposition {
-  /** The `assistant_text` to ship: the derivation of `shape` when shaped, else the input byte-identical. */
+  /** The `assistant_text` to ship: the derivation of `shape`, or the whole reply minus its recorded said copies. */
   readonly text: string;
   readonly shape: AnswerShape | null;
   readonly outcome: 'already_in_shape' | 'shaped' | 'kept_whole';
@@ -157,15 +165,15 @@ interface Unit {
 
 const BULLET_LINE = /^[ \t]{0,6}([-•*]|\d{1,2}[.)])[ \t]{1,4}(\S.*)$/;
 /** A terminator run, its closers, a gap, then the start of the next sentence (capital, digit, currency, opening quote). */
-const SENTENCE_BOUNDARY = /([.!?…]["'”’)\]]{0,3})([ \t]{1,8})(?=["'“‘([]?[A-Z0-9£$€])/g;
-const QUESTION_END = /\?["'”’)\]*]{0,4}$/;
+const SENTENCE_BOUNDARY = /([.!?…]["'”’)\]*_`]*)([ \t]+)(?=["'“‘([*_`]*[A-Z0-9£$€])/g;
+const QUESTION_END = /\?["'”’)\]*_`]*$/;
 const HEADING_MAX = 60;
 
 function isHeadingLine(line: string): boolean {
   const t = line.trim();
   if (t.length === 0) return false;
   if (t.endsWith(':')) return true;
-  return t.length <= HEADING_MAX && !/[.!?…]["'”’)\]*]{0,4}$/.test(t);
+  return t.length <= HEADING_MAX && !/[.!?…]["'”’)\]*_`]*$/.test(t);
 }
 
 /** Sentences of one line, verbatim, at the boundary rule above. */
@@ -252,10 +260,224 @@ export function sentenceMultiset(text: string): string[] {
 const wordCount = (s: string): number => s.split(/[ \t\n]{1,16}/).filter(Boolean).length;
 const isQuestionUnit = (u: Unit): boolean => QUESTION_END.test(u.text.trim());
 
+interface SentenceSpan {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
+interface SaidOnce {
+  readonly text: string;
+  readonly dropped: string[];
+  readonly obligations: FaceObligation[];
+  readonly questions: ReturnType<typeof openQuestionsSegment>;
+}
+function saidOnceKey(text: string): string {
+  const key = text.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  // A reverse scan avoids retrying a long nonterminal punctuation run at every character.
+  let end = key.length;
+  while (end > 0 && '.!?'.includes(key[end - 1]!)) end -= 1;
+  return key.slice(0, end).trimEnd();
+}
+
+/** Remove only the recorded ranges, retaining the bytes of every surviving sentence and gap. */
+function withoutRanges(text: string, ranges: readonly { start: number; end: number }[]): string {
+  let out = '';
+  let at = 0;
+  for (const range of ranges) {
+    out += text.slice(at, range.start);
+    at = range.end;
+  }
+  return out + text.slice(at);
+}
+
+/**
+ * RC6 runs BEFORE atomic units are formed. A substring index finds whole normalised sentences, including a question
+ * inside a chance+depends part. It indexes total sentence characters rather than comparing every pair of sentences.
+ * Strict containers are visited longest first, so every dropped occurrence points directly to a surviving carrier.
+ */
+function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce {
+  const split = openQuestionsSegment(text);
+  const protectedAt = split === null ? -1 : text.indexOf(split.segment);
+  const protectedEnd = protectedAt + (split?.segment.length ?? 0);
+  const lastOutsideQuestions = (words: string): number => {
+    let last = -1;
+    for (let at = text.indexOf(words); at !== -1; at = text.indexOf(words, at + words.length)) {
+      if (protectedAt === -1 || at + words.length <= protectedAt || at >= protectedEnd) last = at;
+    }
+    return last;
+  };
+  const spans: SentenceSpan[] = [];
+  const lines: { start: number; end: number; spans: SentenceSpan[] }[] = [];
+  let lineAt = 0;
+  for (const raw of text.split('\n')) {
+    const bullet = BULLET_LINE.exec(raw);
+    const body = bullet?.[2] ?? raw;
+    const bodyAt = bullet === null ? 0 : raw.indexOf(body);
+    const lineSpans: SentenceSpan[] = [];
+    let cursor = bodyAt;
+    for (const sentence of sentencesOf(body)) {
+      const start = lineAt + raw.indexOf(sentence, cursor);
+      const end = start + sentence.length;
+      cursor = end - lineAt;
+      // Neither a drop candidate nor a containment witness may touch the questions toggle.
+      if (protectedAt !== -1 && start < protectedEnd && end > protectedAt) continue;
+      const span = { text: sentence, start, end };
+      spans.push(span);
+      lineSpans.push(span);
+    }
+    lines.push({ start: lineAt, end: lineAt + raw.length, spans: lineSpans });
+    lineAt += raw.length + 1;
+  }
+
+  // The closing typed ask may move to an identical earlier copy, but never to a merely containing sentence.
+  const closingAsk = obligations.filter((o) => o.role === 'ask')
+    .map((o) => ({ start: lastOutsideQuestions(o.text), end: lastOutsideQuestions(o.text) + o.text.length }))
+    .filter((o) => o.start !== -1).sort((a, b) => b.start - a.start)[0];
+  const askKeys = new Set(spans.filter((s) => closingAsk !== undefined && s.start >= closingAsk.start
+    && s.end <= closingAsk.end).map((s) => saidOnceKey(s.text)));
+  const groups: { key: string; first: SentenceSpan; copies: SentenceSpan[] }[] = [];
+  const groupByKey = new Map<string, number>();
+  for (const span of spans) {
+    const key = saidOnceKey(span.text);
+    if (key === '') continue;
+    const prior = groupByKey.get(key);
+    if (prior !== undefined) groups[prior]!.copies.push(span);
+    else {
+      groupByKey.set(key, groups.length);
+      groups.push({ key, first: span, copies: [span] });
+    }
+  }
+
+  // Aho-Corasick: all complete sentence keys are patterns; output links avoid copying suffix-match arrays.
+  const trie: { next: Map<string, number>; fail: number; output: number; group?: number }[] = [
+    { next: new Map(), fail: 0, output: 0 },
+  ];
+  groups.forEach((group, idx) => {
+    let node = 0;
+    for (const char of group.key) {
+      let next = trie[node]!.next.get(char);
+      if (next === undefined) {
+        next = trie.length;
+        trie[node]!.next.set(char, next);
+        trie.push({ next: new Map(), fail: 0, output: 0 });
+      }
+      node = next;
+    }
+    trie[node]!.group = idx;
+  });
+  const queue = [...trie[0]!.next.values()];
+  for (let head = 0; head < queue.length; head += 1) {
+    const node = queue[head]!;
+    for (const [char, child] of trie[node]!.next) {
+      let fail = trie[node]!.fail;
+      while (fail !== 0 && !trie[fail]!.next.has(char)) fail = trie[fail]!.fail;
+      trie[child]!.fail = trie[fail]!.next.get(char) ?? 0;
+      const suffix = trie[child]!.fail;
+      trie[child]!.output = trie[suffix]!.group !== undefined ? suffix : trie[suffix]!.output;
+      queue.push(child);
+    }
+  }
+  const carrier = new Map<number, number>();
+  const longestFirst = groups.map((_, idx) => idx).sort((a, b) => groups[b]!.key.length - groups[a]!.key.length || a - b);
+  for (const idx of longestFirst) {
+    if (carrier.has(idx)) continue;
+    let node = 0;
+    for (const char of groups[idx]!.key) {
+      while (node !== 0 && !trie[node]!.next.has(char)) node = trie[node]!.fail;
+      node = trie[node]!.next.get(char) ?? 0;
+      for (let match = node; match !== 0; match = trie[match]!.output) {
+        const found = trie[match]!.group;
+        if (found !== undefined && groups[found]!.key.length < groups[idx]!.key.length
+          && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
+      }
+    }
+  }
+  const keptByDrop = new Map<SentenceSpan, SentenceSpan>();
+  groups.forEach((group, idx) => {
+    const kept = groups[carrier.get(idx) ?? idx]!.first;
+    for (const copy of group.copies) if (copy !== kept) keptByDrop.set(copy, kept);
+  });
+  const dropped = spans.filter((s) => keptByDrop.has(s));
+  if (dropped.length === 0) return { text, dropped: [], obligations: [...obligations], questions: split };
+
+  const ranges: { start: number; end: number }[] = [];
+  for (const line of lines) {
+    const kept = line.spans.filter((s) => !keptByDrop.has(s));
+    if (!line.spans.some((s) => keptByDrop.has(s))) continue;
+    // Whole-line removal also removes an empty bullet marker. Protected text on that line stays byte-identical.
+    if (kept.length === 0 && !(protectedAt !== -1 && line.start < protectedEnd && line.end > protectedAt)) {
+      ranges.push({ start: line.start, end: line.end });
+      continue;
+    }
+    for (let i = 0; i < line.spans.length; i += 1) {
+      if (!keptByDrop.has(line.spans[i]!)) continue;
+      const first = i;
+      while (i + 1 < line.spans.length && keptByDrop.has(line.spans[i + 1]!)
+        && !(protectedAt !== -1 && line.spans[i]!.end <= protectedAt && line.spans[i + 1]!.start >= protectedEnd)) i += 1;
+      const next = line.spans[i + 1];
+      const prev = line.spans[first - 1];
+      let start = next === undefined && prev !== undefined ? prev.end : line.spans[first]!.start;
+      let end = next?.start ?? line.spans[i]!.end;
+      if (protectedAt !== -1 && start < protectedEnd && end > protectedAt) {
+        if (line.spans[first]!.start >= protectedEnd) start = line.spans[first]!.start;
+        else end = line.spans[i]!.end;
+      }
+      ranges.push({ start, end });
+    }
+  }
+  const rebound = obligations.flatMap((o): FaceObligation[] => {
+    const at = lastOutsideQuestions(o.text);
+    if (at === -1) return [{ ...o }];
+    const end = at + o.text.length;
+    const enclosingDrop = dropped.find((s) => s.start <= at && s.end >= end);
+    if (enclosingDrop !== undefined) return [{ ...o, text: keptByDrop.get(enclosingDrop)!.text }];
+    const local = ranges.filter((r) => r.start < end && r.end > at)
+      .map((r) => ({ start: Math.max(0, r.start - at), end: Math.min(o.text.length, r.end - at) }));
+    const remaining = withoutRanges(o.text, local).trim();
+    if (remaining !== '') return [{ ...o, text: remaining }];
+    // An entirely repeated atomic part can lose several sentences at once. Recover its kept atomic span when the
+    // witnesses share a source line; otherwise each surviving carrier owes the same role and metadata.
+    const witnesses = [...new Set(dropped.filter((s) => s.start < end && s.end > at)
+      .map((s) => keptByDrop.get(s)!))].sort((a, b) => a.start - b.start);
+    const first = witnesses[0];
+    const last = witnesses.at(-1);
+    if (first !== undefined && last !== undefined && !text.slice(first.start, last.end).includes('\n')) {
+      const witnessRanges = ranges.filter((r) => r.start < last.end && r.end > first.start)
+        .map((r) => ({ start: Math.max(0, r.start - first.start), end: Math.min(last.end, r.end) - first.start }));
+      return [{ ...o, text: withoutRanges(text.slice(first.start, last.end), witnessRanges).trim() }];
+    }
+    return witnesses.map((s) => ({ ...o, text: s.text }));
+  });
+  const retainedPart = (words: string, offset: number): string => withoutRanges(words,
+    ranges.filter((r) => r.start < offset + words.length && r.end > offset)
+      .map((r) => ({ start: Math.max(0, r.start - offset), end: Math.min(words.length, r.end - offset) })));
+  // Keep the original toggle identity even if its entire preceding lead was absorbed by a later carrier.
+  const questions = split === null ? null : { lead: retainedPart(split.lead, 0).trimEnd(), segment: split.segment,
+    after: split.after === '' ? '' : retainedPart(split.after, text.indexOf(split.after, protectedEnd)).trim() };
+  return { text: withoutRanges(text, ranges), dropped: dropped.map((s) => s.text), obligations: rebound, questions };
+}
+
+/** Subtract exact recorded occurrences, keeping the invariant stricter than the said-once comparison. */
+function expectedSentences(text: string, dropped: readonly string[]): string[] | null {
+  const counts = new Map<string, number>();
+  for (const sentence of dropped) {
+    const key = sentence.replace(/[ \t]{1,64}/g, ' ').trim();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const expected = sentenceMultiset(text).filter((sentence) => {
+    const count = counts.get(sentence) ?? 0;
+    if (count === 0) return true;
+    counts.set(sentence, count - 1);
+    return false;
+  });
+  if ([...counts.values()].some((count) => count !== 0)) return null;
+  return expected;
+}
+
 // ── the composer ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Compose the reply's shape. Never throws; never deletes, rewrites or cuts a sentence.
+ * Compose the reply's shape. Only recorded whole-sentence copies may be deleted; all other text is retained.
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const detailLines = [...new Set((input.detailLines ?? []).filter((line) => line.trim() !== ''))];
@@ -264,36 +486,76 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     .replace(/^[ \t]*[-•*][ \t]*$/gm, '').trim();
   const originalQuestions = detailLines.length === 0 ? null : openQuestionsSegment(body);
   // The questions toggle owns its segment; disclosures sit before it, never inside it.
-  const text = detailLines.length === 0 ? body
+  const originalText = detailLines.length === 0 ? body
     : [originalQuestions?.lead ?? body, ...detailLines, originalQuestions?.segment ?? '', originalQuestions?.after ?? '']
       .filter(Boolean).join('\n\n');
-  if (input.keepWhole !== undefined) return { text, shape: null, outcome: 'kept_whole', reason: input.keepWhole };
-  if (input.profile === 'method_step' || input.profile === 'proposal') return { text, shape: null, outcome: 'kept_whole', reason: input.profile };
-  if (text.trim().length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
+  if (originalText.trim().length === 0) return { text: originalText, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Obligations still present in the final text (a later gate may have removed one: then it is no longer owed).
-  const present = [...(input.obligations ?? []), ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: o.text.trim() }))
-    .filter((o) => o.text.length > 0 && text.includes(o.text))
+  // Obligation identity never depends on quote glyphs (Science #2787 P1-A): a typed text the reply carries with other
+  // quotes ('Raise prices 10%' for ‘Raise prices 10%’) re-binds to the reply's OWN span (the fold keeps lengths), so every
+  // exact match below sees the words as written.
+  const foldedOriginal = foldQuotes(originalText);
+  const asWritten = (t: string): string => {
+    if (originalText.includes(t)) return t;
+    const at = foldedOriginal.indexOf(foldQuotes(t));
+    return at === -1 ? t : originalText.slice(at, at + t.length);
+  };
+  const originalPresent = [...(input.obligations ?? []), ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: asWritten(o.text.trim()) }))
+    .filter((o) => o.text.length > 0 && originalText.includes(o.text))
     // In this explicit-detail path, questions already in their own toggle stay there.
     // Obligations in the ordinary reply remain subject to the same face checks.
     .filter((o) => originalQuestions === null || o.role !== 'ask'
       || originalQuestions.lead.includes(o.text) || originalQuestions.after.includes(o.text))
     .sort((a, b) => b.text.length - a.text.length);
+  const once = sayOnce(originalText, originalPresent);
+  const text = once.text;
+  const present = once.obligations.sort((a, b) => b.text.length - a.text.length);
   // Overlapping obligations are ONE unit (the gate's closing can carry the ask): the larger span stands for both, and it
   // is the ask when it holds one, so it closes the face.
-  const owed: { role: FaceObligationRole; text: string }[] = [];
+  const owed: { role: FaceObligationRole; text: string; lead?: true; subjects?: readonly string[] }[] = [];
   for (const o of present) {
     const container = owed.find((k) => k.text.includes(o.text));
     if (container === undefined) owed.push({ ...o });
-    else if (ROLE_RANK[o.role] > ROLE_RANK[container.role]) container.role = o.role;
+    else {
+      if (ROLE_RANK[o.role] > ROLE_RANK[container.role]) container.role = o.role;
+      if (o.lead === true) container.lead = true;
+      if (o.subjects !== undefined) container.subjects = [...new Set([...(container.subjects ?? []), ...o.subjects])];
+    }
   }
-  if (owed.some((o) => o.text.includes('\n'))) return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated' };
-
-  const split = openQuestionsSegment(text);
+  const split = once.questions;
   const before = parseUnits(split === null ? text : split.lead, owed, 0, 0);
   const after = split === null || split.after === '' ? { units: [] as Unit[] } : parseUnits(split.after, owed, before.paras, before.lines + 1);
   const units: Unit[] = [...before.units, ...after.units].map((u, idx) => ({ ...u, idx }));
-  if (units.length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
+  const rawSplit = openQuestionsSegment(originalText);
+  const rawUnits = once.dropped.length === 0 ? units : [
+    ...parseUnits(rawSplit?.lead ?? originalText, originalPresent, 0, 0).units,
+    ...(rawSplit === null ? [] : parseUnits(rawSplit.after, originalPresent, 0, 0).units),
+  ];
+  const initialMeasure: ReplyMeasure = {
+    words_in: wordCount(originalText), units_in: rawUnits.length,
+    bullets_in: rawUnits.filter((u) => u.kind === 'bullet').length,
+    questions_in: rawUnits.filter(isQuestionUnit).length,
+    face_bullets: 0, detail_units: 0, restatements_to_detail: 0, face_words: 0,
+    face_bullets_over_word_bar: 0, obligations_on_face: 0,
+    face_over_cap: false, face_over_word_budget: false, open_questions_segment: split !== null,
+    said_once_dropped: once.dropped,
+  };
+  const expected = expectedSentences(originalText, once.dropped);
+  const reduced = sentenceMultiset(text);
+  if (expected === null || expected.length !== reduced.length || expected.some((s, i) => s !== reduced[i])) {
+    return { text: originalText, shape: null, outcome: 'kept_whole', reason: 'invariant_failed',
+      measure: { ...initialMeasure, said_once_dropped: [] } };
+  }
+  // Turn identity prohibits reshaping AND the copy rule: a whole reply ships byte-identical (DL rulings R2/R3: a
+  // proposal's disclosure and a method worksheet are verbatim; keepWhole turns are host-composed), never deduplicated.
+  const whole = { ...initialMeasure, said_once_dropped: [] };
+  if (input.keepWhole !== undefined) return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.keepWhole, measure: whole };
+  if (input.profile === 'method_step' || input.profile === 'proposal') return { text: originalText, shape: null, outcome: 'kept_whole', reason: input.profile, measure: whole };
+  if (owed.some((o) => o.text.length === 0 || o.text.includes('\n'))) {
+    return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated', measure: initialMeasure };
+  }
+  if (units.length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty', measure: initialMeasure };
 
   // Each obligation binds its LAST occurrence (the host appends); an earlier narrator copy is an ordinary unit.
   for (const role of ['ask', 'withheld_reason', 'caveat', 'evidence', 'host', 'detail'] as const) {
@@ -304,7 +566,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     }
   }
   if (owed.some((o) => !units.some((u) => u.obligation === o.role && u.text.includes(o.text)))) {
-    return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated' };
+    return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated', measure: initialMeasure };
   }
 
   // Only a PRESENT typed withheld reason can licence moving an unbound narrator cause to detail.
@@ -345,7 +607,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     ?? units.find((u) => u.kind === 'heading' && eligible(u))
     ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host' && !mixedLead(u)) : undefined)
     ?? (units.length === 1 && eligible(units[0]!) && !mixedLead(units[0]!) ? units[0] : undefined);
-  if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline' };
+  if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure: initialMeasure };
   // A frame that introduces CHANCES ("…, chances of meeting it, in this model, are:", "…, on current information:"), never a
   // goal-keyword frame for another finding ("Risks to meeting your goal with X:"; Codex re-review 7ff59a6e).
   const CHANCE_FRAME = /\b(?:chances?|current information)\b[^\n]{0,200}:$/i;
@@ -382,10 +644,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const detailUnits = units.filter((u) => !faceSet.has(u));
 
   const measure: ReplyMeasure = {
-    words_in: wordCount(text),
-    units_in: units.length,
-    bullets_in: units.filter((u) => u.kind === 'bullet').length,
-    questions_in: units.filter(isQuestionUnit).length,
+    ...initialMeasure,
     face_bullets: faceBullets.length,
     detail_units: detailUnits.length,
     restatements_to_detail: restatements.size,
@@ -398,8 +657,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   };
   // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
   // too little would go behind "More detail" to be worth a click.
-  if (goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
-  if (goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS
+    // D-12: more than one question never ships whole on the face, however little would go to detail (RC6 can leave that).
+    && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
   // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
   if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
   // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face
@@ -416,10 +677,11 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const parsed = schema.safeParse({ headline: headlineText, bullets: faceBullets.map((u) => u.text), detail });
   if (!parsed.success) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure };
   const shaped = deriveAnswerTextFromShape(parsed.data);
-  // ⛔ THE INVARIANT: every sentence of the input, and nothing else, is in the derived text.
-  const a = sentenceMultiset(text);
+  // ⛔ THE INVARIANT: every input sentence except exactly the recorded copies, and nothing else, is derived.
+  const a = expected;
   const b = sentenceMultiset(shaped);
-  if (a.length !== b.length || a.some((s, i) => s !== b[i])) return { text, shape: null, outcome: 'kept_whole', reason: 'invariant_failed', measure };
+  if (a.length !== b.length || a.some((s, i) => s !== b[i])) return { text: originalText, shape: null, outcome: 'kept_whole', reason: 'invariant_failed',
+    measure: { ...measure, said_once_dropped: [] } };
   return { text: shaped, shape: parsed.data, outcome: 'shaped', measure };
 }
 

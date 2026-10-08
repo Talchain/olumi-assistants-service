@@ -22,6 +22,9 @@ const SCENARIO = '7a5e4d3c-2b1a-4d0e-9f8a-7b6c5d4e3f2a';
 const ALL_SCREEN = JSON.parse(readFileSync(new URL('./fixtures/waveB-screen-chance-lines-20261007.json', import.meta.url), 'utf8')) as { line: string; source: string }[];
 const SCREEN = ALL_SCREEN.filter((s) => s.source.includes('/unseen-b3-2/')).map((s) => s.line);
 const SCREEN_T1B = ALL_SCREEN.filter((s) => s.source.includes('/t1b-b5-1/')).map((s) => s.line);
+const SIZE_QUESTION = 'How sure are you of that size?';
+// RC6 keeps the first screen unit intact and drops only the later copy of its question.
+const SCREEN_T1B_SAID_ONCE = SCREEN_T1B.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
 let analysisResult: Json = READ.analysis_result;
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
@@ -123,8 +126,11 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     useT1b();
     expect(READ.analysis_state.leader_claim.permitted).toBe(false);
     expect(SCREEN_T1B).toHaveLength(3);
+    expect(count(SCREEN_T1B[0]!, SIZE_QUESTION)).toBe(1);
+    expect(count(SCREEN_T1B[1]!, SIZE_QUESTION)).toBe(1);
     const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
-    for (const line of SCREEN_T1B) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
+    for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
+    expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
     // B15 (#2783, DL): the lead-in opens the headline and is directly followed by the first screen chance finding; it
     // still introduces the list and never ends the reply on a colon.
     const lead = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
@@ -136,7 +142,9 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   it('POINTS through the REAL leader gate: the Agent writes the screen’s lines, the gate deletes them, and the user still reads each once', async () => {
     useT1b();
     const b = await turn(run(`For reaching at least £126,000 monthly recurring revenue, on current information:\n\n${SCREEN_T1B.join(' ')}`), 'Run it');
-    for (const line of SCREEN_T1B) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
+    for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
+    expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
+    expect(b.assistant_text.startsWith(`For reaching at least £126,000 monthly recurring revenue, on current information:\n${SCREEN_T1B[0]!}`), 'the first chance+depends unit keeps its question and still leads').toBe(true);
   });
 
   it('CONTROL: a turn that ran nothing adds nothing', async () => {
