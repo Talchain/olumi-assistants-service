@@ -19,6 +19,7 @@ import type { SelectedRow } from '../guidance/index.js';
 import { structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
 import { ACTION_IDS, ACTION_REGISTRY, STANDARD_ACTIONS, type ActionGroup, type ActionId } from './registry.js';
 import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
+import { biasRiskOf, type BiasRiskV1 } from './bias-triggers.js';
 
 export type ItemRef =
   | { readonly kind: 'option' | 'factor' | 'risk' | 'outcome' | 'goal'; readonly id: string }
@@ -45,6 +46,8 @@ export interface ActionBarV1 {
   readonly priority: readonly ActionOffer[];
   readonly standard: readonly ActionOffer[];
   readonly more: readonly ActionOffer[];
+  /** P45: the standing one-line bias-risk row; every item presses an offer on this same bar. Absent when none fires. */
+  readonly bias_risk?: BiasRiskV1;
 }
 
 export const PRIORITY_MAX = 2;
@@ -155,9 +158,10 @@ function drafts(f: ActionFacts): Draft[] {
         : { enabled: false, disabled_reason: DISABLED.needs_goal },
       risks !== undefined ? tierOfPriority(risks) : GENERIC_TIER));
     }
-    if (estimatePointsOf(f).length > 0) {
+    // Both estimate actions speak of "this result" and are run_dependent in the registry: offered only on a bound Run (DL on #2766).
+    if (f.runBound && estimatePointsOf(f).length > 0) {
       out.push(draft(f, 'bias_anchoring', { enabled: true, why_now: WHY_NOW.bias_anchoring }, GENERIC_TIER));
-      if (f.runBound) out.push(draft(f, 'check_estimates', { enabled: true, why_now: WHY_NOW.check_estimates }, GENERIC_TIER));
+      out.push(draft(f, 'check_estimates', { enabled: true, why_now: WHY_NOW.check_estimates }, GENERIC_TIER));
     }
     const premortem = rc('RC-PREMORTEM');
     const date = f.deadline === null ? null : sayDate(f.deadline);
@@ -197,7 +201,9 @@ export function actionBarOf(f: ActionFacts): ActionBarV1 {
   const priority = standing !== undefined && !f.approvalWaiting && !f.runStale ? [standing]
     : others.filter(d => d.offer.enabled && d.tier > 0 && d.tier <= PILL_TIER_MAX).slice(0, PRIORITY_MAX);
   const more = others.filter((d) => !priority.includes(d)).slice(0, MORE_MAX);
-  return { v: 1, state_key: f.stateKey, revision: f.revision, priority: priority.map((d) => d.offer), standard, more: more.map((d) => d.offer) };
+  const bar = { v: 1 as const, state_key: f.stateKey, revision: f.revision, priority: priority.map((d) => d.offer), standard, more: more.map((d) => d.offer) };
+  const biasRisk = biasRiskOf(f, [...bar.priority, ...bar.standard, ...bar.more], f.optionFrame);
+  return biasRisk !== undefined ? { ...bar, bias_risk: biasRisk } : bar;
 }
 
 const sameTarget = (a: ItemRef | undefined, b: ItemRef | undefined): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);

@@ -279,7 +279,8 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     expect(t1._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_option', true]]);
     const approve = approveChipOf(t1);
     expect(approve?.id, JSON.stringify(t1.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
-    expect(t1.suggested_actions.map((c) => c.id)).toEqual([approve!.id, 'agent-amend-proposal',
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+    expect(t1.suggested_actions.map((c) => c.id)).toEqual([approve!.id, 'agent-amend-proposal', `agent-decline-proposal:${approve!.id.slice('agent-approve-proposal:'.length)}`,
       `agent-question-keep:${approve!.id.slice('agent-approve-proposal:'.length)}`]);
     // The reply names the assumption it questions (typed labels) and the ONE option it holds.
     expect(t1.assistant_text).toContain('‘Price’ → ‘Customer churn’');

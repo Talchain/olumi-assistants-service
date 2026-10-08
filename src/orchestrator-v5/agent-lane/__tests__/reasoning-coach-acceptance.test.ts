@@ -38,10 +38,29 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
     // R2 re-pin: claim predicates, duration exemption, kind-correct fallback and licensed control; historical fixtures stay intact.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('62c88de383013184f30b1acea2bbf20bc96a0fcd0deeb0cc3c3683b218e96a70');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('11be6e25f237d5079f6db00a608b1531e3fe636addfea5d378774fd292aaa717');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
+  });
+  it('W4 (no status quo option) carries no bias cue: a missing baseline is a method gap, not status quo bias (Science 21:12Z, P45 (d))', () => {
+    const source = JSON.parse(readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url), 'utf8'));
+    const findWiden = (o: unknown): Record<string, unknown> | undefined => {
+      if (!o || typeof o !== 'object') return undefined;
+      const r = o as Record<string, unknown>;
+      if (r.policy_id === 'RC-WIDEN') return r;
+      for (const v of Object.values(r)) { const hit = findWiden(v); if (hit) return hit; }
+      return undefined;
+    };
+    const widen = findWiden(source)!;
+    const variants = JSON.stringify(widen).match(/\{"id":"W\d"[^}]*\}/g) ?? [];
+    const w3 = variants.find((v) => v.startsWith('{"id":"W3"'));
+    const w4 = variants.find((v) => v.startsWith('{"id":"W4"'));
+    expect(w3, 'control: W3 keeps its narrow_framing cue').toContain('"bias_cue":"narrow_framing"');
+    expect(w4, 'W4 is present').toBeDefined();
+    expect(w4).not.toContain('bias_cue');
+    expect(JSON.stringify(source)).not.toMatch(/"status_quo":\s*"/);
+    expect(JSON.stringify(POLICY)).not.toMatch(/"bias_cue":"status_quo"|"status_quo":"/);
   });
   it.each(cases)('$id — real selector, exact slots/items/actions and rendered copy', c => {
     const state = c.state as GuidanceSignals;

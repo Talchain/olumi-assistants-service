@@ -57,14 +57,24 @@ export function holdStatedEventRisks<
   };
 }
 
-/** The draft's disclosure for a held event risk: the user's own range and horizon, said back as theirs. */
-export function heldEventRiskLine(label: string, block: EventRiskV1T): string {
+/** The shared occurrence words for draft disclosures and held approval cards. */
+export function eventRiskLikelihoodWords(block: EventRiskV1T): string {
   const low = Number((block.occurrence.p_low * 100).toFixed(6));
   const high = Number((block.occurrence.p_high * 100).toFixed(6));
   const likelihood = low === high ? `${low}%` : `${low}–${high}%`;
   const months = block.horizon.months;
   const horizon = months === 1 ? 'a month' : `${months} months`;
-  return `Held your stated likelihood for ${label}: it may happen (about ${likelihood} within ${horizon}), as you wrote.`;
+  return `about ${likelihood} within ${horizon}`;
+}
+
+/** The approval card's likelihood line: one string for the card record AND the confirm chip the user sees. */
+export function eventRiskCardLine(block: EventRiskV1T): string {
+  return `It may happen: ${eventRiskLikelihoodWords(block)}, as you said.`;
+}
+
+/** The draft's disclosure for a held event risk, said back as the user's own. */
+export function heldEventRiskLine(label: string, block: EventRiskV1T): string {
+  return `Held your stated likelihood for ${label}: it may happen (${eventRiskLikelihoodWords(block)}), as you wrote.`;
 }
 
 /** The draft's disclosure when a stated likelihood is not modelled because the risk has a cause (ISL v1 refuses it). */

@@ -7,6 +7,7 @@
  * "Quality trade-off"; "Overlapping costs", "Handover debt", "Offer fallout", "Work cannot be split".
  */
 import { describe, expect, it } from 'vitest';
+import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
 import { readFileSync } from 'node:fs';
 import { assembleGuidanceSignals } from '../../turn-context/guidance-signals.js';
 import {
@@ -275,8 +276,7 @@ describe('S-C standing gap signal: typed, from model state, ONE question', () =>
   });
 });
 
-describe('S-C regex scaling (preamble: 5k→20k, 3 shapes, < 8×, min of 5)', () => {
-  const time = (f: () => void): number => { let best = Infinity; for (let i = 0; i < 5; i++) { const t = performance.now(); f(); best = Math.min(best, performance.now() - t); } return best; };
+describe('S-C regex scaling (preamble: 5k→20k, 3 shapes, < 8×, min of 7 calibrated batches)', () => {
   const shapes: Record<string, (n: number) => string> = {
     spaces: (n) => ' '.repeat(n),
     budgetNoMoney: (n) => 'budget '.repeat(Math.ceil(n / 7)).slice(0, n),
@@ -285,8 +285,8 @@ describe('S-C regex scaling (preamble: 5k→20k, 3 shapes, < 8×, min of 5)', ()
   for (const [name, shape] of Object.entries(shapes)) {
     it(`RX-${name}: STATED_BUDGET scales linearly; an unbounded Add message is refused before any work`, () => {
       const small = shape(5_000); const big = shape(20_000);
-      const r = (time(() => STATED_BUDGET.test(big)) + 0.05) / (time(() => STATED_BUDGET.test(small)) + 0.05);
-      expect(r, `budget ${name}`).toBeLessThan(8);
+      const m = scalingRatio(() => STATED_BUDGET.test(small), () => STATED_BUDGET.test(big));
+      expect(m.ratio, `budget ${name} ${m.detail}`).toBeLessThan(8);
       // The Add press has no regex: it is reconstructed, and refused above 600 chars before any work.
       expect(widenAddCallOf('agent-widen-add:0000000000000000', `Add the risk ‘x’ to ‘o’: driven by more ‘${big}’, it would lower ‘y’.`, { graph: fixture('v1') })).toBeNull();
     });
