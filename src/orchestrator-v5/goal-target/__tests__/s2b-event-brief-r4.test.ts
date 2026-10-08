@@ -1,8 +1,11 @@
-/** #2762 r6: the candidate decides event vs quantity through real admission and build. */
+/** #2762 r7: class boundaries and uncarried figures through real admission and build. */
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
 import { admitCandidateModel, type CandidateModel } from '../../agent-lane/admit-model.js';
 import { buildModelFromBrief } from '../../agent-lane/runtime/build-model.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { withEventNumberLoss, withEventShareDate } from '../event-by-date-model.js';
+import { applyTeamShareEdit } from '../team-share-write.js';
 
 type Rec = Record<string, any>;
 const eventCandidate = (metric = 'launch', deliverable = metric): CandidateModel => ({
@@ -52,6 +55,7 @@ describe('R4 ordinary event briefs through real candidate checks', () => {
     expect(result).toMatchObject({ ok: true, mutated: true });
     expect(graph?.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({ threshold_source: 'definitional' });
     expect(graph?.goal_constraints).toContainEqual(expect.objectContaining({ value: 200000, operator: '<=', unit: 'GBP' }));
+    expect(result.not_represented ?? []).not.toContain(numberLossSentence('£200k'));
   });
 
   it.each([
@@ -95,14 +99,148 @@ describe('R4 ordinary event briefs through real candidate checks', () => {
   it('R6-3-CONTROL a null noncurrency event candidate discloses a separate quantity objective', () => {
     const admitted = admitCandidateModel(eventCandidate(), {}, 'Launch and reach £200k MRR by April');
     expect(admitted.nodes.find(n => n.kind === 'goal')).toMatchObject({ id: 'event_goal' });
-    expect(admitted.loss).toContainEqual(expect.objectContaining({ reason: expect.stringContaining('reach £200k MRR') }));
+    expect(admitted.loss).toContainEqual(expect.objectContaining({ before: '£200k MRR', reason: numberLossSentence('£200k MRR') }));
   });
 
   it('R6-3-CONTROL contextual limit is kept and the separate quantity objective has words', () => {
     const admitted = admitCandidateModel(budgetCandidate(), {}, 'Launch by April on a budget of £200k and reach £300k MRR by April');
     expect(admitted.nodes.find(n => n.kind === 'goal')).toMatchObject({ id: 'event_goal' });
     expect(admitted.goal_constraints).toContainEqual(expect.objectContaining({ value: 200000, unit: 'GBP' }));
-    expect(admitted.loss).toContainEqual(expect.objectContaining({ reason: expect.stringContaining('reach £300k MRR') }));
+    expect(admitted.loss).toContainEqual(expect.objectContaining({ before: '£300k MRR', reason: numberLossSentence('£300k MRR') }));
+  });
+});
+
+describe('R7 class boundaries: whole numbers, canonical currency, and uncarried figures', () => {
+  it('R7-C-DECIMAL-BEFORE-DATE launch and deadline stay together around the decimal budget', async () => {
+    const candidate = { ...budgetCandidate(200500), goal: eventCandidate('app launch', 'the app').goal };
+    await expectNoNumberDisclosure(candidate, 'Launch the app on a budget of £200.5k by April');
+  });
+
+  it('R7-C-VERSION a digit-dot-digit inside the app name is never a sentence boundary', async () => {
+    await expectNoNumberDisclosure(eventCandidate('v2.1 app launch', 'the v2.1 app'), 'Launch the v2.1 app by April');
+  });
+
+  it('R7-C-PLAIN-MRR a secondary quantity with no currency remains disclosed', async () => {
+    await expectNumberDisclosure(eventCandidate(), 'Launch by April and reach 300k MRR by April', '300k MRR');
+  });
+
+  it('R7-C-UNCARRIED-TIME an unheld decimal team duration remains one disclosed amount', async () => {
+    await expectNumberDisclosure(eventCandidate(), 'Launch by April. It takes 6.5 months.', '6.5 months');
+  });
+
+  it.each([
+    ['Between 4 and 6 months.', 4, 6],
+    ['6.5 months.', 6.5, 6.5],
+  ] as const)('R7-C-HELD-TIME a canonical team-time write carries every matching duration endpoint: %s', async (words, low, high) => {
+    const { admitted } = await expectEvent(eventCandidate(), 'Launch by April');
+    const dated = withEventShareDate(admitted, '2027-04-30', '2026-10-01');
+    const written = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team',
+      low_months: low, high_months: high, deadline: '2027-04-30', reference_date: '2026-10-01' },
+    computeAnalysisAffectingGraphHash(dated as never)!);
+    expect(written.kind).toBe('mutated');
+    if (written.kind !== 'mutated') throw new Error('Canonical team-time write failed');
+    const held = withEventNumberLoss(written.mutatedGraph as ReturnType<typeof admitCandidateModel>, `Launch by April. ${words}`);
+    expect(numberLosses(held)).toEqual([]);
+  });
+
+  it('R7-C-COMPUTED-SHARE a computed completion percentage cannot carry a stated headcount', async () => {
+    const { admitted } = await expectEvent(eventCandidate(), 'Launch by April');
+    const dated = withEventShareDate(admitted, '2027-04-30', '2026-10-01');
+    const written = applyTeamShareEdit(dated, { goal_id: 'event_goal', team_id: 'event_team',
+      low_months: 4, high_months: 6, deadline: '2027-04-30', reference_date: '2026-10-01' },
+    computeAnalysisAffectingGraphHash(dated as never)!);
+    expect(written.kind).toBe('mutated');
+    if (written.kind !== 'mutated') throw new Error('Canonical team-time write failed');
+    const computed = written.mutatedGraph.nodes.find((node: Rec) => node.id === 'event_team').observed_state.raw_value;
+    expect(computed).toBeGreaterThan(0);
+    const quote = `${computed} engineers`;
+    const checked = withEventNumberLoss(written.mutatedGraph as ReturnType<typeof admitCandidateModel>, `Launch by April. We have ${quote}.`);
+    expect(numberLosses(checked).map(loss => loss.reason)).toEqual([numberLossSentence(quote)]);
+  });
+
+  it('R7-C-LOSS-IDEMPOTENT recomputing amount loss replaces existing disclosures without duplicates', () => {
+    const brief = 'Launch by April and reach 300k MRR by April';
+    const first = admitCandidateModel(eventCandidate(), {}, brief);
+    const second = withEventNumberLoss(first, brief);
+    expect(second).toEqual(first);
+    expect(withEventNumberLoss(second, brief)).toEqual(first);
+    expect(numberLosses(second).map(loss => loss.reason)).toEqual([numberLossSentence('300k MRR')]);
+  });
+
+  it('R7-C-SAME-AMOUNT a carried budget cannot hide an equal secondary quantity', async () => {
+    await expectNumberDisclosure(budgetCandidate(),
+      'Launch by April on a budget of £200k and reach £200k MRR by April', '£200k MRR');
+  });
+
+  it.each(['MRR', 'ARR'])('R7-C-UNNAMED-RATE a total Budget limit cannot carry the only stated %s figure', async metric => {
+    await expectNumberDisclosure(budgetCandidate(), `Launch by April and reach £200k ${metric} by April`, `£200k ${metric}`);
+  });
+
+  it('R7-C-MULTIPLE each uncarried figure has its own plain sentence in loss and not_represented', async () => {
+    await expectNumberDisclosure(eventCandidate(),
+      'Launch by April. We have 3 engineers and 2 designers. Reach 300k MRR by April.',
+      '3 engineers', '2 designers', '300k MRR');
+  });
+
+  it('R7-C-CAPACITY-SWITCH a generated zero switch cannot carry a stated zero headcount', async () => {
+    const candidate: CandidateModel = { ...eventCandidate(), options: [
+      ...eventCandidate().options,
+      { label: 'Hire engineers', provenance: 'ai_proposed', added_capacity: {
+        monthly_share_pct: 10, lead_months_low: 1, lead_months_high: 2,
+      } },
+    ] };
+    await expectNumberDisclosure(candidate, 'Launch by April. We have 0 engineers.', '0 engineers');
+  });
+
+  it.each([
+    'Launch by April.\n\n3 engineers.',
+    'Launch by April \n3 engineers.',
+  ])('R7-C-NEWLINE a stated figure span starts at the number after a newline: %s', async brief => {
+    await expectNumberDisclosure(eventCandidate(), brief, '3 engineers');
+  });
+
+  it('R7-C-INTERVENTION a retained factor and its actual option level carry both stated amounts', async () => {
+    const candidate: CandidateModel = { ...eventCandidate(), options: [
+      ...eventCandidate().options,
+      { label: 'Increase hiring cost', provenance: 'explicit', interventions: [
+        { factor_label: 'Hiring cost', value: 200000, unit: 'GBP', provenance: 'explicit' },
+      ] },
+    ], factors: [
+      { label: 'Hiring cost', role: 'controllable', baseline_known: true, baseline_value: 100000,
+        unit: 'GBP', provenance: 'explicit', plausible_max: 300000 },
+    ] };
+    const brief = 'Launch by April. Hiring cost is £100k; Increase hiring cost to £200k.';
+    const { admitted, graph, result } = await expectEvent(candidate, brief);
+    for (const model of [admitted, graph]) {
+      const factor = model.nodes.find((node: Rec) => node.label === 'Hiring cost');
+      expect(factor.observed_state).toMatchObject({ raw_value: 100000, unit: 'GBP' });
+      expect(model.nodes.find((node: Rec) => node.id === 'event_option_2').interventions[factor.id])
+        .toMatchObject({ raw_value: 200000, unit: 'GBP' });
+    }
+    expect(numberLosses(admitted)).toEqual([]);
+    expect((result.not_represented ?? []).some((reason: string) => reason.startsWith('Your brief also says "'))).toBe(false);
+  });
+
+  it.each([
+    'Launch by 30 April 2027. We have 3 engineers.',
+    'Launch by 2027-04-30. We have 3 engineers.',
+    'Launch within 6 months. We have 3 engineers.',
+  ])('R7-C-DATE a numeric deadline is exempt while the uncarried team figure is disclosed: %s', async brief => {
+    await expectNumberDisclosure(eventCandidate(), brief, '3 engineers');
+  });
+
+  it('R7-C-FACTOR-SCALE a model-held normalized monetary factor is carried at its unit scale', async () => {
+    const candidate: CandidateModel = { ...eventCandidate(), factors: [
+      { label: 'Hiring cost', role: 'observable', baseline_known: true, baseline_value: 100,
+        unit: '£k', provenance: 'explicit', plausible_max: 200 },
+    ] };
+    const { admitted, graph, result } = await expectEvent(candidate, 'Launch by April. Hiring cost is £100k.');
+    for (const model of [admitted, graph]) {
+      expect(model.nodes).toContainEqual(expect.objectContaining({ label: 'Hiring cost',
+        observed_state: expect.objectContaining({ value: 0.5, raw_value: 100, unit: '£k' }) }));
+    }
+    expect(numberLosses(admitted)).toEqual([]);
+    expect(result.not_represented ?? []).not.toContain(numberLossSentence('£100k'));
   });
 });
 
@@ -123,23 +261,35 @@ async function expectEvent(candidate: CandidateModel, brief: string): Promise<{ 
   return { admitted, graph: graph!, result };
 }
 
-async function expectMoneyDisclosure(candidate: CandidateModel, brief: string): Promise<void> {
+const numberLossSentence = (quote: string): string =>
+  `Your brief also says "${quote}"; this deadline forecast doesn't model it yet.`;
+const numberLosses = (model: Rec): Rec[] => model.loss.filter((loss: Rec) =>
+  loss.field_path.endsWith('event_forecast_not_modelled') && loss.reason.startsWith('Your brief also says "'));
+async function expectNumberDisclosure(candidate: CandidateModel, brief: string, ...quotes: string[]): Promise<void> {
   const { admitted, result } = await expectEvent(candidate, brief);
-  expect(admitted.loss).toContainEqual(expect.objectContaining({
-    field_path: 'brief.event_forecast_not_modelled', before: brief, after: null,
-    reason: expect.stringContaining(brief),
-  }));
-  expect(result.not_represented).toContainEqual(expect.stringContaining(brief));
-  expect(result.not_represented).toContainEqual(expect.stringContaining('not modelled by this forecast'));
+  expect(numberLosses(admitted).map(loss => loss.reason)).toEqual(quotes.map(numberLossSentence));
+  for (const quote of quotes) {
+    expect(admitted.loss).toContainEqual(expect.objectContaining({
+      field_path: expect.stringMatching(/event_forecast_not_modelled$/), before: quote, after: null,
+      reason: numberLossSentence(quote),
+    }));
+    expect(result.not_represented).toContain(numberLossSentence(quote));
+  }
+  expect(numberLosses(admitted).some(loss => /\b(?:best|winner|recommend)\b/i.test(loss.reason))).toBe(false);
+}
+async function expectNoNumberDisclosure(candidate: CandidateModel, brief: string): Promise<void> {
+  const { admitted, result } = await expectEvent(candidate, brief);
+  expect(numberLosses(admitted)).toEqual([]);
+  expect((result.not_represented ?? []).some((reason: string) => reason.startsWith('Your brief also says "'))).toBe(false);
 }
 
-describe('R6 class rule: event briefs retain context and monetary objectives have words', () => {
+describe('R6 class rule: event briefs retain context and uncarried figures have words', () => {
   it('R6-C-BUDGET Launch by April on a budget of £200k', async () => {
-    await expectMoneyDisclosure(budgetCandidate(), 'Launch by April on a budget of £200k');
+    await expectNoNumberDisclosure(budgetCandidate(), 'Launch by April on a budget of £200k');
   });
 
   it('R6-C-ENGINEERS Launch by April. We have 3 engineers.', async () => {
-    await expectEvent(eventCandidate(), 'Launch by April. We have 3 engineers.');
+    await expectNumberDisclosure(eventCandidate(), 'Launch by April. We have 3 engineers.', '3 engineers');
   });
 
   it('R6-C-HIRING Launch by April. Hiring cost is £100k.', async () => {
@@ -147,16 +297,18 @@ describe('R6 class rule: event briefs retain context and monetary objectives hav
       { label: 'Hiring cost', role: 'observable', baseline_known: true, baseline_value: 100000,
         unit: 'GBP', provenance: 'explicit', plausible_max: 200000 },
     ] };
-    const { admitted, graph } = await expectEvent(candidate, 'Launch by April. Hiring cost is £100k.');
+    const { admitted, graph, result } = await expectEvent(candidate, 'Launch by April. Hiring cost is £100k.');
     for (const model of [admitted, graph]) {
       expect(model.nodes).toContainEqual(expect.objectContaining({ label: 'Hiring cost',
         observed_state: expect.objectContaining({ raw_value: 100000, unit: 'GBP' }) }));
     }
+    expect(numberLosses(admitted)).toEqual([]);
+    expect(result.not_represented ?? []).not.toContain(numberLossSentence('£100k'));
   });
 
   it.each(['sales', 'marketing'])('R6-C-CAMPAIGN Launch the %s campaign by April on a budget of £200k', async kind => {
     const candidate = { ...budgetCandidate(), goal: eventCandidate(`${kind} campaign launch`, `the ${kind} campaign`).goal };
-    await expectMoneyDisclosure(candidate, `Launch the ${kind} campaign by April on a budget of £200k`);
+    await expectNoNumberDisclosure(candidate, `Launch the ${kind} campaign by April on a budget of £200k`);
   });
 
   it('R6-C-APP We are launching the app by April', async () => {
@@ -164,7 +316,7 @@ describe('R6 class rule: event briefs retain context and monetary objectives hav
   });
 
   it('R6-C-NO-DRAFTED-LIMIT money absent from the candidate still has words', async () => {
-    await expectMoneyDisclosure(eventCandidate(), 'Launch by April on a budget of £200k');
+    await expectNumberDisclosure(eventCandidate(), 'Launch by April on a budget of £200k', '£200k');
   });
 
   it.each([
@@ -173,6 +325,10 @@ describe('R6 class rule: event briefs retain context and monetary objectives hav
     ['£', 'Launch by April on a budget of £200k'],
     ['pounds', 'Ensure the launch budget is £200k by April'],
     ['pounds a month', 'Ensure the launch budget is £200k by April'],
+    ['GBP million', 'Ensure the launch budget is £200k by April'],
+    ['EUR million', 'Ensure the launch budget is £200k by April'],
+    ['£k', 'Ensure the launch budget is £200k by April'],
+    ['USD', 'Ensure the launch budget is £200k by April'],
   ])('R6-C-CURRENCY null target with %s takes normal quantity admission: %s', async (unit, brief) => {
     const candidate = brief.startsWith('Launch by') ? eventCandidate() : eventCandidate('launch budget', 'the launch budget');
     candidate.goal.unit = unit;
@@ -211,27 +367,27 @@ describe('R6 class rule: event briefs retain context and monetary objectives hav
   });
 
   it.each([
-    'Launch by April and reach 300k GBP MRR by April',
-    'Launch by April and reach GBP 300k MRR by April',
-    'Launch by April and reach 300k pounds MRR by April',
-    'Launch by April and reach 300k dollars MRR by April',
-    'Launch by April and reach 300k euros MRR by April',
-  ])('R6-C-CURRENCY-WORDS money in any position has words: %s', async brief => {
-    await expectMoneyDisclosure(eventCandidate(), brief);
+    ['Launch by April and reach 300k GBP MRR by April', '300k GBP MRR'],
+    ['Launch by April and reach GBP 300k MRR by April', 'GBP 300k MRR'],
+    ['Launch by April and reach 300k pounds MRR by April', '300k pounds MRR'],
+    ['Launch by April and reach 300k dollars MRR by April', '300k dollars MRR'],
+    ['Launch by April and reach 300k euros MRR by April', '300k euros MRR'],
+  ])('R6-C-CURRENCY-WORDS money in any position has words: %s', async (brief, quote) => {
+    await expectNumberDisclosure(eventCandidate(), brief, quote);
   });
 
   // These r5 noun guards are re-pinned: null target + noncurrency is an event when its words/date attest.
   it.each([
-    ['revenue', 'revenue', '% of revenue', 'Deliver revenue within £200k of our target by April'],
-    ['launch budget', 'the launch budget', '% of the launch budget', 'Ensure the launch budget is £200k by April'],
-    ['launch', 'the launch budget', '% of the launch budget', 'Ensure the launch budget is £200k by April'],
-    ['cost', 'the cost', '% of the cost', 'Deliver the cost within £200k by April'],
-    ['spend', 'the spend', '% of the spend', 'Deliver the spend within £200k by April'],
-    ['MRR', 'MRR', '% of MRR', 'Deliver MRR within £200k of our target by April'],
-  ])('R6-C-NULL-NONCURRENCY %s / %s / %s admits event and discloses money', async (metric, deliverable, unit, brief) => {
+    ['revenue', 'revenue', '% of revenue', 'Deliver revenue within £200k of our target by April', '£200k of our target'],
+    ['launch budget', 'the launch budget', '% of the launch budget', 'Ensure the launch budget is £200k by April', '£200k'],
+    ['launch', 'the launch budget', '% of the launch budget', 'Ensure the launch budget is £200k by April', '£200k'],
+    ['cost', 'the cost', '% of the cost', 'Deliver the cost within £200k by April', '£200k'],
+    ['spend', 'the spend', '% of the spend', 'Deliver the spend within £200k by April', '£200k'],
+    ['MRR', 'MRR', '% of MRR', 'Deliver MRR within £200k of our target by April', '£200k of our target'],
+  ])('R6-C-NULL-NONCURRENCY %s / %s / %s admits event and discloses money', async (metric, deliverable, unit, brief, quote) => {
     const candidate = eventCandidate(metric, deliverable);
     candidate.goal.unit = unit;
-    await expectMoneyDisclosure(candidate, brief);
+    await expectNumberDisclosure(candidate, brief, quote);
   });
 
   it.each([
@@ -242,7 +398,7 @@ describe('R6 class rule: event briefs retain context and monetary objectives hav
   ] as const)('R6-C-MIXED-MRR %s budget at %s with %s separator preserves objective in loss', async (amount, value, separator) => {
     const candidate = budgetCandidate(value);
     const brief = `Launch by April on a budget of ${amount}${separator}reach £300k MRR by April`;
-    await expectMoneyDisclosure(candidate, brief);
+    await expectNumberDisclosure(candidate, brief, '£300k MRR');
   });
 
   it('R5-C2-DECIMAL-LIMIT a decimal contextual budget remains one amount through admission and build', async () => {
@@ -259,6 +415,8 @@ describe('R6 class rule: event briefs retain context and monetary objectives hav
     expect(graph?.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({ threshold_source: 'definitional' });
     expect(graph?.goal_constraints).toContainEqual(expect.objectContaining({ value: 200500, unit: 'GBP' }));
     expect(graph?.nodes.some((n: Rec) => n.id === graph.goal_constraints[0]!.node_id)).toBe(true);
+    expect(numberLosses(admitted)).toEqual([]);
+    expect(result.not_represented ?? []).not.toContain(numberLossSentence('£200.5k'));
   });
 
   it.each([
@@ -271,6 +429,6 @@ describe('R6 class rule: event briefs retain context and monetary objectives hav
   ] as const)('R6-C-MIXED-TOLERANCE %s budget at %s discloses revenue against %s target', async (amount, value, targetOwner) => {
     const candidate = budgetCandidate(value);
     const brief = `Launch by April on a budget of ${amount} and deliver revenue within £300k of ${targetOwner} target by April`;
-    await expectMoneyDisclosure(candidate, brief);
+    await expectNumberDisclosure(candidate, brief, `£300k of ${targetOwner} target`);
   });
 });

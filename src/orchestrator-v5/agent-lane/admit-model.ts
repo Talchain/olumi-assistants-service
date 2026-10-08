@@ -68,7 +68,7 @@ import {
   type AdmittedConstraint,
 } from './admit-constraint.js';
 
-import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate } from '../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss } from '../goal-target/event-by-date-model.js';
 
 const MAX_ID = 100;
 
@@ -3050,11 +3050,11 @@ export function admitCandidateModel(
     candidateModel = { ...candidateModel, goal: { ...candidateModel.goal, kind: null } };
   }
   if (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal)) {
-    const event = admitEventByDate(candidateModel, brief);
+    const event = admitEventByDate(candidateModel);
     const hasContext = candidateModel.constraints.length + candidateModel.factors.length + candidateModel.risks.length
       + candidateModel.outcomes.length + candidateModel.links.length + (candidateModel.identities?.length ?? 0) > 0
       || candidateModel.options.some(o => (o.interventions?.length ?? 0) + (o.changes?.length ?? 0) > 0);
-    if (!hasContext) return event;
+    if (!hasContext) return withEventNumberLoss(event, brief ?? '');
     // Limits can name a quantity even when no causal factor was drafted for it. Keep that named quantity, without a
     // fabricated current value, and let the established constraint/scale admitters carry its limit and option settings.
     const named = new Set([...candidateModel.factors, ...candidateModel.risks, ...candidateModel.outcomes].map(n => canonicalLabel(n.label)));
@@ -3064,7 +3064,7 @@ export function admitCandidateModel(
         unit: c.unit ?? null, provenance: c.provenance }));
     const context = admitOnce(withQuantityFrames({ ...candidateModel, factors: [...candidateModel.factors, ...limitFactors] }),
       widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
-    return carryEventReasoningContext(event, context, candidateModel);
+    return withEventNumberLoss(carryEventReasoningContext(event, context, candidateModel), brief ?? '');
   }
   if (candidateModel.goal.kind === 'event_by_date' && candidateModel.factors.length === 0 && candidateModel.risks.length === 0
     && candidateModel.outcomes.length === 0 && candidateModel.links.length === 0) throw new Error('event_goal_needs_redraft');
