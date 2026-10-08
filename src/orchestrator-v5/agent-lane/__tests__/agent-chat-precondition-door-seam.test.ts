@@ -221,7 +221,9 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     const { assessCanonicalAnalysisReadiness } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
     const readinessBefore = assessCanonicalAnalysisReadiness(before);
     const { response, approve } = await offer(preconditionArgs());
-    expect(approve.detail).toContain(DISCLOSURE);
+    expect(approve.detail).toBe(DISCLOSURE);
+    expect(response.assistant_text, 'the disclosure is never left to narration').toContain(DISCLOSURE);
+    expect(openAiCalls, 'only the scripted proposal call, no narration call').toBe(1);
     const card = response._proposal_fields!.proposals.find((p) => p.approve_action.id === approve.id)!;
     expect(card.approve_action.detail).toBe(approve.detail);
     expect(card.missing).toEqual([]);
@@ -349,17 +351,27 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
   }, 120_000);
 
-  it('chat-precondition-likelihood: user occurrence survives with the host stamp and zero edges for future option-conditional support', async () => {
+  it.each([
+    ["I'd put it at 10–30% within 6 months."],
+    ['If it slips, MRR will be lower by 10% within 6 months.'],
+  ])('chat-precondition-likelihood: a precondition stores no occurrence and claims none (%s)', async (extra) => {
     seed();
-    const event = { version: 1, occurrence: { p_low: 0.1, p_high: 0.3, basis: 'user', meaning: 'at_least_once_within_horizon' }, horizon: { months: 6 } };
-    const { result, approve } = await offer(preconditionArgs(), `${P44_MESSAGE} I'd put it at 10–30% within 6 months.`);
-    expect(approve.detail).toContain(DISCLOSURE);
-    expect(approve.detail).toContain('It may happen: about 10–30% within 6 months, as you said.');
-    expect((result.risk as Record<string, unknown>).likelihood).toMatchObject({ p_low_pct: 10, p_high_pct: 30, horizon_months: 6, basis: 'user' });
+    const { response, approve } = await offer(preconditionArgs(), `${P44_MESSAGE} ${extra}`);
+    expect(approve.detail).toBe(DISCLOSURE);
+    expect(`${approve.detail}\n${response.assistant_text}`).not.toMatch(/may happen|likelihood|10%|10–30%/);
     await approveOffer(approve);
     expect(riskNow().relies_on).toEqual({ option_id: OPTION_ID });
-    expect(riskNow().event_risk).toEqual(event);
+    expect(riskNow().event_risk).toBeUndefined();
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
+  }, 120_000);
+
+  it.each(['Office flood while away', 'Shoulder injury'])('chat-precondition-filler-words: %s cannot pass the sanity gate through a function word', async (riskLabel) => {
+    seed();
+    const { approve } = await offer({ ...ordinaryArgs(riskLabel), relies_on_option: OPTION_LABEL }, `Add a risk: ${riskLabel} lowers MRR.`);
+    expect(approve.detail).not.toContain('relies on this not happening');
+    await approveOffer(approve);
+    expect(riskNow(riskLabel).relies_on).toBeUndefined();
+    expect(graphNow().edges.some((e) => e.from === riskNow(riskLabel).id && e.to === 'mrr')).toBe(true);
   }, 120_000);
 
   it('chat-precondition-invalid-conflicting-links: accepted option lease drops unresolvable model links before ordinary link validation', async () => {
@@ -384,18 +396,31 @@ describe('chat precondition — real /agent/v1/turn door', () => {
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
   }, 120_000);
 
-  it('chat-precondition-deterministic-likelihood-and-price: user £59 and occurrence carriers compose together in one proposal call', async () => {
+  it('chat-precondition-deterministic-price: the user’s £59 is carried by the option label in one proposal call', async () => {
     seed();
-    const message = "Add a risk: Feature release slips. The rise to £59 relies on the next Pro feature release. I'd put the slips at 10–30% within 6 months.";
+    const message = 'Add a risk: Feature release slips. The rise to £59 relies on the next Pro feature release.';
     const { response, approve } = await offer({ ...preconditionArgs(), whole_request: true }, message);
-    expect(openAiCalls, '£59 in the option label and likelihood both covered without narration').toBe(1);
+    expect(openAiCalls, '£59 in the option label is covered without narration').toBe(1);
     expect(response.assistant_text).toContain(DISCLOSURE);
-    expect(response.assistant_text).toContain('10–30% within 6 months');
-    expect(response.assistant_text).toContain('The likelihood you stated is kept for when the model can apply the risk to that option.');
     await approveOffer(approve);
     expect(riskNow().relies_on).toEqual({ option_id: OPTION_ID });
-    expect(riskNow().event_risk).toEqual({ version: 1, occurrence: { p_low: 0.1, p_high: 0.3, basis: 'user', meaning: 'at_least_once_within_horizon' }, horizon: { months: 6 } });
     expect(graphNow().edges.filter((e) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
+  }, 120_000);
+
+  it('chat-precondition-raw-stamp-arg: a model-authored relies_on on the exposed tool is ignored', async () => {
+    seed();
+    const { approve } = await offer({ ...ordinaryArgs(), relies_on: { option_id: OPTION_ID } });
+    expect(approve.detail).not.toContain('relies on this not happening');
+    await approveOffer(approve);
+    expect(riskNow().relies_on).toBeUndefined();
+    expect(graphNow().edges.some((e) => e.from === RISK_ID && e.to === 'mrr')).toBe(true);
+  }, 120_000);
+
+  it('chat-precondition-empty-lease: an empty lease with no affects keeps today\'s no_affects refusal before any read', async () => {
+    seed();
+    script = [() => fnCall('propose_new_risk', { rationale: 'x', label: RISK_LABEL, relies_on_option: '  ', affects: [], caused_by: [] }), () => say('Nothing changed.')];
+    const response = await turn({ message: P44_MESSAGE });
+    expect(response._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'propose_new_risk', ok: false, refusal: 'no_affects' }));
   }, 120_000);
 
   it('chat-precondition-model-cannot-author: invented generic writer denied; existing field-safety still rejects model-authored node stamp', async () => {

@@ -6,24 +6,37 @@ import type { ReliesOnRisk } from './relies-on-risk.js';
 type Node = StatusQuoNodeLike & { readonly label: string; readonly description?: string };
 type Graph = { readonly nodes: readonly Node[]; readonly edges: readonly GraphEdgeLike[] };
 const labelKey = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
+// Function words never corroborate, on EITHER side (Codex #2823 r1: "while" in the brief, "should" in the decision).
 const FILLER_WORDS = new Set([
-  'about', 'also', 'because', 'been', 'being', 'could', 'does', 'each', 'from', 'have', 'into',
-  'just', 'might', 'next', 'only', 'other', 'risk', 'risks', 'should', 'some', 'that', 'their',
-  'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'when', 'where', 'which',
-  'will', 'with', 'would', 'your', 'happen', 'happens', 'happened', 'happening',
+  'about', 'above', 'after', 'again', 'against', 'also', 'although', 'among', 'another', 'because', 'been', 'before',
+  'being', 'below', 'between', 'both', 'could', 'does', 'doing', 'down', 'during', 'each', 'either', 'else', 'even',
+  'ever', 'every', 'from', 'further', 'have', 'having', 'here', 'however', 'into', 'just', 'least', 'less', 'like',
+  'made', 'make', 'many', 'might', 'more', 'most', 'much', 'must', 'near', 'need', 'neither', 'never', 'next', 'none',
+  'only', 'other', 'otherwise', 'over', 'perhaps', 'quite', 'rather', 'really', 'same', 'shall', 'should', 'since',
+  'some', 'such', 'than', 'that', 'their', 'theirs', 'them', 'then', 'there', 'therefore', 'these', 'they', 'this',
+  'those', 'though', 'through', 'thus', 'till', 'under', 'unless', 'until', 'upon', 'very', 'what', 'whatever',
+  'when', 'whenever', 'where', 'whether', 'which', 'while', 'whilst', 'whom', 'whose', 'will', 'with', 'within',
+  'without', 'would', 'your', 'yours', 'risk', 'risks', 'happen', 'happens', 'happened', 'happening',
 ]);
-const wordsOf = (text: string): string[] => text.toLowerCase().match(/[\p{L}]+/gu) ?? [];
+const letters = (word: string): number => Array.from(word).length;
+const contentWordsOf = (text: string): string[] => (text.toLowerCase().match(/[\p{L}]+/gu) ?? [])
+  .filter((word) => letters(word) >= 4 && !FILLER_WORDS.has(word));
+/** Same word, one an inflection of the other ("slip"/"slips"), or a shared stem of at least five letters. */
+const sameStem = (a: string, b: string): boolean => {
+  const [x, y] = [Array.from(a), Array.from(b)];
+  let shared = 0;
+  while (shared < x.length && shared < y.length && x[shared] === y[shared]) shared += 1;
+  return shared === Math.min(x.length, y.length) || shared >= 5;
+};
 
 /**
- * A bounded sanity gate, not a causal inference: one content word of at least four letters shares its first
- * four letters with the option, decision or STORED brief. User approval of the disclosed card is the safeguard.
+ * A bounded sanity gate, not a causal inference: one content word of the risk label shares a stem with a content
+ * word of the option, decision or STORED brief. User approval of the disclosed card is the safeguard.
  * Neither the current risk request nor the model's rationale can provide this contextual corroboration.
  */
 export function chatRiskPreconditionMatches(riskLabel: string, optionLabel: string, decisionText: string, briefText: string): boolean {
-  const riskWords = wordsOf(riskLabel).filter((word) => word.length >= 4 && !FILLER_WORDS.has(word));
-  const contextPrefixes = new Set(wordsOf(`${optionLabel}\n${decisionText}\n${briefText}`)
-    .filter((word) => word.length >= 4).map((word) => word.slice(0, 4)));
-  return riskWords.some((word) => contextPrefixes.has(word.slice(0, 4)));
+  const context = contentWordsOf(`${optionLabel}\n${decisionText}\n${briefText}`);
+  return contentWordsOf(riskLabel).some((word) => context.some((other) => sameStem(word, other)));
 }
 
 /** No id, description, fuzzy or baseline lookup: an invalid lease simply leaves today's risk path available. */

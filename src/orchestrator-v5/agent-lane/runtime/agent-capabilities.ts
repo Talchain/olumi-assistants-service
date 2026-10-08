@@ -8265,8 +8265,9 @@ export function createAgentCapabilities(
       if (ctx.widen_relies_on !== undefined && (widenPrecondition === undefined || requestedAffects.length !== 0 || requestedCauses.length !== 0)) {
         return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'Nothing was prepared: this option precondition must have no links.' };
       }
-      // Preserve the ordinary no-affects refusal without a read. A proposed chat lease needs the canonical read first.
-      if (requestedAffects.length === 0 && widenPrecondition === undefined && args?.relies_on_option === undefined) {
+      // Preserve the ordinary no-affects refusal without a read. Only a non-empty chat lease needs the canonical read first.
+      const chatLease = typeof args?.relies_on_option === 'string' && args.relies_on_option.trim() !== '' ? args.relies_on_option : undefined;
+      if (requestedAffects.length === 0 && widenPrecondition === undefined && chatLease === undefined) {
         return { ok: false, mutated: false, refusal: 'no_affects',
           detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
       }
@@ -8274,7 +8275,7 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // A model label is only a lease: the HOST mints the stamp, through exactly the existing widen hold path.
       // Invalid/unrelated/ambiguous/baseline labels are ignored; their ordinary links are left intact.
-      const precondition = widenPrecondition ?? chatRiskPreconditionFor(args?.relies_on_option, label, g, g.brief_text);
+      const precondition = widenPrecondition ?? chatRiskPreconditionFor(chatLease, label, g, g.brief_text);
       const affects = precondition === undefined ? requestedAffects : [];
       const causedBy = precondition === undefined ? requestedCauses : [];
       if (affects.length === 0 && precondition === undefined) {
@@ -8317,8 +8318,8 @@ export function createAgentCapabilities(
       }
       // Only the user's turn may author the likelihood or name its drivers.
       const userText = ctx.user_turn_text ?? ctx.user_text ?? '';
-      // The held/apply guards permit occurrence plus an option-bound zero-link precondition. Keep the user's likelihood.
-      const stated = readStatedEventRisk(userText);
+      // A precondition carries no occurrence: the reader can mistake an impact ("cut MRR by 10% within 6 months") for a likelihood (Codex #2823 r1).
+      const stated = precondition === undefined ? readStatedEventRisk(userText) : undefined;
       const driverLabels = stated === undefined ? [] : causedBy.map((c) => {
         const asked = String(c?.factor_label ?? '');
         const resolved = resolveNamed(g, asked, (node) => node.kind === 'factor');
@@ -8416,7 +8417,6 @@ export function createAgentCapabilities(
         note: precondition !== undefined
           ? `Nothing has changed yet. This risk is kept without links because it is a precondition of ‘${preconditionOption!.label}’. `
           + "The Run leaves it out because it cannot yet apply the risk to that option alone; that option's chance does not include it yet. Nothing is added until you approve it."
-          + (eventRisk === undefined ? '' : ' The likelihood you stated is kept for when the model can apply the risk to that option.')
           : 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
           + (stated !== undefined && riskCauses.length > 0 ? ' ' + HELD_RISK_CAUSE_NOTE : '')

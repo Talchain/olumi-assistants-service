@@ -167,12 +167,10 @@ function newRiskReply(r: Rec): string | null {
   if (risk.relies_on !== undefined) {
     if (precondition === undefined || !nonEmpty(precondition.option_id) || !nonEmpty(precondition.option_label)
       || threatens === null || threatens.length !== 0 || drivenBy === null || drivenBy.length !== 0
-      || (risk.links_dropped !== undefined && risk.links_dropped !== true)) return null;
+      || (risk.links_dropped !== undefined && risk.links_dropped !== true) || risk.likelihood !== undefined) return null;
     return reply(subject, [
       reliesOnRiskLine(risk.label, precondition.option_label),
       ...(risk.links_dropped === true ? [`It is kept without links because it is a precondition of ${q(precondition.option_label)}.`] : []),
-      ...likelihoodLines,
-      ...(likelihood === undefined ? [] : ['The likelihood you stated is kept for when the model can apply the risk to that option.']),
     ], question(r.public_label));
   }
   if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
@@ -434,7 +432,9 @@ export function userFiguresTheCallLeaves(args: unknown, userMessage: string): st
 
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
-  if (recordOf(args)?.whole_request !== true) return null;
+  // RC3 (a′): a precondition's disclosure is never left to narration (Codex #2823 r1), so it composes without that word.
+  const precondition = tool === 'propose_new_risk' && recordOf(recordOf(recordOf(result)?.risk)?.relies_on) !== undefined;
+  if (recordOf(args)?.whole_request !== true && !precondition) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
   return composeRecoveredProposalReply(tool, args, result, userMessage);
 }

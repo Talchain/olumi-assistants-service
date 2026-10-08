@@ -52,7 +52,7 @@ A user-stated, valid likelihood **with its time horizon** is retained as `event_
 | `src/orchestrator-v5/agent-lane/__tests__/agent-chat-precondition-door-seam.test.ts` **new** | RED-first requested real-door rows and targeted authority, conflicting-link, likelihood, deterministic-reply and ordinary-driver controls. |
 | `src/orchestrator-v5/agent-lane/__tests__/fixtures/chat-precondition/p44-r5-graph-after.json` **new** | Exact supplied P44 graph envelope, including stored brief. |
 | `src/orchestrator-v5/agent-lane/__tests__/fixtures/chat-precondition/p44-r5-add-risk.turns.json` **new** | Exact supplied served turns for the existing card control. |
-| `scripts/chat-precondition-mutants.mjs` **new** | Isolated requested mutants with load gating, baseline checks, relevant assertion failures and paired controls. |
+| (mutant runner) | Not committed; kept in the lane evidence folder. Hand mutants recorded in the r1 section. |
 | `acceptance-evidence/chat-precondition/REPORT.md` **new** | This restartable report. |
 
 `agent-v1-turn.ts`, `widen-turn.ts`, schemas, generic field safety, Run projection and option-chance disclosure code were not changed. The canonical graph endpoint already returns stored `brief_text`, so no route change or additional store read is needed.
@@ -79,7 +79,7 @@ The Run-input row uses the production snapshot loader and final `createRunAnalys
 
 ## Mutants — execution pending
 
-`node scripts/chat-precondition-mutants.mjs` copies the current working tree into isolated temporary directories, links dependencies and never edits workspace production files. It checks load before tests, runs one Vitest worker with ignored stdin, and writes source hashes, commands, logs and JSON assertion results to its evidence directory.
+`chat-precondition-mutants.mjs` (kept in the lane evidence folder, not committed) copies the current working tree into isolated temporary directories, links dependencies and never edits workspace production files. It checks load before tests, runs one Vitest worker with ignored stdin, and writes source hashes, commands, logs and JSON assertion results to its evidence directory.
 
 | Mutant | Required failed row | Required passing control |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ pnpm exec vitest run --configLoader=runner --maxWorkers=1 --no-file-parallelism 
 The mutant runner performs its own load checks and baseline run:
 
 ```sh
-node scripts/chat-precondition-mutants.mjs --output-dir /private/tmp/chat-precondition-mutant-evidence </dev/null
+node <lane-evidence>/chat-precondition-mutants.mjs --output-dir /private/tmp/chat-precondition-mutant-evidence </dev/null
 ```
 
 After a fresh successful load gate, production typechecking can run without generation or build side effects:
@@ -118,3 +118,11 @@ pnpm exec tsc -p tsconfig.build.json --noEmit </dev/null
 ```
 
 No deployment or served-product fix is claimed by this working-tree implementation.
+
+## r1 (author, after Codex review r1 at e17cf545, VERDICT FAIL: 2 P1, 4 P2) — supersedes the sections above where they differ
+- **Gate (P1):** function words are excluded on BOTH sides; letters are counted per code point; words match only if equal, one an inflection of the other, or sharing a ≥5-letter stem. Rows `filler-words` (Office flood while away; Shoulder injury) are RED at e17cf545 and GREEN now.
+- **Likelihood (P1):** a precondition carries NO occurrence. `readStatedEventRisk` reads an impact ("lower by 10% within 6 months") as a 10% likelihood. That is a pre-existing served defect on the ordinary path too, routed separately. Rows `likelihood` ×2 are RED at e17cf545 and GREEN now. The "likelihood kept" behaviour described above is withdrawn.
+- **Narration (P2):** a precondition result always composes the Science reply deterministically (no `whole_request` needed). The p44 row asserts the exact card detail, the reply carrying the disclosure, and 1 LLM call.
+- **Rows (P2):** `raw-stamp-arg` drives the exposed `propose_new_risk` with a raw `relies_on` and expects no stamp. `empty-lease` keeps `no_affects` before any read.
+- **Mutants (P2):** the runner script is not committed (no repo convention). Hand mutants on committed e17cf545: gate always true → only `unrelated` RED; stamp skipped → `p44-r5` + 5 lease rows RED, with paired controls GREEN.
+- 22/22 seam rows. Neighbours: widen-risks-seam + agent-event-risk-door-seam 37/37; proposal-reply-new-risk 6/6; proposal-reply-one-call + widen-risks 82/82.
