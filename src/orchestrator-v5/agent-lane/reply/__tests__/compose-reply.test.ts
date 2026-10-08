@@ -467,6 +467,12 @@ describe('B15: a present typed goal-chance finding is the headline, by identity'
     expect(composeReplyShape({ text: framed, obligations }).shape?.headline).toBe(chances[0]);
     const far = [share, servedLines[1]!, '', 'Something else entirely.', '', chances[0]!, chances[1]!].join('\n');
     expect(composeReplyShape({ text: far, obligations }).shape?.headline).toBe(chances[0]);
+    // Codex re-review 7ff59a6e P2: a goal-keyword frame for another finding never joins.
+    const goalRisk = [share, 'Risks to meeting your goal with Raise prices 10%:', chances[0]!, chances[1]!].join('\n');
+    expect(composeReplyShape({ text: goalRisk, obligations }).shape?.headline).toBe(chances[0]);
+    // …and a chance frame in bold still joins (trailing emphasis aside).
+    const bold = [share, `**${servedLines[1]!}**`, chances[0]!, chances[1]!].join('\n');
+    expect(composeReplyShape({ text: bold, obligations }).shape?.headline).toBe(`**${servedLines[1]}**\n${chances[0]}`);
     // control: the chance frame directly before joins
     const near = [share, servedLines[1]!, chances[0]!, chances[1]!].join('\n');
     expect(composeReplyShape({ text: near, obligations }).shape?.headline).toBe(`${servedLines[1]}\n${chances[0]}`);

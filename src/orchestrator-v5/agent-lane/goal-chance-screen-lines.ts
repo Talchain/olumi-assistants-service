@@ -72,7 +72,10 @@ export function chanceInOwnWords(sentence: string, l: GoalChanceScreenLine): boo
   // EXACTLY "<label>: <figure>." (quotes/emphasis aside): the sentence IS this option's figure, never a share or a range
   // that mentions it, never a longer label that starts with this one (Codex r on 297d1f1b, P1).
   const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-  return sentence !== l.chance && plain(sentence).replace(/[.!]$/, '') === `${plain(l.label)}: ${plain(l.figure)}`;
+  const said = plain(sentence).replace(/[.!]$/, '');
+  const own = `${plain(l.label)}: ${plain(l.figure)}`;
+  // Also the screen's own words with the Agent's emphasis/quotes ("**Label**: about 47% chance of meeting your goal, …").
+  return sentence !== l.chance && (said === own || said === `${own} ${plain(CHANCE_LABEL)}`);
 }
 
 /** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */

@@ -296,6 +296,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(chanceInOwnWords(`${l.label} with annual billing: ${l.figure}.`, l)).toBe(false);
     expect(chanceInOwnWords(`${l.label}: between ${l.figure} and 60%.`, l)).toBe(false);
     expect(chanceInOwnWords(l.chance, l), 'the canonical sentence is typed already').toBe(false);
+    // Codex re-review 7ff59a6e P1: the screen's own words with the Agent's emphasis on the label still lead.
+    expect(chanceInOwnWords(`**${l.label}**: ${l.figure} chance of meeting your goal, in this model.`, l)).toBe(true);
+    expect(chanceInOwnWords(`${l.label}: ${l.figure} chance of meeting your goal, in this model, if prices hold.`, l)).toBe(false);
   });
 
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
