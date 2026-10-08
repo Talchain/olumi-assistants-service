@@ -4,7 +4,7 @@ import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js
 import { goalDeadlineOf, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { sayDate, timeBetween } from './deadline-date.js';
 import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
-import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { readUnitParts } from '../agent-lane/same-unit.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -12,13 +12,6 @@ const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Ar
 /** Brief-owned event/deadline scope; drafter flags never attest it. Bounded linear scans. */
 export const EVENT_WORDS = /\b(?:launch(?:ed|ing|es)?|deliver(?:ed|y|ing|s)?|ship(?:ped|ping|s)?|finish(?:ed|ing|es)?|complet(?:e|ed|ion|ing)|go(?:es)?[ \t]{1,4}live|releas(?:e|ed|ing|es))\b/i;
 export const EVENT_DEADLINE = /\b(?:deadlines?|on[ \t-]{1,4}time|by[ \t]{1,4}(?:\d{1,4}(?:st|nd|rd|th)?\b|Q[1-4]\b|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|next|the|year|month|week)|within[ \t]{1,4}\d{1,3}[ \t]{1,4}(?:days?|weeks?|months?))\b/i;
-export const QUANTITY_TARGET = /[£$€][ \t]{0,4}\d|\b\d[\d,.]{0,20}[ \t]{0,4}(?:%|(?!(?:days?|weeks?|months?|years?|developers?|people|leads?|January|February|March|April|May|June|July|August|September|October|November|December)\b)[a-z][a-z-]{0,40}\b)/i;
-/** Date numbers are dates, not quantity targets; every run is bounded. */
-const CALENDAR_NUMBERS = /\b(?:\d{1,2}(?:st|nd|rd|th)?[ \t]{1,4})?(?:January|February|March|April|May|June|July|August|September|October|November|December)(?:[ \t]{1,4}\d{4})?\b/gi;
-/** Ignore only an explicitly contextual money limit; a tolerance to a target remains a quantity. */
-const CONTEXTUAL_MONEY_LIMIT = /\b(?:on[ \t]{1,4}a[ \t]{1,4}budget[ \t]{1,4}of|within|budget[ \t]{1,4}is)[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?(?![\p{L}\p{N}])(?![ \t]{0,4}of[ \t]{1,4}(?:our|the)[ \t]{1,4}target\b)|\bwith[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?[ \t]{1,4}to[ \t]{1,4}spend\b/giu;
-/** A money limit is not context when the goal itself names that money quantity. */
-const MONEY_GOAL_QUANTITY = /\b(?:budgets?|revenue|mrr|arr|costs?|spend(?:ing)?|expenses?|income|profits?|turnover|prices?|sales|salar(?:y|ies)|wages?|cash)\b/i;
 const EVENT_VERB_ROOTS: Readonly<Record<string, string>> = {
   launch: 'launch', launching: 'launch', launched: 'launch', launches: 'launch',
   ship: 'ship', shipping: 'ship', shipped: 'ship', ships: 'ship',
@@ -26,20 +19,16 @@ const EVENT_VERB_ROOTS: Readonly<Record<string, string>> = {
   deliver: 'deliver', delivering: 'deliver', delivered: 'deliver', delivers: 'deliver',
   finish: 'finish', finishing: 'finish', finished: 'finish', finishes: 'finish',
 };
+/** The candidate's quantity decides the class; numbers elsewhere in the brief do not. */
+export function isQuantityGoalCandidate(goal: CandidateModel['goal']): boolean {
+  return goal.value !== null || readUnitParts(goal.unit)?.kind === 'currency';
+}
 export function briefAttestsEventByDate(brief: unknown, goal?: CandidateModel['goal']): boolean {
   if (typeof brief !== 'string' || brief.length > 20000) return false;
-  if (goal && (QUANTITY_TARGET.test(goal.metric)
-    || (goal.value !== null && goal.value !== undefined))) return false;
-  const mayMaskMoney = !goal || (!MONEY_GOAL_QUANTITY.test(`${goal.metric} ${goal.deliverable ?? ''}`)
-    && readCurrencyUnitWithQualifiers(goal.unit).kind !== 'currency');
+  if (goal && isQuantityGoalCandidate(goal)) return false;
   const words = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u)
     .filter(w => w && !['a', 'an', 'the'].includes(w)).map(w => EVENT_VERB_ROOTS[w] ?? w);
-  // Keep decimal amounts intact, and check every quantity before accepting any event sentence.
-  const sentences = brief.split(/(?<!\d)\.|\.(?!\d)|[!?;\n]/);
-  const quantities = sentences.map(sentence =>
-    (mayMaskMoney ? sentence.replace(CONTEXTUAL_MONEY_LIMIT, 'limit') : sentence).replace(CALENDAR_NUMBERS, 'date'));
-  if (quantities.some(sentence => QUANTITY_TARGET.test(sentence))) return false;
-  return sentences.some(sentence => {
+  return brief.split(/[.!?;\n]/).some(sentence => {
     if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence)) return false;
     if (!goal) return true;
     const held = new Set(words(sentence)), deliverable = words(goal.deliverable ?? ''), metric = words(goal.metric);
@@ -109,11 +98,16 @@ export function teamTimeAsk(graph: unknown): string | null {
     : `How long would ${part.deliverable} take with the team you have now?`;
 }
 
-export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
+export function admitEventByDate(candidate: CandidateModel, brief = ''): AdmittedModel {
   const deliverable = candidate.goal.deliverable?.trim();
   if (!deliverable || deliverable.length > 100) throw new Error('event_deliverable_required');
   const unit = `% of ${deliverable}`;
   const loss: Rec[] = [];
+  // Currency words/symbols use the shared unit reader, in any position. No amounts are parsed or masked.
+  if (brief.split(/[\p{N}\p{P}\p{Z}\s]+/u).some(word => readUnitParts(word)?.kind === 'currency')) {
+    loss.push({ field_path: 'brief.event_forecast_not_modelled', before: brief, after: null, severity: 'warn',
+      reason: `The deadline chance forecasts completion of "${deliverable}". Money limits and factors kept in the model remain separate. Any other money objective in these brief words is not modelled by this forecast: "${brief}".` });
+  }
   const unresolved: string[] = [];
   const nodes: Rec[] = [
     { id: 'event_goal', kind: 'goal', label: `Share of ${deliverable} done by the deadline`, provenance: 'ai_inferred',

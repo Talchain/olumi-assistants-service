@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
@@ -1507,6 +1507,9 @@ export async function buildModelFromBrief(
     }
     // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
     candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
+    if (candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
+      candidate = { ...candidate, goal: { ...candidate.goal, kind: null } };
+    }
     if (candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
       && candidate.factors.length === 0 && candidate.risks.length === 0 && candidate.outcomes.length === 0 && candidate.links.length === 0) {
       return { ok: false, mutated: false, refusal: 'construction_needs_redraft',

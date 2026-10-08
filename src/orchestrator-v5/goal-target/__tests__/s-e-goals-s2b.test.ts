@@ -26,7 +26,7 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import type { SessionTurnWrite } from '../../session/store.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
-import { draftedTeamPartOf, eventShareCarrierOf, withEventShareDate, briefAttestsEventByDate, EVENT_WORDS, EVENT_DEADLINE, QUANTITY_TARGET } from '../event-by-date-model.js';
+import { draftedTeamPartOf, eventShareCarrierOf, withEventShareDate, briefAttestsEventByDate, EVENT_WORDS, EVENT_DEADLINE } from '../event-by-date-model.js';
 import { shareByDateGoalOf, goalKindOf } from '../goal-kind.js';
 import * as shareMath from '../event-by-date-share.js';
 import { teamShareMoments, extraShareMoments } from '../event-by-date-share.js';
@@ -281,7 +281,7 @@ describe('R2 identity-bound regression rows', () => {
     expect(admitCandidateModel(control, {}, brief).nodes).toBeDefined();
   });
   it('P1-1 admission regex near-miss 5k -> 20k timing rows <8x', () => {
-    for (const regex of [EVENT_WORDS, EVENT_DEADLINE, QUANTITY_TARGET]) {
+    for (const regex of [EVENT_WORDS, EVENT_DEADLINE]) {
       const elapsed = (n: number) => { const input = '9 '.repeat(n), start = performance.now();
         for (let i = 0; i < 1000; i++) regex.test(input); return performance.now() - start; };
       elapsed(5000); elapsed(20000);

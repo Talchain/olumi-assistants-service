@@ -68,7 +68,7 @@ import {
   type AdmittedConstraint,
 } from './admit-constraint.js';
 
-import { briefAttestsEventByDate, admitEventByDate } from '../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate } from '../goal-target/event-by-date-model.js';
 
 const MAX_ID = 100;
 
@@ -3046,8 +3046,11 @@ export function admitCandidateModel(
    */
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
 ): AdmittedModel {
+  if (candidateModel.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidateModel.goal)) {
+    candidateModel = { ...candidateModel, goal: { ...candidateModel.goal, kind: null } };
+  }
   if (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal)) {
-    const event = admitEventByDate(candidateModel);
+    const event = admitEventByDate(candidateModel, brief);
     const hasContext = candidateModel.constraints.length + candidateModel.factors.length + candidateModel.risks.length
       + candidateModel.outcomes.length + candidateModel.links.length + (candidateModel.identities?.length ?? 0) > 0
       || candidateModel.options.some(o => (o.interventions?.length ?? 0) + (o.changes?.length ?? 0) > 0);
