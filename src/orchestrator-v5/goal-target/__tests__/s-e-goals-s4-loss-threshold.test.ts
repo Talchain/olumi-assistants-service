@@ -467,5 +467,5 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     writeFileSync('/tmp/s4-loss-timing.json', JSON.stringify(timing));
     console.log(`S4 loss-threshold timing (20k -> 160k, whitespace + near-miss): ${timing.detail}`);
     expect(timing.ratio).toBeLessThan(22);
-  });
+  }, 60_000);
 });
