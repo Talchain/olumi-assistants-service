@@ -4,6 +4,8 @@ import { isPendingActionExpired, parsePendingAction, type PendingAction } from '
 import { isChangeOwnPercent } from './admit-model.js';
 import { readStatedGoalLevel } from './goal-current-level.js';
 import { unitPhraseFamily } from './unit-conflict.js';
+import { thresholdReasonOf } from '../compose/claim-safety-cage.js';
+import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 
 export const CURRENT_LEVEL_TOOL = 'propose_goal_current_level';
 type Ask = PendingAction & { action: Extract<PendingAction['action'], { kind: 'elicit_goal_current_level' }> };
@@ -16,6 +18,30 @@ const names = (s: string, label: string): boolean => label.trim() !== '' && new 
 const UNCERTAIN = /\b(?:don['’]t know|do not know|not sure|unsure|no idea|don['’]t have|do not have|cannot|can['’]t|maybe|perhaps|probably|possibly|likely|unlikely|presumably|apparently|I think|I believe|I suspect|guess|might|could|would|will)\b/i;
 const CONDITIONAL = /\b(?:if|unless|provided|providing|assuming|as long as|on condition|subject to)\b/i;
 const QUESTION = /\?|^\s*(?:what|why|how|when|where|which|who|can|could|should|would|is|are|do|does)\b/i;
+
+/**
+ * GOAL-REACH 3b: the Run's goal chance was refused, and the goal has no current level the user stated, so the resolving
+ * step is the user's own figure. Refused by ISL for want of it (Science §(g): `missing_goal_baseline`, or a root goal
+ * with no level: `root_goal` / `root_value_source`), or by CEE's own GOAL_FIGURES_TARGET_NOT_TESTABLE (whose words ask
+ * "What's today's level of …?"; P44 served witness 53e2ddbd, 8 Oct). ONE source for the bar's `set_current_level` question AND the ask it persists, so the words the
+ * press sends are the question the answer path matches (and then forces the existing current-level card).
+ * `null` unless there is exactly one goal, it has a label, and it carries no stated level yet.
+ */
+export function goalLevelAskOf(graph: unknown, analysisResult: unknown): { goal: Rec; unit: string | undefined; question: string } | null {
+  const result = rec(analysisResult);
+  const enrichment = rec(result?.enrichment) ?? result;
+  const carried = thresholdReasonOf(enrichment);
+  const refusedForLevel = carried !== null && (carried.reason === 'missing_goal_baseline' || (carried.reason === 'root_goal' && carried.root_case === 'root_value_source'));
+  const untestable = records(enrichment?.inference_warnings).some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  if (!refusedForLevel && !untestable) return null;
+  const goals = records(rec(graph)?.nodes).filter((n) => n.kind === 'goal');
+  const goal = goals.length === 1 ? goals[0]! : undefined;
+  if (goal === undefined || typeof goal.label !== 'string' || goal.label.trim() === '' || typeof rec(goal.observed_state)?.raw_value === 'number') return null;
+  const held = rec(goal.observed_state)?.unit ?? goal.goal_threshold_unit;
+  const unit = isChangeOwnPercent({ frame: goal.goal_threshold_frame, unit: held, metric: goal.label, value: goal.goal_threshold_raw }) || typeof held !== 'string' ? undefined : held;
+  const question = `To show each option's chance of reaching your ${goal.label} target, I first need today\u2019s level of \u2018${goal.label}\u2019. What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
+  return { goal, unit, question };
+}
 
 /** Bounded figure/unit spans from the person's own reply; never a host choice between the figures. */
 export function levelAnswerFigures(message: string): string[] {
@@ -96,6 +122,18 @@ export function currentLevelAskOnAnswer(input: {
       action: { kind: 'elicit_goal_current_level', goal_id: goal.id, goal_label: goal.label, user_id: input.userId,
         question: first.question, ...(typeof unit === 'string' ? { goal_unit: unit } : {}) },
       preconditions: { target_id: goal.id }, expires_at_turn_count: 3,
+      emitted_at_iso: input.emittedAtIso, expires_at_iso: new Date(Date.parse(input.emittedAtIso) + 10 * 60_000).toISOString(),
+    });
+    if (pa !== null) return pa as Ask;
+  }
+  // GOAL-REACH 3b: the bar's set_current_level press delivered the threshold ask (the same words, one source).
+  const asked = goalLevelAskOf(input.graph, input.analysisResult);
+  if (asked !== null && plain(input.sentText).includes(plain(asked.question))) {
+    const pa = parsePendingAction({
+      id: randomUUID(), scenario_id: input.scenarioId, chip_id: 'agent-current-level-ask',
+      action: { kind: 'elicit_goal_current_level', goal_id: asked.goal.id, goal_label: asked.goal.label, user_id: input.userId,
+        question: asked.question, ...(asked.unit !== undefined ? { goal_unit: asked.unit } : {}) },
+      preconditions: { target_id: asked.goal.id }, expires_at_turn_count: 3,
       emitted_at_iso: input.emittedAtIso, expires_at_iso: new Date(Date.parse(input.emittedAtIso) + 10 * 60_000).toISOString(),
     });
     if (pa !== null) return pa as Ask;

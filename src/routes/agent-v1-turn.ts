@@ -4564,7 +4564,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const sentText = String(wireBody.assistant_text ?? text);
     // Persist the producer's exact delivered question or its qualified clarification, after every egress gate.
     const levelAskAnswered = levelAnswerTool !== undefined || result.tool_calls.some(call => call.name === CURRENT_LEVEL_TOOL);
-    const deliveredLevelAsk = mode === 'full' && fastPath !== 'method' ? currentLevelAskOnAnswer({
+    // GOAL-REACH 3b (COPY-SHAPE patch): the bar's set_current_level press is a typed reply ('method'), and its words ARE
+    // the current-level ask, so it is persisted like the producer's own (otherwise the answer could not force the card).
+    const deliveredLevelAsk = mode === 'full' && (fastPath !== 'method' || actionPress?.action === 'set_current_level') ? currentLevelAskOnAnswer({
       graph: readbackGraph, analysisResult, sentText, scenarioId, userId, emittedAtIso,
       prior: levelAsk, answered: levelAskAnswered, message,
       awaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),

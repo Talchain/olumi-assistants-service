@@ -22,6 +22,7 @@ import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
 import { sayGoalChange } from './limit-frame.js';
+import { thresholdReasonOf, type ThresholdReason } from '../compose/claim-safety-cage.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -255,6 +256,10 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   ];
   if (!codes.includes('GOAL_THRESHOLD_NOT_CONVERTIBLE')) return null;
   const goal = (((graph as { nodes?: unknown } | null)?.nodes ?? []) as Node[]).find((n) => n.kind === 'goal');
+  // GOAL-REACH 3b: PLoT #444 carries ISL's reason; with it, the cause is SAID, per Science §(g). Without it (a pre-#444
+  // payload), the lines below are unchanged.
+  const carried = thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment);
+  if (carried !== null) return goal === undefined ? null : thresholdReasonSentence(carried, goal, graph);
   const raw = goal?.goal_threshold_raw;
   const unit = typeof goal?.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
   if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
@@ -271,4 +276,62 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   return hasCurrent
     ? `Your ${label} ${target} was not checked in this analysis.`
     : `Your ${label} ${target} is not checked yet: the model has no current ${label} figure to measure it against.`;
+}
+
+/** Science §(g) (AIQ final): every reason's sentence ends with this, since only the goal chance was refused. */
+export const THRESHOLD_REST_STANDS = ' The rest of this Run\'s results still stand.';
+const OLUMI_BUILT = ' That\'s a limit of how Olumi built the model, not something you entered.';
+
+/** The one option whose interventions set the goal node itself, or undefined (none, or more than one: not guessed). */
+function optionSettingGoal(graph: unknown, goalId: string): string | undefined {
+  const options = (((graph as { nodes?: unknown } | null)?.nodes ?? []) as (Node & { interventions?: unknown; data?: { interventions?: unknown } })[])
+    .filter((n) => n.kind === 'option');
+  const setting = options.filter((o) => [o.interventions, o.data?.interventions]
+    .some((iv) => iv !== null && typeof iv === 'object' && Object.prototype.hasOwnProperty.call(iv, goalId)));
+  return setting.length === 1 ? (setting[0]!.label ?? setting[0]!.id) : undefined;
+}
+
+/**
+ * GOAL-REACH 3b: Science §(g)'s sentence for the carried reason, words verbatim (AIQ final), {goal}/{option}/{X} from
+ * the model. A sentence whose slot the model cannot fill (no single option sets the goal; a %-change reason on a goal not
+ * framed as one) falls back to the 'unknown' sentence, never a guess.
+ */
+export function thresholdReasonSentence(carried: ThresholdReason, goal: Node, graph: unknown): string {
+  const g = goal.label ?? goal.id;
+  const raw = goal.goal_threshold_raw;
+  const pct = goal.goal_threshold_frame === 'change_rel' && typeof raw === 'number' && Number.isFinite(raw)
+    ? `${Math.round(Math.abs(raw) * 100 * 1e6) / 1e6}%` : undefined;
+  const unknown = `Olumi can't show each option's chance of reaching your ${g} target in this Run.`;
+  const say = (): string => {
+    switch (carried.reason) {
+      case 'missing_goal_baseline':
+        return `Olumi can't show each option's chance of reaching your ${g} target yet: the model doesn't have ${g}'s current level to measure from.`;
+      case 'root_goal':
+        if (carried.root_case === 'root_value_source') return `Olumi can't show the chance of reaching your ${g} target: nothing in the model is linked to ${g}, and it has no current level, so the options have nothing to move.`;
+        if (carried.root_case === 'root_intercept') return `Olumi can't show the chance of reaching your ${g} target: nothing in the model is linked to ${g}, and the way Olumi built it doesn't let today's level be compared with the target.${OLUMI_BUILT}`;
+        return unknown;
+      case 'goal_pinned_by_intervention': {
+        const option = optionSettingGoal(graph, goal.id);
+        return option === undefined ? unknown
+          : `Olumi can't show the chance of reaching your ${g} target: ‘${option}’ sets ${g} directly, so its result would be the setting itself, not something the model worked out.`;
+      }
+      case 'goal_values_outside_normalised_domain':
+        return `Olumi can't show the chance of reaching your ${g} target reliably: the target sits outside the range Olumi set up for ${g} in this model. That's a limit of how Olumi built the model, not of your figures.`;
+      case 'non_finite_conversion_input':
+      case 'goal_node_missing':
+        return `Olumi can't show the chance of reaching your ${g} target in this Run because of a fault on Olumi's side.`;
+      case 'epsilon_breaks_status_quo_reference':
+      case 'auto_scaled_noise_breaks_status_quo_reference':
+        return `Olumi can't show the chance of reaching your ${g} target: random variation Olumi added to the model can't be separated from the options' own effect.${OLUMI_BUILT}`;
+      case 'change_rel_raw_range_missing':
+        return pct === undefined ? unknown
+          : `Olumi can't show the chance of a ${pct} change in ${g}: the model doesn't carry the range it needs to measure a percentage change of ${g}. That's a limit of how Olumi set up the goal.`;
+      case 'change_rel_base_zero':
+        return pct === undefined ? unknown
+          : `Olumi can't show the chance of a ${pct} change in ${g}: its current level is zero, and a percentage of zero is still zero. A target stated as an amount would work.`;
+      case 'unknown':
+        return unknown;
+    }
+  };
+  return say() + THRESHOLD_REST_STANDS;
 }

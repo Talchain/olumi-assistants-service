@@ -25,6 +25,8 @@ import { proposeProductIdentity } from '../../identity-proposal.js';
 import { actionFactsOf, type ActionRead } from '../state.js';
 import { actionBarOf } from '../rank.js';
 import { withShareByDateChanceGate } from '../../../goal-target/goal-chance-range.js';
+import { readFileSync } from 'node:fs';
+import { isOlumiSideThreshold, thresholdReasonOf, THRESHOLD_REASONS } from '../../../compose/claim-safety-cage.js';
 
 type Rec = Record<string, any>;
 type Graph = { nodes: Rec[]; edges: Rec[]; [key: string]: unknown };
@@ -42,8 +44,6 @@ const IDENTITY = GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED;
 export const KNOWN_GAPS = new Set<string>([
   // PLoT's scale-cut reason needs a rescale/correct-size door on the bar.
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
-  // No current goal level: the existing conversational ask is not a bar action yet.
-  GOAL_FIGURES_TARGET_NOT_TESTABLE,
   // Identical arms need a control that changes/adopts the actual option levels.
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   // Invalid engine probability has no corrective bar control; Run is outside this bar.
@@ -55,6 +55,9 @@ export const KNOWN_GAPS = new Set<string>([
   GOAL_FIGURES_SHARE_APPROXIMATION,
   // Build 1b: ask what the goal is made of; never confirm a contradictory reading.
   `${IDENTITY}:contradictory_current_level`,
+  // GOAL-REACH 3b (Science §(g)): user-side threshold reasons whose control is not a bar action yet.
+  // "Show what ‘{option}’ changes": PLoT's detail names no option, and no setting-removal writer exists (UNVERIFIED).
+  'THRESHOLD:goal_pinned_by_intervention',
 ]);
 
 const paul = (): Graph => structuredClone(paulStored) as Graph;
@@ -154,7 +157,8 @@ const INVENTORY: Readonly<Record<string, { make: () => Fixture; resolves: readon
     return { graph, result: withShareByDateChanceGate(baselineResult(), graph, 'mrr') as Rec };
   }, resolves: [] },
   [GOAL_FIGURES_PRODUCT_NOT_READ]: { make: productNotRead, resolves: ['confirm_reading'] },
-  [GOAL_FIGURES_TARGET_NOT_TESTABLE]: { make: targetNotTestable, resolves: [] },
+  // GOAL-REACH 3b: the user's current level (set_current_level → the persisted ask → the existing card).
+  [GOAL_FIGURES_TARGET_NOT_TESTABLE]: { make: targetNotTestable, resolves: ['set_current_level'] },
   [GOAL_FIGURES_OPTIONS_IDENTICAL]: { make: identicalOptions, resolves: [] },
   [GOAL_FIGURES_PROBABILITY_UNUSABLE]: { make: () => {
     const graph = twoParentGraph(); const result = baselineResult();
@@ -204,5 +208,85 @@ describe('GOAL-REACH row 7 — withhold → recovery class guard', () => {
     const bar = actionBarOf(actionFactsOf(readOf(fixture)));
     expect([...bar.priority, ...bar.standard, ...bar.more].some(o => o.enabled && o.action_id === 'confirm_reading')).toBe(false);
     expect(KNOWN_GAPS.has(`${IDENTITY}:contradictory_current_level`)).toBe(true);
+  });
+});
+
+/**
+ * GOAL-REACH 3b: the same withhold → recovery contract for GOAL_THRESHOLD_NOT_CONVERTIBLE, per carried reason. The
+ * warning is a CAPTURED PLoT #444 body's (fixtures/plot-threshold-444). Each reason has an enabled resolving offer, a
+ * named KNOWN_GAPS entry, or is Olumi-side (Science carve-out): explain-only + the defect log, and NEVER a press of its own.
+ */
+const CAPTURED = (name: string): Rec[] => (JSON.parse(readFileSync(new URL(`../../__tests__/fixtures/plot-threshold-444/${name}.json`, import.meta.url), 'utf8')) as Rec)
+  .inference_warnings;
+function thresholdFixture(name: string, withWarning = true): Fixture {
+  const graph = twoParentGraph();
+  if (name.startsWith('change_rel')) Object.assign(goalOf(graph), { goal_threshold_raw: 0.15, goal_threshold_unit: '%', goal_threshold_frame: 'change_rel' });
+  const result = baselineResult();
+  for (const row of result.option_comparison) delete row.probability_of_goal;
+  if (withWarning) result.inference_warnings = CAPTURED(name);
+  return { graph, result };
+}
+const THRESHOLD_INVENTORY: Readonly<Record<string, readonly string[]>> = {
+  missing_goal_baseline: ['set_current_level'],
+  // §(g) primary "Link what drives {goal}" has no 0-LLM edge door yet; the secondary (current level) resolves it.
+  root_goal__root_value_source: ['set_current_level'],
+  root_goal__root_intercept: [],
+  root_goal: [],
+  goal_pinned_by_intervention: [],
+  goal_values_outside_normalised_domain: [],
+  non_finite_conversion_input: [],
+  goal_node_missing: [],
+  epsilon_breaks_status_quo_reference: [],
+  auto_scaled_noise_breaks_status_quo_reference: [],
+  change_rel_raw_range_missing: [],
+  change_rel_base_zero: ['set_goal'],
+  absent_reason: [],
+};
+const offerIds = (f: Fixture): string[] => { const b = actionBarOf(actionFactsOf(readOf(f))); return [...b.priority, ...b.standard, ...b.more].filter(o => o.enabled).map(o => o.action_id as string).sort(); };
+
+describe('GOAL-REACH 3b — GOAL_THRESHOLD_NOT_CONVERTIBLE reason → recovery class guard', () => {
+  it('the inventory covers every ISL reason, both root forms and PLoT\'s fallback', () => {
+    const covered = new Set(Object.keys(THRESHOLD_INVENTORY).map(k => thresholdReasonOf({ inference_warnings: CAPTURED(k) })!.reason));
+    expect([...covered].sort()).toEqual([...THRESHOLD_REASONS].sort());
+  });
+
+  it.each(Object.keys(THRESHOLD_INVENTORY))('%s: an enabled resolving offer, a named KNOWN_GAP, or Olumi-side with no press of its own', name => {
+    const fixture = thresholdFixture(name);
+    const carried = thresholdReasonOf(fixture.result)!;
+    expect(carried, `${name}: the captured warning must fire`).not.toBeNull();
+    const ids = offerIds(fixture);
+    const resolving = THRESHOLD_INVENTORY[name]!.filter(id => ids.includes(id));
+    if (isOlumiSideThreshold(carried)) {
+      expect(THRESHOLD_INVENTORY[name], `${name}: an Olumi-side reason is never given a control`).toEqual([]);
+      expect(ids, `${name}: FAKE CONTROL — the bar must not change because of an Olumi-side reason`).toEqual(offerIds(thresholdFixture(name, false)));
+    } else {
+      expect(resolving.length > 0 || KNOWN_GAPS.has(`THRESHOLD:${name}`), `${name}: no enabled resolving action and no KNOWN_GAPS entry`).toBe(true);
+    }
+  });
+
+  it('change_rel_base_zero offers the target as an amount; CONTROL: the same goal without the refusal does not', () => {
+    expect(offerIds(thresholdFixture('change_rel_base_zero'))).toContain('set_goal');
+    expect(offerIds(thresholdFixture('change_rel_base_zero', false))).not.toContain('set_goal');
+  });
+
+  it('the Olumi-side defect is logged on the Run path by the one predicate (wiring row)', () => {
+    const src = readFileSync(new URL('../../../tools/handlers/run-analysis.ts', import.meta.url), 'utf8');
+    expect(src).toContain("if (thresholdReason !== null && isOlumiSideThreshold(thresholdReason)) {");
+    expect(src).toContain("event: 'run_analysis.goal_threshold_olumi_side'");
+  });
+});
+
+describe('GOAL-REACH 3b — Paul\'s served post-Yes Run (P44 draw 2, 53e2ddbd)', () => {
+  const served = JSON.parse(readFileSync(new URL('../../__tests__/fixtures/goal-reach-served-run2-53e2ddbd.json', import.meta.url), 'utf8')) as Rec;
+  it('the served Run withholds by TARGET_NOT_TESTABLE and its served bar had no current-level control (the gap, as witnessed)', () => {
+    expect(served.analysis_result.enrichment.inference_warnings.map((w: Rec) => w.code)).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
+    expect(served.served_action_ids).not.toContain('set_current_level');
+  });
+  it('RED: the same served state now carries one enabled set_current_level asking for today\'s MRR', () => {
+    const bar = actionBarOf(actionFactsOf({ scenarioId: served.scenario_id, graph: served.graph, graphHash: served.graph_hash,
+      analysisState: served.analysis_state, analysisResult: served.analysis_result, analysisReady: served.analysis_ready }));
+    const offers = [...bar.priority, ...bar.standard, ...bar.more].filter(o => o.action_id === 'set_current_level');
+    expect(offers).toHaveLength(1);
+    expect(offers[0]!.enabled).toBe(true);
   });
 });
