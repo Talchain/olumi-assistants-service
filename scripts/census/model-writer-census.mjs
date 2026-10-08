@@ -23,7 +23,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const DOOR_FILE = 'src/orchestrator-v5/persist-graph-write.ts';
 const STORE_FILE = 'src/orchestrator-v5/session/supabase-store.ts';
 const DOOR = 'appendCheckedGraphWrite';
-// Read-only pg_proc evidence supplied in .codex-out/census-addendum-1.md.
+// Read-only pg_proc evidence measured by af (8 Oct ~23:3xZ, project below); see PR #2891.
 // These definitions live in another repo; this is not a blanket SQL exemption.
 export const DEPLOYED_ONLY_RPCS = {
   copy_guest_scenario: {

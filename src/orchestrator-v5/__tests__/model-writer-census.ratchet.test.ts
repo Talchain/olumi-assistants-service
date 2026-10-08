@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, relative } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -7,12 +8,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts/census/model-writer-census.mjs');
 
-// RATCHET: these measured baselines may ONLY DECREASE. Never raise to admit a writer.
-// At b33222d4047f82a995254ac81cf57ee6794d1479, Addendum 1 resolves the two
-// deployed-only RPCs: 13 writers measured using migration SQL + pg_proc evidence.
-// Completeness still refuses every other RPC with missing SQL or a dynamic name.
+// RATCHET: the outside-door count may ONLY DECREASE. Never raise it to admit a writer.
+// Measured at CEE staging b33222d4047f82a995254ac81cf57ee6794d1479: 13 outside the door.
+// A PR that moves a writer through the door must lower BASELINE in the same PR (stale-baseline row).
+// Door callers are reported, not capped: routing a writer through the door raises that count.
 const BASELINE = 13;
-const BASELINE_DOOR = 4;
 
 interface Site { file: string; line: number; kind: string; callee: string; reason?: string }
 interface Census {
@@ -32,13 +32,16 @@ describe('model writer census ratchet', () => {
       cwd: ROOT, encoding: 'utf8', timeout: 120_000,
     });
     measured = JSON.parse(json) as Census;
-    writeFileSync(join(ROOT, '.codex-out/census.json'), json);
   }, 120_000);
 
-  it('outside-door writers and door callers may only decrease', () => {
+  it('outside-door writers may only decrease (door callers reported, not capped)', () => {
     expect(measured.outside_door, JSON.stringify(measured.sites, null, 2)).toBeLessThanOrEqual(BASELINE);
-    expect(measured.door_callers).toBeLessThanOrEqual(BASELINE_DOOR);
     expect(measured.production_files).toBeGreaterThan(300);
+    process.stdout.write(`CENSUS outside_door=${measured.outside_door} door_callers=${measured.door_callers}\n`);
+  });
+
+  it('refuses a stale baseline: a fixed writer lowers BASELINE in the same PR', () => {
+    expect(measured.outside_door, `lower baseline to ${measured.outside_door}`).toBe(BASELINE);
   });
 
   it('every production RPC must have resolved migration SQL or named deployed evidence', () => {
@@ -57,10 +60,7 @@ describe('model writer census ratchet', () => {
   });
 
   it('same AST run counts a planted direct RPC and excludes a fake door RPC', async () => {
-    // All temporary files stay inside the repo. No external cleanup is performed.
-    const tempParent = join(ROOT, '.codex-out/census-controls');
-    mkdirSync(tempParent, { recursive: true });
-    const temp = mkdtempSync(join(tempParent, 'run-'));
+    const temp = mkdtempSync(join(tmpdir(), 'census-controls-'));
     const fixture = join(temp, 'fixture.ts');
     writeFileSync(fixture, [
       'declare const client: { rpc(name: string, args: object): void };',
