@@ -133,8 +133,6 @@ BEGIN
        NULL::bigint, v_mutation_unchanged, repeat('a', 64), repeat('a', 64), TRUE, 'fresh_unchanged_graph', v_graph_a, FALSE),
       ('fresh_current_expected', v_scenario_a, 'phase2-c-current', 'phase2-c:request-current',
        NULL::bigint, v_mutation_current, repeat('a', 64), repeat('b', 64), TRUE, 'fresh_current_expected', v_graph_b, TRUE),
-      ('fresh_direct_answer_no_graph', v_scenario_a, 'phase2-c-answer', 'agent_turn:phase2-c-answer',
-       NULL::bigint, v_mutation_answer, repeat('b', 64), repeat('b', 64), TRUE, 'fresh_direct_answer_no_graph', NULL::jsonb, FALSE),
       ('independent_fresh', v_scenario_b, 'phase2-c-fresh-b', 'phase2-c:request-b',
        0::bigint, v_mutation_b, NULL::text, repeat('a', 64), FALSE, 'independent_fresh', v_graph_a, TRUE),
       ('v5_cas_refusal', v_scenario_a, 'phase2-c-v5-cas', 'phase2-c:request-cas',

@@ -50,6 +50,10 @@
 --   a literal no-graph direct answer cannot succeed through this v6 wrapper.
 -- =============================================================================
 
+-- Fail fast instead of queueing every scenarios writer behind ACCESS EXCLUSIVE
+-- (rehearsal: ADD COLUMN is metadata-only, 0.6 ms on 20,563 rows). On timeout, retry.
+SET LOCAL lock_timeout = '3s';
+
 ALTER TABLE public.scenarios
   ADD COLUMN revision BIGINT NOT NULL DEFAULT 0;
 
