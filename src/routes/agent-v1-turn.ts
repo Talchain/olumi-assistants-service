@@ -184,7 +184,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
+import { answerShapeFromDerivedText, withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /**
@@ -2312,6 +2312,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
       if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
+      /**
+       * ⭐ THE STORED WORDS' OWN SHAPE (DL 58e392, 8 Oct: every Explain replay shipped whole while live was shaped). A replay
+       * that ships the stored words UNCHANGED, of a turn the live route shapes (coaching: no method press, review, approval
+       * or proposal card, which ship whole live), reads its shape back from those words (`answerShapeFromDerivedText`: only
+       * the composer's own format, only when it re-derives them byte for byte). `withShapeOnlyIfItDerives` still runs last.
+       */
+      const storedWordsShape = replayComposed === null && approvedProposal === undefined && !decisionReviewReplay && !methodTerminalReplay
+        && replayCard === undefined && typeof prior.assistant_message === 'string' && withoutProposalIds(replayText) === prior.assistant_message
+        ? answerShapeFromDerivedText(prior.assistant_message) : null;
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: replayComposed !== null ? replayComposed.text : withoutProposalIds(replayText),
         stage: 'frame',
@@ -2323,7 +2332,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
         ...(replayFields !== undefined ? { _proposal_fields: replayFields } : {}),
         ...(replayNarration !== undefined ? { narration: replayNarration } : {}),
-        ...(replayComposed?.shape != null ? { _answer_shape: replayComposed.shape } : {}),
+        ...(replayComposed?.shape != null ? { _answer_shape: replayComposed.shape }
+          : storedWordsShape !== null ? { _answer_shape: storedWordsShape } : {}),
         // The CURRENT result as the live turn carries it: the readback's bound block and its sidecars, same fact.
         ...(resultFirstReplay && state.analysisResult !== undefined ? { blocks: [state.analysisResult] } : {}),
         ...(resultFirstReplay && state.limitVerdicts !== undefined ? { limit_verdicts: state.limitVerdicts } : {}),
