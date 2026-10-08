@@ -12,6 +12,10 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import {
   applyIdentityConfirmEdit, identityCardOfferable, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel,
 } from '../identity-confirm-edit.js';
+import { identityProposalOfferable } from '../../agent-lane/held-approval-offers.js';
+import { breakEvenFor, breakEvenLine } from '../../agent-lane/break-even.js';
+import { goalCoherenceAsk } from '../../agent-lane/goal-coherence.js';
+import type { StructuredProposal } from '../../agent-lane/proposal.js';
 
 type Rec = Record<string, any>;
 const stored = JSON.parse(readFileSync(resolve(process.cwd(), 'src/orchestrator-v5/system-events/__tests__/fixtures/b1-828d87ac-stored-graph.json'), 'utf8')) as Rec;
@@ -67,4 +71,38 @@ describe('no Yes over a part with no level (stored 828d87ac)', () => {
     expect(identityPartLevelAsk('MRR', ['Pro plan price', 'Paying subscribers'], [{ label: 'Paying subscribers', kind: 'factor' }]))
       .toBe('To work out ‘MRR’ as ‘Pro plan price’ × ‘Paying subscribers’, I need ‘Paying subscribers’: what is it today?');
   });
+
+  // #2851 buddy r1 P1-1: a HELD card (restored on reload, carried on Run/explain/retry) is executable only while offerable.
+  it('a held confirm_identity proposal is not executable on 828d87ac; CONTROLS: the user-count graph, and a non-identity proposal', () => {
+    const held = (g: Rec): StructuredProposal => {
+      const card = proposeProductIdentity(g)!;
+      return { operations: [{ op: 'confirm_identity', path: card.outcome_id, value: { ...card, factor_ids: [...card.factor_ids] } }] } as unknown as StructuredProposal;
+    };
+    expect(identityProposalOfferable(held(beforeYes()), beforeYes())).toBe(false);
+    const users = { ...inferred, nodes: inferred.nodes.map((n: Rec) => (n.id === 'pro_paying_subscribers'
+      ? { ...n, observed_state: { unit: 'subscribers', value: 0.15, raw_value: 300, source: 'user_override' } } : n)) };
+    expect(identityProposalOfferable(held(users), users)).toBe(true);
+    const other = { operations: [{ op: 'set_factor_value', path: 'x', value: 1 }] } as unknown as StructuredProposal;
+    expect(identityProposalOfferable(other, beforeYes())).toBe(true);
+  });
+
+  // #2851 buddy r1 P1-3 (DL): no MRR arithmetic from Olumi's basis-less count anywhere in the Run reply.
+  it('break-even says nothing on 9f32a4b4 (no £12,250, no 208/227); CONTRAST: the user\'s 300 gives £14,700', () => {
+    expect(breakEvenFor(inferred)).toBeNull();
+    const users = { ...inferred, nodes: inferred.nodes.map((n: Rec) => (n.id === 'pro_paying_subscribers'
+      ? { ...n, observed_state: { unit: 'subscribers', value: 0.15, raw_value: 300, source: 'user_override' } } : n)) };
+    const be = breakEvenFor(users);
+    expect(be?.baseline_goal).toBe(14700);
+    expect(breakEvenLine(be!)).toMatch(/14,700/);
+    expect(breakEvenLine(be!)).not.toMatch(/12,250/);
+  });
+
+  // goal coherence asks only at an order-of-magnitude gap (GOAL_COHERENCE_RATIO 10): 5,000 × £49 = £245,000 vs £20,000.
+  it('goal coherence computes no implied MRR from Olumi\'s count; CONTRAST: the same 5,000 as the user\'s figure is asked about', () => {
+    const count = (source: string): Rec => ({ ...inferred, nodes: inferred.nodes.map((n: Rec) => (n.id === 'pro_paying_subscribers'
+      ? { ...n, observed_state: { unit: 'subscribers', value: 2.5, raw_value: 5000, source } } : n)) });
+    expect(goalCoherenceAsk(count('cee_inference'), { nodeId: 'pro_monthly_price', previousRaw: 50 })).toBeNull();
+    expect(goalCoherenceAsk(count('user_override'), { nodeId: 'pro_monthly_price', previousRaw: 50 })?.implied).toBe(245000);
+  });
 });
+

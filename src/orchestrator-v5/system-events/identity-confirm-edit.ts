@@ -153,7 +153,10 @@ export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: re
     // drafter's, with no basis (levels carry no basis field yet), so it is MISSING: the reading never computes from it.
     const owner = classifyValueSource(os?.source);
     const usersLevel = typeof os?.value === 'number' && Number.isFinite(os.value) && (owner === 'user_stated' || owner === 'user_ratified');
-    if (usersLevel || todaysLevelFor(persistedGraph, id) !== null) continue;
+    // Today's level read through the user's figure counts only where the part has NO value of its own: that is the only
+    // case `todaysWrite` writes it (#2851 buddy r1 P1-2: an Olumi value with no raw figure passed here and was kept).
+    const ownValue = typeof os?.value === 'number' && Number.isFinite(os.value);
+    if (usersLevel || (!ownValue && todaysLevelFor(persistedGraph, id) !== null)) continue;
     out.push({ id, label: typeof part.label === 'string' && part.label.trim() !== '' ? part.label.trim() : id, kind: String(part.kind) });
   }
   return out;

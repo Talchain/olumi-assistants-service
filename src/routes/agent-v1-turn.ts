@@ -87,7 +87,7 @@ import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestr
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
-import { agentProposals as proposals, executableWaitingProposal, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
+import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
@@ -495,11 +495,11 @@ function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
  * EVERY proposal still waiting for its yes that would execute on this graph, however many (`executableWaitingProposal`
  * wants exactly one, for the chip it re-offers). Any of them makes the turn a decision point for guidance (T2).
  */
-function executableWaitingProposalIds(scenarioId: string, userId: string | null, graphHash: string | undefined): string[] {
+function executableWaitingProposalIds(scenarioId: string, userId: string | null, graphHash: string | undefined, graph?: unknown): string[] {
   if (graphHash === undefined) return [];
   return proposals.outstanding(scenarioId, userId).map((p) => p.proposal_id).filter((id) => proposals.authorise({
     proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash,
-  }).status === 'execute');
+  }).status === 'execute' && identityProposalOfferable(proposals.get(id), graph));
 }
 
 /** The offered actions with each id once, the FIRST kept, in order (R3 5910885689: the same card offered twice). */
@@ -2280,7 +2280,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
-          const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
+          const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)?.say;
           // The live Run turn's methods note (`disclosuresFor`, a Run on this turn) comes first in its owed lines.
           const indexNow = indexGoalWeightsMessages(state.analysisResult);
@@ -2364,7 +2364,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const stillValid = decisionReviewReplay ? [] : stillValidOffers(offered, {
           outstandingProposalIds: new Set([
             ...replayRecords.map(r => r.proposal_id),
-            ...executableWaitingProposalIds(scenarioId, userId, state.graphHash),
+            ...executableWaitingProposalIds(scenarioId, userId, state.graphHash, state.graph),
             ...(await liveHeldRefs(scenarioId)),
           ]),
           analysisReady: state.analysisReady,
@@ -3172,7 +3172,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const facts = actionFactsOf({ scenarioId, graph: rb.graph, graphHash: rb.graphHash, analysisState: rb.analysisState,
           analysisReady: rb.analysisReady, analysisResult: rb.analysisResult, optionParticipation: rb.optionParticipation,
           identityEvaluated: rb.identityEvaluated });
-        return { facts, decision: decidePress(chip, facts, undefined, body['message']), graphHash: rb.graphHash };
+        return { facts, decision: decidePress(chip, facts, undefined, body['message']), graphHash: rb.graphHash, graph: rb.graph };
       })();
       if (decided !== null && decided.decision.kind !== 'not_an_action') {
         actionPress = decided.decision.press;
@@ -3182,7 +3182,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // latest carrier under the product's own survival rule (Codex r1 P1-1 on #2751: widen's card is a `gmh_` hold).
         let stillWaiting = false;
         if (remembered !== undefined && remembered.proposalId.startsWith('prop_')) {
-          stillWaiting = executableWaitingProposal(scenarioId, userId, decided.graphHash) === remembered.proposalId;
+          stillWaiting = executableWaitingProposal(scenarioId, userId, decided.graphHash, decided.graph) === remembered.proposalId;
         } else if (remembered !== undefined && typeof store.readMostRecentPendingActions === 'function') {
           try {
             // A product hold's pending carries its own id as `chip_id` (the approve chip is built from it).
@@ -4007,7 +4007,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Not when this turn prepared a proposal of its own: that one's card is the offer.
       const preparedNow = result.tool_calls.some((c) => c.name !== 'authorise_change' && c.ok && typeof c.proposal_id === 'string');
       if (fastPath !== 'run' && fastPath !== 'explain' && (toTheCard.length === 0 || preparedNow)) return [];
-      const id = executableWaitingProposal(scenarioId, userId, graphHash);
+      const id = executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph);
       if (id === undefined || (fastPath !== 'run' && fastPath !== 'explain' && !toTheCard.includes(id))) return [];
       const chip = [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
@@ -4102,7 +4102,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
     }
     // Select once from the same readback, before fixing the pills. Specific controls and waiting cards win.
-    const guidanceWaitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
+    const guidanceWaitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash, readbackGraph);
     const guidanceWaiting = guidanceWaitingIds.map((id) => ({ id: approvalChipIdFor(id) }));
     const guidanceRunKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length)
@@ -4117,7 +4117,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
       // S-B typed replies own their exits, including an intentional empty list (Science's estimate questions).
     }, actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
-      && executableWaitingProposal(scenarioId, userId, graphHash) === undefined,
+      && executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph) === undefined,
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
     /**
      * ⭐ S-D CARD CONTINUITY: a held proposal is approvable only by its card, so while one is held and this turn offers no
@@ -4381,7 +4381,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // the door's own fixed words, never the Agent's improvised offer (a band for a new link the model would double-count).
     // They stand in for the narration before the display call, so every owed line below composes with them unchanged.
     const awaitingApproval = offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
-      || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined;
+      || executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph) !== undefined;
     const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, {
       tools: result.tool_calls.map((c) => c.name), awaitingApproval, scopeQuestionOwed: rawScopeQuestion !== null }) : null;
     const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
@@ -4639,7 +4639,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     {
       // Any proposal that would still execute waits for its yes: that card is the step, re-offered or not (`offeredNow`).
-      const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
+      const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash, readbackGraph);
       const guidance = nextStepOffers.selection;
       if (guidance !== undefined) wireBody = { ...wireBody, guidance };
       // ⭐ S-C/S-E STANDING GAP SIGNAL (DL ruling 7 Oct): typed and deterministic, from this same final readback, on every

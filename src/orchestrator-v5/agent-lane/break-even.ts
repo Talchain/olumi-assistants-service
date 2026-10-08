@@ -126,6 +126,10 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
   const v0By = byOf(vos?.source);
   const unit = typeof pos?.unit === 'string' ? pos.unit.trim() : '';
   if (p0 === null || v0 === null || p0By === null || v0By === null || !(p0 > 0) || !(v0 > 0) || unit === '') return null;
+  // ⛔ #2851 (DL ruling 2; Paul's 2 Oct brief §9 check 1): the product's PARTS today are the user's figures or nothing.
+  // Olumi's basis-less count (B1 9f32a4b4's drafted 250) gave "£12,250 … 208/227 subscribers" in the Run reply while the
+  // card asked for that count: two stories from one model. The card's own rule (`identityPartsWithoutLevel`) decides.
+  if (p0By === 'olumi' || v0By === 'olumi') return null;
   // MG B3: the volume must be a COUNT with a stated unit — a rate (%, points, basis points) times a price is no revenue.
   const volumeUnit = typeof vos?.unit === 'string' ? vos.unit.trim() : '';
   if (volumeUnit === '' || classifyUnitScaleClass(volumeUnit) !== 'unknown') return null;

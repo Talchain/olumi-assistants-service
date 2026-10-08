@@ -41,6 +41,10 @@ function levelFor(graph: unknown, node: Rec): Level | null {
   const today = typeof node.id === 'string' ? todaysLevelFor(graph, node.id) : null;
   if (today !== null) return { node, raw: today.raw, unit: today.unit };
   const os = isRec(node.observed_state) ? node.observed_state : undefined;
+  // ⛔ #2851 (DL ruling 2): a part's level is the user's figure or none. Olumi's basis-less figure is a missing level,
+  // the card's own rule (`identityPartsWithoutLevel`), so no implied goal level is computed from it.
+  const owner = classifyValueSource(os?.source);
+  if (owner !== 'user_stated' && owner !== 'user_ratified') return null;
   if (os?.raw_value !== undefined) {
     const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
