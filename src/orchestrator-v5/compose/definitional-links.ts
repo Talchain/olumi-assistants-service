@@ -17,6 +17,7 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { composeEdgeIdentity } from './edge-address.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 
 export interface DefinitionalLink {
   readonly carrier_id: string;
@@ -63,7 +64,9 @@ function declaredIdentities(graph: unknown): DefinitionalLink[] {
     if (operands === null || addends === null || operands.length === 0) continue;
     // ⭐ CEE #3: an accumulation's three inputs DEFINE its stock at the horizon too; it is never read as a product.
     const accumulation = identity.operation === 'accumulation';
-    if (accumulation && (operands.length !== 3 || !Number.isInteger(identity.horizon_months))) continue;
+    // Joint review P2-C1: ONE predicate with the Run's parse. A shape `NodeV3` erases reaches PLoT as a linear node whose
+    // strength IS used, so refusing its link edit ("isn't used in the analysis") would outlive the Run. Never on a goal.
+    if (accumulation && (node.kind === 'goal' || NodeV3.shape.nonlinear_identity.safeParse(identity).data === undefined)) continue;
     out.push({
       carrier_id: node.id,
       operation: accumulation ? 'accumulation' : identity.operation === 'sum' ? 'sum' : 'product',

@@ -74,6 +74,19 @@ describe('readers treat an accumulation as a definition, never as a product', ()
     expect(definitionalLinkOf(graph, 'other', 'subs_m12')).toBeNull();
   });
 
+  it.each([
+    ['horizon 0', { horizon_months: 0 }], ['horizon 121', { horizon_months: 121 }], ['rate_scale 2', { rate_scale: 2 }],
+    ['a repeated id', { factor_ids: ['subs_today', 'churn', 'churn'] }], ['an extra key', { addends: [] }],
+  ])('a carrier the Run\'s parse erases (%s) defines no link: its strength IS used, so its edit is never refused', (_why, over) => {
+    const bad = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'subs_m12' ? node({ ...ACC, ...over }) : n)) };
+    expect(definitionalLinkOf(bad, 'churn', 'subs_m12')).toBeNull();
+  });
+
+  it('an accumulation on the GOAL defines no link (PLoT and ISL refuse it there)', () => {
+    const onGoal = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'goal' ? { ...n, nonlinear_identity: ACC } : n)) };
+    expect(definitionalLinkOf(onGoal, 'churn', 'goal')).toBeNull();
+  });
+
   it('words the refusal as worked out over the months, never as a product formula', () => {
     const link = definitionalLinkOf(graph, 'churn', 'subs_m12')!;
     const text = definitionalLinkRefusalText(graph, link);
