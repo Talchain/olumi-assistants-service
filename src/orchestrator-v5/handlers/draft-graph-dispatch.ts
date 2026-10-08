@@ -1121,6 +1121,7 @@ export async function dispatchDraftGraph(
     const commitStartedAt = Date.now();
     const framingNotice = draftOptionFramingNotice(draftResult);
     const modelBuildingReceipt = draftModelBuildingReceipt(draftResult.modelBuildingNotices);
+    const expectedRevision = draftBase?.revision;
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
@@ -1191,7 +1192,7 @@ export async function dispatchDraftGraph(
         // V5 Conversation Context Reliability: persist the user's brief.
         userMessage: payload.message,
         contentGraph: draftResult.graphOutput,
-        expectedRevision: draftBase?.revision,
+        ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       },
     );
     const persistenceMs = Date.now() - commitStartedAt;

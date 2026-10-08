@@ -1825,6 +1825,10 @@ export async function runTurnExecutor(
       const commitMeta = zeroSelectionProjection.applied
         ? { ...meta, pending_actions: [] }
         : meta;
+      const { expectedRevision: _callSiteExpectedRevision, ...commitMetaWithoutRevision } = commitMeta;
+      const expectedRevision = resolvedCanonicalGraphForCommit
+        ? resolvedCanonicalGraphForCommit.revision
+        : context.persistedRevision;
       result = await commitDirectAnswer(
         zeroSelectionProjection.response,
         {
@@ -1846,12 +1850,10 @@ export async function runTurnExecutor(
           // meta) to exclude the proposal they just consumed / rejected, so it
           // can never carry forward and reappear as a zombie.
           priorPendingActions: context.most_recent_pending_actions ?? [],
-          ...commitMeta,
+          ...commitMetaWithoutRevision,
           // A degraded-read recovery supplies graph and revision together;
           // otherwise retain the original turn snapshot's revision.
-          expectedRevision: resolvedCanonicalGraphForCommit
-            ? resolvedCanonicalGraphForCommit.revision
-            : context.persistedRevision,
+          ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           // ⭐⭐ GATE 1 — deliberately AFTER `...commitMeta`, unlike the two
           // injections above it. Those are DEFAULTS a call site may override;
           // this is a GUARANTEE. All ~36 executor commit sites funnel through

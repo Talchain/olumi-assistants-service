@@ -1658,7 +1658,7 @@ export async function commitDirectAnswer(
       // expected-base hashes (undefined when the path is not instrumented).
       expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
       expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
-      expectedRevision: metadata.expectedRevision,
+      ...(metadata.expectedRevision !== undefined ? { expectedRevision: metadata.expectedRevision } : {}),
       ...(atomicVersionPlan.kind === 'plan'
         ? { modelVersion: atomicVersionPlan.write }
         : {}),

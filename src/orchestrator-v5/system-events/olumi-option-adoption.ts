@@ -169,7 +169,7 @@ export async function commitOlumiOptionAdoptionInProcess(
       contentGraph: applied.graph,
       ...computeExpectedGraphCasHashes(before),
       coaching_state: null,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
     });
     if (!committed.graphPersisted || !committed.thisAttemptWrote
       || committed.persistedAnalysisGraphHash !== applied.graph_hash) {

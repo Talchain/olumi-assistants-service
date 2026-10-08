@@ -1780,7 +1780,7 @@ async function dispatchEdgeStrengthEdit(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -2267,7 +2267,7 @@ async function dispatchStructuralDelete(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -2676,7 +2676,7 @@ async function dispatchFactorValueEdit(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });
@@ -4163,7 +4163,7 @@ async function dispatchStructuralRename(
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
       // "known-absent base" into "no base asserted" and darkens the CAS guard.
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -4523,7 +4523,7 @@ async function dispatchOptionStatusEdit(
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       contentGraph: result.mutatedGraph,
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -4913,7 +4913,7 @@ async function dispatchStructuralAdd(
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
       // "known-absent base" into "no base asserted" and darkens the CAS guard.
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -5286,7 +5286,7 @@ async function dispatchStructuralAddEdge(
       // SPREAD, never conditionally omitted — `supabase-store.ts` derives
       // `p_expected_base_known` from key PRESENCE.
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -5634,7 +5634,7 @@ async function dispatchAddConstraintEdit(
       // SPREAD, never conditionally omitted — see the fve writer's note: the
       // store derives the known-base CAS guard from key PRESENCE.
       ...cas,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });

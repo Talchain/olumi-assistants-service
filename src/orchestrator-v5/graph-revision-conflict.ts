@@ -36,7 +36,8 @@ const isRevision = (value: unknown): value is number =>
 /** Read measured revision details preserved by the RPC or an in-process refusal. */
 export function readRevisionConflictDetails(error: GraphStaleWriteError): RevisionDetails {
   if (error.conflict_category !== 'revision_conflict') return {};
-  const cause = (error as unknown as { cause?: unknown }).cause;
+  const cause = typeof error === 'object' && error !== null && 'cause' in error
+    ? error.cause : undefined;
   if (cause === null || typeof cause !== 'object') return {};
   let detail: unknown = (cause as { details?: unknown }).details;
   if (typeof detail === 'string') {

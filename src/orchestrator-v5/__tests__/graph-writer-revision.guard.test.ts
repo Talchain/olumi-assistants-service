@@ -91,11 +91,30 @@ function mightSupply(expression: ts.Expression, key: string): boolean {
     ? mightSupply(property.expression, key) : propertyName(property.name) === key);
 }
 
-/** Follow property order and require a revision on every spread branch. */
+/** Omit only the same undefined expectation; arbitrary conditional omission is unsafe. */
+function omitsOnlyUndefinedRevision(expression: ts.ConditionalExpression, key: string): boolean {
+  if (key !== 'expectedRevision') return false;
+  const condition = unwrap(expression.condition);
+  const present = unwrap(expression.whenTrue);
+  const absent = unwrap(expression.whenFalse);
+  if (!ts.isBinaryExpression(condition) || condition.operatorToken.kind !== ts.SyntaxKind.ExclamationEqualsEqualsToken
+    || !ts.isIdentifier(condition.right) || condition.right.text !== 'undefined'
+    || !ts.isObjectLiteralExpression(present) || present.properties.length !== 1
+    || !ts.isObjectLiteralExpression(absent) || absent.properties.length !== 0) return false;
+  const property = present.properties[0]!;
+  if (ts.isSpreadAssignment(property) || propertyName(property.name) !== key) return false;
+  const revision = ts.isPropertyAssignment(property) ? property.initializer
+    : ts.isShorthandPropertyAssignment(property) ? property.name : undefined;
+  return revision !== undefined && isRevisionValue(revision)
+    && unwrap(revision).getText() === unwrap(condition.left).getText();
+}
+
+/** Follow property order; conditional omission is allowed only for an undefined expectation. */
 function guaranteesRevision(expression: ts.Expression, alreadySupplied = false, key = 'expectedRevision'): boolean {
   const value = unwrap(expression);
   if (isKnownHashOnlySpread(value)) return alreadySupplied;
   if (ts.isConditionalExpression(value)) {
+    if (omitsOnlyUndefinedRevision(value, key)) return true;
     return guaranteesRevision(value.whenTrue, alreadySupplied, key) && guaranteesRevision(value.whenFalse, alreadySupplied, key);
   }
   if (!ts.isObjectLiteralExpression(value)) return false;
@@ -232,6 +251,9 @@ describe('versioned graph writer revision propagation', () => {
       'const write = { graph: after }; commitDirectAnswer(response, write);',
       'commitDirectAnswer(response, { ...write });',
       'commitDirectAnswer(response, { graph: after, ...(condition ? { expectedRevision: state.revision } : {}) });',
+      'commitDirectAnswer(response, { graph: after, ...(otherRevision !== undefined ? { expectedRevision: state.revision } : {}) });',
+      'commitDirectAnswer(response, { graph: after, ...(state.revision !== undefined ? { expectedRevision: otherRevision } : {}) });',
+      'commitDirectAnswer(response, { graph: after, ...(state.revision !== undefined ? { expectedRevision: state.revision } : opaque) });',
       'commitDirectAnswer(response, { graph: after, expectedRevision: state.revision, ...write });',
       'appendCheckedGraphWrite({ write });',
       'appendCheckedGraphWrite(params);',
@@ -241,6 +263,14 @@ describe('versioned graph writer revision propagation', () => {
     expect(revisionDoors(parse('fixture.ts',
       'commitDirectAnswer(response, { ...write, expectedRevision: state.revision });'))
       .map((door) => door.hasRevision)).toEqual([true]);
+    for (const field of ['expectedRevision', 'state.revision']) {
+      expect(revisionDoors(parse('fixture.ts',
+        `commitDirectAnswer(response, { graph: after, ...(${field} !== undefined ? { expectedRevision: ${field} } : {}) });`))
+        .map((door) => door.hasRevision)).toEqual([true]);
+    }
+    expect(revisionDoors(parse('fixture.ts',
+      'commitDirectAnswer(response, { graph: after, ...(state.revision !== undefined ? { expectedRevision: state.revision } : {}), ...write });'))
+      .map((door) => door.hasRevision)).toEqual([false]);
   });
 
   it('commit forwards the caller revision verbatim into the exact write argument', () => {
@@ -292,8 +322,15 @@ describe('versioned graph writer revision propagation', () => {
         expect(node.initializer && ts.isCallExpression(node.initializer)).toBe(true);
         if (node.initializer && ts.isCallExpression(node.initializer)) {
           expect(node.initializer.expression.getText(floor)).toBe('withoutAgentSubturnText');
-          const input = node.initializer.arguments[0]!;
-          expect(guaranteesRevision(input)).toBe(true);
+          const input = unwrap(node.initializer.arguments[0]!);
+          expect(ts.isConditionalExpression(input)).toBe(true);
+          if (ts.isConditionalExpression(input)) {
+            expect(input.condition.getText(floor)).toBe(
+              "params.write.expectedRevision === undefined && !Object.prototype.hasOwnProperty.call(write, 'expectedRevision')",
+            );
+            expect(input.whenTrue.getText(floor)).toBe('write');
+            expect(guaranteesRevision(input.whenFalse)).toBe(true);
+          }
           forwarded.push(...propertyValues(input, 'expectedRevision').map((value) => value.getText(floor)));
         }
       }

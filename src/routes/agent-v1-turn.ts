@@ -2581,8 +2581,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // revision refusal proves it wrote nothing; earlier writes and unknown
     // outcomes must keep the claim.
     let writesDispatched = 0;
-    const countingWrite = async <T>(write: () => Promise<T>): Promise<T> => {
-      writesDispatched += 1;
+    const undoRefusedWrite = async <T>(write: () => Promise<T>): Promise<T> => {
       try { return await write(); }
       catch (err) {
         // Undo only this refused attempt; an earlier step may already have written.
@@ -2605,11 +2604,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
       const send = async () => promoteRevisionConflictResponse(await readingDispatch(path, body));
-      if (path.endsWith('/graph/register')) return countingWrite(send);
+      if (path.endsWith('/graph/register')) {
+        writesDispatched += 1;
+        return undoRefusedWrite(send);
+      }
       // A v2 turn can commit through several subdoors before a later refusal.
       // Its revision 409 cannot prove that the whole dispatched turn wrote nothing.
-      if (path === '/orchestrate/v2/turn') writesDispatched += 1;
-      return send();
+      if (path === '/orchestrate/v2/turn') {
+        writesDispatched += 1;
+        return send();
+      }
+      return readingDispatch(path, body);
     };
     /**
      * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), handed to the build capability. The route
@@ -2676,7 +2681,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // S2b team_time uses this same fenced batch door and cached read-back.
         commitOptionLevels: async (input) => {
           // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
-          return countingWrite(() => readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
@@ -2687,27 +2695,45 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
-          return countingWrite(() => readCache.around(() => holdAddRiskInProcess(input, String(req.id))));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
+          });
         },
         // ⭐ PJ-E-FIG (DL #72 5866036457): the add-factor door — ONE held change carrying the user's figures, in-process.
         holdAddFactor: async (input) => {
-          return countingWrite(() => readCache.around(() => holdAddFactorInProcess(input, String(req.id))));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => holdAddFactorInProcess(input, String(req.id)));
+          });
         },
         commitLimitAdd: async (input) => {
           const fenceRefused = () => ({ status: 'refused' as const, reason: 'turn_fence_refused' });
-          return countingWrite(() => readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitAddInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitAddInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         commitLimitEdit: async (input) => {
-          return countingWrite(() => readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitEditInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitEditInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         commitOlumiOptionAdoption: async (input) => {
-          return countingWrite(() => readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOlumiOptionAdoptionInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOlumiOptionAdoptionInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         // ⭐ MG F1 T6 (#2471): an option's status, in-process, so "applied" rests on the writer's own typed outcome. It runs
         // as an Agent SUB-TURN, exactly as the HTTP dispatch it replaces did (:1499): the writer's narration is not the
         // conversation, so its row keeps no conversation text (#2352 class; DL CR on #2471 P2).
         commitOptionStatus: async (input) => {
-          return countingWrite(() => readCache.around(() => runAsAgentSubturn(input.scenario_id, () => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionStatusInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused))));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runAsAgentSubturn(input.scenario_id, () => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionStatusInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          });
         },
       },
     );
@@ -3670,10 +3696,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // No possible writes remain: release the claim, so a retry of the SAME
       // turn_id can run. Earlier writes or unknown outcomes keep the claim.
       const released = await releaseUnwrittenTurnClaim();
-      if (isRevisionConflict(err)) return reply.code(409).send({
-        ...toErrorV1(err, req),
-        ...(turnId !== undefined ? { retry_safe: released } : {}),
-      });
+      if (isRevisionConflict(err)) {
+        const refusal = { error: {
+          ...toErrorV1(err, req),
+          ...(turnId !== undefined ? { retry_safe: released } : {}),
+        } };
+        return reply.code(409).send(refusal.error);
+      }
       return reply.code(502).send({
         error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
         ...(turnId !== undefined ? { retry_safe: released } : {}),

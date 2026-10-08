@@ -456,7 +456,15 @@ export async function appendCheckedGraphWrite(
     // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
     // Reconciliation may replace the write, but it cannot replace the revision
     // captured by its original server read. Bind it again at the append seam.
-    const storedWrite = withoutAgentSubturnText({ ...write, expectedRevision: params.write.expectedRevision });
+    const { expectedRevision: _reconciledExpectedRevision, ...writeWithoutRevision } = write;
+    const storedWrite = withoutAgentSubturnText(
+      params.write.expectedRevision === undefined && !Object.prototype.hasOwnProperty.call(write, 'expectedRevision')
+        ? write
+        : {
+          ...writeWithoutRevision,
+          ...(params.write.expectedRevision !== undefined ? { expectedRevision: params.write.expectedRevision } : {}),
+        },
+    );
     if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
     const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
     if (!('status' in outcome)) return outcome;

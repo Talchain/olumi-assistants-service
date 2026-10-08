@@ -1203,7 +1203,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       handler_facts: plan.handlerFacts as never, graph: plan.graph, contentGraph: plan.graph,
       baseGraphForInvariants: before, ...computeExpectedGraphCasHashes(before),
       graph_hash: plan.analysisGraphHash, priorPendingActions: holds.threaded,
-      expectedRevision,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
     }, store);
     // Scope was verified at the specialised write door above; the generic invariant
     // guard still compares the real CAS base and final projection exactly.

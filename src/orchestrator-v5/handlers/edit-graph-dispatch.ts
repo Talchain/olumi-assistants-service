@@ -5722,6 +5722,7 @@ export async function dispatchEditGraph(
       turnId: payload.turn_id,
       site: 'edit_graph_dispatch',
     });
+    const expectedRevision = useAppendV6() ? editBase?.revision : undefined;
     const commitResult = await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
@@ -5793,7 +5794,7 @@ export async function dispatchEditGraph(
       // post-edit appliedGraph on a successful mutation, else undefined → the
       // egress is graph-free too), keeping stored == wire.
       contentGraph: graphForCommit,
-      expectedRevision: useAppendV6() ? editBase?.revision : undefined,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
     });
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
     // the commit seam itself may rewrite the response (turn-TTL lapse

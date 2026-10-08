@@ -450,7 +450,7 @@ export async function runReplacementTurn(
           operations: p.operations,
           modelRevision: p.model_revision,
           ...(revisionChecked ? {
-            expectedRevision: p.expected_graph_revision,
+            ...(p.expected_graph_revision !== undefined ? { expectedRevision: p.expected_graph_revision } : {}),
             reconcile: true as const,
             beforeAppend: checkpointApplyRevision(p.id),
           } : {}),

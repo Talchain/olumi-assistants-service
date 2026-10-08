@@ -1379,7 +1379,7 @@ export default async function route(app: FastifyInstance) {
             ...(threadedPendings === undefined ? {} : { pending_actions: threadedPendings }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
-            expectedRevision,
+            ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           },
           });
         });

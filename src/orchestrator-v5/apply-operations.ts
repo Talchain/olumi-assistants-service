@@ -748,7 +748,7 @@ export function createApplyOperations(
         ...invariantBaselineFor(read),
         ...computeExpectedGraphCasHashes(before),
         graph_hash: analysisGraphHash,
-        expectedRevision,
+        ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       },
       store,
     );
