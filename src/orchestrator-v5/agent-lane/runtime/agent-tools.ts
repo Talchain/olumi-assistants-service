@@ -901,10 +901,10 @@ export interface AgentCapabilities {
   proposeNewFactor?(ctx: AgentToolContext, args: {
     rationale: string;
     factors: readonly {
-      label: string; unit: string; today: { value: number; unit?: string };
-      affects: string; direction: 'positive' | 'negative';
+      label: string; affects: string; direction: 'positive' | 'negative';
+      unit?: string; today?: { value: number; unit?: string };
     }[];
-  }): Promise<ToolResult>;
+  }, internal?: { readonly kind: 'olumi_direction' }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeLimitChange?(ctx: AgentToolContext, args: {
     limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;

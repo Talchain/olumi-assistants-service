@@ -3584,23 +3584,39 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
  * ONE hold is committed with the turn row (`commitDirectAnswer`, no graph), prior live holds carried. The confirm is the
  * product's own held resume, ONE `commitTurn` under CAS. Every outcome but `held` leaves the graph and the row untouched.
  */
-export type HoldAddFactorInput = {
+type HoldAddFactorBase = {
   readonly scenario_id: string;
   /** The hold's own turn row (a v4 uuid), fresh per offer — see `HoldAddRiskInput.turn_id`. */
   readonly turn_id: string;
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
-  /** 1..3 new factors, each with its ONE link and the user's figure, framed (`isUserTodayObservedState`). */
-  readonly factors: readonly {
-    readonly id?: string;
-    readonly label: string;
-    readonly link: { readonly to_id: string; readonly effect_direction: 'positive' | 'negative' };
-    readonly observed_state: Readonly<Record<string, unknown>>;
-    /** Why the figure is the user's, and their own words for the card (`UserTodayLevel`): recorded on the hold. */
-    readonly basis?: UserTodayBasis;
-    readonly quote?: string;
-  }[];
 };
+type HoldAddFactorDefinition = {
+  readonly id?: string;
+  readonly label: string;
+  readonly link: { readonly to_id: string; readonly effect_direction: 'positive' | 'negative' };
+};
+export type HoldAddFactorInput = HoldAddFactorBase & (
+  | {
+      readonly variant?: never;
+      /** 1..3 new factors, each with its ONE link and the user's framed figure. */
+      readonly factors: readonly (HoldAddFactorDefinition & {
+        readonly observed_state: Readonly<Record<string, unknown>>;
+        /** Why the figure is the user's, and their own words for the card: recorded on the hold. */
+        readonly basis?: UserTodayBasis;
+        readonly quote?: string;
+      })[];
+    }
+  | {
+      /** Internal widen Add only, with no user figure or user authorship record. */
+      readonly variant: 'olumi_direction';
+      readonly factors: readonly (HoldAddFactorDefinition & {
+        readonly observed_state?: never;
+        readonly basis?: never;
+        readonly quote?: never;
+      })[];
+    }
+);
 export type HoldAddFactorResult =
   | {
       readonly status: 'held';
@@ -3649,8 +3665,12 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
   const factors = input.factors.map((f) => ({ ...(f.id !== undefined ? { id: f.id } : {}), label: f.label, link: f.link }));
   const outcome = dispatchAddFactorTransaction({
     params: { factors },
-    userToday: input.factors.map((f) => f.observed_state),
-    userTodayWhy: input.factors.map((f) => ({ ...(f.basis !== undefined ? { basis: f.basis } : {}), ...(f.quote !== undefined ? { quote: f.quote } : {}) })),
+    ...(input.variant === 'olumi_direction'
+      ? { variant: 'olumi_direction' as const }
+      : {
+          userToday: input.factors.map((f) => f.observed_state),
+          userTodayWhy: input.factors.map((f) => ({ ...(f.basis !== undefined ? { basis: f.basis } : {}), ...(f.quote !== undefined ? { quote: f.quote } : {}) })),
+        }),
     currentGraph: persistedGraph,
     currentGraphHash: currentHash,
     freshness,

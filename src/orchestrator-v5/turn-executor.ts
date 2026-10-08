@@ -4667,6 +4667,7 @@ export async function runTurnExecutor(
           ...(read.gradedToday !== undefined ? { gradedToday: read.gradedToday } : {}),
           // ⭐ PJ-E-FIG — the add-factor door's figures, the user's, land in this same apply (DL #72 5866036457).
           ...(read.userToday !== undefined ? { userToday: read.userToday } : {}),
+          olumiDirection: read.olumiDirection,
           ...(read.userEventRisk !== undefined ? { userEventRisk: read.userEventRisk } : {}),
           currentGraph: gmBaseGraph,
           currentGraphHash: gmBaseHash,
@@ -4958,6 +4959,7 @@ export async function runTurnExecutor(
             ...(stepStated !== undefined ? { userStatedNodeIds: stepStated } : {}),
             ...(stepToday !== undefined ? { gradedToday: stepToday } : {}),
             ...(stepUserToday !== undefined ? { userToday: stepUserToday } : {}),
+            olumiDirection: reads[i]!.olumiDirection,
             ...(reads[i]!.userEventRisk !== undefined ? { userEventRisk: reads[i]!.userEventRisk } : {}),
             currentGraph: preStepGraph,
             currentGraphHash: workingHash,

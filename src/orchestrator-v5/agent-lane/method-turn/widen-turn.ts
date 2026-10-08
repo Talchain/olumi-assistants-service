@@ -32,6 +32,8 @@ import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import type { AgentCapabilities, ToolResult } from '../runtime/agent-tools.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { buildAddFactorTransaction, isNewFactorTarget } from '../../routing/add-factor-transaction.js';
+import { currentDefinitionalCarrier, endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
@@ -681,7 +683,7 @@ export function questionFallbackReply(q: QuestionedLink): string {
  * with its OWN "Prepare one risk called …" message (premortem.ts `risk_request`), an ordinary Agent turn. The risks press is
  * therefore the id AND this exact server-authored message; the canvas "+" sends its own typed id (`ask:risks`).
  */
-export type WidenTarget = 'options' | 'risks';
+export type WidenTarget = 'options' | 'risks' | 'factors';
 
 /** The W6 press (RC-WIDEN target risks, primary action "Suggest risks"), offered by `nextStepsFromGuidance`. */
 export const SUGGEST_RISKS_CHIP = {
@@ -696,6 +698,7 @@ const foldWords = (s: string): string => s.replace(/[‘’]/gu, "'").replace(/\
 
 /** Which target a press opens, by identity; null for every other press (including the pre-mortem's risk request). */
 export function widenTargetOf(chipId: unknown, message?: unknown): WidenTarget | null {
+  if (chipId === CANVAS_FACTORS_PRESS.id) return 'factors';
   if (isWidenPress(chipId)) return 'options';
   if (chipId === CANVAS_RISKS_PRESS_ID) return 'risks';
   if (chipId === SUGGEST_RISKS_CHIP.id && typeof message === 'string' && message.length <= 200
@@ -973,7 +976,7 @@ function riskAddMessage(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | '
  * The press id binds the message AND the node identities it was minted on (Codex r1 P1 on #2744): a label that later
  * names another node (a rename plus a new node with the old name) recomputes to a different id and is refused.
  */
-const addPressId = (message: string, ids: readonly [string, string, string]): string =>
+const addPressId = (message: string, ids: readonly string[]): string =>
   `${WIDEN_ADD_PREFIX}${createHash('sha256').update(JSON.stringify([message, ...ids]), 'utf8').digest('hex').slice(0, 16)}`;
 
 export function riskAddPressFor(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects'>): SuggestedAction {
@@ -1120,4 +1123,152 @@ export function risksTurnForReadback(rb: MethodReadback, userWords: string = '')
     leaderLicensed: leaderLicenceFromState(rb.analysisState, rb.analysisReady) !== 'withheld',
   });
   return risksTurnFromSignals(signals, rb.graph, userWords);
+}
+
+
+/** P14: one typed coverage call, followed by a pure identity gate. */
+export const CANVAS_FACTORS_PRESS = {
+  id: 'ask:missing-factor', label: 'Suggest factors',
+  message: 'What else could change how this turns out that the model doesn’t have yet?',
+} as const satisfies SuggestedAction;
+export const FACTOR_METHOD = {
+  id: 'influence_diagram_elicitation',
+  categories: ['customers and demand', 'money and price', 'people and capacity', 'time and timing',
+    'how the work is done', 'outside conditions (competitors, rules, the economy)'] as const,
+} as const;
+export const FACTOR_MAX_ITEMS = 3;
+export const FACTOR_ADD_REFUSED_REPLY =
+  'I couldn’t prepare that factor as a change, so nothing was added. The model may have changed since I suggested it. Press Suggest factors for a fresh set.';
+export const OLUMI_DIRECTION_BASIS = "Olumi's suggestion: the direction is Olumi's estimate from general patterns, not from your data or your words. Its strength isn't set yet.";
+export interface RunFactorsWidenTurn {
+  readonly kind: 'run_factors'; readonly target: 'factors'; readonly graph: Graph;
+  readonly raw: unknown; readonly directive: string; readonly goal_label: string;
+}
+export interface FactorSuggestion {
+  readonly label: string; readonly category: string; readonly since: string;
+  readonly anchor: { readonly id: string; readonly label: string };
+  readonly direction: 'positive' | 'negative'; readonly press: SuggestedAction;
+}
+export interface FactorGateResult {
+  readonly kept: readonly FactorSuggestion[];
+  readonly dropped: readonly { readonly index: number; readonly failed: readonly string[] }[];
+  readonly redirect?: string;
+}
+const factorCandidateSchema = z.object({
+  label: z.string().trim().min(1).max(60), category: z.enum(FACTOR_METHOD.categories),
+  anchor_id: nodeId, direction: z.enum(['positive', 'negative']), since: z.string().trim().min(1).max(120),
+}).strict();
+// Bounded candidate lengths precede every regex. No masking: Olumi supplies both the name and mechanism.
+const COVERAGE_BAN = /\b(?:key|main|most important|top|primary|root cause|the real|the answer|best|winners?|recommend\w*|ahead|beats?|leader\w*|you missed|you forgot|your model is wrong|incomplete|all the drivers|complete|everything that matters|will|proven|research shows|likely|probably|hidden risks|unintended consequences|lever|uncontrollable)\b/iu;
+function coverageWordsAllowed(label: string, since: string): boolean {
+  return ![label, since].some((t) => /[\d?\n‘’]/u.test(t) || COVERAGE_BAN.test(foldWords(t)))
+    && label.split(/\s+/u).length <= 6 && since.split(/\s+/u).length <= 12;
+}
+function uniqueCoverageAnchor(g: Graph, id: string): Rec | undefined {
+  const hits = g.nodes.filter((n) => n.id === id);
+  if (hits.length !== 1) return undefined;
+  const n = hits[0]!; const label = labelOf(n);
+  return label !== null && label.length <= 200 && !/[\n‘’]/u.test(label)
+    && g.nodes.filter((x) => norm(String(x.label ?? '')) === norm(label)).length === 1 ? n : undefined;
+}
+/** S-DEF is reached through its real held-carrier predicate, never inferred from a node's label. */
+function definitionRedirect(turn: Pick<RunFactorsWidenTurn, 'graph' | 'raw'>, id: string): string | undefined {
+  const n = turn.graph.nodes.find((x) => x.id === id);
+  if (n === undefined || labelOf(n) === null) return undefined;
+  const ends = endsOfGraph(turn.raw);
+  const fixed = rec(n.nonlinear_identity);
+  const operands = new Set(Array.isArray(fixed?.factor_ids) ? fixed.factor_ids : []);
+  const sources = turn.graph.edges.filter((e) => e.to === id && (operands.has(e.from)
+    || (currentDefinitionalCarrier(e) !== undefined && ['definition', 'user_range'].includes(heldLinkOf(e, ends(e))?.reason ?? ''))))
+    .map((e) => turn.graph.nodes.find((x) => x.id === e.from)).filter((x): x is Rec => x !== undefined && labelOf(x) !== null);
+  // An identity can name its operands without drawing their edges.
+  for (const source of turn.graph.nodes.filter((x) => operands.has(x.id) && labelOf(x) !== null)) {
+    if (!sources.some((x) => x.id === source.id)) sources.push(source);
+  }
+  if (sources.length === 0) return undefined;
+  return `${quote(labelOf(n)!)} is worked out from ${sources.map((x) => quote(labelOf(x)!)).join(' and ')}, so a new cause would act on one of those. Press + on one of them.`;
+}
+export function factorsTurnForReadback(rb: MethodReadback): RunFactorsWidenTurn | WidenUnavailableTurn {
+  if (rb.graph === undefined || rb.graph === null) return { ...unavailable('model_unread'),
+    reply: 'I can’t suggest factors right now because I couldn’t read your model. Try again in a moment.' };
+  const graph = graphOf(rb.graph); const goal = goalOf(rb.graph, graph);
+  const anchors = graph.nodes.filter((n) => isNewFactorTarget(n as never) && uniqueCoverageAnchor(graph, String(n.id)) !== undefined);
+  const directive = [
+    'METHOD TURN: influence-diagram elicitation. Do not write prose. Reply with ONLY <factor_suggestions>JSON array</factor_suggestions>. The server writes every word the user sees.',
+    `Return up to ${FACTOR_MAX_ITEMS} possible drivers, one per distinct category, from ${JSON.stringify(FACTOR_METHOD.categories)}.`,
+    'Each item has exactly label, category, anchor_id, direction (positive or negative), since (at most twelve words). Label: at most six words. No digits in label or since. No rankings, certainty, diagnosis or completeness claims.',
+    `Use an exact anchor_id from these nodes; new factor links INTO that node: ${JSON.stringify(anchors.map((n) => ({ id: n.id, label: n.label, definition: definitionRedirect({ graph, raw: rb.graph }, String(n.id)) ?? null })))}. Never drive a node fixed by a definition.`,
+    `All existing labels (never repeat them): ${JSON.stringify(graph.nodes.map((n) => n.label))}.`,
+  ].join('\n');
+  return { kind: 'run_factors', target: 'factors', graph, raw: rb.graph, directive, goal_label: labelOf(goal) ?? 'your goal' };
+}
+function factorAddMessage(s: Pick<FactorSuggestion, 'label' | 'anchor' | 'direction'>): string {
+  return `Add the factor ${quote(s.label)}: it could ${s.direction === 'positive' ? 'raise' : 'lower'} ${quote(s.anchor.label)}.`;
+}
+export function factorAddPressFor(s: Pick<FactorSuggestion, 'label' | 'anchor' | 'direction'>): SuggestedAction {
+  const message = factorAddMessage(s);
+  return { id: addPressId(message, ['factors', s.anchor.id]), label: `Add ${quote(s.label)}`, message };
+}
+export function factorGate(turn: RunFactorsWidenTurn, candidates: unknown): FactorGateResult {
+  const kept: FactorSuggestion[] = []; const dropped: { index: number; failed: string[] }[] = [];
+  let redirect: string | undefined;
+  for (const [index, item] of (Array.isArray(candidates) ? candidates : []).entries()) {
+    const raw = rec(item);
+    if (typeof raw?.label !== 'string' || raw.label.length > 60 || typeof raw.since !== 'string' || raw.since.length > 120) {
+      dropped.push({ index, failed: ['FD-SCHEMA'] }); continue;
+    }
+    const parsed = factorCandidateSchema.safeParse(item);
+    if (!parsed.success) { dropped.push({ index, failed: ['FD-SCHEMA'] }); continue; }
+    const c = parsed.data; const failed: string[] = [];
+    if (turn.graph.nodes.some((n) => sameLabel(typeof n.label === 'string' ? n.label : undefined, c.label))
+      || kept.some((n) => sameLabel(n.label, c.label))) failed.push('FD-NO-DUP');
+    const anchor = uniqueCoverageAnchor(turn.graph, c.anchor_id);
+    if (anchor === undefined || !isNewFactorTarget(anchor as never)) failed.push('FD-ANCHOR');
+    const definition = definitionRedirect(turn, c.anchor_id);
+    if (definition !== undefined) { failed.push('FD-NOT-DEFINED'); redirect ??= definition; }
+    if (!coverageWordsAllowed(c.label, c.since)) failed.push('FD-WORDS');
+    if (kept.some((n) => n.category === c.category)) failed.push('FD-DISTINCT');
+    if (failed.length === 0 && !buildAddFactorTransaction({ factors: [{ label: c.label,
+      link: { to_id: c.anchor_id, effect_direction: c.direction } }] }, { nodes: turn.graph.nodes as never, edges: turn.graph.edges as never }, { kind: 'olumi_direction' }).matched) failed.push('FD-DOOR');
+    if (failed.length === 0 && kept.length >= FACTOR_MAX_ITEMS) failed.push('FD-COUNT');
+    if (failed.length > 0) { dropped.push({ index, failed }); continue; }
+    const suggestion = { label: c.label, category: c.category, since: c.since,
+      direction: c.direction, anchor: { id: c.anchor_id, label: labelOf(anchor)! } };
+    kept.push({ ...suggestion, press: factorAddPressFor(suggestion) });
+  }
+  return { kept, dropped, ...(redirect !== undefined ? { redirect } : {}) };
+}
+function readCoverageCandidates(draft: string, tag: string): unknown {
+  if (draft.length > 20_000) return undefined;
+  const open = `<${tag}>`; const close = `</${tag}>`; const start = draft.indexOf(open); const end = draft.lastIndexOf(close);
+  if (start < 0 || end < start) return undefined;
+  try { return JSON.parse(draft.slice(start + open.length, end)) as unknown; } catch { return undefined; }
+}
+export function settleFactorsTurn(turn: RunFactorsWidenTurn, draft: string) {
+  const gate = factorGate(turn, readCoverageCandidates(draft, 'factor_suggestions'));
+  const lines = gate.kept.map((s) => `- ${quote(s.label)} (${s.category}): could ${s.direction === 'positive' ? 'raise' : 'lower'} ${quote(s.anchor.label)}, since ${s.since}.`);
+  const names = [...new Set(gate.kept.map((s) => quote(s.anchor.label)))].join(' and ');
+  const reply = gate.kept.length > 0 ? [
+    'Possible drivers not in the model yet.',
+    `I looked for what else could drive ${names}, across customers and demand, money and price, people and capacity, timing, how the work is done, and outside conditions (influence-diagram elicitation).`,
+    ...lines, 'Possible drivers to consider, not established causes.', 'Nothing is added until you choose one and approve the change.',
+  ].join('\n') : gate.redirect ?? 'I couldn’t prepare a possible driver from this model. Nothing was added.';
+  return { reply, gate, offered: gate.kept.length, actions: gate.kept.length > 0 ? [...gate.kept.map((s) => s.press), SOMETHING_ELSE_CHIP] : [CANVAS_FACTORS_PRESS] };
+}
+export type FactorAddCall = { readonly tool: 'propose_new_factor'; readonly internal: { readonly kind: 'olumi_direction' }; readonly args: {
+  factors: readonly { label: string; affects: string; direction: 'positive' | 'negative' }[]; rationale: string; whole_request: true;
+} };
+export function factorAddCallOf(chipId: unknown, message: unknown, rb: MethodReadback): FactorAddCall | null {
+  const prefix = 'Add the factor ‘';
+  if (!isWidenAddPressId(chipId) || typeof message !== 'string' || message.length > 600 || !message.startsWith(prefix)) return null;
+  const end = message.indexOf('’', prefix.length); const label = end < 0 ? '' : message.slice(prefix.length, end);
+  if (label === '' || label.length > 60) return null;
+  const turn = factorsTurnForReadback(rb); if (turn.kind !== 'run_factors') return null;
+  for (const anchor of turn.graph.nodes) for (const direction of DIRECTIONS) {
+    const gate = factorGate(turn, [{ label, category: FACTOR_METHOD.categories[0], anchor_id: anchor.id, direction, since: 'general patterns suggest this connection' }]);
+    const s = gate.kept[0];
+    if (s?.press.message === message && s.press.id === chipId) return { tool: 'propose_new_factor', internal: { kind: 'olumi_direction' },
+      args: { factors: [{ label, affects: s.anchor.id, direction }], rationale: 'Olumi suggested this driver (influence-diagram elicitation); the user chose to add it.', whole_request: true } };
+  }
+  return null;
 }
