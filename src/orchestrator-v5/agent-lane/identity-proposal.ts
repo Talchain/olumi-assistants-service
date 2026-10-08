@@ -92,6 +92,52 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
  * Science §(e) Q1.2 binds the goal's own parents, so a path through another node alone
  * cannot qualify. Callers check writability and dry-run the existing confirmation door.
  */
+const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
+
+/** A direct parent of the goal other than the reading's own factors (options, decisions and excluded nodes aside). */
+function isOtherDirectParent(e: Rec, goalId: string, ids: readonly string[], byId: ReadonlyMap<string, Rec>): boolean {
+  if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') return false;
+  const n = byId.get(e.from);
+  return !(n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded');
+}
+
+/**
+ * Science §(e) addendum 2: the direct parents that VETO the reading: user-authored, or not a definitional addend. One
+ * source for the proposer (any veto → no card) and the routing ask (build 1c, addendum 5), which names the vetoing node.
+ */
+function vetoingParentsOf(goalId: string, ids: readonly string[], edges: readonly Rec[], byId: ReadonlyMap<string, Rec>): string[] {
+  const out: string[] = [];
+  for (const e of edges) {
+    if (!isOtherDirectParent(e, goalId, ids, byId)) continue;
+    const n = byId.get(e.from as string)!;
+    const prov = isRec(e.provenance) ? e.provenance : undefined;
+    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
+    if ((prov?.definitional !== true || userAuthored) && !out.includes(e.from as string)) out.push(e.from as string);
+  }
+  return out;
+}
+
+/**
+ * GOAL-REACH build 1c (Science §(e) addendum 5): the ONE risk linked straight into the goal that vetoes Olumi's stored
+ * reading, when re-routing it is all the card needs (the same graph without that risk's link into the goal gives the
+ * card). `null` for no veto, a veto by a non-risk or by more than one parent, or a reading that fails on other grounds.
+ */
+export function storedReadingVetoOf(graph: unknown): { readonly goal_id: string; readonly risk_id: string; readonly factor_ids: readonly [string, string] } | null {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const goals = nodes.filter(n => n.kind === 'goal');
+  const goal = goals.length === 1 ? goals[0]! : undefined;
+  const goalId = goal === undefined ? undefined : text(goal.id);
+  const ids = goal === undefined ? null : unconfirmedProduct(goal);
+  if (goalId === undefined || ids === null || ids.length !== 2) return null;
+  const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
+  const vetoes = vetoingParentsOf(goalId, ids, edges, byId);
+  if (vetoes.length !== 1 || byId.get(vetoes[0]!)?.kind !== 'risk') return null;
+  const without = { ...(graph as Rec), edges: edges.filter(e => !(e.from === vetoes[0] && e.to === goalId)) };
+  if (proposeOnStoredReading(without) === null) return null;
+  return { goal_id: goalId, risk_id: vetoes[0]!, factor_ids: [ids[0]!, ids[1]!] };
+}
+
 function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
@@ -131,15 +177,11 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   // Science §(e) addendum 2: every OTHER direct parent of the goal is part of what the Run computes. A drafter-made
   // definitional addend (edge provenance.definitional, node not the user's) joins the reading's words; anything else — a
   // user-authored or non-definitional risk or factor straight into the goal — means the goal is not this product: null.
-  const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
+  if (vetoingParentsOf(goalId, ids, edges, byId).length > 0) return null;
   const addends: string[] = [];
   for (const e of edges) {
-    if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') continue;
-    const n = byId.get(e.from);
-    if (n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded') continue;
-    const prov = isRec(e.provenance) ? e.provenance : undefined;
-    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
-    if (prov?.definitional !== true || userAuthored) return null;
+    if (!isOtherDirectParent(e, goalId, ids, byId)) continue;
+    const n = byId.get(e.from as string)!;
     const mean = isRec(e.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
     const negative = e.effect_direction === 'negative' || (mean !== undefined && mean < 0);
     addends.push(`${negative ? 'less' : 'plus'} ‘${text(n.label) ?? String(n.id)}’`);
