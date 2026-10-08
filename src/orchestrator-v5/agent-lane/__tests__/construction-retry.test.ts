@@ -19,6 +19,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import type { CallStructuredModel } from '../runtime/build-model.js';
+import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 import { registrationRequestHash, registrationTurnId } from '../../graph-registration/registration-identity.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
@@ -75,7 +76,7 @@ describe('a lost construction response is recovered', () => {
   it('RED: the retry recovers the SAME version, writes no second one, and does NOT regenerate', async () => {
     const store = statefulStore();
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(candidate('Raise to £59')) }; };
+    const call: CallStructuredModel = async (req) => { if (!isDraftWideningRequest(req)) generations += 1; return { text: JSON.stringify(candidate('Raise to £59')) }; };
 
     const first = await build(store.d, call);          // commits…
     expect(first.ok, JSON.stringify(first).slice(0, 200)).toBe(true);
@@ -98,7 +99,7 @@ describe('a lost construction response is recovered', () => {
   it('CONTRAST: a populated graph with NO matching construction is still refused, and nothing is generated', async () => {
     const store = statefulStore({ preloadNodes: [{ id: 'x', kind: 'goal', label: 'An existing model' }] });
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(candidate('Raise to £59')) }; };
+    const call: CallStructuredModel = async (req) => { if (!isDraftWideningRequest(req)) generations += 1; return { text: JSON.stringify(candidate('Raise to £59')) }; };
     const r = await build(store.d, call);
     expect(r.ok).toBe(false);
     expect(r.refusal).toBe('model_already_exists');
@@ -128,7 +129,7 @@ describe('a populated scenario whose versions are NOT this construction', () => 
         ? { status: 200, json: { versions, next_cursor: null } }
         : { status: 200, json: { graph: { nodes: [{ id: 'x', kind: 'goal', label: 'Built by hand' }], edges: [] }, graph_hash: 'h9' } };
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: '{}' }; };
+    const call: CallStructuredModel = async (req) => { if (!isDraftWideningRequest(req)) generations += 1; return { text: '{}' }; };
     const r = await build(d, call);
     expect(r.ok, 'a foreign version must never satisfy the construction lookup').toBe(false);
     expect(r.refusal).toBe('model_already_exists');
