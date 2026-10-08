@@ -1,0 +1,4 @@
+design	likelihood_correct_figure_and_horizon	likelihood_refused	impact_fired	impact_dropped	other_fired	other_dropped	baseline_correct_likelihood_preserved	baseline_correct_likelihood_lost	baseline_nonlikelihood_fire_dropped	baseline_nonlikelihood_fire_retained
+base_unqualified_percentage	7	3	27	47	57	29	7	0	0	84
+impact_blocklist_only	8	2	8	66	41	45	7	0	43	41
+impact_precedence_and_likelihood_allowlist	8	2	0	74	0	86	7	0	84	0

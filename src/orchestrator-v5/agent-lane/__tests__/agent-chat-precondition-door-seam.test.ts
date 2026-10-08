@@ -2,6 +2,7 @@
  * Harness follows agent-event-risk-door-seam.test.ts, including JSONB order and production pending parsing.
  * Unexecuted when BRIEF load check is blocked; no claim of a witnessed RED or GREEN.
  */
+import { readStatedEventRisk } from '../../routing/stated-event-risk.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
@@ -352,9 +353,12 @@ describe('chat precondition — real /agent/v1/turn door', () => {
   }, 120_000);
 
   it.each([
-    ["I'd put it at 10–30% within 6 months."],
-    ['If it slips, MRR will be lower by 10% within 6 months.'],
-  ])('chat-precondition-likelihood: a precondition stores no occurrence and claims none (%s)', async (extra) => {
+    // #2828 (DL ruling 8 Oct): only explicit likelihood words read, so this row uses one. The reader DOES read it (asserted
+    // below), so the precondition path's "no occurrence" is a real check, not a vacuous one.
+    ['There is a 10–30% chance it slips within 6 months.', true],
+    ['If it slips, MRR will be lower by 10% within 6 months.', false],
+  ])('chat-precondition-likelihood: a precondition stores no occurrence and claims none (%s)', async (extra, readerReads) => {
+    expect(readStatedEventRisk(extra) !== undefined, 'non-vacuous: the reader reads the explicit likelihood').toBe(readerReads);
     seed();
     const { response, approve } = await offer(preconditionArgs(), `${P44_MESSAGE} ${extra}`);
     expect(approve.detail).toBe(DISCLOSURE);
