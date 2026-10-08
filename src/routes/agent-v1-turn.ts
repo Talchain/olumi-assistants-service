@@ -49,6 +49,8 @@ import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v
 import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
+import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
+export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -295,7 +297,6 @@ export const AGENT_TURN_CLAIM_WAIT = {
  * always below 100 s and below the 110 s undici bound. A first analysis cannot start past its own,
  * earlier deadline and says so (`first-analysis.ts`), so it needs no reserve here.
  */
-export const CONSTRUCTION_TAIL_RESERVE_MS = 15_000;
 /** When the construction call must have ended, in a turn that began at `turnStartedAt`. */
 export function constructionDeadline(
   turnStartedAt: number,
@@ -2619,9 +2620,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
     let constructionTrace: ConstructionTrace | undefined;
     const capabilities = createAgentCapabilities(
-      countingDispatch, proposals, (reqBody) => callStructured(reqBody, constructionDeadlineAt), mode,
+      countingDispatch, proposals, (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
+        deadlineAt: constructionDeadlineAt,
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
         /**
          * ⭐ C6-1: THE CANVAS DRAWS THE FIRST MODEL WHEN IT IS REGISTERED, NOT AT THE END OF THE TURN.
