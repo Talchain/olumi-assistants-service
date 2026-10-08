@@ -3,11 +3,12 @@ import type { FastifyRequest } from 'fastify';
 import { getRequestId } from './request-id.js';
 import { redactLogMessage } from './redaction.js';
 import { log } from './telemetry.js';
+import { isRevisionConflict, readRevisionConflictDetails } from '../orchestrator-v5/graph-revision-conflict.js';
 
 /**
  * Error codes for structured error responses
  */
-export type ErrorCode = 'BAD_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'RATE_LIMITED' | 'INTERNAL';
+export type ErrorCode = 'BAD_INPUT' | 'UNAUTHENTICATED' | 'FORBIDDEN' | 'NOT_FOUND' | 'RATE_LIMITED' | 'INTERNAL' | 'revision_conflict';
 
 /**
  * Structured error response (error.v1 schema)
@@ -19,6 +20,8 @@ export interface ErrorV1 {
   details?: Record<string, unknown>;
   request_id?: string;
   stage?: string;  // Pipeline stage where error occurred (for debugging)
+  expected?: number;
+  current?: number;
 }
 
 /**
@@ -186,6 +189,15 @@ export function toErrorV1(error: unknown, requestOrOptions?: FastifyRequest | To
 
   const requestId = request ? getRequestId(request) : undefined;
 
+  if (isRevisionConflict(error)) {
+    const revisions = readRevisionConflictDetails(error);
+    const result = { ...buildErrorV1('revision_conflict',
+      'This model changed while the edit was being saved. Refresh and reconfirm.',
+      { code: 'revision_conflict', ...revisions }, requestId), ...revisions };
+    if (stage) result.stage = stage;
+    return result;
+  }
+
   // Zod validation errors
   if (error instanceof ZodError) {
     const result = zodErrorToErrorV1(error, requestId);
@@ -338,6 +350,8 @@ export function isClientAbortError(error: unknown): boolean {
  */
 export function getStatusCodeForErrorCode(code: ErrorCode): number {
   switch (code) {
+    case 'revision_conflict':
+      return 409;
     case 'BAD_INPUT':
       return 400;
     case 'UNAUTHENTICATED':

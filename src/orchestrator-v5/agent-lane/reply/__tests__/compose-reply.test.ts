@@ -1527,7 +1527,7 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     assertDisclosure(c, ROBUSTNESS_MARKER, note);
   });
 
-  it.each([false, true])('r16 robustness keeps its oversized first point and a contiguous prefix (ask = %s)', withAsk => {
+  it.each([false, true])('FU1 robustness: first point overflows, so no optional points appear on the face (ask = %s)', withAsk => {
     const headline = 'Check the reasoning behind the comparison:';
     const first = 'Check the evidence for subscriber retention before relying on the comparison, including the different customer groups, the period covered by the evidence, the assumptions about how pricing changes affect renewal, and the uncertainty in each relationship between the proposed changes and the goal, while retaining the team’s competing interpretations, unresolved disagreements, and expectations about later outcomes so that everyone can challenge the model and decide which evidence would most improve the shared reasoning before relying on any result from this run.';
     const second = 'Review the hiring assumptions.';
@@ -1540,12 +1540,63 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     ] });
     expect(c.outcome).toBe('shaped');
     expect(c.shape!.headline).toBe(headline);
-    expect(c.shape!.bullets).toEqual([ROBUSTNESS_MARKER, first, ...(withAsk ? [ask] : [])]);
-    expect(c.shape!.detail).toContain(second);
-    expect(c.shape!.detail).not.toContain(first);
-    expect(c.measure!.face_over_word_budget).toBe(true);
-    expect(c.measure!.face_words).toBeGreaterThan(80);
+    expect(c.shape!.bullets).toEqual([ROBUSTNESS_MARKER, ...(withAsk ? [ask] : [])]);
+    for (const point of [first, second]) {
+      expect(count(c.shape!.detail, point), 'every optional point remains once in detail').toBe(1);
+      expect(count(c.text, point), 'no optional point is lost or duplicated').toBe(1);
+    }
+    expect(c.measure!.face_over_word_budget).toBe(false);
+    expect(c.measure!.face_words).toBeLessThanOrEqual(80);
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceKept(text, c.text);
+  });
+
+  it('FU1 robustness: the first point fits alone but not beside the mandatory face, and a smaller second point never skips it', () => {
+    const headline = 'Check the reasoning behind the comparison:';
+    const first = 'Check the evidence for subscriber retention before relying on the comparison, including the different customer groups, the period covered by the evidence, the assumptions about how pricing changes affect renewal, and the uncertainty in each relationship between the proposed changes and the goal, while retaining the team’s competing interpretations, unresolved disagreements, and expectations about later outcomes so that everyone can challenge the model and improve the shared reasoning.';
+    const second = 'Review the hiring assumptions.';
+    const note = 'The result is not yet robust — small changes could flip it.';
+    const text = [headline, `- ${first}`, `- ${second}`, '', context, note, ask].join('\n');
+    expect(first.split(/\s+/u).length).toBeLessThanOrEqual(80);
+    expect([headline, ROBUSTNESS_MARKER, first, ask].join(' ').split(/\s+/u).length).toBeGreaterThan(80);
+    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+      { role: 'caveat', text: note, disclosure: { kind: 'robustness' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.headline).toBe(headline);
+    expect(c.shape!.bullets).toEqual([ROBUSTNESS_MARKER, ask]);
+    for (const point of [first, second]) {
+      expect(count(c.shape!.detail, point)).toBe(1);
+      expect(count(c.text, point)).toBe(1);
+    }
+    expect(c.measure!.face_over_word_budget).toBe(false);
+    expect(c.measure!.face_words).toBeLessThanOrEqual(80);
+    everySentenceKept(text, c.text);
+  });
+
+  it('FU1 robustness: the first two points fit, the third does not, and the face keeps exactly that prefix', () => {
+    const headline = 'Check the reasoning behind the comparison:';
+    const points = [
+      'Check the retention evidence before relying on the comparison.',
+      'Review the hiring assumptions and their uncertainty.',
+      'Keep the different customer groups, the periods covered by the evidence, the assumptions about how pricing changes affect renewal, and the uncertainty in each causal relationship visible so that the team can challenge the reasoning and decide which evidence would most improve the shared model before relying on the result and compare expectations with later outcomes.',
+    ];
+    const note = 'The result is not yet robust — small changes could flip it.';
+    const text = [headline, ...points.map(point => `- ${point}`), '', context, note].join('\n');
+    expect([headline, ROBUSTNESS_MARKER, ...points.slice(0, 2)].join(' ').split(/\s+/u).length).toBeLessThanOrEqual(80);
+    expect([headline, ROBUSTNESS_MARKER, ...points].join(' ').split(/\s+/u).length).toBeGreaterThan(80);
+    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+      { role: 'caveat', text: note, disclosure: { kind: 'robustness' } },
+    ] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.headline).toBe(headline);
+    expect(c.shape!.bullets).toEqual([ROBUSTNESS_MARKER, ...points.slice(0, 2)]);
+    for (const point of points.slice(0, 2)) expect(c.shape!.detail).not.toContain(point);
+    expect(count(c.shape!.detail, points[2]!)).toBe(1);
+    for (const point of points) expect(count(c.text, point)).toBe(1);
+    expect(c.measure!.face_over_word_budget).toBe(false);
+    expect(c.measure!.face_words).toBeLessThanOrEqual(80);
     everySentenceKept(text, c.text);
   });
 
