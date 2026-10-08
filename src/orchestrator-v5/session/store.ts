@@ -686,6 +686,8 @@ export interface SessionStore {
     readonly graph: unknown | null;
     readonly briefText: string | null;
     readonly analysisInvalidatedAt: string | null;
+    /** Same uncached SELECT as graph; not a revision-at-Run claim. */
+    readonly revision?: number;
   } | null>;
   /** Scoped durable rows for the selected Run's additive recording disclosure. */
   readRunRecordingRows?(scenarioId: string, decisionRecordId: string | null): Promise<import('../run-recording.js').RunRecordingRows>;
