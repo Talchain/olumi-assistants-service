@@ -175,6 +175,9 @@ function drafts(f: ActionFacts): Draft[] {
     // Both estimate actions speak of "this result" and are run_dependent in the registry: offered only on a bound Run (DL on #2766).
     if (f.runBound && estimatePointsOf(f).length > 0) {
       out.push(draft(f, 'bias_anchoring', { enabled: true, why_now: WHY_NOW.bias_anchoring }, GENERIC_TIER));
+    }
+    if (f.runBound && f.olumiEstimates !== null
+      && f.olumiEstimates.count + f.olumiEstimates.accepted + f.olumiEstimates.placeholderLinks > 0) {
       out.push(draft(f, 'check_estimates', { enabled: true, why_now: WHY_NOW.check_estimates }, GENERIC_TIER));
     }
     const premortem = rc('RC-PREMORTEM');

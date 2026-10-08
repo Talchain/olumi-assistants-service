@@ -533,17 +533,19 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
     ].join('\n');
     expect(anchoring).toMatchObject({ kind: 'reply', reply: { text: expected, outcome: 'ran', exits: [] } });
     expect(estimates).toMatchObject({ kind: 'reply', reply: { outcome: 'ran', exits: [], text: [
-      "Olumi's estimates that this result rests on:",
-      "- ‘Far’: 25%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Near’: 15%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Extra’: 10%. That's Olumi's estimate, not a measured figure.",
-      "If you have your own figure for any of these, tell me and I'll propose it for you to approve.",
+      'Olumi supplied 3 of the figures behind this result: 3 values.',
+      'For example:',
+      'Near (value)',
+      'Extra (value)',
+      'Far (value)',
+      "1 you accepted from Olumi's suggestions.",
     ].join('\n') } });
     for (const d of [anchoring, estimates]) {
       if (d.kind !== 'reply') throw new Error('expected typed reply');
       expect(d.reply.text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
-      expect(d.reply.text.split('\n').filter(l => l.startsWith('- '))).toHaveLength(3);
     }
+    if (anchoring.kind !== 'reply') throw new Error('expected typed reply');
+    expect(anchoring.reply.text.split('\n').filter(l => l.startsWith('- '))).toHaveLength(3);
   });
   it.each(['frame', 'analyse', 'decide', 'review', null] as const)('canonical stage %s gates exactly one anchoring receipt badge, absent for check_estimates', stage => {
     const facts = { ...actionFactsOf(read()), canonicalStage: stage };

@@ -35,6 +35,7 @@ import { identityConfirmBaseIsWritable } from '../../system-events/editable-grap
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { scopeIssueBlocks } from '../goal-scope.js';
+import { olumiEstimatesFeedingResult, type OlumiEstimates } from '../olumi-estimates-feeding-result.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
@@ -61,6 +62,7 @@ export interface ActionRevision { readonly graph_hash: string | null; readonly r
 export interface ActionFacts {
   readonly scenarioId: string;
   readonly canonicalStage: StageType | null;
+  readonly olumiEstimates: OlumiEstimates | null;
   readonly estimateCandidates: readonly (GoalPathFactor & { readonly figure: string })[];
   readonly estimateDriverIds: readonly string[];
   /** Goal-path factors whose value is Olumi's (estimate or accepted), BEFORE the display-scale filter: the bias check's "could Anchoring be checked" fact. */
@@ -159,7 +161,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', identityReading: null, goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
     optionFrame: { nonSqOptionLabels: [], statusQuoPresent: false, sameLever: false },
-    estimateCandidates: [], estimateDriverIds: [], olumiEstimateCount: 0, canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
+    estimateCandidates: [], estimateDriverIds: [], olumiEstimateCount: 0, olumiEstimates: null, canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
   const nodes = raw.nodes.map(rec);
   try {
@@ -191,6 +193,12 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       readable: true,
       identityReading,
       canonicalStage: canonicalStageOf(signals['run.kind'], read.graph),
+      olumiEstimates: runKey === null ? null : olumiEstimatesFeedingResult({
+        goalPathFactors: signals['model.goal_path_factors'],
+        goalPathLinks: signals['model.goal_path_links'],
+        // option-setting provenance: not carried by this read (RC4 packet UNVERIFIED reader)
+        driverIds: [],
+      }),
       estimateCandidates: signals['model.goal_path_factors'].flatMap(f => {
         if (f.value_authorship !== 'olumi_estimate' && f.value_authorship !== 'olumi_accepted') return [];
         const node = nodes.find(n => n?.id === f.factor_id);
