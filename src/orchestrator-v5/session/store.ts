@@ -112,6 +112,8 @@ export interface AtomicCommittedModelVersionReceipt {
 export interface SessionAppendOutcome {
   readonly id: string;
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
+  /** Present only on the Phase 2 v6 path; includes accepted replays. */
+  readonly revision?: number;
   /**
    * TRUE when this append REPLAYED an already-committed turn — i.e. the RPC
    * returned a pre-existing row and wrote nothing.
@@ -169,6 +171,8 @@ export interface SessionTurnWrite {
   readonly llm_calls_used: number;
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
+  /** Scenario revision from the turn-start server read; v6 requires it. */
+  readonly expectedRevision?: number;
   /**
    * When present, the graph JSONB is persisted to scenarios.graph atomically
    * with the turn insert inside append_turn_atomic. Both writes commit or roll
@@ -703,6 +707,8 @@ export interface SessionStore {
   loadGraphAndBriefText(scenarioId: string): Promise<{
     readonly graph: unknown | null;
     readonly briefText: string | null;
+    /** Omitted until the v6 code cutover; never inferred from the graph. */
+    readonly revision?: number;
   }>;
   /** DB-stamped restore chronology marker; null means no restore invalidation. */
   readAnalysisInvalidatedAt?(scenarioId: string): Promise<string | null>;

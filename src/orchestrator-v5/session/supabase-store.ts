@@ -208,6 +208,14 @@ function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
 const V5_CONVERSATION_TURN_COLUMNS =
   'id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message';
 
+// Phase 2(c) ships inert. Change by code only after the Paul-gated step 3
+// migration/cutover; the same constant gates the new column read and RPC.
+export const USE_APPEND_V6 = false;
+
+function isScenarioRevision(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 interface SupabaseErrorLike {
   message?: string;
   code?: string;
@@ -1534,7 +1542,7 @@ export class SupabaseSessionStore implements SessionStore {
     // fact permanently false on three live paths.
     const expectedBaseKnown = write.expectedGraphIdentityHash !== undefined;
 
-    const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
+    const rpcArgs = {
       ...baseRpcArgs,
       p_expected_graph_identity_hash: trustedExpectedHash,
       p_expected_base_known: expectedBaseKnown,
@@ -1560,7 +1568,10 @@ export class SupabaseSessionStore implements SessionStore {
       p_version_authored_by: version.authored_by,
       p_version_creation_kind: version.creation_kind,
       p_version_source_turn_id: version.source_turn_id,
-    });
+    };
+    const { data, error } = USE_APPEND_V6
+      ? await this.callAppendTurnAtomicV6(write, rpcArgs)
+      : await this.client.rpc('append_turn_atomic_v5', rpcArgs);
 
     if (error) {
       const fenceEvaluation = classifyAtomicFenceError(error);
@@ -1602,6 +1613,14 @@ export class SupabaseSessionStore implements SessionStore {
       // the only thing left to get right is telling the operator why, exactly
       // as `append_turn_atomic_v4`'s PGRST202 does at :1114-1127.
       if (errCode(error) === 'PGRST202') {
+        if (USE_APPEND_V6) {
+          throw new StateCommitFailedError(
+            'append_turn_atomic_v6 is not present in this database (PGRST202). ' +
+              'Phase 2(c) requires migration 20261008160000_phase2_c_scenario_revision ' +
+              'before the code cutover; no legacy fallback can enforce revision.',
+            { cause: error, rpc_code: errCode(error) },
+          );
+        }
         throw new StateCommitFailedError(
           'append_turn_atomic_v5 is not present in this database (PGRST202). Model versioning ' +
             '(CEE_MODEL_VERSIONS_ENABLED, default ON) requires it, and no legacy fallback is safe ' +
@@ -1619,12 +1638,39 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     const parsed = parseAtomicVersionedAppend(data);
+    if (USE_APPEND_V6 && !isScenarioRevision(data?.revision)) {
+      throw new StateCommitFailedError('append_turn_atomic_v6 returned an invalid scenario revision');
+    }
     if (generation !== null) {
       this.emitFenceEvaluated(write, 'current', generation, null, 'atomic_append');
     }
     this.cache.invalidateAll(write.scenario_id);
     await this.resolveDraftLossAfterGraphCommit(write);
-    return parsed;
+    return USE_APPEND_V6 ? { ...parsed, revision: data.revision } : parsed;
+  }
+
+  /** Always-on revision CAS on the new path; never refresh the expected value here. */
+  private async callAppendTurnAtomicV6(write: SessionTurnWrite, rpcArgs: Record<string, unknown>) {
+    if (!isScenarioRevision(write.expectedRevision)) {
+      throw new StateCommitFailedError(
+        'append_turn_atomic_v6 requires a non-negative safe-integer revision from the turn-start read',
+      );
+    }
+    const result = await this.client.rpc('append_turn_atomic_v6', {
+      ...rpcArgs,
+      p_expected_revision: write.expectedRevision,
+    });
+    if (!result.error && result.data?.reason === 'revision_conflict') {
+      throw new GraphStaleWriteError(
+        `append_turn_atomic_v6 rejected a stale revision for scenario ${write.scenario_id}; refresh and reconfirm.`,
+        {
+          conflict_category: 'revision_conflict',
+          cause: result.data,
+          expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
+        },
+      );
+    }
+    return result;
   }
 
   /**
@@ -2611,6 +2657,15 @@ export class SupabaseSessionStore implements SessionStore {
   async loadGraphAndBriefText(scenarioId: string): Promise<{
     readonly graph: unknown | null;
     readonly briefText: string | null;
+    readonly revision?: number;
+  }> {
+    return this.readGraphAndBriefText(scenarioId, USE_APPEND_V6);
+  }
+
+  private async readGraphAndBriefText(scenarioId: string, includeRevision: boolean): Promise<{
+    readonly graph: unknown | null;
+    readonly briefText: string | null;
+    readonly revision?: number;
   }> {
     // Note: scenarios.* fields are NOT cached by SessionLRUCache (which
     // is scoped to v5_conversation_turns). Every call hits Supabase
@@ -2622,7 +2677,7 @@ export class SupabaseSessionStore implements SessionStore {
     // Selecting it would be dead bytes on the wire.
     const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
-      .select('graph, brief_text')
+      .select(includeRevision ? 'graph, brief_text, revision' : 'graph, brief_text')
       .eq('id', scenarioId)
       .maybeSingle());
 
@@ -2634,7 +2689,7 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     if (data == null) {
-      return { graph: null, briefText: null };
+      return { graph: null, briefText: null, ...(includeRevision ? { revision: 0 } : {}) };
     }
 
     const rawBriefText = (data as { brief_text?: unknown }).brief_text;
@@ -2643,9 +2698,18 @@ export class SupabaseSessionStore implements SessionStore {
         ? rawBriefText
         : null;
 
+    const revision = (data as { revision?: unknown }).revision;
+    if (includeRevision && !isScenarioRevision(revision)) {
+      throw new SessionReadError(
+        `loadGraphAndBriefText returned an invalid revision for scenario ${scenarioId}`,
+        { code: 'scenario_revision_invalid' },
+      );
+    }
+
     return {
       graph: (data as { graph?: unknown }).graph ?? null,
       briefText,
+      ...(includeRevision && isScenarioRevision(revision) ? { revision } : {}),
     };
   }
 
