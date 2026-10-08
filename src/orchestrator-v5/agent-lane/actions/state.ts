@@ -21,6 +21,7 @@ import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 import { approvalChipIdFor, typedApprovalOf } from '../approval-chips.js';
 import type { StageType } from '@talchain/schemas/boundary';
+import type { OptionFrame } from './bias-triggers.js';
 import type { GoalPathFactor, ValueAuthorship } from '../turn-context/guidance-signals.js';
 import { canonicalStageOf } from '../method-turn/method-turn.js';
 import { goalChanceDriversForAgent } from '../../goal-target/goal-chance-range-agent.js';
@@ -75,6 +76,8 @@ export interface ActionFacts {
   /** `goal_horizon.deadline` (YYYY-MM-DD) when the goal holds one: the pre-mortem's horizon (contract v1.1 item 4). */
   readonly deadline: string | null;
   readonly ownOptionCount: number;
+  /** The option set's typed frame (guidance signals), read by the bias-risk row (P45). */
+  readonly optionFrame: OptionFrame;
   readonly goalPathFactorCount: number;
   readonly riskCount: number;
   readonly outcomeCount: number;
@@ -146,6 +149,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     runAdmissible: typeof ready?.may_run === 'boolean' ? ready.may_run : ready?.status === 'ready',
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
+    optionFrame: { nonSqOptionLabels: [], statusQuoPresent: false, sameLever: false },
     estimateCandidates: [], estimateDriverIds: [], canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
   const nodes = raw.nodes.map(rec);
@@ -182,6 +186,11 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       targetPresent: goal !== undefined && statedGoalTargetOf(raw, goal) !== null,
       deadline,
       ownOptionCount: signals['model.non_sq_option_ids'].length,
+      optionFrame: {
+        nonSqOptionLabels: signals['model.non_sq_option_ids'].map(id => signals['model.option_labels'][id] ?? ''),
+        statusQuoPresent: signals['model.status_quo_option_id'] !== null,
+        sameLever: signals['model.same_lever'],
+      },
       goalPathFactorCount: signals['model.goal_path_factor_ids'].length,
       riskCount: signals['model.risk_ids'].length,
       outcomeCount: raw.nodes.map(rec).filter(n => n?.kind === 'outcome').length,
