@@ -82,6 +82,8 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   if (a === null || b === null) return null;
   const label = words(node.label);
   if (label === null || words(aNode.label) === null || words(bNode.label) === null) return null;
+  // ⛔ A percentage is a rate of change or a share, never a count of the goal's units (buddy r2 P1): fail closed.
+  if ([a.unit, b.unit].some((u) => /%|\bper\s*cent\b|\bpercent(age)?\b|\bpct\b/i.test(u))) return null;
   const c = unitsCompose(unit, label, { unit: a.unit, label: aId }, { unit: b.unit, label: bId });
   if (c.kind === 'no') return null;
   const [rate, count] = c.rate === aId ? [a, b] : [b, a];
@@ -151,7 +153,8 @@ export function goalCoherenceAsk(input: unknown, edited: { nodeId: string; previ
     if (carriers.length > 1) return null;
     // ⛔ Same units are not a sum (buddy r1 P1): parents on ordinary causal links carry weighted effects. Add only under a
     // definitional `sum` identity, or read a sole product-carrier parent as the goal's own reading.
-    if (identity?.operation !== 'sum' && !(parents.length === 1 && carriers.length === 1)) return null;
+    // A product carrier on a causal link is not the goal's definition (buddy r2 P1): only a definitional `sum` adds.
+    if (identity?.operation !== 'sum') return null;
     const levels: Level[] = [];
     const expressions: string[] = [];
     for (const id of parents) {
@@ -195,7 +198,8 @@ export function goalCoherenceAsk(input: unknown, edited: { nodeId: string; previ
   if (!finite(ratio) || (floor ? ratio < GOAL_COHERENCE_RATIO : ratio > 1 / GOAL_COHERENCE_RATIO)) return null;
   const money = readMoney(goalUnit, goalLabel)?.code ?? goalUnit;
   // Two significant figures, never collapsed to "£0" by the two-decimal cap (buddy r1 P2).
-  const sayTwo = (n: number): string => { const t = twoFigures(n); return t !== 0 && Math.abs(t) < 0.01 ? sayFigureAsWritten(t, money) : sayFigure(t, money); };
+  // Under a penny/cent the honest reading is "less than 0.01", never "£0" (buddy r2 P2).
+  const sayTwo = (n: number): string => { const t = twoFigures(n); return t !== 0 && Math.abs(t) < 0.01 ? `less than ${sayFigure(0.01, money)}` : sayFigure(t, money); };
   const value = figure(editedLevel);
   const suffix = product?.unconfirmed ? `, if ${product.clause}` : '';
   // Science §(f) Q4 + addendum (8 Oct): a count asks about scope; money against a per-period goal may be a yearly figure;

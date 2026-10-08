@@ -273,10 +273,11 @@ function carrier(): Graph {
 }
 
 describe('RC5 one coherent product carrier on the goal path', () => {
-  it('the sole unconfirmed carrier fires with the carrier\'s own inline definition', () => {
-    const result = ask(carrier());
-    expect(result).toMatchObject({ ratio: 19.6, implied: 392_000, target: 20_000 });
-    expect(result?.text).toBe(Q4.replace('already be met.', "already be met, if Pro plan MRR = Pro plan price × Pro paying subscribers (Olumi's reading)."));
+  it('a sole product carrier on a causal link is NOT the goal\'s definition: fails closed (buddy r2 P1; §(f) Q3)', () => {
+    expect(ask(carrier())).toBeNull();
+    const sized = carrier();
+    (sized.edges.find((e) => e.from === 'pro_plan_mrr') as Record<string, unknown>).strength = { mean: 0.01, std: 0.005 };
+    expect(ask(sized)).toBeNull();
   });
 
   it('one goal with two unconfirmed product carriers fails closed instead of inventing one reading', () => {
@@ -369,7 +370,16 @@ describe('RC5 buddy r1 fixes', () => {
     const graph = product(1);
     node(graph, GOAL).goal_direction = '<=';
     level(graph, PRICE).raw_value = 0.0025;
-    expect(ask(graph)?.text).toContain('about £0.0025,');
+    expect(ask(graph)?.text).toContain('about less than £0.01,');
+  });
+});
+
+describe('RC5 buddy r2 fixes', () => {
+  it.each(['percent', 'percentage', 'pct', '% per month', 'per cent'])('a percentage part (%s) is never a count of the goal\'s units', (unit) => {
+    const graph = product(2);
+    level(graph, SUBSCRIBERS).unit = unit;
+    node(graph, GOAL).goal_direction = '<=';
+    expect(ask(graph)).toBeNull();
   });
 });
 
