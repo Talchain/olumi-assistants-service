@@ -1,4 +1,4 @@
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
 import { describe, expect, it } from 'vitest';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, strictForTheDrafter } from '../runtime/build-model.js';
 

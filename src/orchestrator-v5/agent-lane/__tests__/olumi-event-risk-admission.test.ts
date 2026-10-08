@@ -3,10 +3,12 @@ import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { holdStatedEventRisks } from '../stated-event-risk-draft.js';
 import { goalChanceEstimateLikelihoods } from '../goal-chance-estimate-attribution.js';
+// Test fixtures rebuild the candidate in place; CandidateModel is read-only for production callers.
+type Draft = { -readonly [K in keyof CandidateModel]: CandidateModel[K] };
 
 const BASIS = 'Typical annual key-staff turnover in small software teams.';
 const LABEL = 'Key developer departure';
-function candidate(p = 10): CandidateModel {
+function candidate(p = 10): Draft {
   return {
     goal: { metric: 'Revenue', operator: '>=', value: 20000, unit: 'GBP/month', horizon_months: 12,
       provenance: 'explicit', baseline_known: true, baseline_value: 10000, baseline_provenance: 'explicit' },
@@ -23,7 +25,7 @@ function admit(c: CandidateModel, brief = '') {
   return { ...result, ...graph };
 }
 const risk = (result: ReturnType<typeof admit>) => result.nodes.find(n => n.kind === 'risk')!;
-function probability(c: CandidateModel, label = `${LABEL} probability`, value = 10, unit = '%'): CandidateModel {
+function probability(c: CandidateModel, label = `${LABEL} probability`, value = 10, unit = '%'): Draft {
   return { ...c, risks: c.risks.map(({ occurrence: _occurrence, ...r }: any) => r),
     factors: [{ label, role: 'external', baseline_known: false, baseline_value: value, unit, provenance: 'ai_proposed', plausible_max: unit === '%' ? 100 : 1 }],
     links: [...c.links, { from: label, to: 'Revenue', direction: 'negative', provenance: 'ai_proposed' }],
