@@ -155,3 +155,34 @@ describe('r6 L1-LAUNCHING-WORDS closed grammar', () => {
     expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
+
+describe('L1-LAUNCHING-WORDS one-pass tokeniser parity', () => {
+  // FROZEN REFERENCE: deliverableIsALaunch before the one-pass tokeniser (staging d783ab21), verbatim but for its name.
+  const ARTICLES = new Set(['the', 'our', 'a']);
+  const frozenIsALaunch = (deliverable: string, isModifier: (w: string) => boolean, isWord: (w: string) => boolean): boolean => {
+    const words = deliverable.trim().toLowerCase().split(/\s+/u);
+    if (words[0] === 'launching') {
+      const object = words.slice(2);
+      return ARTICLES.has(words[1] ?? '') && object.length <= 2 && object.every(isModifier);
+    }
+    const launch = words.indexOf('launch');
+    if (launch < 0) return false;
+    const modifiers = words.slice(ARTICLES.has(words[0] ?? '') ? 1 : 0, launch);
+    if (modifiers.length > 2 || !modifiers.every(isModifier)) return false;
+    const place = words.slice(launch + 1);
+    return place.length === 0 || ((place[0] === 'in' || place[0] === 'across')
+      && place.length >= 2 && place.length <= 4 && place.slice(1).every(isWord));
+  };
+  // Word predicates are unchanged by the tokeniser; the corpus uses only plain words, so letters-only is exact here.
+  const plain = (w: string) => /^[a-z]+$/u.test(w);
+  const notPrep = (w: string) => plain(w) && !['in', 'across', 'of', 'for', 'and'].includes(w);
+  const corpus = [
+    'the launch', ' Launching the app ', 'launching our new app', 'the launch\tin  uk', 'launch', '', '   ',
+    'our new product launch across the eu', 'the big new launch', 'the launch in the united kingdom', 'the launch in a b c d',
+    'a new beta launch in north west europe', 'the new beta launch in north west europe now', 'the launch', 'unicode launch',
+    'the launch checklist', `the${' '.repeat(50)}launch`, 'launch　in europe',
+  ];
+  it.each(corpus)('same verdict as the frozen reference: %j', (s) => {
+    expect(deliverableIsALaunch(s)).toBe(frozenIsALaunch(s, notPrep, plain));
+  });
+});
