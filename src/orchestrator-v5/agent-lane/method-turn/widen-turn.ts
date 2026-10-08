@@ -37,6 +37,8 @@ import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { chanceGoalDeadlineAsk, goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
+import { constructionOperationId } from '../runtime/build-model.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -700,6 +702,11 @@ export function favouredOptionOf(graph: unknown): { id: string; label: string } 
 
 /** The answer-offer envelope's label cap (migration `append_agent_answer_with_offers`: char_length(label) 1–80). */
 export const THIN_DRAFT_BUTTON_MAX = 80;
+
+/** The existing constructor's committed row identity, rather than a generic graph import's registration. */
+export function constructionRegistrationTurnId(scenarioId: string, brief: string): string {
+  return registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief.trim()));
+}
 
 /** Offer the existing risks door after a thin first draft; the reply contract owns placement of the face. */
 export function thinDraftOffer(graph: unknown, mutated: boolean): { face: string; button: string; press: SuggestedAction } | null {
