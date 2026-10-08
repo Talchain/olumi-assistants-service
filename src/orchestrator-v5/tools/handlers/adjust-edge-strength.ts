@@ -334,7 +334,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         strength: { ...targetEdge.strength },
         effect_direction: targetEdge.effect_direction,
         // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side says nobody sized it, so no reader names
-        // the prior as a band ("Strong → Moderate"). Additive: \`before\` is a record on both receipt schemas.
+        // the prior as a band ("Strong → Moderate"). Additive: `before` is a record on both receipt schemas.
         ...(isPlaceholderLink(targetEdge) ? { sizing: 'placeholder' as const } : {}),
       };
       // Direction at numeric zero is authority-sensitive. It therefore rides

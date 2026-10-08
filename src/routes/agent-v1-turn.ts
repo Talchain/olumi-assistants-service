@@ -4940,8 +4940,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
       /**
        * ⭐ IDENTITY-EXACT (DL 8 Oct; design lane-placeholder-licence.md): the identities THIS Run evaluated, the read's
-       * \`analysis_identity_evaluated_node_ids\` (same fact, same gates as \`analysis_result\`), as a SIDECAR root key (the
-       * \`option_participation\` pattern). goal-certainty's \`exact\` rule treats an operand → evaluated identity link as exact,
+       * `analysis_identity_evaluated_node_ids` (same fact, same gates as `analysis_result`), as a SIDECAR root key (the
+       * `option_participation` pattern). goal-certainty's `exact` rule treats an operand → evaluated identity link as exact,
        * so DGAI stops marking those links "strength not set". Sorted; [] = recorded, none; absent = not attested.
        */
       ...(identityEvaluated !== undefined ? { identity_evaluated_node_ids: [...identityEvaluated].sort() } : {}),
