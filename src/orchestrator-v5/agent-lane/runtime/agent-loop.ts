@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
+import { composeHeldResultReply } from '../proposal-reply.js';
 import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
@@ -477,8 +478,11 @@ export async function runAgentTurn(
   const recoverNarration = (err: unknown, hopsTaken: number): AgentTurnResult => {
     const held = lastHeldCall!; // `narrateNext` is true only after a hop whose every call held a proposal.
     const composed = input.composeReply?.(held.name, held.args, held.result);
+    // ⛔ P44 (a) / Codex #2781 r5: failed conversational gates must not hide the held result's disclosures.
+    const recoveredReply = typeof composed === 'string' && composed.trim() !== '' ? composed
+      : composeHeldResultReply(held.name, held.result);
     const label = held.result.public_label;
-    const text = typeof composed === 'string' && composed.trim() !== '' ? composed
+    const text = typeof recoveredReply === 'string' && recoveredReply.trim() !== '' ? recoveredReply
       : typeof label === 'string' && label.trim() !== ''
         ? `I have prepared this change: ${label}. Nothing is changed until you approve it.`
         : 'I have prepared a change for you to review. Nothing is changed until you approve it.';

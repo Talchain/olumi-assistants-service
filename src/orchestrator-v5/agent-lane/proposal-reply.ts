@@ -402,6 +402,12 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   const carried = likelihood?.basis === 'user' && nonEmpty(likelihood.quote)
     ? { args, event_risk_statement: likelihood.quote } : args;
   if (userFiguresTheCallLeaves(carried, userMessage).length > 0) return null;
+  return composeHeldResultReply(tool, result);
+}
+
+/** ⭐ P44 (a) / Codex #2781 r5: typed held-result disclosures, independent of conversational gates. */
+export function composeHeldResultReply(tool: string, result: unknown): string | null {
+  const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
     : tool === 'propose_link_strengths' ? LINK_SET_KEYS : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_new_factor' ? NEW_FACTOR_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS

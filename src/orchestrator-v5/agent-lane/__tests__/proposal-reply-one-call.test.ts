@@ -12,7 +12,7 @@
  *   - a result key outside the tool's allowlist (a disclosure kind with no template) falls back.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { composeProposalReply } from '../proposal-reply.js';
+import { composeHeldResultReply, composeProposalReply } from '../proposal-reply.js';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { AGENT_TOOLS, type AgentCapabilities } from '../runtime/agent-tools.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
@@ -67,6 +67,22 @@ const WHOLE = { whole_request: true };
 const LONE = (): Record<string, unknown> => Object.fromEntries(Object.entries({ ...E07, levels_not_set: undefined }).filter(([, v]) => v !== undefined));
 const clean = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 
+/** ⭐ P44 (a) / Codex #2781 r5: exact A08 fixture from proposal-reply-new-risk.test.ts. */
+const RISK = {
+  ok: true, mutated: false, proposal_id: 'gmh_4c1d2e3f4a5b',
+  public_label: 'Approve 2 changes',
+  held_message: "Yes, add risk 'Competitor price cut or AI-feature deal' and link 'Competitor price cut or AI-feature deal' to 'MRR'.",
+  held_detail: "Add risk 'Competitor price cut or AI-feature deal'\nLink 'Competitor price cut or AI-feature deal' to 'MRR'",
+  base_revision: 'a'.repeat(64),
+  risk: { label: 'Competitor price cut or AI-feature deal', threatens: ['MRR (lowers it)'], driven_by: [], how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate' },
+  note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
+};
+/** ⭐ P44 (a) / Codex #2781 r5: existing user-stated factor row from fixtures/b1-two-state/rows.ts. */
+const FACTOR = {
+  ok: true, mutated: false, proposal_id: 'factor', held_message: 'Yes, add X.',
+  factors: [{ label: 'X', affects: 'Y', current_value: { value: 1, unit: 'binary', stated_by: 'user', quote: 'on' }, how_strongly: 'not known yet: Olumi uses a placeholder strength for the link, not an estimate' }],
+};
+
 const TOOL_NAMES = AGENT_TOOLS.map((t) => t.name);
 /** AIC condition 4: no tool name, no snake_case identifier, no forbidden phrase; every figure is the tool's own. */
 function guard(reply: string, result: unknown): void {
@@ -76,6 +92,33 @@ function guard(reply: string, result: unknown): void {
   const source = JSON.stringify(result).replace(/,(?=\d{3}\b)/g, '');
   for (const n of reply.match(/\d[\d,]*(?:\.\d+)?/g) ?? []) expect(source, `figure ${n}`).toContain(n.replace(/,/g, ''));
 }
+
+/** ⭐ P44 (a) / Codex #2781 r5: held-result templates preserve the conversational reply bytes. */
+describe('held-result replies preserve the existing templates', () => {
+  const rows = [
+    { name: 'risk', tool: 'propose_new_risk', result: RISK },
+    { name: 'option', tool: 'propose_new_option', result: LONE() },
+    { name: 'option with estimated levels', tool: 'propose_new_option', result: clean(SPLIT) },
+    { name: 'option with a new factor', tool: 'propose_new_option', result: clean(GRANDFATHER) },
+    { name: 'factor', tool: 'propose_new_factor', result: FACTOR },
+    { name: 'link strength', tool: 'propose_link_strength', result: LINK },
+  ];
+
+  it.each(rows)('$name: passing conversational gates gives exactly the held-result reply', ({ tool, result }) => {
+    const heldReply = composeHeldResultReply(tool, result);
+    expect(heldReply).not.toBeNull();
+    expect(composeProposalReply(tool, WHOLE, result, 'Add it.')).toBe(heldReply);
+  });
+
+  // ⛔ P44 (a) / Codex #2781 r5: whole_request gates conversation, never the held-result disclosures.
+  it.each(rows)('$name: the held-result reply has no whole_request dependency', ({ tool, result }) => {
+    const heldReply = composeHeldResultReply(tool, result);
+    expect(heldReply).not.toBeNull();
+    expect(composeProposalReply(tool, { whole_request: false }, result, 'Add it.')).toBeNull();
+    expect(composeProposalReply(tool, {}, result, 'Add it.')).toBeNull();
+    expect(composeHeldResultReply(tool, result)).toBe(heldReply);
+  });
+});
 
 describe('the composed reply says exactly what the tool returned, in AIC’s words', () => {
   it('FALLBACK (E07 as served): a figure the tool REFUSED to set keeps the second call — its reason is the user’s', () => {

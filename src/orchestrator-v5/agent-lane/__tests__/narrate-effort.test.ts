@@ -16,6 +16,7 @@ import type { AgentCapabilities } from '../runtime/agent-tools.js';
 import { budgetFor, callEffortFor, conversationBudgetFor } from '../model-budgets.js';
 import { approvalChipsFor, NOT_ON_NARRATION, proposalsAwaitingApproval } from '../approval-chips.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
+import { composeProposalReply } from '../proposal-reply.js';
 
 /** agent-capabilities.ts `proposeNewRisk`, held (its success shape). */
 const HELD = {
@@ -25,6 +26,20 @@ const HELD = {
   base_revision: 'a'.repeat(64),
   risk: { label: 'Onboarding new hires takes longer than expected', threatens: ['Incremental platform delivery capacity (lowers it)'], driven_by: [], how_strongly: 'not known yet' },
   note: 'Nothing has changed yet. …',
+};
+// ⭐ P44 (a) / Codex #2781 r5: served A09 copied from proposal-reply-new-risk.test.ts, including its A08 fields.
+const HELD_RISK = {
+  ok: true, mutated: false, proposal_id: 'gmh_5d6e7f8a9b0c',
+  public_label: 'Approve 3 changes',
+  held_message: "Yes, add risk 'Competitor price or AI-feature response', link 'Competitor price or AI-feature response' to 'MRR' and link 'Pro plan price' to 'Competitor price or AI-feature response'.",
+  held_detail: "Add risk 'Competitor price cut or AI-feature deal'\nLink 'Competitor price cut or AI-feature deal' to 'MRR'",
+  base_revision: 'a'.repeat(64),
+  risk: {
+    label: 'Competitor price or AI-feature response', threatens: ['MRR (lowers it)'],
+    driven_by: ['Pro plan price (more of it makes the risk more likely)'],
+    how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
+  },
+  note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
 };
 const REFUSED = { ok: false, mutated: false, refusal: 'not_prepared', detail: 'Olumi could not prepare that as one change.' };
 
@@ -197,7 +212,7 @@ describe('narration recovery from the known held result', () => {
   const args = { label: 'Onboarding new hires takes longer than expected', affects: [{ target_label: 'G', direction: 'negative' }], rationale: 'r', whole_request: false };
   const call = { type: 'function_call', call_id: 'c1', name: 'propose_new_risk', arguments: JSON.stringify(args) };
   const base = { ctx: { scenario_id: 's', authenticated_user_id: 'u', request_id: 'r' }, history: [], message: 'Add a risk.', instructions: 'i', maxOutputTokens: 500 };
-  const recovered = (r: AgentTurnResult, held = HELD) => {
+  const recovered = (r: AgentTurnResult, held: typeof HELD | typeof HELD_RISK = HELD) => {
     expect(r.stopped_reason).toBe('answered');
     expect(r.assistant_text.trim()).not.toBe('');
     expect(r.tool_calls).toEqual([{ name: 'propose_new_risk', ok: true, mutated: false, proposal_id: held.proposal_id }]);
@@ -209,6 +224,58 @@ describe('narration recovery from the known held result', () => {
     expect(JSON.stringify(r.items)).not.toContain(NARRATE_LABEL_LINE);
     expect(r.timing).toMatchObject({ provider_calls: 2, tool_calls: 1, hops: 1 });
   };
+
+  // ⛔ P44 (a) / Codex #2781 r5: conversational gates must not hide a held risk's typed disclosures on recovery.
+  it.each([
+    ['error', new Error('openai_500'), undefined],
+    ['timeout', Object.assign(new Error('deadline exceeded'), { name: 'AbortError' }), undefined],
+    ['incomplete envelope', undefined, { status: 'incomplete', incomplete_reason: 'max_output_tokens', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Unfinished' }] }] }],
+    ['incomplete message', undefined, { output: [{ type: 'message', status: 'incomplete', content: [{ type: 'output_text', text: 'Unfinished' }] }] }],
+  ])('RED P44 (a) %s: recovery discloses the held risk and keeps the same approve card', async (_kind, error, incomplete) => {
+    const riskArgs = { ...args, label: HELD_RISK.risk.label, affects: [{ target_label: 'MRR', direction: 'negative' }] };
+    const caps = { proposeNewRisk: vi.fn(async () => HELD_RISK) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn((tool: string, parsedArgs: unknown, result: unknown) => composeProposalReply(tool, parsedArgs, result, base.message));
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [{ ...call, arguments: JSON.stringify(riskArgs) }] });
+    if (error !== undefined) callModel.mockRejectedValueOnce(error);
+    else callModel.mockResolvedValueOnce(incomplete);
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    recovered(r, HELD_RISK);
+    expect(riskArgs.whole_request).toBe(false);
+    expect(composeReply).toHaveBeenCalledTimes(2);
+    expect(composeReply.mock.results.map((result) => result.value)).toEqual([null, null]);
+    expect(r.assistant_text).toBe([
+      "I’ve prepared this change: add risk 'Competitor price or AI-feature response', link 'Competitor price or AI-feature response' to 'MRR' and link 'Pro plan price' to 'Competitor price or AI-feature response'.",
+      'It threatens MRR (lowers it).',
+      'It is driven by Pro plan price (more of it makes the risk more likely).',
+      'How strongly it acts is not known yet: Olumi uses a placeholder strength for each link, not an estimate, for you to correct.',
+      'Approve these 3 changes?',
+    ].join('\n\n'));
+    expect(JSON.stringify(r.items)).not.toContain('Unfinished');
+    expect(callModel).toHaveBeenCalledTimes(2);
+  });
+
+  // ⭐ P44 (a) / Codex #2781 r5: unknown result keys retain the last-resort label sentence.
+  it('CONTROL P44 (a): a key outside the allowlist falls back to the unchanged deterministic label sentence', async () => {
+    const held = { ...HELD_RISK, extra_disclosure: 'No template covers this key.' };
+    const caps = { proposeNewRisk: vi.fn(async () => held) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn(() => null);
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [call] }).mockRejectedValueOnce(new Error('openai_500'));
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    recovered(r, held);
+    expect(r.assistant_text).toBe(`I have prepared this change: ${held.public_label}. Nothing is changed until you approve it.`);
+  });
+
+  // ⭐ P44 (a) / Codex #2781 r5: the caller's composed text still wins over the held-result template.
+  it('CONTROL P44 (a): composeReply text wins even when the held risk has a template', async () => {
+    const caps = { proposeNewRisk: vi.fn(async () => HELD_RISK) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn().mockReturnValueOnce(null).mockReturnValue('COMPOSED');
+    const callModel = vi.fn().mockResolvedValueOnce({ output: [call] }).mockRejectedValueOnce(new Error('openai_500'));
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    recovered(r, HELD_RISK);
+    expect(r.assistant_text).toBe('COMPOSED');
+    expect(composeReply).toHaveBeenCalledTimes(2);
+    expect(composeReply).toHaveBeenLastCalledWith('propose_new_risk', args, HELD_RISK);
+  });
 
   it.each([
     ['error', new Error('openai_500')],
