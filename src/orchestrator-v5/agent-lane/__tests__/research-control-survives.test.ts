@@ -32,6 +32,7 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf, type LeaderGateInputs } from '../leader-final-egress.js';
 import { findLeaderClaims, textAssertsLeadingOption, textNamesLeadingOption } from '../../compose/leading-option-egress-guard.js';
 import { WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../../compose/analysis-state-v1.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { textAtRest } from '../decision-input-ask.js';
 
 const SCENARIO = '8b3e4d5c-6f7a-4b8c-9d0e-1f2a3b4c5d70';
@@ -128,6 +129,7 @@ describe('an accepted search offer has its control on the wire', () => {
   type Body = {
     assistant_text: string;
     suggested_actions: { id: string; label: string; message: string; detail?: string }[];
+    _answer_shape?: AnswerShape;
     _agent?: { tool_calls?: { name: string; ok: boolean }[] };
   };
   const turn = async (): Promise<Body> => {
@@ -210,7 +212,17 @@ describe('an accepted search offer has its control on the wire', () => {
     const b = await turn();
     expect(controls(b)).toEqual([]);
     expect(b.assistant_text, 'the gate edited the sentence that named a leader').not.toContain('is the best option');
-    expect(b.assistant_text.endsWith(WITHDRAWN), b.assistant_text).toBe(true);
+    // Contract order (i): "RESEARCH_* words stay on the face per #2746". The composer places the two fixed
+    // control-truth lines in separate face bullets, then the next step; their old contiguous suffix is not the contract.
+    expect(b._answer_shape, 'the delivered research truth has a shaped face').toBeDefined();
+    const shape = b._answer_shape!;
+    const face = [shape.headline, ...(shape.bullets ?? [])].join('\n');
+    for (const truth of [RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_WORDING_REASON_TEXT]) {
+      expect(b.assistant_text.split(truth).length - 1, `delivered exactly once: ${truth}`).toBe(1);
+      expect(face.split(truth).length - 1, `must-face research truth: ${truth}`).toBe(1);
+      expect(shape.detail ?? '', 'no research truth is hidden or duplicated in detail').not.toContain(truth);
+    }
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
   });
 
   it('CONTRAST: the same turn with a neutral query keeps its control, and nothing is added to the reply', async () => {

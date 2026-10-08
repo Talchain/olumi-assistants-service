@@ -1,6 +1,6 @@
 /** The real build route, with Paul's captured graph and narrator words; no provider is contacted. */
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../utils/telemetry.js';
@@ -210,13 +210,9 @@ describe('ONE reply contract through the build route', () => {
     const wholeGraphAuthoredCount = deriveOlumiAuthoredValues(FX.read.graph).length;
     expect(wholeGraphAuthoredCount, 'M3 control: whole-model authored figures differ from RC4 result census').not.toBe(facts.olumiEstimates!.count);
     if (process.env.ONE_REPLY_CAPTURE_BASE === '1') {
-      writeFileSync('/private/tmp/accel-cs-contract-r1-base.json', JSON.stringify({ log: shapeLog,
-        census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
       expect(shapeLog).toMatchObject({ outcome: 'kept_whole', reason: 'proposal' });
       return;
     }
-    writeFileSync('/private/tmp/accel-cs-contract-r1-final-debug.json', JSON.stringify({ input: lastComposeInput, log: shapeLog,
-      census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
     expect(body._answer_shape, JSON.stringify(shapeLog)).toBeDefined();
     const shown = face(body._answer_shape!);
     expect(shown).toContain(`Olumi's estimates: ${facts.olumiEstimates!.count}, see Check estimates.`);
@@ -235,8 +231,6 @@ describe('ONE reply contract through the build route', () => {
     expect(count(body.assistant_text, 'within 12 months')).toBeLessThanOrEqual(1);
     expect(count(body.assistant_text, "doesn't project")).toBeLessThanOrEqual(1);
     await expectStoredAndReplayed(body, lastBuildPayload);
-    writeFileSync('/private/tmp/accel-cs-contract-r1-final.json', JSON.stringify({ log: shapeLog, face: shown,
-      words: words(shown), census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
   });
 
   it('R1 producer control: the identity card owes no second goal-chance explanation', async () => {
@@ -284,6 +278,5 @@ describe('ONE reply contract through the build route', () => {
     const currentLevelControl = body.action_bar?.priority.filter(a => a.action_id === 'set_current_level' && a.enabled === true) ?? [];
     expect(count(shown, '?') + currentLevelControl.length, 'one resolving ask or current-level control').toBe(1);
     expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape!));
-    writeFileSync('/private/tmp/accel-cs-contract-r3-final.json', JSON.stringify({ face: shown, words: words(shown), body }, null, 2));
   });
 });

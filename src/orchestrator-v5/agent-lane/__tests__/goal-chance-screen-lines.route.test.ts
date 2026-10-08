@@ -4,7 +4,7 @@
  * b3-2 readback (`waveB3-unseen2-7addf05-readback-run1.json`, keys untouched). The expected line is the one the UI drew on
  * that Run (`waveB-screen-chance-lines-20261007.json`, source unseen-b3-2). Harness copied from the S2e route test.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
@@ -174,7 +174,6 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(units.join('\n')).not.toContain('What would change it:');
     expect(units.join('\n')).not.toContain("Olumi's estimates:");
     expect(composition?.measure?.face_over_word_budget).toBe(true);
-    writeFileSync('/private/tmp/accel-cs-contract-r2-t1b.json', JSON.stringify({ face: units.join('\n'), words: composition!.measure!.face_words, measure: composition!.measure }, null, 2));
   };
   const shortfallScreenLine = () => {
     READ = structuredClone(READ_T1B);
@@ -237,7 +236,6 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(count(b.assistant_text, horizon)).toBe(1);
     expect(count(b.assistant_text, "doesn't project")).toBe(1);
     await expectStoredAndReplayed(b);
-    writeFileSync('/private/tmp/accel-cs-contract-r2-b1.json', JSON.stringify({ face: units.join('\n'), words: composition!.measure!.face_words, body: b, measure: composition!.measure }, null, 2));
   });
 
   it.each(['by Q3', 'no deadline'] as const)('B3 %s: horizon marker beside chance, short full sentence once in detail', async deadline => {
