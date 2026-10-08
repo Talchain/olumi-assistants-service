@@ -92,14 +92,35 @@ describe('§(s) a bounded RATE gets Olumi\'s convention frame: min(100, max(2 ×
       { label: 'Hold', provenance: 'explicit', interventions: [] },
     ]));
     const frame = frameOf(a, 'Monthly churn')!;
-    expect(frame).toBeGreaterThan(15);
     expect(frame).toBe(30);
+    // #2842 review P2-11: the option's OWN setting is carried exactly — raw 15, normalised 15 ÷ 30 — never clipped to 13.
+    const set = (nodeOf(a, 'Discount') as unknown as { interventions: Record<string, { raw_value?: number; value?: number }> }).interventions[nodeOf(a, 'Monthly churn').id];
+    expect(set).toMatchObject({ raw_value: 15, value: 0.5 });
   });
 
-  it('a constraint the user set on the rate counts as a setting (keep churn under 12% → widened)', () => {
+  it('#2842 review P1-6: a rate the USER constrained keeps today\'s frame (its limit stays checkable on the percent rung)', () => {
     const a = admit(candidate([CHURN(3)], [], undefined,
-      [{ metric: 'Monthly churn', operator: '<', value: 12, unit: '%', provenance: 'explicit' }]));
-    expect(frameOf(a, 'Monthly churn')).toBe(24);
+      [{ metric: 'Monthly churn', operator: '<', value: 8, unit: '%', provenance: 'explicit' }]));
+    expect(frameOf(a, 'Monthly churn')).toBe(100);
+  });
+
+  it('Science §(v)(1): an Olumi-ESTIMATED level is framed too: B1\'s churn 5.5% (Olumi\'s) → 15.5 pp; the level stays Olumi\'s', () => {
+    const a = admit(candidate([PRICE(49), { label: 'Monthly churn', unit: '%', level: 5.5, max: 20, known: false, provenance: 'ai_proposed' }], []));
+    expect(frameOf(a, 'Monthly churn')).toBe(15.5);
+    expect(JSON.stringify(nodeOf(a, 'Monthly churn').observed_state)).toMatch(/"source":"cee_inference"/);
+  });
+
+  it('#2842 review P1-2: D4 still checks a percentage level on a non-100 frame (a band below 0% is set aside, not admitted)', () => {
+    const opts = [
+      { label: 'Raise to £75', provenance: 'explicit', interventions: [{ factor_label: 'Pro plan price', value: 75, unit: '£/month', provenance: 'explicit' }] },
+      { label: 'Hold £49', provenance: 'explicit', interventions: [{ factor_label: 'Pro plan price', value: 49, unit: '£/month', provenance: 'explicit' }] },
+    ];
+    const steep = admit(candidate([PRICE(49), CHURN(3)], [{ from: 'Pro plan price', to: 'Monthly churn', direction: 'negative', amount: -0.1 }], opts));
+    expect(frameOf(steep, 'Monthly churn')).toBe(13);
+    expect(edgeOf(steep, 'Pro plan price', 'Monthly churn').provenance?.magnitude).not.toBe('olumi_estimate');
+    // CONTROL: a small effect inside the domain IS admitted on the same frame.
+    const small = admit(candidate([PRICE(49), CHURN(3)], [{ from: 'Pro plan price', to: 'Monthly churn', direction: 'negative', amount: -0.01 }], opts));
+    expect(edgeOf(small, 'Pro plan price', 'Monthly churn').provenance?.magnitude).toBe('olumi_estimate');
   });
 });
 
@@ -114,6 +135,14 @@ describe('§(u)(a) a NON-NEGATIVE level gets 0 to 2 × its level', () => {
     const e = edgeOf(a, 'Pro plan price', 'Monthly churn');
     expect(e.provenance?.magnitude).toBe('olumi_estimate');
     expect(e.strength.mean).toBeCloseTo(0.98, 6);
+  });
+
+  it('a QUALIFIED money-per-unit ("£/Pro subscriber/month", as the drafter wrote it in 2 of 3 arm draws) is a price too', () => {
+    const a = admit(candidate([{ label: 'Pro plan price', unit: '£/Pro subscriber/month', level: 49, max: 200 }], []));
+    expect(frameOf(a, 'Pro plan price')).toBe(98);
+    // CONTROL: a unit whose head is not money stays excluded (the drafter's range stays).
+    const b = admit(candidate([{ label: 'Pro plan price', unit: 'points/Pro subscriber/month', level: 49, max: 200 }], []));
+    expect(frameOf(b, 'Pro plan price')).toBe(200);
   });
 
   it('DISCLOSED as Olumi\'s frame, once per factor, in the construction ledger', () => {
@@ -131,7 +160,7 @@ describe('§(u)(a) a NON-NEGATIVE level gets 0 to 2 × its level', () => {
     expect(frameOf(olumi, 'Pro plan price')).toBe(98);
   });
 
-  it('EXCLUDED: a level of 0, a signed level, and a level Olumi only estimated keep the drafter\'s range', () => {
+  it('EXCLUDED: a level of 0 and a signed level keep the drafter\'s range (an ESTIMATED level is framed: Science §(v)(1))', () => {
     const a = admit(candidate([
       PRICE(49),
       { label: 'Starter subscribers', unit: 'subscribers', level: 0, max: 5000 },
@@ -140,7 +169,50 @@ describe('§(u)(a) a NON-NEGATIVE level gets 0 to 2 × its level', () => {
     ], []));
     expect(frameOf(a, 'Starter subscribers')).toBe(5000);
     expect(frameOf(a, 'Net cash flow')).toBe(100000);
-    expect(frameOf(a, 'Support tickets')).toBe(5000);
+    expect(frameOf(a, 'Support tickets')).toBe(600);
+  });
+
+  it('#2842 review P1-4: money with no positive evidence it cannot go negative ("Operating income") keeps the drafter\'s range', () => {
+    const a = admit(candidate([PRICE(49), { label: 'Operating income', unit: '£/month', level: 10000, max: 100000 }], []));
+    expect(frameOf(a, 'Operating income')).toBe(100000);
+    expect(frameOf(a, 'Pro plan price')).toBe(98);
+  });
+
+  it('#2842 review P1-5: a ceiling of 1 or less (a £0.25 price) is not a frame the writers keep → excluded', () => {
+    const a = admit(candidate([{ label: 'Wholesale price', unit: '£/item', level: 0.25, max: 5 }], [], [
+      { label: 'Raise', provenance: 'explicit', interventions: [{ factor_label: 'Wholesale price', value: 0.3, unit: '£/item', provenance: 'explicit' }] },
+      { label: 'Hold', provenance: 'explicit', interventions: [] },
+    ]));
+    expect(frameOf(a, 'Wholesale price')).toBe(5);
+  });
+
+  it('#2842 review P1-8: a figure the brief writes as ANOTHER kind ("150 customers") is not a price ceiling', () => {
+    const a = admit(candidate([PRICE(49, 150)], []), 'Our Pro plan is £49 a month and we have 150 customers.');
+    expect(frameOf(a, 'Pro plan price')).toBe(98);
+  });
+
+  it('#2842 review P1-1/P1-9: a sized link whose reach EXCEEDS the ceiling (|β| > 1) widens it to (level + reach) ÷ 0.8, so the size stays admitted', () => {
+    // The hiring draft (arm re-run B3 d3): £100,000 per senior engineer over 0–10 engineers into salary spend at £150,000.
+    const a = admit(candidate([
+      { label: 'Annual salary spend', unit: '£/year', level: 150000, max: 2000000 },
+      { label: 'Senior engineers hired', unit: 'engineers', level: 0, max: 10 },
+    ], [{ from: 'Senior engineers hired', to: 'Annual salary spend', direction: 'positive', amount: 100000 }]));
+    expect(frameOf(a, 'Annual salary spend')).toBe(1437500);
+    const e = edgeOf(a, 'Senior engineers hired', 'Annual salary spend');
+    expect(e.provenance?.magnitude).toBe('olumi_estimate');
+    expect(Math.abs(e.strength.mean)).toBeLessThanOrEqual(1);
+    // CONTROL: a link whose reach stays within the ceiling leaves the convention's 2 × level alone.
+    const b = admit(candidate([
+      { label: 'Annual salary spend', unit: '£/year', level: 150000, max: 2000000 },
+      { label: 'Senior engineers hired', unit: 'engineers', level: 0, max: 10 },
+    ], [{ from: 'Senior engineers hired', to: 'Annual salary spend', direction: 'positive', amount: 5000 }]));
+    expect(frameOf(b, 'Annual salary spend')).toBe(300000);
+  });
+
+  it('a constraint the user set on a LEVEL widens its frame (keep the price under £90 → 0–£180)', () => {
+    const a = admit(candidate([PRICE(49)], [], undefined,
+      [{ metric: 'Pro plan price', operator: '<', value: 90, unit: '£/month', provenance: 'explicit' }]));
+    expect(frameOf(a, 'Pro plan price')).toBe(180);
   });
 
   it('EXCLUDED: the GOAL node is never re-framed by the convention', () => {
@@ -188,6 +260,9 @@ describe('§(u)(b) an OLUMI-drafted size takes its sign from the drawn direction
     const user = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'negative', amount: 3, prov: 'explicit' }]), brief);
     const e = edgeOf(user, 'Monthly churn', 'Pro paying subscribers');
     expect(e.provenance?.natural_effect?.amount).not.toBe(-3);
+    // #2842 review P2-11: not flipped AND not adopted as Olumi's: it stays a placeholder, and no sign resolution is logged.
+    expect(e.provenance?.magnitude).toBe('olumi_placeholder');
+    expect(lossText(user)).not.toMatch(/effect_amount :: Olumi's drafted size/);
     // CONTROL (the door is real): the same user sentence with an agreeing direction IS the user's size.
     const agree = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'positive', amount: 3, prov: 'explicit' }]), brief);
     expect(edgeOf(agree, 'Monthly churn', 'Pro paying subscribers').provenance?.magnitude).toBe('user_stated');

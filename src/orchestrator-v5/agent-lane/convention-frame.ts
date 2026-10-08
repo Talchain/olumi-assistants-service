@@ -19,6 +19,7 @@
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { sayFigure } from './say-figure.js';
+import { isCurrencyUnit } from '../../utils/currency-alphabet.js';
 
 /** Words that make a quantity signed or able to exceed its range: never framed by the convention (Science §(s)(2), §(u)). */
 const SIGNED_OR_UNBOUNDED = /\b(change|changes|growth|grow|increase|decrease|uplift|delta|difference|margin|inflation|index|indexed|baseline|yoy|year[- ]on[- ]year|net|nrr|ndr|profit|profits|cash ?flow|balance|surplus|deficit|gain|gains|loss|losses|temperature|return|roi)\b/i;
@@ -39,7 +40,24 @@ function isCountUnit(unit: string): boolean {
   return COUNT_HEADS.has(head) || (head.endsWith('s') && COUNT_HEADS.has(head.slice(0, -1)));
 }
 
+/**
+ * Money per something with a qualifier, as the drafter writes a price: "£/Pro subscriber/month" (the estate's currency
+ * reader says `plain` for it). The head before the first "/" or "per" must itself be a currency.
+ */
+function isMoneyPerUnit(unit: string): boolean {
+  const t = unit.trim();
+  const head = t.split(/\s*\/\s*|\s+per\s+/i)[0] ?? '';
+  return head !== t && head !== '' && isCurrencyUnit(head);
+}
+
 export type ConventionClass = 'bounded_rate' | 'non_negative_level';
+
+/**
+ * A money level with POSITIVE evidence that it cannot go negative (#2842 review P1-4: a currency unit plus a blacklist let
+ * "Operating income" through). Its label must name a price, cost, spend, fee, wage, budget or revenue kind; anything else in
+ * money (income, earnings, value, result…) keeps the drafter's range.
+ */
+const NON_NEGATIVE_MONEY = /\b(price|prices|cost|costs|fee|fees|spend|spending|salary|salaries|wage|wages|pay|payroll|budget|rent|revenue|sales|mrr|arr|subscription|charge|charges|tariff|expense|expenses|bill|invoice)\b/i;
 
 /** Which convention applies to this factor, or `undefined` (excluded: the drafter's range stays). */
 export function conventionClassOf(label: string, unit: string | null | undefined, level: number | null | undefined): ConventionClass | undefined {
@@ -48,8 +66,10 @@ export function conventionClassOf(label: string, unit: string | null | undefined
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percent') return level <= 100 && BOUNDED_RATE.test(label) ? 'bounded_rate' : undefined;
   if (cls !== 'unknown') return undefined; // percentage points, basis points, … : a change, never a level here
-  if (readCurrencyUnitWithQualifiers(unit).kind === 'currency' || isCountUnit(unit)) return 'non_negative_level';
-  return undefined;
+  if (readCurrencyUnitWithQualifiers(unit).kind === 'currency' || isMoneyPerUnit(unit)) {
+    return NON_NEGATIVE_MONEY.test(label) ? 'non_negative_level' : undefined;
+  }
+  return isCountUnit(unit) ? 'non_negative_level' : undefined;
 }
 
 export interface ConventionFrame {
@@ -61,30 +81,43 @@ export interface ConventionFrame {
 
 /**
  * The convention's ceiling for a factor at `level`, widened over `settings` (option settings and user constraints on
- * it, in its own unit) so that none reaches 80% of it. `undefined` when the factor is excluded.
+ * it, in its own unit) and over `spread_upper` (the top of an Olumi-ESTIMATED level's own spread, Science §(v)(1)) so
+ * that none reaches 80% of it. `undefined` when the factor is excluded, or when the ceiling would be 1 or less (a frame
+ * the node writers refuse, so the level and its options would land in two value spaces; #2842 review P1-5).
  */
 export function conventionFrameFor(args: {
   readonly label: string; readonly unit: string | null | undefined; readonly level: number | null | undefined;
-  readonly settings: readonly number[];
+  readonly settings: readonly number[]; readonly spread_upper?: number;
 }): ConventionFrame | undefined {
   const cls = conventionClassOf(args.label, args.unit, args.level);
   if (cls === undefined) return undefined;
   const level = args.level as number;
   let frame = cls === 'bounded_rate' ? Math.min(100, Math.max(2 * level, level + 10)) : 2 * level;
-  const top = Math.max(level, ...args.settings.filter(finite).map(Math.abs));
+  const top = Math.max(level, ...[...args.settings, ...(finite(args.spread_upper) ? [args.spread_upper] : [])].filter(finite).map(Math.abs));
   let widened_by: number | undefined;
   if (top >= 0.8 * frame) {
     widened_by = top;
     frame = cls === 'bounded_rate' ? Math.min(100, 2 * top) : 2 * top;
   }
   if (cls === 'bounded_rate' && top > 100) return undefined; // not a [0, 100] share after all: excluded, never clipped
+  if (!(frame > 1)) return undefined;
   return { cls, frame: Number(frame.toPrecision(12)), ...(widened_by !== undefined ? { widened_by } : {}) };
 }
 
-/** Whether the brief WRITES this figure (a user's ceiling wins over the convention). Exact match on the stated amounts. */
-export function briefWritesFigure(brief: string | undefined, value: number): boolean {
+/** The top of an Olumi-estimated level's own spread: the estate's "half its size" spread (Science §(j)/(v)). */
+export const estimatedSpreadUpper = (level: number): number => level * 1.5;
+
+/**
+ * Whether the brief WRITES this figure as a ceiling could be written for this factor: the same number AND the same kind
+ * of amount (money for a money level, a percentage for a rate, a plain number for a count). #2842 review P1-8: a bare
+ * numeric match let "we have 150 customers" keep a drafted £150 price ceiling.
+ */
+export function briefWritesFigure(brief: string | undefined, value: number, cls?: ConventionClass, unit?: string | null): boolean {
   if (typeof brief !== 'string' || !finite(value)) return false;
-  return findStatedAmounts(brief).some((a) => Math.abs(a.magnitude - value) < 1e-9);
+  const kind = cls === 'bounded_rate' ? 'percent'
+    : cls === 'non_negative_level' && typeof unit === 'string' && (readCurrencyUnitWithQualifiers(unit).kind === 'currency' || isMoneyPerUnit(unit)) ? 'currency'
+      : cls === 'non_negative_level' ? 'plain' : undefined;
+  return findStatedAmounts(brief).some((a) => Math.abs(a.magnitude - value) < 1e-9 && (kind === undefined || a.kind === kind));
 }
 
 /** "Olumi treats ‘Pro plan price’ as between £0 and £98 a month" (Science §(u)'s words), in the factor's own unit. */
