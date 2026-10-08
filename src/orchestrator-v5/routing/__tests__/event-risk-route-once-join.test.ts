@@ -15,7 +15,7 @@ import { endsOfGraph } from '../../goal-target/held-user-links.js';
 import { readStatedEventRisk } from '../stated-event-risk.js';
 import { holdStatedEventRisks } from '../../agent-lane/stated-event-risk-draft.js';
 
-const STATED = 'Our key developer might leave, maybe 10–30% in the next 6 months.';
+const STATED = 'Our key developer might leave, a 10–30% chance in the next 6 months.';
 
 function graphWith(eventRisk: unknown) {
   return {

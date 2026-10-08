@@ -14,7 +14,7 @@ function graph(event: boolean): { nodes: Array<Record<string, any>>; edges: Arra
       { id: 'opt_a', kind: 'option', label: 'Contractors', interventions: { capacity: { value: 0.8 } } },
       { id: 'opt_b', kind: 'option', label: 'Training', interventions: { capacity: { value: 0.6 } } },
       { id: 'risk_dev', kind: 'risk', label: 'Key developer might leave',
-        ...(event ? { event_risk: readStatedEventRisk('10–30% within 6 months')!.event_risk } : {}) },
+        ...(event ? { event_risk: readStatedEventRisk('a 10–30% chance within 6 months')!.event_risk } : {}) },
     ],
     edges: [edge('decision', 'opt_a'), edge('decision', 'opt_b'), edge('opt_a', 'capacity'), edge('opt_b', 'capacity'),
       edge('capacity', 'goal'), edge('risk_dev', 'goal')],
