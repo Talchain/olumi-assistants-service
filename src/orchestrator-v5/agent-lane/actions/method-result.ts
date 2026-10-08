@@ -91,6 +91,9 @@ export function changeRowsAgreeWithHero(analysisResult: unknown, optionIds: read
     const parsed = displayLicenceSchema.safeParse(agentLicenceRecordOf(analysisResult));
     if (!parsed.success) return false;
     const licence = parsed.data;
+    // The hero displays EVERY option the licence names, so its options must be exactly the scored ones: an extra displayed
+    // option could hold the top the rows never compared (Codex review P1 @9d7bd1ea).
+    if (licence.option_ids.length !== optionIds.length || !licence.option_ids.every((id) => optionIds.includes(id))) return false;
     if (!optionIds.every((id) => licence.option_ids.includes(id)
       && !licence.withheld_option_ids?.includes(id) && Object.hasOwn(licence.pct_by_option, id))) return false;
     // A scored option recorded as a range cannot simultaneously authorize a point comparison.

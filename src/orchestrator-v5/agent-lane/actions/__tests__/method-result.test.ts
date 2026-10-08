@@ -204,6 +204,17 @@ describe('"Test without this link": rows are the reply\'s allowlisted lines, bou
 });
 
 describe('"What would change this?": RC\'s measured lines only, and only beside a hero that agrees (ruling 4)', () => {
+  it('Codex review P1 @9d7bd1ea: the licence must name exactly the scored options — an extra displayed option (higher or tied) withholds', () => {
+    const extra = (pct: number) => { const b = structuredClone(BLOCK); const lic = b.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+      lic.option_ids = [...lic.option_ids, 'extra_option']; lic.pct_by_option = { ...lic.pct_by_option, extra_option: pct };
+      if (lic.display_rounding_by_option) lic.display_rounding_by_option = { ...lic.display_rounding_by_option, extra_option: 'whole' }; return b; };
+    const options = [RAISE, STARTER, KEEP];
+    expect(changeRowsAgreeWithHero(extra(90), options, STARTER)).toBe(false); // higher: the hero's top is the extra option
+    expect(changeRowsAgreeWithHero(extra(52), options, STARTER)).toBe(false); // tied
+    expect(changeRowsAgreeWithHero(extra(10), options, STARTER)).toBe(false); // lower: still not the scored set, fail closed
+    expect(changeRowsAgreeWithHero(BLOCK, options, STARTER)).toBe(true); // control: exactly the scored options
+  });
+
   it('Codex review P1 @a8117113: a superlative licence must NAME the run-share top as its leader; a similar hero names none', () => {
     const options = [RAISE, STARTER, KEEP];
     const withForm = (form: string, extra: Json = {}) => { const b = structuredClone(BLOCK); const lic = b.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED'); delete lic.summary_withheld; Object.assign(lic, { form, ...extra }); return b; };
