@@ -221,8 +221,10 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const t = await thinConstruction(riskCount, () => {
       const candidate = constructionCandidate!;
       (candidate.factors as Record<string, unknown>[])[0]!.unit = 'GBP/month';
+      // #2851 RE-PIN (class: Olumi's inferred 250, now a missing level so no card): these rows test the risk offers beside
+      // a pending identity card, so the brief states the count and the card is offered on the user's figure.
       (candidate.factors as Record<string, unknown>[]).push({ label: 'Paying subscribers', role: 'observable',
-        baseline_known: false, baseline_value: 250, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 1000 });
+        baseline_known: true, baseline_value: 250, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000 });
       (candidate.links as Record<string, unknown>[]).push({ from: 'Paying subscribers', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
         effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null });
       // Churn threatens the subscriber count. Give every risk its own real path, so the constructor does not repair
@@ -234,7 +236,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       candidate.identities = [{ outcome: 'Total MRR', operation: 'product', factors: ['Pro plan price', 'Paying subscribers'], provenance: 'ai_proposed' }];
       script.splice(1, 1, () => fnCall('propose_identity', {}), () => say('Here is the model to explore together.'));
       prepare?.();
-    });
+    }, `${CONSTRUCTION_BRIEF} We have 250 paying subscribers.`);
     const identity = t._agent.tool_calls.find((c) => c.name === 'propose_identity');
     expect(identity, `identity fixture setup: ${JSON.stringify(t)}`).toMatchObject({ ok: true, mutated: false });
     expect(t.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t.suggested_actions)).toHaveLength(1);

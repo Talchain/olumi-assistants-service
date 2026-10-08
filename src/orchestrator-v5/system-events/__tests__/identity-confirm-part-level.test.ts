@@ -25,16 +25,16 @@ const pressYes = (g: Rec) => {
   const card = proposeProductIdentity(g);
   expect(card, 'the stored reading is the card the user saw').not.toBeNull();
   return applyIdentityConfirmEdit({ persistedGraph: g, outcome_id: card!.outcome_id, factor_ids: card!.factor_ids, words: card!.words,
-    expected_graph_hash: computeAnalysisAffectingGraphHash(g as never), reading_token: identityConfirmReadingToken(card!) });
+    expected_graph_hash: computeAnalysisAffectingGraphHash(g as never) ?? '', reading_token: identityConfirmReadingToken(card!) });
 };
 
 describe('no Yes over a part with no level (stored 828d87ac)', () => {
   it('⭐ RED: the Yes is refused, saying why, and nothing is written', () => {
     const r = pressYes(beforeYes());
     expect(r.kind).toBe('refused');
-    expect(r.kind === 'refused' && r.reason).toBe('operand_level_missing');
+    expect(r.kind === 'refused' ? r.reason : r.kind).toBe('operand_level_missing');
     // An OUTCOME has no level writer (`LEVEL_WRITER_KINDS`), so the user is never invited to give a figure Olumi can't save.
-    expect(r.kind === 'refused' && r.detail).toBe('Olumi can’t work out ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’ yet: '
+    expect(r.kind === 'refused' ? r.detail : r.kind).toBe('Olumi can’t work out ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’ yet: '
       + '‘Pro paying subscribers’ has no figure in the model, and Olumi can’t record one for it yet, so there is nothing for you to confirm.');
   });
 
@@ -46,11 +46,11 @@ describe('no Yes over a part with no level (stored 828d87ac)', () => {
   it('⭐ RED (stored 9f32a4b4): Olumi\'s basis-less 250 is MISSING: no card, the Yes is refused, and the count is asked blank', () => {
     expect(identityCardOfferable(inferred)).toBe(false);
     const r = pressYes(inferred);
-    expect(r.kind === 'refused' && r.reason).toBe('operand_level_missing');
+    expect(r.kind === 'refused' ? r.reason : r.kind).toBe('operand_level_missing');
     // A FACTOR's level can be saved, so it is asked; the 250 is never offered as the answer.
-    expect(r.kind === 'refused' && r.detail)
+    expect(r.kind === 'refused' ? r.detail : r.kind)
       .toBe('To work out ‘MRR’ as ‘Pro monthly price’ × ‘Pro paying subscribers’, I need ‘Pro paying subscribers’: what is it today?');
-    expect(r.kind === 'refused' && r.detail).not.toMatch(/250/);
+    expect(r.kind === 'refused' ? r.detail : r.kind).not.toMatch(/250/);
   });
 
   it('CONTRAST: the same count as the USER\'s figure is a level: the card is offered, the Yes writes, and their figure is untouched', () => {
@@ -59,7 +59,7 @@ describe('no Yes over a part with no level (stored 828d87ac)', () => {
     expect(identityCardOfferable(users)).toBe(true);
     const r = pressYes(users);
     expect(r.kind).toBe('mutated');
-    expect((r as { mutatedGraph: Rec }).mutatedGraph.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').observed_state)
+    expect((r.kind === 'mutated' ? r.mutatedGraph as Rec : ({ nodes: [] } as Rec)).nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').observed_state)
       .toEqual(users.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').observed_state);
   });
 

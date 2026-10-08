@@ -22,7 +22,8 @@ function servedShape(carrier?: Record<string, unknown>): unknown {
     nodes: [
       { id: 'mrr', kind: 'goal', label: 'MRR', ...(carrier !== undefined ? { nonlinear_identity: carrier } : {}) },
       { id: 'price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 0.49, raw_value: 49, cap: 100, unit: '£', source: 'user_override' } },
-      { id: 'subs', kind: 'factor', label: 'Pro subscribers', observed_state: { value: 0.5, raw_value: 5000, cap: 10000, unit: 'subscribers', source: 'cee_inference' } },
+      { id: 'subs', kind: 'factor', label: 'Pro subscribers', observed_state: { value: 0.5, raw_value: 5000, cap: 10000, unit: 'subscribers', source: 'user_override' } },
+      // #2851 RE-PIN (class: Olumi's inferred count, now a missing level): these rows test ONE commit, so the count is the user's.
       { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.04 } },
     ],
     edges: [

@@ -140,10 +140,12 @@ describe('m1: after the Yes, the Run is not blocked for want of a frame (served 
   it('R3 5907677185 GUARD: a cause range under 2× today\'s level (cap 1,600) could clip the later count → no range, today\'s ask stays', () => {
     const x = g((y) => { node(y, 'current_paying_subscribers').observed_state.cap = 1600; });
     expect(todaysFrameFor(x, 'paying_subscribers_at_12_months')).toBeNull();
-    const { after } = yes(x);
-    expect(node(after, 'paying_subscribers_at_12_months').scale_frame).toBeUndefined();
-    expect(node(after, 'paying_subscribers_at_12_months').observed_state).toBeUndefined();
-    expect(codes(after)).toContain('IDENTITY_FRAME_MISSING');
+    // #2851 RE-PIN (class: a part with no level): this used to write the Yes and leave the Run blocked
+    // (IDENTITY_FRAME_MISSING), confirm-then-refuse. The Yes is now refused before any write, and nothing changes.
+    const card = proposeProductIdentity(x)!;
+    const r = applyIdentityConfirmEdit({ persistedGraph: x, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+      expected_graph_hash: computeAnalysisAffectingGraphHash(x as never) ?? '', reading_token: identityConfirmReadingToken(card) });
+    expect(r.kind === 'refused' ? r.reason : r.kind).toBe('operand_level_missing');
   });
 
   it('CONTROL: m2 (every part already framed) — the Yes adds no range', () => {
