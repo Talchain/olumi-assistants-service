@@ -1,3 +1,4 @@
+import { beforeDoorTag } from './licence-test-graphs.js';
 /**
  * ⛔ AN OPTION NEVER SETS ITSELF — a first model registered with a loop that Run then refused.
  *
@@ -248,7 +249,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     // P2 A5 (#2139), landed after this capture too: option levels are read back in the served short form, on the SERVED
     // factors' own frames and units (`one-form-levels.ts`); anything else they carry still fails this compare.
     expect(asServedBeforeOneForm(body, SERVED.draft_graph).nodes.map((n) => canon(withoutG1(n)))).toEqual(servedNodes.map(canon));
-    expect(body.edges.map(canon)).toEqual(asProjectedMeanCapture(SERVED.draft_graph, body).edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
+    expect(beforeDoorTag(body).edges.map(canon)).toEqual(asProjectedMeanCapture(SERVED.draft_graph, body).edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
     expect(canon(body.goal_constraints)).toEqual(canon(SERVED.draft_graph.goal_constraints));
   });
 

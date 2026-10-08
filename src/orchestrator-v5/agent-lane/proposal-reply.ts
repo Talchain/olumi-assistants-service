@@ -237,15 +237,20 @@ function linkStrengthReply(r: Rec): string | null {
  */
 /** F1b's sizing classes (`LinkSizing`, link-sizing.ts): what a link's `was.sizing` may hold. */
 const LINK_SIZINGS: ReadonlySet<string> = new Set<LinkSizing>(['user', 'placeholder', 'olumi_accepted', 'olumi_estimate', 'unmarked']);
-/** `proposeLinkStrengths`' own two literals for whose a strength is (agent-capabilities.ts `links[].whose`). */
-const LINK_WHOSE: ReadonlySet<string> = new Set(['yours', 'Olumi\u2019s estimate']);
+/** `proposeLinkStrengths`' own literals for whose a strength is; a first estimate never implies a prior size. */
+const REVIEW_ONLY_LINK = 'review only; nobody has sized this link';
+const UNSIZED_LINK_CHANGE = 'placeholder prior changed; nobody has sized this link';
+const LINK_WHOSE: ReadonlySet<string> = new Set(['yours', 'Olumi\u2019s estimate', 'Olumi\u2019s first estimate for a link nobody had sized', REVIEW_ONLY_LINK, UNSIZED_LINK_CHANGE]);
 
 function linkSetReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label) || !Array.isArray(r.links) || r.links.length === 0) return null;
   const links = r.links.map(recordOf);
   // Whose each strength is, as the capability types it: anything else is untyped and keeps the second call (DL on #2475).
   if (links.some((l) => l === undefined || !LINK_WHOSE.has(l.whose as string))) return null;
-  const olumis = links.filter((l) => l!.whose !== 'yours').length;
+  const olumis = links.filter((l) => l!.whose === 'Olumi\u2019s estimate').length;
+  const firstEstimates = links.filter((l) => l!.whose === 'Olumi\u2019s first estimate for a link nobody had sized');
+  const reviewOnly = links.filter((l) => l!.whose === REVIEW_ONLY_LINK);
+  const unsizedChanges = links.filter((l) => l!.whose === UNSIZED_LINK_CHANGE);
   /**
    * ⭐ A LINK OLUMI HAD ALREADY ESTIMATED IS RE-SIZED, NOT SIZED (AI HARNESS #2475; CODEX_CLI_OVERFLOW + DL CR 5937945418 on
    * R3 DEFECT 2): read from the capability's typed `whose`, `keeps_current_strength` and `was.sizing` (F1b's `linkSizing`),
@@ -255,12 +260,30 @@ function linkSetReply(r: Rec): string | null {
   for (const l of links) {
     const was = recordOf(l!.was);
     if (was === undefined || !LINK_SIZINGS.has(was.sizing as string) || typeof l!.keeps_current_strength !== 'boolean') return null;
+    // B1: the capability previewed the canonical review writer and read its class with linkSizing. Only a retained
+    // placeholder can carry the bounded review literal; it neither offers a size nor earns authorship on approval.
+    if (l!.whose === REVIEW_ONLY_LINK) {
+      if (was.sizing !== 'placeholder' || l!.keeps_current_strength !== true || l!.sizing_after_approval !== 'placeholder') return null;
+      continue;
+    }
+    if (l!.whose === UNSIZED_LINK_CHANGE) {
+      if (was.sizing !== 'placeholder' || l!.keeps_current_strength !== false || l!.sizing_after_approval !== 'placeholder') return null;
+      continue;
+    }
+    if (l!.sizing_after_approval === 'placeholder') return null;
+    // Science 393023 LICENCE ruling 3: a first-estimate attribution is valid only for an unsized prior, and vice versa.
+    if ((l!.whose === 'Olumi\u2019s first estimate for a link nobody had sized')
+      !== (l!.whose !== 'yours' && was.sizing === 'placeholder')) return null;
     if (l!.whose === 'yours' || l!.keeps_current_strength || (was.sizing !== 'olumi_estimate' && was.sizing !== 'olumi_accepted')) continue;
     if (!nonEmpty(l!.from) || !nonEmpty(l!.to) || !nonEmpty(was.band)) return null;
     replaced.push(`${q(l!.from.trim())} \u2192 ${q(l!.to.trim())} (${was.band.trim()})`);
   }
   return reply(subjectOf(r.public_label), [
     ...(olumis > 0 ? ['Olumi\u2019s estimates stay marked as Olumi\u2019s, never as your own: approving applies them.'] : []),
+    ...(firstEstimates.length > 0 ? ['For links nobody had sized, this offers Olumi\u2019s first estimate: approving records it as Olumi\u2019s, never as your own.'] : []),
+    ...(firstEstimates.some((l) => l!.keeps_current_strength) ? ['Where the strength is kept as it is, approving records only your review, never authorship.'] : []),
+    ...(reviewOnly.length > 0 ? ['These links aren\u2019t sized in the model yet: approving records only your review and keeps their strength as it is.'] : []),
+    ...(unsizedChanges.length > 0 ? ['These links aren\u2019t sized in the model yet: approving changes the stored placeholder strength and records your review.'] : []),
     ...(replaced.length === 1 ? [`${replaced[0]} already held Olumi\u2019s estimate: this replaces that estimate.`]
       : replaced.length > 1 ? [`These links already held Olumi\u2019s estimate, which this replaces: ${replaced.join('; ')}.`] : []),
   ], question(undefined));
