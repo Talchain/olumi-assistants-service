@@ -9,25 +9,25 @@
  * ONE scoping, read by BOTH surfaces: the chat's spoken `say` (`scope-target-not-testable.ts`) and the panel's
  * `per_option[option_id].message` (this module) come from the same per-option failures (`scopedFailuresFor`):
  *  · a failure about the goal itself (its level, its comparator, its unit: cases a, b, d) is every option's;
- *  · a link that is not sized (case c) is an option's only when it lies on THAT option's own path to the goal.
- * An option left with no failure of its own (the baseline: it moves nothing) says the DL's words (ruling 7 Oct 12:2xZ):
- * it needs nothing more of its own and waits for the others. It is still withheld: no licence changes here.
+ *  · a link that is not sized (case c) belongs to its own path and typed product/accumulation/derived-baseline dependencies.
+ * Gate A (Science §(aa), 8 Oct): no own failure means no target withhold and no invented waiting reason.
  */
 import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
+import { exactIdentityOperandLinks, goalBaselineFromIdentityInputs, readProductIdentityCarrier } from '../admission/identity-evaluations.js';
 import {
   reachedGoalPaths,
+  scoredGoalIdOf,
   targetBecause,
+  targetNotTestableWarning,
   untestableTargetParts,
+  untestableTargetTail,
   type TargetTestability,
   type TargetTestabilityFailure,
 } from '../admission/target-testability.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
-
-/** DL ruling (7 Oct 12:2xZ): the baseline's own words, after the panel's "‘<label>’: not shown yet." */
-export const BASELINE_WAITS_FOR_OTHERS =
-  'It needs nothing more of its own; it waits until the other options can be tested against your target, so all are shown on the same footing.';
 
 /** The per-option message's cap: the Run warning's own carrier cap (`TARGET_TESTABLE_SENTENCE_CAP`, 388) + "Not shown. ". */
 const PER_OPTION_SENTENCE_CAP = 388;
@@ -49,7 +49,10 @@ export function scopedFailuresFor(
   const onPath = new Set(pathLinks.map((l) => JSON.stringify([l.from, l.to])));
   return failures.flatMap((f) => {
     if (f.case !== 'c') return [f];
-    const links = (f.links ?? (f.link === undefined ? [] : [f.link])).filter((l) => onPath.has(JSON.stringify([l.from, l.to])));
+    const failingLinks = f.links ?? (f.link === undefined ? [] : [f.link]);
+    // No path into the goal is a Run-level absence, not another option's linked failure.
+    if (failingLinks.length === 0) return [f];
+    const links = failingLinks.filter((l) => onPath.has(JSON.stringify([l.from, l.to])));
     if (links.length === 0) return [];
     const link = links[0]!;
     return [{ ...f, links, link, lever: labelOf(link.from), link_to: labelOf(link.to) }];
@@ -64,21 +67,58 @@ function ownSentence(graph: unknown, verdict: Extract<TargetTestability, { kind:
 }
 
 /**
- * Each option's own reached path to the goal: the admission walk (`reachedGoalPaths`) over the ANALYSED graph, seeded
- * with the option's interventions, under this Run's identity evaluations. The one path read for the chat's `say` and the
- * panel's `per_option`.
+ * Each option's target dependencies: the admission walk over the ANALYSED graph, seeded with its interventions.
+ * Linear common paths cancel. A feed into operand A of a product or accumulation on the goal path affects an option reaching operand B;
+ * a feed into a derived goal baseline affects every option. These typed dependencies augment the same path read used by
+ * withholding, chat and panel, so `scopedFailuresFor` remains the only failure scoping.
  */
 export function optionPathsOf(
   graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], goalId?: unknown,
 ): Map<string, Array<{ from: string; to: string }>> {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return new Map();
   const nodes = graph.nodes.filter(isRec);
-  const { paths } = reachedGoalPaths(asAnalysed({ ...graph, nodes: graph.nodes }), optionIds, new Map(optionIds.map((id) => {
+  const analysed = asAnalysed({ ...graph, nodes: graph.nodes, edges: graph.edges });
+  const edges: Rec[] = Array.isArray(analysed.edges) ? analysed.edges.filter(isRec) : [];
+  const selectedGoal = scoredGoalIdOf(analysed, goalId);
+  const seeds = new Map(optionIds.map((id) => {
     const option = nodes.find((n) => n.kind === 'option' && n.id === id);
     return [id, isRec(option?.interventions) ? Object.keys(option.interventions) : []] as const;
-  })), identityEvaluations, goalId);
-  return new Map(paths.map((p) => [p.option_id, p.links.flatMap((l) =>
-    (typeof l.from === 'string' && typeof l.to === 'string' ? [{ from: l.from, to: l.to }] : []))] as const));
+  }));
+  const { paths } = reachedGoalPaths(analysed, optionIds, seeds, identityEvaluations, selectedGoal);
+  const reachByNode = new Map<string, Set<unknown>>();
+  const reachFrom = (id: string): Set<unknown> => {
+    let reached = reachByNode.get(id);
+    if (reached === undefined) {
+      reached = reachedGoalPaths(analysed, [id], new Map([[id, [id]]]), identityEvaluations, selectedGoal).reached;
+      reachByNode.set(id, reached);
+    }
+    return reached;
+  };
+  const identities = nodes.flatMap(n => {
+    const product = readProductIdentityCarrier(n);
+    // Science §(aa), class 3: an accumulation operand (inflow/churn/level) → treat as 1.
+    // Read the same typed carrier the Run preserves; an accumulation is declared on a derived node, never the goal.
+    const accumulation = product === null && n.kind !== 'goal'
+      ? NodeV3.shape.nonlinear_identity.safeParse(n.nonlinear_identity).data : undefined;
+    const carrier = product ?? (accumulation?.operation === 'accumulation' ? accumulation : null);
+    return carrier !== null && typeof n.id === 'string' && reachFrom(n.id).has(selectedGoal) ? [carrier] : [];
+  });
+  const baselineOperands = goalBaselineFromIdentityInputs(nodes, selectedGoal, identityEvaluations)
+    ? [...exactIdentityOperandLinks(nodes, edges, identityEvaluations)].filter(e => e.to === selectedGoal).map(e => e.from) : [];
+  const kindOf = new Map(nodes.map(n => [n.id, n.kind]));
+  return new Map(paths.map(p => {
+    const ownReach = reachedGoalPaths(analysed, [p.option_id], seeds, identityEvaluations, selectedGoal).reached;
+    const dependencies = edges.filter(e => {
+      if (typeof e.from !== 'string' || typeof e.to !== 'string' || kindOf.get(e.from) === 'option'
+        || kindOf.get(e.from) === 'decision' || kindOf.get(e.to) === 'option' || kindOf.get(e.to) === 'decision') return false;
+      const feed = reachFrom(e.to);
+      return baselineOperands.some(id => feed.has(id)) || identities.some(c => c.factor_ids.some(a => feed.has(a)
+        && c.factor_ids.some(b => b !== a && ownReach.has(b))));
+    });
+    const links = [...p.links, ...dependencies].flatMap(l =>
+      typeof l.from === 'string' && typeof l.to === 'string' ? [{ from: l.from, to: l.to }] : []);
+    return [p.option_id, [...new Map(links.map(l => [JSON.stringify([l.from, l.to]), l])).values()]] as const;
+  }));
 }
 
 /**
@@ -101,15 +141,12 @@ export function perOptionTargetReasons(
   const out: Record<string, { message: string }> = {};
   for (const id of optionIds) {
     const failures = scopedFailuresFor(verdict.failures, pathsByOption.get(id) ?? [], labelOf);
+    if (failures.length === 0) continue;
     let said: string | null = null;
-    if (failures.length === 0) {
-      said = BASELINE_WAITS_FOR_OTHERS;
-    } else {
-      const scoped = { ...verdict, failures };
-      for (let count = 3; count >= 1 && said === null; count -= 1) {
-        const s = ownSentence(graph, scoped, count);
-        if (s !== null && s.length <= PER_OPTION_SENTENCE_CAP) said = s;
-      }
+    const scoped = { ...verdict, failures };
+    for (let count = 3; count >= 1 && said === null; count -= 1) {
+      const s = ownSentence(graph, scoped, count);
+      if (s !== null && s.length <= PER_OPTION_SENTENCE_CAP) said = s;
     }
     Object.defineProperty(out, id, { enumerable: true, configurable: true, writable: true, value: { message: `Not shown. ${said ?? OWN_REASON_FALLBACK}` } });
   }
@@ -122,4 +159,32 @@ export function perOptionTargetReasonsForRun(
 ): Record<string, { readonly message: string }> {
   if (verdict.kind !== 'not_testable') return {};
   return perOptionTargetReasons(graph, verdict, optionPathsOf(graph, optionIds, identityEvaluations, verdict.goal_id), optionIds);
+}
+
+/** The existing scoped chat writer, shared by the producer and the final range seam. */
+export function scopedTargetSpeech(
+  graph: unknown, verdict: Extract<TargetTestability, { kind: 'not_testable' }>,
+  pathsByOption: ReadonlyMap<string, ReadonlyArray<{ readonly from: string; readonly to: string }>>,
+  optionIds: readonly string[], code: string,
+): { say: string; first_ask?: { kind: 'link'; from: string; to: string } } {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const labelOf = (id: string): string | undefined => {
+    const node = nodes.find(n => n.id === id);
+    return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : undefined;
+  };
+  const spoken = [...pathsByOption].flatMap(([optionId, links]) => {
+    if (!optionIds.includes(optionId)) return [];
+    const label = labelOf(optionId);
+    if (label === undefined) return [];
+    const failures = scopedFailuresFor(verdict.failures, links, labelOf);
+    if (!failures.some(f => f.case === 'c')) return [];
+    const scopedVerdict = { ...verdict, failures };
+    const say = untestableTargetTail(graph, scopedVerdict, [label]);
+    if (say === null) return [];
+    // Keep the writer-compatible ask guard, including its units.
+    const ask = targetNotTestableWarning(graph, scopedVerdict, [optionId], code)?.first_ask;
+    return [{ say, ask }];
+  });
+  const ask = spoken[0]?.ask;
+  return { say: spoken.map(s => s.say).join(' '), ...(ask !== undefined ? { first_ask: ask } : {}) };
 }

@@ -1,0 +1,37 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 2 failed | 12 skipped) 44ms
+     × class 2: a evaluation marking the goal baseline derived from inputs withholds everyone fed by its unsized input 33ms
+     × class 2: a warning marking the goal baseline derived from inputs withholds everyone fed by its unsized input 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 2: a evaluation marking the goal baseline derived from inputs withholds everyone fed by its unsized input
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 2: a warning marking the goal baseline derived from inputs withholds everyone fed by its unsized input
+AssertionError: expected [ 'keep' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "keep",
++ ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:107:26
+    105|     else body.inference_warnings.push({ code: 'GOAL_LEVEL_FROM_IDENTIT…
+    106|     const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal'…
+    107|     expect(chances(out)).toEqual([]);
+       |                          ^
+    108|     expect(warning(out)?.option_ids).toEqual(ids);
+    109|     expect(warning(out)?.per_option.keep.message).toContain('from u to…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 skipped (14)
+   Start at  16:45:23
+   Duration  4.91s (transform 3.50s, setup 112ms, import 4.62s, tests 44ms, environment 0ms)
+

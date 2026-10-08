@@ -8,6 +8,26 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+export const GOAL_LEVEL_FROM_IDENTITY_INPUTS = 'GOAL_LEVEL_FROM_IDENTITY_INPUTS';
+
+/** The existing product-carrier reader, shared with admission's structural sign checks. */
+export function readProductIdentityCarrier(n: Rec): {
+  readonly operation: 'product'; readonly factor_ids: readonly string[]; readonly stated_in_brief: boolean;
+} | null {
+  const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+  if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
+  if (!Array.isArray(c.factor_ids) || c.factor_ids.length < 2 || !c.factor_ids.every((f) => typeof f === 'string' && f !== '')) return null;
+  return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
+}
+
+/** This Run derived the selected goal's baseline from identity inputs, identified only by typed carriers. */
+export function goalBaselineFromIdentityInputs(
+  nodes: readonly Rec[], goalId: unknown, identityEvaluations?: readonly unknown[],
+): boolean {
+  return (identityEvaluations ?? []).some(e => isRec(e) && e.node_id === goalId && e.level_source === 'identity_inputs'
+    && evaluatedIdentityCarriers(nodes, [e]).has(goalId));
+}
+
 /** DL #2851: an accumulation carries goal figures only on all three of the user's levels, never Olumi's estimates. */
 export function identityCanCarryExactLinks(nodes: readonly Rec[], identity: unknown): boolean {
   if (!isRec(identity) || identity.operation !== 'accumulation') return true;

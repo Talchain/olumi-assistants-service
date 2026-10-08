@@ -1,0 +1,335 @@
+{
+  "fixture": "src/orchestrator-v5/tools/handlers/__tests__/fixtures/r3-m1-card-yes-served-run-20260930.json",
+  "base": "53a68cd6e50eee2a30110cd68e859f8edda3c8be",
+  "head": "a4981a7afc5511fff9bf042573a6c1f158a43af8",
+  "targetVerdictSourceIdentical": true,
+  "identityEvaluations": null,
+  "graphOptions": [
+    "59_price",
+    "current_price",
+    "54_price"
+  ],
+  "plotScoredOptions": [
+    "59_price",
+    "current_price"
+  ],
+  "edges": [
+    {
+      "from": "should_we_raise_our_pro_plan_price_from_49_to_59_a_month",
+      "to": "59_price",
+      "sizing": "unmarked",
+      "defaulted": false
+    },
+    {
+      "from": "should_we_raise_our_pro_plan_price_from_49_to_59_a_month",
+      "to": "current_price",
+      "sizing": "unmarked",
+      "defaulted": false
+    },
+    {
+      "from": "should_we_raise_our_pro_plan_price_from_49_to_59_a_month",
+      "to": "54_price",
+      "sizing": "unmarked",
+      "defaulted": false
+    },
+    {
+      "from": "59_price",
+      "to": "pro_plan_price",
+      "sizing": "unmarked",
+      "defaulted": false
+    },
+    {
+      "from": "54_price",
+      "to": "pro_plan_price",
+      "sizing": "unmarked",
+      "defaulted": false
+    },
+    {
+      "from": "current_price",
+      "to": "pro_plan_price",
+      "sizing": "unmarked",
+      "defaulted": false
+    },
+    {
+      "from": "pro_plan_price",
+      "to": "monthly_churn_rate",
+      "sizing": "olumi_estimate",
+      "defaulted": true
+    },
+    {
+      "from": "current_paying_subscribers",
+      "to": "paying_subscribers_at_12_months",
+      "sizing": "placeholder",
+      "defaulted": true
+    },
+    {
+      "from": "monthly_churn_rate",
+      "to": "paying_subscribers_at_12_months",
+      "sizing": "placeholder",
+      "defaulted": true
+    },
+    {
+      "from": "monthly_new_subscriber_additions",
+      "to": "paying_subscribers_at_12_months",
+      "sizing": "placeholder",
+      "defaulted": true
+    },
+    {
+      "from": "pro_plan_price",
+      "to": "mrr",
+      "sizing": "placeholder",
+      "defaulted": true
+    },
+    {
+      "from": "paying_subscribers_at_12_months",
+      "to": "mrr",
+      "sizing": "placeholder",
+      "defaulted": true
+    }
+  ],
+  "purePreTargetGateEvidence": {
+    "productGate": null,
+    "placeholderPaths": [
+      {
+        "option_id": "59_price",
+        "links": [
+          {
+            "from": "monthly_churn_rate",
+            "to": "paying_subscribers_at_12_months"
+          }
+        ]
+      }
+    ],
+    "shownBeforeEarlierGates": [
+      "59_price",
+      "current_price"
+    ],
+    "shownAtTargetGate": [
+      "current_price"
+    ],
+    "warningCodesAtTargetGate": [
+      "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "GOAL_DIRECTION_UNATTESTED",
+      "GOAL_FIGURES_PLACEHOLDER_PATH"
+    ],
+    "qualification": "Pure earlier gate functions on served M1.graph; not a complete handler/wire witness."
+  }
+}
+{
+  "label": "base",
+  "ref": "53a68cd6e50eee2a30110cd68e859f8edda3c8be",
+  "verdict": {
+    "kind": "not_testable",
+    "goal_id": "mrr",
+    "failures": [
+      {
+        "case": "c",
+        "precondition": "P5",
+        "code": "goal_path_placeholder",
+        "links": [
+          {
+            "from": "monthly_churn_rate",
+            "to": "paying_subscribers_at_12_months"
+          }
+        ]
+      }
+    ]
+  },
+  "options": [
+    {
+      "option_id": "59_price",
+      "links": [
+        {
+          "from": "pro_plan_price",
+          "to": "monthly_churn_rate"
+        },
+        {
+          "from": "monthly_churn_rate",
+          "to": "paying_subscribers_at_12_months"
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "mrr"
+        },
+        {
+          "from": "paying_subscribers_at_12_months",
+          "to": "mrr"
+        }
+      ],
+      "scoped_failures": [
+        {
+          "case": "c",
+          "precondition": "P5",
+          "code": "goal_path_placeholder",
+          "links": [
+            {
+              "from": "monthly_churn_rate",
+              "to": "paying_subscribers_at_12_months"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "option_id": "current_price",
+      "links": [],
+      "scoped_failures": []
+    },
+    {
+      "option_id": "54_price",
+      "links": [
+        {
+          "from": "pro_plan_price",
+          "to": "monthly_churn_rate"
+        },
+        {
+          "from": "monthly_churn_rate",
+          "to": "paying_subscribers_at_12_months"
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "mrr"
+        },
+        {
+          "from": "paying_subscribers_at_12_months",
+          "to": "mrr"
+        }
+      ],
+      "scoped_failures": [
+        {
+          "case": "c",
+          "precondition": "P5",
+          "code": "goal_path_placeholder",
+          "links": [
+            {
+              "from": "monthly_churn_rate",
+              "to": "paying_subscribers_at_12_months"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "ownFailingOptions": [
+    "59_price",
+    "54_price"
+  ],
+  "scopedRemainingCandidates": []
+}
+{
+  "label": "head",
+  "ref": "a4981a7afc5511fff9bf042573a6c1f158a43af8",
+  "verdict": {
+    "kind": "not_testable",
+    "goal_id": "mrr",
+    "failures": [
+      {
+        "case": "c",
+        "precondition": "P5",
+        "code": "goal_path_placeholder",
+        "links": [
+          {
+            "from": "monthly_churn_rate",
+            "to": "paying_subscribers_at_12_months"
+          }
+        ]
+      }
+    ]
+  },
+  "options": [
+    {
+      "option_id": "59_price",
+      "links": [
+        {
+          "from": "pro_plan_price",
+          "to": "monthly_churn_rate"
+        },
+        {
+          "from": "monthly_churn_rate",
+          "to": "paying_subscribers_at_12_months"
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "mrr"
+        },
+        {
+          "from": "paying_subscribers_at_12_months",
+          "to": "mrr"
+        },
+        {
+          "from": "current_paying_subscribers",
+          "to": "paying_subscribers_at_12_months"
+        },
+        {
+          "from": "monthly_new_subscriber_additions",
+          "to": "paying_subscribers_at_12_months"
+        }
+      ],
+      "scoped_failures": [
+        {
+          "case": "c",
+          "precondition": "P5",
+          "code": "goal_path_placeholder",
+          "links": [
+            {
+              "from": "monthly_churn_rate",
+              "to": "paying_subscribers_at_12_months"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "option_id": "current_price",
+      "links": [],
+      "scoped_failures": []
+    },
+    {
+      "option_id": "54_price",
+      "links": [
+        {
+          "from": "pro_plan_price",
+          "to": "monthly_churn_rate"
+        },
+        {
+          "from": "monthly_churn_rate",
+          "to": "paying_subscribers_at_12_months"
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "mrr"
+        },
+        {
+          "from": "paying_subscribers_at_12_months",
+          "to": "mrr"
+        },
+        {
+          "from": "current_paying_subscribers",
+          "to": "paying_subscribers_at_12_months"
+        },
+        {
+          "from": "monthly_new_subscriber_additions",
+          "to": "paying_subscribers_at_12_months"
+        }
+      ],
+      "scoped_failures": [
+        {
+          "case": "c",
+          "precondition": "P5",
+          "code": "goal_path_placeholder",
+          "links": [
+            {
+              "from": "monthly_churn_rate",
+              "to": "paying_subscribers_at_12_months"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "ownFailingOptions": [
+    "59_price",
+    "54_price"
+  ],
+  "scopedRemainingCandidates": []
+}

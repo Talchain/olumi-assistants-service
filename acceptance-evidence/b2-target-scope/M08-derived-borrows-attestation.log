@@ -1,0 +1,37 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 2 failed | 12 skipped) 32ms
+     × a false derived evaluation cannot borrow a stated-level evaluation attestation 25ms
+     × a mismatched derived evaluation cannot borrow a stated-level evaluation attestation 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a false derived evaluation cannot borrow a stated-level evaluation attestation
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a mismatched derived evaluation cannot borrow a stated-level evaluation attestation
+AssertionError: expected [] to deeply equal [ 'keep' ]
+
+- Expected
++ Received
+
+- [
+-   "keep",
+- ]
++ []
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:137:78
+    135|         factor_ids: invalid === 'mismatched' ? ['a', 'u'] : ['a', 'b']…
+    136|     ];
+    137|     expect(chances(withholdGoalFiguresForUntestableTarget(body, g, 'go…
+       |                                                                              ^
+    138|   });
+    139|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 skipped (14)
+   Start at  16:45:51
+   Duration  6.30s (transform 4.46s, setup 170ms, import 5.91s, tests 32ms, environment 0ms)
+

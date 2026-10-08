@@ -11,7 +11,13 @@ type Rec = Record<string, any>;
 const eventCandidate = (metric = 'launch', deliverable = metric): CandidateModel => ({
   goal: { kind: 'event_by_date', metric, deliverable, value: null, operator: '>=',
     unit: `% of ${deliverable}`, horizon_months: null, provenance: 'inferred' },
-  options: [{ label: 'Carry on', provenance: 'ai_proposed', is_status_quo: true }],
+  options: [
+    { label: 'Carry on', provenance: 'ai_proposed', is_status_quo: true },
+    // Flagged event construction needs an actual capacity alternative; retain the original status quo.
+    { label: 'Add delivery capacity', provenance: 'ai_proposed', added_capacity: {
+      monthly_share_pct: 10, lead_months_low: 1, lead_months_high: 2,
+    } },
+  ],
   factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [],
 });
 const budgetCandidate = (value = 200000): CandidateModel => ({ ...eventCandidate(), constraints: [
@@ -199,7 +205,7 @@ describe('R7 class boundaries: whole numbers, canonical currency, and uncarried 
     await expectNumberDisclosure(eventCandidate(), brief, '3 engineers');
   });
 
-  it('R7-C-INTERVENTION a retained factor and its actual option level carry both stated amounts', async () => {
+  it('R7-C-INTERVENTION unflagged context carries stated amounts; flagged cost-only option refuses missing capacity', async () => {
     const candidate: CandidateModel = { ...eventCandidate(), options: [
       ...eventCandidate().options,
       { label: 'Increase hiring cost', provenance: 'explicit', interventions: [
@@ -210,15 +216,16 @@ describe('R7 class boundaries: whole numbers, canonical currency, and uncarried 
         unit: 'GBP', provenance: 'explicit', plausible_max: 300000 },
     ] };
     const brief = 'Launch by April. Hiring cost is £100k; Increase hiring cost to £200k.';
-    const { admitted, graph, result } = await expectEvent(candidate, brief);
-    for (const model of [admitted, graph]) {
-      const factor = model.nodes.find((node: Rec) => node.label === 'Hiring cost');
-      expect(factor.observed_state).toMatchObject({ raw_value: 100000, unit: 'GBP' });
-      expect(model.nodes.find((node: Rec) => node.id === 'event_option_2').interventions[factor.id])
-        .toMatchObject({ raw_value: 200000, unit: 'GBP' });
-    }
+    const admitted = admitCandidateModel(candidate, {}, brief);
+    const factor = admitted.nodes.find(node => node.label === 'Hiring cost')!;
+    expect(factor.observed_state).toMatchObject({ raw_value: 100000, unit: 'GBP' });
+    expect(admitted.nodes.find(node => node.id === 'event_option_3')!.interventions![factor.id])
+      .toMatchObject({ raw_value: 200000, unit: 'GBP' });
     expect(numberLosses(admitted)).toEqual([]);
-    expect((result.not_represented ?? []).some((reason: string) => reason.startsWith('Your brief also says "'))).toBe(false);
+    const { result, graph } = await build(candidate, brief);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'event_goal_unadmitted',
+      detail: "Olumi couldn't connect your options to the launch date yet: it needs how much capacity each option adds." });
+    expect(graph).toBeUndefined();
   });
 
   it.each([
@@ -329,7 +336,7 @@ describe('R6 class rule: event briefs retain context and uncarried figures have 
     ['EUR million', 'Ensure the launch budget is £200k by April'],
     ['£k', 'Ensure the launch budget is £200k by April'],
     ['USD', 'Ensure the launch budget is £200k by April'],
-  ])('R6-C-CURRENCY null target with %s takes normal quantity admission: %s', async (unit, brief) => {
+  ])('R6-C-CURRENCY %s stays quantity unflagged; flagged event prompt wins: %s', async (unit, brief) => {
     const candidate = brief.startsWith('Launch by') ? eventCandidate() : eventCandidate('launch budget', 'the launch budget');
     candidate.goal.unit = unit;
     const normal = { ...candidate, goal: { ...candidate.goal, kind: null } };
@@ -339,10 +346,12 @@ describe('R6 class rule: event briefs retain context and uncarried figures have 
     const actual = await build(candidate, brief), control = await build(normal, brief);
     expect(actual.result).toMatchObject({ ok: true, mutated: true });
     expect(actual.graph).toEqual(control.graph);
-    expect(actual.graph?.nodes.find((n: Rec) => n.kind === 'goal')).not.toMatchObject({ id: 'event_goal' });
+    expect(actual.graph?.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({
+      id: 'event_goal', goal_threshold_raw: 100, goal_threshold_unit: `% of ${candidate.goal.deliverable}`,
+    });
   });
 
-  it.each([0, 100])('R6-C-VALUE stated noncurrency target %s takes normal quantity admission', async value => {
+  it.each([0, 100])('R6-C-VALUE %s stays quantity unflagged; flagged event prompt wins', async value => {
     const candidate = eventCandidate(); candidate.goal.value = value;
     const brief = 'Launch by April';
     const admitted = admitCandidateModel(candidate, {}, brief);
@@ -350,8 +359,9 @@ describe('R6 class rule: event briefs retain context and uncarried figures have 
     expect(admitted.nodes.find(n => n.kind === 'goal')).not.toMatchObject({ id: 'event_goal' });
     const { result, graph } = await build(candidate, brief);
     expect(result).toMatchObject({ ok: true, mutated: true });
-    expect(graph?.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({ goal_threshold_raw: value });
-    expect(graph?.nodes.find((n: Rec) => n.kind === 'goal')).not.toMatchObject({ id: 'event_goal' });
+    expect(graph?.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({
+      id: 'event_goal', goal_threshold_raw: 100, goal_threshold_unit: '% of launch',
+    });
   });
 
   it('R6-C-MRR reach £200k MRR by April stays quantity through real build', async () => {
