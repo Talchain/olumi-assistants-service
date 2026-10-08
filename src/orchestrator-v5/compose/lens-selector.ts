@@ -114,6 +114,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   readFlipClaimPosture,
+  readTopLevelFlipRows,
   type FlipClaimPosture,
 } from '../context/flip-threshold-rows.js';
 import {
@@ -751,6 +752,8 @@ interface AnalysisSignals {
    * `fact.result.enrichment` (the property `lens-history.ts` replays on).
    */
   readonly flipClaimPosture: FlipClaimPosture;
+  /** A measured threshold needs a real producer pair and an available probe. */
+  readonly hasMeasuredFlipThreshold: boolean;
   /**
    * DSK slice 1 — the RAW `enrichment.robustness` signals, through the shared
    * S4 normaliser (`readRawRobustnessSignals` — one normaliser, every caller;
@@ -865,6 +868,9 @@ function readAnalysisSignals(
     optionWinProbabilities,
     confidenceTier,
     flipClaimPosture: readFlipClaimPosture(enrichment),
+    hasMeasuredFlipThreshold:
+      enrichment.flip_thresholds_status !== 'unavailable' &&
+      readTopLevelFlipRows(enrichment).some((row) => row.kind === 'flip_pair'),
     rawRobustness: readRawRobustnessSignals(enrichment.robustness),
     // Threaded when the caller already computed it (so the caller can emit the
     // decision telemetry without a second derivation); otherwise computed here
@@ -980,9 +986,8 @@ function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | n
   // subject.
   const dominant = findDominantDriver(signals);
   if (dominant !== null) {
-    // DOMINANT_DRIVER's copy ends "…how far it can move before the leading
-    // option changes", which presupposes the leading option CAN change. On an
-    // attested-no-flip run it cannot, so this door is remapped too.
+    // Keep the attested-no-flip remap. Missing evidence still allows this
+    // qualitative lens; buildSelection separately licenses its measured copy.
     return {
       code: noFlip ? 'DOMINANT_DRIVER_NO_FLIP' : 'DOMINANT_DRIVER',
       subjectFactorId: dominant.factorId,
@@ -1384,13 +1389,15 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
 };
 
+const DOMINANT_DRIVER_QUALITATIVE_BODY = 'One factor is doing most of the work in this result.';
+
 export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   FLIP_RISK_ISOLATED:
     'The result leans on a single factor that could change the most-supported option on its own — a small change to it alone could flip the outcome. Asking what would flip the result shows how much room for error you have.',
   FLIP_RISK_CORRELATED:
     'No single factor is decisive here, but the right combination of factors could change the most-supported option — the outcome is more finely balanced than it first looks. Asking what would flip the result shows which factors move together.',
   DOMINANT_DRIVER:
-    'One factor is doing most of the work in this result. A sensitivity check shows how far it can move before the most-supported option changes.',
+    `${DOMINANT_DRIVER_QUALITATIVE_BODY} A sensitivity check shows how far it can move before the most-supported option changes.`,
   CONFIDENCE_NEEDS_WORK:
     'The analysis is usable but not yet solid. A pre-mortem — imagining the choice went wrong and asking why — surfaces the weak points worth shoring up first.',
   TOP_FACTOR_LOW_CONFIDENCE:
@@ -1563,6 +1570,7 @@ const CORRELATED_YIELD_CODES: ReadonlySet<LensRationaleCode> = new Set([
 function buildSelection(
   lens: LensId,
   hit: EvaluatorHit,
+  signals: AnalysisSignals,
   displacedLens?: LensId,
   displacementCause?: 'no_repeat' | 'correlated_yield',
 ): LensSelection {
@@ -1570,7 +1578,10 @@ function buildSelection(
     lens,
     rationaleCode: hit.code,
     title: TITLE_OVERRIDE_BY_RATIONALE[hit.code] ?? TITLE_BY_LENS[lens],
-    body: BODY_BY_RATIONALE[hit.code],
+    body:
+      hit.code === 'DOMINANT_DRIVER' && !signals.hasMeasuredFlipThreshold
+        ? DOMINANT_DRIVER_QUALITATIVE_BODY
+        : BODY_BY_RATIONALE[hit.code],
     groundingField: GROUNDING_FIELD_BY_RATIONALE[hit.code],
     // Wave-4 δ2: expose the focus subject when the lens points at a single
     // factor. Omitted (undefined) for subject-less rationales → the directive
@@ -2144,7 +2155,7 @@ export function rankInterventions(
   ) {
     marks.set(head.lens, 'displaced_head');
     return finish(
-      buildSelection(runnerUp.lens, runnerUp.hit, head.lens, 'no_repeat'),
+      buildSelection(runnerUp.lens, runnerUp.hit, signals, head.lens, 'no_repeat'),
       marks,
     );
   }
@@ -2153,6 +2164,7 @@ export function rankInterventions(
     buildSelection(
       head.lens,
       head.hit,
+      signals,
       yieldedLens,
       yieldedLens !== undefined ? 'correlated_yield' : undefined,
     ),

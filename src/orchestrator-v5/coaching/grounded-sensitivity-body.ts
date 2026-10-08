@@ -23,7 +23,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * ── ⭐ THE CLAIM BOUNDARY: THIS RESOLVES A PRONOUN, IT ADDS NO PROPOSITION ───
- * Every grounded body asserts exactly what the constant asserted, with the
+ * Every grounded body retains the producer-selected body's claims with the
  * referent made explicit. That is not a stylistic description — it is enforced
  * by construction below: the opening clause is REPLACED and the remainder of
  * the reviewed sentence is carried through by `slice`, byte-for-byte.
@@ -59,10 +59,10 @@
  * `BODY_BY_RATIONALE` lives in `compose/lens-selector.ts` and is reviewed on
  * its own terms. This module does NOT restate those sentences. It declares, per
  * code, the OPENING CLAUSE it expects to find and the grounded clause that
- * replaces it, then asserts the constant actually starts with that opening. If
+ * replaces it, then asserts the selected body starts with that opening. If
  * anyone edits the copy, the assertion fails and this module REFUSES — the
- * caller falls back to the constant and the user sees today's sentence. It
- * cannot silently ground a rewritten sentence or mangle one.
+ * caller falls back to the selected body. It cannot silently ground a rewritten
+ * sentence or mangle one.
  *
  * That refusal is the SAFE half; the LOUD half is a test asserting that every
  * declared code still matches at rest, so a copy edit turns CI red rather than
@@ -326,16 +326,16 @@ function isComposable(body: string): boolean {
  * Resolve the deictic in this run's sensitivity body to the subject factor's
  * producer-authored label.
  *
- * Total: every input yields a decision, and every refusal names its reason. A
- * refusal means the caller keeps today's constant — never a worse sentence.
+ * Total: every input yields a decision, and every refusal names its reason.
+ * A refusal means the caller keeps the producer-selected body.
  */
 export function selectGroundedSensitivityBody(
   rationaleCode: LensRationaleCode,
   subjectFactorId: string | null | undefined,
   enrichment: unknown,
   /**
-   * TEST SEAM — the copy bank to read. Defaults to the real constant, so every
-   * production call is byte-identical to a three-argument call.
+   * TEST SEAM — the default copy bank. Production supplies its licensed body
+   * separately so grounding cannot restore an unlicensed tail from this bank.
    *
    * It exists because the drift guard below CANNOT FIRE on current data: at
    * rest every declared opening matches, so a mutant that deletes the guard
@@ -346,6 +346,8 @@ export function selectGroundedSensitivityBody(
    * discrimination nothing pins is a guard agreeing with itself).
    */
   bodyByRationale: Readonly<Record<LensRationaleCode, string>> = BODY_BY_RATIONALE,
+  /** Production passes the producer-licensed body; substitution retains its tail. */
+  selectedBody?: string,
 ): GroundedSensitivityDecision {
   if (nonEmptyString(subjectFactorId) === null) {
     return { grounded: null, refusalReason: 'no_subject_factor' };
@@ -394,7 +396,7 @@ export function selectGroundedSensitivityBody(
 
   // THE ANTI-MIRROR ASSERTION. We do not restate the copy; we check the copy we
   // borrowed still begins the way we expect, and refuse if it has moved.
-  const constant = bodyByRationale[rationaleCode];
+  const constant = selectedBody ?? bodyByRationale[rationaleCode];
   if (!constant.startsWith(substitution.expectedOpening)) {
     return { grounded: null, refusalReason: 'copy_drifted' };
   }

@@ -1924,14 +1924,16 @@ export function buildLensSurface(
   // `factor_sensitivity`, the very field this lens grounds its claim in.
   //
   // ⚠ THIS RESOLVES A PRONOUN, IT ADDS NO CLAIM. The grounded body replaces the
-  // opening clause and carries the reviewed remainder through verbatim, so it
-  // asserts exactly what the constant asserted — no leading option, no
+  // opening clause and carries the producer-licensed remainder through verbatim.
+  // It asserts exactly what the selected body asserted — no leading option, no
   // magnitude, and no flip verb on the attested-no-flip codes. A refusal (copy
   // drift, missing label, prose gate, body cap) falls back to `selection.body`,
   // which is today's sentence — never a worse one.
   const groundedSensitivity =
     selection.lens === 'sensitivity_flip_risk'
-      ? selectGroundedSensitivityBody(selection.rationaleCode, selection.subjectRef?.id, enrichment)
+      ? selectGroundedSensitivityBody(
+          selection.rationaleCode, selection.subjectRef?.id, enrichment, undefined, selection.body,
+        )
       : null;
 
   const candidate = {
