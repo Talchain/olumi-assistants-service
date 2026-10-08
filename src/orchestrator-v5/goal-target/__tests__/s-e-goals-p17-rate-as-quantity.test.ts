@@ -34,6 +34,96 @@ const chanceGoals = <T extends readonly (readonly [string, string])[]>(rows: T):
   return rows;
 };
 
+// Independent review @ f4c458ad: verbatim one-off label/unit pairs, including the served probability (%) shape.
+const REVIEW_CHANCE_ROWS = [
+  ['T01', 'Probability of on-time delivery', '%'],
+  ['T02', 'Chance we hit the Q3 launch', '%'],
+  ['T11', 'Probability of on-time launch per current plan', '%'],
+  ['T12', 'Q3 launch', '% probability of on-time launch per current plan'],
+  ['T13', 'Probability of hitting every milestone', '%'],
+  ['T14', 'Milestones', '% chance of hitting every milestone'],
+  ['T15', 'Probability of delivering each milestone on time', '%'],
+  ['T16', 'Delivery', '% probability of delivering each milestone on time'],
+  ['T17', 'Chance the launch slips a month', '%'],
+  ['T18', 'Launch', '% chance of the launch slipping a month'],
+  ['T19', 'Chance the Q3 launch slips a month', 'probability (%)'],
+  ['T20', 'Probability we close the Acme deal a quarter early', 'probability (%)'],
+  ['T21', 'Probability our biggest customer churns', '%'],
+  ['T22', 'Likelihood of regulatory approval per Gartner', '%'],
+  ['T26', 'Chance the Acme contract renews', 'probability (%)'],
+  ['T27', 'Success rate of the Q3 launch', 'probability (%)'],
+  ['T28', 'Odds of shipping the platform by Q3', '%'],
+  ['T30', 'On-time feature-launch probability', '%'],
+  ['T32', 'Chance of winning the tender per bid team', '%'],
+  ['T33', 'Probability the hire works out', '%'],
+  ['U01', 'Probability our biggest customer churns', 'probability (%)'],
+  ['U02', 'Probability the Acme lead converts', 'probability (%)'],
+  ['U04', 'Probability the launch is delayed more than a month', 'probability (%)'],
+  ['U05', 'Probability the launch is delayed more than a month', '%'],
+  ['U06', 'Chance the migration takes a year', 'probability (%)'],
+  ['U07', 'Likelihood the board approves the budget', '%'],
+  ['U14', 'Probability we ship a week late', 'probability (%)'],
+  ['U15', 'Probability the Q3 launch slips', 'probability (%)'],
+  ['U16', 'Ship by Q3', '% chance the launch slips a quarter'],
+  ['U17', 'Ship by Q3', '% probability of shipping a quarter late'],
+] as const;
+
+describe('independent review: user-terms safety', () => {
+  it('INVARIANT: a one-off chance never becomes a level', () => {
+    for (const [id, label, unit] of REVIEW_CHANCE_ROWS) {
+      expect.soft(goalKindOf({ label, goal_threshold_unit: unit }), `${id}: ${label} measured in ${unit}`)
+        .toBe('chance_of_event');
+    }
+  });
+
+  it.each(REVIEW_CHANCE_ROWS)('%s CHANCE: %s measured in %s', (_id, label, unit) => {
+    expect(goalKindOf({ label, goal_threshold_unit: unit })).toBe('chance_of_event');
+  });
+  it.each([
+    ['T03', 'Monthly churn probability', '%'],
+    ['T04', 'Customer churn probability per month', '%'],
+    ['T06', 'Defect rate per release', '%'],
+    ['T07', 'Likelihood a deal closes per quarter', '%'],
+    ['T09', 'Uptime', '%'],
+    ['T10', 'Market share', '%'],
+    ['T23', 'Annual probability of a data breach', '%'], // Ruled level: annual hazard marker (rule 1).
+    ['T24', 'Trial conversion probability', '%'],
+    ['T29', 'Monthly churn rate', '%'],
+    ['T34', 'Monthly churn', 'probability (%)'],
+    ['T35', 'Probability the Acme deal closes', '% per quarter'],
+    ['U03', 'Key account retention', 'probability (%)'], // Ruled level: population retention (rule 2).
+    ['U08', 'Monthly probability of hitting target', '%'],
+    ['U09', 'Probability a visitor converts', '%'],
+    ['U10', 'Win rate', 'probability (%)'], // DL P2-D: nominal rate head, no one-off event.
+    ['U11', 'Probability of churn', '%'],
+    ['U12', 'Chance of a security incident a year', '%'], // Ruled level: annual hazard, not an event duration.
+  ] as const)('%s LEVEL: %s measured in %s', (_id, label, unit) => {
+    expect(goalKindOf({ label, goal_threshold_unit: unit })).toBe('level');
+  });
+  it.each([
+    ['T08', 'Win probability per pitch', '%'], // Ambiguous: nominal event + per-noun; safe-direction rate withholding.
+    ['T25', 'Probability a visitor signs up', '%'], // Ambiguous population act: keep the existing safe-direction miss.
+    ['T31', 'Probability of on-time delivery for each release', '%'], // Ambiguous: rate or one-off chance; fail safe.
+    ['U13', 'Probability of on-time delivery per project', '%'], // Ambiguous: rate or one-off chance; fail safe.
+  ] as const)('%s AMBIGUOUS, fail-safe CHANCE: %s measured in %s', (_id, label, unit) => {
+    expect(goalKindOf({ label, goal_threshold_unit: unit })).toBe('chance_of_event');
+  });
+  it('T05 pre-existing vocabulary gap: Risk of a data breach this year measured in %', () => {
+    // Reviewer Expected=chance, but BASE and HEAD read level: "risk" is outside CHANCE_WORD and this fix's scope.
+    expect(goalKindOf({ label: 'Risk of a data breach this year', goal_threshold_unit: '%' })).toBe('level');
+  });
+  it('a generic singular and possessive plural still describe population rates', () => {
+    for (const label of ['Probability a customer churns', 'Probability our customers churn',
+      'Probability my customers churn', 'Probability their customers churn', 'Probability your customers churn']) {
+      expect(goalKindOf({ label, goal_threshold_unit: 'probability (%)' }), label).toBe('level');
+    }
+  });
+  it('Win rate is a quantity under rule 1; the Q3 launch is an event even when called a success rate', () => {
+    expect(readRateAsQuantity('Win rate')).toEqual({ kind: 'quantity', rule: 1 });
+    expect(readRateAsQuantity('Success rate of the Q3 launch')).toEqual({ kind: 'chance', rule: 3 });
+  });
+});
+
 describe('Science (b) rows: a rate is a quantity, a one-off event stays a chance', () => {
   it.each([
     ['churn probability', 2],
@@ -303,6 +393,8 @@ describe('DL-approved r2 class: a non-period denominator cannot turn an event cl
     'chance the launch went wrong per management',
     'probability suppliers fail per management',
     'probability of success if the launch slips per management',
+    // Safe-direction re-pin: with a nominal event, "per <noun>" cannot be distinguished from "per <according-to>".
+    'chance of winning per bid',
   ]))('CHANCE (rule 3): %s', (text) => {
     expect(readRateAsQuantity(text)).toEqual({ kind: 'chance', rule: 3 });
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: text })).toBe('chance_of_event');
@@ -314,7 +406,6 @@ describe('DL-approved r2 class: a non-period denominator cannot turn an event cl
     'chance the launch slips for each year',
     'probability of repayment per loan',
     'probability of a failed payment per transaction',
-    'chance of winning per bid',
     'probability of a breach per year',
     'conversion probability per visitor',
     'probability per loan applications',

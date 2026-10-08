@@ -5,8 +5,8 @@
  * "churn probability" and "conversion probability per visitor" are a level the options move and a goal can be set on
  * ("keep churn below 3% a month"). "chance we win the Acme contract" is ONE event's chance, which Olumi computes.
  * The ruling's test, applied in order (the first rule that fires decides; nothing else is read):
- *  1. a per-period marker → quantity; a per-other-noun marker needs NO event clause in this segment (DL r2).
- *     "per month" wins even over a clause; "per management" cannot turn "the launch slips" into a quantity.
+ *  1. an explicit per-period marker → quantity; other denominators and "rate" require no event in this segment.
+ *     "per month" wins even over an event; "a month" after an event is a duration unless a quantity directly precedes it.
  *  2. a population noun (churn, conversion, retention, default, click-through, open, response, return, attrition) → quantity;
  *  3. a one-off event or decision (win, launch, deal, approval, hire, contract, deadline, "on time", "by <date>",
  *     "succeed", "happen") → chance;
@@ -107,7 +107,7 @@ const populationWord = (w: string): boolean => POPULATION.has(w) || POPULATION_I
 function populationSubject(ws: readonly string[]): boolean {
   const chance = ws.findIndex((w) => CHANCE.has(w));
   const start = chance < 0 ? 0 : chance + (ws[chance + 1] === 'of' ? 2 : 1);
-  let clause = false; let memberAt = -1; let firstWord = -1;
+  let clause = false; let memberAt = -1; let firstWord = -1; let definite = false;
   for (let i = 0; i < ws.length; i++) {
     const w = ws[i]!;
     // A noun immediately before the chance measure heads it ("churn probability").
@@ -122,7 +122,9 @@ function populationSubject(ws: readonly string[]): boolean {
       const nominalLabel = chance < 0 && POPULATION.has(w) && !w.endsWith('s') && !w.endsWith('ed') && !w.endsWith('ing');
       const subject = nominalLabel || (chance >= 0 && ws[chance + 1] === 'of') || firstWord === i || memberAt === i - 1;
       if (populationWord(w) && tail && subject && !clause) return true;
-      if (MEMBER_WORDS.has(w)) memberAt = i;
+      // A definite/possessive singular member names one entity ("our biggest customer"), not a population.
+      if (DETERMINER.has(w)) definite = w !== 'a' && w !== 'an';
+      if (MEMBER_WORDS.has(w)) { if (definite && !w.endsWith('s')) clause = true; else memberAt = i; }
       else if (!DETERMINER.has(w)) {
         if (CLAUSE_SUBJECT.has(w) || EVENT.has(w) || w === '|' || w === 'by' || w === 'on'
           || (chance >= 0 && (w === 'to' || w === 'and' || memberAt >= 0
@@ -133,27 +135,33 @@ function populationSubject(ws: readonly string[]): boolean {
   return false;
 }
 
-/** Rule 1: periods win; other denominators require no event clause. */
+/** Rule 1: explicit periods win; other denominators and rate heads require no finite or nominal event. */
 function perMarker(ws: readonly string[], population: boolean, clause: boolean): boolean {
   const nounAfter = (i: number): boolean => {
     const w = ws[i];
     return w !== undefined && w !== '|' && w[0]! >= 'a' && w[0]! <= 'z' && !DETERMINER.has(w) && !CLAUSE_SUBJECT.has(w);
   };
-  const denominator = (i: number): boolean => nounAfter(i) && (isPeriod(ws[i]) || !clause);
-  return ws.some((w, i) => w === 'rate' || w === 'rates'
+  const event = clause || oneOffEvent(ws);
+  const denominator = (i: number): boolean => nounAfter(i) && (isPeriod(ws[i]) || !event);
+  const quantityBefore = (w: string | undefined): boolean => w !== undefined
+    && (w === '%' || (w[0]! >= '0' && w[0]! <= '9') || CHANCE.has(w) || populationWord(w));
+  return ws.some((w, i) => ((w === 'rate' || w === 'rates') && !event)
     || (isPeriodWord(w) && (population || CHANCE.has(ws[i + 1] ?? '') || (CHANCE.has(ws[i - 1] ?? '') && i + 1 === ws.length)))
     || (w === 'per' && denominator(i + 1))
     || (w === 'for' && ws[i + 1] === 'each' && denominator(i + 2))
     || ((w === 'each' || w === 'every') && denominator(i + 1) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
-    || ((w === 'a' || w === 'an') && isPeriod(ws[i + 1]) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
+    || ((w === 'a' || w === 'an') && isPeriod(ws[i + 1]) && (!event || quantityBefore(ws[i - 1])) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
     || (w === '%' && ws[i + 1] === 'of' && MEMBERS.has(ws[i + 2] ?? '')));
 }
 
 /** Rule 3: a one-off event, "on time", or "by <date or period>". */
 function oneOffEvent(ws: readonly string[]): boolean {
-  return ws.some((w, i) => EVENT.has(w) || (w === 'on' && ws[i + 1] === 'time') || (w === 'ontime')
+  // "Win rate" names a metric, not a one-off event; a following event ("Success rate of the Q3 launch") still counts.
+  // Finite clauses are read independently, so a rate head cannot mask an event clause.
+  return ws.some((w, i) => (EVENT.has(w) && ws[i + 1] !== 'rate' && ws[i + 1] !== 'rates')
+    || (w === 'on' && ws[i + 1] === 'time') || (w === 'ontime')
     || (w === 'by' && ws[i + 1] !== undefined)
-    || (CHANCE.has(w) && (CLAUSE_SUBJECT.has(ws[i + 1] ?? '') || DETERMINER.has(ws[i + 1] ?? '')
+    || (CHANCE.has(w) && w !== 'chances' && (CLAUSE_SUBJECT.has(ws[i + 1] ?? '') || DETERMINER.has(ws[i + 1] ?? '')
       || (ws[i + 1] === 'of' && ws[i + 2]?.endsWith('ing')))));
 }
 

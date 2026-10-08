@@ -490,6 +490,8 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
 // RT-18's card points rule (`meetsReading`) adds one: exact '%' reading only, the writer's own rule.
 // P17 (#2780, 8 Oct): rate-as-quantity.ts adds four TOKEN comparisons, not unit checks: its linear word scanner splits on
 // and matches the literal '%' character inside a goal's label/unit text (Science ruling (b)); a unit classifier does not apply.
+// P17 independent-review P1-A adds a fifth TOKEN comparison: '%' directly before "a/an <period>" names a quantity,
+// whereas an event followed by "a month" names a duration. This reads a lexer token, not a stored unit or its scale.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
@@ -520,7 +522,7 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "orchestrator-v5/compose/warrant-demotion.ts": 1,
   "orchestrator-v5/context/cqe/compromise-backstop.ts": 1,
   "orchestrator-v5/context/cqe/rules.ts": 1,
-  "orchestrator-v5/goal-target/rate-as-quantity.ts": 4,
+  "orchestrator-v5/goal-target/rate-as-quantity.ts": 5,
   "orchestrator-v5/handlers/describe-changeset.ts": 1,
   "orchestrator-v5/label-value-divergence.ts": 1,
   "orchestrator-v5/routing/baseline-answer-mutation.ts": 1,
