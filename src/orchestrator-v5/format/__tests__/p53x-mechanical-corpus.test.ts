@@ -40,3 +40,9 @@ describe('P53x helper keeps the formatter usable-mean fallback (Codex #2819 r3 P
     expect(edgeStrengthWords(edge, 'relationship')).toBe('strong positive link');
   });
 });
+describe('P53x helper: a non-finite compact strength falls back like the formatter (Codex #2819 r4 P2)', () => {
+  it('an Olumi-sized a→b with strength Infinity and strength_mean 0.5 reads strong', () => {
+    const edge = { from: 'a', to: 'b', provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, strength: Number.POSITIVE_INFINITY, strength_mean: 0.5 };
+    expect(edgeStrengthWords(edge, 'relationship')).toBe('strong positive link');
+  });
+});

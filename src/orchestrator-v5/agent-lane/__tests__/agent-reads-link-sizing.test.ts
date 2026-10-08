@@ -244,6 +244,17 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     expect(result.note).toContain('Its numbers are kept exactly as they are');
   });
 
+  it('P53x (Codex #2819 r4 P2): plural same-band review of the D1 placeholder, user-named → no "already sits in the band"', async () => {
+    const { result } = await prepare(false, false, true);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(String(result.note)).not.toContain('already sits in the band the user named');
+    expect(String(result.note)).toContain('No link here had a size yet');
+  });
+  it('CONTROL (P53x): the same plural review of the SIZED link keeps "already sits in the band the user named"', async () => {
+    const { result } = await prepare(true, false, true);
+    expect(String(result.note)).toContain('already sits in the band the user named');
+  });
+
   it('CONTROL: independently sized prospect → revenue keeps Olumi’s estimate across card, whose, note and reply', async () => {
     const { result, proposal, args, userText } = await prepare(true);
     expect(proposal.public_label).toContain(`${pair} as strong, Olumi\u2019s estimate`);

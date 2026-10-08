@@ -25,7 +25,7 @@ export function edgeStrengthWords(edge: unknown, form: Form = 'band'): string {
   const strength = e?.strength;
   // The formatter's usable-mean order (Codex #2819 r3 P2): a finite object mean, else a finite legacy strength_mean.
   const objectMean = record(strength)?.mean;
-  const rawMean = typeof strength === 'number' ? strength
+  const rawMean = typeof strength === 'number' && Number.isFinite(strength) ? strength
     : typeof objectMean === 'number' && Number.isFinite(objectMean) ? objectMean : e?.strength_mean;
   const mean = typeof rawMean === 'number' ? rawMean : Number.NaN;
   // Compact numeric strength is already signed; only canonical/legacy object forms carry a sign override.

@@ -4184,7 +4184,10 @@ export function createAgentCapabilities(
         sourceRemainsUnmarked(x) ? undefined : remainsPlaceholder(x) ? (x.keeps ? reviewOnlyWhose : placeholderChangeWhose)
           : x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours'
           : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
-      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user' && !reviewKeepsPlaceholder(x)).length;
+      const keptNotTheirsAll = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user' && !reviewKeepsPlaceholder(x));
+      // P53x (Codex #2819 r4 P2): a kept PLACEHOLDER has no band to 'sit in'; it gets its own honest sentence.
+      const keptPlaceholders = keptNotTheirsAll.filter((x) => x.sizedBefore === 'placeholder').length;
+      const keptNotTheirs = keptNotTheirsAll.length - keptPlaceholders;
       const reviewOnlyLinks = shown.filter(reviewKeepsPlaceholder);
       const unsizedChanges = shown.filter(x => !x.keeps && remainsPlaceholder(x));
       const proposal = createProposal({
@@ -4241,6 +4244,9 @@ export function createAgentCapabilities(
             : '')
           + (keptNotTheirs > 0
             ? `${keptNotTheirs === shown.length ? 'Every link here' : `${keptNotTheirs} of these links`} already sits in the band the user named, so approving records only their review: its strength is kept exactly as it is and is never the user\u2019s own (\`whose\`). `
+            : '')
+          + (keptPlaceholders > 0
+            ? `${keptPlaceholders === shown.length ? 'No link here had a size yet' : `${keptPlaceholders} of these links had no size yet`}: their numbers are kept exactly as they are, and approving records only the user\u2019s review, never their authorship (\`whose\`). `
             : '')
           + (reEstimated.length > 0
             ? `${reEstimated.length === shown.length ? 'Every link here' : `${reEstimated.length} of these links`} already held Olumi\u2019s estimate (\`was.sizing\`), so this REPLACES an earlier estimate; it does not size a placeholder: never call ${reEstimated.length === 1 ? 'it a placeholder' : 'them placeholders'}. The links nobody has sized are the ones whose \`sizing\` is \`placeholder\` in the model state. `

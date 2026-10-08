@@ -53,6 +53,32 @@ const explicitBandWords = [
   ['src/orchestrator-v5/system-events/edge-strength-edit.ts', 'applyEdgeStrengthEdit', 'CANVAS_BAND_WORD[statedBand ?? edgeBandFromMagnitude(Math.abs(target.mean))]'],
 ] as const;
 
+// P53x r5 (Codex #2819 r4 P2): linkBandWord voices an EXPLICIT proposed/stated band (proposal args, the user's reading
+// or stated band), never a stored mean; every call is listed, by count, so a new mean-derived caller fails.
+const proposedBandWords = [
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'readingNote', 'linkBandWord(i.reading as InfluenceBand)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'readingNote', 'linkBandWord(i.reading as InfluenceBand)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'bandGrounding', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'applyLinkStrengthSet', 'linkBandWord(l.band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrength', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrength', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrength', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrength', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrength', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrength', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrength', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrengths', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrengths', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrengths', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrengths', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrengths', 'linkBandWord(x.band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrengths', 'linkBandWord(x.band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeModelChange', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeModelChange', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeModelChange', 'linkBandWord(band)'],
+  ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'authoriseChange', 'linkBandWord(statedBand)'],
+] as const;
+
 const normalize = (text: string): string => text.replace(/\s+/g, '');
 const key = (file: string, owner: string, call: string): string => `${file}::${owner}::${normalize(call)}`;
 
@@ -89,7 +115,7 @@ function bandMeanCalls(file: string, text: string): string[] {
       const expression = node.expression;
       const local = ts.isIdentifier(expression) ? expression.text : '';
       const callee = nameOf(expression);
-      if (callee === 'edgeBandFromMagnitude' || callee === 'strengthBand' || /^describeBand[A-Za-z]*$/.test(callee)
+      if (callee === 'edgeBandFromMagnitude' || callee === 'strengthBand' || callee === 'linkBandWord' || /^describeBand[A-Za-z]*$/.test(callee)
         || ['relationshipPhrase', 'bidirectedRelationshipPhrase', 'formatEdgeStrengthMagnitude'].includes(callee)) {
         const call = node.getText(source);
         // Normalize a renamed import back to its authoritative converter name.
@@ -166,7 +192,7 @@ function converterIndirections(file: string, text: string): string[] {
     if (ts.isIdentifier(node)) {
       const name = aliases.get(node.text) ?? node.text;
       const parent = node.parent;
-      const ok = !isConverter(name) || declared.has(name)
+      const ok = !isConverter(name)
         || ts.isImportSpecifier(parent) || ts.isImportClause(parent) || ts.isTypeQueryNode(parent)
         || ((ts.isFunctionDeclaration(parent) || ts.isVariableDeclaration(parent)) && parent.name === node)
         || (ts.isCallExpression(parent) && parent.expression === node)
@@ -181,13 +207,19 @@ function converterIndirections(file: string, text: string): string[] {
   return found;
 }
 
+function allowedCounts(): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const [path, owner, call] of [...arithmetic, ...explicitBandWords, ...proposedBandWords]) { const k = key(path, owner, call); m.set(k, (m.get(k) ?? 0) + 1); }
+  return m;
+}
+
 function forbiddenCalls(file: string, text: string, used: Map<string, number> = new Map()): string[] {
   if (file === helper) return [];
-  const allowed = new Set([...arithmetic, ...explicitBandWords].map(([path, owner, call]) => key(path, owner, call)));
+  const allowed = allowedCounts();
   return bandMeanCalls(file, text).filter(call => {
     const count = (used.get(call) ?? 0) + 1;
     used.set(call, count);
-    return !allowed.has(call) || count > 1;
+    return count > (allowed.get(call) ?? 0);
   });
 }
 
@@ -209,7 +241,8 @@ it('P53x AST: band-from-mean calls exist only in the sizing-aware helper or name
   scan('src');
   expect(forbidden).toEqual([]);
   // Keep the exceptions live: a moved/removed arithmetic site requires a reviewed census update too.
-  expect([...used.keys()].sort()).toEqual([...arithmetic, ...explicitBandWords].map(([path, owner, call]) => key(path, owner, call)).sort());
+  // Keep the exceptions live, BY COUNT: a moved/removed/added site requires a reviewed census update too.
+  expect([...used.entries()].sort()).toEqual([...allowedCounts().entries()].sort());
 }, 60_000);
 
 it('P53x AST firing control detects forbidden, renamed and extra calls in an allowed function', () => {
@@ -244,4 +277,15 @@ it('P53x AST firing control (Codex #2819 r2 P2): namespace re-export + computed 
 it('P53x AST firing control (Codex #2819 r3 P2): a template-literal dynamic import of the bands module is refused', () => {
   expect(converterIndirections('src/new-reader.ts', "export const v = async (edge: any) => { const B: any = await import(`../format/edge-strength-bands.js`); const b = 'edgeBand' + 'FromMagnitude'; const w = 'CANVAS_' + 'BAND_WORD'; return B[w][B[b](Math.abs(edge.strength.mean))]; };")).not.toHaveLength(0);
   expect(converterIndirections('src/new-reader.ts', "const m = 'x'; export const v = async () => import(m);")).not.toHaveLength(0);
+});
+
+it('P53x AST firing control (Codex #2819 r4 P2): a NEW mean-derived linkBandWord caller is refused', () => {
+  const file = 'src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts';
+  expect(forbiddenCalls(file, "function proposeLinkStrength() { const currentBand = edgeBandFromMagnitude(Math.abs(mean)); return { current_strength: linkBandWord(currentBand) }; }")
+    .some((f) => f.includes('linkBandWord(currentBand)'))).toBe(true);
+});
+
+it('P53x AST firing control (Codex #2819 r4 P2): an alias INSIDE a declaring module is refused', () => {
+  expect(converterIndirections('src/orchestrator-v5/format/format-graph-for-context.ts', "export function relationshipPhrase(m: number) { return String(m); }\nconst say = relationshipPhrase;\nexport const v = (edge: any) => say(edge.strength.mean);")
+    .some((f) => f.includes('indirect:relationshipPhrase'))).toBe(true);
 });
