@@ -134,6 +134,24 @@ function withoutModelGap(raw: string, live = true): string {
   return rest;
 }
 
+/**
+ * Accel P24 / SCI-10 (#2785): a measured "What would change this?" turn carries the typed `_method_result` sidecar. These
+ * captures pin the leader egress, which the sidecar does not touch: it is asserted by identity (this Run, this turn, and
+ * under ruling A no licence → withheld with no rows), then taken out; every OTHER byte must still equal the pristine capture.
+ */
+function withoutMethodResult(raw: string): string {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const m = parsed['_method_result'] as { v?: unknown; action_id?: unknown; outcome?: unknown; rows?: unknown; turn_id?: unknown; run?: { graph_hash_at_run?: unknown } } | undefined;
+  expect(m).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'withheld', rows: [] });
+  // Bound to the Run this response shows: the live turn's analysis_result block (a replay carries no block; it is held equal to live below).
+  const shown = ((parsed['blocks'] ?? []) as Array<{ type?: unknown; computed_against_hash?: unknown }>).find((block) => block.type === 'analysis_result');
+  if (shown !== undefined) expect(m?.run?.graph_hash_at_run).toBe(shown.computed_against_hash);
+  delete parsed['_method_result'];
+  const rest = JSON.stringify(parsed);
+  expect(rest.length, 'only the _method_result key was removed').toBe(raw.length - JSON.stringify({ _method_result: m }).length + 1);
+  return rest;
+}
+
 describe('fresh goal scope reaches the canonical leader claim at every route egress', () => {
   let app: FastifyInstance;
   let readState: ReturnType<typeof composeAnalysisStateV1>;
@@ -400,7 +418,8 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     const replay = await measuredTurn(true);
     expect(replay.body.assistant_text).toBe(live.body.assistant_text);
     expect(replay.body._agent.replayed).toBe(true);
-    const bytes = { live: withoutModelGap(live.bytes), replay: withoutModelGap(replay.bytes, false) };
+    const bytes = { live: withoutModelGap(withoutMethodResult(live.bytes)), replay: withoutModelGap(withoutMethodResult(replay.bytes), false) };
+    expect(JSON.parse(live.bytes)._method_result).toEqual(JSON.parse(replay.bytes)._method_result); // the replay re-attaches the same sidecar
     if (process.env.CAPTURE_FRESH_SCOPE_BASELINE === '1') writeFileSync(measuredBaselineUrl, `${JSON.stringify(bytes)}\n`);
     expect(bytes).toEqual(JSON.parse(readFileSync(measuredBaselineUrl, 'utf8')));
     expect(scripted.calls).toBe(0); expect(scripted.measureCalls).toBe(1);
