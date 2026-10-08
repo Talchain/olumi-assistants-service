@@ -223,6 +223,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { productHoldRecord } from '../proposal-object/record.js';
 import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
+import { PLAIN_APPROVAL_SUPERSEDED } from '../proposal-object/reply.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -2254,7 +2255,7 @@ export function createAgentCapabilities(
         detail: 'That change is no longer waiting (it expired, or the model changed since it was offered), so nothing was applied. Offer to prepare it again.' };
     }
     const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
-    if (ctx.typed_approval_words !== copy.message) {
+    if (ctx.proposal_edits === undefined && ctx.typed_approval_words !== copy.message) {
       return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
         detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
     }
@@ -2272,19 +2273,33 @@ export function createAgentCapabilities(
       if (edits.proposal_id !== ref || edits.revision !== hold.id || edits.graph_hash !== hold.preconditions.graph_hash
         || edits.graph_hash !== before.graph_hash) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
       }
       const record = productHoldRecord(hold, before);
       if (record !== undefined && record.digest !== edits.digest) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. What this change shows has changed since these values were set.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. What this change shows has changed since these values were set.' };
       }
-      const amended = record === undefined ? undefined : amendHeldOperations(record, edits.fields);
-      if (amended === undefined || !amended.ok) {
+      if (record === undefined) {
         return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
           detail: 'Nothing changed. Those values do not belong to this waiting change.' };
       }
-      userEdits = amended.userEdits;
+      // Check the card binding before its words: a replaced card can also have a newer approval message.
+      if (ctx.typed_approval_words !== copy.message) {
+        return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
+          detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
+      }
+      // Empty fields bind the displayed card only; they generate no amendments or edit receipts.
+      if (edits.fields.length > 0) {
+        const amended = amendHeldOperations(record, edits.fields);
+        if (!amended.ok) {
+          return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
+            detail: 'Nothing changed. Those values do not belong to this waiting change.' };
+        }
+        userEdits = amended.userEdits;
+      }
     }
     const r = await dispatch('/orchestrate/v2/turn', {
       kind: 'message',
@@ -2330,6 +2345,9 @@ export function createAgentCapabilities(
     const verified = applied && after !== null && typeof r.json.graph_hash === 'string' && r.json.graph_hash === after.graph_hash
       && after.graph_hash !== before.graph_hash && !stillHeld && holdsAll(after);
     if (!verified) {
+      if (!applied && edits?.fields.length === 0 && r.json.assistant_text === PLAIN_APPROVAL_SUPERSEDED) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref, detail: PLAIN_APPROVAL_SUPERSEDED };
+      }
       return applied
         ? { ok: false, mutated: true, refusal: 'not_verified', proposal_id: ref,
           detail: 'The change was saved, but the model changed again straight afterwards, so what it now holds could not be confirmed. Read the model again before saying what it holds.' }
