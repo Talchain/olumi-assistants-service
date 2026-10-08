@@ -17,6 +17,7 @@
  */
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayFigureRead } from './say-figure.js';
+import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
 interface Link {
@@ -30,6 +31,7 @@ interface ModelShape {
   readonly links: readonly Link[];
   readonly risks?: readonly { readonly label: string; readonly provenance?: string; readonly analysis_participation?: 'retained_excluded' }[];
   readonly outcomes?: readonly { readonly label: string; readonly unit?: string | null }[];
+  readonly constraints?: readonly { readonly metric: string; readonly operator?: string | null; readonly value?: number | null; readonly unit?: string | null }[];
   readonly identities?: readonly { readonly outcome: string; readonly operation: string; readonly factors: readonly string[] }[];
 }
 
@@ -38,6 +40,7 @@ export type ExtraParentOfProductGoal =
       readonly amount: number; readonly per: number; readonly converted: number; readonly rateLevel: number;
       readonly goalUnit: string; readonly fromUnit: string; readonly volumeUnit: string; readonly rateUnit: string }
   | { readonly kind: 'rerouted_unsized'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string }
+  | { readonly kind: 'kept_out_cause_carried'; readonly from: string; readonly goal: string; readonly volume: string; readonly causes: readonly string[]; readonly limit?: string }
   | { readonly kind: 'kept_out_already_carried'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string;
       readonly via: readonly string[] };
 
@@ -110,6 +113,19 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
     };
     return [...new Set(to(key(rate.label)).filter((c) => reachesVolume(key(c.to))).map((c) => c.to))];
   };
+  /** Does `start` reach `target` without passing through `avoid` or the goal? */
+  const reachesAvoiding = (start: string, target: string, avoid: string): boolean => {
+    const seen = new Set<string>([start]); const queue = [start];
+    while (queue.length > 0) {
+      const at = queue.shift()!;
+      if (at === target) return true;
+      for (const c of model.links) {
+        if (key(c.from) !== at || key(c.to) === avoid || key(c.to) === goal || seen.has(key(c.to))) continue;
+        seen.add(key(c.to)); queue.push(key(c.to));
+      }
+    }
+    return false;
+  };
   const found: ExtraParentOfProductGoal[] = [];
   const links: Link[] = [];
   const keptOut = new Set<string>();
@@ -162,6 +178,27 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
       found.push({ kind: 'rerouted_unsized', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label });
       continue;
     }
+    // ⭐ Science goals §(e) addendum 7 NARROWED (8 Oct, P48 d8c01a8f; 605-scenario census): Olumi's UNSIZED risk straight into
+    // the goal that RESTATES ITS ONE CAUSE crossing a threshold ("Pro churn exceeds 4%" ← Monthly churn (%), and churn →
+    // subscribers exists) counts that cause a second time: it is kept in the model but OUT of the calculation, and said.
+    // Exactly ONE cause, a %-unit rate FACTOR reaching the volume without the risk. A competitor's response (causes: price,
+    // release) is a separate event and stays. Never a user-authored risk, a sized link, a risk with another link out, or
+    // one already reaching an operand.
+    const soleCause = new Set(causes).size === 1 ? factor(causes[0]!) : undefined;
+    if (risk && !reactsToRate && volume !== undefined && soleCause !== undefined && isPercentScaledUnit(soleCause.unit ?? undefined)
+      && reaches(l.from, l) === undefined
+      && l.effect_provenance == null && !finite(l.effect_amount)
+      && !model.links.some((c) => c !== l && key(c.from) === key(l.from))
+      && !(model.risks ?? []).some((r) => key(r.label) === key(l.from) && usersRisk(r, brief))
+      && causes.every((c) => c === key(volume.label) || reachesAvoiding(c, key(volume.label), key(l.from)))) {
+      links.push(l);
+      keptOut.add(key(l.from));
+      const causeLabels = model.links.filter((c) => key(c.to) === key(l.from)).map((c) => c.from);
+      const limit = (model.constraints ?? []).find((k) => causes.includes(key(k.metric)));
+      found.push({ kind: 'kept_out_cause_carried', from: l.from, goal: model.goal.metric, volume: volume.label, causes: [...new Set(causeLabels)],
+        ...(limit !== undefined && limitWords(limit) !== undefined ? { limit: limitWords(limit)! } : {}) });
+      continue;
+    }
     if (reaches(l.from, l) !== undefined || from === undefined || isMoney(from.unit)) { links.push(l); continue; }
     const sized = l.effect_provenance != null && finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0;
     if (!sized || rate === undefined || volume === undefined || !volumeIsFactor || isMoney(volume.unit) || !rate.baseline_known || !finite(rate.baseline_value) || rate.baseline_value <= 0) {
@@ -192,9 +229,25 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
     risks: (model.risks ?? []).map((r) => (keptOut.has(key(r.label)) ? { ...r, analysis_participation: 'retained_excluded' as const } : r)) } as M, found };
 }
 
+/** A limit the brief stated, in its own words ("Monthly churn under 4%"); undefined when it cannot be said plainly. */
+function limitWords(k: { readonly metric: string; readonly operator?: string | null; readonly value?: number | null; readonly unit?: string | null }): string | undefined {
+  const dir = k.operator === '<' || k.operator === '<=' ? 'under' : k.operator === '>' || k.operator === '>=' ? 'over' : undefined;
+  if (dir === undefined || typeof k.value !== 'number' || !Number.isFinite(k.value)) return undefined;
+  const unit = (k.unit ?? '').trim();
+  // A bare percent spelling ("%", "percent") is written "4%"; any longer unit is kept in the brief's words.
+  const barePercent = isPercentScaledUnit(unit) && !/\s/.test(unit);
+  return `${k.metric} ${dir} ${k.value}${barePercent ? '%' : unit === '' ? '' : ` ${unit}`}`;
+}
+
 /** The one sentence each finding is said with (`not_represented`). */
 export function sayExtraParentOfProductGoal(f: ExtraParentOfProductGoal): string {
   // AIQ 5906371639's words: the move is said; nothing is sized.
+  if (f.kind === 'kept_out_cause_carried') {
+    // Science §(e) addendum 7 words: the limit, when the brief stated one, is checked as a limit.
+    const list = f.causes.map((c) => `‘${c}’`).join(' and ');
+    return `‘${f.from}’ is left out of the calculation: ${list} already ${f.causes.length === 1 ? 'affects' : 'affect'} ‘${f.goal}’ through ‘${f.volume}’`
+      + (f.limit !== undefined ? `, and your ‘${f.limit}’ is checked as a limit.` : '.');
+  }
   if (f.kind === 'kept_out_already_carried') {
     const list = f.via.map((v) => `‘${v}’`).join(' and ');
     // AIQ 5906624217: the rate by its own name (never "the price"). The risk stays on the model, so where it went is said.

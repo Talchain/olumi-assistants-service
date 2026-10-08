@@ -17,7 +17,9 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
-import { rerouteExtraParentsOfProductGoal } from '../product-goal-extra-parent.js';
+import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from '../product-goal-extra-parent.js';
+import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { buildAnalysisParticipationDisclosure } from '../../coaching/analysis-participation-disclosure.js';
 
 type Json = Record<string, any>;
 const BRIEF = 'Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. '
@@ -232,5 +234,57 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
   it('CONTROL: an outcome that is NOT an operand of the declared product is never the volume', () => {
     const { found } = rerouteExtraParentsOfProductGoal(outcomeVolume(c => { c.identities[0].factors = ['Pro plan price', 'Something else']; }), BRIEF);
     expect(found).toEqual([]);
+  });
+
+  /**
+   * Science goals §(e) addendum 7 (8 Oct, P48 draw 3 d8c01a8f on CEE 1920e4a4): Olumi drafted the brief's churn LIMIT as a
+   * risk "Pro churn exceeds 4%" ← Monthly churn, straight into MRR, beside churn → subscribers: churn counted twice, and
+   * the reading's card vetoed. Every cause already reaches the volume, so the risk is kept OUT of the calculation, said.
+   */
+  const churnLimitRisk = (edit: (c: Json) => void = () => {}) => draft(c => {
+    Object.assign(c.goal, { baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
+    c.constraints = [{ metric: 'Monthly churn', operator: '<=', value: 4, unit: '%', provenance: 'explicit', frame: 'level' }];
+    c.risks = [{ label: 'Pro churn exceeds 4%', provenance: 'ai_proposed' }];
+    c.links = [
+      link('Pro plan price', 'Monthly recurring revenue', 'positive'),
+      link('Paying subscribers', 'Monthly recurring revenue', 'positive'),
+      link('Pro plan price', 'Monthly churn', 'positive', 0.5, 10, 'ai_proposed'),
+      link('Monthly churn', 'Paying subscribers', 'negative', -12, 1, 'ai_proposed'),
+      link('Monthly churn', 'Pro churn exceeds 4%', 'positive'),
+      link('Pro churn exceeds 4%', 'Monthly recurring revenue', 'negative'),
+    ];
+    edit(c);
+  });
+  const SAID = "‘Pro churn exceeds 4%’ is left out of the calculation: ‘Monthly churn’ already affects ‘Monthly recurring revenue’ through ‘Paying subscribers’, and your ‘Monthly churn under 4%’ is checked as a limit.";
+  it('RED (add. 7, d8c01a8f shape): the churn-limit risk is kept out (retained_excluded), said with the limit, and the card is offered', async () => {
+    const { model, found } = rerouteExtraParentsOfProductGoal(churnLimitRisk(), BRIEF);
+    expect(found).toEqual([{ kind: 'kept_out_cause_carried', from: 'Pro churn exceeds 4%', goal: 'Monthly recurring revenue', volume: 'Paying subscribers', causes: ['Monthly churn'], limit: 'Monthly churn under 4%' }]);
+    expect(sayExtraParentOfProductGoal(found[0]!)).toBe(SAID);
+    expect((model.risks ?? []).find(r => r.label === 'Pro churn exceeds 4%')?.analysis_participation).toBe('retained_excluded');
+    const { graph } = await build(churnLimitRisk());
+    expect(proposeProductIdentity(graph)).not.toBeNull();
+  });
+  it('add. 7, the Run reply: the built graph hands run_analysis a model without the risk, and the Run turn discloses it', async () => {
+    const { graph } = await build(churnLimitRisk());
+    const risk = graph.nodes.find(n => n.label === 'Pro churn exceeds 4%')!;
+    const guarded = guardAnalysisParticipation(graph, { goalNodeId: graph.nodes.find(n => n.kind === 'goal')!.id });
+    expect(guarded.excludedNodeIds).toEqual([risk.id]);
+    expect(buildAnalysisParticipationDisclosure(guarded)).toMatch(/kept out of the calculation/);
+  });
+  it('add. 7, no stated limit: kept out, said WITHOUT the limit clause', () => {
+    const { found } = rerouteExtraParentsOfProductGoal(churnLimitRisk(c => { c.constraints = []; }), BRIEF);
+    expect(sayExtraParentOfProductGoal(found[0]!)).toBe("‘Pro churn exceeds 4%’ is left out of the calculation: ‘Monthly churn’ already affects ‘Monthly recurring revenue’ through ‘Paying subscribers’.");
+  });
+  it.each([
+    ['the USER named the risk', (c: Json) => { c.risks = [{ label: 'Pro churn exceeds 4%', provenance: 'explicit' }]; }],
+    ['a SIZED link into the goal', (c: Json) => { const l = c.links.find((x: Json) => x.from === 'Pro churn exceeds 4%'); Object.assign(l, { effect_amount: -500, effect_per_source_change: 1, effect_provenance: 'ai_proposed' }); }],
+    ['the risk has another link out', (c: Json) => { c.links.push(link('Pro churn exceeds 4%', 'Monthly churn', 'positive')); }],
+    ['a cause that does NOT reach the volume', (c: Json) => { c.links = c.links.filter((l: Json) => !(l.from === 'Monthly churn' && l.to === 'Paying subscribers')); }],
+    // NARROWED (Science 393023, 605-scenario census: 17 competitor-response risks): a separate event, not a restatement.
+    ['a SECOND cause (competitor response ← churn + price, both reaching the volume)', (c: Json) => { c.links.push(link('Pro plan price', 'Pro churn exceeds 4%', 'positive')); }],
+    ['its ONE cause is not a %-unit rate (a release flag)', (c: Json) => { c.factors.find((f: Json) => f.label === 'Monthly churn').unit = 'release live (0/1)'; }],
+  ] as const)('CONTROL (add. 7): %s → left exactly as drafted', (_name, edit) => {
+    const { found } = rerouteExtraParentsOfProductGoal(churnLimitRisk(edit), BRIEF);
+    expect(found.filter(f => f.kind === 'kept_out_cause_carried')).toEqual([]);
   });
 });
