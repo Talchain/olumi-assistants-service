@@ -1,0 +1,10 @@
+{
+  "error_count": 378,
+  "changed_file_error_count": 4,
+  "changed_file_errors": [
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts(37,89): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'readonly unknown[] | undefined'.",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts(81,40): error TS2339: Property 'edges' does not exist on type '{ nodes: any[]; }'.",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts(81,58): error TS2339: Property 'edges' does not exist on type '{ nodes: any[]; }'.",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts(106,39): error TS7006: Parameter 'e' implicitly has an 'any' type."
+  ]
+}

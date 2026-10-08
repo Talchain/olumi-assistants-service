@@ -175,9 +175,11 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
   const labelOf = (n: Rec): string => String(n.label ?? n.id);
   return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
     if (preconditions.has(r.id as string)) {
-      const optionId = (r.relies_on as { option_id: string }).option_id;
-      const option = nodes.find((n) => n.id === optionId)!;
-      return reliesOnRiskLine(labelOf(r), labelOf(option));
+      // A member is either CEE's `relies_on` stamp or an Olumi draft-time widening (#2854: `draft_widening.hits`, NO
+      // relies_on). Never read one shape blind: the served B1 draft 500'd on exactly that (27dfd9e5, 8 Oct).
+      const optionId = recordOf(r.relies_on)?.option_id ?? recordOf(recordOf(r.draft_widening)?.hits)?.id;
+      const option = nodes.find((n) => n.id === optionId && n.kind === 'option');
+      if (option !== undefined) return reliesOnRiskLine(labelOf(r), labelOf(option));
     }
     // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
     // (DL condition 3), in words that stay true when one cause feeds two left-out risks.

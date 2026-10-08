@@ -1,0 +1,53 @@
+{
+  "head": "a4981a7afc5511fff9bf042573a6c1f158a43af8",
+  "branch": "dl/b2-per-option-target-withhold",
+  "fixture_sha256": "6cce6262bf2994f1fdbecde93f635a6057e73bcc42a859f643888d8e8fce599b",
+  "fixture_byte_identical_to_head": true,
+  "fix_files": [
+    "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts",
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+    "src/orchestrator-v5/tools/handlers/run-analysis.ts"
+  ],
+  "staging_files": [
+    "src/routes/__tests__/convention-frame-source-wire.test.ts",
+    "src/routes/__tests__/fixtures/convention-rescue-b1-d2.json"
+  ],
+  "pr_and_fix_changed_ts": [
+    "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts",
+    "src/orchestrator-v5/agent-lane/admit-model.ts",
+    "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts",
+    "src/orchestrator-v5/agent-lane/goal-level-in-goal-units.ts",
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts",
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+    "src/orchestrator-v5/tools/handlers/run-analysis.ts",
+    "src/orchestrator/context/option-result-source.ts",
+    "src/routes/__tests__/convention-frame-source-wire.test.ts"
+  ],
+  "isolated_merge_head": "53a68cd6e50eee2a30110cd68e859f8edda3c8be",
+  "source_sha256": {
+    "src/orchestrator-v5/admission/identity-evaluations.ts": "2c726cd16d19dea89bbdfa76ce57c233cc559ba2e3bc2bb5476700d3ba2bb4f9",
+    "src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts": "25e4c09cbbba7bf944e45538b507c8155cc392956ed2ca556228bbbdabe67a4b",
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts": "0a79db96c236bfacdc0339d8df531a85d9f8871c5b84a439065cad24cd25578f",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts": "cdfcb3b0d6d07a8679a1386055798102c163aabab1b47bfb658925e199c38f44",
+    "src/orchestrator-v5/goal-target/scope-target-not-testable.ts": "99e45e35a76ab92aa4950d370956b6ccc9da25f353b2bbf2006486eab5bdb272",
+    "src/orchestrator-v5/goal-target/target-testability-per-option.ts": "c700a6c1c03d8e318696bf36feec0898b0b68175a944d03aba735606162cb17f",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts": "fc7b563009c52c2a1413ea10e897fc7e4b32adf7e0927b146ecb6f753d759897",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts": "be125a417a646f49abbc10b269eaa3bb9a25340e5ee4667a53ce395e6e7639bb",
+    "src/orchestrator-v5/tools/handlers/run-analysis.ts": "69a088c3d694e569dc330d67bc6434db81ef8e0f12d41d0891a2717ae2605d40",
+    "src/routes/__tests__/convention-frame-source-wire.test.ts": "d4aae9b6676359e0b10c6e44244f42b8027ae5b36dffa59ab06211a67d7578de",
+    "src/routes/__tests__/fixtures/convention-rescue-b1-d2.json": "7357d4770d85da718facbb4af655d4815e07408d089affe864c676464ae65fd7"
+  }
+}

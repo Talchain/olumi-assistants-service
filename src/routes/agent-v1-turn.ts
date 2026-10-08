@@ -89,7 +89,6 @@ import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestr
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../orchestrator-v5/agent-lane/runtime/widen-draft.js';
-import { preconditionRiskIds } from '../graph/inert-risk.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -581,12 +580,11 @@ function userTextsForEgress(typed: readonly string[], knownRows?: RecentTextRows
 async function decisionLinesAskedOnce(
   graph: unknown, ctx: DecisionInputAskContext, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined,
 ): Promise<string[]> {
-  const inputAskGraph = withoutWidenedRisksForInputAsk(graph);
-  const lines = decisionInputLines(inputAskGraph, ctx);
+  const lines = decisionInputLines(graph, ctx);
   if (!lines.some(isDecisionInputAsk) || typeof store.readRecent !== 'function') return lines;
   try {
     const recentReplies = await recentAgentReplies(store, scenarioId, exceptTurnId);
-    return recentReplies.length > 0 ? decisionInputLines(inputAskGraph, { ...ctx, recentReplies }) : lines;
+    return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies }) : lines;
   } catch (err) {
     log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
     return lines;
@@ -646,16 +644,6 @@ function widenedRunWordsOf(graph: unknown): { widenedRiskNote?: string; widenedR
   const note = widenedRiskNote({ options: 0, risks: addedRisks.length });
   const marker = widenedRiskMarker(addedRisks);
   return note === null || marker === null ? {} : { widenedRiskNote: note, widenedRiskMarker: marker };
-}
-
-/** Widening owns these excluded risks' disclosure. The older input ask only understands RC3's relies_on stamp. */
-function withoutWidenedRisksForInputAsk(graph: unknown): unknown {
-  const g = graph as GraphV3T | null | undefined;
-  if (!Array.isArray(g?.nodes) || !Array.isArray(g.edges)) return graph;
-  const excluded = preconditionRiskIds(g.nodes, g.edges, (g.goal_constraints ?? []).map(c => c.node_id));
-  const nodes = g.nodes.filter(node => !(excluded.has(node.id)
-    && node.draft_widening?.provenance === 'ai_suggested_widen'));
-  return nodes.length === g.nodes.length ? graph : { ...g, nodes };
 }
 
 /** The final scenario read owns the UI's cells; missing authority never licenses a substitute projection. */
@@ -2409,7 +2397,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
           rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
-          replayText = withA7AfterGate(rebuilt, withoutWidenedRisksForInputAsk(state.graph), atRest, null);
+          replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           const guidedReplayFinding = replayGuidedText !== null && replayText.includes(replayGuidedText) ? replayGuidedText : null;
           replayObligations = [
             ...(guidedReplayFinding === null ? [] : [{ role: 'host' as const, text: guidedReplayFinding,
@@ -4772,7 +4760,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
     if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
-      const withA7 = withA7AfterGate(wireBody.assistant_text, withoutWidenedRisksForInputAsk(readbackGraph), decisionTurn, statusText);
+      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
 
     }
