@@ -101,7 +101,8 @@ const levelSchema = objectSchema({ value: { type: 'number' }, unit: { type: ['st
 const optionSchema = objectSchema({ label: string, acts_on: { type: 'array', minItems: 1,
   items: objectSchema({ factor_label: string, direction, level: levelSchema }) }, rationale: string });
 const OPTIONS_SCHEMA = objectSchema({ options: { type: 'array', maxItems: 3, items: optionSchema } });
-const RISKS_SCHEMA = objectSchema({ risk_suggestions: { type: 'array', items: objectSchema({
+// Built at call time: widen-turn → … → build-model → here is an import cycle, so RISK_METHOD is unset at module load.
+const risksSchema = (): Rec => objectSchema({ risk_suggestions: { type: 'array', items: objectSchema({
   label: string, category: { type: 'string', enum: RISK_METHOD.categories },
   mechanism: { type: 'string', enum: ['drives', 'relies_on'] }, hits_id: string, through_id: string,
   through_direction: direction, affects_id: string, direction, relies_on: string, watch_for: string,
@@ -207,7 +208,7 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
     };
     const work = async (): Promise<WidenDraftResult | null> => {
       const [riskReply, optionReply] = await Promise.allSettled([
-        riskPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${riskPass.directive}`, RISKS_SCHEMA),
+        riskPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${riskPass.directive}`, risksSchema()),
         optionPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${DRAFT_WIDENING_OPTIONS_PREAMBLE}\n${optionPass.directive}`, OPTIONS_SCHEMA),
       ]);
       if (finished) return null;

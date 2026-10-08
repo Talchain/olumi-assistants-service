@@ -51,7 +51,7 @@ function candidate({ risks = 2, sameLever = false, nonSq = 3, counterCase = fals
         { from: 'Developer hires', to: 'Supplier interruption', direction: 'positive', provenance: 'inferred' },
         { from: 'Supplier interruption', to: 'Feature delivery capacity', direction: 'negative', provenance: 'inferred' },
       ] : []),
-    ]),
+    ]) as CandidateModel['links'],
   };
 }
 const fixture = (args: Parameters<typeof candidate>[0] = {}) => {
@@ -124,7 +124,7 @@ describe('P05b pure typed draft diagnosis', () => {
     const noCounter = { ...rich, edges: [] };
     const sameLever = { ...rich, nodes: rich.nodes.map((n: Rec) => n.id === 'option_b' ? { ...n, interventions: { lever_a: { value: 2 } } } : n) };
     const tooFew = { ...rich, nodes: rich.nodes.filter((n: Rec) => n.id !== 'risk_b') };
-    for (const graph of [rich, noCounter, sameLever, tooFew]) {
+    for (const graph of [rich, noCounter, sameLever, tooFew] as Rec[]) {
       const bytes = JSON.stringify(graph);
       const before = widening.diagnoseDraft(graph);
       const renamed = { ...graph, nodes: graph.nodes.map((n: Rec) => ({ ...n, label: 'Carry on as now', description: 'No action and no risks' })) };
@@ -160,7 +160,7 @@ describe('P05b pure typed draft diagnosis', () => {
 
   it('dv-active-only: baseline and typed status quo risks do not count as an active-option counter-case', () => {
     const graph = validationGraph();
-    const baselineOnly = { ...graph, edges: [{ from: 'baseline_lever', to: 'risk_a' }] };
+    const baselineOnly: Rec = { ...graph, edges: [{ from: 'baseline_lever', to: 'risk_a' }] };
     expect(widening.diagnoseDraft(baselineOnly)).toEqual({ risks: 'no_counter_case', options: null });
     const nestedBaseline = { ...baselineOnly, nodes: baselineOnly.nodes.map((n: Rec) => n.id === 'baseline' ? { ...n, is_baseline: undefined, data: { is_baseline: true } } : n) };
     expect(widening.diagnoseDraft(nestedBaseline)).toEqual({ risks: 'no_counter_case', options: null });
@@ -231,7 +231,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     }));
     const callStructured = generator();
     const events = vi.spyOn(log, 'info').mockImplementation(() => {});
-    await widening.widenDraft({ ...input, finalGraph, callStructured });
+    await widening.widenDraft({ ...input, finalGraph: finalGraph as never, callStructured });
     expect(finalGraph).toHaveBeenCalled();
     expect(finalGraph.mock.calls[0]![0]).toBe(input.admitted);
     expect(callStructured).toHaveBeenCalledTimes(1);
@@ -773,6 +773,20 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
 });
 
 describe('P05b build seam and words', () => {
+  it('dv-no-provider: a caller that passes no widening provider makes no widening call, even on a thin draft (CONTRAST: same draft with one widens)', async () => {
+    const c = candidate({ risks: 1, sameLever: true });
+    const call = vi.fn<CallStructuredModel>(async (req) => isRisks(req) || isOptions(req) ? generator()(req) : { text: JSON.stringify(c) });
+    const dispatch: InternalDispatch = async (path) => path.endsWith('/graph/register')
+      ? { status: 200, json: { model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] }, versions: [] } };
+    const without = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call, undefined, Date.now() + 60_000) as Rec;
+    expect(without.ok, JSON.stringify(without)).toBe(true);
+    expect(call.mock.calls.filter(([req]) => isRisks(req) || isOptions(req))).toHaveLength(0);
+    call.mockClear();
+    const withIt = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call, undefined, Date.now() + 60_000, call) as Rec;
+    expect(withIt.ok, JSON.stringify(withIt)).toBe(true);
+    expect(call.mock.calls.filter(([req]) => isRisks(req) || isOptions(req)).length).toBeGreaterThan(0);
+  });
+
   it('dv-build-rich: a sufficient draft persists byte-identically without any widening call', async () => {
     const c = candidate({ counterCase: true });
     vi.spyOn(widening, 'widenDraft').mockResolvedValueOnce(null);

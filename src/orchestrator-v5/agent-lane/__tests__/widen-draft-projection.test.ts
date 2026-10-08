@@ -45,7 +45,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
         }
         return { status: 200, json: { graph: { nodes: [], edges: [] }, versions: [] } };
       };
-      const out = await buildModelFromBrief('99999999-9999-4999-8999-999999999999', brief, dispatch, call, undefined, Date.now() + 60_000);
+      const out = await buildModelFromBrief('99999999-9999-4999-8999-999999999999', brief, dispatch, call, undefined, Date.now() + 60_000, call);
       expect(out.ok, JSON.stringify(out)).toBe(true);
       return { graph: GraphV3.parse(registered), out };
     };
@@ -56,8 +56,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
     expect(before.graph.edges.find(e => e.from === 'supplier_interruption')?.exists_probability).toBe(1);
     const after = await build([suggestion]);
     for (const node of before.graph.nodes) expect(after.graph.nodes.find(n => n.id === node.id), node.id).toEqual(node);
-    for (const edge of before.graph.edges) expect(after.graph.edges.find(e => edge.id !== undefined
-      ? e.id === edge.id : e.from === edge.from && e.to === edge.to), edge.id ?? `${edge.from}::${edge.to}`).toEqual(edge);
+    for (const edge of before.graph.edges) expect(after.graph.edges.find(e => e.from === edge.from && e.to === edge.to), `${edge.from}::${edge.to}`).toEqual(edge);
     expect(after.graph).toEqual(before.graph);
     expect(after.out).toEqual(before.out);
   });
@@ -135,7 +134,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
     };
     const admitted = admitCandidateModel(candidate, {}, brief);
     const bytes = JSON.stringify({ candidate, admitted });
-    const edgeKey = (edge: AdmittedModel['edges'][number]) => edge.id ?? `${edge.from}::${edge.to}`;
+    const edgeKey = (edge: AdmittedModel['edges'][number]) => `${edge.from}::${edge.to}`;
     const edgeId = edgeKey(admitted.edges.find(edge => edge.from === 'engineer_hires' && edge.to === 'features_delivered')!);
     const project = (model: AdmittedModel) => {
       const mean = model.nodes.some(node => node.id === 'hiring_stalls') ? 1 + 4e-10 : 1 + 2e-10;

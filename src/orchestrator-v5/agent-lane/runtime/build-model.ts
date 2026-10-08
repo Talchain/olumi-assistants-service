@@ -1499,8 +1499,8 @@ export async function buildModelFromBrief(
   callStructured: CallStructuredModel,
   observeConstruction?: (t: ConstructionTrace) => void,
   deadlineAt?: number,
-  // Required to be the plain provider when the drafting argument is wrapped by a recorder.
-  wideningCallStructured: CallStructuredModel = callStructured,
+  // The plain provider (never the recorder-wrapped drafter). Omitted → no widening: today's path, byte for byte.
+  wideningCallStructured?: CallStructuredModel,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const buildInstructions = buildInstructionsForBrief(brief);
@@ -2174,7 +2174,7 @@ export async function buildModelFromBrief(
   };
   finalFor(admitted);
   // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
-  const widened = await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
+  const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
     admissionArgs: [goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] });
   if (widened !== null) {

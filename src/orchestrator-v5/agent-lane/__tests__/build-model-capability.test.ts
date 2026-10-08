@@ -17,6 +17,7 @@ import { ProposalStore } from '../proposal.js';
 import { budgetFor } from '../model-budgets.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
+import { DRAFT_WIDENING_PREAMBLE } from '../runtime/widen-draft.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-1' };
@@ -179,14 +180,17 @@ describe('the construction budget is the measured one', () => {
     // \u2b50 ASSERT WHAT THE CALL SITE SENDS, not what the constant says. A test
     // that only reads budgetFor() is a second copy of the table and is blind in
     // the direction a wrong role would move it.
-    const seen: { max?: number; model?: string; effort?: string }[] = [];
+    const all: { max?: number; model?: string; effort?: string; widening: boolean }[] = [];
     const capture: CallStructuredModel = async (r) => {
-      seen.push({ max: r.max_output_tokens, model: r.model, effort: r.reasoning_effort });
+      all.push({ max: r.max_output_tokens, model: r.model, effort: r.reasoning_effort, widening: r.instructions.startsWith(DRAFT_WIDENING_PREAMBLE) });
       return { text: JSON.stringify(CANDIDATE) };
     };
     const { d } = dispatcher({ before: [], after: [{ id: 'a' }] });
     await createAgentCapabilities(d, new ProposalStore(), capture).buildModelFromBrief(ctx, { brief: 'a brief' });
 
+    // P05b #2854: a thin draft may add Olumi's widening passes on the same provider; each carries the WIDENING ceiling.
+    const seen = all.filter(c => !c.widening);
+    for (const w of all.filter(c => c.widening)) expect(w.max).toBe(budgetFor(w.model!, 'widening').max_output_tokens);
     expect(seen).toHaveLength(1);
     const whole = budgetFor(seen[0].model!, 'whole');
     expect(seen[0].max).toBe(whole.max_output_tokens);
