@@ -29,6 +29,9 @@ export interface WidenDraftInput {
   finalGraph?: (admitted: AdmittedModel) => FinalGraph;
   admissionArgs?: [goalLevelStated?: AdmissionArgs[3], targetFigureWrittenAgain?: AdmissionArgs[4],
     goalLevelFromBrief?: AdmissionArgs[5], sizeWritten?: AdmissionArgs[6], sizeRangeEnd?: AdmissionArgs[7]];
+  /** PARKED (DL 6065138437: 0 options kept from 1 live trigger, pure latency on B1). The served seam never sets it, so
+   *  an options-only deficiency is diagnosed and logged but makes no call. Kept for the word-rule follow-up. */
+  optionsArm?: boolean;
 }
 export interface WidenCounts { options: number; risks: number }
 export interface WidenDraftResult {
@@ -186,15 +189,16 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
       ...(input.admitted.goal_constraints.length > 0 ? { goal_constraints: input.admitted.goal_constraints } : {}) };
     const finalBefore = input.finalGraph?.(input.admitted);
     diagnosis = diagnoseDraft(finalBefore ?? graph);
-    if (diagnosis.risks === null && diagnosis.options === null) { outcome = 'sufficient'; return null; }
+    const repair: DraftDiagnosis = { risks: diagnosis.risks, options: input.optionsArm === true ? diagnosis.options : null };
+    if (repair.risks === null && repair.options === null) { outcome = 'sufficient'; return null; }
     // Registration, readbacks and narration retain the tail already reserved beyond this absolute deadline.
     const cap = Math.min(20_000, (input.deadlineAt ?? Infinity) - started);
     if (cap < 5_000) { outcome = 'no_budget'; return null; }
     const timeoutMs = Math.min(cap, input.timeoutMs ?? 20_000);
     const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [],
       graph, analysisState: undefined, analysisResult: undefined, leaderLicensed: false });
-    const risksTurn = diagnosis.risks === null ? null : risksTurnFromSignals(signals, graph, input.brief);
-    const optionsTurn = diagnosis.options === null ? null : widenTurnFromSignals(signals, graph);
+    const risksTurn = repair.risks === null ? null : risksTurnFromSignals(signals, graph, input.brief);
+    const optionsTurn = repair.options === null ? null : widenTurnFromSignals(signals, graph);
     const riskPass = risksTurn?.kind === 'run_risks' ? risksTurn : null;
     const optionPass = optionsTurn?.kind === 'run' ? optionsTurn : null;
     if (riskPass === null && optionPass === null) {
@@ -225,8 +229,8 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
       }) : rawRisks;
       const risks = riskPass === null ? [] : applyDisconfirm(riskPass, { ...riskGate(riskPass, candidates), candidates }).kept.slice(0, 3);
       const options = optionPass === null ? [] : optionCandidates(optionPass, optionArgs, new Set(signals['model.goal_path_factor_ids']));
-      partial = (risks.length > 0 || options.length > 0) && ((diagnosis!.risks !== null && risks.length === 0)
-        || (diagnosis!.options !== null && options.length === 0));
+      partial = (risks.length > 0 || options.length > 0) && ((repair.risks !== null && risks.length === 0)
+        || (repair.options !== null && options.length === 0));
       if (risks.length === 0 && options.length === 0) { outcome = 'empty_gate'; return null; }
       const oldIds = new Set(input.admitted.nodes.map(n => n.id));
       const admit = (keptRisks: typeof risks, keptOptions: typeof options): WidenDraftResult | null => {
@@ -285,7 +289,7 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
   } finally {
     finished = true;
     if (timer !== undefined) clearTimeout(timer);
-    log.info({ diagnosis, calls, ms: outcome === 'sufficient' ? 0 : clock() - started, counts, outcome, enrichment_incomplete: outcome !== 'widened',
+    log.info({ diagnosis, options_arm: input.optionsArm === true, calls, ms: outcome === 'sufficient' ? 0 : clock() - started, counts, outcome, enrichment_incomplete: outcome !== 'widened',
       ...(partial ? { partial: true } : {}) }, 'agent_draft_widen');
   }
 }

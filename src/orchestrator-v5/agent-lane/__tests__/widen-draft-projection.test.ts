@@ -108,7 +108,8 @@ describe('P05b widening retains the level its existing options gate checked', ()
     const callStructured = vi.fn<CallStructuredModel>(async () => ({ text: JSON.stringify(args) }));
     // Re-admitting the raw 90 to the pre-restatement candidate would make it 190/200.
     // Optional widening must close rather than silently reverse this checked move.
-    expect(await widenDraft({ admitted, candidate, brief, deadlineAt: Date.now() + 60_000, callStructured })).toBeNull();
+    // The options arm is PARKED in the served seam (DL 6065138437); this row tests the arm itself, so it opts in.
+    expect(await widenDraft({ admitted, candidate, brief, deadlineAt: Date.now() + 60_000, callStructured, optionsArm: true })).toBeNull();
     expect(callStructured).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(admitted)).toBe(bytes);
   });
