@@ -2596,12 +2596,12 @@ export class SupabaseSessionStore implements SessionStore {
   async readExistingScenario(scenarioId: string) {
     const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
-      .select('id, user_id, graph, brief_text, analysis_invalidated_at')
+      .select('id, user_id, graph, brief_text, analysis_invalidated_at, revision')
       .eq('id', scenarioId)
       .maybeSingle());
     if (error) throw new SessionReadError('Existing scenario read failed', { cause: error, code: errCode(error) });
     if (data === null) return null;
-    return parseExistingScenarioRow(data, scenarioId);
+    return { ...parseExistingScenarioRow(data, scenarioId), revision: isScenarioRevision(data.revision) ? data.revision : undefined };
   }
 
   /** Read actual capture rows; no process-local status and no capped history lookup. */

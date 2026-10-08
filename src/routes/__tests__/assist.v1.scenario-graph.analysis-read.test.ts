@@ -246,7 +246,7 @@ const BASE_CAPTURE_PATH = join(
  * identity — the link writer's own input (`identityRunUseFromFacts`), carried so the Agent's door cannot disagree with
  * the writer. It rides every answered read, `null` when no Run succeeded, so the base fixture's no-fact read shows it.
  */
-const NEW_KEYS = ["analysis_state", "analysis_result", "current_read", "graph_hash", "analysis_admission", "analysis_identity_run_use"] as const;
+const NEW_KEYS = ["analysis_state", "analysis_result", "current_read", "graph_hash", "analysis_admission", "analysis_identity_run_use", "canonical_analysis_view"] as const;
 
 /**
  * Additions made INSIDE a pre-existing key since the base capture — declared
