@@ -488,6 +488,8 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
 // The combined carrier and native-intervention changes retain 46 sites across 25 files; the percent-level predicate
 // (#2034) adds one: 47 across 26. A1's switch-level refusal copy (`shownSwitchLevel`) adds one: 48 across 27.
 // RT-18's card points rule (`meetsReading`) adds one: exact '%' reading only, the writer's own rule.
+// P17 (#2780, 8 Oct): rate-as-quantity.ts adds four TOKEN comparisons, not unit checks: its linear word scanner splits on
+// and matches the literal '%' character inside a goal's label/unit text (Science ruling (b)); a unit classifier does not apply.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
@@ -518,6 +520,7 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "orchestrator-v5/compose/warrant-demotion.ts": 1,
   "orchestrator-v5/context/cqe/compromise-backstop.ts": 1,
   "orchestrator-v5/context/cqe/rules.ts": 1,
+  "orchestrator-v5/goal-target/rate-as-quantity.ts": 4,
   "orchestrator-v5/handlers/describe-changeset.ts": 1,
   "orchestrator-v5/label-value-divergence.ts": 1,
   "orchestrator-v5/routing/baseline-answer-mutation.ts": 1,
