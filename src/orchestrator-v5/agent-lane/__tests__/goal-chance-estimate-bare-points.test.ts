@@ -46,6 +46,9 @@ describe('r10: estimate points require the licence value and its subject', () =>
     expect(clean(sentence, 0)).toBe(line(0).chance);
     expect(clean(sentence, 0)).not.toContain(sentence);
   });
+  it.each(['Raise to £59: >99%.', 'Raise to £59: more than 99%.', 'Raise to £59: 100%.'])('binds the licensed upper display: %s', sentence => {
+    expect(clean(sentence, 100)).toBe(line(100).chance);
+  });
   it('keeps owing separate from the final value-bound egress, with added=0', () => {
     const bare = '‘Raise to £59’: about 67% in this model.';
     const owed = withScreenLinesOwed(`${bare}\n${line().chance}`, [line()]);

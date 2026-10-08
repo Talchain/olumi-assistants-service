@@ -8,7 +8,7 @@ const plain = (s: string): string => foldQuotes(s).replace(/['"`*_]/g, '').repla
 
 /**
  * The shared live, stored-answer replay and conversation-reload boundary. Only a current licence's own percentage
- * AND option/goal label identify a goal point. All other sentence bytes and intervening whitespace stay untouched.
+ * AND an unambiguous option on its scored goal identify a goal point. All other sentence bytes and whitespace stay untouched.
  * The screen producer owns the replacement, including its attribution and notes; each option is said once.
  */
 export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unknown }>(body: T, context: {
@@ -18,17 +18,28 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   if (!context.current || typeof body.assistant_text !== 'string'
     || typeof licence?.olumi_estimate_link_count !== 'number' || !Number.isSafeInteger(licence.olumi_estimate_link_count)
     || licence.olumi_estimate_link_count <= 0) return body;
+  const nodes = rec(context.graph)?.nodes;
+  const goals = (Array.isArray(nodes) ? nodes : []).map(rec).filter(n => n?.kind === 'goal');
+  // Run identity comes ONLY from analysis_result: the producer captures snapshot.goal_node_id on the licence.
+  // Historical Run snapshots may supply it, but current graph selection/order cannot supply or override it.
+  const run = rec(context.analysisResult), enrichment = rec(run?.enrichment);
+  const goalIds = new Set([licence.goal_node_id, rec(run?.input_snapshot)?.goal_node_id,
+    rec(enrichment?.input_snapshot)?.goal_node_id, run?.goal_node_id, enrichment?.goal_node_id]
+    .filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
+  if (goalIds.size !== 1) return body;
+  const [goalId] = goalIds;
+  const goal = goals.find(n => n?.id === goalId);
+  const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
   const lines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, true)
     .filter(l => l.olumi_estimate_link_count !== undefined);
   if (lines.length === 0) return body;
-  const nodes = rec(context.graph)?.nodes;
-  const goals = (Array.isArray(nodes) ? nodes : []).map(rec).filter(n => n?.kind === 'goal');
-  // Historical licences lack snapshots. Resolve only an explicit scored id or the single unambiguous legacy goal.
-  const run = rec(context.analysisResult), enrichment = rec(run?.enrichment);
-  const goalId = licence.goal_node_id ?? rec(run?.input_snapshot)?.goal_node_id
-    ?? rec(enrichment?.input_snapshot)?.goal_node_id ?? run?.goal_node_id ?? enrichment?.goal_node_id ?? rec(context.graph)?.goal_node_id;
-  const goal = typeof goalId === 'string' ? goals.find(n => n?.id === goalId) : goals.length === 1 ? goals[0] : undefined;
-  const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
+  // Also resolve explicitly named unlicensed options: they cannot fall through to another option's goal-only tuple.
+  const labelsById = new Map((Array.isArray(nodes) ? nodes : []).map(rec).flatMap(n =>
+    n?.kind === 'option' && typeof n.id === 'string' && typeof n.label === 'string' ? [[n.id, n.label] as const] : []));
+  for (const [id, label] of Object.entries(rec(licence.option_labels_by_option) ?? {})) {
+    if (typeof label === 'string') labelsById.set(id, label);
+  }
+  const optionLabels = [...labelsById].map(([id, label]) => ({ id, label }));
   const names = (sentence: string, label: string): boolean => {
     const needle = plain(label).trim();
     if (needle === '') return false;
@@ -95,17 +106,26 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         }
         // Parse the percentage expression, including stacked approximation/comparison qualifiers, never a reply shape.
         const percentages = [...figures.matchAll(/((?:(?:(?:no\s+)?(?:less|more|greater)\s+than|at\s+(?:least|most)|up\s+to|under|over|below|above|[<>]=?|[≤≥]|about|roughly|around|approximately|circa)\s*)*)([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*(?:%|\bpercent\b|\bper\s+cent\b)/g)];
+        // A named option binds its ID, even when another option licenses this percentage. A named other goal conflicts.
+        const namedOptions = optionLabels.filter(o => names(subject, o.label));
+        if (namedOptions.length > 1 || goals.some(g => g?.id !== goalId
+          && typeof g?.label === 'string' && names(subject, g.label))) continue;
         const matched = lines.filter(l => {
           const pct = rec(licence.pct_by_option)?.[l.option_id];
           const valueMatches = percentages.some(p => {
             const value = Number(p[2]!.replace(/,/g, ''));
-          const prefix = p[1]!.trim();
-          const comparison = prefix.replace(/\b(?:about|roughly|around|approximately|circa)\b/g, '').trim();
-          return comparison === '' ? value === pct : pct === 0 && value === 1 && ['<', 'less than'].includes(prefix);
+            const prefix = p[1]!.trim();
+            const comparison = prefix.replace(/\b(?:about|roughly|around|approximately|circa)\b/g, '').trim();
+            // pct_by_option is already rounded by the licence producer; only its exact value or ruled edge display binds.
+            return comparison === '' ? value === pct
+              : (pct === 0 && value === 1 && ['<', 'less than'].includes(prefix))
+                || (pct === 100 && value === 99 && ['>', 'more than'].includes(prefix));
           });
-          return valueMatches && (names(subject, l.label) || (typeof goalLabel === 'string' && names(subject, goalLabel)));
+          return valueMatches && (namedOptions.length === 1 ? namedOptions[0]!.id === l.option_id
+            : typeof goalLabel === 'string' && names(subject, goalLabel));
         });
-        if (matched.length === 0) continue;
+        // Goal-only narration must resolve exactly one (option_id, scored goal_id, displayed value), never guess a tie.
+        if (matched.length !== 1) continue;
         const replacement = matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ');
         edits.push({ start, end, replacement });
       }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 
 const line: GoalChanceScreenLine = {
@@ -83,5 +83,58 @@ describe('r10 licence value and subject bound estimate points', () => {
   ])('preserves a non-goal sentence byte for byte: %s', unrelated => {
     const text = `Keep this spacing.  ${unrelated}\t\n${line.chance}`;
     expect(clean(text)).toBe(text);
+  });
+});
+
+describe('r11 option, scored goal and displayed value identity', () => {
+  const multiGraph = { ...graph, goal_node_id: 'other', nodes: [
+    { id: 'other', kind: 'goal', label: 'Supplier reliability' }, ...graph.nodes,
+    { id: 'keep', kind: 'option', label: 'Keep at £49' },
+    { id: 'excluded', kind: 'option', label: 'Excluded option' },
+  ] };
+  const run = (patch: Record<string, unknown> = {}) => ({ input_snapshot: { goal_node_id: 'mrr' },
+    enrichment: { inference_warnings: [{ ...licence, option_ids: ['raise', 'keep'],
+      option_labels_by_option: { raise: line.label, keep: 'Keep at £49' }, pct_by_option: { raise: 67, keep: 30 }, ...patch }] } });
+  const apply = (text: string, analysisResult: unknown = run(), model: unknown = multiGraph) =>
+    withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult, graph: model, current: true }).assistant_text;
+
+  it('uses the scored second goal from analysis_result, never graph order or selection', () => {
+    expect(apply('Monthly recurring revenue reaches its target in 67% of model runs.')).toBe(line.chance);
+    const other = 'Supplier reliability reaches its target in 67% of model runs.';
+    expect(apply(other)).toBe(other);
+  });
+  it.each([
+    'Raise to £59 reaches Supplier reliability in 67% of model runs.',
+    'Keep at £49 reaches Monthly recurring revenue in 67% of model runs.',
+    'Excluded option reaches Monthly recurring revenue in 67% of model runs.',
+    'The chance of supplier failure is 10%.',
+  ])('preserves a sentence without its licensed tuple: %s', text => {
+    expect(apply(text)).toBe(text);
+  });
+  it('a tied goal percentage cannot invent an option identity', () => {
+    const tied = run({ pct_by_option: { raise: 67, keep: 67 } });
+    const text = 'Monthly recurring revenue reaches its target in 67% of model runs.';
+    expect(apply(text, tied)).toBe(text);
+    expect(apply('Raise to £59: 67%.', tied)).toBe(line.chance);
+  });
+  it('duplicate option labels cannot invent an option identity', () => {
+    const text = 'Raise to £59: 67%.';
+    expect(apply(text, run({ option_labels_by_option: { raise: line.label, keep: line.label } }))).toBe(text);
+  });
+  it('requires a scored goal id on analysis_result, even beside a sole graph goal', () => {
+    const { goal_node_id: _id, goal_label: _label, ...historical } = licence;
+    const noIdentity = { enrichment: { inference_warnings: [historical] } };
+    const text = 'Raise to £59: 67%.';
+    expect(apply(text, noIdentity, { ...graph, goal_node_id: 'mrr' })).toBe(text);
+  });
+  it('rejects conflicting scored goal identities on the same analysis_result', () => {
+    const text = 'Raise to £59: 67%.';
+    expect(apply(text, run({ goal_node_id: 'other' }))).toBe(text);
+  });
+  it('uses the exact licensed value at nearest-five rounding, never the raw probability', () => {
+    const rounded = run({ pct_by_option: { raise: 65, keep: 30 }, display_rounding_by_option: { raise: 'nearest_5' } });
+    const expected = goalChanceScreenLinesForAgent(rounded, multiGraph, true).find(l => l.option_id === 'raise')!.chance;
+    expect(apply('Raise to £59: about 65%.', rounded)).toBe(expected);
+    for (const text of ['Raise to £59: about 67%.', 'Raise to £59: about 66.7%.']) expect(apply(text, rounded)).toBe(text);
   });
 });

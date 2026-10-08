@@ -1936,7 +1936,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * through one would add a language model to an action that is already
        * unambiguous. So it goes straight to `/orchestrate/v2/turn` — the same
        * boundary every tool in this lane writes through, carrying the caller's
-       * own authorization — and the response is returned verbatim.
+       * own authorization — and the response crosses the shared goal-point egress boundary.
        *
        * ⛔ PREVIEW STILL REFUSES. That is the hard boundary of this lane: a
        * read-only preview may not mutate, and a forward is a mutation. The
@@ -1950,7 +1950,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           answerKind: 'substantive',
         });
         return reply.code(200).send({
-          ...finaliseV5Response(composedRefusal, { scenarioId, runDeltaBoundByCaller: true }),
+          ...withEstimateGoalPointsAtEgress(finaliseV5Response(composedRefusal, { scenarioId, runDeltaBoundByCaller: true }), {
+            analysisResult: null, graph: null, current: false,
+          }),
           _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'read_only_preview' },
           _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
@@ -1960,6 +1962,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
       )('/orchestrate/v2/turn', body);
+      // Forwarded board replies use the same current Run boundary before both history and user-visible egress.
+      const forwardedState = forwarded.status === 200 && typeof forwarded.json.assistant_text === 'string'
+        ? await readBackState(dispatchFor(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined), scenarioId)
+        : undefined;
+      const forwardedBody = withEstimateGoalPointsAtEgress(forwarded.json, {
+        analysisResult: forwardedState?.analysisResult, graph: forwardedState?.graph,
+        current: (forwardedState?.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+      });
       /**
        * ⛔ THE AGENT MUST KNOW WHAT THE USER CHANGED ON THE BOARD. Measured on served
        * cc7b26c: after a canvas edit (Tech lead hires 0 → 1), "Re-run the analysis.
@@ -1970,7 +1980,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * appended to this session's history, marked as a board edit — not as
        * something the user asked the Agent to do.
        */
-      const narration = typeof forwarded.json.assistant_text === 'string' ? forwarded.json.assistant_text.trim() : '';
+      const narration = typeof forwardedBody.assistant_text === 'string' ? forwardedBody.assistant_text.trim() : '';
       if (forwarded.status === 200 && kind === 'system_event' && narration.length > 0) {
         histories.set(sessionId, [
           ...histories.get(sessionId),
@@ -1978,7 +1988,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ]);
       }
       return reply.code(forwarded.status).send({
-        ...forwarded.json,
+        ...forwardedBody,
         // Underscore sidecar: egress is `.strict()`. Says plainly that this
         // turn was NOT agent-handled, so a reader cannot mistake a forwarded
         // canvas edit for something the Agent decided.

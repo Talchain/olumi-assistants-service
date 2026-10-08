@@ -169,14 +169,15 @@ const NEWEST_FIRST = [
 beforeEach(() => { readRecent.mockResolvedValue(NEWEST_FIRST); });
 
 describe("the conversation, when asked", () => {
-  it("r10 RED: reload labels a legacy Run's recorded goal point and preserves unrelated risk bytes", async () => {
+  it.each([true, false])("r11 reload: binds only a recorded scored-goal identity (%s), preserving risk bytes", async scored => {
     const graph = { nodes: [
       { id: "raise", kind: "option", label: "Raise to £59" },
       { id: "keep", kind: "option", label: "Keep at £49" },
       { id: "revenue", kind: "goal", label: "Revenue goal" },
     ], edges: [] };
-    // A stored pre-r10 licence: exact option identities and percentages, but no label snapshots yet.
-    const result = { type: "analysis_result", enrichment: { inference_warnings: [{
+    // Historical labels may come from the graph; scored identity must come from analysis_result.
+    const result = { type: "analysis_result", ...(scored ? { input_snapshot: { goal_node_id: "revenue" } } : {}),
+      enrichment: { inference_warnings: [{
       code: "GOAL_CHANCE_LICENSED", form: "each", option_ids: ["raise", "keep"],
       pct_by_option: { raise: 67, keep: 30 }, olumi_estimate_link_count: 1,
       target: { comparator: "at_least", value: 1000, unit: "£" },
@@ -195,7 +196,8 @@ describe("the conversation, when asked", () => {
     const response = await read(app, SCENARIO, { include_conversation_turns: true });
     expect(response.statusCode).toBe(200);
     const text = response.json().conversation_turns[0].assistant_message as string;
-    expect(text).not.toContain(bare);
+    if (scored) expect(text).not.toContain(bare);
+    else expect(text).toBe(`${bare}\n${preserved}\n${labelled}`);
     expect(text).toContain(labelled);
     expect(text.split(labelled).length - 1).toBe(1);
     expect(text).toContain(preserved);

@@ -70,9 +70,9 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     for (const writer of ['withDisclosures(', 'withBreakEvenAnswer(', 'enforceLeaderLicenceAtFinalEgress(', 'withEstimateGoalPointsAtEgress(']) expect(ROUTE).toContain(writer);
   });
 
-  it('r10: live replies, same-id replay and conversation reload use the ONE estimate point classifier', () => {
+  it('r11: live, preview, forwarded replies, same-id replay and reload use the ONE estimate point classifier', () => {
     const gate = 'withEstimateGoalPointsAtEgress(';
-    expect(ROUTE.split(gate).length - 1).toBe(2);
+    expect(ROUTE.split(gate).length - 1).toBe(4);
     expect(RELOAD.split(gate).length - 1).toBe(1);
     const liveAt = ROUTE.lastIndexOf(gate);
     expect(liveAt).toBeLessThan(ROUTE.indexOf(CALL));

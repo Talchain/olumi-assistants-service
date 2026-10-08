@@ -29,6 +29,7 @@ const SIZE_QUESTION = 'How sure are you of that size?';
 // RC6 keeps the first screen unit intact and drops only the later copy of its question.
 const SCREEN_T1B_SAID_ONCE = SCREEN_T1B.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
 let analysisResult: Json = READ.analysis_result;
+let forwardedText = 'ok';
 
 const rows = new Map<string, Json>();
 const store = {
@@ -71,7 +72,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
-      response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
+      response_version: 2, assistant_text: forwardedText, suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [analysisResult], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
@@ -82,7 +83,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
+  beforeEach(() => { rows.clear(); forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
@@ -177,6 +178,17 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const replayed = replay.json() as Body;
     expect(replayed._agent.replayed).toBe(true);
     assertLabelled(replayed.assistant_text);
+  });
+
+  it('r11: a forwarded assistant reply crosses the same current-Run boundary', async () => {
+    const line = estimateScreenLine();
+    const unrelated = 'The chance of supplier failure is 10%.';
+    forwardedText = `Raise to £59: 67%. ${unrelated}`;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'system_event', scenario_id: SCENARIO, event: { kind: 'structural_rename', target_id: 'raise_prices_10', label: 'Raise to £59' },
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().assistant_text).toBe(`${line.chance} ${unrelated}`);
   });
 
   it('fixture control: the served readback carries a range record and withholds the leader on a current Run', () => {
