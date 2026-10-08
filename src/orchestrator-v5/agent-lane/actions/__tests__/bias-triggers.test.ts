@@ -20,6 +20,7 @@ function facts(over: Partial<ActionFacts> = {}): ActionFacts {
     goalPresent: false,
     goalLabel: '',
     identityReading: null,
+    currentLevelQuestion: null,
     goalKind: null,
     targetPresent: false,
     approvalWaiting: false,

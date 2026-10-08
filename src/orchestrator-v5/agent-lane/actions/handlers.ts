@@ -32,6 +32,7 @@ export interface ActionHandler {
 
 export const HANDLERS: Readonly<Record<ActionId, ActionHandler>> = {
   confirm_reading: { route: 'propose_identity', gate: 'offer' },
+  set_current_level: { route: 'typed_reply', gate: 'offer' },
   review: { route: 'decision_review', gate: 'offer' },
   what_changes: { route: 'what_changes', gate: 'own' },
   strengthen: { route: 'strengthen_s1', gate: 'offer' },
@@ -102,6 +103,7 @@ function otherOffers(bar: ActionBarV1, not: ActionId | null, max: number): Actio
 
 const CANT_YET: Record<ActionId, string> = {
   confirm_reading: 'I can’t confirm a reading yet',
+  set_current_level: 'I can’t ask for the current level yet',
   review: 'I can’t review this decision yet',
   what_changes: 'I can’t say what would change this yet',
   strengthen: 'I can’t strengthen the model yet',
@@ -163,6 +165,8 @@ function estimateReply(action: 'bias_anchoring' | 'check_estimates', f: ActionFa
 function gapReply(action: ActionId, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
   if (action === 'set_deadline') return { text: chanceGoalDeadlineAsk(f.goalLabel), exits: [], outcome: 'ran' };
   if (action === 'set_goal') return { text: composeGoalTargetQuestion(), exits: [], outcome: 'ran' };
+  // GOAL-REACH 3b: the exact words the answer path persists as its ask (one source: goalLevelAskOf).
+  if (action === 'set_current_level' && f.currentLevelQuestion !== null) return { text: f.currentLevelQuestion, exits: [], outcome: 'ran' };
   const goalWords = f.goalLabel !== '' ? `‘${f.goalLabel}’` : 'your goal';
   const elements: { name: string; present: boolean; question: string; action?: ActionId }[] = [
     { name: 'goal', present: f.goalPresent, question: 'What are you trying to achieve with this decision?' },
