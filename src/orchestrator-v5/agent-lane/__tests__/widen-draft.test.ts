@@ -10,6 +10,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { risksTurnFromSignals, widenGate, widenTurnFromSignals } from '../method-turn/widen-turn.js';
+import * as widenDoor from '../method-turn/widen-turn.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { inertRiskBranch, preconditionRiskIds, withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
@@ -58,6 +59,28 @@ const fixture = (args: Parameters<typeof candidate>[0] = {}) => {
   const c = candidate(args);
   // The options arm is PARKED in the served seam (DL 6065138437); these unit rows opt in to keep testing it.
   return { candidate: c, admitted: ADMIT(c, {}, BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, optionsArm: true };
+};
+const churnFixture = () => {
+  const input = fixture({ risks: 1 });
+  const brief = 'Reach £20,000 MRR within 12 months. Raise £59 moves Pro monthly price from £49 to £59 per subscriber per month. Keep current pricing is the baseline. Pro monthly churn is 6% and must stay at or below 8%. Pro paying subscribers are exposed to the price rise. Price-rise churn backlash is an existing risk.';
+  const c: CandidateModel = {
+    ...input.candidate,
+    goal: { metric: 'MRR', operator: '>=', value: 20000, unit: '£/month', horizon_months: 12, provenance: 'explicit' },
+    constraints: [{ metric: 'Pro monthly churn', operator: '<=', value: 8, unit: '%', provenance: 'explicit', frame: 'level' }],
+    options: [
+      { label: 'Keep current pricing', provenance: 'explicit', changes: [], interventions: [], is_status_quo: true },
+      opt('Raise £59', 'Pro monthly price', 59, '£/subscriber/month'),
+    ],
+    factors: [factor('Pro monthly price', '£/subscriber/month', 49, 200), factor('Pro monthly churn', '%', 6, 100)],
+    risks: [{ label: 'Price-rise churn backlash', provenance: 'explicit' }],
+    outcomes: [{ label: 'Pro paying subscribers', provenance: 'explicit', unit: 'subscribers', plausible_max: 2000 }],
+    links: [
+      { from: 'Pro monthly price', to: 'Pro paying subscribers', direction: 'negative', provenance: 'inferred' },
+      { from: 'Pro paying subscribers', to: 'MRR', direction: 'positive', provenance: 'inferred' },
+      { from: 'Pro monthly price', to: 'Pro monthly churn', direction: 'positive', provenance: 'inferred' },
+    ],
+  };
+  return { ...input, candidate: c, admitted: ADMIT(c, {}, brief), brief, optionsArm: false };
 };
 const riskSuggestions = (sameLever = false) => [
   { label: 'Recruitment delay', category: 'timing', hits_id: sameLever ? 'grow_engineering_team' : 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'filling both developer roles quickly', watch_for: 'offers remain unaccepted' },
@@ -208,6 +231,86 @@ describe('P05b pure typed draft diagnosis', () => {
 });
 
 describe('P05b automatic widening, rows bound to graph identity', () => {
+  it('dedupe-B1-churn: drop the typed limit restatement and keep a new driver with the same attachment', async () => {
+    const input = churnFixture();
+    const limit = input.admitted.goal_constraints.find(c => c.node_id === 'pro_monthly_churn')!;
+    expect(limit).toMatchObject({ node_id: 'pro_monthly_churn', label: 'Pro monthly churn', operator: '<=', value: 8 });
+    expect(input.admitted.nodes.find(n => n.id === limit.node_id)).toMatchObject({ id: limit.node_id, label: 'Pro monthly churn' });
+    expect(input.admitted.nodes.find(n => n.id === 'raise_59')).toMatchObject({ id: 'raise_59', label: 'Raise £59' });
+    const attachment = { category: 'external', mechanism: 'drives', hits_id: 'raise_59', through_id: 'pro_monthly_price', through_direction: 'positive', affects_id: 'pro_paying_subscribers', direction: 'negative', relies_on: 'customers accepting the price rise', watch_for: 'customers move to other suppliers' };
+    const restatement = { ...attachment, label: 'Churn guardrail breach', restates_id: limit.node_id };
+    const competitor = { ...attachment, label: 'Competitor price undercut', restates_id: null };
+    const gate = vi.spyOn(widenDoor, 'riskGate'); // Pass through to the real shared gate.
+    const callStructured = generator([restatement, competitor], { options: [] });
+    const out = await widening.widenDraft({ ...input, callStructured });
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(gate.mock.calls[0]![1]).toEqual([expect.objectContaining({ ...attachment, label: competitor.label })]);
+    expect(out, JSON.stringify(gate.mock.results[0]!.value)).not.toBeNull();
+    expect(addedNodes(input.admitted, out!.admitted, 'risk').map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: 'competitor_price_undercut', label: 'Competitor price undercut' },
+    ]);
+    expect(out!.admitted.nodes.some(n => n.id === 'churn_guardrail_breach' || n.label === 'Churn guardrail breach')).toBe(false);
+    expect(out!.admitted.nodes.find(n => n.id === 'competitor_price_undercut')!.draft_widening).toMatchObject({
+      hits: { id: 'raise_59', label: 'Raise £59' }, through: { id: 'pro_monthly_price', direction: 'positive' },
+      affects: { id: 'pro_paying_subscribers', direction: 'negative' }, mechanism: 'drives',
+    });
+    expectOriginalIdentity(input.admitted, out!.admitted);
+  });
+
+  it('dedupe-user-risk: drop an existing risk restatement and keep its null sibling', async () => {
+    const input = fixture({ risks: 1 });
+    const existing = input.admitted.nodes.find(n => n.kind === 'risk' && n.id === 'supplier_interruption')!;
+    expect(existing).toMatchObject({ id: 'supplier_interruption', label: 'Supplier interruption' });
+    const attachment = riskSuggestions()[1]!;
+    const restatement = { ...attachment, label: 'Supplier interruption rephrased', restates_id: existing.id };
+    const sibling = { ...attachment, restates_id: null };
+    const gate = vi.spyOn(widenDoor, 'riskGate');
+    const out = await widening.widenDraft({ ...input, callStructured: generator([restatement, sibling], { options: [] }) });
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(gate.mock.calls[0]![1]).toEqual([expect.objectContaining(attachment)]);
+    expect(out, JSON.stringify(gate.mock.results[0]!.value)).not.toBeNull();
+    expect(addedNodes(input.admitted, out!.admitted, 'risk').map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: 'coordination_drag', label: 'Coordination drag' },
+    ]);
+    expect(out!.admitted.nodes.some(n => n.id === 'supplier_interruption_rephrased' || n.label === restatement.label)).toBe(false);
+    expect(out!.admitted.nodes.find(n => n.id === existing.id)).toEqual(existing);
+    expectOriginalIdentity(input.admitted, out!.admitted);
+  });
+
+  it.each(['developer_hires', 'missing_restatement_id'])('dedupe-CONTRAST-%s: unrelated ids still pass through the shared risk gate', async (restates_id) => {
+    const input = fixture({ risks: 1 });
+    expect(input.admitted.goal_constraints.some(c => c.node_id === restates_id)).toBe(false);
+    expect(input.admitted.nodes.some(n => n.kind === 'risk' && n.id === restates_id)).toBe(false);
+    if (restates_id === 'developer_hires') expect(input.admitted.nodes.find(n => n.id === restates_id)).toMatchObject({ kind: 'factor', label: 'Developer hires' });
+    const attachment = riskSuggestions()[1]!;
+    const suggestion = { ...attachment, restates_id };
+    const gate = vi.spyOn(widenDoor, 'riskGate');
+    await widening.widenDraft({ ...input, callStructured: generator([suggestion], { options: [] }) });
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(gate.mock.calls[0]![1]).toEqual([expect.objectContaining(attachment)]);
+  });
+
+  it('dedupe-exact-line: risks line 2 lists limit and risk identities; the opt-in options pass has no such line', async () => {
+    const input = churnFixture();
+    const graph = graphOf(input.admitted);
+    const line = widening.draftWideningRisksLine(graph);
+    const callStructured = generator([], { options: [] });
+    await widening.widenDraft({ ...input, optionsArm: true, callStructured });
+    const requests = callStructured.mock.calls.map(([req]) => req);
+    expect(requests).toHaveLength(2);
+    const risksRequest = requests.find(isRisks)!;
+    const optionsRequest = requests.find(isOptions)!;
+    expect(risksRequest.instructions.split('\n')[1]).toBe(line);
+    expect(line).toContain(`Limits the user already set: ${JSON.stringify([{ id: 'pro_monthly_churn', label: 'Pro monthly churn' }])}.`);
+    expect(line).toContain(`Risks already in the model: ${JSON.stringify([{ id: 'price_rise_churn_backlash', label: 'Price-rise churn backlash' }])}.`);
+    const riskItemSchema = (risksRequest.schema as Rec).properties.risk_suggestions.items;
+    expect(riskItemSchema.properties.restates_id).toEqual({ type: ['string', 'null'] });
+    expect(riskItemSchema.required).toContain('restates_id');
+    expect(optionsRequest.instructions).not.toContain(line);
+    expect(optionsRequest.instructions).not.toContain('restates_id');
+    expect(optionsRequest.instructions.split('\n')[1]).toBe(OPTIONS_PREAMBLE);
+  });
+
   it('dv-rich: a sufficient draft makes zero calls and ships byte-identical with zero widening latency', async () => {
     const input = fixture({ counterCase: true });
     const graph = graphOf(input.admitted);
@@ -729,7 +832,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(widening.DRAFT_WIDENING_PREAMBLE).toBe(PREAMBLE);
     expect(requests).toHaveLength(2);
     for (const req of requests) expect(req.instructions.split('\n')[0]).toBe(PREAMBLE);
-    expect(requests.find(isRisks)!.instructions).toBe(`${PREAMBLE}\n${(risksTurn as Rec).directive}`);
+    expect(requests.find(isRisks)!.instructions).toBe(`${PREAMBLE}\n${widening.draftWideningRisksLine(graphOf(input.admitted))}\n${(risksTurn as Rec).directive}`);
     expect(widening.DRAFT_WIDENING_OPTIONS_PREAMBLE).toBe(OPTIONS_PREAMBLE);
     expect(requests.find(isOptions)!.instructions).toBe(`${PREAMBLE}\n${OPTIONS_PREAMBLE}\n${(optionsTurn as Rec).directive}`);
     expect(createHash('sha256').update(readFileSync(new URL('../method-turn/widen-turn.ts', import.meta.url))).digest('hex')).toBe(WIDEN_TURN_SHA256);

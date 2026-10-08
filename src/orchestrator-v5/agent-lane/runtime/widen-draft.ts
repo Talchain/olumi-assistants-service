@@ -49,6 +49,24 @@ export interface DraftDiagnosis {
 }
 
 export const DRAFT_WIDENING_PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
+/** Risks pass only (DL ruling (A), 8 Oct): every item says, BY ID, whether it only restates a limit the user set or a risk
+ *  already in the model; such an item is dropped by type, never by its words (served B1: "Churn guardrail breach"). */
+export function draftWideningRisksLine(graph: unknown): string {
+  const raw = rec(graph);
+  const nodes = Array.isArray(raw?.nodes) ? raw.nodes.map(rec).filter((n): n is Rec => n !== undefined) : [];
+  const labelOf = (id: unknown) => nodes.find(n => n.id === id)?.label;
+  const limits = (Array.isArray(raw?.goal_constraints) ? raw.goal_constraints : []).map(rec)
+    .filter((c): c is Rec => typeof c?.node_id === 'string').map(c => ({ id: c.node_id as string, label: (labelOf(c.node_id) ?? c.label ?? c.node_id) as string }));
+  const risks = nodes.filter(n => n.kind === 'risk' && typeof n.id === 'string').map(n => ({ id: n.id as string, label: String(n.label ?? n.id) }));
+  return `For each risk, set restates_id to the id of a limit or risk below that it only restates, or null when it adds something new. Limits the user already set: ${JSON.stringify(limits)}. Risks already in the model: ${JSON.stringify(risks)}.`;
+}
+/** The ids a widened risk may restate (limits ∪ risks); an item naming one is dropped. */
+function restatableIds(graph: unknown): ReadonlySet<string> {
+  const raw = rec(graph);
+  const nodes = Array.isArray(raw?.nodes) ? raw.nodes.map(rec).filter((n): n is Rec => n !== undefined) : [];
+  return new Set([...(Array.isArray(raw?.goal_constraints) ? raw.goal_constraints : []).map(c => rec(c)?.node_id),
+    ...nodes.filter(n => n.kind === 'risk').map(n => n.id)].filter((x): x is string => typeof x === 'string'));
+}
 /** True for Olumi's draft-time widening requests (both passes open with the preamble); lets callers tell them from drafting. */
 export const isDraftWideningRequest = (req: { readonly instructions?: unknown }): boolean =>
   typeof req.instructions === 'string' && req.instructions.startsWith(DRAFT_WIDENING_PREAMBLE);
@@ -112,6 +130,7 @@ const risksSchema = (): Rec => objectSchema({ risk_suggestions: { type: 'array',
   label: string, category: { type: 'string', enum: RISK_METHOD.categories },
   mechanism: { type: 'string', enum: ['drives', 'relies_on'] }, hits_id: string, through_id: string,
   through_direction: direction, affects_id: string, direction, relies_on: string, watch_for: string,
+  restates_id: { type: ['string', 'null'] },
 }) } });
 
 /** Re-admission may change frames or repair old entities. Any such change costs only this optional widening. */
@@ -215,18 +234,22 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
     };
     const work = async (): Promise<WidenDraftResult | null> => {
       const [riskReply, optionReply] = await Promise.allSettled([
-        riskPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${riskPass.directive}`, risksSchema()),
+        riskPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${draftWideningRisksLine(graph)}\n${riskPass.directive}`, risksSchema()),
         optionPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${DRAFT_WIDENING_OPTIONS_PREAMBLE}\n${optionPass.directive}`, OPTIONS_SCHEMA),
       ]);
       if (finished) return null;
       const riskArgs = riskReply.status === 'fulfilled' ? riskReply.value : undefined;
       const optionArgs = optionReply.status === 'fulfilled' ? optionReply.value : undefined;
       const rawRisks = rec(riskArgs)?.risk_suggestions;
+      const restatable = restatableIds(graph);
       // These automatic suggestions have a stricter copy rule than the shared interactive risk gate.
       const candidates = Array.isArray(rawRisks) ? rawRisks.filter(item => {
         const risk = rec(item);
+        // Typed dedupe: an item that names a user limit or an existing risk as what it restates adds nothing.
+        if (typeof risk?.restates_id === 'string' && restatable.has(risk.restates_id)) return false;
         return ![risk?.label, risk?.relies_on, risk?.watch_for].some(hasForbiddenWideningWords);
-      }) : rawRisks;
+        // The shared riskGate's RK-SCHEMA is strict: the draft-time-only field never reaches it.
+      }).map(item => { const { restates_id: _restates, ...rest } = rec(item) ?? {}; return rest; }) : rawRisks;
       const risks = riskPass === null ? [] : applyDisconfirm(riskPass, { ...riskGate(riskPass, candidates), candidates }).kept.slice(0, 3);
       const options = optionPass === null ? [] : optionCandidates(optionPass, optionArgs, new Set(signals['model.goal_path_factor_ids']));
       partial = (risks.length > 0 || options.length > 0) && ((repair.risks !== null && risks.length === 0)
