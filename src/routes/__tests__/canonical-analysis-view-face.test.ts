@@ -13,6 +13,7 @@ const saved: Json = JSON.parse(readFileSync(new URL('./fixtures/canonical-view-b
 // src/canvas/runView/runView.ts:25 / :27 @ dl/ws5-option-card-chance-headline
 // 8f53cea7eb4cb04bea5bd54b3f06d2f076d5cc8c (same strings on staging 5bd88ba9).
 const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
+const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
 const graph = { nodes: [
   { id: 'raise', kind: 'option', label: 'Raise' }, { id: 'keep', kind: 'option', label: 'Keep' },
@@ -114,17 +115,17 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
 
   it('FACE-WITHHELD-IDENTITY: Run-wide words precede stored certainty and the licence line', () => {
     expect(readStoredGoalCertainty([certainty])).toBeDefined();
-    expect(cell(project(args([licence, identity], [certainty]))).face).toBe(identity.message);
+    expect(cell(project(args([licence, identity], [certainty]))).why).toBe(identity.message);
   });
 
   it('FACE-WITHHELD-CERTAINTY: the same Run’s recorded say precedes the licence line', () => {
-    expect(cell(project(args([licence], [certainty]))).face).toBe(certainty.say);
+    expect(cell(project(args([licence], [certainty]))).why).toBe(certainty.say);
     const bad = { ...certainty, no_break_even: 'unknown_future_reason' };
-    expect(cell(project(args([licence], [bad]))).face).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
+    expect(cell(project(args([licence], [bad]))).why).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
   });
 
   it('FACE-WITHHELD-LICENCE: the named licence line precedes the option fallback', () => {
-    expect(cell(project(args())).face).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
+    expect(cell(project(args())).why).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
   });
 
   it('FACE-LABELS: only a recorded string or graph label may name a withheld option', () => {
@@ -132,19 +133,56 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
       option_labels_by_option: {} }]);
     input.graph = { ...graph, nodes: graph.nodes.map(node => node.id === 'raise' ? { ...node, id: 'toString' } : node) };
     input.currentResult.enrichment.option_comparison[0].option_id = 'toString';
-    expect(cell(project(input), 'toString').face).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
+    expect(cell(project(input), 'toString').why).toBe(`‘Raise’: ${OPTION_CHANCE_WITHHELD}`);
   });
 
   it('FACE-WITHHELD-FALLBACK: no identity, certainty or licence line uses the frozen option sentence', () => {
     const input = args([{ code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', option_ids: ['raise'] }]);
-    expect(cell(project(input)).face).toBe(OPTION_CHANCE_WITHHELD);
+    expect(cell(project(input)).why).toBe(OPTION_CHANCE_WITHHELD);
   });
 
   it('FACE-BYTE-IDENTITY: fallback and stale bytes equal DGAI’s pasted constants, including U+2019', () => {
-    const fallback = cell(project(args([{ code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', option_ids: ['raise'] }]))).face;
+    const fallback = cell(project(args([{ code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', option_ids: ['raise'] }]))).why;
     const stale = project({ ...args(), derivation: { freshness: 'stale' }, analysisState: { run_state: { kind: 'complete_stale' } } });
     expect(Buffer.from(fallback ?? '')).toEqual(Buffer.from(OPTION_CHANCE_WITHHELD));
     expect(Buffer.from(stale.face_when_stale ?? '')).toEqual(Buffer.from(RUN_AGAIN_FOR_CHANCE));
+  });
+
+  it('FACE-WITHHELD-SHORT: every withheld face is the frozen short marker', () => {
+    const labels = args([{ ...licence, option_ids: ['toString', 'keep'], withheld_option_ids: ['toString'],
+      option_labels_by_option: {} }]);
+    labels.graph = { ...graph, nodes: graph.nodes.map(node => node.id === 'raise' ? { ...node, id: 'toString' } : node) };
+    labels.currentResult.enrichment.option_comparison[0].option_id = 'toString';
+    const placeholder = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', message: 'Not shown. A link is not sized.' };
+    const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: 'Not shown. The target cannot be tested yet.' };
+    const cases = [
+      { input: args([licence, identity], [certainty]), id: 'raise' },
+      { input: args([licence], [certainty]), id: 'raise' },
+      { input: args([licence], [{ ...certainty, no_break_even: 'unknown_future_reason' }]), id: 'raise' },
+      { input: args(), id: 'raise' },
+      { input: labels, id: 'toString' },
+      { input: args([{ code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', option_ids: ['raise'] }]), id: 'raise' },
+      { input: args([licence, placeholder, target, identity, identity]), id: 'raise' },
+      { input: args([licence, { ...identity, message: 'Not shown. raw_node_id is unresolved.' }]), id: 'raise' },
+    ];
+    for (const { input, id } of cases) {
+      const c = cell(project(input), id);
+      expect(c.kind).toBe('withheld');
+      expect(Buffer.from(c.face)).toEqual(Buffer.from(OPTION_CHANCE_NOT_SHOWN));
+      expect(c.face.split(/\s+/).length).toBeLessThanOrEqual(8);
+      expect(c.face).not.toContain('?');
+    }
+  });
+
+  it('FACE-NON-WITHHELD-NO-WHY: figure and range cells have no why own-property', () => {
+    const figure = cell(project(args()), 'keep');
+    const range = cell(project(args([licence, { code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Some options have a licensed range.', option_ids: ['raise'], range_by_option: {
+      raise: { low_pct: 23, high_pct: 90, low_rounding: 'whole', high_rounding: 'nearest_5',
+        kind: 'link_strength', from: 'price', to: 'revenue', among: 'all' },
+    } }])));
+    expect(figure.kind).toBe('figure');
+    expect(range.kind).toBe('range');
+    for (const c of [figure, range]) expect(Object.hasOwn(c, 'why')).toBe(false);
   });
 
   it('FACE-STALE: the rerun sentence exists only beside a real stale Run, without reopening currentness gates', () => {
@@ -191,9 +229,9 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
   it('FACE-IDENTITY-READER: moved UI reader keeps target precedence, deduplication and unsafe-word fallback', () => {
     const placeholder = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', message: 'Not shown. A link is not sized.' };
     const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: 'Not shown. The target cannot be tested yet.' };
-    expect(cell(project(args([licence, placeholder, target, identity, identity]))).face)
+    expect(cell(project(args([licence, placeholder, target, identity, identity]))).why)
       .toBe(`${target.message} ${identity.message}`);
-    expect(cell(project(args([licence, { ...identity, message: 'Not shown. raw_node_id is unresolved.' }]))).face)
+    expect(cell(project(args([licence, { ...identity, message: 'Not shown. raw_node_id is unresolved.' }]))).why)
       .toBe("Not shown. Olumi can't give each option's figures for this goal from this run.");
   });
 });
