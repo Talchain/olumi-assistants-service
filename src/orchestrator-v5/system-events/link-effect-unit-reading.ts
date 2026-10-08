@@ -351,11 +351,11 @@ export function prepareLinkEffectUnitReadings(
     // A gauge not yet written is a fallback for an unknown quantity. This end's own noun or explicitly stated unit
     // supplies its unit first; U1 still guards every stored unit/level/other size. Require literal evidence so an Agent
     // unit alone cannot supersede the gauge, and an already stored gauge remains established.
+    // A structured percent LEVEL keeps its authority: only a percentage-point unit may supersede its gauge.
+    const levelAllows = (u: string) => !percentLevels.has(String(node.id)) || levelUnitKey(u) === levelUnitKey('%');
     const ownBeforeGauge = reading?.via === 'gauge' && reading.stored !== true
-      && ((ownNoun !== undefined && eligible(node, edges, from, to, ownNoun.unit))
-        || (unit !== undefined && eligible(node, edges, from, to, unit)
-          // A structured percent LEVEL keeps its authority: only a percentage-point unit may supersede its gauge.
-          && (!percentLevels.has(String(node.id)) || levelUnitKey(unit) === levelUnitKey('%'))));
+      && ((ownNoun !== undefined && eligible(node, edges, from, to, ownNoun.unit) && levelAllows(ownNoun.unit))
+        || (unit !== undefined && eligible(node, edges, from, to, unit) && levelAllows(unit)));
     const mediatedUnit = reading === undefined || (reading.via === 'gauge' && (node === source || ownBeforeGauge)) ? undefined : reading.unit;
     const magnitude = view.get(String(node.id));
     const frame = magnitude === undefined ? undefined : resolveMagnitudeFrame(magnitude);

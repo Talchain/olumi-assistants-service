@@ -636,7 +636,10 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       const assistantText = replacesHeldFigure && heldFigure !== null
         ? userFigureReplacedReceipt(heldFigure, resultBandWord)
         : noop
-        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean, unsized: isPlaceholderLink(rawTargetEdge ?? targetEdge) })
+        ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean,
+            // The SAVED sizing (a review may size a placeholder as Olumi's accepted estimate, `sizedByApproval`).
+            unsized: isPlaceholderLink((result.mutatedGraph as { edges?: Array<{ from?: unknown; to?: unknown }> }).edges
+              ?.find((e) => e.from === parsed.from && e.to === parsed.to)) })
         : formatEdgeAdjustment({
             fromLabel,
             toLabel,

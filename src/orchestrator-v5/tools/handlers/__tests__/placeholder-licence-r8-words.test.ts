@@ -79,6 +79,13 @@ describe('r9 finding 1: the NO-OP receipt never names a placeholder band', () =>
     expect(out.assistant_text).toContain('has not been sized yet');
     expect(out.assistant_text).not.toMatch(/already (strong|moderate|slight|very strong)/);
   });
+  it('r10: a door default set to its own value is SAVED as Olumi accepted estimate, never "not sized yet"', async () => {
+    const g = withDoorDefault();
+    const out = await createAdjustEdgeStrengthHandler()(invocation(g, 'f-budget→g-revenue', 0.5));
+    const saved = (out.mutated_graph as GraphV3T).edges.find((x) => x.from === 'f-budget' && x.to === 'g-revenue');
+    expect(linkSizing(saved)).toBe('olumi_accepted');
+    expect(out.assistant_text).not.toContain('has not been sized yet');
+  });
   it('CONTROL: the sized fixture link (0.4/0.1) set to its own value still says "is already …"', async () => {
     const out = await createAdjustEdgeStrengthHandler()(invocation(structuredClone(buildD1Fixture()), 'f-budget→g-revenue', 0.4));
     expect(out.assistant_text).toMatch(/is already /);

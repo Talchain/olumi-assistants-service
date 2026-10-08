@@ -19,6 +19,7 @@
  */
 import { readRecord } from './fragile-link-challenge.js';
 import { edgeReviewedByUser } from '../../cee/graph-readiness/obligation-provenance.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 export type EdgeAuthorship = 'olumi_assumed' | 'not_olumi_assumed' | 'not_tested';
 
@@ -29,7 +30,11 @@ export const OLUMI_ASSUMED_EDGE_SOURCES: readonly string[] = Object.freeze(['cee
 export function classifyEdgeAuthorship(edge: Record<string, unknown>): Exclude<EdgeAuthorship, 'not_tested'> {
   const source = readRecord(edge.provenance)?.source;
   // R11: a confirmed link is still Olumi's size, but the user has given their view of it: it is not asked about again.
-  return edge.defaulted === true && !edgeReviewedByUser(edge) && typeof source === 'string' && OLUMI_ASSUMED_EDGE_SOURCES.includes(source)
+  // Science 393023 LICENCE ruling 1: a user-DRAWN link whose mean Olumi projected holds Olumi's numbers (the source records
+  // who drew it). Only that explicit carrier class is added; an unknown or absent source still never asserts an origin.
+  const projectedUserDrawn = source === 'user_specified' && linkSizing(edge) === 'placeholder';
+  return !edgeReviewedByUser(edge) && ((edge.defaulted === true && typeof source === 'string' && OLUMI_ASSUMED_EDGE_SOURCES.includes(source))
+    || projectedUserDrawn)
     ? 'olumi_assumed'
     : 'not_olumi_assumed';
 }
