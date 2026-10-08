@@ -340,10 +340,22 @@ export function prepareLinkEffectUnitReadings(
     const label = String(node.label ?? node.id);
     const reading = mediated.get(String(node.id));
     const ownNoun = labelHeadUnit(quote, value, label, String(other.label ?? other.id), node === source);
-    // A gauge not yet written is a fallback for an unknown quantity. This end's own stated noun supplies its unit
-    // first; U1 still guards every stored unit/level/other size, and an already stored gauge remains established.
-    const ownBeforeGauge = reading?.via === 'gauge' && reading.stored !== true && ownNoun !== undefined
-      && eligible(node, edges, from, to, ownNoun.unit);
+    const candidates = ownNoun !== undefined ? [{ clause: ownNoun.source_quote, unit: ownNoun.unit }] : amounts.flatMap((a, i) => {
+      if (a.magnitude !== Math.abs(value)) return [];
+      const clause = clauseOf(quote, amounts, i, node, other)
+        ?? (options?.link_selected === true ? selectedCurrencyClause(quote, a) : undefined);
+      return clause === undefined ? [] : [{ clause, ...literalUnit(a, clause, node) }];
+    });
+    const one: { clause: string; unit?: string; barePercent?: true } | undefined = candidates.length === 1 ? candidates[0] : undefined;
+    const unit = one?.unit;
+    // A gauge not yet written is a fallback for an unknown quantity. This end's own noun or explicitly stated unit
+    // supplies its unit first; U1 still guards every stored unit/level/other size. Require literal evidence so an Agent
+    // unit alone cannot supersede the gauge, and an already stored gauge remains established.
+    // A structured percent LEVEL keeps its authority: only a percentage-point unit may supersede its gauge.
+    const levelAllows = (u: string) => !percentLevels.has(String(node.id)) || levelUnitKey(u) === levelUnitKey('%');
+    const ownBeforeGauge = reading?.via === 'gauge' && reading.stored !== true
+      && ((ownNoun !== undefined && eligible(node, edges, from, to, ownNoun.unit) && levelAllows(ownNoun.unit))
+        || (unit !== undefined && eligible(node, edges, from, to, unit) && levelAllows(unit)));
     const mediatedUnit = reading === undefined || (reading.via === 'gauge' && (node === source || ownBeforeGauge)) ? undefined : reading.unit;
     const magnitude = view.get(String(node.id));
     const frame = magnitude === undefined ? undefined : resolveMagnitudeFrame(magnitude);
@@ -377,14 +389,6 @@ export function prepareLinkEffectUnitReadings(
     }
     // Step 1's established size continues to govern; this door adopts units for UNSIZED ends only.
     if (establishedUnit !== undefined) continue;
-    const candidates = ownNoun !== undefined ? [{ clause: ownNoun.source_quote, unit: ownNoun.unit }] : amounts.flatMap((a, i) => {
-      if (a.magnitude !== Math.abs(value)) return [];
-      const clause = clauseOf(quote, amounts, i, node, other)
-        ?? (options?.link_selected === true ? selectedCurrencyClause(quote, a) : undefined);
-      return clause === undefined ? [] : [{ clause, ...literalUnit(a, clause, node) }];
-    });
-    const one: { clause: string; unit?: string; barePercent?: true } | undefined = candidates.length === 1 ? candidates[0] : undefined;
-    const unit = one?.unit;
     if (!eligible(node, edges, from, to, unit ?? statedUnit)) continue;
     if (one?.barePercent === true) {
       asks.push(pointsOrShareAsk(label, value, undefined, undefined));

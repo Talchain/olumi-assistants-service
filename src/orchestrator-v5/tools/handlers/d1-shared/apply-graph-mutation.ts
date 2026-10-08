@@ -23,6 +23,7 @@ import { assertShareByDatePreserved } from '../../../goal-target/share-by-date-c
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import { log } from '../../../../utils/telemetry.js';
 import { D1HandlerError } from './errors.js';
+import { preconditionRiskLinkViolations } from '../../../../orchestrator/graph-structure-validator.js';
 
 /**
  * The runtime shape of a graph returned by `applyAndValidateMutation`:
@@ -113,6 +114,17 @@ export function applyAndValidateMutation<TBefore, TAfter>(
         },
       },
     );
+  }
+
+  // Direct mutators (including referee candidates) share the default
+  // structural validator's precondition-link rule with patch-based writers.
+  // Other drafting gaps stay permitted, as they were before this backstop.
+  const preconditionViolation = preconditionRiskLinkViolations(postParse.data)[0];
+  if (preconditionViolation !== undefined) {
+    throw new D1HandlerError('GRAPH_INVARIANT_VIOLATED', preconditionViolation.detail, {
+      details: { violation_code: preconditionViolation.code },
+      userGuidance: preconditionViolation.detail,
+    });
   }
 
   // 3. Merge the mutated structural fields onto the full ingress

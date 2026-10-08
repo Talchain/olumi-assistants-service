@@ -1625,6 +1625,8 @@ export function enrichGraphWithFactors(
         provenance: {
           source: "hypothesis",
           quote: briefExtractionQuote(factor.matchedText),
+          // Science 393023 LICENCE (b): this door's 0.5/0.2 is a size nobody chose.
+          magnitude: "olumi_placeholder",
         },
         provenance_source: "hypothesis",
       };
@@ -2760,6 +2762,8 @@ export async function enrichGraphWithFactorsAsync(
           provenance: {
             source: "hypothesis",
             quote: briefExtractionQuote(factor.matchedText),
+            // Science 393023 LICENCE (b): this door's 0.5/0.2 is a size nobody chose.
+            magnitude: "olumi_placeholder",
           },
           provenance_source: "hypothesis",
         }

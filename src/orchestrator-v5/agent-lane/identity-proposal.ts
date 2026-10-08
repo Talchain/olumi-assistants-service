@@ -29,9 +29,9 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 export interface IdentityProposal {
   readonly outcome_id: string;
   readonly operation: 'product';
-  /** The rate's id, then the count's. */
+  /** The existing cards put the rate first; a stored reading keeps its declared order. */
   readonly factor_ids: readonly [string, string];
-  /** The card's words: the reading, then the arithmetic on the user's stored figures. */
+  /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
 }
 
@@ -83,7 +83,93 @@ function unconfirmedProduct(node: Rec): readonly string[] | null {
 }
 
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
-  return proposeOnGoal(graph) ?? proposeOnCarrier(graph);
+  return proposeOnGoal(graph) ?? proposeOnCarrier(graph) ?? proposeOnStoredReading(graph);
+}
+
+/**
+ * GOAL-REACH build 1: the stored lock carries its own confirmation reading. Unlike the
+ * legacy cards, this checks the definition without requiring a stated current goal level.
+ * Science §(e) Q1.2 binds the goal's own parents, so a path through another node alone
+ * cannot qualify. Callers check writability and dry-run the existing confirmation door.
+ */
+function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const goals = nodes.filter(n => n.kind === 'goal');
+  if (goals.length !== 1) return null;
+  const goal = goals[0]!;
+  const goalId = text(goal.id);
+  const goalLabel = text(goal.label);
+  const ids = unconfirmedProduct(goal);
+  // Condition 1: exactly one valid stored reading over two distinct existing factors.
+  if (goalId === undefined || goalLabel === undefined || ids === null || ids.length !== 2 || ids[0] === ids[1]
+    || goal.analysis_participation === 'retained_excluded' || identityConflictsWithScope(goal)) return null;
+  // DL (8 Oct): ISL adds a LISTED addend's signed value, which the edge-sign words below cannot state; no card until build 2.
+  const listed = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity.addends : undefined;
+  if (listed !== undefined && !(Array.isArray(listed) && listed.length === 0)) return null;
+  const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
+  const parts = ids.map(id => byId.get(id));
+  if (parts.some(n => n === undefined || n.kind !== 'factor' || n.analysis_participation === 'retained_excluded')) return null;
+  // Condition 2: the reading's factors are both direct parents (and therefore on the goal path).
+  if (!ids.every(id => edges.some(e => e.edge_type !== 'bidirected' && e.from === id && e.to === goalId))) return null;
+  const reachesGoal = (from: string): boolean => {
+    const seen = new Set([from]); const queue = [from];
+    for (let i = 0; i < queue.length; i += 1) {
+      for (const e of edges) {
+        if (e.edge_type === 'bidirected' || e.from !== queue[i] || typeof e.to !== 'string') continue;
+        if (e.to === goalId) return true;
+        const next = byId.get(e.to);
+        if (next === undefined || next.analysis_participation === 'retained_excluded' || seen.has(e.to)) continue;
+        seen.add(e.to); queue.push(e.to);
+      }
+    }
+    return false;
+  };
+  // Codex r2 P2: a carrier kept out of the calculation (retained_excluded) is not a competing reading the Run sees.
+  if (nodes.some(n => n !== goal && n.analysis_participation !== 'retained_excluded' && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'product'
+    && typeof n.id === 'string' && reachesGoal(n.id))) return null;
+  // Science §(e) addendum 2: every OTHER direct parent of the goal is part of what the Run computes. A drafter-made
+  // definitional addend (edge provenance.definitional, node not the user's) joins the reading's words; anything else — a
+  // user-authored or non-definitional risk or factor straight into the goal — means the goal is not this product: null.
+  const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
+  const addends: string[] = [];
+  for (const e of edges) {
+    if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') continue;
+    const n = byId.get(e.from);
+    if (n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded') continue;
+    const prov = isRec(e.provenance) ? e.provenance : undefined;
+    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
+    if (prov?.definitional !== true || userAuthored) return null;
+    const mean = isRec(e.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
+    const negative = e.effect_direction === 'negative' || (mean !== undefined && mean < 0);
+    addends.push(`${negative ? 'less' : 'plus'} ‘${text(n.label) ?? String(n.id)}’`);
+  }
+  const [a, b] = parts as [Rec, Rec];
+  const level = (n: Rec) => ({ unit: isRec(n.observed_state) ? text(n.observed_state.unit) : undefined, label: String(n.id) });
+  const goalUnit = text(goal.goal_threshold_unit);
+  // Condition 3: use the existing unit reader, including Science's £/month × count confirmation form.
+  if (readMoneyTotal(goalUnit, goalLabel) === null || unitsCompose(goalUnit, goalLabel, level(a), level(b)).kind === 'no') return null;
+  const current = usersLevel(goal);
+  const currentState = isRec(goal.observed_state) ? goal.observed_state : undefined;
+  // Science §(e) Q1.3 also covers a stated zero or unreadable current level; usersLevel's
+  // legacy null for those must not turn a contradictory statement into an absent one.
+  if (current === null && currentState !== undefined && classifyValueSource(currentState.source) === 'user_stated') return null;
+  // Condition 4: a stated CURRENT level must reconcile at the factors' current raw values within the existing 5%.
+  if (current !== null) {
+    // Codex r1 P2: currency AND period read in the goal's own context ("Monthly recurring revenue" + GBP = £/month).
+    const cm = readMoneyTotal(current.unit, goalLabel); const gm = readMoneyTotal(goalUnit, goalLabel);
+    if (cm === null || gm === null || cm.code !== gm.code || cm.period !== gm.period) return null;
+    const operands = [a, b].map(n => {
+      const os = isRec(n.observed_state) ? n.observed_state : undefined;
+      return typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) && text(os.unit) !== undefined
+        ? { id: String(n.id), label: text(n.label) ?? String(n.id), value: os.raw_value, unit: text(os.unit)! } : null;
+    });
+    if (operands[0] === null || operands[1] === null || !Number.isFinite(operands[0]!.value * operands[1]!.value)
+      || reading(goal, goalLabel, current, operands[0]!, operands[1]!) === null) return null;
+  }
+  const words = `Olumi reads ‘${goalLabel}’ as ‘${text(a.label) ?? ids[0]}’ × ‘${text(b.label) ?? ids[1]}’${addends.map(x => `, ${x}`).join('')}. Is that how you work it out?`;
+  if (words.length > CARD_WORDS_MAX) return null;
+  return { outcome_id: goalId, operation: 'product', factor_ids: [ids[0]!, ids[1]!], words };
 }
 
 type Rec2 = Rec;

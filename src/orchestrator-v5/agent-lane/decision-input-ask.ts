@@ -16,7 +16,8 @@ import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
-import { inertRiskBranch } from '../../graph/inert-risk.js';
+import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
+import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
 
 type Rec = Record<string, unknown>;
@@ -139,14 +140,22 @@ const withinMonths = (goal: Rec): string => {
 function leftOutLines(graph: unknown, goalLabel: string): string[] {
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
-  const edges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
-    .filter((e): e is Rec => e !== undefined && e.edge_type !== 'bidirected' && typeof e.from === 'string' && typeof e.to === 'string')
-    .map((e) => ({ from: e.from as string, to: e.to as string }));
+  const allEdges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
+    .filter((e): e is Rec => e !== undefined && typeof e.from === 'string' && typeof e.to === 'string')
+    .map((e) => ({ from: e.from as string, to: e.to as string, edge_type: e.edge_type }));
+  const edges = allEdges.filter((e) => e.edge_type !== 'bidirected');
   const limits = (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map((k) => recordOf(k)?.node_id)
     .filter((id): id is string => typeof id === 'string');
-  const leftOut = inertRiskBranch(nodes as { id: string; kind?: unknown; category?: unknown }[], edges, limits);
+  const typedNodes = nodes as { id: string; kind?: unknown; category?: unknown; relies_on?: unknown }[];
+  const leftOut = inertRiskBranch(typedNodes, allEdges, limits);
+  const preconditions = preconditionRiskIds(typedNodes, allEdges, limits);
   const labelOf = (n: Rec): string => String(n.label ?? n.id);
   return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
+    if (preconditions.has(r.id as string)) {
+      const optionId = (r.relies_on as { option_id: string }).option_id;
+      const option = nodes.find((n) => n.id === optionId)!;
+      return reliesOnRiskLine(labelOf(r), labelOf(option));
+    }
     // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
     // (DL condition 3), in words that stay true when one cause feeds two left-out risks.
     const upstream = new Set<string>(); const walk = [r.id as string];

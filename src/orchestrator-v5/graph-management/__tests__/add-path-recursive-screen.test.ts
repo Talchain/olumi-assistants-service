@@ -118,6 +118,7 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
       'proposed_by',
       'provenance',
       'provenance_display',
+      'relies_on', // RC3: host-authored option precondition, never producer-writable.
       'starterid',
       'startertitle',
       'std_defaulted',
@@ -138,8 +139,8 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`
     // + #2306's `goal_sense_reading` + AIQ (b)'s `goal_level_reading` + F1 T6's option lifecycle `proposed_by` /
     // `option_status` / `analysis_participation`) + the 5 J2 names + event_risk.v1 slice 2a's `event_risk` (added to the
-    // union directly: only CEE's validated hold stamp may author the block).
-    expect(all.length).toBe(26);
+    // union directly: only CEE's validated hold stamp may author the block) + RC3's `relies_on` server stamp.
+    expect(all.length).toBe(27);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

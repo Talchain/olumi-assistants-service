@@ -34,8 +34,13 @@
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
-import { percentLimitFrameProvable, percentPeriodsDiffer, statedOperatorOf, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { percentLimitFrameProvable, percentPeriodsDiffer, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { meetsLimit, statedOperatorOf } from '../../agent-lane/limit-operator-words.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
+import { canReachAnyGoal, type ReachabilityEdge } from '../../../graph/reachability.js';
+import { isDirectedEdge } from '../../../schemas/graph.js';
+import { effectiveLinkExistenceProbability, endsOfGraph } from '../../goal-target/held-user-links.js';
+import { isRetainedExcluded } from './run-analysis-participation-guard.js';
 
 type Rec = Record<string, unknown>;
 
@@ -107,18 +112,35 @@ function levelHasAnAuthor(node: Rec, os: Rec): boolean {
   return deriveInferredValues({ nodes: [node] }).length === 1;
 }
 
+/** Reader-only reachability after participation and option/decision filtering; never the carrier's root test. */
+function engineDirectedEdges(graph: unknown): Rec[] {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return [];
+  const nodeIds = new Set(graph.nodes.filter(isRec)
+    .filter((n) => !isRetainedExcluded(n) && n.kind !== 'option' && n.kind !== 'decision').map((n) => n.id));
+  return graph.edges.filter(isRec).filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to)
+    && isDirectedEdge({ edge_type: e.edge_type === 'bidirected' ? 'bidirected' : 'directed' }));
+}
+
+export interface LevelLimitNodeDecision {
+  readonly engineReadLevel: number;
+  readonly carryBaseline: boolean;
+}
+
 /**
- * The ids of the nodes whose current level a level limit is checked against on this run. `_options` (the run's final wire
- * options) no longer decide it: R-c is per option, after the run (AIQ 5900908629). Kept so callers stay unchanged.
+ * The carrier's unchanged per-node decision, also read by the strict-limit readers. Its scored targets include ANY
+ * edge from a non-option/non-decision node, regardless of directedness, participation or existence. Roots use their
+ * value even beside a stale baseline; non-roots preserve a baseline or use the value this decision carries. The goal
+ * exclusion uses only the passed goal id. Reader-only measurement refusals belong at the readers, never here.
  */
-export function levelLimitBaselineNodeIds(
-  graph: unknown,
-  goalConstraints: unknown,
-  goalNodeId?: string,
-  _options?: ReadonlyArray<Record<string, unknown>>,
-): Set<string> {
-  const out = new Set<string>();
-  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
+export function levelLimitNodeDecision(graph: unknown, c: Rec, node: Rec, goalNodeId?: string): LevelLimitNodeDecision | undefined {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return undefined;
+  const os = node.observed_state;
+  if (typeof node.id !== 'string' || !isRec(os)
+    || c.value_frame !== 'level' || typeof c.value !== 'number'
+    || typeof os.value !== 'number' || !Number.isFinite(os.value) || !levelHasAnAuthor(node, os)
+    || statedUnitAcrossPeriod(c, node) !== undefined) return undefined;
+  const onLevel = levelLimitReadsOnNodeLevel(c.value, typeof c.unit === 'string' ? c.unit : undefined, node, os);
+  if (!onLevel && !levelLimitReadsOnNodeCap(graph, c, node, os)) return undefined;
   const nodes = graph.nodes.filter(isRec);
   const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
@@ -130,24 +152,32 @@ export function levelLimitBaselineNodeIds(
       })
       .map((e) => e.to),
   );
+  if (!scoredTargets.has(node.id)) return { engineReadLevel: os.value, carryBaseline: false };
+  if (os.baseline !== undefined) return typeof os.baseline === 'number' && Number.isFinite(os.baseline)
+    ? { engineReadLevel: os.baseline, carryBaseline: false } : undefined;
+  if (node.kind !== 'factor' || node.id === goalNodeId) return undefined;
+  // R-c is per option after the Run: a placeholder-moving option's score is withheld there, not by dropping this baseline.
+  return { engineReadLevel: os.value, carryBaseline: true };
+}
+
+/**
+ * The ids whose current level carries on this Run. `_options` no longer decide it: R-c is per option after the Run
+ * (AIQ 5900908629). Kept so callers stay unchanged.
+ */
+export function levelLimitBaselineNodeIds(
+  graph: unknown,
+  goalConstraints: unknown,
+  goalNodeId?: string,
+  _options?: ReadonlyArray<Record<string, unknown>>,
+): Set<string> {
+  const out = new Set<string>();
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
+  const nodes = graph.nodes.filter(isRec);
   for (const c of goalConstraints) {
-    if (!isRec(c) || c.value_frame !== 'level' || typeof c.value !== 'number') continue;
+    if (!isRec(c)) continue;
     const node = nodes.find((n) => n.id === c.node_id);
-    if (node === undefined || typeof node.id !== 'string') continue;
-    if (node.kind !== 'factor' || node.id === goalNodeId || !scoredTargets.has(node.id)) continue;
-    const os = node.observed_state;
-    if (!isRec(os) || typeof os.value !== 'number' || !Number.isFinite(os.value) || os.baseline !== undefined) continue;
-    if (!levelHasAnAuthor(node, os)) continue;
-    if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
-    const unit = typeof c.unit === 'string' ? c.unit : undefined;
-    // ⭐ R-c is PER OPTION since AIQ #72 5900908629 (lock A PJ-A3, R3 5900778834: #2268's per-limit gate here dropped
-    // churn's baseline for ALL options when one added option moved churn through a placeholder, so Paul's churn ≤ 4% went
-    // unscored). The baseline now always carries, so PLoT scores every option; the options a placeholder moves have
-    // their own P withheld after the run (`collectLimitLevelOwners` → `withholdOptionLimitScores`, `run-analysis.ts`).
-    const onLevel = levelLimitReadsOnNodeLevel(c.value, unit, node, os);
-    const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os);
-    if (!onLevel && !onCap) continue;
-    out.add(node.id);
+    if (node === undefined) continue;
+    if (levelLimitNodeDecision(graph, c, node, goalNodeId)?.carryBaseline) out.add(node.id as string);
   }
   return out;
 }
@@ -316,9 +346,9 @@ export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstrain
 }
 
 /**
- * ⭐ A2 FOLLOW-UP (DL verdict on #2180): THE ONE CASE WHERE "LESS THAN" AND "AT MOST" DIFFER. An option that SETS the
- * limited quantity at EXACTLY a strict limit's threshold does not meet it: "keep churn under 4%" is not met by an option
- * that sets churn at 4%. The store holds that limit as `operator: "<="` + `operator_as_stated: "<"`, and PLoT/ISL get
+ * ⭐ A2 FOLLOW-UP (DL verdict on #2180): THE ONE CASE WHERE "LESS THAN" AND "AT MOST" DIFFER. An option whose limited
+ * quantity stays at EXACTLY a strict limit's threshold does not meet it: "keep churn under 4%" is not met by an option
+ * that sets churn at 4%, or leaves today's 4% alone. The store holds `operator: "<="` + `operator_as_stated: "<"`, and PLoT/ISL get
  * `<=` only (`run-analysis.ts` `withholdStatedOperator`), so the engine counts that option as meeting it. Over continuous
  * draws P(X < 4) = P(X <= 4) and the engine's score IS the stated limit's; the pinned level is the exception.
  *
@@ -329,7 +359,11 @@ export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstrain
  * SAME FRAME, from the two proofs this module already owns and nothing else — no unit is parsed here:
  *   · a `"%"` limit PLoT reads on the node's own level (`levelLimitReadsOnNodeLevel`): the level is the percentage ÷ 100;
  *   · a limit in the factor's own unit read on its own cap (`limitTargetCaps`): the level is the figure ÷ cap.
- * The option's level is the number PLoT received (the run's final wire options), compared with `valuesMatch`. A limit in
+ * The option's level is the number PLoT received (the run's final wire options), or the node's effective current level when
+ * no intervened node has a directed causal path to it — the engine-read level from `levelLimitNodeDecision`. Moving an
+ * ancestor can move the limited quantity without setting it, so those options retain the producer's result.
+ * `meetsLimit` owns the tie tolerance
+ * and strictness, shared with the Agent's model view. A limit in
  * any other shape proves no frame and is left alone: PLoT does not score it against the node's level either (it is
  * refused or unscored upstream). Level-framed rows only (a delta limit is on a change, not a level). A strict row is
  * read through `statedOperatorOf`, so a stamp that contradicts the held operator is never strict here. Pure.
@@ -338,10 +372,16 @@ export function strictLimitsPinnedAtThreshold(
   graph: unknown,
   goalConstraints: unknown,
   options: ReadonlyArray<Record<string, unknown>>,
+  goalNodeId?: string,
 ): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
   const nodes = graph.nodes.filter(isRec);
+  const endsOf = endsOfGraph(graph);
+  const edges = engineDirectedEdges(graph).flatMap((e): ReachabilityEdge[] =>
+    typeof e.from === 'string' && typeof e.to === 'string' && effectiveLinkExistenceProbability(e, endsOf(e)) !== 0
+      ? [{ from: e.from, to: e.to, edge_type: e.edge_type === 'bidirected' ? 'bidirected' : 'directed' }]
+      : []);
   for (const c of goalConstraints) {
     if (!isRec(c) || c.value_frame !== 'level' || typeof c.constraint_id !== 'string' || typeof c.node_id !== 'string') continue;
     const stated = statedOperatorOf(c);
@@ -350,10 +390,20 @@ export function strictLimitsPinnedAtThreshold(
     if (node === undefined || typeof c.value !== 'number' || !Number.isFinite(c.value)) continue;
     const threshold = thresholdOnNodeLevel(graph, c, node, c.value);
     if (threshold === undefined) continue;
+    const decision = levelLimitNodeDecision(graph, c, node, goalNodeId);
+    const os = isRec(node.observed_state) ? node.observed_state : {};
+    const today = os.stated_role === 'constraint' || isRetainedExcluded(node) ? undefined : decision?.engineReadLevel;
+    const todayAtThreshold = today !== undefined && meetsLimit(today, stated, threshold) === 'at_threshold';
+    const limitedNodeIds = new Set([c.node_id]);
     for (const o of options) {
       const id = typeof o.option_id === 'string' && o.option_id !== '' ? o.option_id : typeof o.id === 'string' && o.id !== '' ? o.id : undefined;
-      const level = isRec(o.interventions) ? o.interventions[c.node_id] : undefined;
-      if (id === undefined || typeof level !== 'number' || !valuesMatch(level, threshold)) continue;
+      const interventions = isRec(o.interventions) ? o.interventions : {};
+      const setsLimitedNode = Object.hasOwn(interventions, c.node_id);
+      const level = interventions[c.node_id];
+      const atThreshold = setsLimitedNode
+        ? typeof level === 'number' && meetsLimit(level, stated, threshold) === 'at_threshold'
+        : todayAtThreshold && !Object.keys(interventions).some((intervenedId) => canReachAnyGoal(intervenedId, edges, limitedNodeIds));
+      if (id === undefined || !atThreshold) continue;
       const ids = out.get(id) ?? new Set<string>();
       ids.add(c.constraint_id);
       out.set(id, ids);
@@ -363,7 +413,7 @@ export function strictLimitsPinnedAtThreshold(
 }
 
 /** A level limit's threshold on its node's own level, where this module proves PLoT reads it there; else `undefined`. */
-function thresholdOnNodeLevel(graph: unknown, c: Rec, node: Rec, value: number): number | undefined {
+export function thresholdOnNodeLevel(graph: unknown, c: Rec, node: Rec, value: number): number | undefined {
   const os = isRec(node.observed_state) ? node.observed_state : {};
   if (levelLimitReadsOnNodeLevel(value, typeof c.unit === 'string' ? c.unit : undefined, node, os)) return value / 100;
   const cap = limitTargetCaps(graph, [c]).get(node.id as string);

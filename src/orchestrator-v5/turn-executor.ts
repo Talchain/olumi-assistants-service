@@ -308,6 +308,7 @@ import { appendLapseNotice, threadHoldsThroughMutatingCommit } from './handlers/
 import { PatchOperationsArraySchema } from '../orchestrator/patch-validation.js';
 import { productHoldRecord } from './agent-lane/proposal-object/record.js';
 import { amendHeldOperations, parseProposalEdits } from './agent-lane/proposal-object/amend.js';
+import { PLAIN_APPROVAL_SUPERSEDED } from './agent-lane/proposal-object/reply.js';
 import {
   buildReadinessRepairOffer,
   withReadinessApplyControl,
@@ -2637,6 +2638,8 @@ export async function runTurnExecutor(
   // invariant exists to forbid.
   let analysisElectionOfferChip: SuggestedAction | undefined;
   let functionalAnswerText: string | undefined;
+  // Set only by the deterministic card-binding refusal; its required copy must survive final egress.
+  let plainApprovalBindingSuperseded = false;
 
   // ROADMAP 1.132 (F1) — the SINGLE capture chokepoint for direct-answer
   // composes in this executor. Every direct-answer compose in the turn body goes
@@ -3910,6 +3913,8 @@ export async function runTurnExecutor(
           readonly consumedPendingRefs?: readonly string[];
         },
       ): Promise<TurnExecutorRunResult> => {
+        plainApprovalBindingSuperseded = decisionStatus === 'superseded'
+          && overrides?.assistantText === PLAIN_APPROVAL_SUPERSEDED;
         const recoveryAssistantText =
           overrides?.assistantText ??
           (decisionStatus === 'superseded'
@@ -4614,6 +4619,8 @@ export async function runTurnExecutor(
         // hash a CANONICALISED graph — a raw recompute avoids false
         // supersessions while staying fail-closed.)
         const gmBaseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+        const proposalEdits = parseProposalEdits((payload.chip?.parameters as Record<string, unknown> | undefined)?.['proposal_edits']);
+        const plainBindingRecovery = proposalEdits?.fields.length === 0 ? { assistantText: PLAIN_APPROVAL_SUPERSEDED } : undefined;
         let gmBaseHash: string | null = null;
         try {
           gmBaseHash = computeAnalysisAffectingGraphHash(
@@ -4629,7 +4636,7 @@ export async function runTurnExecutor(
           pinnedHash.length === 0 ||
           gmBaseHash !== pinnedHash
         ) {
-          return commitProposedChangeRecovery('superseded', 'gm_held_execute_superseded');
+          return commitProposedChangeRecovery('superseded', 'gm_held_execute_superseded', plainBindingRecovery);
         }
         /**
          * ⭐ S-D APPROVE-WITH-EDITS (lane EDIT-PANEL; design §6). The user's values for THIS stored revision ride the
@@ -4637,24 +4644,26 @@ export async function runTurnExecutor(
          * hold this turn read under its pin — so the batch that lands is exactly the stored hold plus this request's
          * edits, never another panel's (Codex P0). Anything that does not bind applies nothing.
          */
-        const proposalEdits = parseProposalEdits((payload.chip?.parameters as Record<string, unknown> | undefined)?.['proposal_edits']);
         let heldOperations = read.operations;
         if (proposalEdits !== undefined) {
           if (proposalEdits === null || proposalEdits.proposal_id !== heldPending.chip_id) {
             return commitProposedChangeRecovery('invalid', 'gm_held_edits_malformed');
           }
           if (proposalEdits.revision !== heldPending.id || proposalEdits.graph_hash !== pinnedHash) {
-            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded');
+            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded', plainBindingRecovery);
           }
           const editRecord = productHoldRecord(heldPending, gmBaseGraph);
           // What the panel showed (labels included), re-derived from the stored hold on the stored model, must be unchanged.
           if (editRecord !== undefined && editRecord.digest !== proposalEdits.digest) {
-            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded');
+            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded', plainBindingRecovery);
           }
-          const amended = editRecord === undefined ? undefined : amendHeldOperations(editRecord, proposalEdits.fields);
-          const reparsed = amended?.ok === true ? PatchOperationsArraySchema.safeParse(amended.operations) : undefined;
-          if (reparsed === undefined || !reparsed.success) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
-          heldOperations = reparsed.data;
+          if (editRecord === undefined) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
+          if (proposalEdits.fields.length > 0) {
+            const amended = amendHeldOperations(editRecord, proposalEdits.fields);
+            const reparsed = amended.ok ? PatchOperationsArraySchema.safeParse(amended.operations) : undefined;
+            if (reparsed === undefined || !reparsed.success) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
+            heldOperations = reparsed.data;
+          }
         }
         const outcome = executeGmHeldResume({
           operations: heldOperations,
@@ -4709,7 +4718,7 @@ export async function runTurnExecutor(
             'invalid',
             `gm_held_execute_${outcome.status}`,
             {
-              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              assistantText: outcome.userReason ?? GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
               consumedPendingRefs: [heldPending.chip_id],
             },
           );
@@ -4923,6 +4932,7 @@ export async function runTurnExecutor(
         const appliedFacts: ExecutedGmOutcome['fact'][] = [];
         const consumedRefs: string[] = [];
         const declinedLabels: string[] = [];
+        const declinedReasons: string[] = [];
         /**
          * P0 (2026-08-16) — chips of holds that were ATTEMPTED and declined.
          *
@@ -4980,6 +4990,7 @@ export async function runTurnExecutor(
               'GM held-execute (all) — one confirmed hold declined (fail-closed); the others are unaffected',
             );
             declinedLabels.push(resolveProposalRenderCopy(holds[i]!.action).label);
+            if (outcome.userReason !== undefined) declinedReasons.push(outcome.userReason);
             // Attempted and refused — the chip is spent (see the declaration).
             attemptedDeclinedRefs.push(holds[i]!.chip_id);
             continue;
@@ -5020,7 +5031,7 @@ export async function runTurnExecutor(
             'invalid',
             'consent_all_all_declined',
             {
-              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              assistantText: declinedReasons.length > 0 ? [...new Set(declinedReasons)].join('\n\n') : GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
               consumedPendingRefs: attemptedDeclinedRefs,
             },
           );
@@ -5042,6 +5053,7 @@ export async function runTurnExecutor(
             declinedLabels.length === 1 ? 'that one' : 'those'
           }.`;
         }
+        if (declinedReasons.length > 0) receiptText += `\n\n${[...new Set(declinedReasons)].join('\n\n')}`;
         const appliedResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: receiptText,
@@ -15802,6 +15814,8 @@ export async function runTurnExecutor(
     if (!response) return;
     const assistantText = response.assistant_text;
     if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    // P53's server-authored refusal says exactly what this approval wrote. Preserve only that validated response.
+    if (plainApprovalBindingSuperseded && assistantText === PLAIN_APPROVAL_SUPERSEDED) return;
     const guarded = applyEgressForbiddenPhraseGuard(assistantText);
     if (!guarded.rewritten) return;
     emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {

@@ -16,6 +16,7 @@ import { AGENT_TOOLS } from '../../runtime/agent-tools.js';
 import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
 import { linkTargetOf } from '../../guidance/select-strengthen-placeholder.js';
 import { linkStrengthsCardArgs } from '../../strengthen-press.js';
+import { isPlaceholderLink } from '../../../../cee/magnitude/link-sizing.js';
 import {
   FALLBACK_TEMPLATE,
   PLAN_PICK_PREFIX,
@@ -447,9 +448,13 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
     const links = run().context.supplied_items.filter((i) => i.kind === 'link');
     expect(links.length).toBeGreaterThan(0);
     const bandEnum = toolSchema('propose_link_strengths').properties.links.items.properties.strength.enum as string[];
+    // Science 393023 LICENCE ruling 3, re-derived: a placeholder link item has no band, so NO card proposes its prior.
+    const classes = new Set<string>();
     for (const item of links) {
       const edge = (D3.body.draft_graph.edges as { from: string; to: string; strength: { mean: number } }[]).find((e) => `${e.from}->${e.to}` === item.id)!;
       const card = cardCallFor(item, D3.body.draft_graph, 'Run a pre-mortem');
+      classes.add(isPlaceholderLink(edge) ? 'placeholder' : 'sized');
+      if (isPlaceholderLink(edge)) { expect(card, item.id).toBeNull(); continue; }
       expect(card?.tool).toBe('propose_link_strengths');
       if (card?.tool !== 'propose_link_strengths') return;
       expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)) }]);
@@ -458,6 +463,7 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
       expect(Object.keys(card.args.links[0])).not.toContain('from_words');
       expect(card.args.rationale).toBe('Run a pre-mortem');
     }
+    expect([...classes].sort(), 'D3 carries a sized link item AND a placeholder one').toEqual(['placeholder', 'sized']);
   });
 
   it('ROW C2 PAIR (served sign): a NEGATIVE link is offered at the band of its size, never of its sign', () => {
@@ -552,8 +558,10 @@ describe('round 2 (CODEX_CLI_OVERFLOW 5939415083; DL ruling): a recognised press
     if (out?.kind !== 'run') throw new Error('expected a run');
     const link = out.context.supplied_items.find((i) => i.kind === 'link')!;
     const edge = (D1.body.draft_graph.edges as { from: string; to: string }[]).find((e) => `${e.from}->${e.to}` === link.id)!;
-    expect(cardCallFor(link, D1.body.draft_graph)).toEqual({
-      tool: 'propose_link_strengths', args: linkStrengthsCardArgs(linkTargetOf(D1.body.draft_graph, edge.from, edge.to)!, PREMORTEM_CARD_RATIONALE) });
+    // Science 393023 LICENCE ruling 3, re-derived: the composer is still the ONE builder; a placeholder link gets none.
+    const target = linkTargetOf(D1.body.draft_graph, edge.from, edge.to)!;
+    expect(cardCallFor(link, D1.body.draft_graph)).toEqual(isPlaceholderLink(edge) ? null : {
+      tool: 'propose_link_strengths', args: linkStrengthsCardArgs(target, PREMORTEM_CARD_RATIONALE) });
   });
 
   it('ROW N5: the turn\'s record is rebuilt at its explicit boundary: earlier turns byte-equal, then the user\'s words, then what was SENT', () => {
