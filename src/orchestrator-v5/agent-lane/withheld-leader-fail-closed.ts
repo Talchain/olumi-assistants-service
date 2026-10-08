@@ -1223,6 +1223,14 @@ const REASON_NOT_RECORDED =
   'and the reason is not recorded, so I will not guess at one; ask me to run the analysis and I can tell you then';
 
 const sentence = (clause: string): string => `${NO_LEADER_OPENING}, ${clause}.`;
+/**
+ * RC6 (#2801): the gate's own "No single option can be put forward yet, because <why>[; <action>]." for this co-hold, so
+ * the route can type it BY IDENTITY when the reply carries it (the reply composer then says the bare reason only once).
+ */
+export const noLeaderBecauseSentences = (coHold: GoalFigureCoHold): string[] => [
+  sentence(`because ${coHold.why}`),
+  ...(coHold.action === undefined ? [] : [sentence(`because ${coHold.why}; ${coHold.action}`)]),
+];
 
 /** Every sentence this module can append — the build-time probe and the idempotence check read this. */
 /**

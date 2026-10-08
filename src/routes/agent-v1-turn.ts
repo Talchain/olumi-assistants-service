@@ -120,7 +120,7 @@ import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/ag
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
-import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
+import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf, noLeaderBecauseSentences } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
@@ -4513,6 +4513,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
         ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
         ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
+          .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
+        // RC6: the gate's own "No single option … because <why>." when the reply already carries it (the gate then adds no
+        // closing, so `leaderGateClosing` is null): typed by identity, so the bare reason is said once inside it.
+        ...(coHold === undefined ? [] : noLeaderBecauseSentences(coHold)).filter((l) => reply.includes(l))
           .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
         ...AGENT_NO_LEADER_SENTENCES.filter((text) => reply.includes(text))
           .map((text) => ({ role: 'withheld_reason' as const, text })),
