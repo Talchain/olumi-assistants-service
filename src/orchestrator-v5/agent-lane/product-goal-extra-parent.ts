@@ -234,7 +234,9 @@ function limitWords(k: { readonly metric: string; readonly operator?: string | n
   const dir = k.operator === '<' || k.operator === '<=' ? 'under' : k.operator === '>' || k.operator === '>=' ? 'over' : undefined;
   if (dir === undefined || typeof k.value !== 'number' || !Number.isFinite(k.value)) return undefined;
   const unit = (k.unit ?? '').trim();
-  return `${k.metric} ${dir} ${k.value}${unit === '%' ? '%' : unit === '' ? '' : ` ${unit}`}`;
+  // A bare percent spelling ("%", "percent") is written "4%"; any longer unit is kept in the brief's words.
+  const barePercent = isPercentScaledUnit(unit) && !/\s/.test(unit);
+  return `${k.metric} ${dir} ${k.value}${barePercent ? '%' : unit === '' ? '' : ` ${unit}`}`;
 }
 
 /** The one sentence each finding is said with (`not_represented`). */
