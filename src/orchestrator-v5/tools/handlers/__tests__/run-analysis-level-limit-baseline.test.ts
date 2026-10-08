@@ -213,7 +213,7 @@ describe('PARITY: the carrier retains its frozen HEAD output', () => {
     const graph = {
       ...original,
       ...(graphGoal === undefined ? {} : { goal_node_id: graphGoal }),
-      nodes: original.nodes.map((node) => node.id === 'f' ? { ...node, ...parent } : node),
+      nodes: original.nodes.map((node) => node.id === 'f' ? { ...node, ...parent } : node) as Record<string, unknown>[],
       edges: original.edges.filter((e) => !root || e.to !== 'n').map((e) => e.to === 'n' ? { ...e, ...edge } : e),
     };
     if (duplicate) graph.nodes.push({ id: 'n', kind: 'factor', label: 'Duplicate', scale_frame: 100,
