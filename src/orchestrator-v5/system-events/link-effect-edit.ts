@@ -247,6 +247,19 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   };
 }
 
+/** The existing writer's conversion frames, including its mediator and adopted-% views. Read-only. */
+export function linkEffectConversionFrames(graph: unknown, from: string, to: string): { source: number | undefined; target: number | undefined } | null {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || linkEffectEndUnits(graph, from, to) === null) return null;
+  const nodes = graph.nodes.filter(isRec);
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const source = view.get(from); const target = view.get(to);
+  if (source === undefined || target === undefined) return null;
+  const readings = mediatorReadings(graph);
+  const sourceNode = withAdoptedPercentFrame(nodes.find(n => n.id === from), withMediatorReading(source, readings.get(from), 'source'));
+  const targetNode = withAdoptedPercentFrame(nodes.find(n => n.id === to), withMediatorReading(target, readings.get(to), 'target'));
+  return { source: resolveMagnitudeFrame(sourceNode), target: resolveMagnitudeFrame(targetNode) };
+}
+
 /** An end the user stated by its node's own LABEL, read as that node's count unit (shown on the card for approval). */
 export interface LinkEffectLabelReading {
   readonly node_id: string;

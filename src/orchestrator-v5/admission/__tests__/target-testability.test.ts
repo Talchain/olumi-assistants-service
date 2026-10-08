@@ -68,7 +68,6 @@ describe('the verdict (0 LLM)', () => {
         { from: 'warm_connections_pursued', to: 'angel_investor_meetings' },
         { from: 'angel_investor_outreach', to: 'angel_investor_meetings' },
         { from: 'fundraising_overhead', to: 'runway_exhaustion' },
-        { from: 'fundraising_overhead', to: 'investment_firm_outreach' },
       ] },
     ] });
   });
@@ -77,7 +76,7 @@ describe('the verdict (0 LLM)', () => {
     expect(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul))).toBe(
       // RE-PINNED, RT-10 B′ (Science's template edits, #87 5999608477): (c) names the canvas object, and the level
       // question is "What's today's level of {goal}?". The target words and every failing reason are unchanged.
-      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the links from Investment firm meetings to securing funding, from Angel investor meetings to securing funding and from Runway exhaustion to securing funding and 8 more. What's today's level of securing funding?");
+      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the links from Investment firm meetings to securing funding, from Angel investor meetings to securing funding and from Runway exhaustion to securing funding and 7 more. What's today's level of securing funding?");
   });
 
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {
@@ -179,12 +178,11 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
       expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(guardAnalysisParticipation(g, { goalNodeId: 'mrr' }).graph));
     }
   });
-  it('RED: m1 as served → not testable, (c), naming the price', () => {
+  it('§(i): m1 as served keeps its churn placeholder; the converting price estimate clears (c)', () => {
     const v = targetTestabilityOf(M1);
-    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
+    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
       link: { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' }, links: [
       { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' },
-      { from: 'pro_plan_price', to: 'monthly_churn_rate' },
     ] }]);
     // RE-PINNED, RT-10 B′ R2: the verdict no longer caps the mode — m1 is admitted as it is without its target.
     expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe(resolveAnalysisAdmission(withoutTarget(M1)).permitted_analysis_mode);

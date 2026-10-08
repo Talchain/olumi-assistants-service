@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ActionSchema } from '@talchain/schemas/boundary';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
+import { targetNotTestableWarning, targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Json = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
@@ -346,6 +347,37 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
       assistant_message: 'How much does ‘Monthly churn’ change ‘Paying Pro subscribers’?' }];
     const body = await run();
     expect(body.suggested_actions.some((c: Json) => c.id === pressId(...PAIRS[0]))).toBe(false);
+  });
+
+  it.each([false, true])('N=0 conversion press survives final wire and respects its exact closed question (%s)', async closed => {
+    fixture(false);
+    // Explicit author variant: the two placeholder links have been sized; the existing price estimate is now a band.
+    for (const [from, to] of PAIRS.slice(0, 2)) {
+      const edge = graph.edges.find((e: Json) => e.from === from && e.to === to);
+      edge.provenance = { source: 'user_specified', magnitude: 'user_stated' };
+    }
+    const band = graph.edges.find((e: Json) => e.from === PAIRS[2][0] && e.to === PAIRS[2][1]);
+    delete band.provenance.natural_effect;
+    const opts = graph.nodes.filter((n: Json) => n.kind === 'option').map((n: Json) => n.id);
+    result.enrichment.inference_warnings = [targetNotTestableWarning(graph, targetTestabilityOf(graph), opts, 'GOAL_FIGURES_TARGET_NOT_TESTABLE')];
+    const words = "How much does ‘Pro plan price’ change ‘Monthly churn’, in percentage points? Olumi has it as a band, which can't be turned into your goal's units.";
+    if (closed) recent = [{ turn_id: 'closed-band', request_hash: 'agent_turn:closed-band', assistant_message: words }];
+    const body = await run();
+    expect(body.assistant_text).not.toContain('Not shown yet: 0');
+    expect(body.guided_sizing.total).toBe(0);
+    const presses = wirePresses(body);
+    expect(presses.map(p => p.label)).toEqual(closed ? [] : [words]);
+    expect(body.guided_sizing.links).toHaveLength(closed ? 0 : 1);
+    if (!closed) {
+      expect(body.guided_sizing.links[0]).toMatchObject({ from: PAIRS[2][0], to: PAIRS[2][1], nonconverting: true });
+      scripts.push({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: randomUUID(), arguments: JSON.stringify({
+        from_label: 'Pro plan price', to_label: 'Monthly churn', amount: 0.03, amount_unit: 'percentage points',
+        per_source_change: 1, per_source_change_unit: '£/month', quote: presses[0]!.message,
+      }) }] });
+      await turn(presses[0]!.message, { source: 'chip', chip: { id: presses[0]!.id } });
+      expect(linkDoorEntries.at(-1)?.grounded_links).toEqual([{ from: PAIRS[2][0], to: PAIRS[2][1] }]);
+      expect(doorCalls).toHaveLength(0);
+    }
   });
 
   const sizeThroughDoor = async (from: string, to: string, fromLabel: string, toLabel: string,

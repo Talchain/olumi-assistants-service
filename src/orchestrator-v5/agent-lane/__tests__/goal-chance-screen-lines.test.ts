@@ -70,10 +70,16 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
     expect(screenFor('unseen-b4-1')).toHaveLength(2);
   });
 
-  it('served points (B5 T1b on 3fce64f, prod cut-6 T1b): every line equals the line the UI drew, in licence order', () => {
+  it('served points: B5 unchanged; prod cut-6 retains its figures/order and gains the RC4 estimate label', () => {
     expect(linesOf(B5_T1B).map(whole)).toEqual(screenFor('t1b-b5-1'));
     expect(screenFor('t1b-b5-1')).toHaveLength(3);
-    expect(PROD_SCREEN.startsWith(linesOf(PROD).map(whole).join(' '))).toBe(true);
+    const prod = linesOf(PROD);
+    expect(PROD_SCREEN.startsWith(prod.map(whole).join(' ').replaceAll(
+      ", using Olumi's estimates for 1 link (see Check estimates)", ''))).toBe(true);
+    for (const line of prod) {
+      expect(line.olumi_estimate_link_count).toBe(1);
+      expect(line.chance).toContain(", using Olumi's estimates for 1 link (see Check estimates).");
+    }
     expect(linesOf(PROD)).toHaveLength(3);
   });
 
@@ -134,8 +140,12 @@ describe('S4c: owed only when the reply does not give that option’s figure', (
     expect(out.text).toBe(B5_T1B.assistant_text.replace(`${T1B_LEAD}\n\n`, `${T1B_LEAD}\n\n${screenFor('t1b-b5-1').join(' ')}\n\n`));
   });
 
-  it('the served prod cut-6 T1b reply already gives every figure in its own words: unchanged', () => {
-    expect(withScreenLinesOwed(PROD.assistant_text, linesOf(PROD))).toEqual({ text: PROD.assistant_text, added: 0 });
+  it('the served prod cut-6 unlabelled figures do not pay the labelled point, and narrator counts are removed', () => {
+    const narratorCount = ' Six underlying values were supplied by Olumi, not you; sensitivity has not established which assumption matters most.';
+    expect(PROD.assistant_text).toContain(narratorCount);
+    expect(withScreenLinesOwed(PROD.assistant_text, linesOf(PROD))).toEqual({
+      text: `${PROD.assistant_text.replace(narratorCount, '')}\n\n${linesOf(PROD).map(whole).join(' ')}`, added: 5,
+    });
   });
 
   it('a reply that already says the lines (restyled quotes and bold) is unchanged', () => {

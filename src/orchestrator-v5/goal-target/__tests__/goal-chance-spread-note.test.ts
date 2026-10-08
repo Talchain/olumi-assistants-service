@@ -177,7 +177,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const l = licence(rs, delta, g);
     expect(l.form).toBe('highest'); noNote(l);
   });
-  it('chat: B chance ends with the note once; an existing chance sentence gains it without repeating the chance', () => {
+  it('chat: B chance ends with the note once; an unlabelled figure owes the full estimate-labelled point', () => {
     const g = graph();
     const result = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, level);
     const lines = goalChanceScreenLinesForAgent(result, g, true);
@@ -193,7 +193,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(withScreenLinesOwed(completed, [b]).added).toBe(0);
     const phrased = `${b.label}: ${b.figure}.`;
     const phrasedDone = withScreenLinesOwed(phrased, [b]).text;
-    expect(phrasedDone).toBe(`${phrased} ${SPREAD_NOTE_WITHOUT_DOWNSIDE}`);
+    expect(phrasedDone).toBe(`${phrased}\n\n${b.chance}${b.depends === '' ? '' : ` ${b.depends}`}`);
     expect(withScreenLinesOwed(phrasedDone, [b]).added).toBe(0);
     const orphan = withScreenLinesOwed(`${SPREAD_NOTE_WITHOUT_DOWNSIDE}\n${chanceOnly}`, [b]).text;
     expect(orphan.split(SPREAD_NOTE_WITHOUT_DOWNSIDE)).toHaveLength(2);
@@ -218,10 +218,10 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const b = lines.find(l => l.option_id === B)!;
     expect(b.spread_note).toBe(SPREAD_NOTE_WITHOUT_DOWNSIDE);
     expect(b.shortfall_note).toBe(`In its worst 1 in 20 runs of this model, ‘${b.label}’ falls short of your target by £15,000 / month or more.`);
-    expect(b.chance).toBe(`‘${b.label}’: ${b.figure} chance of meeting your goal, in this model. ${SPREAD_NOTE_WITHOUT_DOWNSIDE} ${b.shortfall_note}`);
+    expect(b.chance).toBe(`‘${b.label}’: ${b.figure} chance of meeting your goal, in this model, using Olumi's estimates for 2 links (see Check estimates). ${SPREAD_NOTE_WITHOUT_DOWNSIDE} ${b.shortfall_note}`);
     const sq = lines.find(l => l.option_id === SQ)!;
     expect(sq.shortfall_note).toBe(`In this model, ‘${sq.label}’ falls short of your target in almost every run, typically by about £6,000 / month.`);
-    expect(sq.chance).toBe(`‘${sq.label}’: less than 1% chance of meeting your goal, in this model. ${sq.shortfall_note}`);
+    expect(sq.chance).toBe(`‘${sq.label}’: less than 1% chance of meeting your goal, in this model, using Olumi's estimates for 2 links (see Check estimates). ${sq.shortfall_note}`);
   });
   it('B19 r3 owed insertion: Agent wording stays and the canonical shortfall unit is appended once', () => {
     const { lines } = shortfallScreenFixture();
@@ -282,8 +282,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
       : `${spreadOnly.label} still needs evidence.`;
     const text = `${b.chance}${separator}${ownRow}`;
     const completed = withScreenLinesOwed(text, [b, spreadOnly]);
-    const ownDone = mode === 'canonical' ? spreadOnly.chance : mode === 'agent' ? `${ownRow} ${spreadOnly.spread_note}`
-      : `${ownRow}\n\n${spreadOnly.chance}`;
+    const ownDone = mode === 'canonical' ? spreadOnly.chance : `${ownRow}\n\n${spreadOnly.chance}`;
     expect(completed).toEqual({ text: `${b.chance}${separator}${ownDone}`, added: 1 });
     expect(completed.text.split(b.spread_note!)).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [b, spreadOnly])).toEqual({ text: completed.text, added: 0 });
@@ -293,7 +292,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const own = `${spreadOnly.label}: ${spreadOnly.figure}`;
     const text = `${own} ${b.chance}`;
     const completed = withScreenLinesOwed(text, [b, spreadOnly]);
-    expect(completed).toEqual({ text: `${text} ${spreadOnly.spread_note}`, added: 1 });
+    expect(completed).toEqual({ text: `${text}\n\n${spreadOnly.chance}`, added: 1 });
     expect(completed.text.split(b.chance)).toHaveLength(2);
     expect(withScreenLinesOwed(completed.text, [b, spreadOnly])).toEqual({ text: completed.text, added: 0 });
   });

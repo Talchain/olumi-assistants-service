@@ -1,6 +1,7 @@
-import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
-import { goalOrderedLinks } from '../admission/target-testability.js';
+import { convertingOlumiEstimate, goalOrderedLinks, targetTestabilityOf } from '../admission/target-testability.js';
+import { linkEffectEndUnits } from '../system-events/link-effect-edit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from './goal-certainty.js';
 import { withoutAskedQuestion } from './goal-chance-withheld.js';
@@ -19,6 +20,8 @@ export interface GuidedSizingDraft {
     readonly from_label: string; readonly to_label: string;
     /** Zero-based position, nearest the goal first; equal distances retain warning order. */
     readonly order: number;
+    /** Science §(i) carve-out: a held size that case (c) still cannot convert, after placeholders. */
+    readonly nonconverting?: true;
   }[];
 }
 
@@ -39,24 +42,32 @@ export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links'> {
 export const guidedSizingSentence = (total: number): string =>
   `Not shown yet: ${total} links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.`;
 
-/** N comes solely from ONE typed warning. The graph supplies labels and ordering, never membership/count. */
-export function guidedSizingFromWarning(warning: unknown, graph: unknown): GuidedSizingDraft | undefined {
+/** N comes solely from ONE typed placeholder warning. The SAME case-(c) verdict supplies conversion carve-outs. */
+export function guidedSizingFromWarning(warning: unknown, graph: unknown, identityEvaluations?: readonly unknown[]): GuidedSizingDraft | undefined {
   const w = record(warning);
-  if (w?.code !== GOAL_FIGURES_PLACEHOLDER_PATH || !Array.isArray(w.acceptable_links) || w.acceptable_links.length < 2) return undefined;
-  const links = w.acceptable_links.map(record);
+  if (w?.code !== GOAL_FIGURES_PLACEHOLDER_PATH && w?.code !== GOAL_FIGURES_TARGET_NOT_TESTABLE) return undefined;
+  const links = (w.code === GOAL_FIGURES_PLACEHOLDER_PATH && Array.isArray(w.acceptable_links) ? w.acceptable_links : []).map(record);
   if (!links.every((l): l is Rec & { from: string; to: string } => l !== undefined
     && typeof l.from === 'string' && l.from !== '' && typeof l.to === 'string' && l.to !== '')) return undefined;
   const nodes = record(graph)?.nodes;
   const byId = new Map((Array.isArray(nodes) ? nodes.map(record).filter((n): n is Rec => n !== undefined) : []).map(n => [n.id, n]));
   const label = (id: string): string => typeof byId.get(id)?.label === 'string' ? byId.get(id)!.label as string : id;
-  // Existing reverse shortest-hop relaxation from goals; the optional tie rule preserves THIS warning's order.
-  const ordered = goalOrderedLinks(graph, links, true);
   const edges = record(graph)?.edges;
-  return { v: 1, total: links.length,
+  const edgeFor = (l: { from: string; to: string }): Rec | undefined =>
+    (Array.isArray(edges) ? edges.map(record) : []).find(e => e?.from === l.from && e.to === l.to);
+  const placeholders = links.filter(l => isPlaceholderLink(edgeFor(l)));
+  const verdict = targetTestabilityOf(graph, identityEvaluations);
+  const carveouts = verdict.kind !== 'not_testable' ? [] : verdict.failures.filter(f => f.case === 'c').flatMap(f => f.links ?? [])
+    .filter(l => edgeFor(l) !== undefined && !isPlaceholderLink(edgeFor(l)) && !convertingOlumiEstimate(edgeFor(l), graph));
+  if (placeholders.length < 2 && carveouts.length === 0) return undefined;
+  // Existing reverse shortest-hop relaxation from goals; the optional tie rule preserves THIS warning's order.
+  const ordered = [...goalOrderedLinks(graph, placeholders, true), ...goalOrderedLinks(graph, carveouts, true)];
+  return { v: 1, total: placeholders.length,
     links: ordered.map((l, order) => {
       const matches = (Array.isArray(edges) ? edges.map(record) : []).filter(e => e?.from === l.from && e.to === l.to);
       const id = matches.length === 1 && typeof matches[0]?.id === 'string' ? matches[0].id : undefined;
-      return { ...l, ...(id !== undefined ? { id } : {}), from_label: label(l.from), to_label: label(l.to), order };
+      return { ...l, ...(id !== undefined ? { id } : {}), from_label: label(l.from), to_label: label(l.to), order,
+        ...(order >= placeholders.length ? { nonconverting: true as const } : {}) };
     }) };
 }
 
@@ -66,10 +77,14 @@ export function guidedSizingForRun(result: unknown, graph: unknown): GuidedSizin
   if (!Array.isArray(warnings)) return undefined;
   // The words reader's dominant gates still own the reply and prohibit sizing offers.
   if (warnings.some(w => [GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PRODUCT_NOT_READ].includes(String(record(w)?.code)))) return undefined;
-  return guidedSizingFromWarning(warnings.find(w => record(w)?.code === GOAL_FIGURES_PLACEHOLDER_PATH), graph);
+  const evaluations = r?.identity_evaluations ?? record(r?.enrichment)?.identity_evaluations;
+  return guidedSizingFromWarning(warnings.find(w => record(w)?.code === GOAL_FIGURES_PLACEHOLDER_PATH)
+    ?? warnings.find(w => record(w)?.code === GOAL_FIGURES_TARGET_NOT_TESTABLE), graph,
+    Array.isArray(evaluations) ? evaluations : undefined);
 }
 
 const PRESS_PREFIX = 'agent-size-link:';
+const NONCONVERTING_REASON = " Olumi has it as a band, which can't be turned into your goal's units.";
 /** DGAI 0.81.0's strict ActionSchema accepts no parameters. The hook alone carries inspector data. */
 export function guidedSizingWireAction(action: SuggestedAction): SuggestedAction {
   return action.id.startsWith(PRESS_PREFIX)
@@ -104,16 +119,30 @@ export function guidedSizingActions(sizing: GuidedSizingDraft | undefined, graph
   return sizing.links.flatMap(l => {
     const matches = edges.map(record).filter(e => l.id !== undefined ? e?.id === l.id && e.from === l.from && e.to === l.to : e?.from === l.from && e.to === l.to);
     // The selected warning can predate a size: ask only for the SAME held, still-unsized edge.
-    if (matches.length !== 1 || !isPlaceholderLink(matches[0])) return [];
-    const label = `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`;
+    if (matches.length !== 1 || (l.nonconverting === true
+      ? isPlaceholderLink(matches[0]) || convertingOlumiEstimate(matches[0], graph)
+      : !isPlaceholderLink(matches[0]))) return [];
+    const ends = l.nonconverting === true ? linkEffectEndUnits(graph, l.from, l.to) : null;
+    const unit = ends?.target.own[0] ?? ends?.target.adopted;
+    if (l.nonconverting === true && unit === undefined) return [];
+    const label = l.nonconverting === true
+      ? `How much does ‘${l.from_label}’ change ‘${l.to_label}’, in ${unit}?${NONCONVERTING_REASON}`
+      : `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`;
+    const question = l.nonconverting === true ? label.slice(0, -NONCONVERTING_REASON.length) : label;
     const legacy = `How much does ‘${l.from_label}’ change ‘${l.to_label}’?`;
-    if (withoutAskedQuestion(label, recentReplies) === '' || withoutAskedQuestion(legacy, recentReplies) === '') return [];
+    if (withoutAskedQuestion(question, recentReplies) === '' || withoutAskedQuestion(legacy, recentReplies) === '') return [];
     // FU-1's existing denial closes the ask without sizing the edge. Its receipt is the durable answer text.
     const stays = `Nothing is recorded: the link from “${l.from_label}” to “${l.to_label}” stays as it is.`;
     if (recentReplies.some(reply => reply.includes(stays))) return [];
     return [{ id: `${PRESS_PREFIX}${encodeURIComponent(l.from)}:${encodeURIComponent(l.to)}`, label, message: label,
       parameters: { from: l.from, to: l.to, ...(l.id !== undefined ? { edge_id: l.id } : {}) } }];
   });
+}
+
+/** The existing never-reask reader takes questions ending in '?', not a press's following explanation. */
+export function guidedSizingQuestions(sizing: GuidedSizingDraft | undefined, graph: unknown): string[] {
+  return guidedSizingActions(sizing, graph).map(a => a.label.endsWith(NONCONVERTING_REASON)
+    ? a.label.slice(0, -NONCONVERTING_REASON.length) : a.label);
 }
 
 /** M is produced afresh from the authoritative stored graph AFTER the existing door verifies its commit. */
@@ -125,7 +154,7 @@ export function guidedSizingProgress(graph: unknown): { draft: GuidedSizingDraft
   // Same predicate AND same deduplicating warning producer as a Run's N; no stale-warning subtraction.
   const warning = placeholderGoalWarning(graph, paths, GOAL_FIGURES_PLACEHOLDER_PATH);
   const draft = guidedSizingFromWarning(warning, graph);
-  return draft === undefined ? undefined : { draft, remaining: draft.total,
+  return draft === undefined || draft.total < 2 ? undefined : { draft, remaining: draft.total,
     progress_line: `${draft.total} more to go; with 1 left, Olumi can show a range.` };
 }
 

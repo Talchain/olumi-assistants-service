@@ -18,7 +18,7 @@ import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 import { sameUnit, unitsCompose } from '../agent-lane/reconciling-product.js';
-import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
+import { linkEffectConversionFrames, linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
 import { edgeStrengthWords } from '../format/edge-strength-words.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
@@ -26,6 +26,7 @@ import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
 import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.js';
+import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -68,9 +69,9 @@ export type TargetTestability =
  * - (1) INTO the goal: every link from a node an option moves carries a `natural_effect` whose `amount_unit` is the
  *   goal's unit (R3 5914500931: "strong" is unitless, so it converts nothing), OR the goal's identity is confirmed
  *   (its operands are exact);
- * - (2) ON the path: no link is sized only by Olumi (an `olumi_*` magnitude the user did not state). Served m1 after
- *   the identity card's Yes rested on Olumi's price → churn guess (AIQ 5914435183: `exploratory` until the user sizes
- *   it). A structural link nobody sized carries no guess and is not a failure here.
+ * - (2) ON the path: a placeholder or an Olumi size that cannot convert still fails. Science §(i)'s 8 Oct amendment
+ *   admits a current natural estimate in its ends' units; the downstream path/identity carries it into goal units.
+ *   Every other precondition remains. A structural link nobody sized carries no guess and is not a failure here.
  * A confirmed identity's ISL rules are checked by the Run, so that pass stays listed as unchecked.
  */
 function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown): boolean {
@@ -114,6 +115,28 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
   // another currency keeps the confirmed identity; nothing downstream converts it).
   const goalLabel = typeof goal.label === 'string' ? goal.label : '';
   return unitsCompose(goal.goal_threshold_unit, goalLabel, levels[0], levels[1]).kind !== 'no';
+}
+
+/** Science §(i) (A): ONE estimate-conversion predicate for case (c) and its guided-list reader.
+ * Read the writer's end units and magnitude converter, including its refused/unreadable frames. A stored natural
+ * effect describes only the coefficient it was written for. This licenses no placeholder, user band or accepted size.
+ */
+export function convertingOlumiEstimate(edge: unknown, graph: unknown): boolean {
+  if (!isRec(edge) || linkSizing(edge) !== 'olumi_estimate' || !isRec(graph) || !Array.isArray(graph.nodes)
+    || typeof edge.from !== 'string' || typeof edge.to !== 'string') return false;
+  const natural = isRec(edge.provenance) && isRec(edge.provenance.natural_effect) ? edge.provenance.natural_effect : undefined;
+  const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
+  if (natural === undefined || !finite(natural.amount) || !finite(natural.per_source_change)
+    || natural.per_source_change === 0 || !finite(mean) || natural.strength_mean !== mean) return false;
+  const ends = linkEffectEndUnits(graph, edge.from, edge.to);
+  if (ends === null || !statedInOneOf(natural.amount_unit, [...ends.target.own, ends.target.adopted])
+    || !statedInOneOf(natural.per_source_change_unit, [...ends.source.own, ends.source.adopted])) return false;
+  const frames = linkEffectConversionFrames(graph, edge.from, edge.to);
+  if (frames === null) return false;
+  const beta = convertLinkEffect(natural.amount, natural.per_source_change, frames.target, frames.source);
+  // naturalEffectOf persists BOTH amount and per to six significant figures, while strength_mean keeps beta.
+  // Each rounding has <=5e-6 relative error; their ratio differs by <=1e-5 of the larger coefficient.
+  return beta !== null && Math.abs(mean) <= 1 && Math.abs(beta - mean) <= 1e-5 * Math.max(Math.abs(beta), Math.abs(mean));
 }
 
 /** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
@@ -292,7 +315,7 @@ export function targetTestabilityOf(
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
     const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
-      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf));
+      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     // ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's sizes on both sides of a level-less mediator size the path (M's

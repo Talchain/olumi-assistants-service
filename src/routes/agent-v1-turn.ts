@@ -103,7 +103,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
-import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress } from '../orchestrator-v5/agent-lane/guided-sizing.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingQuestions, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -2341,7 +2341,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready'
         ? guidedSizingForRun(state.analysisResult, state.graph) : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
-        await repliesToCheckAsks(replayGuidedDraft?.links.map(l => `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`) ?? [], store, scenarioId, turnId));
+        await repliesToCheckAsks(guidedSizingQuestions(replayGuidedDraft, state.graph), store, scenarioId, turnId));
       replayActions.push(...replayGuidedActions);
       const replayGuided = bindGuidedSizing(replayGuidedDraft, replayGuidedActions, {
         graph_hash: state.graphHash ?? '', run_key: replayNarration?.run_key ?? '',
@@ -4068,7 +4068,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
     const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,
-      await repliesToCheckAsks(guidedDraft?.links.map(l => `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`) ?? [], store, scenarioId, undefined));
+      await repliesToCheckAsks(guidedSizingQuestions(guidedDraft, readbackGraph), store, scenarioId, undefined));
     offeredNow.push(...guidedActions);
     const guidedSizing = bindGuidedSizing(guidedDraft, guidedActions, {
       graph_hash: graphHash ?? '',
