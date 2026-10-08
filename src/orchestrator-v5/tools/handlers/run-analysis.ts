@@ -218,6 +218,7 @@ import { perOptionTargetReasonsForRun } from '../../goal-target/target-testabili
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
+import { withAccumulationRateSpread } from '../../agent-lane/accumulation-rate-spread.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -1151,8 +1152,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis held links at existence 1.0: a user range, a validated definition or route-once (wire copy only; ids only)',
       );
     }
+    const rateSpreadWireGraph = withAccumulationRateSpread(heldWireGraph);
+    if (rateSpreadWireGraph !== heldWireGraph) {
+      log.info(
+        { event: 'run_analysis.accumulation_rate_spread', request_id: invocation.requestId, scenario_id: args.scenario_id },
+        'run_analysis carried accumulation rate spread from current authorship (wire copy only; ids only)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: withShareByDateFrame(heldWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph),
+      graph: withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
