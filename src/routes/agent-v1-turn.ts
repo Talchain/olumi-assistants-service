@@ -4466,6 +4466,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: `${l.chance} ${l.depends}`, lead: true as const }]),
           { role: 'evidence', text: l.chance, lead: true },
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends }]),
+          ...[l.spread_note, l.shortfall_note].filter((note): note is string => note !== undefined)
+            .map((text): FaceObligation => ({ role: 'evidence', text })),
           // B15: where the narrator gave this figure in its own accepted words (so nothing was added), THAT sentence is
           // the finding: typed as leading evidence, by this option's label and screen figure (Codex P1, DL 6049287605).
           // With its spread note as ONE unit when the note follows it (never a chance on the face, its qualifier in detail).
