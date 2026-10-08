@@ -86,6 +86,7 @@ export const DISABLED = {
   needs_current_analysis: 'Needs a current analysis.',
   needs_goal: 'Needs a goal in the model first.',
   needs_option: 'Needs at least one option in the model.',
+  already_waiting: 'Waiting for your yes on the suggested change. Approve it, or change something first.',
 } as const;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -174,7 +175,8 @@ function drafts(f: ActionFacts): Draft[] {
     out.push(draft(f, 'pre_mortem',
       !f.goalPresent ? { enabled: false, disabled_reason: DISABLED.needs_goal }
         : f.ownOptionCount < 1 ? { enabled: false, disabled_reason: DISABLED.needs_option }
-          : { enabled: true, why_now: WHY_NOW.pre_mortem },
+          : f.approvalWaiting ? { enabled: false, disabled_reason: DISABLED.already_waiting }
+            : { enabled: true, why_now: WHY_NOW.pre_mortem },
       premortem !== undefined ? tierOfPriority(premortem) : GENERIC_TIER, userLine !== undefined ? { user_line: userLine } : {}));
 
     const widen = rc('RC-WIDEN', (r) => r.target === 'options');
