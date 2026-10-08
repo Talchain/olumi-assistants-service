@@ -102,7 +102,8 @@ describe('GOAL-REACH build 1 stored reading', () => {
       if (change === 'two_goals') g.nodes.push({ id: 'another_goal', kind: 'goal', label: 'Another' });
       if (change === 'long_words') price.label = 'p'.repeat(401);
       if (change === 'second_reading') node(g, 'mrr_lost_to_price_driven_churn').nonlinear_identity = { operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: false };
-      if (change === 'nonfactor') price.kind = 'outcome';
+      // Science §(e) addendum 6 (8 Oct): an OUTCOME operand of the declared product now reads as a factor; any other kind still fails closed.
+      if (change === 'nonfactor') price.kind = 'risk';
     });
     expect(proposeProductIdentity(g)).toBeNull();
     expect(confirm(g)).toHaveLength(0);
