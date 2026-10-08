@@ -5,7 +5,8 @@
  * buildModelFromBrief, and the registered graph is scored by the typed predicate diagnoseDraft. A draft is NARROW when
  * it has fewer than two risks, no risk on an active option's path, or no second option on a proven-distinct lever.
  *
- * Done for S7 = 0 narrow drafts. The baseline (scripts/ci/construction-breadth-baseline.json) may only shrink:
+ * Breadth is a FLOOR for S7, not its done-definition (#87 6070861769: objective, capacity, partial-work ambiguity, provenance
+ * and time preserved). Target 0 narrow. The baseline (scripts/ci/construction-breadth-baseline.json) may only shrink:
  * a newly narrow draft fails, and a draft that became sufficient fails until its id is removed from the baseline.
  */
 import fs from 'node:fs';
@@ -45,17 +46,17 @@ describe('S7 construction-breadth census (ratchet)', () => {
     expect(baseline.narrow_ids).toHaveLength(baseline.narrow_count);
 
     const narrow: string[] = [];
-    let sufficient = 0;
     for (const row of corpus) {
       const graph = await registeredGraph(row);
       expect(graph, `${row.id}: no graph registered`).not.toBeNull();
+      // Contrast that still holds at the zero target: the same graph with its risks removed must read as narrow.
+      const stripped = { ...graph!, nodes: (graph!.nodes as Rec[]).filter(n => n.kind !== 'risk') };
+      expect(diagnoseDraft(stripped).risks, `${row.id}: probe blind to a risk-less graph`).toBe('too_few');
       const d = diagnoseDraft(graph);
-      if (d.risks !== null || d.options !== null) narrow.push(row.id); else sufficient++;
+      if (d.risks !== null || d.options !== null) narrow.push(row.id);
     }
-    // Contrast: the predicate separates the corpus (some of each), so a probe that reads every draft alike fails here.
-    expect(narrow.length).toBeGreaterThan(0);
-    expect(sufficient).toBeGreaterThan(0);
 
+    expect(narrow.length).toBeLessThanOrEqual(baseline.narrow_count);
     const allowed = new Set(baseline.narrow_ids);
     const newlyNarrow = narrow.filter(id => !allowed.has(id));
     expect(newlyNarrow, 'drafts that became NARROW (construction regressed)').toEqual([]);
