@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BIAS_RISK_MAX, biasRiskOf, type OptionFrame } from '../bias-triggers.js';
+import { BIAS_RISK_MAX, biasCheckReply, biasRiskOf, type OptionFrame } from '../bias-triggers.js';
 import type { ActionOffer } from '../rank.js';
 import type { ActionId } from '../registry.js';
 import { estimatePointsOf, type ActionFacts } from '../state.js';
@@ -58,6 +58,125 @@ const estimates: ActionFacts['estimateCandidates'] = [
   { factor_id: 'far', label: 'Market size', value_authorship: 'olumi_estimate', goal_distance: 2, value_hash: 'far-value', figure: '100' },
   { factor_id: 'near', label: 'Conversion rate', value_authorship: 'olumi_estimate', goal_distance: 1, value_hash: 'near-value', figure: '20%' },
 ];
+
+describe('P45 slice 3 biasCheckReply', () => {
+  const moreOptions = { ...offer('more_options'), label: 'More options' };
+  const anchoring = { ...offer('bias_anchoring'), label: 'Anchoring' };
+  const offers = [anchoring, moreOptions];
+  const checked = 'Checked: Narrow framing, Anchoring.';
+  const close = 'Which of these is worth ten minutes now?';
+
+  it('both fire at frame: exact model items, both badge lines, and ordered same-bar offer keys', () => {
+    const f = facts({
+      canonicalStage: 'frame', // Both claims apply here; evaluate omits the narrow-framing badge.
+      estimateCandidates: [...estimates].reverse(),
+      estimateDriverIds: ['far'],
+      optionFrame: frame({ nonSqOptionLabels: ['Hire a Tech Lead', 'Use a consultancy'], sameLever: true }),
+    });
+    const reply = biasCheckReply(f, offers);
+    expect(reply.text).toBe([
+      checked,
+      'Narrow framing: where the pattern could bite: ‘Hire a Tech Lead’, ‘Use a consultancy’. One test: press ‘More options’.',
+      'Decision-science claim: Narrow framing and insufficient option generation · medium evidence',
+      'Anchoring: where the pattern could bite: ‘Market size’. One test: press ‘Anchoring’.',
+      'Decision-science claim: Anchoring and insufficient adjustment · strong evidence',
+      close,
+    ].join('\n'));
+    expect(reply.exits.map(o => o.offer_key)).toEqual([moreOptions.offer_key, anchoring.offer_key]);
+    expect(reply.exits[0]).toBe(moreOptions);
+    expect(reply.exits[1]).toBe(anchoring);
+    expect(reply.text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);
+  });
+
+  it('none fires: exact two-line valid result and no exits', () => {
+    const reply = biasCheckReply(facts({ optionFrame: frame() }), offers);
+    expect(reply).toEqual({
+      text: `${checked}\nNone of these patterns' triggers fire in this model.`,
+      exits: [],
+    });
+  });
+
+  it('only B-007 W2 with status quo: names the single non-SQ option', () => {
+    const reply = biasCheckReply(facts({
+      optionFrame: frame({ nonSqOptionLabels: ['Hire a Tech Lead'], statusQuoPresent: true }),
+    }), offers);
+    expect(reply.text).toBe([
+      checked,
+      'Narrow framing: where the pattern could bite: ‘Hire a Tech Lead’. One test: press ‘More options’.',
+      close,
+    ].join('\n'));
+    expect(reply.exits).toEqual([moreOptions]);
+    expect(reply.exits[0]).toBe(moreOptions);
+  });
+
+  it('same-lever B-007: lists every non-SQ option label in model order', () => {
+    const reply = biasCheckReply(facts({
+      optionFrame: frame({ nonSqOptionLabels: ['Hire a Tech Lead', 'Use a consultancy', 'Train the team'], sameLever: true }),
+    }), offers);
+    expect(reply.text).toBe([
+      checked,
+      'Narrow framing: where the pattern could bite: ‘Hire a Tech Lead’, ‘Use a consultancy’, ‘Train the team’. One test: press ‘More options’.',
+      close,
+    ].join('\n'));
+    expect(reply.exits).toEqual([moreOptions]);
+  });
+
+  it('pre-Run (no bound Run, no Anchoring offer): Anchoring is said NOT checked, never folded into "none fire"', () => {
+    const f = facts({ runBound: false, estimateCandidates: estimates, optionFrame: frame() });
+    expect(estimatePointsOf(f).length, 'precondition: Olumi estimates exist').toBeGreaterThan(0);
+    expect(biasCheckReply(f, [moreOptions])).toEqual({
+      text: ['Checked: Narrow framing.', 'Not checked yet: Anchoring, because it needs a current analysis first.',
+        "None of these patterns' triggers fire in this model."].join('\n'),
+      exits: [],
+    });
+  });
+
+  it('no enabled More options (no goal): Narrow framing is said NOT checked; a bound Run still checks Anchoring', () => {
+    const f = facts({ runBound: true, optionFrame: frame({ sameLever: true }) });
+    expect(biasCheckReply(f, [{ ...moreOptions, enabled: false }])).toEqual({
+      text: ['Checked: Anchoring.', 'Not checked yet: Narrow framing, because the model needs a goal first.',
+        "None of these patterns' triggers fire in this model."].join('\n'),
+      exits: [],
+    });
+    expect(biasCheckReply({ ...f, runBound: false }, []).text).toBe(['Not checked yet: Narrow framing, because the model needs a goal first.',
+      'Not checked yet: Anchoring, because it needs a current analysis first.'].join('\n'));
+  });
+
+  it('keeps the wire bias_risk byte-identical with exactly its existing keys, with and without science', () => {
+    for (const canonicalStage of [null, 'frame'] as const) {
+      const f = facts({ canonicalStage, estimateCandidates: estimates, optionFrame: frame({ sameLever: true }) });
+      const before = JSON.stringify(biasRiskOf(f, offers, f.optionFrame));
+      biasCheckReply(f, offers);
+      const risk = biasRiskOf(f, offers, f.optionFrame)!;
+      expect(JSON.stringify(risk)).toBe(before);
+      expect(JSON.stringify(risk)).toBe(JSON.stringify({
+        v: 1,
+        items: [
+          {
+            claim_id: 'DSK-B-007', name: 'Narrow framing',
+            why: 'These options all work through the same lever, which can hide better routes.',
+            action_id: 'more_options', press_id: moreOptions.press_id, offer_key: moreOptions.offer_key,
+            ...(canonicalStage === 'frame' ? { science: resolveDskClaimProvenance('DSK-B-007') } : {}),
+          },
+          {
+            claim_id: 'DSK-B-001', name: 'Anchoring',
+            why: 'Olumi’s starting figure for ‘Conversion rate’ could pull later estimates towards it.',
+            action_id: 'bias_anchoring', press_id: anchoring.press_id, offer_key: anchoring.offer_key,
+            ...(canonicalStage === 'frame' ? { science: resolveDskClaimProvenance('DSK-B-001') } : {}),
+          },
+        ],
+      }));
+      expect(Object.keys(risk)).toEqual(['v', 'items']);
+      for (const item of risk.items) {
+        expect(Object.keys(item)).toEqual([
+          'claim_id', 'name', 'why', 'action_id', 'press_id', 'offer_key',
+          ...(canonicalStage === 'frame' ? ['science'] : []),
+        ]);
+        expect(JSON.parse(JSON.stringify(item))).not.toHaveProperty('item');
+      }
+    }
+  });
+});
 
 describe('biasRiskOf', () => {
   it('returns nothing for a neutral frame, with a same-lever control that yields narrow framing', () => {
