@@ -217,6 +217,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'proposed_by',
   'option_status',
   'analysis_participation',
+  // RC3: only a server-validated widen press may leave an option precondition out of the Run.
+  'relies_on',
 ];
 
 /**
@@ -431,6 +433,36 @@ export function hasInterventionRangeWrite(operations: readonly { readonly value?
       contains(child, [...path, ...key.toLowerCase().split(/[./]/).filter(Boolean)]));
   };
   return operations.some(op => contains(op.value, []));
+}
+
+/**
+ * RC3: generic node mutations cannot author, rebind or clear the server's
+ * precondition stamp, irrespective of referee mode. Check the actual applied
+ * payload and every pointer/key spelling, including whole-object merges.
+ * An interventions factor id or category label is data, not a stamp field.
+ */
+export function hasReliesOnRiskWrite(operations: readonly {
+  readonly op: string;
+  readonly path?: string;
+  readonly field?: string;
+  readonly value?: unknown;
+}[]): boolean {
+  const segments = (key: string): string[] => key.toLowerCase().split(/[./]/).filter(Boolean);
+  const contains = (value: unknown, path: readonly string[]): boolean => {
+    const intervention = path.indexOf('interventions');
+    if (path.some((segment, i) => segment === 'relies_on' && (intervention === -1 || i !== intervention + 1))) return true;
+    // Below an intervention member the keys may be arbitrary category labels.
+    if (intervention !== -1 && path.length > intervention + 2) return false;
+    if (Array.isArray(value)) return value.some(child => contains(child, path));
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, child]) => contains(child, [...path, ...segments(key)]));
+  };
+  return operations.some(op => {
+    if (op.op !== 'add_node' && op.op !== 'update_node') return false;
+    const pointerField = op.path?.startsWith('/nodes/') ? segments(op.path).slice(2) : [];
+    return contains(undefined, op.field === undefined ? pointerField : segments(op.field))
+      || contains(op.value, []);
+  });
 }
 
 /**

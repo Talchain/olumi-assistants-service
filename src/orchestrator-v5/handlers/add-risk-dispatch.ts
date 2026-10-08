@@ -23,6 +23,7 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-ma
 import type { PendingAction } from '../session/pending-action.js';
 import { buildAddRiskTransaction, type AddRiskSkipReason } from '../routing/add-risk-transaction.js';
 import { eventRiskCardLine } from '../agent-lane/stated-event-risk-draft.js';
+import { heldReliesOnRiskLines, reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
 
 type StageIndicator = OlumiResponse['stage_indicator'];
 
@@ -31,6 +32,8 @@ export interface AddRiskTransactionInput {
   readonly params: unknown;
   /** event_risk.v1 slice 2a: validates with EventRiskV1 before holding. */
   readonly userEventRisk?: unknown;
+  /** RC3: host-authored option precondition; permits no links and stamps the held add_node itself. */
+  readonly reliesOn?: unknown;
   /** The PERSISTED pre-edit graph (the frame authority the hold is pinned to). */
   readonly currentGraph: unknown;
   /** Hash of `currentGraph`, resolved by the caller (never re-derived here). */
@@ -69,9 +72,11 @@ export function dispatchAddRiskTransaction(input: AddRiskTransactionInput): AddR
   const view = toGraphView(input.currentGraph);
   if (view === null) return { kind: 'refused', reason: 'unreadable_graph' };
 
-  const built = buildAddRiskTransaction(input.params, view);
+  const built = buildAddRiskTransaction(input.params, view, input.reliesOn);
   if (!built.matched) return { kind: 'refused', reason: built.reason };
   const { operations, riskId, riskLabel } = built.proposal;
+  const refereeOperations = reliesOnRefereeOperations(operations, input.currentGraph);
+  if (refereeOperations === undefined) return { kind: 'refused', reason: 'parameters_invalid' };
   const userEventRisk = input.userEventRisk === undefined ? undefined
     : readUserEventRiskMember({ ...(input.userEventRisk as object), risk_id: riskId });
   if (input.userEventRisk !== undefined && (userEventRisk === undefined || built.proposal.links.some((l) => l.to === riskId))) {
@@ -82,7 +87,7 @@ export function dispatchAddRiskTransaction(input: AddRiskTransactionInput): AddR
 
   const decision = evaluateEditGraphMutations({
     mode: 'live',
-    operations,
+    operations: refereeOperations,
     currentGraph: input.currentGraph,
     currentGraphHash: input.currentGraphHash,
     // Built against this very graph: base_hash_match by construction.
@@ -102,9 +107,12 @@ export function dispatchAddRiskTransaction(input: AddRiskTransactionInput): AddR
     return { kind: 'refused', reason: 'not_held', governing: decision.governing };
   }
   // The stated likelihood rides on the confirm chip the user reads, in the card record's own words (record.ts).
-  const likelihoodLine = userEventRisk === undefined ? undefined : eventRiskCardLine(userEventRisk.event_risk);
-  const chip: EditGmChip = likelihoodLine === undefined ? heldChip
-    : { ...heldChip, detail: heldChip.detail !== undefined ? `${heldChip.detail}\n${likelihoodLine}` : likelihoodLine };
+  const lines = [
+    ...(userEventRisk === undefined ? [] : [eventRiskCardLine(userEventRisk.event_risk)]),
+    ...heldReliesOnRiskLines(operations, input.currentGraph),
+  ];
+  const chip: EditGmChip = lines.length === 0 ? heldChip
+    : { ...heldChip, detail: [...(heldChip.detail === undefined ? [] : [heldChip.detail]), ...lines].join('\n') };
   const blocks: OlumiResponse['blocks'] = decision.heldProposalBlock != null ? [decision.heldProposalBlock as HeldProposalBlock] : [];
   const response: OlumiResponse = {
     response_version: 2,
@@ -115,8 +123,9 @@ export function dispatchAddRiskTransaction(input: AddRiskTransactionInput): AddR
     stage_indicator: input.stage,
   } as OlumiResponse;
   const pending = decision.pendingActions[0]!;
-  const pendingActions = userEventRisk === undefined ? decision.pendingActions : [{ ...pending, action: { ...pending.action,
-    inline_patch: { ...(pending.action as { inline_patch: Record<string, unknown> }).inline_patch, [GM_HELD_USER_EVENT_RISK_KEY]: userEventRisk },
+  const pendingActions = input.reliesOn === undefined && userEventRisk === undefined ? decision.pendingActions : [{ ...pending, action: { ...pending.action,
+    inline_patch: { ...(pending.action as { inline_patch: Record<string, unknown> }).inline_patch, operations,
+      ...(userEventRisk === undefined ? {} : { [GM_HELD_USER_EVENT_RISK_KEY]: userEventRisk }) },
   } } as PendingAction];
   return { kind: 'held', response, pendingActions, riskId, riskLabel, chip };
 }

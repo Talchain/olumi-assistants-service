@@ -171,6 +171,9 @@ import { createProposal, ProposalStore, type ProposalInterpretation, type Propos
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
+import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
+import type { PatchOperation } from '../../../orchestrator/types.js';
+import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -220,6 +223,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { productHoldRecord } from '../proposal-object/record.js';
 import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
+import { PLAIN_APPROVAL_SUPERSEDED } from '../proposal-object/reply.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -969,6 +973,8 @@ interface GraphRead {
     analysis_participation?: unknown;
     /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
     option_status?: unknown;
+    /** RC3: persisted server-authored option precondition. Inclusion is resolved over the whole graph. */
+    relies_on?: unknown;
     goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
@@ -984,6 +990,7 @@ interface GraphRead {
     from: string;
     to: string;
     origin?: unknown;
+    edge_type?: unknown;
     /** Whose link it is and how strong: read by the model context (C33) and the link-strength proposal and its write check. */
     provenance?: unknown;
     strength?: unknown;
@@ -1210,6 +1217,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           // them made the Agent reconstruct from the prompt what canonical state
           // already knew.
           const os = (n.observed_state ?? {}) as Record<string, unknown>;
+          const precondition = n.kind === 'risk' ? readReliesOnRisk(n.relies_on) : undefined;
           const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
           const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
           // Value provenance is a DIFFERENT fact from entity provenance: who put
@@ -1233,6 +1241,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             label: n.label,
             ...(n.description !== undefined ? { full_label: n.description } : {}),
             kind: n.kind,
+            ...(precondition === undefined ? {} : { relies_on: precondition }),
             // A value only when one is actually stored. Absence is reported as
             // unknown rather than as a zero.
             value: num(os.value) ? os.value : null,
@@ -1275,6 +1284,14 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
+  const preconditions = preconditionRiskIds(g.nodes, g.edges, limitNodeIdsOf(g.raw));
+  const leftOut = g.nodes.filter((n) => preconditions.has(n.id)).flatMap((risk) => {
+    const stamp = readReliesOnRisk(risk.relies_on);
+    if (stamp === undefined) return [];
+    return [{ id: risk.id, label: risk.label, relies_on: stamp,
+      reason: reliesOnRiskLine(risk.label, labelOf.get(stamp.option_id)!),
+      use: "Kept for discussion. Never a driver, sensitivity or worth-checking row, and never cite it as a reason for a goal chance: the Run leaves it out." }];
+  });
   const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
     const trio = pickGoalThresholdTrio(n as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
     const frame = (n as { goal_threshold_frame?: unknown }).goal_threshold_frame;
@@ -1386,6 +1403,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
     links,
+    ...(leftOut.length === 0 ? {} : { left_out_of_run: leftOut }),
     readiness: readinessViewOf(g.raw),
     ...(earlierAnalysisOf(g.analysis_state, g.analysis_ready) ?? {}),
   };
@@ -2237,7 +2255,7 @@ export function createAgentCapabilities(
         detail: 'That change is no longer waiting (it expired, or the model changed since it was offered), so nothing was applied. Offer to prepare it again.' };
     }
     const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
-    if (ctx.typed_approval_words !== copy.message) {
+    if (ctx.proposal_edits === undefined && ctx.typed_approval_words !== copy.message) {
       return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
         detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
     }
@@ -2255,19 +2273,33 @@ export function createAgentCapabilities(
       if (edits.proposal_id !== ref || edits.revision !== hold.id || edits.graph_hash !== hold.preconditions.graph_hash
         || edits.graph_hash !== before.graph_hash) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
       }
       const record = productHoldRecord(hold, before);
       if (record !== undefined && record.digest !== edits.digest) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. What this change shows has changed since these values were set.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. What this change shows has changed since these values were set.' };
       }
-      const amended = record === undefined ? undefined : amendHeldOperations(record, edits.fields);
-      if (amended === undefined || !amended.ok) {
+      if (record === undefined) {
         return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
           detail: 'Nothing changed. Those values do not belong to this waiting change.' };
       }
-      userEdits = amended.userEdits;
+      // Check the card binding before its words: a replaced card can also have a newer approval message.
+      if (ctx.typed_approval_words !== copy.message) {
+        return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
+          detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
+      }
+      // Empty fields bind the displayed card only; they generate no amendments or edit receipts.
+      if (edits.fields.length > 0) {
+        const amended = amendHeldOperations(record, edits.fields);
+        if (!amended.ok) {
+          return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
+            detail: 'Nothing changed. Those values do not belong to this waiting change.' };
+        }
+        userEdits = amended.userEdits;
+      }
     }
     const r = await dispatch('/orchestrate/v2/turn', {
       kind: 'message',
@@ -2313,6 +2345,9 @@ export function createAgentCapabilities(
     const verified = applied && after !== null && typeof r.json.graph_hash === 'string' && r.json.graph_hash === after.graph_hash
       && after.graph_hash !== before.graph_hash && !stillHeld && holdsAll(after);
     if (!verified) {
+      if (!applied && edits?.fields.length === 0 && r.json.assistant_text === PLAIN_APPROVAL_SUPERSEDED) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref, detail: PLAIN_APPROVAL_SUPERSEDED };
+      }
       return applied
         ? { ok: false, mutated: true, refusal: 'not_verified', proposal_id: ref,
           detail: 'The change was saved, but the model changed again straight afterwards, so what it now holds could not be confirmed. Read the model again before saying what it holds.' }
@@ -8197,12 +8232,20 @@ export function createAgentCapabilities(
       }
       const affects = Array.isArray(args?.affects) ? args.affects : [];
       const causedBy = Array.isArray(args?.caused_by) ? args.caused_by : [];
-      if (affects.length === 0) {
+      const precondition = ctx.widen_relies_on === undefined ? undefined : readReliesOnRisk(ctx.widen_relies_on);
+      if (ctx.widen_relies_on !== undefined && (precondition === undefined || affects.length !== 0 || causedBy.length !== 0)) {
+        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'Nothing was prepared: this option precondition must have no links.' };
+      }
+      if (affects.length === 0 && precondition === undefined) {
         return { ok: false, mutated: false, refusal: 'no_affects',
           detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const preconditionOption = precondition === undefined ? undefined : g.nodes.find((n) => n.id === precondition.option_id && n.kind === 'option');
+      if (precondition !== undefined && preconditionOption === undefined) {
+        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'The option this risk relies on is no longer in the model. Nothing was prepared.' };
+      }
       if (g.nodes.some((n) => norm(n.label) === norm(label))) {
         return { ok: false, mutated: false, refusal: 'risk_exists',
           detail: `The model already has something called "${label}", so nothing was prepared. Describe it from the model instead of adding it again.` };
@@ -8235,7 +8278,7 @@ export function createAgentCapabilities(
       }
       // Only the user's turn may author the likelihood or name its drivers.
       const userText = ctx.user_turn_text ?? ctx.user_text ?? '';
-      const stated = readStatedEventRisk(userText);
+      const stated = precondition === undefined ? readStatedEventRisk(userText) : undefined;
       const driverLabels = stated === undefined ? [] : causedBy.map((c) => {
         const asked = String(c?.factor_label ?? '');
         const resolved = resolveNamed(g, asked, (node) => node.kind === 'factor');
@@ -8264,7 +8307,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
       }
       // The door's own builder, run here purely: a spec it would refuse is never sent.
-      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never });
+      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never }, precondition);
       if (!built.matched) {
         const why = built.reason === 'kind_pair_not_allowed'
           ? ` ${RISK_LINKS_RULE}`
@@ -8282,6 +8325,7 @@ export function createAgentCapabilities(
         base_graph_hash: g.graph_hash,
         risk: { id: riskId, label },
         links,
+        ...(precondition === undefined ? {} : { relies_on: precondition }),
         ...(eventRisk !== undefined ? { user_event_risk: eventRisk } : {}),
       });
       if (res.status === 'stale') {
@@ -8296,6 +8340,9 @@ export function createAgentCapabilities(
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
           heldOk = (eventRisk === undefined || (hold !== undefined && isDeepStrictEqual((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_EVENT_RISK_KEY], { risk_id: riskId, ...eventRisk })))
             && ops.some((o) => o.op === 'add_node' && o.path === riskId)
+            && (precondition === undefined || (reliesOnRefereeOperations(ops as PatchOperation[], g) !== undefined
+              && ops.some((o) => o.op === 'add_node' && o.path === riskId
+                && isDeepStrictEqual((o.value as Record<string, unknown>)?.relies_on, precondition))))
             && built.proposal.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`));
         } catch {
           heldOk = false;
@@ -8318,13 +8365,16 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         risk: {
           label,
+          ...(precondition === undefined ? {} : { relies_on: { option_id: precondition.option_id, option_label: preconditionOption!.label } }),
           ...(eventRisk !== undefined ? { likelihood: { p_low_pct: eventRisk.event_risk.occurrence.p_low * 100, p_high_pct: eventRisk.event_risk.occurrence.p_high * 100, horizon_months: eventRisk.event_risk.horizon.months, basis: 'user', quote: eventRisk.quote } } : {}),
           threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
           how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
         },
         ...(droppedDrivers.length > 0 ? { dropped_drivers: droppedDrivers } : {}),
-        note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
+        note: precondition !== undefined
+          ? "Nothing has changed yet. This risk stays on the model with no links. The Run leaves it out because it cannot yet apply the risk to that option alone; that option's chance does not include it yet."
+          : 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
           + (stated !== undefined && riskCauses.length > 0 ? ' ' + HELD_RISK_CAUSE_NOTE : '')
           + (droppedDrivers.length > 0 ? ` I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.` : '')

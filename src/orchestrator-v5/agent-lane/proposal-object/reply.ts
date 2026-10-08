@@ -9,6 +9,9 @@ import { sayFigureAsWritten } from '../say-figure.js';
 
 const BAND_WORD: Readonly<Record<StrengthBand, string>> = { slight: 'slight', moderate: 'moderate', strong: 'strong', very_strong: 'very strong' };
 
+// AIQ: words pending
+export const PLAIN_APPROVAL_SUPERSEDED = 'Nothing changed. That card is out of date: the change it shows has been replaced. Use the newest card for it.';
+
 /** One sentence per field the user set, then one line naming the links left as Olumi's. */
 export function userEditsReceipt(edits: readonly UserEdit[]): string {
   const lines: string[] = [];
