@@ -500,6 +500,12 @@ describe('EVENT-RISK RC3 (a′): a precondition stays on the model with zero lin
     expect(first.gate.shared_preconditions.map((p) => p.label)).toEqual(['Team attrition']);
     expect(first.reply).toContain('Risk: ‘Team attrition’ (outside events).');
     expect(first.gate.kept.length + first.gate.shared_preconditions.length).toBeLessThanOrEqual(3);
+    // Codex #2817 r2: the same note AFTER three risks is still said; the last risk gives up its slot.
+    const last = settleRisksTurn(turnOn(fixture('v1')), appendix([...TURN2.slice(0, 3), shared]));
+    expect(last.gate.shared_preconditions.map((p) => p.label)).toEqual(['Team attrition']);
+    expect(last.reply).toContain('Risk: ‘Team attrition’ (outside events).');
+    expect(last.gate.kept.length + last.gate.shared_preconditions.length).toBeLessThanOrEqual(3);
+    expect(last.offered).toBe(last.actions.filter((a) => isWidenAddPressId(a.id)).length);
   });
 
   it('rc3-shared-precondition: a shared relies_on item is refused because it has no option identity to stamp', () => {

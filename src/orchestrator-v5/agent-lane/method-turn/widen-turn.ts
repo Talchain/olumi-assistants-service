@@ -926,6 +926,8 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
   const kept: RiskSuggestion[] = [];
   const dropped: { index: number; failed: string[] }[] = [];
   const sharedPreconditions: { label: string; category: RiskCategory; relies_on: string }[] = [];
+  // A shared precondition refused only for the count: it may take a slot after the loop (never silence, Codex #2817 r2).
+  const squeezedShared: { index: number; label: string; category: RiskCategory; relies_on: string }[] = [];
   const raw = Array.isArray(candidates) ? candidates : [];
   for (const [index, item] of raw.entries()) {
     const failed: string[] = [];
@@ -972,6 +974,9 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
       if (!built.matched) failed.push('RK-DOOR');
     }
     if (kept.length + sharedPreconditions.length >= RISK_MAX_ITEMS && (failed.length === 0 || (failed.length === 1 && failed[0] === 'RK-SHARED-PRECONDITION'))) failed.push('RK-COUNT');
+    if (failed.length === 2 && failed[0] === 'RK-SHARED-PRECONDITION' && failed[1] === 'RK-COUNT') {
+      squeezedShared.push({ index, label: c.label.trim(), category: c.category, relies_on: c.relies_on.replace(/[.!]+$/u, '') });
+    }
     if (failed.length === 1 && failed[0] === 'RK-SHARED-PRECONDITION') {
       sharedPreconditions.push({ label: c.label.trim(), category: c.category, relies_on: c.relies_on.replace(/[.!]+$/u, '') });
     }
@@ -987,6 +992,20 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
     kept.push({ ...s, press: riskAddPressFor(s) });
   }
   // Science: what the options DIFFER on first; a shared assumption cannot change the comparison, so it comes last.
+  // Never silence: when no shared precondition was disclosed but one was squeezed out by the count, it takes the LAST kept
+  // item's slot (that item is dropped for the count instead), so the reply still says it and stays within three items.
+  // Refused only for shared + count, so it already passed RK-NO-DUP and RK-DISTINCT against every kept item.
+  const squeezed = squeezedShared[0];
+  if (sharedPreconditions.length === 0 && squeezed !== undefined) {
+    const evicted = kept.pop();
+    if (evicted !== undefined) {
+      const at = raw.findIndex((x) => sameLabel(String(rec(x)?.label ?? ''), evicted.label));
+      dropped.push({ index: at, failed: ['RK-COUNT'] });
+    }
+    const entry = dropped.find((d) => d.index === squeezed.index);
+    if (entry !== undefined) entry.failed = ['RK-SHARED-PRECONDITION'];
+    sharedPreconditions.push({ label: squeezed.label, category: squeezed.category, relies_on: squeezed.relies_on });
+  }
   return { kept: [...kept.filter((k) => !k.shared), ...kept.filter((k) => k.shared)], dropped, shared_preconditions: sharedPreconditions };
 }
 
