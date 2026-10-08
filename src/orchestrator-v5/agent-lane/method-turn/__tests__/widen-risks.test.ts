@@ -281,7 +281,7 @@ describe('S-C standing gap signal: typed, from model state, ONE question', () =>
   });
 });
 
-describe('S-C regex scaling (preamble: 5k→20k, 3 shapes, < 8×, min of 7 calibrated batches)', () => {
+describe('S-C regex scaling (preamble: 5k→40k, 3 shapes, < 22×, min of 7 calibrated batches)', () => {
   const shapes: Record<string, (n: number) => string> = {
     spaces: (n) => ' '.repeat(n),
     budgetNoMoney: (n) => 'budget '.repeat(Math.ceil(n / 7)).slice(0, n),
@@ -289,9 +289,10 @@ describe('S-C regex scaling (preamble: 5k→20k, 3 shapes, < 8×, min of 7 calib
   };
   for (const [name, shape] of Object.entries(shapes)) {
     it(`RX-${name}: STATED_BUDGET scales linearly; an unbounded Add message is refused before any work`, () => {
-      const small = shape(5_000); const big = shape(20_000);
+      const small = shape(5_000); const big = shape(40_000);
       const m = scalingRatio(() => STATED_BUDGET.test(small), () => STATED_BUDGET.test(big));
-      expect(m.ratio, `budget ${name} ${m.detail}`).toBeLessThan(8);
+      // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+      expect(m.ratio, `budget ${name} ${m.detail}`).toBeLessThan(22);
       // The Add press has no regex: it is reconstructed, and refused above 600 chars before any work.
       expect(widenAddCallOf('agent-widen-add:0000000000000000', `Add the risk ‘x’ to ‘o’: driven by more ‘${big}’, it would lower ‘y’.`, { graph: fixture('v1') })).toBeNull();
     });

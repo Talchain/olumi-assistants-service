@@ -19,6 +19,7 @@
  * graph".
  */
 
+import { assertShareByDatePreserved } from '../../../goal-target/share-by-date-carrier.js';
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
 import { log } from '../../../../utils/telemetry.js';
 import { D1HandlerError } from './errors.js';
@@ -98,6 +99,7 @@ export function applyAndValidateMutation<TBefore, TAfter>(
   }
   const clone = JSON.parse(JSON.stringify(ingressParse.data)) as GraphV3T;
   const { before, after } = mutator(clone);
+  assertShareByDatePreserved(ingressGraph, clone);
 
   // 2. Re-parse the mutated graph for post-mutation validation.
   const postParse = GraphV3.safeParse(clone);
@@ -237,6 +239,7 @@ export function mergeMutatedGraphForPersistence(args: {
   const persistedMalformed =
     persistedBase !== null && persistedBase !== undefined && !persistedUsable;
 
+  assertShareByDatePreserved(persistedBase ?? null, mutatedGraph);
   const merged: Record<string, unknown> = persistedUsable
     ? {
         ...(persistedBase as Record<string, unknown>),

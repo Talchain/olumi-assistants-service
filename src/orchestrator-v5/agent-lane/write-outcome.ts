@@ -26,7 +26,7 @@
  */
 
 import type { ToolResult } from './runtime/agent-tools.js';
-import { proposalsAwaitingApproval } from './approval-chips.js';
+import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
@@ -328,8 +328,10 @@ function openQuestionsLine(r: ToolResult): string {
   const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
-  const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
-  const rest = qs.length - OPEN_QUESTIONS_SHOWN;
+  const next = typeof r.displayed_next_question === 'string' ? r.displayed_next_question : null;
+  const shownCount = next === null ? OPEN_QUESTIONS_SHOWN : 1;
+  const shown = (next === null ? qs.slice(0, shownCount) : [next]).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const rest = qs.length - shownCount;
   // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
   // names the omitted items even if an earlier sentence is dropped; the disclosure lists all (`_agent.open_questions`).
   const more = rest > 0 ? ` ${rest} more question${rest === 1 ? ' remains' : 's remain'} unresolved.` : '';
@@ -377,6 +379,14 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
 
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+  // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
+  // The narrating call's approval never reached the store, so the held change still awaits the user's yes — unless the
+  // turn then withdrew it (Codex #2781 r4 P2): the words follow the approve chip's own rule (`pending`), never the refusal.
+  // It speaks for that change only (r5 P2): an earlier approval this turn may have saved, so no turn-wide "nothing changed";
+  // a withdrawn change has no line of its own.
+  if (name === 'authorise_change' && r.ok === false && r.refusal === NOT_ON_NARRATION) {
+    return pending !== null ? 'The change above is waiting for your approval.' : '';
+  }
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
