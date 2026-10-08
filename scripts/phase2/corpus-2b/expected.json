@@ -1,0 +1,1949 @@
+[
+  {
+    "case_id": "01-success",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": 0,
+        "driver": null,
+        "high": 0.00038399837067659557,
+        "licence_status": "permitted_with_caveat",
+        "low": 0,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.5204,
+        "driver": {
+          "authored_by": "olumi",
+          "from": "starter_tier_mrr",
+          "kind": "link_strength",
+          "quantity_id": "starter_tier_mrr->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": false
+        },
+        "high": 0.5301819493354264,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.5106023835310499,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.4677,
+        "driver": {
+          "authored_by": "user",
+          "from": "existing_plan_price_increase",
+          "kind": "link_strength",
+          "quantity_id": "existing_plan_price_increase->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": true
+        },
+        "high": 0.47748988364324035,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.4579349226515052,
+        "option_id": "raise_prices_10",
+        "withheld_reason": null
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:01:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000001",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-01-success",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "02-legacy-missing-run",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000002",
+      "reason": "run_id_absent",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "03-legacy-null-run",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000003",
+      "reason": "run_id_absent",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "04-refusal-marker",
+    "disposition": "skipped_refusal",
+    "options": [],
+    "quarantine": null,
+    "run": null
+  },
+  {
+    "case_id": "05-refusal-with-run",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": "analysis_refused"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": "analysis_refused"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "raise_prices_10",
+        "withheld_reason": "analysis_refused"
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:05:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000005",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-05-refusal-with-run",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "withheld",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "06-degraded",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000006",
+      "reason": "analysis_status_unsupported",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "07-partial",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000007",
+      "reason": "analysis_status_unsupported",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "08-failed",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": "analysis_failed"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": "analysis_failed"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "raise_prices_10",
+        "withheld_reason": "analysis_failed"
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:08:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000008",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-08-failed",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "failed",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "09-blocked",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": "analysis_blocked"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": "analysis_blocked"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "raise_prices_10",
+        "withheld_reason": "analysis_blocked"
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:09:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000009",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-09-blocked",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "withheld",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "10-multiple-options",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": 0,
+        "driver": null,
+        "high": 0.00038399837067659557,
+        "licence_status": "permitted_with_caveat",
+        "low": 0,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.5204,
+        "driver": {
+          "authored_by": "olumi",
+          "from": "starter_tier_mrr",
+          "kind": "link_strength",
+          "quantity_id": "starter_tier_mrr->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": false
+        },
+        "high": 0.5301819493354264,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.5106023835310499,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.4677,
+        "driver": {
+          "authored_by": "user",
+          "from": "existing_plan_price_increase",
+          "kind": "link_strength",
+          "quantity_id": "existing_plan_price_increase->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": true
+        },
+        "high": 0.47748988364324035,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.4579349226515052,
+        "option_id": "raise_prices_10",
+        "withheld_reason": null
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:10:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000010",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-10-multiple-options",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "11-missing-probability",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": 0,
+        "driver": null,
+        "high": 0.00038399837067659557,
+        "licence_status": "permitted_with_caveat",
+        "low": 0,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.5204,
+        "driver": {
+          "authored_by": "olumi",
+          "from": "starter_tier_mrr",
+          "kind": "link_strength",
+          "quantity_id": "starter_tier_mrr->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": false
+        },
+        "high": 0.5301819493354264,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.5106023835310499,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": null
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "raise_prices_10",
+        "withheld_reason": "probability_of_goal_not_recorded"
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:11:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000011",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-11-missing-probability",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "12-null-probability",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000012",
+      "reason": "probability_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "13-above-one",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000013",
+      "reason": "probability_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "14-below-zero",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000014",
+      "reason": "probability_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "15-string-probability",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000015",
+      "reason": "probability_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "16-boolean-probability",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000016",
+      "reason": "probability_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "17-wrong-summary",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000017",
+      "reason": "summary_shape",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "18-wrong-leader",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000018",
+      "reason": "leading_option_id_shape",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "19-wrong-run-id",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000019",
+      "reason": "run_id_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "20-unknown-enrichment",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": 0,
+        "driver": null,
+        "high": 0.00038399837067659557,
+        "licence_status": "permitted_with_caveat",
+        "low": 0,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.5204,
+        "driver": {
+          "authored_by": "olumi",
+          "from": "starter_tier_mrr",
+          "kind": "link_strength",
+          "quantity_id": "starter_tier_mrr->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": false
+        },
+        "high": 0.5301819493354264,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.5106023835310499,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.4677,
+        "driver": {
+          "authored_by": "user",
+          "from": "existing_plan_price_increase",
+          "kind": "link_strength",
+          "quantity_id": "existing_plan_price_increase->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": true
+        },
+        "high": 0.47748988364324035,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.4579349226515052,
+        "option_id": "raise_prices_10",
+        "withheld_reason": null
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:20:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000020",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-20-unknown-enrichment",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "21-enrichment-absent",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000021",
+      "reason": "option_comparison_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "22-enrichment-wrong-type",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000022",
+      "reason": "enrichment_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "23-computed-at-missing",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000023",
+      "reason": "computed_at_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "24-computed-at-invalid",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000024",
+      "reason": "computed_at_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "25-clock-skew",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": 0,
+        "driver": null,
+        "high": 0.00038399837067659557,
+        "licence_status": "permitted_with_caveat",
+        "low": 0,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.5204,
+        "driver": {
+          "authored_by": "olumi",
+          "from": "starter_tier_mrr",
+          "kind": "link_strength",
+          "quantity_id": "starter_tier_mrr->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": false
+        },
+        "high": 0.5301819493354264,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.5106023835310499,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.4677,
+        "driver": {
+          "authored_by": "user",
+          "from": "existing_plan_price_increase",
+          "kind": "link_strength",
+          "quantity_id": "existing_plan_price_increase->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": true
+        },
+        "high": 0.47748988364324035,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.4579349226515052,
+        "option_id": "raise_prices_10",
+        "withheld_reason": null
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T08:00:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000025",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-25-clock-skew",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "26-duplicate-run-id",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000026",
+      "reason": "duplicate_run_id",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "27-invalid-precision",
+    "disposition": "quarantined",
+    "options": [],
+    "quarantine": {
+      "fact_id": "712b0000-0000-4000-8001-000000000027",
+      "reason": "precision_invalid",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001"
+    },
+    "run": null
+  },
+  {
+    "case_id": "28-no-licence",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "raise_prices_10",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:28:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000028",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-28-no-licence",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "29-legacy-success-status",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": 0,
+        "driver": null,
+        "high": 0.00038399837067659557,
+        "licence_status": "permitted_with_caveat",
+        "low": 0,
+        "option_id": "keep_pricing_as_it_is",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.5204,
+        "driver": {
+          "authored_by": "olumi",
+          "from": "starter_tier_mrr",
+          "kind": "link_strength",
+          "quantity_id": "starter_tier_mrr->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": false
+        },
+        "high": 0.5301819493354264,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.5106023835310499,
+        "option_id": "launch_49_starter_tier",
+        "withheld_reason": null
+      },
+      {
+        "chance": 0.4677,
+        "driver": {
+          "authored_by": "user",
+          "from": "existing_plan_price_increase",
+          "kind": "link_strength",
+          "quantity_id": "existing_plan_price_increase->monthly_recurring_revenue",
+          "side": "low",
+          "strength": "weaker",
+          "to": "monthly_recurring_revenue",
+          "user_stated_link": true
+        },
+        "high": 0.47748988364324035,
+        "licence_status": "permitted_with_caveat",
+        "low": 0.4579349226515052,
+        "option_id": "raise_prices_10",
+        "withheld_reason": null
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:29:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000029",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-29-legacy-success-status",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  },
+  {
+    "case_id": "30-huge-100-options",
+    "disposition": "derived",
+    "options": [
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-000",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-001",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-002",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-003",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-004",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-005",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-006",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-007",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-008",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-009",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-010",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-011",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-012",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-013",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-014",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-015",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-016",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-017",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-018",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-019",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-020",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-021",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-022",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-023",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-024",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-025",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-026",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-027",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-028",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-029",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-030",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-031",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-032",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-033",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-034",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-035",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-036",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-037",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-038",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-039",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-040",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-041",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-042",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-043",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-044",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-045",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-046",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-047",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-048",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-049",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-050",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-051",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-052",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-053",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-054",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-055",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-056",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-057",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-058",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-059",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-060",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-061",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-062",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-063",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-064",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-065",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-066",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-067",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-068",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-069",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-070",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-071",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-072",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-073",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-074",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-075",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-076",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-077",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-078",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-079",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-080",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-081",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-082",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-083",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-084",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-085",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-086",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-087",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-088",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-089",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-090",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-091",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-092",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-093",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-094",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-095",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-096",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-097",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-098",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      },
+      {
+        "chance": null,
+        "driver": null,
+        "high": null,
+        "licence_status": "withheld",
+        "low": null,
+        "option_id": "option-099",
+        "withheld_reason": "goal_chance_licence_not_recorded"
+      }
+    ],
+    "quarantine": null,
+    "run": {
+      "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "computed_at": "2026-10-09T10:30:00.000Z",
+      "constraint_may_name_leading_option": null,
+      "fact_id": "712b0000-0000-4000-8001-000000000030",
+      "graph_identity_hash": null,
+      "input_snapshot": {
+        "constraints": [],
+        "factors": [],
+        "goal": null,
+        "links": [],
+        "options": [
+          {
+            "option_id": "raise_prices_10",
+            "settings": []
+          },
+          {
+            "option_id": "launch_49_starter_tier",
+            "settings": []
+          },
+          {
+            "option_id": "keep_pricing_as_it_is",
+            "settings": []
+          }
+        ],
+        "options_not_sent": [],
+        "sent_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_version": 1
+      },
+      "leading_option_id": null,
+      "run_id": "2b-30-huge-100-options",
+      "scenario_id": "712b0000-0000-4000-8000-000000000001",
+      "scenario_revision": 7,
+      "status": "succeeded",
+      "user_id": null
+    }
+  }
+]

@@ -97,7 +97,7 @@ SELECT 'before migration/backfill/synthetic seed' AS phase,
        scenarios AS scenarios_rows, turns AS v5_conversation_turns_rows,
        facts AS v5_handler_facts_rows FROM phase2_a_counts_before;
 
-\ir ../../supabase/migrations/20261008170000_phase2_a_typed_runs.sql
+\ir ../../supabase/migrations/20261009010000_phase2_a_typed_runs.sql
 
 CREATE TEMP TABLE phase2_a_results (
   check_name TEXT PRIMARY KEY, passed BOOLEAN NOT NULL, detail TEXT
@@ -1056,7 +1056,7 @@ BEGIN
 END;
 $final_counts$;
 
-\ir ../../supabase/migrations/rollback/20261008170000_phase2_a_typed_runs_rollback.sql.do-not-apply
+\ir ../../supabase/migrations/rollback/20261009010000_phase2_a_typed_runs_rollback.sql.do-not-apply
 
 DO $rollback_assertions$
 BEGIN

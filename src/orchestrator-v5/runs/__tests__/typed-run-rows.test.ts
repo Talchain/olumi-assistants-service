@@ -9,7 +9,7 @@ const succeeded = captured('../../agent-lane/__tests__/fixtures/cut9-prod-p1-2-7
 const secondSucceeded = captured('../../agent-lane/__tests__/fixtures/waveB5-t1b-3fce64f-readback-run1.json');
 const withheld = captured('../../agent-lane/method-turn/__tests__/fixtures/w9b/C.json');
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-const migration = readFileSync(new URL('../../../../supabase/migrations/20261008170000_phase2_a_typed_runs.sql', import.meta.url), 'utf8');
+const migration = readFileSync(new URL('../../../../supabase/migrations/20261009010000_phase2_a_typed_runs.sql', import.meta.url), 'utf8');
 
 /**
  * Real served captures supply every result, option, licence, run ID and timestamp.
@@ -303,5 +303,88 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
       expect(mapped.ok.graph_identity_hash).toBe(identity);
       expect(mapped.ok.graph_identity_hash).not.toBe(fact.result.graph_hash_at_run);
     }
+  });
+});
+
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { canonicalJson, loadCorpus, parity2b } from '../../../../scripts/phase2/parity-2b.js';
+import { selectRunAnalysisFact } from '../../context/freshness.js';
+import { readLatestRun, type AnalysisRunReadRow } from '../read-latest-run.js';
+
+/** Models the actual view's status predicate and query order; does not invoke the fact selector. */
+function typedTableClient(rows: AnalysisRunReadRow[]): Pick<SupabaseClient, 'from'> {
+  return { from(table: string) {
+    expect(table).toBe('latest_successful_run');
+    let scenarioId: string;
+    let limit = 0;
+    const orders: { column: keyof AnalysisRunReadRow; ascending: boolean }[] = [];
+    const builder = {
+      select() { return builder; },
+      eq(column: string, value: string) { expect(column).toBe('scenario_id'); scenarioId = value; return builder; },
+      order(column: keyof AnalysisRunReadRow, opts: { ascending: boolean }) { orders.push({ column, ...opts }); return builder; },
+      limit(n: number) { limit = n; return builder; },
+      returns() {
+        expect(orders).toEqual([
+          { column: 'scenario_revision', ascending: false }, { column: 'computed_at', ascending: false },
+          { column: 'run_id', ascending: false },
+        ]);
+        const selected = rows.filter(row => row.scenario_id === scenarioId && row.status === 'succeeded')
+          .sort((a, b) => {
+            for (const order of orders) {
+              const av = a[order.column]; const bv = b[order.column];
+              if (av !== bv) return ((av as string | number) < (bv as string | number) ? -1 : 1) * (order.ascending ? 1 : -1);
+            }
+            return 0;
+          }).slice(0, limit);
+        return Promise.resolve({ data: selected, error: null });
+      },
+    };
+    return builder;
+  } } as unknown as Pick<SupabaseClient, 'from'>;
+}
+function materialisedCorpus() {
+  return parity2b().flatMap(entry => entry.run === null ? [] : [{ ...entry.run,
+    created_at: loadCorpus().find(c => c.case_id === entry.case_id)!.created_at,
+  }]);
+}
+describe('S1 2B shared corpus and dormant typed reader', () => {
+  it('reproduces expected.json in-process from the same 30 source payloads', () => {
+    expect(loadCorpus()).toHaveLength(30);
+    expect(canonicalJson(parity2b())).toBe(readFileSync(new URL('../../../../scripts/phase2/corpus-2b/expected.json', import.meta.url), 'utf8'));
+    const rows = parity2b();
+    expect(rows.find(row => row.case_id === '30-huge-100-options')?.options).toHaveLength(100);
+    expect(rows.find(row => row.case_id === '26-duplicate-run-id')?.quarantine?.reason).toBe('duplicate_run_id');
+    expect(rows.find(row => row.case_id === '04-refusal-marker')?.disposition).toBe('skipped_refusal');
+  });
+  it('same shared corpus: readLatestRun chooses selectRunAnalysisFact’s successful Run', async () => {
+    const corpus = loadCorpus();
+    // Quarantine/duplicate isolation is the typed storage boundary. Compare the
+    // same surviving source facts, rather than asking the unvalidated pure selector
+    // to interpret malformed rows the typed table deliberately does not contain.
+    const derivedIds = new Set(parity2b().flatMap(entry => entry.run === null ? [] : [entry.run.fact_id]));
+    const facts = [...corpus].filter(entry => derivedIds.has(entry.fact_id)).sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .flatMap(entry => { const parsed = HandlerFactSchema.safeParse(entry.fact); return parsed.success ? [parsed.data] : []; });
+    const selected = selectRunAnalysisFact(facts);
+    expect(selected?.fact.fact_type).toBe('run_analysis');
+    if (selected?.fact.fact_type !== 'run_analysis') throw new Error('No corpus success');
+    const actual = await readLatestRun(typedTableClient(materialisedCorpus()), corpus[0]!.scenario_id);
+    expect(actual?.run_id).toBe(selected.fact.result.run_id);
+    expect(actual?.computed_at).toBe(selected.computed_at);
+    expect(actual?.scenario_revision).toBe(7);
+  });
+  it.each([false, true])('malformed-row isolation (corruption=%s) preserves the valid newest Run', async corrupt => {
+    const corpus = loadCorpus();
+    const first = structuredClone(corpus[0]!);
+    const newest = structuredClone(corpus[9]!);
+    const bad = structuredClone(corpus[12]!); // probability 1.7
+    const entries = corrupt ? [first, bad, newest] : [first, newest];
+    const derived = parity2b(entries);
+    expect(derived.filter(entry => entry.quarantine !== null)).toHaveLength(corrupt ? 1 : 0);
+    if (corrupt) expect(derived[1]?.quarantine?.fact_id).toBe(bad.fact_id);
+    const rows = derived.flatMap(entry => entry.run === null ? [] : [{ ...entry.run, created_at: first.created_at }]);
+    await expect(readLatestRun(typedTableClient(rows), first.scenario_id)).resolves.toMatchObject({
+      run_id: (newest.fact as Json).result.run_id, fact_id: newest.fact_id,
+    });
   });
 });
