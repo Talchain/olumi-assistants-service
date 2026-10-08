@@ -120,6 +120,11 @@ export function approvalSizes(edge: unknown): boolean {
  */
 export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
   if (!approvalSizes(edge)) return provenance;
+  // Science 393023 LICENCE ruling 1 / R3 B1: `user_specified` on a projected mean records who drew the link, not who
+  // sized it. A review must keep that carrier: clearing it would make the unchanged prior read `user` under the ONE
+  // predicate's ordering and award authorship for a confirm. Record the review only; no size or source is rewritten.
+  const stored = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
+  if (stored?.source === 'user_specified' && stored.mean_projected === true) return provenance;
   // R8-3 (Science 393023 ruling 1): a projected mean beside Olumi's estimate is a placeholder, but an approval that would
   // write the same magnitude would clear the carrier ALONE, and the carrier is outside the analysis hash. Nothing is
   // written: the link stays a placeholder (fail-closed) rather than reading sized against an unchanged hash.

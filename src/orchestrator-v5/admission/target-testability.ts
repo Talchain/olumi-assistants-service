@@ -15,7 +15,7 @@ import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity
  * P5, a quantified path from an option into the goal's own unit, is MODEL GENERATION's `sizeLink` question and is not
  * checked here yet. Words: AIQ #77 5912882031. Pure and total.
  */
-import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
+import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
@@ -387,7 +387,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     const mean = isRec(edge?.strength) ? edge.strength.mean : undefined;
     // The band edit's own stamp (`adjust-edge-strength.ts`): `source: 'user_specified'` + `provenance_display: 'user_set'`, and
     // no stated size. A link the user only DREW carries the source but not the display, so it is never "set as" a band.
-    const userBand = isRec(edge?.provenance) && edge.provenance.source === 'user_specified' && edge?.provenance_display === 'user_set'
+    const userBand = linkSizing(edge) === 'user' && isRec(edge?.provenance) && edge?.provenance_display === 'user_set'
       && edge.provenance.magnitude !== 'user_stated' && edge.provenance.natural_effect === undefined;
     return userBand && typeof mean === 'number' && Number.isFinite(mean) ? CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(mean))] : null;
   })();

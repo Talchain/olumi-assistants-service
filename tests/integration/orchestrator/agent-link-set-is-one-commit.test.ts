@@ -20,6 +20,8 @@ import { readFileSync } from 'node:fs';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { edgeStrengthProvenance, earnsAuthorshipCredit } from '../../../src/cee/graph-readiness/obligation-provenance.js';
+import { linkSizing } from '../../../src/cee/magnitude/link-sizing.js';
 
 const SCENARIO_ID = '64c5eccc-0000-4000-8000-000000000001';
 
@@ -465,6 +467,82 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(edge('capacityQuality').strength.mean).toBe(0.85);
     expect(edge('capacityQuality').provenance?.source).toBe('user_specified');
     expect(await userStated()).toBe(1);
+  });
+
+  const projectedPriceRevenue = () => {
+    const e = edge('capacityQuality');
+    e.strength = { mean: 0.5, std: 0.125 };
+    e.effect_direction = 'positive';
+    e.provenance = { source: 'user_specified', mean_projected: true } as never;
+    delete e.defaulted;
+    const nodes = (persisted as { nodes: { id: string; label: string }[] }).nodes;
+    nodes.find(n => n.id === e.from)!.label = 'Price';
+    nodes.find(n => n.id === e.to)!.label = 'Revenue';
+    expect(linkSizing(e), 'identity: the drawn Price → Revenue prior is not user-sized').toBe('placeholder');
+    return JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
+  };
+
+  it('RED (R7 finding 3, plural approval door): Price → Revenue same-band words record review, keep 0.5/0.125 and award no user credit', async () => {
+    const before = projectedPriceRevenue();
+    const hashBefore = currentHash();
+    const words = 'Price is strong.';
+    const { caps, ctx, store } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Price', to_label: 'Revenue',
+      strength: 'strong', from_words: words }], rationale: words });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const proposal = store.get(String(p.proposal_id))!;
+    expect(proposal.scenario_id).toBe(SCENARIO_ID);
+    expect(proposal.operations).toEqual([expect.objectContaining({ op: 'set_link_strength', path: `${edge('capacityQuality').from}::${edge('capacityQuality').to}`,
+      value: expect.objectContaining({ magnitude: 0.5, intent: 'confirm_current', band: 'strong' }) })]);
+    // Science 393023 LICENCE ruling 3, re-derived:
+    // projected Price → Revenue was treated as the user's own / approval refused; now same-band approval is review,
+    // μ=0.5 / σ=0.125 and the projection carrier stay stored, so there is no user authorship credit.
+    const out = await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size, 'one approval, one commit').toBe(1);
+    expect(doorCalls).toBe(1);
+    const after = edge('capacityQuality') as Edge & Record<string, unknown>;
+    expect(after.strength).toStrictEqual(before.strength);
+    const { reviewed_by_user: review, ...kept } = after.provenance as Record<string, unknown>;
+    expect(review).toMatchObject({ intent: 'confirm', band: 'strong' });
+    expect(kept).toStrictEqual(before.provenance);
+    expect(linkSizing(after)).toBe('placeholder');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(after))).toBe(false);
+    expect(currentHash(), 'review only keeps the analysis identity').toBe(hashBefore);
+    expect(String(out.follow_up)).not.toMatch(/your (?:own )?estimate|you set/i);
+  });
+
+  it('RED (R7 class reader): the adopted-strength door does not refuse projected Price → Revenue as the user’s own; genuine user-sized control refuses', async () => {
+    projectedPriceRevenue();
+    const link = edge('capacityQuality');
+    const request = (turnId: string) => ({ scenario_id: SCENARIO_ID, base_graph_hash: currentHash(),
+      turn_id: turnId, links: [], levels: [],
+      link_strengths: [{ from: link.from, to: link.to, magnitude: 0.3, band: 'moderate' as const, intent: 'set' as const,
+        author: 'model_proposed' as const, expected: { mean: 0.5, effect_direction: 'positive' as const } }] });
+    // Science 393023 LICENCE ruling 3, re-derived:
+    // source=user_specified + mean_projected used to trigger link_became_users_own; canonical sizing says placeholder,
+    // so the real approved-strength writer may apply the offered band, still without user credit.
+    const out = await commitOptionLevelsInProcess(request('33333333-3333-4333-8333-3333333333a7'), 'r7-projected-adoption');
+    expect(out.status, JSON.stringify(out)).toBe('committed');
+    expect(rows.size).toBe(1);
+    expect(edge('capacityQuality').strength.mean).toBe(0.3);
+    expect((edge('capacityQuality').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'moderate' });
+    expect(linkSizing(edge('capacityQuality')), 'the projected structural origin remains fail-closed, never user-sized').toBe('placeholder');
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge('capacityQuality')))).toBe(false);
+
+    persisted = servedGraph();
+    rows.clear();
+    const userLink = edge('capacityQuality');
+    userLink.strength = { mean: 0.5, std: 0.125 };
+    userLink.effect_direction = 'positive';
+    userLink.provenance = { source: 'user_specified' };
+    delete userLink.defaulted;
+    expect(linkSizing(userLink), 'CONTROL: source=user_specified without projection is user-sized').toBe('user');
+    const before = JSON.stringify(persisted);
+    const refused = await commitOptionLevelsInProcess(request('33333333-3333-4333-8333-3333333333b7'), 'r7-user-adoption-control');
+    expect(refused).toMatchObject({ status: 'refused', reason: 'link_became_users_own' });
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
   });
 
   it('RED (B2): an agreement holding band words ("the strong and moderate calls look right") credits no link', async () => {
