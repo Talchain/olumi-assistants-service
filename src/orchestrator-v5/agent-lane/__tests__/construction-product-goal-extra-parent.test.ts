@@ -202,9 +202,32 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
     expect(edge(graph, 'Price sensitivity', 'GOAL')).toBeUndefined();
     expect(proposeProductIdentity(graph)).not.toBeNull();
   });
-  it('CONTROL (add. 6 correction: never a user-authored link): the USER named the risk → MRR link → left exactly as drafted, no card', async () => {
-    const { found } = rerouteExtraParentsOfProductGoal(outcomeVolume(c => { c.links.find((l: Json) => l.from === 'Price sensitivity' && l.to === 'Monthly recurring revenue').provenance = 'explicit'; }));
+  const noAltRoute = (c: Json) => { c.links = c.links.filter((l: Json) => !(l.from === 'Monthly churn' && l.to === 'Paying subscribers')); };
+  it('Codex r1 P1-3: a risk the USER named (explicit), with no other price route, is never re-pointed — the link stays into MRR', () => {
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.risks = [{ label: 'Price sensitivity', provenance: 'explicit' }]; });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
     expect(found).toEqual([]);
+    expect(model.links.filter(l => l.from === 'Price sensitivity').map(l => l.to)).toEqual(['Monthly recurring revenue']);
+  });
+  it('Codex r1 P1-2: a SIZED link into the goal is never converted into an outcome volume (no unit to state it in)', () => {
+    // Churn must NOT already reach the volume (else it is an addend, kept before the sized branch is reached).
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.links.push(link('Monthly churn', 'Monthly recurring revenue', 'negative', -735, 1, 'ai_proposed')); });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
+    expect(found.some(f => f.kind === 'rerouted')).toBe(false);
+    expect(model.links.some(l => l.from === 'Monthly churn' && l.to === 'Monthly recurring revenue' && l.effect_amount === -735)).toBe(true);
+  });
+  it('Codex r1 P2: a DEFINITIONAL link into the goal is an addend — kept where it is, even with an outcome volume', () => {
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.links.find((l: Json) => l.from === 'Price sensitivity' && l.to === 'Monthly recurring revenue').definitional = true; });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
+    expect(found).toEqual([]);
+    expect(model.links.filter(l => l.from === 'Price sensitivity').map(l => l.to)).toEqual(['Monthly recurring revenue']);
+  });
+  it('CONTROL (add. 6 correction: never a user-authored link): the USER stated the risk → MRR link, no other route → left exactly as drafted, no card', async () => {
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.links.find((l: Json) => l.from === 'Price sensitivity' && l.to === 'Monthly recurring revenue').provenance = 'explicit'; });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
+    expect(found).toEqual([]);
+    expect(model.links.filter(l => l.from === 'Price sensitivity').map(l => l.to)).toEqual(['Monthly recurring revenue']);
+    expect(proposeProductIdentity((await build(shaped)).graph)).toBeNull();
   });
   it('CONTROL: an outcome that is NOT an operand of the declared product is never the volume', () => {
     const { found } = rerouteExtraParentsOfProductGoal(outcomeVolume(c => { c.identities[0].factors = ['Pro plan price', 'Something else']; }), BRIEF);

@@ -93,6 +93,28 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
  * Science §(e) Q1.2 binds the goal's own parents, so a path through another node alone
  * cannot qualify. Callers check writability and dry-run the existing confirmation door.
  */
+/**
+ * Science §(e) addendum 6 (8 Oct, P48 552acb7d): an operand with NO stored unit may take its count unit from its own
+ * label, only when the full reader reads ONE count (no period, no per-denominator) and the label carries no money, rate
+ * or share word ("Pro paying subscribers" → a count; "Pro subscriber revenue" → nothing). A stored unit always wins (the
+ * caller reads it first). Never credited as the user's: the card's words name no unit.
+ */
+// Codex r1 P1 (#2826): words are singularised before the check, so inflections and plurals are caught ("Revenues",
+// "Royalties", "Percentages"); a label joining two things, or an average, is not ONE count.
+const NOT_A_COUNT_WORDS = new Set(['revenue', 'income', 'sale', 'price', 'cost', 'fee', 'spend', 'spending', 'budget', 'mrr', 'arr', 'arpu',
+  'margin', 'profit', 'value', 'rate', 'ratio', 'share', 'percent', 'percentage', 'churn', 'conversion', 'royalty', 'earning', 'payment',
+  'pound', 'dollar', 'euro', 'cash', 'money', 'amount', 'average', 'mean', 'median', 'per', 'of', 'from', 'and', 'or', 'with', 'by']);
+const singularWord = (w: string): string => w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.endsWith('ses') ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+function labelCountUnit(n: Rec): string | undefined {
+  if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
+  const label = text(n.label);
+  if (label === undefined || /[%£$€¥\d()]/.test(label)) return undefined;
+  const words = label.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '');
+  if (words.length === 0 || words.length > 4 || words.some((w) => NOT_A_COUNT_WORDS.has(singularWord(w)))) return undefined;
+  const parts = readUnitParts(label);
+  return parts?.kind === 'count' && parts.per === null && parts.period === null && (parts.noun?.length ?? 0) > 0 ? label : undefined;
+}
+
 function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
@@ -133,22 +155,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   // Science §(e) addendum 2: every OTHER direct parent of the goal is part of what the Run computes. A drafter-made
   // definitional addend (edge provenance.definitional, node not the user's) joins the reading's words; anything else — a
   // user-authored or non-definitional risk or factor straight into the goal — means the goal is not this product: null.
-  /**
- * Science §(e) addendum 6 (8 Oct, P48 552acb7d): an operand with NO stored unit may take its count unit from its own
- * label, only when the full reader reads ONE count (no period, no per-denominator) and the label carries no money, rate
- * or share word ("Pro paying subscribers" → a count; "Pro subscriber revenue" → nothing). A stored unit always wins (the
- * caller reads it first). Never credited as the user's: the card's words name no unit.
- */
-const NOT_A_COUNT = /\b(?:revenue|income|sales|price|prices|cost|costs|fee|fees|spend|spending|budget|mrr|arr|arpu|margin|profit|value|rate|rates|ratio|share|percent|percentage|churn|conversion)\b|[%£$€¥]|\d/i;
-function labelCountUnit(n: Rec): string | undefined {
-  if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
-  const label = text(n.label);
-  if (label === undefined || NOT_A_COUNT.test(label)) return undefined;
-  const parts = readUnitParts(label);
-  return parts?.kind === 'count' && parts.per === null && parts.period === null && (parts.noun?.length ?? 0) > 0 ? label : undefined;
-}
-
-const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
+  const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
   const addends: string[] = [];
   for (const e of edges) {
     if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') continue;

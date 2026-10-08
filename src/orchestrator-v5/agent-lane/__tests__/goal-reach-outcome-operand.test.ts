@@ -27,10 +27,19 @@ describe('addendum 6 — an outcome operand of the declared product', () => {
     // Discriminating: this label COMPOSES (its noun ends in "subscriber"), so only the money-word guard refuses it.
     expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = 'Revenue-generating subscribers'; }))).toBeNull();
     expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').observed_state = { unit: 'hours' }; }))).toBeNull();
-    expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').kind = 'risk'; }))).toBeNull();
+    // Kind guard isolated: the node keeps a stored count unit, so only its kind refuses it (Codex r1 #2826).
+    expect(proposeProductIdentity(graph(g => { noRiskLink(g); Object.assign(node(g, 'pro_paying_subscribers'), { kind: 'risk', observed_state: { unit: 'subscribers' } }); }))).toBeNull();
     expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = 'Subscribers per month'; }))).toBeNull();
   });
-  it('CONTROL: a stored count unit on the outcome works without the label (the stored unit wins)', () => {
-    expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').observed_state = { unit: 'subscribers' }; }))?.words).toBe(WORDS);
+  it('CONTROL: a stored count unit WINS over an unsafe label (the label is never read then)', () => {
+    expect(proposeProductIdentity(graph(g => { noRiskLink(g); Object.assign(node(g, 'pro_paying_subscribers'), { label: 'Revenues from subscribers', observed_state: { unit: 'subscribers' } }); }))?.factor_ids)
+      .toEqual(['pro_plan_monthly_price', 'pro_paying_subscribers']);
+  });
+  it.each(['Percentages of subscribers', 'Revenues from subscribers', 'Royalties from subscribers', 'Subscribers and seats', 'Average order count', 'Subscribers (k)'])(
+    'Codex r1 P1: "%s" is not ONE count → null', label => {
+      expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = label; }))).toBeNull();
+    });
+  it('CONTROL: an ordinary count label (word order varies) still reads as the count', () => {
+    expect(proposeProductIdentity(graph(g => { noRiskLink(g); node(g, 'pro_paying_subscribers').label = 'Paying Pro subscribers'; }))).not.toBeNull();
   });
 });

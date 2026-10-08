@@ -22,6 +22,7 @@ import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amou
 interface Link {
   readonly from: string; readonly to: string; readonly direction?: string; readonly provenance?: string;
   readonly effect_amount?: number | null; readonly effect_per_source_change?: number | null; readonly effect_provenance?: string | null;
+  readonly definitional?: boolean | null;
 }
 interface ModelShape {
   readonly goal: { readonly metric: string; readonly unit?: string | null };
@@ -77,6 +78,9 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
   const volumeLabel = rate === undefined ? undefined : ident.factors.find((f) => key(f) !== key(rate.label));
   const volume: { readonly label: string; readonly unit?: string | null } | undefined = volumeLabel === undefined ? undefined
     : factor(volumeLabel) ?? outcome(volumeLabel);
+  // Codex r1 P1-2 (#2826): an OUTCOME volume serves the UNSIZED re-point / keep-out only; the sized conversion below writes a
+  // figure in the volume's unit, so it still needs a factor volume (an outcome may carry no unit).
+  const volumeIsFactor = volumeLabel !== undefined && factor(volumeLabel) !== undefined;
   const reaches = (from: string, skip: Link): string | undefined => {
     const seen = new Set<string>([key(from)]);
     const queue = [key(from)];
@@ -113,6 +117,8 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
     if (key(l.to) !== goal || operands.has(key(l.from))) { links.push(l); continue; }
     // A link the user stated (or sized) is theirs: never dropped or re-pointed here (AIQ 5902792262).
     if (l.provenance === 'explicit' || l.effect_provenance === 'explicit') { links.push(l); continue; }
+    // Codex r1 P2 (#2826): a drafter-made DEFINITIONAL link into the goal is an addend of the reading (§(e) addendum 2), kept.
+    if (l.definitional === true) { links.push(l); continue; }
     // ⛔ C46 RULE 7 (CI on #2328 e216097c: construction-product-identity + c46-leader-withheld-on-a-product): a direct cause
     // of the goal that ALSO feeds an operand is an ADDEND — a discount cuts revenue directly AND adds subscribers. Two
     // mechanisms, not one counted twice, so it is left exactly as drafted. So is a money parent (an addend in the goal's
@@ -131,6 +137,9 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
     const reactsToRate = rate !== undefined && causes.length > 0 && causes.every((c) => c === key(rate.label));
     if (risk && reactsToRate && reaches(l.from, l) === undefined && l.effect_provenance == null && !finite(l.effect_amount)
       && rate !== undefined && volume !== undefined && !isMoney(volume.unit)) {
+      // Codex r1 P1-3 (#2826) / §(e) add. 6 correction: never a user-authored risk, re-pointed OR kept out (it was guarded
+      // only on the keep-out branch). Without the brief to tell, it is treated as the user's (no move).
+      if ((model.risks ?? []).some((r) => key(r.label) === key(l.from) && usersRisk(r, brief))) { links.push(l); continue; }
       const via = rateRoutesToVolume(l.from);
       // ⛔ R3 5906615257 / AIQ 5906624217 row 2: only OLUMI'S risk is kept out of the calculation. A risk the user named is their concern:
       // never removed, even with no link out, so it is left exactly as drafted (no card), a conservative under-claim.
@@ -155,7 +164,7 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
     }
     if (reaches(l.from, l) !== undefined || from === undefined || isMoney(from.unit)) { links.push(l); continue; }
     const sized = l.effect_provenance != null && finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0;
-    if (!sized || rate === undefined || volume === undefined || isMoney(volume.unit) || !rate.baseline_known || !finite(rate.baseline_value) || rate.baseline_value <= 0) {
+    if (!sized || rate === undefined || volume === undefined || !volumeIsFactor || isMoney(volume.unit) || !rate.baseline_known || !finite(rate.baseline_value) || rate.baseline_value <= 0) {
       links.push(l);
       continue;
     }
