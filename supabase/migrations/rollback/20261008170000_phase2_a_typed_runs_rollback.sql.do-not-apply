@@ -1,0 +1,14 @@
+-- PROPOSAL ROLLBACK, DO NOT APPLY — removes only Phase 2(a)'s new objects.
+-- Existing v2-v6 functions, scenarios.revision and its trigger remain intact.
+SET LOCAL lock_timeout = '3s';
+
+DROP FUNCTION public.append_turn_atomic_v7(
+  UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB,
+  JSONB, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BIGINT,
+  UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN,
+  BIGINT, JSONB
+);
+DROP VIEW public.latest_successful_run;
+DROP TABLE public.analysis_run_options;
+DROP TABLE public.analysis_runs;
+DROP TABLE public.analysis_run_quarantine;
