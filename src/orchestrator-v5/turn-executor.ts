@@ -4709,7 +4709,7 @@ export async function runTurnExecutor(
             'invalid',
             `gm_held_execute_${outcome.status}`,
             {
-              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              assistantText: outcome.userReason ?? GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
               consumedPendingRefs: [heldPending.chip_id],
             },
           );
@@ -4923,6 +4923,7 @@ export async function runTurnExecutor(
         const appliedFacts: ExecutedGmOutcome['fact'][] = [];
         const consumedRefs: string[] = [];
         const declinedLabels: string[] = [];
+        const declinedReasons: string[] = [];
         /**
          * P0 (2026-08-16) — chips of holds that were ATTEMPTED and declined.
          *
@@ -4980,6 +4981,7 @@ export async function runTurnExecutor(
               'GM held-execute (all) — one confirmed hold declined (fail-closed); the others are unaffected',
             );
             declinedLabels.push(resolveProposalRenderCopy(holds[i]!.action).label);
+            if (outcome.userReason !== undefined) declinedReasons.push(outcome.userReason);
             // Attempted and refused — the chip is spent (see the declaration).
             attemptedDeclinedRefs.push(holds[i]!.chip_id);
             continue;
@@ -5020,7 +5022,7 @@ export async function runTurnExecutor(
             'invalid',
             'consent_all_all_declined',
             {
-              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              assistantText: declinedReasons.length > 0 ? [...new Set(declinedReasons)].join('\n\n') : GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
               consumedPendingRefs: attemptedDeclinedRefs,
             },
           );
@@ -5042,6 +5044,7 @@ export async function runTurnExecutor(
             declinedLabels.length === 1 ? 'that one' : 'those'
           }.`;
         }
+        if (declinedReasons.length > 0) receiptText += `\n\n${[...new Set(declinedReasons)].join('\n\n')}`;
         const appliedResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: receiptText,

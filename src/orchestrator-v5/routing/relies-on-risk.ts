@@ -1,6 +1,7 @@
 /** RC3 (a′): server-authored, option-bound preconditions stay on the model with no Run effect. */
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
+import { hasReliesOnRiskWrite } from '../graph-management/field-safety.js';
 
 type Rec = Record<string, unknown>;
 const record = (x: unknown): Rec | undefined => x !== null && typeof x === 'object' && !Array.isArray(x) ? x as Rec : undefined;
@@ -17,6 +18,9 @@ export function reliesOnRefereeOperations(operations: readonly PatchOperation[],
   const edges = Array.isArray(g?.edges) ? g.edges.map(record).filter((e): e is Rec => e !== undefined) : [];
   for (const op of operations) {
     const node = record(op.value);
+    // The only exception to the generic writer screen is this validated,
+    // top-level add stamp. Nested/merge updates never acquire that authority.
+    if (hasReliesOnRiskWrite([op]) && (op.op !== 'add_node' || node?.relies_on === undefined)) return undefined;
     if (node?.relies_on === undefined) continue;
     const stamp = readReliesOnRisk(node.relies_on);
     const id = node.id;
@@ -40,6 +44,19 @@ export function reliesOnRefereeOperations(operations: readonly PatchOperation[],
     if (op.op !== 'add_node' || value?.relies_on === undefined) return op;
     const { relies_on: _stamp, ...rest } = value;
     return { ...op, value: rest };
+  });
+}
+
+/** Generic persistence merges may carry an existing server stamp, never change it. */
+export function hasReliesOnRiskStampChange(before: unknown, after: unknown): boolean {
+  const priorNodes = record(before)?.nodes;
+  const nextNodes = record(after)?.nodes;
+  const prior = Array.isArray(priorNodes) ? priorNodes.map(record).filter((n): n is Rec => n !== undefined) : [];
+  if (!Array.isArray(nextNodes)) return false;
+  return nextNodes.map(record).some(node => {
+    if (node === undefined) return false;
+    const previous = prior.find(n => n.id === node.id);
+    return readReliesOnRisk(previous?.relies_on)?.option_id !== readReliesOnRisk(node.relies_on)?.option_id;
   });
 }
 

@@ -436,6 +436,36 @@ export function hasInterventionRangeWrite(operations: readonly { readonly value?
 }
 
 /**
+ * RC3: generic node mutations cannot author, rebind or clear the server's
+ * precondition stamp, irrespective of referee mode. Check the actual applied
+ * payload and every pointer/key spelling, including whole-object merges.
+ * An interventions factor id or category label is data, not a stamp field.
+ */
+export function hasReliesOnRiskWrite(operations: readonly {
+  readonly op: string;
+  readonly path?: string;
+  readonly field?: string;
+  readonly value?: unknown;
+}[]): boolean {
+  const segments = (key: string): string[] => key.toLowerCase().split(/[./]/).filter(Boolean);
+  const contains = (value: unknown, path: readonly string[]): boolean => {
+    const intervention = path.indexOf('interventions');
+    if (path.some((segment, i) => segment === 'relies_on' && (intervention === -1 || i !== intervention + 1))) return true;
+    // Below an intervention member the keys may be arbitrary category labels.
+    if (intervention !== -1 && path.length > intervention + 2) return false;
+    if (Array.isArray(value)) return value.some(child => contains(child, path));
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, child]) => contains(child, [...path, ...segments(key)]));
+  };
+  return operations.some(op => {
+    if (op.op !== 'add_node' && op.op !== 'update_node') return false;
+    const pointerField = op.path?.startsWith('/nodes/') ? segments(op.path).slice(2) : [];
+    return contains(undefined, op.field === undefined ? pointerField : segments(op.field))
+      || contains(op.value, []);
+  });
+}
+
+/**
  * The key whose VALUE is the factor map — the one boundary where the screen
  * stops treating keys as vocabulary. Named once so the screen above and the
  * STRIP below cannot drift about where the interventions grammar begins

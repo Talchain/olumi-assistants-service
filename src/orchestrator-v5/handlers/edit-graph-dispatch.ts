@@ -1,4 +1,6 @@
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
+import { hasReliesOnRiskWrite } from '../graph-management/field-safety.js';
+import { hasReliesOnRiskStampChange } from '../routing/relies-on-risk.js';
 /**
  * V5 pre-Sonnet dispatch for edit_graph turns.
  *
@@ -2170,6 +2172,12 @@ export function mergeAppliedGraphForPersistence(args: {
     persistedUsable ? persistedBase : ingressBase
   ) as Record<string, unknown>;
 
+  // Generic edit/system-event merges have no authority to mint or rebind the
+  // stamp. Compare with the same stored base the merge will actually use.
+  if (hasReliesOnRiskStampChange(base, appliedGraph)) {
+    throw new Error('A precondition risk needs its dedicated proposal and approval; nothing was changed.');
+  }
+
   const merged: Record<string, unknown> = {
     ...base,
     nodes: appliedGraph.nodes,
@@ -3074,6 +3082,13 @@ export async function dispatchEditGraph(
   const editLlmCall = extractEditLlmCallTelemetry(editResult, adapter.name);
 
   try {
+  // Defence at the generic dispatch boundary: every mode obeys server stamp
+  // ownership, including a future producer that bypasses the edit handler.
+  if (hasReliesOnRiskWrite(editResult.operations ?? [])) {
+    editResult = { ...editResult, blocks: [], wasRejected: true, appliedGraph: null,
+      appliedChanges: undefined, pendingClarification: undefined, suggestedActions: undefined,
+      assistantText: 'A precondition risk needs its dedicated proposal and approval; nothing was changed.' };
+  }
   let response = editResultToOlumiResponse(editResult, payload);
 
   // ⭐ CLAIM-THEN-STARVE EXIT — hand the turn back BEFORE committing.

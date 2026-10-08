@@ -42,7 +42,7 @@
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk, type UserEventRisk } from '../routing/stated-event-risk.js';
 import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
-import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
+import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember, recheckAddFactorBatch, stampNewUserTodayLevels, type UserTodayLevel } from '../routing/add-factor-transaction.js';
 import { toGraphView } from './add-option-dispatch.js';
@@ -65,6 +65,7 @@ import {
   applyAndValidateMutation,
   type PersistedGraphV3T,
 } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
 import {
   buildEditGraphHandlerFact,
   buildGenericEditGraphHandlerFact,
@@ -597,10 +598,14 @@ export type GmHeldExecuteOutcome =
       /** Re-referee blocked the batch — a "yes" never overrides integrity. */
       readonly status: 'referee_blocked';
       readonly governing: EditGmGoverningVerdict;
+      /** Only the central rule's typed label-based refusal; never raw diagnostics. */
+      readonly userReason?: string;
     }
   | {
       /** Apply/validate/fact construction failed — nothing to persist. */
       readonly status: 'apply_failed';
+      /** Only the central rule's typed label-based refusal; never raw diagnostics. */
+      readonly userReason?: string;
       /**
        * `incomplete_apply` (P1b): the batch applied without throwing, but at
        * least one confirmed op did NOT land on the canonical persisted graph
@@ -707,6 +712,12 @@ export function confirmationSatisfies(governing: EditGmGoverningVerdict): boolea
   }
 }
 
+function preconditionLinkRefusalOf(err: unknown): string | undefined {
+  if (err instanceof PatchApplyError && err.code === 'PRECONDITION_RISK_LINKED') return err.message;
+  if (err instanceof D1HandlerError && err.details?.violation_code === 'PRECONDITION_RISK_LINKED') return err.userGuidance;
+  return undefined;
+}
+
 /**
  * Re-referee + apply + receipt for a confirmed hold. Pure with respect to
  * storage; never throws.
@@ -736,7 +747,18 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
   });
   if (!confirmationSatisfies(decision.governing)) {
-    return { status: 'referee_blocked', governing: decision.governing };
+    // A hold minted before the incident-link rule shipped is still refused.
+    // Rebuild its pure candidate only to recover the central typed reason;
+    // unrelated referee/schema diagnostics remain redacted as before.
+    let userReason: string | undefined;
+    try {
+      const parsed = GraphV3.safeParse(input.currentGraph);
+      if (parsed.success) applyPatchOperations(parsed.data, operations);
+    } catch (err) {
+      userReason = preconditionLinkRefusalOf(err);
+    }
+    return { status: 'referee_blocked', governing: decision.governing,
+      ...(userReason === undefined ? {} : { userReason }) };
   }
 
   // ── 2a. A new switch's today-0 (Canonical #70 5854919806 item 1) ──────
@@ -953,7 +975,9 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
       },
       'GM held-execute — confirmed batch failed to apply/validate; declining (nothing persisted)',
     );
-    return { status: 'apply_failed', reason: 'apply_error' };
+    const userReason = preconditionLinkRefusalOf(err);
+    return { status: 'apply_failed', reason: 'apply_error',
+      ...(userReason === undefined ? {} : { userReason }) };
   }
 
   // A confirmed removal must also leave the option representation consumed by

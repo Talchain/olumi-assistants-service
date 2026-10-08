@@ -141,6 +141,7 @@ import type { FastifyInstance } from "fastify";
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
 import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
 import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
+import { readReliesOnRisk } from "../orchestrator-v5/routing/relies-on-risk.js";
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
 import { eventRiskIngressIssues } from "../schemas/event-risk.js";
@@ -158,7 +159,7 @@ import { admitInterventionRange, interventionPoint } from "../orchestrator-v5/in
 import { statedCountInterventionRange } from "../orchestrator-v5/agent-lane/stated-by-user.js";
 import { sameUnit } from "../orchestrator-v5/agent-lane/same-unit.js";
 import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
-import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations, PreconditionRiskLinkWriteError } from "../orchestrator-v5/persist-graph-write.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
@@ -212,6 +213,32 @@ function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | un
 }
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
+
+class PreconditionStampApprovalRequiredError extends Error {}
+
+/** A whole-graph UI registration cannot erase or rebind a surviving server-stamped identity. */
+function withStoredPreconditionRiskStamps<T extends { nodes: ReadonlyArray<{ id?: unknown; kind?: unknown; relies_on?: unknown }> }>(
+  graph: T,
+  stored: unknown,
+): T {
+  const prior = isEdgeRecord(stored) && Array.isArray(stored.nodes) ? stored.nodes.filter(isEdgeRecord) : [];
+  let changed = false;
+  const nodes = graph.nodes.map((node) => {
+    const previous = prior.find((old) => old.id === node.id);
+    const stamp = readReliesOnRisk(previous?.relies_on);
+    if (stamp === undefined) return node;
+    const submitted = readReliesOnRisk(node.relies_on);
+    if (node.kind !== previous?.kind || (submitted !== undefined && submitted.option_id !== stamp.option_id)) {
+      throw new PreconditionStampApprovalRequiredError();
+    }
+    if (submitted !== undefined) return node;
+    // Absent/malformed read metadata makes no statement about the host stamp.
+    // Carry it before hashing and central validation; an accompanying edge is refused, never dropped.
+    changed = true;
+    return { ...node, relies_on: stamp };
+  });
+  return changed ? { ...graph, nodes } : graph;
+}
 
 /**
  * ⭐ AN ABSENT `goal_constraints` IS "NO STATEMENT", NOT "NO LIMITS" (#70 5852105101).
@@ -895,11 +922,15 @@ export default async function route(app: FastifyInstance) {
       // server read as the CAS base above.
       let graphToRegister: typeof parsed.data;
       try {
-        graphToRegister = withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
+        graphToRegister = withStoredPreconditionRiskStamps(withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
           withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
           baseGraphForInvariants,
-        ), baseGraphForInvariants);
+        ), baseGraphForInvariants), baseGraphForInvariants);
       } catch (err) {
+        if (err instanceof PreconditionStampApprovalRequiredError) {
+          return invalid('PRECONDITION_STAMP_SERVER_OWNED',
+            'A precondition risk needs its dedicated proposal and approval; nothing was changed.');
+        }
         if (!(err instanceof OptionGapApprovalRequiredError)) throw err;
         return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'Changes to the listed model gaps and questions need approval on their change card. Nothing was written.',
@@ -1364,6 +1395,9 @@ export default async function route(app: FastifyInstance) {
                 requestId,
               ),
             );
+        }
+        if (err instanceof PreconditionRiskLinkWriteError) {
+          return invalid(err.code, err.message);
         }
         if (err instanceof PersistedGraphInvariantError) {
           // The caller supplied these bytes, so name what is wrong with them —

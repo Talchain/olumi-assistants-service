@@ -51,7 +51,14 @@ export function preconditionRiskIds(
   }).map((n) => n.id));
 }
 
-/** Compute-only projection. Eligibility is read from the saved model, before another wire projection drops edges/options. */
+/**
+ * Compute-only projection. Eligibility is read from the saved model, before another wire projection drops edges/options.
+ * `ref_high_water` is the display-reference allocator, never a causal input. Omit it uniformly, including on a graph
+ * with no precondition risks: the first real Add issues R1 and raises R's saved counter, and retaining that counter
+ * after omitting its risk would still change the Run wire/digests. Never reconstruct issuance history or lower the
+ * saved counter (retired refs must never be reused). All remaining node refs, including actual causal risks and
+ * options, stay byte-for-byte intact; this copy is never persisted. Run and the counterfactual reader both use it.
+ */
 export function withoutPreconditionRisks<T>(graph: T, identityGraph: unknown = graph): T {
   if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return graph;
   if (identityGraph === null || typeof identityGraph !== 'object' || Array.isArray(identityGraph)) return graph;
@@ -60,7 +67,9 @@ export function withoutPreconditionRisks<T>(graph: T, identityGraph: unknown = g
   if (!Array.isArray(g.nodes) || !Array.isArray(identity.nodes) || !Array.isArray(identity.edges)) return graph;
   const limits = (identity.goal_constraints ?? []).flatMap((c) => typeof c.node_id === 'string' ? [c.node_id] : []);
   const leftOut = preconditionRiskIds(identity.nodes, identity.edges, limits);
-  return leftOut.size === 0 ? graph : { ...graph, nodes: g.nodes.filter((n) => !leftOut.has(n.id)) };
+  if (leftOut.size === 0 && !Object.hasOwn(graph, 'ref_high_water')) return graph;
+  const { ref_high_water: _allocator, ...computeGraph } = graph as T & { ref_high_water?: unknown };
+  return { ...computeGraph, nodes: leftOut.size === 0 ? g.nodes : g.nodes.filter((n) => !leftOut.has(n.id)) } as T;
 }
 
 export function inertRiskBranch(

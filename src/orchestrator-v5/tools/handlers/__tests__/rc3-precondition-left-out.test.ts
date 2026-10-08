@@ -136,7 +136,9 @@ describe('RC3 a′ identity-keyed readiness and Run exclusion', () => {
     g.edges.push({ ...edge, strength: { mean: -0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' });
     expect(leftOut(g).has(RISK_ID)).toBe(false);
     expect(withoutPreconditionRisks(g)).toBe(g);
-    if (edge.from !== RISK_ID) expect(validateGraphStructure(g as never, { leaveOutInertRisks: true }).valid).toBe(false);
+    const structural = validateGraphStructure(g as never, { leaveOutInertRisks: true });
+    expect(structural.valid, 'every stamped incident edge is refused, including a risk → goal or bidirected edge').toBe(false);
+    expect(structural.violations).toContainEqual(expect.objectContaining({ code: 'PRECONDITION_RISK_LINKED' }));
   });
 
   it('rc3-disclosure: the host names the affected option and model limitation, never asks for a goal direction', () => {
