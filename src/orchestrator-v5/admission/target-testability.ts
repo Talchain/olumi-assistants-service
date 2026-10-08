@@ -151,10 +151,10 @@ export function targetVerdictWithholdsTargetClaims(verdict: TargetTestability): 
  * raw target only the row stating that figure; Codex r1 #2606), never by operator. A deadline row on the goal (DR row 3),
  * a different-figure row beside a raw target, every other node's limit, and a testable target: null, nothing moves.
  */
-export function untestableGoalTargetRowId(input: unknown, identityEvaluations?: readonly unknown[]): string | null {
-  const verdict = targetTestabilityOf(input, identityEvaluations);
+export function untestableGoalTargetRowId(input: unknown, identityEvaluations?: readonly unknown[], brief?: string): string | null {
+  const verdict = targetTestabilityOf(input, identityEvaluations, brief);
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable' || !isRec(input) || !Array.isArray(input.nodes)) return null;
-  const graph = asAnalysed(input as Rec & { nodes: unknown[] });
+  const graph = asAnalysed(input as Rec & { nodes: unknown[] }, undefined, brief);
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && n.id === verdict.goal_id);
   const row = goal === undefined ? undefined : goalTargetRow(graph, goal);
   return typeof row?.constraint_id === 'string' && row.constraint_id !== '' ? row.constraint_id : null;
@@ -230,9 +230,11 @@ export function targetTestabilityOf(
    * d5 ruling for #2644). Omitted (before a Run) = none attested: only a confirmed identity counts.
    */
   identityEvaluations?: readonly unknown[],
+  /** Stored scenario brief; missing means no derived exclusion. */
+  brief?: string,
 ): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
-  const graph = asAnalysed(input as Rec & { nodes: unknown[] });
+  const graph = asAnalysed(input as Rec & { nodes: unknown[] }, undefined, brief);
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goal === undefined) return { kind: 'no_goal' };
   const goalId = goal.id as string;

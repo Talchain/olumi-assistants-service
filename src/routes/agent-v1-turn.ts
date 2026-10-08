@@ -1255,8 +1255,9 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; briefText?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
   let graphHash: string | undefined;
+  let briefText: string | undefined;
   let analysisReady: unknown;
   /**
    * ⛔ THE SCENARIO'S OWN `analysis_state`, not the finaliser's no-context verdict
@@ -1323,6 +1324,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
     const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (after.status === 200) {
       graph = after.json.graph;
+      briefText = typeof after.json.brief_text === 'string' ? after.json.brief_text : undefined;
       scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
@@ -1479,7 +1481,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
+  return { graphHash, briefText, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2263,7 +2265,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
           rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
-          const riskCaveatNow = unitlessRiskChanceCaveatForAgent(state.graph);
+          const riskCaveatNow = unitlessRiskChanceCaveatForAgent(state.graph, state.briefText);
           rebuilt = withUnitlessRiskChanceCaveat(rebuilt, screenNow, riskCaveatNow);
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           replayObligations = [
@@ -4440,7 +4442,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(turnId !== undefined ? { turn_id: turnId } : {}), added_count: ranged.added },
         'agent-lane: the screen\'s chance line was said by Olumi (the reply did not say it)');
       }
-      unitlessRiskCaveat = unitlessRiskChanceCaveatForAgent(readbackGraph);
+      unitlessRiskCaveat = unitlessRiskChanceCaveatForAgent(readbackGraph, finalRead.briefText);
       wireBody = { ...wireBody, assistant_text: withUnitlessRiskChanceCaveat(String(wireBody.assistant_text), screenLines, unitlessRiskCaveat) };
     }
     /**

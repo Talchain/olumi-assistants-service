@@ -1,3 +1,5 @@
+import { isRetainedExcluded, unitlessOlumiRiskKeptOut } from './unitless-risk-exclusion.js';
+import { resolveGoalDirection } from '../goal-target/goal-direction.js';
 import { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
 export { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
 import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
@@ -48,20 +50,19 @@ const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object'
 const CHANCE_LABEL = 'chance of meeting your goal, in this model';
 
 /**
- * Science goals §(r)(b): ONE omission beside the chance for risks kept out by Olumi's draft-time producer family.
- * Participation and authorship are the persisted carrier; no new node field or inference from a risk's label.
+ * Science goals §(r)(b): ONE omission beside the chance, from the SAME current-graph derivation as Run.
+ * Older durable extra-parent exclusions retain their own words and never inflate this omission count.
  */
-export function unitlessRiskChanceCaveatForAgent(graph: unknown): string | undefined {
+export function unitlessRiskChanceCaveatForAgent(graph: unknown, brief?: string): string | undefined {
   const g = rec(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(rec).filter((n): n is Rec => n !== undefined);
-  const excluded = nodes.filter(n => n.kind === 'risk' && n.analysis_participation === 'retained_excluded'
-    && n.provenance === 'ai_inferred' && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '');
+  const excluded = nodes.filter(n => !isRetainedExcluded(n) && unitlessOlumiRiskKeptOut(n, graph, brief));
   if (excluded.length === 0) return undefined;
   const goals = nodes.filter(n => n.kind === 'goal' && typeof n.id === 'string');
-  const byId = new Map(nodes.filter(n => typeof n.id === 'string').map(n => [n.id as string, n]));
+  const byId = new Map(nodes.filter(n => typeof n.id === 'string' && (n.kind === 'goal' || !isRetainedExcluded(n))).map(n => [n.id as string, n]));
   const outgoing = new Map<string, Rec[]>();
   for (const e of (Array.isArray(g?.edges) ? g.edges : []).map(rec)) {
-    if (e === undefined || typeof e.from !== 'string' || typeof e.to !== 'string' || !byId.has(e.to)) continue;
+    if (e === undefined || e.edge_type === 'bidirected' || typeof e.from !== 'string' || typeof e.to !== 'string' || !byId.has(e.from) || !byId.has(e.to)) continue;
     outgoing.set(e.from, [...(outgoing.get(e.from) ?? []), e]);
   }
   const signOf = (e: Rec): number => {
@@ -72,10 +73,11 @@ export function unitlessRiskChanceCaveatForAgent(graph: unknown): string | undef
     const mean = rec(e.strength)?.mean;
     return typeof mean === 'number' && Number.isFinite(mean) ? Math.sign(mean) : 0;
   };
-  const pointsDown = (riskId: string): boolean => {
-    if (goals.length !== 1) return false;
+  const chanceEffect = (riskId: string): number => {
+    if (goals.length !== 1) return 0;
     const goalId = goals[0]!.id;
-    let reachesGoal = false;
+    const goalDirection = resolveGoalDirection(graph, goalId)?.direction === 'minimise' ? -1 : 1;
+    const effects = new Set<number>();
     const pending: { id: string; sign: number }[] = [{ id: riskId, sign: 1 }];
     // At most three signed states per node: bounded even for a malformed cyclic graph. Unknown propagates as 0.
     const visited = new Map<string, Set<number>>();
@@ -91,17 +93,19 @@ export function unitlessRiskChanceCaveatForAgent(graph: unknown): string | undef
         if (kind === 'option' || kind === 'decision') continue;
         const sign = state.sign * signOf(e);
         if (to === goalId) {
-          reachesGoal = true;
-          if (sign !== -1) return false;
+          effects.add(sign * goalDirection);
         } else pending.push({ id: to, sign });
       }
     }
-    return reachesGoal;
+    return effects.size === 1 ? [...effects][0]! : 0;
   };
   const first = excluded[0]!;
   const others = excluded.length - 1;
   const omission = `It doesn't yet include ‘${first.label}’${others === 0 ? '' : ` (and ${others} other risk${others === 1 ? '' : 's'} Olumi added)`}`;
-  return `${omission}, so it ${excluded.every(n => pointsDown(n.id as string)) ? 'may be too high' : "may move when they're included"}.`;
+  const effects = excluded.map(n => chanceEffect(n.id as string));
+  const direction = effects.every(sign => sign === -1) ? 'may be too high'
+    : effects.every(sign => sign === 1) ? 'may be too low' : "may move when they're included";
+  return `${omission}, so it ${direction}.`;
 }
 
 /** Place the omission after this turn's chance findings, including accepted narrator words and their qualifiers. */

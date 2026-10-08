@@ -1,4 +1,4 @@
-/** PR-1 / Science goals (r): fixture drafts, real admission, real Run boundary. No LLM or database. */
+/** FIX-1 / Science goals (r): fixture drafts, current-graph derivation, real Run boundary. No LLM or database. */
 import { describe, expect, it, vi } from 'vitest';
 import { Ajv } from 'ajv';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
@@ -75,8 +75,9 @@ const optionsOf = (graph: Graph) => graph.nodes.filter(n => n.kind === 'option')
 const goalOf = (graph: Graph) => graph.nodes.find(n => n.kind === 'goal')!;
 const protectedTargetsOf = (graph: Graph) => graph.nodes.filter(n => n.kind === 'option')
   .flatMap(n => Object.keys(n.interventions ?? {}));
-const guarded = (graph: Graph) => guardAnalysisParticipation(graph, {
+const guarded = (graph: Graph, brief = BRIEF) => guardAnalysisParticipation(graph, {
   goalNodeId: goalOf(graph).id, submittedOptionIds: optionsOf(graph), optionInterventionTargetIds: protectedTargetsOf(graph),
+  brief,
 });
 
 async function build(c: CandidateModel, brief = BRIEF): Promise<{ graph: Graph; out: Json }> {
@@ -97,7 +98,7 @@ async function build(c: CandidateModel, brief = BRIEF): Promise<{ graph: Graph; 
 }
 
 /** Real handler; only PLoT transport and scenario reading are fixture dependencies. */
-async function runPayload(graph: Graph): Promise<{ payload: Json; result: Json }> {
+async function runPayload(graph: Graph, brief = BRIEF): Promise<{ payload: Json; result: Json }> {
   const optionIds = optionsOf(graph);
   const run = vi.fn(async () => ({
     meta: { seed_used: 1, n_samples: 1000, response_hash: 'unitless-risk-pr1' },
@@ -109,12 +110,12 @@ async function runPayload(graph: Graph): Promise<{ payload: Json; result: Json }
   const handler = createRunAnalysisHandler({
     plotClient: { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient,
     scenarioReader: async () => ({ graph, options: graph.nodes.filter(n => n.kind === 'option'),
-      goal_node_id: goalOf(graph).id, rawPersistedGraph: graph } as unknown as RunAnalysisScenarioSnapshot),
+      goal_node_id: goalOf(graph).id, rawPersistedGraph: graph, briefText: brief } as unknown as RunAnalysisScenarioSnapshot),
   });
   const outcome = await handler({
     context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [],
       session_id: SCENARIO, request_id: 'req-unitless-risk', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 },
-      prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+      prior_turns: [], prior_facts: [], scenarioBriefText: brief, persistedGraph: null },
     payload: makeMessagePayload({ turn_id: 'unitless-risk', scenario_id: SCENARIO, message: 'Run the analysis.',
       turn_class: 'decide', stage: 'analyse' }),
     requestId: 'req-unitless-risk', signal: new AbortController().signal, orientationText: '',
@@ -125,26 +126,27 @@ async function runPayload(graph: Graph): Promise<{ payload: Json; result: Json }
   return { payload: (run.mock.calls as unknown as [Json][])[0]![0], result: (fact as Json).result };
 }
 
-describe('PR-1: unitless risks Olumi added are retained, disclosed, and absent from the chance', () => {
-  it('RED: admission stamps the added unitless risk; the persisted risk and its incident links survive', () => {
+describe('FIX-1: unitless risks Olumi added are retained, disclosed, and absent from the chance', () => {
+  it('admission does not stamp the added unitless risk; current graph derivation keeps it out and its stored incident links survive', () => {
     const c = candidate();
     const before = structuredClone(c);
     const graph = graphOf(c);
     const risk = riskOf(graph);
     expect(risk.provenance).toBe('ai_inferred');
-    expect(risk.analysis_participation).toBe('retained_excluded');
+    expect(risk.analysis_participation).toBeUndefined();
+    expect(guarded(graph).excludedNodeIds).toContain(risk.id);
     expect(graph.edges.filter(e => e.from === risk.id || e.to === risk.id)).toHaveLength(2);
     expect(c, 'the admission step must be pure').toEqual(before);
   });
 
   it('RED: the real registered draft returns the omission disclosure through not_represented', async () => {
     const { graph, out } = await build(candidate());
-    expect(riskOf(graph).analysis_participation).toBe('retained_excluded');
+    expect(riskOf(graph).analysis_participation).toBeUndefined();
     expect(out.not_represented).toContain(DISCLOSURE);
     expect((out.not_represented as string[]).filter(s => s === DISCLOSURE)).toHaveLength(1);
   });
 
-  it('RED: removing only this exclusion restores the withholding; the real Run guard removes both incident links', async () => {
+  it('deliberately including the risk restores withholding; the current-graph Run guard otherwise removes both incident links', async () => {
     // The chance mirror also checks the stored target. Admission alone precedes the builder's
     // holdStatedGoalAttributes step, so exercise the registered graph the real Run receives.
     const { graph } = await build(candidate());
@@ -152,8 +154,8 @@ describe('PR-1: unitless risks Olumi added are retained, disclosed, and absent f
     const direct = graph.edges.find(e => e.to === goalOf(graph).id && e.from !== risk.id);
     expect(direct?.provenance?.magnitude, 'premise: real scoped admission credits the separately stated core size').toBe('user_stated');
     const before = structuredClone(graph);
-    delete riskOf(before).analysis_participation;
-    expect(chancesWithheldByAGuess(before), 'premise: the risk path alone blocks the sized core').toBe(true);
+    riskOf(before).analysis_participation = 'included';
+    expect(chancesWithheldByAGuess(before, BRIEF), 'premise: the risk path alone blocks the sized core').toBe(true);
     expect(unsizedLeaderGoalPaths(before, optionsOf(before)).some(p => p.links.some(l => l.from === risk.id || l.to === risk.id))).toBe(true);
     const run = guarded(graph);
     expect(run.refusals).toEqual([]);
@@ -162,8 +164,8 @@ describe('PR-1: unitless risks Olumi added are retained, disclosed, and absent f
     expect(run.graph.nodes.some(n => n.id === risk.id)).toBe(false);
     expect(run.graph.edges.some(e => e.from === risk.id || e.to === risk.id)).toBe(false);
     expect(unsizedLeaderGoalPaths(run.graph, optionsOf(run.graph))).toEqual([]);
-    expect(chancesWithheldByAGuess(graph)).toBe(false);
-    expect(riskOf(graph).analysis_participation).toBe('retained_excluded');
+    expect(chancesWithheldByAGuess(graph, BRIEF)).toBe(false);
+    expect(riskOf(graph).analysis_participation).toBeUndefined();
   });
 
   it('RED: the actual PLoT payload has neither the excluded risk nor its edges, and no risk-link chance warning survives', async () => {
@@ -180,6 +182,9 @@ describe('PR-1: unitless risks Olumi added are retained, disclosed, and absent f
 
   it.each(['explicit', 'from_brief'])('NEVER (a): a %s risk stays in the calculation', provenance => {
     const graph = graphOf(candidate(c => { c.risks[0].provenance = provenance; }));
+    // `from_brief` is the persisted display carrier, not an admitted candidate authorship literal.
+    if (provenance === 'from_brief') riskOf(graph).provenance = 'from_brief';
+    expect(riskOf(graph).provenance).toBe('from_brief');
     expect(riskOf(graph).analysis_participation).not.toBe('retained_excluded');
     expect(guarded(graph).excludedNodeIds).toEqual([]);
   });
@@ -188,7 +193,7 @@ describe('PR-1: unitless risks Olumi added are retained, disclosed, and absent f
     const { graph, out } = await build(candidate(), `${BRIEF} We are worried about price sensitivity.`);
     expect(riskOf(graph).analysis_participation).not.toBe('retained_excluded');
     expect(out.not_represented).not.toContain(DISCLOSURE);
-    expect(chancesWithheldByAGuess(graph)).toBe(true);
+    expect(chancesWithheldByAGuess(graph, `${BRIEF} We are worried about price sensitivity.`)).toBe(true);
   });
 
   it('NEVER (b): an explicit size on ANY incident link protects a unitless risk', () => {
@@ -209,12 +214,12 @@ describe('PR-1: unitless risks Olumi added are retained, disclosed, and absent f
     expect(risk.event_risk?.occurrence).toEqual({ p_low: 0.1, p_high: 0.3, basis: 'user', meaning: 'at_least_once_within_horizon' });
     expect(risk.analysis_participation).not.toBe('retained_excluded');
     expect(guarded(graph).excludedNodeIds).toEqual([]);
-    // Same risk name and graph, with only the likelihood removed: the brief-word rule still
-    // does not protect this plural label, so only the user likelihood can distinguish the arms.
+    // The stem veto also protects the same user-named risk when no likelihood was given.
     const withoutLikelihood = await build(c, `${BRIEF} Our subscriber leaves in the next 6 months.`);
     const ordinaryRisk = riskOf(withoutLikelihood.graph, 'Subscribers leave');
     expect(ordinaryRisk.event_risk).toBeUndefined();
-    expect(ordinaryRisk.analysis_participation).toBe('retained_excluded');
+    expect(ordinaryRisk.analysis_participation).toBeUndefined();
+    expect(guarded(withoutLikelihood.graph, `${BRIEF} Our subscriber leaves in the next 6 months.`).excludedNodeIds).toEqual([]);
   });
 
   it("NEVER (b'): a stated likelihood remains protected while an incoming cause prevents the event-risk hold", () => {
@@ -269,7 +274,7 @@ describe('PR-1: unitless risks Olumi added are retained, disclosed, and absent f
     expect(guarded(graph).refusals).toEqual([]);
   });
 
-  it('CONTROL: a natural-unit risk remains included even when its links still need sizing', () => {
+  it('CONTROL: a drafted natural-unit quantity never produces a durable unitless-risk participation stamp', () => {
     const graph = graphOf(candidate(c => Object.assign(c.risks[0], { unit: 'subscribers', plausible_max: 1000 })));
     expect(riskOf(graph).analysis_participation).not.toBe('retained_excluded');
   });

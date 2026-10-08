@@ -15,7 +15,10 @@
  * that reason — the calculation cannot be influenced by something it never
  * received, so the exclusion needs no downstream cooperation to be true.
  *
- * ⛔ ONLY THE EXACT LITERAL `'retained_excluded'` EXCLUDES. Absence is NOT a
+ * DURABLE EXCLUSIONS still require the exact literal `'retained_excluded'`.
+ * Olumi-added unitless risks are additionally DERIVED from the current graph and stored brief
+ * by isExcludedFromAnalysis; final sizing, user authorship and a deliberate include veto that class.
+ * For the durable family alone: Absence is NOT a
  * claim (182,015 persisted nodes carry no field and every one of them must
  * keep participating), `'included'` participates, and an UNRECOGNISED value
  * participates. This is the binding display contract read back at the
@@ -62,8 +65,8 @@
  */
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
 
-/** The one literal that excludes. Not exported as a predicate — see the file docblock. */
-const RETAINED_EXCLUDED = 'retained_excluded';
+import { isExcludedFromAnalysis } from '../../agent-lane/unitless-risk-exclusion.js';
+export { isRetainedExcluded } from '../../agent-lane/unitless-risk-exclusion.js';
 
 export type ParticipationRefusalReason =
   | 'goal_node'
@@ -76,7 +79,7 @@ export interface ParticipationRefusal {
 }
 
 export interface AnalysisParticipationGuardResult<T = unknown> {
-  /** A deep CLONE with retained-excluded nodes and their incident edges removed. */
+  /** A deep CLONE with durable/derived excluded nodes and their incident edges removed. */
   readonly graph: T;
   /**
    * Node ids actually withheld from the calculation, in graph order.
@@ -108,6 +111,10 @@ export interface AnalysisParticipationGuardResult<T = unknown> {
 export interface AnalysisParticipationGuardOpts {
   /** `goal_node_id` as sent to PLoT beside the graph. */
   readonly goalNodeId?: string | null;
+  /** The scenario's stored brief; absent means no derived unitless-risk exclusions. */
+  readonly brief?: string;
+  /** Stored constraint rows when carried beside the graph by the scenario reader. */
+  readonly goalConstraints?: unknown;
   /** Every node id any SUBMITTED option intervenes on. */
   readonly optionInterventionTargetIds?: Iterable<string>;
   /** Ids of the options being compared on this run. */
@@ -125,15 +132,8 @@ function readNodeId(node: unknown): string | null {
   return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
-/** Exported for rule R (`held-user-links.ts` `endsOfGraph`): its route structure is the graph the Run is SENT. */
-export function isRetainedExcluded(node: unknown): boolean {
-  if (node === null || typeof node !== 'object') return false;
-  // Strict equality against the single literal. Never a negation of 'included'.
-  return (node as { analysis_participation?: unknown }).analysis_participation === RETAINED_EXCLUDED;
-}
-
 /**
- * Return a deep CLONE of `graph` with every `'retained_excluded'` node — and
+ * Return a deep CLONE of `graph` with durable or currently derived excluded nodes — and
  * every edge incident to one — withheld from the calculation. The input graph
  * is never mutated, so `scenarios.graph`, the parsed snapshot and
  * `rawPersistedGraph` (hashed for `graph_hash_at_run` / freshness) are
@@ -169,21 +169,27 @@ export function guardAnalysisParticipation<T = unknown>(
     }
 
     // Cheap pre-pass on the INPUT: if nothing is excluded there is nothing to
-    // do, and the overwhelmingly common graph pays only one scan and no clone.
-    const anyExcluded = nodes.some((n) => isRetainedExcluded(n));
+    // do, and the overwhelmingly common graph needs no deep clone.
+    const interventionTargets = new Set(opts.optionInterventionTargetIds ?? []);
+    const record = graph as Record<string, unknown>;
+    const currentGraph = { ...record,
+      ...(opts.goalConstraints !== undefined ? { goal_constraints: opts.goalConstraints } : {}),
+      options: [...(Array.isArray(record.options) ? record.options : []),
+        { interventions: Object.fromEntries([...interventionTargets].map(id => [id, 0])) }],
+    };
+    const anyExcluded = nodes.some(n => isExcludedFromAnalysis(n, currentGraph, opts.brief));
     if (!anyExcluded) {
       return { graph, excludedNodeIds: [], prunedEdgeCount: 0, refusals: [] };
     }
 
     const goalNodeId = typeof opts.goalNodeId === 'string' ? opts.goalNodeId : null;
-    const interventionTargets = new Set(opts.optionInterventionTargetIds ?? []);
     const submittedOptionIds = new Set(opts.submittedOptionIds ?? []);
 
     const refusals: ParticipationRefusal[] = [];
     const dropIds = new Set<string>();
 
     for (const node of nodes) {
-      if (!isRetainedExcluded(node)) continue;
+      if (!isExcludedFromAnalysis(node, currentGraph, opts.brief)) continue;
       const id = readNodeId(node);
       // A retained-excluded node with no usable id cannot be matched to an
       // edge endpoint, so it cannot be dropped safely. Keep it (fail towards

@@ -76,7 +76,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: READ.graph, graph_hash: READ.graph_hash, analysis_result: analysisResult, analysis_state: READ.analysis_state,
-      analysis_ready: READ.analysis_ready,
+      analysis_ready: READ.analysis_ready, brief_text: READ.brief_text,
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -215,17 +215,19 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b.assistant_text).not.toContain('between about');
   });
 
-  const addExcludedRisk = (label: string, direction?: string): void => {
+  const addUnitlessRisk = (label: string, direction?: string): void => {
+    READ.brief_text = 'Compare the fourth shop and wholesale alternatives for growing monthly profit.';
     const id = `omitted_risk_${READ.graph.nodes.length}`;
-    READ.graph.nodes.push({ id, kind: 'risk', label, provenance: 'ai_inferred', analysis_participation: 'retained_excluded' });
-    if (direction !== undefined) READ.graph.edges.push({ from: id, to: READ.graph.nodes.find((n: Json) => n.kind === 'goal').id,
-      effect_direction: direction, strength: { mean: direction === 'negative' ? -0.3 : 0.3, std: 0.15 } });
+    READ.graph.nodes.push({ id, kind: 'risk', label, provenance: 'ai_inferred' });
+    READ.graph.edges.push({ from: id, to: READ.graph.nodes.find((n: Json) => n.kind === 'goal').id,
+      effect_direction: direction ?? 'unknown', strength: { mean: direction === 'negative' ? -0.3 : 0.3, std: 0.15 },
+      defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
   };
   const omission = (tail: string) => `It doesn't yet include ‘Client backlash’${tail}`;
 
-  it('PR-1 RED: the sent Run reply puts its negative-risk omission directly after the chance evidence', async () => {
+  it('FIX-1: the sent Run reply puts its derived negative-risk omission directly after the chance evidence', async () => {
     READ = structuredClone(READ_B3);
-    addExcludedRisk('Client backlash', 'negative');
+    addUnitlessRisk('Client backlash', 'negative');
     const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
     const caveat = omission(', so it may be too high.');
     expect(count(b.assistant_text, caveat), b.assistant_text).toBe(1);
@@ -235,13 +237,30 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     if (b._answer_shape) expect([b._answer_shape.headline, ...b._answer_shape.bullets].join(' ')).toContain(caveat);
   });
 
-  it.each(['positive', undefined])('PR-1 RED: mixed or unknown (%s) directions are said as may move on the sent reply', async (direction) => {
+  it.each(['positive', undefined])('FIX-1: mixed or unknown (%s) directions are said as may move on the sent reply', async (direction) => {
     READ = structuredClone(READ_B3);
-    addExcludedRisk('Client backlash', 'negative');
-    addExcludedRisk('Supplier response', direction);
+    addUnitlessRisk('Client backlash', 'negative');
+    addUnitlessRisk('Supplier response', direction);
     const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
     expect(count(b.assistant_text, omission(" (and 1 other risk Olumi added), so it may move when they're included.")), b.assistant_text).toBe(1);
     expect(b.assistant_text).not.toContain('so it may be too high.');
+  });
+
+  it('FIX-1: an omitted risk whose only effect raises the chance is said as may be too low', async () => {
+    READ = structuredClone(READ_B3);
+    addUnitlessRisk('Client backlash', 'positive');
+    const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
+    expect(count(b.assistant_text, omission(', so it may be too low.')), b.assistant_text).toBe(1);
+    expect(b.assistant_text).not.toContain('so it may be too high.');
+    expect(b.assistant_text).not.toContain("may move when they're included");
+  });
+
+  it('FIX-1: an unavailable stored brief produces no derived omission on the sent reply', async () => {
+    READ = structuredClone(READ_B3);
+    addUnitlessRisk('Client backlash', 'negative');
+    delete READ.brief_text;
+    const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
+    expect(b.assistant_text).not.toContain("It doesn't yet include");
   });
 
   it('PR-1 CONTROL: zero exclusions adds no omission to the sent reply', async () => {

@@ -31,6 +31,7 @@ import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
 import { exactIdentityOperandLinks } from '../../orchestrator-v5/admission/identity-evaluations.js';
+import { isExcludedFromAnalysis } from '../../orchestrator-v5/agent-lane/unitless-risk-exclusion.js';
 import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
 
 type Rec = Record<string, unknown>;
@@ -115,12 +116,13 @@ export function olumiGuessedGoalLink(e: Rec, unitOf: (id: unknown) => string | u
 
 /**
  * The graph the Run computes on (P0 PARTNER #75 5916838445): a node the user kept out of the calculation
- * (`analysis_participation: 'retained_excluded'`, the exact literal `run-analysis-participation-guard.ts` acts on) and
- * every edge touching it are handed to PLoT absent, so they are on no path here either. The goal is never dropped (the
+ * (`analysis_participation: 'retained_excluded'`) or an Olumi unitless risk derived from the current graph and stored
+ * brief, and every edge touching it, are handed to PLoT absent, so they are on no path here either. Missing brief
+ * means no derived exclusions; every reader shares isExcludedFromAnalysis with the Run guard. The goal is never dropped (the
  * guard refuses that run instead), nor `keep` (B6's limited node, whose own limit is being read).
  */
-export function asAnalysed<G extends { nodes: readonly unknown[]; edges?: unknown }>(graph: G, keep?: unknown): G {
-  const out = new Set(graph.nodes.filter((n) => isRec(n) && n.analysis_participation === 'retained_excluded' && n.kind !== 'goal' && n.id !== keep)
+export function asAnalysed<G extends { nodes: readonly unknown[]; edges?: unknown }>(graph: G, keep?: unknown, brief?: string): G {
+  const out = new Set(graph.nodes.filter((n) => isRec(n) && isExcludedFromAnalysis(n, graph, brief) && n.kind !== 'goal' && n.id !== keep)
     .map((n) => (n as Rec).id));
   if (out.size === 0) return graph;
   return {

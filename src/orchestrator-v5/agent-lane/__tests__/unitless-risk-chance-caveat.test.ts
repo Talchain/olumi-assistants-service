@@ -1,33 +1,26 @@
-/** PR-1, Science goals §(r)(b): an Olumi-added omitted risk is visible beside the chance, with its own direction. */
+/** FIX-1, Science goals §(r)(b): the current-graph omission is visible beside the chance, with its own direction. */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as screenLinesModule from '../goal-chance-screen-lines.js';
 import { type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
 import { composeReplyShape, sentenceMultiset } from '../reply/compose-reply.js';
 
-// Namespace reads give assertion REDs on the unchanged base, rather than a missing-export collection failure.
-const desired = screenLinesModule as unknown as {
-  unitlessRiskChanceCaveatForAgent?: (graph: unknown) => string | undefined;
-  withUnitlessRiskChanceCaveat?: (text: string, lines: readonly GoalChanceScreenLine[], caveat?: string) => string;
-};
-const unitlessRiskChanceCaveatForAgent = (g: unknown): string | undefined => {
-  expect(desired.unitlessRiskChanceCaveatForAgent, 'the exclusion omission has a deterministic producer').toBeTypeOf('function');
-  return desired.unitlessRiskChanceCaveatForAgent!(g);
-};
-const withUnitlessRiskChanceCaveat = (text: string, lines: readonly GoalChanceScreenLine[], caveat?: string): string => {
-  expect(desired.withUnitlessRiskChanceCaveat, 'the exclusion omission is inserted before reply composition').toBeTypeOf('function');
-  return desired.withUnitlessRiskChanceCaveat!(text, lines, caveat);
-};
+const BRIEF = 'Grow Monthly revenue by changing the subscription price.';
+const unitlessRiskChanceCaveatForAgent = (g: unknown, brief: string | undefined = BRIEF): string | undefined =>
+  screenLinesModule.unitlessRiskChanceCaveatForAgent(g, brief);
+const withUnitlessRiskChanceCaveat = screenLinesModule.withUnitlessRiskChanceCaveat;
 
 type Rec = Record<string, any>;
 const risk = (id = 'backlash', label = 'Client backlash', change: Rec = {}): Rec => ({
-  id, label, kind: 'risk', provenance: 'ai_inferred', analysis_participation: 'retained_excluded', ...change,
+  id, label, kind: 'risk', provenance: 'ai_inferred', ...change,
 });
-const goal = { id: 'goal', label: 'Monthly revenue', kind: 'goal' };
+const goal = { id: 'goal', label: 'Monthly revenue', kind: 'goal', goal_direction: '>=',
+  goal_threshold_raw: 20000, goal_threshold_cap: 40000, goal_threshold_unit: 'GBP/month', goal_threshold_frame: 'level' };
 function link(from: string, to = 'goal', direction?: unknown, change: Rec = {}): Rec {
   // Omitted argument is the negative default; explicitly undefined represents a link without a sign.
   const sign = arguments.length < 3 ? 'negative' : direction;
-  return { from, to, ...(sign === undefined ? {} : { effect_direction: sign }), ...change };
+  return { from, to, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' },
+    ...(sign === undefined ? {} : { effect_direction: sign }), ...change };
 }
 const graph = (risks: Rec[] = [risk()], edges: Rec[] = [link('backlash')], otherNodes: Rec[] = []): Rec => ({
   nodes: [goal, ...risks, ...otherNodes], edges,
@@ -35,7 +28,7 @@ const graph = (risks: Rec[] = [risk()], edges: Rec[] = [link('backlash')], other
 const HIGH = "It doesn't yet include ‘Client backlash’, so it may be too high.";
 const MOVE = "It doesn't yet include ‘Client backlash’, so it may move when they're included.";
 
-describe('RED on base: one omission caveat from the persisted exclusion and authorship carrier', () => {
+describe('one omission caveat from the current-graph derivation and authorship carrier', () => {
   it('one negative omitted risk: omission and too-high words, once', () => {
     const g = graph();
     const before = JSON.stringify(g);
@@ -59,6 +52,15 @@ describe('RED on base: one omission caveat from the persisted exclusion and auth
     expect(unitlessRiskChanceCaveatForAgent(undefined)).toBeUndefined();
   });
 
+  it('an older retained extra-parent exclusion contributes no unitless-risk caveat', () => {
+    expect(unitlessRiskChanceCaveatForAgent(graph([risk('backlash', 'Client backlash', { analysis_participation: 'retained_excluded' })])))
+      .toBeUndefined();
+  });
+
+  it('missing brief fails closed and derives no omission', () => {
+    expect(screenLinesModule.unitlessRiskChanceCaveatForAgent(graph())).toBeUndefined();
+  });
+
   it.each(['from_brief', 'user_set', 'explicit', undefined])('a user/unknown-authorship risk (%s) never contributes to the caveat', provenance => {
     expect(unitlessRiskChanceCaveatForAgent(graph([risk('backlash', 'Client backlash', { provenance })])))
       .toBeUndefined();
@@ -78,7 +80,7 @@ describe('RED on base: one omission caveat from the persisted exclusion and auth
   });
 });
 
-describe('RED on base: too high only when every excluded risk’s goal-path sign is negative', () => {
+describe('goal-path effect × goal direction determines the omission words', () => {
   it('an indirect positive × negative path points down, regardless of an unrelated positive dead end', () => {
     expect(unitlessRiskChanceCaveatForAgent(graph([risk()], [
       link('backlash', 'churn', 'positive'), link('churn'), link('backlash', 'dead-end', 'positive'),
@@ -97,13 +99,21 @@ describe('RED on base: too high only when every excluded risk’s goal-path sign
       .toBe("It doesn't yet include ‘Client backlash’ (and 1 other risk Olumi added), so it may move when they're included.");
   });
 
+  it('all omitted risks raise the chance: the omission may make it too low', () => {
+    expect(unitlessRiskChanceCaveatForAgent(graph([risk()], [link('backlash', 'goal', 'positive')])))
+      .toBe("It doesn't yet include ‘Client backlash’, so it may be too low.");
+  });
+
   it.each([
     ['explicit unknown sign', [link('backlash', 'goal', 'unknown', { strength: { mean: -0.5 } })]],
     ['no sign', [link('backlash', 'goal', undefined)]],
     ['zero strength', [link('backlash', 'goal', undefined, { strength: { mean: 0 } })]],
-    ['no goal path', []],
   ])('%s never licences too high', (_row, edges) => {
     expect(unitlessRiskChanceCaveatForAgent(graph([risk()], edges))).toBe(MOVE);
+  });
+
+  it('no goal path derives no analysis omission', () => {
+    expect(unitlessRiskChanceCaveatForAgent(graph([risk()], []))).toBeUndefined();
   });
 
   it('an unknown link on one indirect goal path keeps the direction open', () => {

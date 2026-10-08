@@ -1,3 +1,5 @@
+import { asAnalysed } from '../../../orchestrator/context/placeholder-parts.js';
+import { isRetainedExcluded, unitlessOlumiRiskKeptOut, sayUnitlessRiskExcluded } from '../unitless-risk-exclusion.js';
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -1439,13 +1441,9 @@ export type ConstructionTrace =
  * goal path is only Olumi's guess. The Run's own two readers (`run-analysis.ts`: the placeholder paths, and the target's P5
  * codes), each product read as evaluated, as a Run that evaluates it does. Pure.
  */
-export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] }): boolean {
-  // The Run reads the graph its participation guard hands PLoT (`run-analysis-participation-guard.ts`, the one literal): a
-  // node kept out of the calculation, and every link at it, is not there (the £85k draft's kept-out price risk).
-  const out = new Set((drafted.nodes as readonly Record<string, unknown>[])
-    .filter((n) => n.analysis_participation === 'retained_excluded' && n.kind !== 'goal').map((n) => n.id));
-  const nodes = (drafted.nodes as readonly Record<string, unknown>[]).filter((n) => !out.has(n.id));
-  const graph = { nodes, edges: (drafted.edges as readonly Record<string, unknown>[]).filter((e) => !out.has(e.from) && !out.has(e.to)) };
+export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] }, brief?: string): boolean {
+  const graph = asAnalysed(drafted, undefined, brief);
+  const nodes = graph.nodes as readonly Record<string, unknown>[];
   const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
   const evaluations = nodes.filter((n) => n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object').map((n) => {
     const i = n.nonlinear_identity as Record<string, unknown>;
@@ -1573,12 +1571,12 @@ export async function buildModelFromBrief(
    */
   const trialGraph = (c: CandidateModel) => {
     const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
-    return { nodes: a.nodes, edges: a.edges };
+    return { nodes: a.nodes, edges: a.edges, goal_constraints: a.goal_constraints };
   };
   const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
   const cutApplies = unsupported.model !== candidate && (() => {
     const after = trialGraph(unsupported.model);
-    return !chancesWithheldByAGuess(after) && goalPathsCarryTheUsersFigures(after) && chancesWithheldByAGuess(trialGraph(candidate));
+    return !chancesWithheldByAGuess(after, brief) && goalPathsCarryTheUsersFigures(after) && chancesWithheldByAGuess(trialGraph(candidate), brief);
   })();
   if (cutApplies) candidate = unsupported.model;
   let mechanismsUnmodelled: readonly UnmodelledMechanism[] = cutApplies ? unsupported.mechanisms : [];
@@ -2315,7 +2313,8 @@ export async function buildModelFromBrief(
       // A goal read as a two-part product: an extra direct parent re-pointed or taken out (`product-goal-extra-parent.ts`).
       ...admitted.loss.filter((l) => /\.rate_operand\./.test(l.field_path)).map((l) => l.reason),
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),
-      ...admitted.loss.filter((l) => l.field_path.endsWith('.unitless_risk_excluded')).map((l) => l.reason),
+      ...graph.nodes.filter(n => !isRetainedExcluded(n) && unitlessOlumiRiskKeptOut(n, graph, brief))
+        .map(n => sayUnitlessRiskExcluded(n.label)),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>

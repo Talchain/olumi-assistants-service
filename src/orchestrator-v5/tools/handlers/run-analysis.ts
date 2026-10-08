@@ -764,7 +764,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }).graph;
 
     // --- 2.7. Participation guard (COLLAB Track A) -------------------------
-    // Honours `node.analysis_participation === 'retained_excluded'`: the node
+    // Honours durable retained exclusions and derives Olumi's unitless risks from this current graph/brief: the node
     // stays in `scenarios.graph` with its label, value and authorship intact
     // and is simply ABSENT from the wire graph — the same construction the
     // option gate above uses, one level down. Incident edges go with it
@@ -791,6 +791,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
     const participation = guardAnalysisParticipation(graphAfterIntercepts, {
       goalNodeId: snapshot.goal_node_id,
+      brief: snapshot.briefText,
+      goalConstraints: snapshot.goal_constraints,
       optionInterventionTargetIds,
       submittedOptionIds,
       requestId: invocation.requestId,
