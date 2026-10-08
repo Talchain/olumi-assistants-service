@@ -5,14 +5,14 @@
  * revision, the bar offers the pre-mortem DISABLED with a reason that points at the waiting card. It reads only the
  * persisted carrier (`approvalWaitingOf`), so the live bar and the reload GET's bar stay byte-identical (amendment 9).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import served from '../../__tests__/fixtures/m1-s1-served-graphs.json';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { actionFactsOf, type ActionRead } from '../state.js';
 import { actionBarOf, DISABLED, type ActionBarV1 } from '../rank.js';
 import { approvalChipIdFor } from '../../approval-chips.js';
 import { parsePendingAction, type PendingAction } from '../../../session/pending-action.js';
-import { computeProposalId } from '../../proposal.js';
+import { computeProposalId, type ProposalContent } from '../../proposal.js';
 import { proposalPendingAction } from '../../durable-proposal.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
@@ -35,13 +35,13 @@ const ran = (graph: unknown): ActionRead => {
  * by `parsePendingAction`, so no egress could ever see it).
  */
 const approval = (graph: unknown, overrides: Partial<PendingAction> = {}): PendingAction => {
-  const content = { scenario_id: SCENARIO, user_id: null, base_graph_identity_hash: hashOf(graph),
-    operations: [{ op: 'set', path: 'nodes/f/observed_state/value', value: 0.4 }],
+  const content: ProposalContent = { scenario_id: SCENARIO, user_id: null, base_graph_identity_hash: hashOf(graph),
+    operations: [{ op: 'set_factor_value', path: 'sprint_capacity_for_ai_reporting', value: 40 }],
     provenance: { authored_by: 'model_proposed', basis: 'estimate' }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: 'Approve the change' };
-  const id = computeProposalId(content as never);
-  const carrier = proposalPendingAction({ ...content, proposal_id: id } as never,
-    { id: approvalChipIdFor(id), label: 'Approve', message: 'Approve the held change.' } as never, { scenario_id: SCENARIO, emitted_at_iso: AT });
+  const id = computeProposalId(content);
+  const carrier = proposalPendingAction({ ...content, proposal_id: id },
+    { id: approvalChipIdFor(id), label: 'Approve', message: 'Approve the held change.' }, { scenario_id: SCENARIO, emitted_at_iso: AT });
   return { ...carrier, ...overrides };
 };
 const bar = (read: ActionRead) => actionBarOf(actionFactsOf(read));
@@ -49,6 +49,9 @@ const offers = (b: ActionBarV1) => [...b.priority, ...b.standard, ...b.more];
 const premortem = (b: ActionBarV1) => offers(b).find((o) => o.action_id === 'pre_mortem');
 
 describe('P02 bar gate: no fresh pre-mortem press while its card waits', () => {
+  // The carrier's wall TTL is real time (`isPendingActionExpired` reads Date.now()): freeze the clock at AT so the rows never expire (Codex r2 P2).
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(AT)); });
+  afterEach(() => { vi.useRealTimers(); });
   it('CONTROL: a bound Run with no waiting card offers the pre-mortem enabled', () => {
     expect(premortem(bar(ran(D1.graph)))).toMatchObject({ enabled: true });
   });
