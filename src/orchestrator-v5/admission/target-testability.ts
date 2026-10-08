@@ -20,7 +20,7 @@ import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-targ
 import { sameUnit, unitsCompose } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../format/edge-strength-words.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
@@ -416,7 +416,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     // no stated size. A link the user only DREW carries the source but not the display, so it is never "set as" a band.
     const userBand = linkSizing(edge) === 'user' && isRec(edge?.provenance) && edge?.provenance_display === 'user_set'
       && edge.provenance.magnitude !== 'user_stated' && edge.provenance.natural_effect === undefined;
-    return userBand && typeof mean === 'number' && Number.isFinite(mean) ? CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(mean))] : null;
+    return userBand && typeof mean === 'number' && Number.isFinite(mean) ? edgeStrengthWords(edge) : null;
   })();
   const askedAfterTheBand = (question: string): string => bandTheUserSet === null ? question
     : `You set this link as ${bandTheUserSet}. To test your ${change === undefined ? `${figure} target` : `target (${change})`} I need it in ${unit || 'the goal unit'}: `

@@ -70,6 +70,7 @@ import {
 } from "./stated-option-figure-adoption.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
+import { isPlaceholderLink } from '../magnitude/link-sizing.js';
 
 // ============================================================================
 // V3 Types
@@ -2540,6 +2541,9 @@ function generateValidationWarnings(
 
   // P1-CEE-3: Check for negligible and low strength edges
   for (const edge of graph.edges) {
+    // Science 393023 LICENCE ruling 3 (P53x, Codex #2819 P2): a placeholder's mean is a default, not a size: never
+    // word it as 'low' or 'negligible' strength.
+    if (isPlaceholderLink(edge)) continue;
     const absMean = Math.abs(edge.strength.mean);
 
     if (absMean < EDGE_STRENGTH_LOW_THRESHOLD) {
