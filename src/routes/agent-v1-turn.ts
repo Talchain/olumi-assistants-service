@@ -613,8 +613,8 @@ export { withholdDisclosureForCells as withholdDisclosureFor } from '../orchestr
 /** Normalize only the exact horizon producer identities; the cells select their single replacement form. */
 function withCellHorizon(text: string, graph: unknown, cells: readonly CanonicalAnalysisCell[]): string {
   const line = untestedHorizonLineForCells(graph, cells);
-  const variants = [untestedHorizonLine(graph), untestedHorizonLine(graph, { besideChance: true }),
-    untestedHorizonLine(graph, { besideChance: true, plural: true }), untestedHorizonLineForCells(graph, [])];
+  const variants = [untestedHorizonLine(graph, { normalizationOnly: true }), untestedHorizonLine(graph, { besideChance: true, normalizationOnly: true }),
+    untestedHorizonLine(graph, { besideChance: true, plural: true, normalizationOnly: true }), untestedHorizonLineForCells(graph, [], true)];
   for (const variant of new Set(variants)) if (variant !== null && variant !== line) text = text.replaceAll(variant, line ?? '');
   // Narration and the host can each carry a different exact producer form. Once the cells unify them, keep ONE copy
   // in its first place; only this typed horizon identity is deduplicated, never arbitrary repeated reasoning.

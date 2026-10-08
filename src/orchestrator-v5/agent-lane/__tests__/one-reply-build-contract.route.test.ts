@@ -237,12 +237,11 @@ describe('ONE reply contract through the build route', () => {
   it('r13 draft without widened: omitted and zero typed counts keep the existing reply byte-identical', async () => {
     narrator = 'Olumi built your pricing model.';
     const body = await buildTurn();
-    // Captured from this same route/harness before r13's wiring, including the exact display grammar.
-    expect(body.assistant_text, 'no widening is byte-identical to the original route').toBe([
+    // The historical capture retains its display grammar, with §(ad)'s retired chance-free horizon clause removed.
+    expect(body.assistant_text, 'no widening preserves the existing reply apart from the retired horizon clause').toBe([
       "Not shown: how MRR is worked out isn't confirmed",
       "• Olumi's estimates: 3, see Check estimates.",
       'Olumi built your pricing model.',
-      "This model doesn't yet say whether any option gets there within 12 months.",
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from. The rest of this Run's results still stand.",
       GOAL_CHANCE_CAPTURE,
     ].join('\n\n'));
@@ -318,7 +317,7 @@ describe('ONE reply contract through the build route', () => {
     await expectStoredAndReplayed(body, payload);
   });
 
-  it('r11b B1 automatic first Run: exact pilot face/detail uses one cell marker and the chance-free horizon', async () => {
+  it('r11b B1 automatic first Run: exact pilot face/detail uses one cell marker without the retired horizon clause', async () => {
     currentRead = { ...structuredClone(B1), current_read: { analysis_ready: structuredClone(B1.analysis_ready),
       computed_against_hash: B1.graph_hash, current_analysis_hash: B1.graph_hash, run_id: 'fixture-head-b1' } };
     buildBrief = B1.brief;
@@ -336,7 +335,7 @@ describe('ONE reply contract through the build route', () => {
     expect(shown).toContain('How likely or how large is "Price-rise cancellation risk" today?');
     expect(shown).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
-    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    expect(body.assistant_text).not.toContain("This model doesn't yet say whether any option gets there within 12 months.");
     for (const sentence of [
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
       'This run doesn’t yet show each option’s chance of reaching £20,000.',
@@ -368,7 +367,7 @@ describe('ONE reply contract through the build route', () => {
       "Not shown: how MRR is worked out isn't confirmed",
     ]);
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
-    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    expect(body.assistant_text).not.toContain("This model doesn't yet say whether any option gets there within 12 months.");
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 

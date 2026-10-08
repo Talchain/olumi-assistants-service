@@ -1,3 +1,5 @@
+import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
+import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
@@ -154,11 +156,12 @@ export function projectCanonicalAnalysisCells(
     const licenceLine = licence?.withheld_option_ids?.includes(option_id) && label !== undefined
       ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
     // DGAI RunView:125 precedence, applied only to the existing withheld cell.
-    const withheldWhy = identityMessage ?? certainty.get(option_id) ?? reasonLine ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
+    const horizonReason = reasons.find(reason => reason.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+    const withheldWhy = horizonReason?.message ?? identityMessage ?? certainty.get(option_id) ?? reasonLine ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
     const face = faces.get(option_id);
     const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
       : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
-        : reasons.length > 0 ? { kind: 'withheld', reasons, face: OPTION_CHANCE_NOT_SHOWN, why: withheldWhy } : { kind: 'none' };
+        : reasons.length > 0 ? { kind: 'withheld', reasons, face: horizonReason === undefined ? OPTION_CHANCE_NOT_SHOWN : ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, why: withheldWhy } : { kind: 'none' };
     return { option_id, cell };
   });
 }

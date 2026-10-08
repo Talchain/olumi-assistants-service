@@ -53,10 +53,12 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
+import { goalHorizonWithholdDetail } from '../../goal-target/goal-horizon-detail.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
@@ -2217,6 +2219,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ] } };
     }
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
+    // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
+    // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
+    response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -2853,7 +2858,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
+      snapshot.rawPersistedGraph ?? graphForAnalysis);
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
@@ -4002,6 +4008,20 @@ export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph:
     node_ids: [String(goal.id)], option_ids: scored,
     detail: { reason: 'missing_goal_baseline' },
   }, { keepOutcome: true, keepOrdering: true });
+}
+
+/** A held month needs this Run's evaluated carrier or the user's explicit steady attestation. */
+export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown): E {
+  if (goalHorizonVerdict(graph, response) !== 'withhold') return response;
+  const goal = soleGoalOf(graph);
+  const { scored } = goalFigureOptions(response);
+  if (goal === undefined || scored.length === 0) return response;
+  const message = goalHorizonWithholdDetail(graph);
+  return withholdOptionGoalFigures(response, new Set(scored), {
+    code: GOAL_FIGURES_HORIZON_NOT_TESTED, severity: 'warning', message, say: message,
+    node_ids: [String(goal.id)], option_ids: scored,
+    detail: { reason: 'HORIZON_NOT_TESTED' },
+  }, { keepOutcome: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */
