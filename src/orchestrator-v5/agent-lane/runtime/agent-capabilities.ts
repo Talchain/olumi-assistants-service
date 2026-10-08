@@ -2058,6 +2058,8 @@ export function createAgentCapabilities(
    * caller that does not want one). See `../first-analysis.ts` for the rules it enforces.
    */
   opts: {
+    /** Absolute end of this turn's drafter call, shared with optional draft widening. */
+    readonly deadlineAt?: number;
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
      * ⭐ C6-1: told ONCE, the moment a construction THIS request committed is confirmed from state — before the
@@ -7451,7 +7453,7 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace));
+        built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt));
         if (built.ok !== true) return built;
       }
 

@@ -44,9 +44,14 @@ function candidate(extraFactors: number) {
 }
 
 /** Feeds a sequence of candidates, one per structured call, and counts the calls. */
+const wideningFallback = (instructions: string) => instructions.startsWith('METHOD TURN:')
+  ? { text: JSON.stringify(instructions.includes('suggest risks') ? { risk_suggestions: [] } : { options: [] }) } : null;
 function structuredSequence(...payloads: readonly unknown[]) {
   const calls: string[] = [];
   const fn = vi.fn(async (req: { instructions: string }) => {
+    // These rows count construction/repair calls. Optional widening is pinned in widen-draft.test.ts.
+    const fallback = wideningFallback(req.instructions);
+    if (fallback !== null) return fallback;
     const idx = calls.length;
     calls.push(req.instructions);
     return { text: JSON.stringify(payloads[Math.min(idx, payloads.length - 1)]) };
@@ -265,7 +270,12 @@ describe('⭐ the compact retry may not choose a goal: it returns the user’s e
   };
   function recording(...payloads: unknown[]) {
     const reqs: Req[] = [];
-    const fn = vi.fn(async (req: Req) => { reqs.push(req); return { text: JSON.stringify(payloads[Math.min(reqs.length - 1, payloads.length - 1)]) }; }) as unknown as CallStructuredModel;
+    const fn = vi.fn(async (req: Req) => {
+      const fallback = wideningFallback(req.instructions);
+      if (fallback !== null) return fallback;
+      reqs.push(req);
+      return { text: JSON.stringify(payloads[Math.min(reqs.length - 1, payloads.length - 1)]) };
+    }) as unknown as CallStructuredModel;
     const registered: { graph?: { nodes?: { id: string; kind?: string; label?: string }[]; edges?: { from: string; to: string }[] } }[] = [];
     const d: InternalDispatch = async (path, body) => {
       if (path.endsWith('/graph/register')) registered.push(body as never);

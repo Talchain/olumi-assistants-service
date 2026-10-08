@@ -45,6 +45,7 @@ import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-te
 import { identityCanCarryExactLinks } from '../../admission/identity-evaluations.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
+import { widenDraft } from './widen-draft.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -469,7 +470,7 @@ export type CallStructuredModel = (req: {
   model: string; instructions: string; input: string;
   max_output_tokens: number; schema: Record<string, unknown>;
   reasoning_effort?: 'low' | 'medium' | 'high';
-}) => Promise<{
+}, deadlineAt?: number) => Promise<{
   text: string; usage?: Record<string, unknown>;
   /**
    * The Responses API's own completion status (AIX-001), e.g. `incomplete` with reason `max_output_tokens` —
@@ -1497,6 +1498,7 @@ export async function buildModelFromBrief(
   dispatch: InternalDispatch,
   callStructured: CallStructuredModel,
   observeConstruction?: (t: ConstructionTrace) => void,
+  deadlineAt?: number,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const buildInstructions = buildInstructionsForBrief(brief);
@@ -1608,6 +1610,7 @@ export async function buildModelFromBrief(
   let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
+  let admissionCandidate = firstIdentity.model;
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
@@ -1797,6 +1800,7 @@ export async function buildModelFromBrief(
             .filter((n) => !kept.has(nodeIdentity(n)))
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
           candidate = retryCandidate;
+          admissionCandidate = retryIdentity.model;
           admitted = retryAdmitted;
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
@@ -1882,6 +1886,14 @@ export async function buildModelFromBrief(
       detail: notToldApart.map(notToldApartLine).join(' '),
       ambiguous_names: notToldApart.map((a) => ({ option: a.option, owners: [...a.owners], because: a.because })),
     };
+  }
+  // Optional widening uses the exact candidate and admission arguments that survived the retry.
+  // It runs before the existing goal/identity disclosures and the one canonical registration.
+  const widened = await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured, deadlineAt,
+    admissionArgs: [goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] });
+  if (widened !== null) {
+    admitted = widened.admitted;
+    size = assessConstructionSize(admitted);
   }
   // Said where the user always sees it: the carrier the model folded into their goal, with their own arithmetic.
   if (foldedCarrier !== null) {
@@ -2263,6 +2275,7 @@ export async function buildModelFromBrief(
   return {
     ok: true,
     mutated: true,
+    ...(widened !== null ? { widened: { ...widened.counts } } : {}),
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
     // The untyped question's ONE channel for a later answer (the existing reconcile path); it never gates (`scopeIssueBlocks`).
