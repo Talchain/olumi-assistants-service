@@ -162,7 +162,7 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
         inference_warnings: [
           { code: 'GOAL_FIGURES_PRODUCT_NOT_READ' },
           { code: 'GOAL_HORIZON_NOT_TESTED', severity: 'info',
-            message: 'This model doesn\'t yet say whether any option gets there within 12 months.' },
+            message: 'This chance uses the model\'s numbers as they are today; the model doesn\'t project how they change over time yet, so it can\'t say whether you\'ll reach £85,000 within 12 months.' },
         ],
       },
     });

@@ -311,7 +311,10 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(first._answer_shape).toBeDefined();
     expect(first.assistant_text).not.toContain(producerGuided!);
     expect(first.assistant_text.split(GUIDED_WITHOUT_INVITE)).toHaveLength(2);
-    expect(first._answer_shape.headline).toBe(reason.replace(THRESHOLD_REST_STANDS, ''));
+    expect(first._answer_shape.headline).toBe("Not shown: MRR's current level is missing");
+    expect(first._answer_shape.detail).toContain(GUIDED_WITHOUT_INVITE);
+    expect(first._answer_shape.detail.split(reason)).toHaveLength(2);
+    expect([first._answer_shape.headline, ...first._answer_shape.bullets].join('\n')).not.toContain(reason.replace(THRESHOLD_REST_STANDS, ''));
     expect(first.assistant_text).toBe(deriveAnswerTextFromShape(first._answer_shape));
     expect(wirePresses(first).map(action => action.id)).toEqual(ORDERED_PAIRS.map(pair => pressId(pair[0], pair[1])));
     const calls = runCalls;

@@ -93,7 +93,7 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     expect(face).not.toContain(closing);
   });
 
-  it.each(['gate appended', 'already present'] as const)('%s: the face carries the cause once; the restatement stays in detail and durable text', async (source) => {
+  it.each(['gate appended', 'already present'] as const)('%s: the face carries the typed cause marker once; the full cause and restatement stay in detail and durable text', async (source) => {
     if (source === 'already present') modelReply = `${prose}\n\n${closing}`;
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: 'What assumption remains unresolved?',
@@ -104,8 +104,13 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     expect(b.blocks).toContainEqual(expect.objectContaining({ type: 'analysis_result' }));
     expect(b._answer_shape, response.body).toBeDefined();
     const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join('\n');
-    expect(face).toContain(closing);
-    expect(face.split(closing)).toHaveLength(2);
+    // The explicit typed placeholder warning owns this note; the marker never comes from its prose.
+    const marker = "Not shown: some relationships aren't sized yet";
+    expect(face).toContain(marker);
+    expect(face.split(marker)).toHaveLength(2);
+    expect(face).not.toContain(closing);
+    expect(b._answer_shape!.detail.split(closing)).toHaveLength(2);
+    expect(b.assistant_text.split(closing)).toHaveLength(2);
     expect(face).not.toContain(narrator);
     expect(b._answer_shape!.detail).toContain(narrator);
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);

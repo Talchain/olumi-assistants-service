@@ -5,7 +5,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../utils/telemetry.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { sentenceMultiset } from '../reply/compose-reply.js';
+import { markerForDisclosure, sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { actionFactsOf } from '../actions/state.js';
 import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -15,12 +16,14 @@ type Rec = Record<string, unknown>;
 type Graph = { nodes: Rec[]; edges: Rec[] };
 type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_actions: Rec[];
   pending_actions: { action: Rec }[]; action_bar?: { priority: Rec[]; more: Rec[] };
-  _agent: { tool_calls: { name: string; ok: boolean }[] } };
+  _agent: { tool_calls: { name: string; ok: boolean }[]; replayed?: boolean } };
 const FX = JSON.parse(readFileSync(new URL('./fixtures/one-reply-paul-pricing.json', import.meta.url), 'utf8')) as {
   brief: string; narrator: string; read: Rec & { graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec };
 };
 let currentRead = FX.read;
 let lastComposeInput: unknown;
+let withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['withholdDisclosureFor'];
+let lastBuildPayload: Rec;
 let saved: Graph = { nodes: [], edges: [] };
 let askedToBuild = false;
 // COMPLETE retains final prose, not the provider's raw message. Include its captured goal-chance explanation
@@ -35,7 +38,7 @@ const store = {
   readAnalysisInvalidatedAt: vi.fn(async () => null),
   append: vi.fn(async (w: Rec) => {
     const id = String(w.turn_id);
-    rows.set(id, { id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null,
+    rows.set(id, { id, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null,
       user_message: w.userMessage ?? null, pending_actions: w.pending_actions ?? [], llm_calls_used: w.llm_calls_used ?? 0 });
     return { id };
   }),
@@ -92,7 +95,9 @@ describe('ONE reply contract through the build route', () => {
       }
       return new Response(JSON.stringify(say(narrator)), { status: 200 });
     }));
-    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const route = await import('../../../routes/agent-v1-turn.js');
+    withholdDisclosureFor = route.withholdDisclosureFor;
+    const { agentV1TurnRoute } = route;
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => saved.nodes.length === 0
       ? { graph: saved, graph_hash: 'empty', analysis_state: { run_state: { kind: 'never_run' } } }
@@ -113,15 +118,87 @@ describe('ONE reply contract through the build route', () => {
     currentRead = FX.read; lastComposeInput = undefined; info.mockClear(); });
   async function buildTurn() {
     const turnId = randomUUID();
-    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: randomUUID(), turn_id: turnId, message: FX.brief,
-    } });
+    lastBuildPayload = { kind: 'message', scenario_id: randomUUID(), turn_id: turnId, message: FX.brief };
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: lastBuildPayload });
     expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
     const body = response.json() as Body;
     expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
     expect(rows.get(turnId)?.assistant_message).toBe(body.assistant_text);
     return body;
   }
+  const expectStoredAndReplayed = async (body: Body, payload: Rec): Promise<void> => {
+    expect(body._answer_shape, 'PL live: the displayed contract carries its face/detail shape').toBeDefined();
+    const durable = rows.get(String(payload.turn_id));
+    expect(durable?.assistant_message, 'PL live: durable answer text equals displayed text').toBe(body.assistant_text);
+    expect(body.assistant_text, 'PL live: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(body._answer_shape!));
+    const providerCalls = vi.mocked(fetch).mock.calls.length;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body).toBe(200);
+    const replay = response.json() as Body;
+    expect(replay._agent.replayed).toBe(true);
+    expect(vi.mocked(fetch).mock.calls.length, 'PL replay makes no provider call').toBe(providerCalls);
+    expect(replay.assistant_text, 'PL replay: durable answer text equals displayed text').toBe(durable?.assistant_message);
+    expect(replay.assistant_text, 'PL replay: exact live words').toBe(body.assistant_text);
+    expect(replay._answer_shape, 'PL replay: exact live face/detail shape').toEqual(body._answer_shape);
+    expect(replay.assistant_text, 'PL replay: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(replay._answer_shape!));
+  };
+
+  it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'])(
+    'typed %s warning cannot claim that a confirmed identity is unconfirmed', code => {
+      const graph = structuredClone(FX.read.graph);
+      const goal = graph.nodes.find(n => n.id === 'mrr')!;
+      (goal.nonlinear_identity as Rec).stated_in_brief = true;
+      const verdict = targetTestabilityOf(graph);
+      expect(verdict.kind === 'not_testable' && verdict.failures.some(f => f.code === 'identity_unconfirmed')).toBe(false);
+      const note = withholdDisclosureFor(graph, { enrichment: { inference_warnings: [{ code,
+        message: 'The identity is not confirmed — deliberately misleading words must not select the cause.' }] } });
+      expect(note).toEqual({ kind: 'withhold', cause: 'other', goalLabel: 'MRR' });
+      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+    });
+
+  it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'])(
+    'typed %s warning uses unconfirmed wording only when the graph verdict confirms that cause', code => {
+      const verdict = targetTestabilityOf(FX.read.graph);
+      expect(verdict.kind === 'not_testable' && verdict.failures.some(f => f.code === 'identity_unconfirmed')).toBe(true);
+      const note = withholdDisclosureFor(FX.read.graph, { inference_warnings: [{ code, message: 'A generic read failure.' }] });
+      expect(note).toEqual({ kind: 'withhold', cause: 'unconfirmed_identity', goalLabel: 'MRR' });
+      expect(markerForDisclosure(note)).toBe("Not shown: how MRR is worked out isn't confirmed");
+    });
+
+  it.each([null, 42, { nodes: null }, { nodes: [null, undefined, 12, 'x', {}] },
+    { nodes: [{ kind: 'goal', label: 42 }] }, { nodes: [{ kind: 'goal', label: '  ' }] }])(
+    'typed withheld marker safely falls back when graph nodes or the goal label are malformed (%j)', graph => {
+      const note = withholdDisclosureFor(graph, { inference_warnings: [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE',
+        detail: { reason: 'missing_goal_baseline' } }] });
+      expect(note).toEqual({ kind: 'withhold', cause: 'missing_current_level' });
+      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+    });
+
+  it.each(['GOAL_FIGURES_USER_EFFECT_CLAMPED', 'GOAL_FIGURES_OPTIONS_IDENTICAL', 'GOAL_FIGURES_PROBABILITY_UNUSABLE',
+    'GOAL_FIGURES_SHARE_APPROXIMATION', 'GOAL_FIGURES_CHANCE_AS_GOAL'])(
+    'typed %s cause uses the fallback instead of borrowing a different graph cause', code => {
+      const note = withholdDisclosureFor(FX.read.graph, { inference_warnings: [{ code, message: 'A retained exact note.' }] });
+      expect(note).toEqual({ kind: 'withhold', cause: 'other', goalLabel: 'MRR' });
+      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+    });
+
+  it.each(['non_finite_conversion_input', 'future_unmapped_reason'])(
+    'typed threshold cause %s cannot be renamed after a latent graph failure', reason => {
+      const note = withholdDisclosureFor(FX.read.graph, { inference_warnings: [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE',
+        detail: { reason }, message: 'The complete threshold note stays under More detail.' }] });
+      expect(note).toEqual({ kind: 'withhold', cause: 'other', goalLabel: 'MRR' });
+      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+    });
+
+  it('typed marker labels apply the existing proposal-id display reader before the last writer', () => {
+    const graph = structuredClone(FX.read.graph);
+    graph.nodes.find(n => n.id === 'mrr')!.label = 'MRR prop_deadbeef0123456789';
+    const note = withholdDisclosureFor(graph, { inference_warnings: [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE',
+      detail: { reason: 'missing_goal_baseline' } }] });
+    expect(note).toEqual({ kind: 'withhold', cause: 'missing_current_level', goalLabel: 'MRR this proposal' });
+    expect(markerForDisclosure(note)).toBe("Not shown: MRR this proposal's current level is missing");
+    expect(markerForDisclosure(note)).not.toContain('prop_deadbeef0123456789');
+  });
 
   it('R1 Paul: one concise face, typed-card question in detail, RC4 census, plain units', async () => {
     const body = await buildTurn();
@@ -157,6 +234,7 @@ describe('ONE reply contract through the build route', () => {
     expect(count(body.assistant_text, 'The model holds the deadline; no result answers that yet.')).toBe(0);
     expect(count(body.assistant_text, 'within 12 months')).toBeLessThanOrEqual(1);
     expect(count(body.assistant_text, "doesn't project")).toBeLessThanOrEqual(1);
+    await expectStoredAndReplayed(body, lastBuildPayload);
     writeFileSync('/private/tmp/accel-cs-contract-r1-final.json', JSON.stringify({ log: shapeLog, face: shown,
       words: words(shown), census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
   });
@@ -171,7 +249,7 @@ describe('ONE reply contract through the build route', () => {
     expect(words(face(body._answer_shape!))).toBeLessThanOrEqual(80);
   });
 
-  it('R3 withheld Run: its current-level reason is the face finding with one next step', async () => {
+  it('R3 withheld Run: typed current-level marker on the face, full reason in detail, one next step', async () => {
     currentRead = structuredClone(FX.read);
     saved = structuredClone(currentRead.graph);
     const goal = saved.nodes.find(n => n.id === 'mrr')!;
@@ -191,8 +269,13 @@ describe('ONE reply contract through the build route', () => {
     expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
     const body = response.json() as Body;
     expect(body._answer_shape, body.assistant_text).toBeDefined();
-    expect(body._answer_shape!.headline).toContain('current level');
     const shown = face(body._answer_shape!);
+    const marker = "Not shown: MRR's current level is missing";
+    expect(shown, 'typed missing-current-level marker is must-face').toContain(marker);
+    const reason = (lastComposeInput as ReplyComposeInput).obligations?.find(o => o.role === 'withheld_reason' && o.lead === true && o.ownsNextStep !== true)?.text;
+    expect(reason, 'typed full withheld reason is produced by the route').toBeDefined();
+    expect(count(shown, reason!), 'full withheld reason stays off the face').toBe(0);
+    expect(count(body._answer_shape!.detail, reason!), 'full withheld reason is verbatim in detail once').toBe(1);
     expect(words(shown)).toBeLessThanOrEqual(80);
     expect(shown).not.toContain('What would change it:');
     expect(whatChangesFaceLine(currentRead.analysis_result, saved)).toBeNull();

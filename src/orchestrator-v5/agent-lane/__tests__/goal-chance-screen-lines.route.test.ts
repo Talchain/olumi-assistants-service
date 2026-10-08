@@ -9,10 +9,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
 import { SPREAD_NOTE_WITHOUT_DOWNSIDE } from '../../goal-target/goal-chance-licence.js';
-import type { AnswerShape } from '../../routing/answer-shape.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { untestedHorizonLine } from '../decision-input-ask.js';
 import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
-import type { ReplyComposeInput, ReplyComposition } from '../reply/compose-reply.js';
+import { HORIZON_MARKER, type ReplyComposeInput, type ReplyComposition } from '../reply/compose-reply.js';
 import { runExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 import { goalKindOf } from '../../goal-target/goal-kind.js';
 import { teamShareMoments, extraShareMoments } from '../../goal-target/event-by-date-share.js';
@@ -38,6 +38,7 @@ let analysisResult: Json = READ.analysis_result;
 let forwardedText = 'ok';
 let composeInput: ReplyComposeInput | undefined;
 let composition: ReplyComposition | undefined;
+let lastTurnPayload: Json;
 vi.mock('../reply/compose-reply.js', async original => {
   const actual = await original<typeof import('../reply/compose-reply.js')>();
   return { ...actual, composeReplyShape: (input: ReplyComposeInput) => {
@@ -111,9 +112,9 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     seq += 1;
     callModelOutputs = outputs;
     const more: Json = typeof extra === 'string' ? { agent_session_id: extra } : extra;
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message, turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, ...more,
-    } });
+    lastTurnPayload = { kind: 'message', scenario_id: SCENARIO, message,
+      turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, ...more };
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: lastTurnPayload });
     expect(r.statusCode, r.body).toBe(200);
     const b = r.json() as Body;
     expect(b._agent.replayed).not.toBe(true);
@@ -122,6 +123,33 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   const run = (reply: string) => [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }], say(reply)];
   const count = (text: string, s: string): number => text.split(s).length - 1;
+  const expectStoredAndReplayed = async (body: Body): Promise<void> => {
+    const payload = structuredClone(lastTurnPayload);
+    expect(body._answer_shape, 'PL live: displayed contract carries its face/detail shape').toBeDefined();
+    const durable = rows.get(payload.turn_id);
+    expect(durable?.assistant_message, 'PL live: durable answer text equals displayed text').toBe(body.assistant_text);
+    expect(body.assistant_text, 'PL live: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(body._answer_shape!));
+    const providerCalls = vi.mocked(fetch).mock.calls.length;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body).toBe(200);
+    const replay = response.json() as Body;
+    expect(replay._agent.replayed).toBe(true);
+    expect(vi.mocked(fetch).mock.calls.length, 'PL replay makes no provider call').toBe(providerCalls);
+    expect(replay.assistant_text, 'PL replay: durable answer text equals displayed text').toBe(durable?.assistant_message);
+    expect(replay.assistant_text, 'PL replay: exact live words').toBe(body.assistant_text);
+    expect(replay._answer_shape, 'PL replay: exact live face/detail shape').toEqual(body._answer_shape);
+    expect(replay.assistant_text, 'PL replay: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(replay._answer_shape!));
+  };
+  const expectHorizonMarker = (body: Body, chance: string, fullSentence: string): void => {
+    const shape = body._answer_shape!;
+    const units = [shape.headline, ...shape.bullets];
+    expect(units[units.indexOf(chance) + 1], 'must-face horizon marker immediately follows its chance').toBe(HORIZON_MARKER);
+    expect(count(units.join('\n'), HORIZON_MARKER), 'one horizon marker on face').toBe(1);
+    expect(count(units.join('\n'), fullSentence), 'full horizon sentence is off face').toBe(0);
+    expect(count(shape.detail, fullSentence), 'full horizon sentence is verbatim in detail once').toBe(1);
+    expect(count(body.assistant_text, fullSentence), 'one full horizon sentence in whole reply').toBe(1);
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape));
+  };
   const estimateScreenLine = () => {
     READ = structuredClone(READ_T1B);
     READ.graph.nodes.find((n: Json) => n.id === 'raise_prices_10').label = 'Raise to £59';
@@ -136,11 +164,13 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
-  const expectMandatoryOverflow = (body: Body) => {
+  const expectMandatoryFindings = (body: Body) => {
     expect(body._answer_shape, 'R2 T1b coaching reply carries one shape').toBeDefined();
     const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
     const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
-    expect(units, 'exact mandatory finding identities, then horizon; no optional framing/W/E').toEqual([...SCREEN_T1B_SAID_ONCE, horizon]);
+    expect(units, 'exact mandatory finding identities, then short horizon marker; no optional framing/W/E').toEqual([...SCREEN_T1B_SAID_ONCE, HORIZON_MARKER]);
+    expectHorizonMarker(body, SCREEN_T1B_SAID_ONCE.at(-1)!, horizon);
+    expect(composition?.measure?.face_words, 'T1b is re-measured below its old 137-word face').toBeLessThan(120);
     expect(units.join('\n')).not.toContain('What would change it:');
     expect(units.join('\n')).not.toContain("Olumi's estimates:");
     expect(composition?.measure?.face_over_word_budget).toBe(true);
@@ -195,35 +225,34 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b._answer_shape).toBeUndefined();
   });
 
-  it('B1 Paul Run: exact full horizon once, immediately after the chance, with one next step', async () => {
+  it('B1 Paul Run: marker beside chance, exact full horizon in detail once, with one next step', async () => {
     const line = oneChance();
     const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
     const next = 'What evidence should we check next?';
     const b = await turn(run(`Your comparison is ready. ${next}`), 'Run it');
     expect(composeInput?.faceContract).toBe('run');
     const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expectHorizonMarker(b, line.chance, horizon);
     expect(units.at(-1)).toBe(next);
     expect(count(b.assistant_text, horizon)).toBe(1);
     expect(count(b.assistant_text, "doesn't project")).toBe(1);
+    await expectStoredAndReplayed(b);
     writeFileSync('/private/tmp/accel-cs-contract-r2-b1.json', JSON.stringify({ face: units.join('\n'), words: composition!.measure!.face_words, body: b, measure: composition!.measure }, null, 2));
   });
 
-  it.each(['by Q3', 'no deadline'] as const)('B3 %s: short horizon once on the face beside the chance', async deadline => {
+  it.each(['by Q3', 'no deadline'] as const)('B3 %s: horizon marker beside chance, short full sentence once in detail', async deadline => {
     const line = oneChance({ goal_horizon_months: undefined, ...(deadline === 'by Q3' ? { goal_deadline_as_stated: 'by Q3' } : {}) });
     const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expectHorizonMarker(b, line.chance, horizon);
     expect(count(b.assistant_text, horizon)).toBe(1);
   });
 
-  it('no target + months: exact no-target horizon on the face once', async () => {
+  it('no target + months: marker beside chance, exact no-target horizon in detail once', async () => {
     const line = oneChance({ goal_threshold_raw: undefined, goal_threshold: undefined, goal_threshold_cap: undefined });
     const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll get there within 12 months.";
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expectHorizonMarker(b, line.chance, horizon);
     expect(count(b.assistant_text, horizon)).toBe(1);
   });
 
@@ -231,8 +260,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const line = oneChance({ label: 'Hire engineers', goal_threshold_raw: 6, goal_threshold_unit: 'engineers', goal_horizon_months: 9 });
     const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach 6 engineers within 9 months.";
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expectHorizonMarker(b, line.chance, horizon);
     expect(count(b.assistant_text, horizon)).toBe(1);
   });
 
@@ -293,22 +321,25 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const plural = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
     const b = await turn(run(`Review the recorded assumptions.\n\n${singular}`), 'Run it');
     const lines = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
-    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    expect(units[units.indexOf(lines.at(-1)!.chance) + 1]).toBe(plural);
+    expectHorizonMarker(b, lines.at(-1)!.chance, plural);
     expect(count(b.assistant_text, plural)).toBe(1);
     expect(count(b.assistant_text, "doesn't project")).toBe(1);
   });
 
-  it('W current licensed Run: same selected result and graph; face order chance, horizon, W, E', async () => {
+  it('W current licensed Run: same selected result and graph; face order chance, horizon marker, W, E', async () => {
     const line = oneChance({ goal_horizon_months: undefined }, true);
     const expected = whatChangesFaceLine(analysisResult, READ.graph);
     expect(expected).not.toBeNull();
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
     const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    const horizon = untestedHorizonLine(READ.graph, { besideChance: true })!;
+    const screen = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
+    expect(screen, 'W uses the same selected result and producer finding').toEqual([line]);
+    const findingUnits = screen.map(finding => [finding.chance, finding.depends].filter(Boolean).join(' '));
+    expect(units.slice(0, findingUnits.length), 'every exact chance plus its typed dependency precedes the marker').toEqual(findingUnits);
+    const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: screen.length > 1 })!;
     expect(composeInput?.whatChanges).toBe(expected);
-    expect(units.indexOf(horizon)).toBeGreaterThanOrEqual(units.indexOf(line.chance) + 1);
-    expect(units[units.indexOf(horizon) + 1]).toBe(expected);
+    expectHorizonMarker(b, findingUnits.at(-1)!, horizon);
+    expect(units[units.indexOf(HORIZON_MARKER) + 1]).toBe(expected);
     const e = units.findIndex(unit => unit.startsWith("Olumi's estimates:"));
     if (e >= 0) expect(e).toBeGreaterThan(units.indexOf(expected!));
   });
@@ -478,7 +509,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expectMandatoryOverflow(b);
+    expectMandatoryFindings(b);
+    await expectStoredAndReplayed(b);
     // B15 (#2783, DL): the lead-in opens the headline and is directly followed by the first screen chance finding; it
     // still introduces the list and never ends the reply on a colon.
     const lead = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
@@ -493,7 +525,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run(`For reaching at least £126,000 monthly recurring revenue, on current information:\n\n${SCREEN_T1B.join(' ')}`), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expectMandatoryOverflow(b);
+    expectMandatoryFindings(b);
     expect(b._answer_shape!.headline, 'the first chance+depends unit keeps its question and still leads').toBe(SCREEN_T1B[0]!);
   });
 

@@ -10,7 +10,7 @@
  */
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
-import { sentencesOf } from '../reply/compose-reply.js';
+import { sentencesOf, WITHHOLD_FALLBACK_MARKER } from '../reply/compose-reply.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -172,7 +172,10 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(shape, explained.assistant_text).toBeDefined();
     const finding = goalChanceWithheldForAgent(SERVED.block, GRAPH)!.say;
     expect(finding).toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
-    expect(shape!.headline).toBe(finding);
+    expect(WITHHOLD_FALLBACK_MARKER).toBe('Not shown yet; why is under More detail');
+    expect(shape!.headline).toBe(WITHHOLD_FALLBACK_MARKER);
+    expect([shape!.headline, ...shape!.bullets].join('\n')).not.toContain(finding);
+    expect(shape!.detail.split(finding)).toHaveLength(2);
     expect(shape!.detail).toContain(FALLBACK);
     expect(explained.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
     expect(explained.assistant_text.split(finding)).toHaveLength(2);

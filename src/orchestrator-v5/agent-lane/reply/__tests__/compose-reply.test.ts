@@ -15,6 +15,7 @@
  * this author's head.
  */
 import { RUN_RESULT_READY_TEXT } from '../../run-explanation.js';
+import { noLeaderBecauseSentences } from '../../withheld-leader-fail-closed.js';
 import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/goal-kind.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,10 +23,11 @@ import { describe, it, expect } from 'vitest';
 import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
   composeReplyShape, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
+  HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER,
   type ReplyComposition, type FaceObligation,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
-import { openQuestionsSegment, textAtRest } from '../../decision-input-ask.js';
+import { openQuestionsSegment, textAtRest, untestedHorizonLine } from '../../decision-input-ask.js';
 
 const face = (c: ReplyComposition): string[] => (c.shape === null ? [] : [c.shape.headline, ...c.shape.bullets]);
 /** Every sentence of `original` is in `shipped`, verbatim (bullet markers aside). */
@@ -486,8 +488,7 @@ describe('RC6 said once', () => {
   it.each([
     ['explain_00_24_38', served.explain_00_24_38],
     ['explain_00_30_46', served.explain_00_30_46],
-  ])('P1 %s with the route’s IDENTITY typing of the gate’s closing (noLeaderBecauseSentences; Codex r6/r8): the standalone copy goes', async (_id, text) => {
-    const { noLeaderBecauseSentences } = await import('../../withheld-leader-fail-closed.js');
+  ])('P1 %s with the route’s IDENTITY typing of the gate’s closing (noLeaderBecauseSentences; Codex r6/r8): the standalone copy goes', (_id, text) => {
     const why = served.withhold_sentence.replace(/\.$/, '');
     const [closing] = noLeaderBecauseSentences({ why });
     expect(closing, 'the gate’s own words are the served bullet').toBe(served.no_leader_with_reason);
@@ -1317,7 +1318,7 @@ describe('r2 scope and mandatory horizon units', () => {
     everySentenceKept(text, c.text);
   });
 
-  it.each([false, true])('Run binds the exact horizon once after chances and own notes, before W/E/N (existing = %s)', existing => {
+  it.each([false, true])('Run binds the horizon marker after chances and own notes, with the full sentence once in detail (existing = %s)', existing => {
     const ownNote = 'This depends on subscribers staying after launch.';
     const context = 'The team retains the assumptions and evidence behind the figures for later review.';
     const text = [chance, chance2, ownNote, context, ...(existing ? [horizonLine] : []), ask].join('\n\n');
@@ -1329,14 +1330,17 @@ describe('r2 scope and mandatory horizon units', () => {
     ] });
     expect(c.outcome).toBe('shaped');
     expect(c.shape!.headline).toBe(chance);
-    expect(c.shape!.bullets).toEqual([chance2, ownNote, horizonLine, whatChanges, estimatesLine, ask]);
+    expect(HORIZON_MARKER).toBe("At today's numbers; not projected forward yet");
+    expect(c.shape!.bullets).toEqual([chance2, ownNote, HORIZON_MARKER, whatChanges, estimatesLine, ask]);
+    expect(face(c).join('\n')).not.toContain(horizonLine);
+    expect(c.shape!.detail.split(horizonLine)).toHaveLength(2);
     expect(c.text.split(horizonLine)).toHaveLength(2);
     expect(c.measure!.face_words).toBeLessThanOrEqual(80);
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
-    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset([text, ...(existing ? [] : [horizonLine]), whatChanges, estimatesLine].join('\n\n')));
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset([text, ...(existing ? [] : [horizonLine]), HORIZON_MARKER, whatChanges, estimatesLine].join('\n\n')));
   });
 
-  it('mandatory overflow keeps horizon and matched figure notes; optional E/W and narrator chance frame move to detail', () => {
+  it('short horizon marker lets the chance frame stay at 79 words; matched notes stay face and optional E/W move to detail', () => {
     const frame = 'For your goal, on current information:';
     const finding = `${chance} It rests on how many subscribers stay after launch and whether the current estimate represents the evidence available to the team.`;
     const ownNote = 'The range retains each uncertainty about subscriber response, delivery timing and the available evidence behind the relationship.';
@@ -1349,10 +1353,13 @@ describe('r2 scope and mandatory horizon units', () => {
       { role: 'ask', text: ask },
     ] });
     expect(c.outcome).toBe('shaped');
-    expect([c.shape!.headline, ...c.shape!.bullets]).toEqual([finding, ownNote, firmness, horizonLine, ask]);
-    for (const line of [frame, estimatesLine, whatChanges]) expect(c.shape!.detail).toContain(line);
-    expect(c.measure!.face_words).toBeGreaterThan(80);
-    expect(c.measure!.face_over_word_budget).toBe(true);
+    expect([c.shape!.headline, ...c.shape!.bullets]).toEqual([`${frame}\n${finding}`, ownNote, firmness, HORIZON_MARKER, ask]);
+    expect(face(c).join('\n')).not.toContain(horizonLine);
+    expect(c.shape!.detail.split(horizonLine)).toHaveLength(2);
+    for (const line of [estimatesLine, whatChanges]) expect(c.shape!.detail).toContain(line);
+    expect(c.shape!.detail).not.toContain(frame);
+    expect(c.measure!.face_words).toBe(79);
+    expect(c.measure!.face_over_word_budget).toBe(false);
     expect(c.text.split(horizonLine)).toHaveLength(2);
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
     everySentenceKept(text, c.text);
@@ -1364,5 +1371,281 @@ describe('r2 scope and mandatory horizon units', () => {
     expect(c.outcome).toBe('already_in_shape');
     expect(c.text).toBe('I mapped your strategy.');
     expect(c.text).not.toContain(horizonLine);
+  });
+});
+
+describe('r5 progressive disclosure: typed markers stay beside their figures and full notes stay once in detail', () => {
+  const chance = 'Starter tier: 34% chance.';
+  const chance2 = 'Price rise: 47% chance.';
+  const chance3 = 'Keep pricing as it is: less than 1% chance.';
+  const fullHorizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
+  const shortHorizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
+  const pluralHorizon = "These chances use the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
+  const context = 'The model retains the assumptions, evidence and uncertainty behind each figure for later review by the team.';
+  const ask = 'Which assumption should we check first?';
+  const count = (text: string, sentence: string) => text.split(sentence).length - 1;
+  const assertDisclosure = (c: ReplyComposition, marker: string, full: string) => {
+    expect(c.outcome).toBe('shaped');
+    expect(count(face(c).join('\n'), marker), 'the exact marker is must-face once').toBe(1);
+    expect(face(c).join('\n'), 'the full sentence is under More detail').not.toContain(full);
+    expect(count(c.shape!.detail, full), 'the full sentence is verbatim once in detail').toBe(1);
+    expect(count(c.text, full)).toBe(1);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  };
+
+  it.each([
+    ['B1 single chance / FULL', [chance], fullHorizon, 12],
+    ['B1 single chance / SHORT', [chance], shortHorizon, undefined],
+    ['T1b plural chances / FULL', [chance, chance2, chance3], pluralHorizon, 12],
+  ] as const)('%s: one marker follows the chance lines; full horizon moves to detail; face stays under the old 137 words', (_row, chances, full, months) => {
+    const graph = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold_raw: 20000, goal_threshold_unit: '£/month',
+      ...(months === undefined ? {} : { goal_horizon_months: months }) }], edges: [] };
+    expect(untestedHorizonLine(graph, { besideChance: true, plural: chances.length > 1 })).toBe(full);
+    const c = composeReplyShape({ faceContract: 'run', text: [...chances, context, ask].join('\n\n'), horizonLine: full,
+      obligations: [...chances.map((text, index) => ({ role: 'evidence' as const, text, lead: true as const, subjects: [`option-${index}`] })),
+        { role: 'ask', text: ask }] });
+    expect(HORIZON_MARKER).toBe("At today's numbers; not projected forward yet");
+    expect(c.shape!.headline).toBe(chances[0]);
+    expect(c.shape!.bullets).toEqual([...chances.slice(1), HORIZON_MARKER, ask]);
+    assertDisclosure(c, HORIZON_MARKER, full);
+    expect(c.measure!.face_words).toBeLessThanOrEqual(80);
+    expect(c.measure!.face_words).toBeLessThan(137);
+  });
+
+  it.each([
+    ['missing_current_level', "Not shown: MRR's current level is missing"],
+    ['unconfirmed_identity', "Not shown: how MRR is worked out isn't confirmed"],
+    ['unsized_links', "Not shown: some relationships aren't sized yet"],
+    ['no_target', 'Not shown: no target figure yet'],
+    ['other', 'Not shown yet; why is under More detail'],
+  ] as const)('R3 withheld Run: typed %s cause supplies the exact marker, independently of the note words', (cause, marker) => {
+    // The note deliberately does not provide the marker noun phrase: the typed source owns that choice.
+    const note = 'This figure cannot be shown from the current model; the recorded inputs need your check.';
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, note, ask].join('\n\n'), obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['mrr'] },
+      { role: 'withheld_reason', text: note, subjects: ['mrr'], disclosure: { kind: 'withhold', cause, goalLabel: 'MRR' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape!.headline).toBe(chance);
+    expect(c.shape!.bullets).toEqual([marker, ask]);
+    assertDisclosure(c, marker, note);
+  });
+
+  it('a typed withheld note for another subject stays in detail without a face marker', () => {
+    const note = 'The other goal has no recorded current level yet.';
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, note, ask].join('\n\n'), obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['mrr'] },
+      { role: 'withheld_reason', text: note, subjects: ['cost'], disclosure: { kind: 'withhold', cause: 'missing_current_level', goalLabel: 'Cost' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape!.bullets).toEqual([ask]);
+    expect(c.shape!.detail).toContain(note);
+    expect(c.text).not.toContain("Not shown: Cost's current level is missing");
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  it('firmness uses the typed source figure as written and sits immediately after its matched chance', () => {
+    const note = "The chance may look firmer because an Olumi estimate is used as exact; 99% is a different figure mentioned in this explanation.";
+    const marker = "May look firmer: uses Olumi's 5% as exact";
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, chance2, context, note, ask].join('\n\n'), obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
+      { role: 'evidence', text: chance2, lead: true, subjects: ['price'] },
+      { role: 'caveat', text: note, subjects: ['starter'], disclosure: { kind: 'firmness', figure: '5%' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape!.headline).toBe(chance);
+    expect(c.shape!.bullets).toEqual([marker, chance2, ask]);
+    assertDisclosure(c, marker, note);
+    expect(c.text).not.toContain("May look firmer: uses Olumi's 99% as exact");
+  });
+
+  it('matching firmness marker is mandatory when optional estimates and what-changes demote', () => {
+    const finding = `${chance} The chance retains the uncertainty in subscriber response and the causal relationship to revenue, and it still depends on how quickly the team can deliver the recorded strategy under the current hiring assumptions and available evidence. The team needs evidence for each of these assumptions before treating the finding as reliable.`;
+    const note = 'The current churn estimate is treated as exact by this run; that makes this chance look firmer than the evidence supports.';
+    const marker = "May look firmer: uses Olumi's 5% as exact";
+    const estimatesLine = "Olumi's estimates: 5, see Check estimates.";
+    const whatChanges = 'Changing the churn assumption and the price response could substantially change this chance of meeting the goal.';
+    const c = composeReplyShape({ faceContract: 'run', text: [finding, context, note, ask].join('\n\n'), estimatesLine, whatChanges, obligations: [
+      { role: 'evidence', text: finding, lead: true, subjects: ['starter'] },
+      { role: 'caveat', text: note, subjects: ['starter'], disclosure: { kind: 'firmness', figure: '5%' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape!.bullets).toEqual([marker, ask]);
+    for (const optional of [estimatesLine, whatChanges]) expect(c.shape!.detail).toContain(optional);
+    assertDisclosure(c, marker, note);
+  });
+
+  it('robustness exports the single user-specified marker and moves the full caveat once to detail', () => {
+    const note = 'The result is not yet robust — small changes could flip it.';
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, note, ask].join('\n\n'), obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
+      { role: 'caveat', text: note, subjects: ['starter'], disclosure: { kind: 'robustness' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(ROBUSTNESS_MARKER).toBe('Not yet robust: small changes could flip it');
+    expect(c.shape!.bullets).toEqual([ROBUSTNESS_MARKER, ask]);
+    assertDisclosure(c, ROBUSTNESS_MARKER, note);
+  });
+
+  it('quote-restyled typed disclosure still supplies its marker and retains the note glyphs as written', () => {
+    const typed = 'The chance is withheld because ‘MRR’ has no recorded current level.';
+    const written = typed.replace(/[‘’]/g, "'");
+    const marker = "Not shown: MRR's current level is missing";
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, written, ask].join('\n\n'), obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['mrr'] },
+      { role: 'withheld_reason', text: typed, subjects: ['mrr'], disclosure: { kind: 'withhold', cause: 'missing_current_level', goalLabel: 'MRR' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape!.bullets).toEqual([marker, ask]);
+    assertDisclosure(c, marker, written);
+    expect(c.text).not.toContain(typed);
+  });
+
+  it('robustness with only the second chance subject follows that chance, not the first', () => {
+    const note = 'The result is not yet robust — small changes could flip it.';
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, chance2, context, note, ask].join('\n\n'), obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
+      { role: 'evidence', text: chance2, lead: true, subjects: ['price'] },
+      { role: 'caveat', text: note, subjects: ['price'], disclosure: { kind: 'robustness' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape!.headline).toBe(chance);
+    expect(c.shape!.bullets).toEqual([chance2, ROBUSTNESS_MARKER, ask]);
+    assertDisclosure(c, ROBUSTNESS_MARKER, note);
+  });
+
+  it('overlapping typed withheld cause and closing keep the complete closing once, without an orphan or extra fragment', () => {
+    const cause = 'some relationships are not sized yet';
+    const closing = `No single option can be put forward yet, because ${cause}.`;
+    const marker = "Not shown: some relationships aren't sized yet";
+    const text = [closing, context].join('\n\n');
+    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+      { role: 'withheld_reason', text: cause, lead: true, subjects: ['mrr→goal'], disclosure: { kind: 'withhold', cause: 'unsized_links' } },
+      { role: 'withheld_reason', text: closing, subjects: ['mrr→goal'], disclosure: { kind: 'withhold', cause: 'unsized_links' } },
+    ] });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(marker);
+    expect(count(face(c).join('\n'), marker)).toBe(1);
+    expect(face(c).join('\n')).not.toContain(closing);
+    expect(count(c.shape!.detail, closing)).toBe(1);
+    expect(count(c.shape!.detail, cause), 'only the cause inside its complete closing remains').toBe(1);
+    expect(c.text).not.toContain('because .');
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceExceptReportedKept([text, marker].join('\n\n'), c);
+  });
+
+  it('a lone partial typed cause moves its complete containing sentence to detail without rewriting its syntax', () => {
+    const cause = 'some relationships are not sized yet';
+    const closing = `No single option can be put forward yet, because ${cause}.`;
+    const marker = "Not shown: some relationships aren't sized yet";
+    const text = [closing, context].join('\n\n');
+    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+      { role: 'withheld_reason', text: cause, lead: true, subjects: ['mrr→goal'], disclosure: { kind: 'withhold', cause: 'unsized_links' } },
+    ] });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(marker);
+    expect(count(face(c).join('\n'), marker)).toBe(1);
+    expect(face(c).join('\n')).not.toContain(closing);
+    expect(count(c.shape!.detail, closing)).toBe(1);
+    expect(count(c.shape!.detail, cause)).toBe(1);
+    expect(c.text).not.toContain('because .');
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceExceptReportedKept([text, marker].join('\n\n'), c);
+  });
+  it.each(['withhold', 'firmness'] as const)('a matched %s marker precedes the chance companion immediately after the figure', kind => {
+    const companion = 'This chance also carries the recorded spread in subscriber outcomes.';
+    const note = kind === 'firmness'
+      ? 'The churn input is held as an exact Olumi estimate in this Run.'
+      : 'The alternate result cannot be shown until the missing current level is provided.';
+    const disclosure: NonNullable<FaceObligation['disclosure']> = kind === 'firmness'
+      ? { kind: 'firmness', figure: '5%' }
+      : { kind: 'withhold', cause: 'missing_current_level', goalLabel: 'MRR' };
+    const marker = kind === 'firmness'
+      ? "May look firmer: uses Olumi's 5% as exact"
+      : "Not shown: MRR's current level is missing";
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, companion, note, ask].join('\n\n'), obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
+      { role: 'evidence', text: companion, companionOf: 'starter', subjects: ['starter'] },
+      { role: kind === 'firmness' ? 'caveat' : 'withheld_reason', text: note, subjects: ['starter'], disclosure },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(chance);
+    expect(c.shape!.bullets).toEqual([marker, companion, ask]);
+    assertDisclosure(c, marker, note);
+    expect(c.shape!.detail).not.toContain(companion);
+    expect(count(c.text, companion)).toBe(1);
+  });
+
+  it('a robustness note whose typed subject has no face figure stays in detail without synthesising a marker', () => {
+    const note = 'The result is not yet robust — small changes could flip it.';
+    const text = [chance, context, note, ask].join('\n\n');
+    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+      { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
+      { role: 'caveat', text: note, subjects: ['unshown-option'], disclosure: { kind: 'robustness' } },
+      { role: 'ask', text: ask },
+    ] });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(chance);
+    expect(c.shape!.bullets).toEqual([ask]);
+    expect(c.text).not.toContain(ROBUSTNESS_MARKER);
+    expect(face(c).join('\n')).not.toContain(note);
+    expect(count(c.shape!.detail, note)).toBe(1);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceExceptReportedKept(text, c);
+  });
+
+});
+
+describe('r5 P05b widening inputs use the typed Draft/Run contract', () => {
+  const headline = 'Olumi built your pricing model.';
+  const chance = 'Starter tier: 34% chance.';
+  const context = 'The model retains its existing assumptions and evidence so the team can review the whole strategic framing before relying on a result.';
+  const widenedLine = 'Olumi added 3 risks and 2 ideas to widen the model.';
+  const widenedRiskNote = 'The 3 risks Olumi added are not included in this chance of meeting your goal.';
+  const count = (text: string, sentence: string) => text.split(sentence).length - 1;
+
+  it('draft: widenedLine is mandatory immediately after H; widenedRiskNote is once in detail', () => {
+    const c = composeReplyShape({ faceContract: 'draft', text: [headline, context].join('\n\n'), widenedLine, widenedRiskNote });
+    expect(c.shape!.headline).toBe(headline);
+    expect(c.shape!.bullets).toEqual([widenedLine]);
+    expect(c.shape!.detail).toContain(widenedRiskNote);
+    expect(face(c).join('\n')).not.toContain(widenedRiskNote);
+    expect(count(c.text, widenedLine)).toBe(1);
+    expect(count(c.shape!.detail, widenedRiskNote)).toBe(1);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  it('run: widenedLine goes to detail; the added-risks marker is must-face after chances, full note once in detail', () => {
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context].join('\n\n'), widenedLine, widenedRiskNote,
+      obligations: [{ role: 'evidence', text: chance, lead: true, subjects: ['starter'] }] });
+    expect(WIDENED_RISK_MARKER).toBe("Olumi's added risks aren't in this chance");
+    expect(c.shape!.headline).toBe(chance);
+    expect(c.shape!.bullets).toEqual([WIDENED_RISK_MARKER]);
+    for (const line of [widenedLine, widenedRiskNote]) {
+      expect(face(c).join('\n')).not.toContain(line);
+      expect(count(c.shape!.detail, line)).toBe(1);
+    }
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  it('no contract: widening inputs are ignored and the text stays byte-identical', () => {
+    const text = 'The strategy needs more evidence.';
+    const c = composeReplyShape({ text, widenedLine, widenedRiskNote });
+    expect(c).toMatchObject({ text, shape: null, outcome: 'already_in_shape' });
+    expect(c).toEqual(composeReplyShape({ text }));
+  });
+
+  it('draft over budget: widenedLine never demotes when W/E go to detail', () => {
+    const longHeadline = `${headline} The model keeps the team's strategic assumptions, causal relationships, evidence, disagreements and uncertainty visible for careful review before any recommendation can be relied on, while preserving the different contributions and expected outcomes that people will later compare with what actually happens. Participants can challenge the assumptions and preserve different interpretations while they test the evidence behind the strategy.`;
+    const c = composeReplyShape({ faceContract: 'draft', text: [longHeadline, context].join('\n\n'), widenedLine,
+      obligations: [{ role: 'evidence', text: longHeadline, lead: true, subjects: ['strategy'] }],
+      whatChanges: 'Changing the current subscriber assumption would change the projected revenue the most.',
+      estimatesLine: "Olumi's estimates: 5, see Check estimates." });
+    expect(c.shape!.headline).toBe(longHeadline);
+    expect(c.shape!.bullets[0]).toBe(widenedLine);
+    expect(c.shape!.detail).not.toContain(widenedLine);
+    expect(c.shape!.detail).toContain("Olumi's estimates: 5, see Check estimates.");
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
   });
 });

@@ -14,6 +14,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { HORIZON_MARKER, shapeFromDerivedAnswerText } from '../reply/compose-reply.js';
 
 const ROUTE = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
 const RELOAD = readFileSync(new URL('../../../routes/assist.v1.scenario-graph.ts', import.meta.url), 'utf8');
@@ -58,11 +60,13 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
   // ⭐ 2b-0 (DL APPROVE #2783): the current-Run REPLAY applies the SAME composer to the same typed parts, and its shape
   // rides only when the composed text equals the stored words and still derives the text after the final gates
   // (`withShapeOnlyIfItDerives`). Exactly these two named sites; any third is a second shaping mechanism.
-  const REPLAY_CALL = ': composeReplyShape({ text: withoutProposalIds(replayText), obligations: withA7AsDetail(replayObligations, replayA7,';
+  const REPLAY_CALL = ': composeReplyShape({ text: withoutProposalIds(replayText), obligations: withWithholdMarkers(withA7AsDetail(replayObligations, replayA7,';
   it('1. exactly two composer calls: the live one and the parity-proven replay', () => {
     expect(ROUTE.split('composeReplyShape(').length - 1).toBe(2);
     expect(ROUTE).toContain(CALL);
     expect(ROUTE).toContain(REPLAY_CALL);
+    expect(ROUTE).toContain('withWithholdMarkers(withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayScreen.length > 0), state.graph, state.analysisResult)');
+    expect(ROUTE).toContain("obligations: withWithholdMarkers(withA7AsDetail(obligations, a7Repeat, reply, faceContract === 'run' && screenLines.length > 0), readbackGraph, analysisResult),");
     expect(ROUTE).toContain('&& composedCandidate.text === prior.assistant_message ? composedCandidate : null;');
     expect(ROUTE).toContain('return withShapeOnlyIfItDerives(gatedReplay);');
   });
@@ -135,5 +139,39 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     // An attach is `_answer_shape: <value>`; a drop is a destructuring alias (`_answer_shape: _stale`).
     const attaches = sources.flatMap((src) => [...src.matchAll(/\b_answer_shape\s*:\s*(?!_)([A-Za-z][\w.]{0,60})/g)].map((m) => m[1]));
     expect(attaches).toEqual(['replayComposed.shape', 'composedReply.shape']);
+  });
+});
+
+
+describe('PL: a canonical durable reply restores its displayed shape without a provider or cache', () => {
+  it.each([
+    { headline: 'Your draft is ready.', bullets: ['Three options are in the model.'], detail: 'The team’s assumptions remain visible.' },
+    { headline: 'The chance is 67% in this model.', bullets: [HORIZON_MARKER, 'What evidence should we check next?'],
+      detail: 'This chance uses the model’s numbers as they are today.\n\nAn unresolved disagreement remains in the model.' },
+    { headline: 'The chance is 67% in this model.', bullets: [HORIZON_MARKER], detail: '' },
+  ] satisfies AnswerShape[])('canonical face/detail grammar restores every field: $headline', shape => {
+    const stored = deriveAnswerTextFromShape(shape);
+    const restored = shapeFromDerivedAnswerText(stored);
+    expect(restored, 'PL: exact shape, including detail paragraph boundaries').toEqual(shape);
+    expect(deriveAnswerTextFromShape(restored!), 'PL: the restored presentation preserves durable bytes').toBe(stored);
+  });
+
+  it.each([
+    'An ordinary answer without a bullet block.',
+    'A headline.\n\nOrdinary detail, not a face bullet block.',
+    'A headline.\n\n- A provider-authored dash bullet.',
+    'A headline.\n\n• ',
+    ' A headline.\n\n• A point.',
+    'A headline.\n\n• A point. ',
+    'A headline.\n\n• A point.\nA continuation without the canonical bullet prefix.',
+  ])('noncanonical words are kept whole, without a manufactured face: %s', stored => {
+    expect(shapeFromDerivedAnswerText(stored)).toBeNull();
+  });
+
+  it('PL mutant: a shape that moves the full qualification to its face cannot pass the live shape parity assertion', () => {
+    const shape: AnswerShape = { headline: 'The chance is 67% in this model.', bullets: [HORIZON_MARKER],
+      detail: 'This chance uses the model’s numbers as they are today.' };
+    const mutant: AnswerShape = { ...shape, bullets: [shape.detail], detail: HORIZON_MARKER };
+    expect(shapeFromDerivedAnswerText(deriveAnswerTextFromShape(mutant))).not.toEqual(shape);
   });
 });

@@ -106,6 +106,7 @@ import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-g
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
+import { GOAL_FIGURES_WITHHELD_CODES } from '../orchestrator/context/option-result-source.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -125,7 +126,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf, noLeaderBecauseSentences } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDerivedAnswerText, type FaceDisclosure, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
@@ -608,6 +609,51 @@ async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, e
  * the user read already said it word for word, this reply types it `detail`: still said, under More detail, never removed.
  * `null` when A7 is not owed, the latest answer did not say it, or the read fails (then it stays where it is).
  */
+/** Marker vocabulary comes only from the typed Run warning and target verdict, never their display words. */
+export function withholdDisclosureFor(graph: unknown, result: unknown): FaceDisclosure {
+  const g = graph as { nodes?: unknown[] } | null;
+  const goals = Array.isArray(g?.nodes) ? g.nodes.filter((n): n is { kind: 'goal'; label?: unknown } =>
+    n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal') : [];
+  const rawLabel = goals.length === 1 ? goals[0]?.label : undefined;
+  const displayedLabel = typeof rawLabel === 'string' ? withoutProposalIds(rawLabel).trim() : '';
+  const label = displayedLabel === '' ? undefined : displayedLabel;
+  const r = result as { enrichment?: { inference_warnings?: Array<{ code?: string; detail?: { reason?: string } }> }; inference_warnings?: Array<{ code?: string; detail?: { reason?: string } }> } | null;
+  const rawWarnings = r?.enrichment?.inference_warnings ?? r?.inference_warnings;
+  const warnings = Array.isArray(rawWarnings) ? rawWarnings.filter(w => w !== null && typeof w === 'object') : [];
+  const verdict = targetTestabilityOf(graph);
+  const causes = new Set<'missing_current_level' | 'unconfirmed_identity' | 'unsized_links' | 'no_target'>();
+  const fallback = (): FaceDisclosure => ({ kind: 'withhold', cause: 'other', ...(label === undefined ? {} : { goalLabel: label }) });
+  // A Run's other typed withholds (identical options, clamped effects, unusable points, etc.) cannot be renamed after
+  // an unrelated graph precondition. Their complete note survives; this vocabulary intentionally has no short cause.
+  if (warnings.some(w => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+    && !['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ', 'GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_TARGET_NOT_TESTABLE'].includes(w.code))) return fallback();
+  if (warnings.some(w => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE' && w.detail?.reason === 'missing_goal_baseline')) return { kind: 'withhold', cause: 'missing_current_level', ...(label === undefined ? {} : { goalLabel: label }) };
+  if (warnings.some(w => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE')) return fallback();
+  if (warnings.some(w => w.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED' || w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
+    // An evaluation/read failure may concern an already confirmed identity. Only the typed graph verdict licenses
+    // unconfirmed wording; otherwise the complete warning remains in detail behind the conservative marker.
+    if (verdict.kind === 'not_testable' && verdict.failures.some(f => f.code === 'identity_unconfirmed')) causes.add('unconfirmed_identity');
+    else return { kind: 'withhold', cause: 'other', ...(label === undefined ? {} : { goalLabel: label }) };
+  }
+  if (warnings.some(w => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')) causes.add('unsized_links');
+  // A recorded Run cause wins over other latent preconditions in today's graph.
+  if (causes.size > 0) return { kind: 'withhold', cause: causes.size === 1 ? [...causes][0]! : 'other', ...(label === undefined ? {} : { goalLabel: label }) };
+  if (verdict.kind === 'no_target') causes.add('no_target');
+  if (verdict.kind === 'not_testable') for (const failure of verdict.failures) {
+    if (failure.code === 'missing_goal_baseline') causes.add('missing_current_level');
+    if (failure.code === 'identity_unconfirmed') causes.add('unconfirmed_identity');
+    if (failure.code === 'goal_path_placeholder' || failure.code === 'goal_path_unsized') causes.add('unsized_links');
+  }
+  // A combined note carries every cause in detail; do not pretend one selected cause is its whole explanation.
+  return { kind: 'withhold', cause: causes.size === 1 ? [...causes][0]! : 'other', ...(label === undefined ? {} : { goalLabel: label }) };
+}
+
+function withWithholdMarkers(obligations: readonly FaceObligation[], graph: unknown, result: unknown): FaceObligation[] {
+  const guided = obligations.filter(o => o.ownsNextStep === true).map(o => o.text);
+  return obligations.map(o => o.role !== 'withheld_reason' || guided.some(text => text.includes(o.text) || o.text.includes(text))
+    ? o : { ...o, disclosure: withholdDisclosureFor(graph, result) });
+}
+
 /** A7 typed `detail` (one role per unit: any other typing of the same line is replaced). Pure; unchanged when `a7` is null. */
 export function withA7AsDetail(obligations: readonly FaceObligation[], a7: string | null, text: string, chanceOnFace = false): FaceObligation[] {
   if (chanceOnFace || a7 === null || !text.includes(a7)) return [...obligations];
@@ -2335,6 +2381,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               ? [{ role: 'withheld_reason' as const, text: withheldReplayFinding, lead: true as const,
                 ...(guidedReplayFinding === null ? {} : { ownsNextStep: true as const }) }] : []),
             { role: 'host', text: RUN_RESULT_READY_TEXT },
+            ...(reasonNow === null ? [] : [{ role: 'host' as const, text: reasonNow }]),
             ...(typeof say === 'string' && say.trim() !== '' ? [say, ...sentencesOf(say)].map((text): FaceObligation => ({ role: 'withheld_reason', text })) : []),
             // Mirror live typing: a combined goal-chance say may carry the level ask beside guided sizing.
             ...[askNow, rootNow, ...lines, say].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
@@ -2427,14 +2474,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'complete_current'
         ? null : whatChangesFaceLine(state.analysisResult, state.graph);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayScreen.length > 0), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
+        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: withWithholdMarkers(withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayScreen.length > 0), state.graph, state.analysisResult), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
       const parityReplayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
-      const replayComposed = parityReplayComposed ?? (composedCandidate !== null && composedCandidate.shape !== null
+      // Ordinary replay is the durable answer, including its canonical presentation grammar. No cache is needed.
+      // Current/stale result-first replays above retain their state-bound recomposition rather than an old shape.
+      const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText) : null;
+      const replayComposed = parityReplayComposed ?? (durableShape === null ? null : { text: replayText, shape: durableShape }) ?? (composedCandidate !== null && composedCandidate.shape !== null
         && replayScreen.length === 0 && replayObligations?.some(o => o.role === 'withheld_reason' && o.lead === true)
         ? composedCandidate : null);
       const composedReplay = composeDirectAnswerResponse({
@@ -4829,7 +4879,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...[RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT].filter((text) => reply.includes(text))
           .map((text) => ({ role: 'caveat' as const, text })),
         // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
-        ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
+        ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat, disclosure: { kind: 'robustness' as const } }] : []),
         // Typed screen evidence: chance lines stay with their own notes; comparison basis/root lines go to detail.
         // A chance and what it depends on are ONE finding: the joined line (as
         // `withScreenLinesOwed` writes it) binds as one unit when present, else each sentence binds where it stands.
@@ -4893,7 +4943,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
-        obligations: withA7AsDetail(obligations, a7Repeat, reply, faceContract === 'run' && screenLines.length > 0),
+        obligations: withWithholdMarkers(withA7AsDetail(obligations, a7Repeat, reply, faceContract === 'run' && screenLines.length > 0), readbackGraph, analysisResult),
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }

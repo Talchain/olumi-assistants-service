@@ -16,7 +16,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { REPLY_FACE_WORD_BUDGET } from '../reply/compose-reply.js';
+import { HORIZON_MARKER, REPLY_FACE_WORD_BUDGET } from '../reply/compose-reply.js';
 import { untestedHorizonLine } from '../decision-input-ask.js';
 
 type Json = Record<string, any>;
@@ -114,11 +114,11 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     const shape = b._answer_shape!;
     const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: true });
     expect(horizon).not.toBeNull();
-    const mandatory = [...saidOnceLines, horizon!];
+    const mandatory = [...saidOnceLines, HORIZON_MARKER];
     const face = [shape.headline, ...shape.bullets];
-    // ONE reply contract: exact chance findings, their own notes/question and horizon remain mandatory over 80 words.
+    // r5 item 2: exact chance findings, their own notes/question and horizon marker remain mandatory over 80 words.
     // The optional narrator frame is demoted with E/W; no screen finding or its question is shortened to make room.
-    expect(mandatory.join(' ').trim().split(/\s+/)).toHaveLength(137);
+    expect(mandatory.join(' ').trim().split(/\s+/)).toHaveLength(113);
     expect(mandatory.join(' ').trim().split(/\s+/).length).toBeGreaterThan(REPLY_FACE_WORD_BUDGET);
     expect(face).toEqual(mandatory);
     expect(shape.headline, 'the first unit and its question still lead, unchanged').toBe(SCREEN[0]!);
@@ -127,6 +127,10 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     expect(count(shape.detail, LEAD), 'the optional frame remains exactly once under More detail').toBe(1);
     expect(count(shape.detail, nearTie)).toBe(1);
     expect(count(b.assistant_text, nearTie)).toBe(1);
+    expect(face.join('\n')).not.toContain(horizon!);
+    expect(count(face.join('\n'), HORIZON_MARKER), 'one plural marker after the chance lines').toBe(1);
+    expect(face.at(-1), 'the mandatory plural marker follows all exact chance findings').toBe(HORIZON_MARKER);
+    expect(count(shape.detail, horizon!), 'full producer horizon is verbatim once in detail').toBe(1);
     expect(count(b.assistant_text, horizon!)).toBe(1);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
     expect(b._answer_shape!.bullets).toContain(saidOnceLines[1]!);

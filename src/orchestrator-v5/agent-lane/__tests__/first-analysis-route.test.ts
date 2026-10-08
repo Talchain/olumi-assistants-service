@@ -21,6 +21,8 @@ import { readFileSync } from 'node:fs';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
 import { RUN_RESULT_READY_TEXT, RUN_EXPLANATION_PREFIX } from '../run-explanation.js';
+import { readMoneyTotal } from '../same-unit.js';
+import { sayFigure } from '../say-figure.js';
 
 const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
@@ -774,7 +776,7 @@ describe('F3: the first reply names the goal it could not check', () => {
     return g as unknown as typeof READY_GRAPH;
   })();
   const REASON = { enrichment: { decision_brief: { warning_codes: ['GOAL_THRESHOLD_NOT_CONVERTIBLE'] } } };
-  const LINE = 'Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.';
+  const LINE = 'Your MRR target of \u00a320,000 a month is not checked yet: the model has no current MRR figure to measure it against.';
   beforeAll(async () => {
     installFetch();
     installRunStub();
@@ -790,6 +792,10 @@ describe('F3: the first reply names the goal it could not check', () => {
   });
 
   it('RED (served 013636Z): the build turn whose first pass could not score the goal names it and why', async () => {
+    const goal = GOAL_GRAPH.nodes.find((node) => node.kind === 'goal') as unknown as Record<string, unknown>;
+    const moneyUnit = readMoneyTotal(goal.goal_threshold_unit, '');
+    expect(moneyUnit, 'the unchecked-target producer reads a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(20000, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£20,000 a month');
     knobs.analysisResultExtra = REASON;
     const b = await buildTurn(app);
     expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: true });
@@ -799,10 +805,14 @@ describe('F3: the first reply names the goal it could not check', () => {
   it('CONTRAST (served 013214Z): when the arithmetic already states the target, the goal line is not added too', async () => {
     const { readFileSync } = await import('node:fs');
     knobs.graph = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as typeof READY_GRAPH;
+    const goal = knobs.graph.nodes.find((node) => node.kind === 'goal') as unknown as Record<string, unknown>;
+    const moneyUnit = readMoneyTotal(goal.goal_threshold_unit, '');
+    expect(moneyUnit, 'the arithmetic producer reads a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(20000, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£20,000 a month');
     knobs.leaderClaim = { permitted: false, withheld_reason: 'nonlinear_identity_sign_unproven' };
     knobs.analysisResultExtra = REASON;
     const b = await buildTurn(app);
-    expect(b.assistant_text).toContain('\u00a320,000/month needs 339');
+    expect(b.assistant_text).toContain('\u00a320,000 a month needs 339');
     expect(b.assistant_text).not.toContain('is not checked yet');
   });
 

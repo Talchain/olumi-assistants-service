@@ -53,6 +53,32 @@ export const REPLY_FACE_WORD_BUDGET = 80;
 /** The optional face lines demote in this one deterministic order; mandatory units never demote. */
 export const FACE_DEMOTION_ORDER = ['estimates', 'what_changes'] as const;
 
+/** Paul/DL/Science 93: expert wording belongs in detail; these exact markers must remain on the face. */
+export const HORIZON_MARKER = "At today's numbers; not projected forward yet";
+/** Science approval pending: keep the proposed robustness wording in this ONE constant. */
+export const ROBUSTNESS_MARKER = 'Not yet robust: small changes could flip it';
+export const WIDENED_RISK_MARKER = "Olumi's added risks aren't in this chance";
+export const WITHHOLD_FALLBACK_MARKER = 'Not shown yet; why is under More detail';
+export const FIRMNESS_MARKER_PREFIX = "May look firmer: uses Olumi's ";
+
+export type FaceDisclosure =
+  | { readonly kind: 'withhold'; readonly cause: 'missing_current_level' | 'unconfirmed_identity' | 'unsized_links' | 'no_target' | 'other'; readonly goalLabel?: string }
+  | { readonly kind: 'firmness'; readonly figure: string }
+  | { readonly kind: 'robustness' };
+
+/** Typed cause/figure only: a marker is never inferred from a note's prose. */
+export function markerForDisclosure(note: FaceDisclosure): string {
+  if (note.kind === 'robustness') return ROBUSTNESS_MARKER;
+  if (note.kind === 'firmness') return `${FIRMNESS_MARKER_PREFIX}${note.figure} as exact`;
+  switch (note.cause) {
+    case 'missing_current_level': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: ${note.goalLabel}'s current level is missing`;
+    case 'unconfirmed_identity': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: how ${note.goalLabel} is worked out isn't confirmed`;
+    case 'unsized_links': return "Not shown: some relationships aren't sized yet";
+    case 'no_target': return 'Not shown: no target figure yet';
+    case 'other': return WITHHOLD_FALLBACK_MARKER;
+  }
+}
+
 /**
  * ⭐ THE PRODUCER HALF: one sentence every chat-writing model is given (joined into `AGENT_INSTRUCTIONS`, and appended to
  * `RESEARCH_INSTRUCTIONS`). Code only: it ships in the CEE build and is never written to a prompt store. No dash a user
@@ -83,6 +109,8 @@ export interface FaceObligation {
   readonly lead?: true;
   /** This finding and its typed presses already carry the visible next step. */
   readonly ownsNextStep?: true;
+  /** Progressive-disclosure marker, supplied by the typed cause or note source. */
+  readonly disclosure?: FaceDisclosure;
 }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
@@ -101,6 +129,10 @@ export interface ReplyComposeInput {
   readonly faceContract?: 'draft' | 'run';
   /** Exact horizon disclosure owed beside on-face Run chances, after their own notes. */
   readonly horizonLine?: string;
+  /** P05b owns these words and counts; Draft face immediately after H, Run detail, ignored without a contract. */
+  readonly widenedLine?: string;
+  /** Draft detail; Run must-face marker after chances, with the full note in detail. */
+  readonly widenedRiskNote?: string;
   readonly obligations?: readonly FaceObligation[];
   /** Code-authored disclosures owed once, under More detail even for a short reply. */
   readonly detailLines?: readonly string[];
@@ -562,9 +594,47 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const faceContract = input.faceContract !== undefined;
-  const detailLines = [...new Set((input.detailLines ?? []).filter((line) => line.trim() !== ''))];
-  const faceHostLines = !faceContract || input.keepWhole !== undefined || input.profile === 'method_step' || input.profile === 'proposal' ? [] : [input.faceContract === 'run' ? input.horizonLine : undefined, input.whatChanges, input.estimatesLine].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
-  const sourceText = [input.text, ...faceHostLines.filter((line) => !input.text.includes(line))].filter(Boolean).join('\n\n');
+  const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
+  const foldedInput = foldQuotes(input.text);
+  const disclosures = canMark ? (input.obligations ?? []).filter(o => o.disclosure !== undefined && o.ownsNextStep !== true)
+    .flatMap(o => {
+      const at = foldedInput.indexOf(foldQuotes(o.text));
+      if (at === -1) return [];
+      const written = input.text.slice(at, at + o.text.length);
+      // A typed reason fragment is not a licence to tear its enclosing sentence apart. Prefer the route's complete
+      // host/withheld part; absent that, bind the full source sentence by syntax alone, retaining every original byte.
+      const container = (input.obligations ?? []).filter(part => (part.role === 'host' || part.role === 'withheld_reason')
+        && part.ownsNextStep !== true && part.text.length > o.text.length && foldQuotes(part.text).includes(foldQuotes(written)))
+        .sort((a, b) => b.text.length - a.text.length).find(part => foldedInput.includes(foldQuotes(part.text)));
+      if (container !== undefined) {
+        const start = foldedInput.indexOf(foldQuotes(container.text));
+        return [{ ...o, text: input.text.slice(start, start + container.text.length) }];
+      }
+      const sentence = /[.!?]["'”’)\]*_`]*$/.test(written) ? undefined
+        : input.text.split('\n').flatMap(raw => sentencesOf(BULLET_LINE.exec(raw)?.[2] ?? raw)).find(part => part.includes(written));
+      return [{ ...o, text: sentence ?? written }];
+    }) : [];
+  const markerObligations = disclosures.filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
+    || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
+      && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));
+  // The full typed note owns detail even when another host part contained it. Its marker carries the face identity.
+  const inputObligations = (input.obligations ?? []).filter(o => !disclosures.some(d => foldQuotes(o.text).includes(foldQuotes(d.text)) || foldQuotes(d.text).includes(foldQuotes(o.text))))
+    .concat(markerObligations);
+  const horizonDetail = canMark && input.faceContract === 'run' ? input.horizonLine : undefined;
+  const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, ...widenDetail]
+    .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
+  const markerLines = [...new Set(markerObligations.map(o => o.text))];
+  const faceHostLines = !faceContract || !canMark ? [] : [
+    horizonDetail === undefined ? undefined : HORIZON_MARKER,
+    input.faceContract === 'draft' ? input.widenedLine : undefined,
+    input.faceContract === 'run' && input.widenedRiskNote !== undefined ? WIDENED_RISK_MARKER : undefined,
+    input.whatChanges, input.estimatesLine,
+  ].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
+  const inputQuestions = openQuestionsSegment(input.text);
+  const addedFaceLines = [...faceHostLines, ...markerLines].filter(line => !input.text.includes(line));
+  const sourceText = addedFaceLines.length === 0 ? input.text : [inputQuestions?.lead ?? input.text,
+    ...addedFaceLines, inputQuestions?.segment ?? '', inputQuestions?.after ?? ''].filter(Boolean).join('\n\n');
   // Move verbatim narrator copies to their typed detail position; never duplicate a risk sentence.
   const body = detailLines.length === 0 ? sourceText : detailLines.reduce((text, line) => text.replaceAll(line, ''), sourceText)
     .replace(/^[ \t]*[-•*][ \t]*$/gm, '').trim();
@@ -599,13 +669,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       ...separateControlQuestion({ ...o, text: o.text.slice(at + question.length).trim() }),
     ].filter((part) => part.text !== '');
   };
-  const originalPresent = [...(input.obligations ?? []), ...faceHostLines.map((text): FaceObligation => ({ role: 'host', text })), ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: asWritten(o.text.trim()) }))
+  const originalPresent = [...inputObligations, ...faceHostLines.map((text): FaceObligation => ({ role: 'host', text })), ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: asWritten(o.text.trim()) }))
     .filter((o) => o.text.length > 0 && originalText.includes(o.text))
     .flatMap(separateControlQuestion)
     // A typed withheld finding can lead without taking an adjacent host status along with it.
     .flatMap((o): FaceObligation[] => {
       if (!faceContract) return [o];
-      const finding = (input.obligations ?? []).find((lead) => lead.lead === true && lead.role === 'withheld_reason'
+      const finding = inputObligations.find((lead) => lead.lead === true && lead.role === 'withheld_reason'
         && o.text !== asWritten(lead.text) && o.text.includes(asWritten(lead.text)));
       if (finding === undefined) return [o];
       const written = { ...finding, text: asWritten(finding.text) };
@@ -791,10 +861,25 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
           && (o.subjects ?? []).some((subject) => figureSubjects.has(subject)));
       }));
     const horizon = input.faceContract !== 'run' || input.horizonLine === undefined ? undefined
-      : units.find((u) => u.text === asWritten(input.horizonLine!.trim()));
+      : units.find((u) => u.text === HORIZON_MARKER);
+    const widened = input.faceContract !== 'draft' || input.widenedLine === undefined ? undefined
+      : units.find(u => u.text === asWritten(input.widenedLine!.trim()));
+    const widenedRisk = input.faceContract !== 'run' || input.widenedRiskNote === undefined ? undefined
+      : units.find(u => u.text === WIDENED_RISK_MARKER);
+    const robustness = units.find(u => u.text === ROBUSTNESS_MARKER && u.obligation === 'caveat');
+    // #2565 retains the Explain narrator's existing bullet identities when its finding has no screen chance.
+    const robustnessPool = robustness === undefined || present.some(o => o.lead === true) || faceRun === undefined ? []
+      : units.filter(u => u.run === faceRun && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u));
+    let pointWords = wordCount(headlineText) + (robustness === undefined ? 0 : wordCount(robustness.text)) + (ask === undefined ? 0 : wordCount(ask.text));
+    const robustnessPoints = robustnessPool.length > REPLY_FACE_MAX_BULLETS ? [] : robustnessPool
+      .slice(0, Math.max(0, REPLY_FACE_MAX_BULLETS - 1 - (ask === undefined ? 0 : 1))).filter(u => {
+        if (pointWords + wordCount(u.text) > REPLY_FACE_WORD_BUDGET) return false;
+        pointWords += wordCount(u.text);
+        return true;
+      });
     const whatChanges = input.whatChanges === undefined ? undefined : units.find((u) => u.text === asWritten(input.whatChanges!.trim()));
     const estimates = input.estimatesLine === undefined ? undefined : units.find((u) => u.text === asWritten(input.estimatesLine!.trim()));
-    faceSet = new Set<Unit>([...findingUnits, ...companions, ...exceptions, ...(horizon === undefined ? [] : [horizon]),
+    faceSet = new Set<Unit>([...findingUnits, ...companions, ...exceptions, ...robustnessPoints, ...[widened, widenedRisk, robustness].filter((u): u is Unit => u !== undefined), ...(horizon === undefined ? [] : [horizon]),
       ...(whatChanges === undefined ? [] : [whatChanges]), ...(estimates === undefined ? [] : [estimates]),
       ...(ask === undefined ? [] : [ask]), ...(chanceLeadIn === undefined ? [] : [chanceLeadIn])]);
     const faceWordCount = (): number => wordCount(headlineText) + [...faceSet]
@@ -813,24 +898,26 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     }
     faceBullets = [];
     const addExceptionsAfter = (finding: Unit): void => {
+      const figureSubjects = subjectsOf(finding);
+      const matching = exceptions.filter(exception => faceSet.has(exception) && !faceBullets.includes(exception)
+        && present.some(o => exception.text.includes(o.text) && (o.subjects ?? []).some(subject => figureSubjects.has(subject))));
+      const isMarker = (exception: Unit): boolean => markerLines.some(line => foldQuotes(line) === foldQuotes(exception.text));
+      // A typed disclosure qualifies its figure immediately; the figure's companion still follows the same figure.
+      faceBullets.push(...matching.filter(isMarker));
       for (const companion of companions) {
         if (!faceBullets.includes(companion) && present.some((o) => companion.text === o.text
-          && o.companionOf !== undefined && subjectsOf(finding).has(o.companionOf))) faceBullets.push(companion);
+          && o.companionOf !== undefined && figureSubjects.has(o.companionOf))) faceBullets.push(companion);
       }
-      const figureSubjects = subjectsOf(finding);
-      for (const exception of exceptions) {
-        if (faceSet.has(exception) && !faceBullets.includes(exception)
-          && present.some((o) => exception.text.includes(o.text) && (o.subjects ?? []).some((subject) => figureSubjects.has(subject)))) {
-          faceBullets.push(exception);
-        }
-      }
+      faceBullets.push(...matching.filter(exception => !isMarker(exception)));
     };
+    for (const line of [widened, ...(robustness !== undefined && !(present.find(o => o.text === ROBUSTNESS_MARKER)?.subjects?.length) ? [robustness] : [])]) if (line !== undefined && line !== headline) faceBullets.push(line);
     addExceptionsAfter(headline);
     for (const chance of chanceUnits) {
       faceBullets.push(chance);
       addExceptionsAfter(chance);
     }
-    for (const line of [horizon, whatChanges, estimates, ask]) {
+    faceBullets.push(...robustnessPoints);
+    for (const line of [horizon, widenedRisk, whatChanges, estimates, ask]) {
       if (line !== undefined && line !== headline && faceSet.has(line) && !faceBullets.includes(line)) faceBullets.push(line);
     }
     faceWords = faceWordCount();
@@ -916,4 +1003,16 @@ export function withShapeOnlyIfItDerives<B extends { assistant_text?: unknown; _
   if (shape === undefined || deriveAnswerTextFromShape(shape) === body.assistant_text) return body;
   const { _answer_shape: _unproven, ...whole } = body;
   return whole as B;
+}
+
+/** Recover a canonical bullet-bearing presentation from durable answer bytes, without a model or mutable cache. */
+export function shapeFromDerivedAnswerText(text: string): AnswerShape | null {
+  const parts = text.split('\n\n');
+  const headline = parts[0];
+  const bulletBlock = parts[1];
+  if (headline === undefined || headline.trim() === '' || bulletBlock === undefined) return null;
+  const rows = bulletBlock.split('\n');
+  if (rows.length === 0 || rows.some(row => !row.startsWith('• ') || row.slice(2).trim() === '')) return null;
+  const shape: AnswerShape = { headline, bullets: rows.map(row => row.slice(2)), detail: parts.slice(2).join('\n\n') };
+  return deriveAnswerTextFromShape(shape) === text ? shape : null;
 }

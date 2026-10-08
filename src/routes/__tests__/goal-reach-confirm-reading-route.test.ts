@@ -311,13 +311,18 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
       return body as { assistant_text: string; _answer_shape?: AnswerShape };
     };
     setThresholdRefused('non_finite_conversion_input');
+    expect(source.analysis.analysis_result).toMatchObject({ enrichment: { inference_warnings: expect.arrayContaining([
+      expect.objectContaining({ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', detail: { reason: 'non_finite_conversion_input' } }),
+    ]) } });
     const reply = await run();
     expect(reply._answer_shape, reply.assistant_text).toBeDefined();
     const shape = reply._answer_shape!;
-    expect(shape.headline).toBe(FINDING);
+    expect(shape.headline).toBe('Not shown yet; why is under More detail');
     const face = [shape.headline, ...shape.bullets].join('\n');
+    expect(face).not.toContain(FINDING);
+    expect(shape.detail.split(FINDING)).toHaveLength(2);
     expect(face).not.toContain(RUN_RESULT_READY_TEXT);
-    // The Olumi-side fault owes no user question; the contract keeps its exact finding on the face.
+    // The typed Olumi-side fault owes no user question; its exact full finding is retained under More detail.
     expect(face.match(/\?/g) ?? []).toHaveLength(0);
     expect(shape.detail).toContain(RUN_RESULT_READY_TEXT);
     expect(shape.detail).toContain(RETAINED_RESULTS);

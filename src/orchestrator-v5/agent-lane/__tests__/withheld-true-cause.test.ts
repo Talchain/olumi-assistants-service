@@ -244,9 +244,7 @@ describe('(f) a placeholder path beside an untestable target: the chat discloses
   it('W5: a legacy capture cannot prove the placeholders are its only cause; keep the complete target requirement', () => {
     const say = goalChanceWithheldForAgent(D1.analysis_result)!.say;
     expect(placeholder.links).toHaveLength(2);
-    // #2830 changes the display noun to "effects"; the legacy capture still owns the complete target requirement.
-    const targetSay = D1.analysis_result.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE').say;
-    expect(say).toContain(targetSay.replace('size for the links', 'size for the effects'));
+    expect(say).toContain(D1.analysis_result.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE').say);
     expect(say).not.toContain('Size them to see the chance');
   });
 

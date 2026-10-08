@@ -34,7 +34,7 @@ import {
 
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
-import { sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
+import { HORIZON_MARKER, ROBUSTNESS_MARKER, WITHHOLD_FALLBACK_MARKER, sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
 import { textAtRest, untestedHorizonLine } from '../decision-input-ask.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
@@ -128,6 +128,16 @@ const unmarked = (line: string) => line.trim().replace(/^[•\-*]\s+/, '');
 const unhyphen = (s: string) => s.replace(/-/g, ' ');
 const faceOf = (s: AnswerShape) => [s.headline, ...s.bullets].join('\n');
 const faceWords = (s: AnswerShape) => faceOf(s).split(/\s+/).filter(Boolean).length;
+const occurrences = (text: string, exact: string): number => text.split(exact).length - 1;
+const expectRobustnessDisclosure = (b: Body): void => {
+  expect(b._answer_shape, 'typed robustness marker requires a face/detail presentation').toBeDefined();
+  const shape = b._answer_shape!;
+  expect(shape.bullets[0], 'the robustness marker is bullet 1').toBe(ROBUSTNESS_MARKER);
+  expect(occurrences(faceOf(shape), ROBUSTNESS_CAVEAT), 'the expert caveat is off face').toBe(0);
+  expect(occurrences(shape.detail, ROBUSTNESS_CAVEAT), 'the full robustness caveat is verbatim once in detail').toBe(1);
+  expect(occurrences(b.assistant_text, ROBUSTNESS_CAVEAT), 'the whole reply retains one full caveat').toBe(1);
+  expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
+};
 
 describe('an analysis reply on the Agent route arrives headline first (`_answer_shape`)', () => {
   let app: FastifyInstance;
@@ -285,9 +295,12 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
     const horizon = untestedHorizonLine(readbackGraph, { besideChance: true, plural: true });
     expect(horizon, 'a horizon always accompanies these two non-event goal chances').not.toBeNull();
-    expect([b._answer_shape!.headline, ...b._answer_shape!.bullets].slice(0, 3), 'chance findings and their own notes precede the mandatory horizon').toEqual([
-      ...screen.map((line) => [line.chance, line.depends].filter(Boolean).join(' ')), horizon,
+    expect([b._answer_shape!.headline, ...b._answer_shape!.bullets].slice(0, 3), 'chance findings and their own notes precede the mandatory horizon marker').toEqual([
+      ...screen.map((line) => [line.chance, line.depends].filter(Boolean).join(' ')), HORIZON_MARKER,
     ]);
+    expect(faceOf(b._answer_shape!)).not.toContain(horizon!);
+    expect(occurrences(b._answer_shape!.detail, horizon!)).toBe(1);
+    expect(occurrences(b.assistant_text, horizon!)).toBe(1);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
     expect(b._answer_shape!.detail).toContain(RUN_DISCLOSURE);
     for (const line of screen) {
@@ -473,6 +486,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(FOUR_BULLETS.text.startsWith(shape!.headline), 'the headline is the reply’s own first sentence').toBe(true);
     expect(faceOf(shape!), 'an unbound firmness caveat names no typed face figure').not.toContain(ROBUSTNESS_CAVEAT);
     expect(shape!.detail).toContain(ROBUSTNESS_CAVEAT);
+    expectRobustnessDisclosure(b);
     expect(faceWords(shape!)).toBeLessThanOrEqual(80);
     for (const point of bulletLines) {
       expect(faceOf(shape!)).not.toContain(point);
@@ -486,7 +500,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   it.each([
     ['in its first sentence', RANKS_FIRST, RANKS_FIRST_SENTENCE],
     ['in a bullet', RANKS_IN_BULLET, RANKS_IN_BULLET_SENTENCE],
-  ])('2. WITHHELD: a reply that ranks %s → the gate drops the ranking and appends its reason; the composer, after the gate, keeps that reason ON THE FACE', async (_where, served, rankingSentence) => {
+  ])('2. WITHHELD: a reply that ranks %s → the gate drops the ranking and appends its reason; the composer keeps its typed marker on the face and full reason in detail', async (_where, served, rankingSentence) => {
     // The controls: the sentence is in the served reply, and shaping BEFORE the gate would have put it on the face.
     expect(served.text).toContain(rankingSentence);
     const early = synthesiseAnswerShapeFromText(served.text);
@@ -500,23 +514,25 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b.assistant_text, 'the control: the gate’s own sentence is in the reply').toContain(noLeaderSentence);
     expect(b._answer_shape, 'shaped after the gate').toBeDefined();
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-    expect(faceOf(b._answer_shape!), 'R1: the withheld reason is on the face').toContain(noLeaderSentence);
+    expect(faceOf(b._answer_shape!), 'typed fallback withhold marker is must-face').toContain(WITHHOLD_FALLBACK_MARKER);
+    expect(faceOf(b._answer_shape!), 'full withheld reason is behind progressive disclosure').not.toContain(noLeaderSentence);
+    expect(occurrences(b._answer_shape!.detail, noLeaderSentence), 'exact gate reason once in detail').toBe(1);
     expect(b.assistant_text.split(noLeaderSentence)).toHaveLength(2);
     expect(b.assistant_text).not.toContain(rankingSentence);
     for (const leak of served.leak_phrases) expect(unhyphen(b.assistant_text)).not.toContain(unhyphen(leak));
     expect(rows.get(turnId)?.assistant_message, 'the replayed row holds the same text').toBe(b.assistant_text);
   });
 
-  it('3. RUN: the two-sentence reply already within the face ships exactly as written, with its caveat once', async () => {
+  it('3. RUN: a short two-sentence reply retains every sentence with robustness marker on face, full caveat once in detail', async () => {
     const { b } = await typedRun(ONE_PARAGRAPH);
     expect(carriesResult(b), 'the control: an analysis-bearing turn').toBe(true);
-    // Approved 5471d752 correction: a contract reply already within its face ships as written.
+    // r5 item 2: even a short contract reply shapes when the typed marker must remain on face.
     const expected = `${ONE_PARAGRAPH} ${ROBUSTNESS_CAVEAT}`;
-    expect(b._answer_shape).toBeUndefined();
-    expect(b.assistant_text).toBe(expected);
+    expectRobustnessDisclosure(b);
+    expect(b._answer_shape!.headline).toBe(sentencesOf(ONE_PARAGRAPH)[0]);
     expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
     expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the same licensed caveat is kept once').toHaveLength(2);
-    expect(sentenceMultiset(b.assistant_text)).toEqual(sentenceMultiset(expected));
+    expect(sentenceMultiset(b.assistant_text).filter(sentence => sentence !== ROBUSTNESS_MARKER)).toEqual(sentenceMultiset(expected));
   });
 
   it('3. RUN: a four-paragraph reply with no bullets shapes, with its supporting sentences in detail', async () => {
@@ -528,6 +544,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(faceWords(b._answer_shape!)).toBeLessThanOrEqual(80);
     expect(faceOf(b._answer_shape!)).not.toContain(ROBUSTNESS_CAVEAT);
     expect(b._answer_shape!.detail).toContain(ROBUSTNESS_CAVEAT);
+    expectRobustnessDisclosure(b);
     expect(text.startsWith(b._answer_shape!.headline)).toBe(true);
     expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the caveat is kept, once (R1: in detail)').toHaveLength(2);
     for (const para of text.split('\n\n')) for (const s of para.split(/(?<=[.!?])\s+(?=[A-Z])/)) expect(b.assistant_text).toContain(s.trim());
@@ -645,7 +662,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 
-  it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8: a short question-tail reply ships whole with its basis visible once (present=%s punctuated=%s)', async (present, punctuated) => {
+  it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8: short question-tail reply retains its basis once with robustness marker and full detail (present=%s punctuated=%s)', async (present, punctuated) => {
     readbackReady = FX.state.analysis_ready;
     const question = punctuated ? 'What baseline should we use?' : 'The baseline is unknown';
     const narrated = `The comparison is conditional. Questions this model does not answer yet: ${question}${present ? `\n\n${BASIS_UNAVAILABLE}` : ''}`;
@@ -653,11 +670,12 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
     expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
     expect(b.assistant_text).toContain(question);
-    // Approved 5471d752 correction: this exact short contract reply ships as written, without a shape.
+    // r5 item 2: the full qualification moves to detail; its typed marker requires shape even here.
     const expected = ['The comparison is conditional.', ROBUSTNESS_CAVEAT, BASIS_UNAVAILABLE,
       `Questions this model does not answer yet: ${question}`].join('\n\n');
-    expect(b._answer_shape).toBeUndefined();
-    expect(b.assistant_text).toBe(expected);
+    expectRobustnessDisclosure(b);
+    expect(sentenceMultiset(b.assistant_text).filter(sentence => sentence !== ROBUSTNESS_MARKER)).toEqual(sentenceMultiset(expected));
+    expect(occurrences(b._answer_shape!.detail, BASIS_UNAVAILABLE), 'the exact generic basis stays once in detail').toBe(1);
     expect(b.assistant_text.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(80);
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
     if (process.env.B3_WIRE_EVIDENCE) {
