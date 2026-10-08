@@ -290,8 +290,11 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
     for (const carrier of [{ keep: { reason: 'zero_spread', side: 'falls_short', line } }, {}]) {
       const view = projectWithReasonCarrier(input, carrier);
       expect(cell(view, 'raise')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why: target.message });
-      expect(cell(view, 'keep')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN,
-        why: Object.hasOwn(carrier, 'keep') ? line : `‘Keep’: ${OPTION_CHANCE_WITHHELD}` });
+      expect(JSON.stringify(cell(view, 'keep'))).not.toContain(target.message);
+      // #2879 (buddy r1): a licence with no licensed point attests only its named zero-spread reasons, so with none
+      // recorded for Keep its cell is `none`, never a generic withhold and never Raise's words.
+      expect(cell(view, 'keep')).toEqual(Object.hasOwn(carrier, 'keep')
+        ? expect.objectContaining({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why: line }) : { kind: 'none' });
     }
   });
 
