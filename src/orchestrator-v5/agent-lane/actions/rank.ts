@@ -19,6 +19,7 @@ import type { SelectedRow } from '../guidance/index.js';
 import { structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
 import { ACTION_IDS, ACTION_REGISTRY, STANDARD_ACTIONS, type ActionGroup, type ActionId } from './registry.js';
 import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
+import { biasRiskOf, type BiasRiskV1 } from './bias-triggers.js';
 
 export type ItemRef =
   | { readonly kind: 'option' | 'factor' | 'risk' | 'outcome' | 'goal'; readonly id: string }
@@ -45,6 +46,8 @@ export interface ActionBarV1 {
   readonly priority: readonly ActionOffer[];
   readonly standard: readonly ActionOffer[];
   readonly more: readonly ActionOffer[];
+  /** P45: the standing one-line bias-risk row; every item presses an offer on this same bar. Absent when none fires. */
+  readonly bias_risk?: BiasRiskV1;
 }
 
 export const PRIORITY_MAX = 2;
@@ -52,6 +55,8 @@ export const MORE_MAX = 20;
 /** RC priorities P1–P3 are the actionable ones a pill may carry (P4/P5 stay in the menu). */
 const PILL_TIER_MAX = 3;
 const GENERIC_TIER = 9;
+/** Menu-only and last: a full More menu drops the bias check before any existing offer. */
+const BIAS_CHECK_TIER = GENERIC_TIER + 1;
 
 export const WHY_NOW = {
   review: 'Lists what this result rests on before you rely on it.',
@@ -73,6 +78,7 @@ export const WHY_NOW = {
   more_risks: 'Find risks you haven’t considered yet.',
   bias_anchoring: 'Test Olumi’s figures against your own evidence.',
   check_estimates: 'See the Olumi estimates feeding this result.',
+  bias_check: 'See where common reasoning patterns could bite in this model.',
   test_link: 'This result is most sensitive to one link: see what happens without it.',
 } as const;
 
@@ -182,6 +188,9 @@ function drafts(f: ActionFacts): Draft[] {
     const target: ItemRef = { kind: 'link', from_id: f.testLink.from_id, to_id: f.testLink.to_id };
     out.push(draft(f, 'test_link', { enabled: true, why_now: WHY_NOW.test_link }, PILL_TIER_MAX, { target, press_id: structuralChallengePressId(f.testLink) }));
   }
+  if (f.readable) {
+    out.push(draft(f, 'bias_check', { enabled: true, why_now: WHY_NOW.bias_check }, BIAS_CHECK_TIER));
+  }
   return out;
 }
 
@@ -198,7 +207,9 @@ export function actionBarOf(f: ActionFacts): ActionBarV1 {
   const priority = standing !== undefined && !f.approvalWaiting && !f.runStale ? [standing]
     : others.filter(d => d.offer.enabled && d.tier > 0 && d.tier <= PILL_TIER_MAX).slice(0, PRIORITY_MAX);
   const more = others.filter((d) => !priority.includes(d)).slice(0, MORE_MAX);
-  return { v: 1, state_key: f.stateKey, revision: f.revision, priority: priority.map((d) => d.offer), standard, more: more.map((d) => d.offer) };
+  const bar = { v: 1 as const, state_key: f.stateKey, revision: f.revision, priority: priority.map((d) => d.offer), standard, more: more.map((d) => d.offer) };
+  const biasRisk = biasRiskOf(f, [...bar.priority, ...bar.standard, ...bar.more], f.optionFrame);
+  return biasRisk !== undefined ? { ...bar, bias_risk: biasRisk } : bar;
 }
 
 const sameTarget = (a: ItemRef | undefined, b: ItemRef | undefined): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);

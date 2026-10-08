@@ -366,9 +366,11 @@ describe('the one horizon writer (goal-horizon-write.ts): its own gates, without
   });
 });
 
-describe('timing (preamble rule): every new regex at 5k → 20k characters, 3 shapes, scaling < 8× (min of 7 calibrated batches)', () => {
+describe('timing (preamble rule): every new regex at 5k → 40k characters, 4 shapes, scaling < 22× (min of 7 calibrated batches)', () => {
   // The public readers gate their input (80 / 200 characters), so each PATTERN is timed directly, unanchored inputs included.
-  // Calibrated batches (scalingRatio): single-call min-of-5 read 8.48× on CI (7 Oct). Linear ≈ 4×, quadratic ≈ 16×.
+  // Calibrated batches (scalingRatio): single-call min-of-5 read 8.48× on CI (7 Oct), and the calibrated 4× input ratio still
+  // read 8.16× against a bar of 8 (#2767, #2790 shard 3, 7 Oct). 8× input instead: linear ≈ 8×, quadratic ≈ 64×, and the bar
+  // sits at their geometric midpoint (≈ 22×), so a slow CI runner's noise cannot cross it and a quadratic pattern still cannot pass.
   const patterns: readonly RegExp[] = [CHANCE_WORD, UNIT_HEAD_CUT, new RegExp(SCALE_NOTE.source), ...DEADLINE_PATTERNS_FOR_TIMING];
   it.each([
     ['spaces', (n: number) => ' '.repeat(n)],
@@ -376,10 +378,10 @@ describe('timing (preamble rule): every new regex at 5k → 20k characters, 3 sh
     ['chance words, no boundary', (n: number) => 'likelihoodchanceodds'.repeat(Math.ceil(n / 20)).slice(0, n)],
     ['open brackets', (n: number) => '(['.repeat(Math.ceil(n / 2)).slice(0, n)],
   ])('%s', (_shape, make) => {
-    const [small, big] = [make(5000), make(20000)];
+    const [small, big] = [make(5000), make(40000)];
     for (const re of patterns) {
       const m = scalingRatio(() => re.exec(small), () => re.exec(big));
-      expect(m.ratio, `${String(re)} ${m.detail}`).toBeLessThan(8);
+      expect(m.ratio, `${String(re)} ${m.detail}`).toBeLessThan(22);
     }
   });
 });

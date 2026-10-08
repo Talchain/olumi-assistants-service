@@ -558,7 +558,7 @@ describe('the Agent route runs the first analysis itself, once', () => {
    */
   /**
    * ⛔ DL item 3 (2 Oct; CODEX r2 P1 on #2509, CODEX on #2517): this row used to require a shape here, and that shape put
-   * the host's OWN build lines ("The model was saved as version 1.", what is held fixed, the questions the model does not
+   * the host's OWN build lines (what is held fixed, the questions the model does not
    * answer yet) behind "Show more", because the UI renders `_answer_shape` instead of the text. The build turn's narration
    * is still the narrator's, but the reply is no longer ONLY the narrator's words, so it ships whole with every host line
    * on the face. CONTROL: `agent-run-reply-answer-shape.test.ts` rows 8/11 (the narrator's words alone are still shaped).
@@ -575,7 +575,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await turn(app, { message: BRIEF }) as Body & { _answer_shape?: { headline: string; bullets: string[]; detail: string } };
     expect(b._diagnostic_trace.first_analysis, 'the control: the first pass ran').toMatchObject({ ran: true });
     expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the control: an analysis-bearing turn').toBe(true);
-    expect(b.assistant_text.split('The model was saved as version 1.'), 'the host’s own build line, once').toHaveLength(2);
+    expect(b.assistant_text).not.toMatch(/model was saved|I saved the model/i);
+    expect(b.assistant_text.split('Questions this model does not answer yet:'), 'the host’s surviving questions line, once').toHaveLength(2);
     expect(b._answer_shape, 'shaped').toBeDefined();
     expect(b.assistant_text).toBe(deriveAnswerTextFromShapeOf(b._answer_shape!));
     expect(prose.startsWith(b._answer_shape!.headline), 'the narrator’s first sentence leads').toBe(true);

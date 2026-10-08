@@ -17,6 +17,7 @@ import { ACTION_PRESS_PREFIX, ACTION_REGISTRY, actionOfPress, isUnknownActionPre
 import { actionBarOf, currentOfferFor, DISABLED, type ActionBarV1, type ActionOffer, type ItemRef } from './rank.js';
 import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
 import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
+import { biasBadgeApplies, biasCheckReply } from './bias-triggers.js';
 import { resolveDskClaimProvenance, type DskClaimProvenance } from '../../compose/dsk-claim-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { composeGoalTargetQuestion } from '../../goal-target/decide-goal-target-ask.js';
@@ -42,6 +43,7 @@ export const HANDLERS: Readonly<Record<ActionId, ActionHandler>> = {
   more_risks: { route: 'widen_turn', gate: 'own' },
   bias_anchoring: { route: 'typed_reply', gate: 'offer' },
   check_estimates: { route: 'typed_reply', gate: 'offer' },
+  bias_check: { route: 'typed_reply', gate: 'offer' },
 };
 
 /** A working way on from a "can't yet": another current offer, the Run, or the existing "what it still needs" turn. */
@@ -110,6 +112,7 @@ const CANT_YET: Record<ActionId, string> = {
   more_risks: 'I can’t suggest risks yet',
   bias_anchoring: 'I can’t check anchoring yet',
   check_estimates: 'I can’t show the estimates yet',
+  bias_check: 'I can’t run a bias check yet',
 };
 const BECAUSE: Record<keyof typeof DISABLED, string> = {
   needs_current_analysis: 'it needs a current analysis first.',
@@ -147,7 +150,7 @@ function estimateReply(action: 'bias_anchoring' | 'check_estimates', f: ActionFa
   }
   if (points.length === 0) return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const stage = f.canonicalStage === null ? null : mapStageToDecisionStage(f.canonicalStage);
-  const science = stage === 'frame' || stage === 'evaluate' ? resolveDskClaimProvenance('DSK-B-001') : null;
+  const science = biasBadgeApplies('DSK-B-001', stage) ? resolveDskClaimProvenance('DSK-B-001') : null;
   return { text: ["A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
     ...points.map(p => `- Olumi put ‘${p.label}’ at ${p.figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
     'Which of these would you check first?'].join('\n'), exits: [], outcome: 'ran', ...(science !== null ? { science } : {}) };
@@ -195,7 +198,13 @@ export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = ac
   }
   const handler = HANDLERS[press.action];
   const offer = currentOfferFor(bar, press.action, press.target);
-  if (handler.route === 'typed_reply' && offer?.enabled === true) return { kind: 'reply', press, reply: press.action === 'bias_anchoring' || press.action === 'check_estimates' ? estimateReply(press.action, f) : gapReply(press.action, f, bar) };
+  if (handler.route === 'typed_reply' && offer?.enabled === true) {
+    if (press.action === 'bias_check') {
+      const reply = biasCheckReply(f, [...bar.priority, ...bar.standard, ...bar.more]);
+      return { kind: 'reply', press, reply: { text: reply.text, exits: reply.exits.map(offer => ({ kind: 'offer' as const, offer })), outcome: 'ran' } };
+    }
+    return { kind: 'reply', press, reply: press.action === 'bias_anchoring' || press.action === 'check_estimates' ? estimateReply(press.action, f) : gapReply(press.action, f, bar) };
+  }
   if (handler.gate === 'own' || offer?.enabled === true) return { kind: 'route', press, handler, offer };
   return { kind: 'reply', press, reply: cantYet(press.action, offer, f, bar) };
 }

@@ -199,6 +199,8 @@ describe('result-first on retry, lost response and failed explanation (live rout
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await runTurn(r1)).json() as Body;
       expect(replay.assistant_text, `restart=${restart}`).toBe(live.assistant_text);
+      // 2b-0 (DL: reload = same): the replay passes the same composer, so the layout is the live one, byte for byte.
+      expect((replay as { _answer_shape?: unknown })._answer_shape, `restart=${restart}`).toEqual((live as { _answer_shape?: unknown })._answer_shape);
       expect(replay.assistant_text).not.toMatch(/1,234,567|4,321/);
       expect(replay.narration?.run_key).not.toBe(runA.narration!.run_key);
     }

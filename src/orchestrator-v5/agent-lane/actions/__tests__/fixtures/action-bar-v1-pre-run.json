@@ -97,6 +97,17 @@
       "enabled": true,
       "why_now": "See what your brief has and what it is missing.",
       "offer_key": "524f6501fd806533"
+    },
+    {
+      "action_id": "bias_check",
+      "label": "Bias check",
+      "icon": "ScanSearch",
+      "group": "method",
+      "press_id": "act:bias_check",
+      "user_line": "Where could a common reasoning pattern bite in this model?",
+      "enabled": true,
+      "why_now": "See where common reasoning patterns could bite in this model.",
+      "offer_key": "a2525c4a4c4c69be"
     }
   ]
 }
