@@ -305,4 +305,12 @@ describe('GOAL-REACH 3b — Paul\'s served post-Yes Run (P44 draw 2, 53e2ddbd)',
     expect(preconditionsOf(levelless)).toContain('P1');
     expect(barOf(levelless)).toHaveLength(1);
   });
+  it('Codex r2 P1s: the derived level never applies to a relative-change target, nor when the factors\' units do not compose into the target\'s currency/period', () => {
+    expect(preconditionsOf(served.graph)).not.toContain('P1'); // control: the served level goal (GBP/month) derives
+    const relative = structuredClone(served.graph);
+    Object.assign(goalOf(relative), { goal_threshold_frame: 'change_rel', goal_threshold_raw: 0.15, goal_threshold: 0.15 });
+    expect(preconditionsOf(relative)).toContain('P1');
+    const dollars = structuredClone(served.graph); goalOf(dollars).goal_threshold_unit = '$/month';
+    expect(preconditionsOf(dollars)).toContain('P1');
+  });
 });

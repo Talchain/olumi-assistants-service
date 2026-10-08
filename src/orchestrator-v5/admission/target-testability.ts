@@ -17,7 +17,7 @@ import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity
  */
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
-import { sameUnit } from '../agent-lane/reconciling-product.js';
+import { sameUnit, unitsCompose } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
@@ -104,11 +104,16 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   if (identity?.operation !== 'product' || identity.stated_in_brief !== true || !Array.isArray(identity.factor_ids)
     || identity.factor_ids.length !== 2) return false;
-  return identity.factor_ids.every((id) => {
+  const levels = identity.factor_ids.map((id) => {
     const n = nodes.find((x) => isRec(x) && x.id === id) as Rec | undefined;
     const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
-    return os !== undefined && finite(os.raw_value);
+    return os !== undefined && finite(os.raw_value) ? { unit: os.unit, label: String(id) } : undefined;
   });
+  if (levels[0] === undefined || levels[1] === undefined) return false;
+  // Codex r2 P1 (#2816): the factors' units must compose into the TARGET's currency and period (a target edited to
+  // another currency keeps the confirmed identity; nothing downstream converts it).
+  const goalLabel = typeof goal.label === 'string' ? goal.label : '';
+  return unitsCompose(goal.goal_threshold_unit, goalLabel, levels[0], levels[1]).kind !== 'no';
 }
 
 /** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
@@ -242,7 +247,8 @@ export function targetTestabilityOf(
   const today = isRec(goal.observed_state) ? goal.observed_state : undefined;
   // P1 — today's level where the frame requires it (`limitNeedsTodaysLevel`), as science reads it
   // (`observed_state.baseline`, the schema-v3 goal limb's condition). Never derived from the target.
-  const hasToday = (today !== undefined && finite(today.baseline)) || confirmedProductHasLevels(graph.nodes, goal);
+  // Codex r2 P1 (#2816): the derived level is a LEVEL frame's only; ISL's relative-change resolver still needs the base.
+  const hasToday = (today !== undefined && finite(today.baseline)) || (levelFrame && confirmedProductHasLevels(graph.nodes, goal));
   if (limitNeedsTodaysLevel(effectiveFrame) && !hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
   // P2 — a level target normalises strictly inside (0, 1) (ISL clips at the edges). Change frames normalise elsewhere.
   if (levelFrame && finite(goal.goal_threshold) && !(goal.goal_threshold > 0 && goal.goal_threshold < 1)) {

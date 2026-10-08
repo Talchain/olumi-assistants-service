@@ -125,6 +125,10 @@ describe('GOAL-REACH 3b — the current-level ask is only offered when its answe
     expect(goalLevelAskOf(graphOf(goal({ label: 'M'.repeat(166) })), result('missing_goal_baseline'))).toBeNull();
     expect(goalLevelAskOf(graphOf(goal({ label: 'M'.repeat(120) })), result('missing_goal_baseline'))?.question.length).toBeLessThanOrEqual(400);
   });
+  it('Codex r2 P2: an empty or over-long unit → no ask (the pending ask would reject it)', () => {
+    expect(goalLevelAskOf(graphOf(goal({ goal_threshold_unit: ' ' })), result('missing_goal_baseline'))).toBeNull();
+    expect(goalLevelAskOf(graphOf(goal({ goal_threshold_unit: 'x'.repeat(65) })), result('missing_goal_baseline'))).toBeNull();
+  });
   it('an Olumi-side reason, or a goal that already has a stated level, asks nothing', () => {
     expect(goalLevelAskOf(graphOf(), result('goal_values_outside_normalised_domain'))).toBeNull();
     expect(goalLevelAskOf(graphOf(goal({ observed_state: { raw_value: 14700, unit: '£/month' } })), result('missing_goal_baseline'))).toBeNull();

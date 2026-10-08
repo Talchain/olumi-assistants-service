@@ -47,6 +47,8 @@ export function goalLevelAskOf(graph: unknown, analysisResult: unknown): { goal:
   if (typeof goal.goal_threshold_raw !== 'number' || !Number.isFinite(goal.goal_threshold_raw)) return null;
   const held = rec(goal.observed_state)?.unit ?? goal.goal_threshold_unit;
   const unit = isChangeOwnPercent({ frame: goal.goal_threshold_frame, unit: held, metric: goal.label, value: goal.goal_threshold_raw }) || typeof held !== 'string' ? undefined : held;
+  // Codex r2 P2 (#2816): the pending ask's own unit bounds (non-empty, ≤64), or the offer would be inert.
+  if (unit !== undefined && (unit.trim() === '' || unit.length > 64)) return null;
   const question = `To show each option's chance of reaching your ${goal.label} target, I first need today\u2019s level of \u2018${goal.label}\u2019. What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
   // Codex r1 P2-5: the pending ask holds at most 400 characters; a longer question could be offered but never persisted.
   if (question.length > 400) return null;
