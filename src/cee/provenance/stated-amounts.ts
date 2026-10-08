@@ -329,7 +329,11 @@ export function readUnit(unit: string | null | undefined): UnitReading {
   if (typeof unit !== "string" || unit.trim().length === 0) {
     return { kind: "plain", multiplier: 1 };
   }
-  const trimmed = unit.trim();
+  // ⛔ LINEAR, NOT CUBIC (P44, 8 Oct): UNIT_PATTERN chains `\s*` around optional groups, so an internal whitespace run
+  // the pattern then rejects ("£" + 4,000 spaces + "/ month") backtracked every split of the run: 19 s at n=4,000.
+  // Every whitespace token in both patterns is `\s*` and no currency, ISO code or magnitude literal contains
+  // whitespace, so one space per run reads every unit exactly as before.
+  const trimmed = unit.trim().replace(/\s+/g, " ");
   if (/^percent(age)?$/i.test(trimmed)) return { kind: "percent", multiplier: 1 };
   const iso = ISO_UNIT_PATTERN.exec(trimmed);
   if (iso) {
