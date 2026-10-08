@@ -1,3 +1,4 @@
+// Science 393023 LICENCE (a)/(b), 7 Oct: goal_path_unsized → goal_path_placeholder; endpoint questions stay pinned.
 /**
  * RT-10 B′ (Science d5, #2606 words defect): case (c) names the FAILING link by its own two ends, never "{lever} to
  * {goal}". P5 fails on the first link into the goal not sized in its unit, else on the first Olumi-guessed link
@@ -33,7 +34,7 @@ describe('B′ (c) names the failing link by its own two ends', () => {
     const v = targetTestabilityOf(g);
     expect(v.kind).toBe('not_testable');
     if (v.kind !== 'not_testable') return;
-    expect(v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Starter monthly price', link_to: 'Starter-tier monthly recurring revenue',
+    expect(v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Starter monthly price', link_to: 'Starter-tier monthly recurring revenue',
       link: { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' }, links: [
         { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' },
         { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' },

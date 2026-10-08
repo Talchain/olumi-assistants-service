@@ -9,15 +9,16 @@
  *   then link id `from->to` (`tools/select_ref.py` `strengthen_candidates`).
  * - Never S1: a user-sized, accepted (`olumi_accepted`) or ordinary `olumi_estimate` link: `placeholderGoalPaths` walks
  *   only links `linkSizing` calls `placeholder` (the one predicate, `isPlaceholderLink`).
- * - `band` and both labels come from `linkTargetOf` (below): the writer's own band rule. A link with no readable mean is
- *   skipped (the writer refuses it).
+ * - Both labels come from `linkTargetOf` (below). A placeholder has no current band; its prior is never an estimate.
+ *   A link with no readable mean is skipped (the writer refuses it).
  * - No leader dependency: it reads no analysis, so it answers the same while leader naming is withheld.
  *
  * It returns a target only. It builds no proposal, writes nothing and authors no copy: AI HARNESS turns the target into
- * ONE `propose_link_strengths` call (one link, this band, no `from_words`). Null → the press keeps today's answer.
+ * a size ask. Only an independently sized link can supply a band for a proposal.
  */
 import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../../format/influence-bands.js';
+import { isPlaceholderLink } from '../../../cee/magnitude/link-sizing.js';
 import { placeholderGoalPaths } from '../goal-certainty.js';
 
 export interface LinkTarget {
@@ -25,7 +26,7 @@ export interface LinkTarget {
   readonly to_id: string;
   readonly from_label: string;
   readonly to_label: string;
-  readonly band: InfluenceBand;
+  readonly band?: InfluenceBand;
 }
 export interface StrengthenPlaceholderTarget extends LinkTarget {
   readonly variant: 'S1';
@@ -35,7 +36,7 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
- * ONE link's card target: both labels and the band the writer compares against, `edgeBandFromMagnitude(|strength.mean|)`
+ * ONE link's card target: both labels and, only for a sized link, `edgeBandFromMagnitude(|strength.mean|)`.
  * (as `propose_link_strengths` computes `currentBand`). Null when the link, either label or a readable mean is missing:
  * the writer would refuse it. Any link, whatever its sizing: the S1 picker below and T3's method-turn card both read a
  * link through here, so there is one read of the mean and one band rule (SCIENCE/DSK 5938284906).
@@ -49,7 +50,8 @@ export function linkTargetOf(graph: unknown, from_id: string, to_id: string): Li
   const from = nodes.find((n) => n.id === from_id);
   const to = nodes.find((n) => n.id === to_id);
   if (typeof from?.label !== 'string' || typeof to?.label !== 'string') return null;
-  return { from_id, to_id, from_label: from.label, to_label: to.label, band: edgeBandFromMagnitude(Math.abs(mean)) };
+  return { from_id, to_id, from_label: from.label, to_label: to.label,
+    ...(isPlaceholderLink(edge) ? {} : { band: edgeBandFromMagnitude(Math.abs(mean)) }) };
 }
 
 export function selectStrengthenPlaceholder(

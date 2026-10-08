@@ -19,6 +19,7 @@
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { unitOf } from '../../cee/magnitude/link-effect.js';
 import { CURRENCY_SYMBOL_TO_CODE, isCurrencyUnit } from '../../utils/currency-alphabet.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -64,8 +65,8 @@ function namedLink(graph: unknown, message: string): { edge: Rec; source: Rec; t
 
 /** The user has said this link's strength or size: never asked back. */
 function usersOwnLink(edge: Rec): boolean {
-  const p = recordOf(edge.provenance);
-  return p?.source === 'user_specified' || p?.magnitude === 'user_stated';
+  // The one reading (Science 393023 LICENCE ruling 1): a link the user drew with a projected mean is not sized yet.
+  return linkSizing(edge) === 'user';
 }
 
 /** +1 / -1 when the stored direction is known and consistent, else null. */

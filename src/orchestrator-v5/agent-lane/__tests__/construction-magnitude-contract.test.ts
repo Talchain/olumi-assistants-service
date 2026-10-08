@@ -272,7 +272,8 @@ describe('R6: the contrast control — a target with no frame keeps today\'s ±0
     expect(e.strength).toStrictEqual({ mean: 0.5, std: 0.125 });
     expect(e.exists_probability).toBe(0.8);
     expect(e.defaulted).toBe(true);
-    expect(e.provenance).toStrictEqual({ source: 'cee_hypothesis', mean_projected: true });
+    // Science 393023 LICENCE (a)/(b), 7 Oct: new unsized admitted links keep projection and carry the placeholder tag.
+    expect(e.provenance).toStrictEqual({ source: 'cee_hypothesis', mean_projected: true, magnitude: 'olumi_placeholder' });
     expect(e).toStrictEqual(edge(unsized, 'pro_plan_price', 'price_sensitivity'));
   });
 });
@@ -370,7 +371,8 @@ describe('Run 1 wording: churn as "% of Pro subscribers per month" is a percenta
     const { graph } = await register(c);
     const e = edge(graph, 'price_sensitivity', CHURN);
     expect(e.strength).toMatchObject({ mean: 0.5, std: 0.125 });
-    expect(e.provenance?.magnitude).toBeUndefined();
+    // Science 393023 LICENCE (a)/(b), 7 Oct: new no-frame defaults are tagged placeholders.
+    expect(e.provenance?.magnitude).toBe('olumi_placeholder');
   });
 
   it('ONE RULE (R&C #2034 B1): a 0.5 "% per month" level limit is NOT a percentage level (`percentLevelFrame`) — ±0.5 kept', async () => {

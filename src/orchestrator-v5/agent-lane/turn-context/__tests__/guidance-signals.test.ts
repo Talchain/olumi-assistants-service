@@ -12,6 +12,89 @@ import { detectSameLeverOptions } from '../../../../cee/structure/index.js';
 
 type Case = { id: string; capture: string; capture_sha256: string; capture_sha_matches_case: boolean; body: Record<string, any>; expected_state: Record<string, unknown> };
 const F = JSON.parse(readFileSync(new URL('./fixtures/rc-served-signal-cases.json', import.meta.url), 'utf8')) as { cases: Case[] };
+// Science 393023 LICENCE (a)/(b), 7 Oct: these served goal-path entries read unmarked → placeholder; all other signals stay pinned.
+const RECLASSIFIED: Record<string, string[]> = {
+  "A-D2-RUN2-WIDEN-P1": [
+    "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+    "distraction_from_investment_firm_fundraising->securing_funding"
+  ],
+  "A-STRENGTHEN-PLACEHOLDER-P1": [
+    "enterprise_prospect_signing_likelihood->quarterly_revenue",
+    "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+    "revenue_lost_to_trial_abandonment->quarterly_revenue"
+  ],
+  "A-WHAT-CHANGES-NONE-MEASURABLE-SILENT": [
+    "gcp_workload_share->monthly_cloud_savings",
+    "gcp_savings_at_full_migration->monthly_cloud_savings"
+  ],
+  "A-DECISION-POINT-SUPPRESSES": [
+    "gcp_workload_share->monthly_cloud_savings",
+    "gcp_savings_at_full_migration->monthly_cloud_savings"
+  ],
+  "A-STALE-SILENT": [
+    "gcp_workload_share->monthly_cloud_savings",
+    "gcp_savings_at_full_migration->monthly_cloud_savings"
+  ],
+  "A-COACH-EDITS-PENDING-SILENT": [
+    "gcp_workload_share->monthly_cloud_savings",
+    "gcp_savings_at_full_migration->monthly_cloud_savings"
+  ],
+  "A-Q-D1-BUILD": [
+    "enterprise_prospect_signing_likelihood->quarterly_revenue",
+    "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+    "revenue_lost_to_trial_abandonment->quarterly_revenue"
+  ],
+  "A-Q-D2-BUILD": [
+    "qualified_angel_investor_conversations->securing_funding",
+    "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+    "distraction_from_investment_firm_fundraising->securing_funding"
+  ],
+  "A-Q-D3-BUILD": [
+    "gcp_workload_share->monthly_cloud_savings",
+    "gcp_savings_at_full_migration->monthly_cloud_savings"
+  ]
+};
+// Science 393023 LICENCE (a)/(b), 7 Oct: the same reclassification expands the reached placeholder lists; exact order stays pinned.
+const PLACEHOLDER_PATHS: Record<string, string[]> = {
+  "A-D2-RUN2-WIDEN-P1": [
+    "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+    "distraction_from_investment_firm_fundraising->securing_funding"
+  ],
+  "A-STRENGTHEN-PLACEHOLDER-P1": [
+    "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+    "enterprise_prospect_signing_likelihood->quarterly_revenue",
+    "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+    "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+    "revenue_lost_to_trial_abandonment->quarterly_revenue"
+  ],
+  "A-Q-D1-BUILD": [
+    "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+    "enterprise_prospect_signing_likelihood->quarterly_revenue",
+    "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+    "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+    "revenue_lost_to_trial_abandonment->quarterly_revenue"
+  ],
+  "A-Q-D2-BUILD": [
+    "qualified_angel_investor_conversations->securing_funding",
+    "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+    "distraction_from_investment_firm_fundraising->securing_funding"
+  ],
+  "A-WHAT-CHANGES-NONE-MEASURABLE-SILENT": [
+    "gcp_workload_share->monthly_cloud_savings"
+  ],
+  "A-DECISION-POINT-SUPPRESSES": [
+    "gcp_workload_share->monthly_cloud_savings"
+  ],
+  "A-STALE-SILENT": [
+    "gcp_workload_share->monthly_cloud_savings"
+  ],
+  "A-COACH-EDITS-PENDING-SILENT": [
+    "gcp_workload_share->monthly_cloud_savings"
+  ],
+  "A-Q-D3-BUILD": [
+    "gcp_workload_share->monthly_cloud_savings"
+  ]
+};
 const byId = (id: string): Case => F.cases.find((c) => c.id === id)!;
 
 /** Inputs, not derivations: the request kind, the persisted guidance and the explicit request come from the turn. */
@@ -47,7 +130,12 @@ describe('guidance signals from served captures (RC derivation check)', () => {
       const got = assembleGuidanceSignals(inputsOf(c)) as unknown as Record<string, unknown>;
       const derived = Object.keys(c.expected_state).filter((k) => !INPUT_KEYS.has(k));
       expect(derived.length, 'vacuity: the case states derived signals').toBeGreaterThan(15);
-      for (const k of derived) expect(withoutHashes(k, got[k]), k).toEqual(c.expected_state[k]);
+      for (const k of derived) {
+        const expected = k === 'model.goal_path_links'
+          ? (c.expected_state[k] as { link_id: string; link_sizing: string }[]).map(l => RECLASSIFIED[c.id]!.includes(l.link_id) ? { ...l, link_sizing: 'placeholder' } : l)
+          : k === 'model.placeholder_goal_links' ? PLACEHOLDER_PATHS[c.id] : c.expected_state[k];
+        expect(withoutHashes(k, got[k]), k).toEqual(expected);
+      }
       const entries = [...(got['model.goal_path_links'] as { value_hash: string }[]), ...(got['model.goal_path_factors'] as { value_hash: string }[])];
       expect(entries.length).toBeGreaterThan(0);
       for (const e of entries) expect(e.value_hash).toMatch(HEX12);
