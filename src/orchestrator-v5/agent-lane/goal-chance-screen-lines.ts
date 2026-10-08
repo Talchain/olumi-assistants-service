@@ -63,6 +63,48 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   return [...points, ...ranges];
 }
 
+/**
+ * B15 (DL CHANGES_REQUIRED on #2783, Codex P1): ONE sentence in which the narrator gave this option's screen figure in its
+ * own accepted words (the option named, then its figure) — the same acceptance `alreadySaid` uses, bound to one sentence
+ * so the route can type it as this finding's leading evidence. Never the canonical sentence (typed already).
+ */
+export function chanceInOwnWords(sentence: string, l: GoalChanceScreenLine): boolean {
+  // EXACTLY "<label>: <figure>." (quotes/emphasis aside): the sentence IS this option's figure, never a share or a range
+  // that mentions it, never a longer label that starts with this one (Codex r on 297d1f1b, P1).
+  const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const said = plain(sentence).replace(/[.!]$/, '');
+  const own = `${plain(l.label)}: ${plain(l.figure)}`;
+  // Also the screen's own words with the Agent's emphasis/quotes ("**Label**: about 47% chance of meeting your goal, …").
+  return sentence !== l.chance && (said === own || said === `${own} ${plain(CHANCE_LABEL)}`);
+}
+
+/**
+ * The leading-evidence texts for this option's figure said in the narrator's own accepted words: the sentence, and — when
+ * the screen's spread note follows it (as `withScreenLinesOwed` places it) — the sentence WITH its note as ONE unit, so the
+ * qualifier can never be split from its chance (Codex r3 on #2783 ed3964a6, P1). [] when the canonical line is present.
+ */
+export function ownWordsLeadTexts(reply: string, l: GoalChanceScreenLine, sentencesOf: (row: string) => string[]): string[] {
+  if (reply.includes(l.chance)) return [];
+  const said = reply.split('\n').map((row) => row.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, ''))
+    .flatMap((row) => sentencesOf(row)).find((sentence) => chanceInOwnWords(sentence, l));
+  if (said === undefined) return [];
+  if (l.spread_note === undefined) return [said];
+  // The note as it actually stands right after the sentence (spacing and the Agent's emphasis aside), bound as said.
+  const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const at = reply.indexOf(said);
+  const after = reply.slice(at + said.length);
+  const lead = /^[ \t]+/.exec(after)?.[0] ?? '';
+  const want = plain(l.spread_note);
+  for (let end = lead.length + 1; end <= Math.min(after.length, lead.length + l.spread_note.length * 2); end += 1) {
+    if (after[end - 1] === '\n') break;
+    if (plain(after.slice(lead.length, end)) !== want) continue;
+    // Closing emphasis/quotes after the note's stop belong to it ("…further **short.**": Codex r5 on #2783).
+    const close = /^["'”’`*_]{0,4}/.exec(after.slice(end))![0];
+    return [`${said}${after.slice(0, end + close.length)}`, said];
+  }
+  return [said];
+}
+
 /** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */
 function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
   if (sameWordsIn(text, l.chance)) return true;
@@ -75,7 +117,7 @@ function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
 }
 
 /** A lead-in the Agent left with nothing under it ("For reaching at least £126,000 …, on current information:"). */
-const LEAD_IN = /\b(?:chances?|goal|target|reach(?:ing)?|meeting|current information)\b[^\n]{0,200}:$/i;
+export const LEAD_IN = /\b(?:chances?|goal|target|reach(?:ing)?|meeting|current information)\b[^\n]{0,200}:$/i;
 const LIST_START = /^\s*(?:[-*•]|\d{1,3}[.)])\s/;
 
 /**

@@ -210,3 +210,18 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(Object.keys(ContextPackRunDeltaSchema.shape).sort()).toEqual(Object.keys(RunDeltaSchema.innerType().shape).filter(k => !omitted.has(k)).sort());
   });
 });
+
+describe('saved Runs from before #2786 (Codex r4 on #2783)', () => {
+  it('the retired "(see its downside)" note is read as the short words; any other text still drops the map', async () => {
+    const { goalChanceLicenceForAgent: forAgent } = await import('../goal-chance-licence.js');
+    const g = graph();
+    const result = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, delta) as Json;
+    const rec = result.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
+    const id = Object.keys(rec.spread_note_by_option ?? {})[0];
+    expect(id, 'control: the fixture licenses a spread note').toBeDefined();
+    rec.spread_note_by_option = { [id!]: 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).' };
+    expect(forAgent(result)?.spread_note_by_option).toEqual({ [id!]: SPREAD_NOTE_WITHOUT_DOWNSIDE });
+    rec.spread_note_by_option = { [id!]: 'Its spread is wide.' };
+    expect(forAgent(result)?.spread_note_by_option).toBeUndefined();
+  });
+});
