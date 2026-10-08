@@ -13,6 +13,17 @@ import { goalKindOf, rateUnitInPercent } from '../goal-kind.js';
 import { readStatedGoalLevel } from '../../agent-lane/goal-current-level.js';
 import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 
+// Register every expected-chance corpus row for the fail-safe invariant below; keep the original table assertions too.
+const chanceCorpus: { label?: string; goal_threshold_unit: string }[] = [];
+const chanceTexts = <T extends readonly (string | readonly [string, number])[]>(rows: T): T => {
+  chanceCorpus.push(...rows.map((row) => ({ goal_threshold_unit: typeof row === 'string' ? row : row[0] })));
+  return rows;
+};
+const chanceGoals = <T extends readonly (readonly [string, string])[]>(rows: T): T => {
+  chanceCorpus.push(...rows.map(([label, unit]) => ({ label, goal_threshold_unit: unit })));
+  return rows;
+};
+
 describe('Science (b) rows: a rate is a quantity, a one-off event stays a chance', () => {
   it.each([
     ['churn probability', 2],
@@ -24,11 +35,11 @@ describe('Science (b) rows: a rate is a quantity, a one-off event stays a chance
     expect(readRateAsQuantity(text)).toEqual({ kind: 'quantity', rule });
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: text })).toBe('level');
   });
-  it.each([
+  it.each(chanceTexts([
     ['probability we hit the launch date', 3],
     ['chance of winning the Acme contract', 3],
     ['probability the hire works out', 3],
-  ] as const)('CHANCE twin: %s (rule %i)', (text, rule) => {
+  ] as const))('CHANCE twin: %s (rule %i)', (text, rule) => {
     expect(readRateAsQuantity(text)).toEqual({ kind: 'chance', rule });
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: text })).toBe('chance_of_event');
   });
@@ -52,7 +63,7 @@ describe('the goal’s label is read with its unit (the drafter often writes the
     expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe('level');
   });
   // SERVED: every distinct goal pair from the captured corpus (counts in comments).
-  it.each([
+  it.each(chanceGoals([
     ['ship the new platform by Q3', 'probability of shipping by Q3 (%)'], // 17
     ['Ship the new platform by Q3', 'probability (%)'], // 14
     ['ship the new platform by Q3', 'probability (%)'], // 11
@@ -66,18 +77,18 @@ describe('the goal’s label is read with its unit (the drafter often writes the
     ['ship the new platform by Q3', '% likelihood of shipment'], // 1
     ['meet our next feature-launch deadline', '% on-time probability'], // 1 (Paul's 6582edbc shape)
     ['New platform shipped by Q3', 'probability (0–1)'], // 1
-  ])('SERVED CHANCE stays a chance: %s measured in %s', (label, unit) => {
+  ] as const))('SERVED CHANCE stays a chance: %s measured in %s', (label, unit) => {
     expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe('chance_of_event');
   });
 });
 
 describe('Codex buddy r1 (#2780 @ 7ddad08b): event timing and everyday words never make a one-off event a rate', () => {
-  it.each([
+  it.each(chanceGoals([
     ['Launch a month from now', 'probability (%)'],
     ['Probability we win the open tender', 'probability (%)'],
     ['Return the deposit by Friday', 'probability (%)'],
     ['Default supplier delivers on time', 'probability (%)'],
-  ])('CHANCE: %s measured in %s', (label, unit) => {
+  ] as const))('CHANCE: %s measured in %s', (label, unit) => {
     expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe('chance_of_event');
   });
   it.each([
@@ -101,7 +112,7 @@ describe('Codex buddy r1 (#2780 @ 7ddad08b): event timing and everyday words nev
 });
 
 describe('review r1: subjects and denominators are read within each segment, in Science (b) order', () => {
-  it.each([
+  it.each(chanceTexts([
     'chance we meet the churn target by Friday',
     'probability the open tender succeeds',
     'probability that the conversion target succeeds',
@@ -111,7 +122,7 @@ describe('review r1: subjects and denominators are read within each segment, in 
     'probability the annual tender succeeds',
     'probability the customer experiences churn',
     'probability the plan limits churn',
-  ])('an event remains a chance: %s', (text) => {
+  ]))('an event remains a chance: %s', (text) => {
     expect(readRateAsQuantity(text)).toEqual({ kind: 'chance', rule: 3 });
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: text })).toBe('chance_of_event');
   });
@@ -119,7 +130,7 @@ describe('review r1: subjects and denominators are read within each segment, in 
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: 'probability', label: 'Return the deposit by Friday' })).toBe('chance_of_event');
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: 'probability of', label: 'Return the deposit by Friday' })).toBe('chance_of_event');
   });
-  it.each(['probability of a plan to cut churn', 'probability of return of the deposit', 'probability of open tender success'])(
+  it.each(chanceTexts(['probability of a plan to cut churn', 'probability of return of the deposit', 'probability of open tender success']))(
     'a population word in an event is not its subject: %s', (text) => {
       expect(readRateAsQuantity(text).kind).toBe('chance');
     });
@@ -131,7 +142,7 @@ describe('review r1: subjects and denominators are read within each segment, in 
     expect(readRateAsQuantity(text).kind).toBe('chance');
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: 'probability', label: text })).toBe('chance_of_event');
   });
-  it.each(['The supplier defaults', 'The tender opens', 'The supplier churns'])(
+  it.each(chanceGoals(['The supplier defaults', 'The tender opens', 'The supplier churns'].map((label) => [label, 'probability'] as const)))(
     'a label’s verb is not a population subject: %s', (label) => {
       expect(goalKindOf({ kind: 'goal', goal_threshold_unit: 'probability', label })).toBe('chance_of_event');
     });
@@ -191,6 +202,60 @@ describe('Codex buddy r2 (#2780 @ c0c84cfa): date offsets, subject-bound members
     ['Customer returns', 'probability (%)', 'level'],
   ])('%s measured in %s → %s', (label, unit, kind) => {
     expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe(kind);
+  });
+});
+
+describe('DL-approved r2 class: a non-period denominator cannot turn an event clause into a quantity', () => {
+  it.each(chanceTexts([
+    'chance the launch slips per management', // RED before: unsafe level (r2 @ f79abcc6).
+    'probability the open tender succeeds per bid',
+    'probability a customer churns per transaction',
+    'probability that a loan defaults per loan',
+    'chance we meet the churn target for each bid',
+    'likelihood the supplier fails every transaction',
+    'chance the teams win per management',
+    'chance the launch went wrong per management',
+    'probability suppliers fail per management',
+    'probability of success if the launch slips per management',
+  ]))('CHANCE (rule 3): %s', (text) => {
+    expect(readRateAsQuantity(text)).toEqual({ kind: 'chance', rule: 3 });
+    expect(goalKindOf({ kind: 'goal', goal_threshold_unit: text })).toBe('chance_of_event');
+  });
+  it.each([
+    'probability a customer churns per month',
+    'probability that a loan defaults per year',
+    'chance the launch slips each month',
+    'chance the launch slips for each year',
+    'probability of repayment per loan',
+    'probability of a failed payment per transaction',
+    'chance of winning per bid',
+    'probability of a breach per year',
+    'conversion probability per visitor',
+    'probability per loan applications',
+    'chance per high risk loans',
+  ])('QUANTITY (rule 1): %s', (text) => {
+    expect(readRateAsQuantity(text)).toEqual({ kind: 'quantity', rule: 1 });
+    expect(goalKindOf({ kind: 'goal', goal_threshold_unit: text })).toBe('level');
+  });
+  it('FAIL-SAFE: every corpus row expected to be a chance stays a chance', () => {
+    const otherChanceRows = [
+      { goal_threshold_unit: 'probability (%)' },
+      { goal_threshold_unit: 'probability the migration finishes within a month' },
+      { label: `churn ${'x'.repeat(1_000_000)}`, goal_threshold_unit: 'probability (%)' },
+      { label: 'Return the deposit by Friday', goal_threshold_unit: 'probability' },
+      { label: 'Return the deposit by Friday', goal_threshold_unit: 'probability of' },
+      { goal_threshold_unit: 'probability per' },
+      { label: 'probability monthly revenue reaches target', goal_threshold_unit: 'probability' },
+      { label: 'Return the deposit by Friday', goal_threshold_unit: 'probability of the customer' },
+      { label: 'Launch a month after the funding round', goal_threshold_unit: 'probability (%)' },
+      { label: 'Return the customer deposit by Friday', goal_threshold_unit: 'probability (%)' },
+    ];
+    for (const goal of [...chanceCorpus, ...otherChanceRows]) {
+      expect(readRateAsQuantity(goal.goal_threshold_unit).kind, goal.goal_threshold_unit).toBe('chance');
+      expect(goalKindOf({ kind: 'goal', ...goal }), JSON.stringify(goal).slice(0, 200)).toBe('chance_of_event');
+    }
+    // This row asserts only the reader's bound; an over-long unit is not admitted by unitNamesAChance.
+    expect(readRateAsQuantity(`churn probability${' '.repeat(400)}`).kind).toBe('chance');
   });
 });
 

@@ -5,7 +5,8 @@
  * "churn probability" and "conversion probability per visitor" are a level the options move and a goal can be set on
  * ("keep churn below 3% a month"). "chance we win the Acme contract" is ONE event's chance, which Olumi computes.
  * The ruling's test, applied in order (the first rule that fires decides; nothing else is read):
- *  1. a per-unit or per-period marker → quantity ("per month", "monthly", "a month", "per customer", "% of users", "rate");
+ *  1. a per-period marker → quantity; a per-other-noun marker needs NO event clause in this segment (DL r2).
+ *     "per month" wins even over a clause; "per management" cannot turn "the launch slips" into a quantity.
  *  2. a population noun (churn, conversion, retention, default, click-through, open, response, return, attrition) → quantity;
  *  3. a one-off event or decision (win, launch, deal, approval, hire, contract, deadline, "on time", "by <date>",
  *     "succeed", "happen") → chance;
@@ -42,6 +43,44 @@ const DATE_AFTER = new Set(['from', 'away', 'later', 'ago', 'out', 'time', 'afte
 const CLAUSE_SUBJECT = new Set(['we', 'i', 'you', 'they', 'it', 'that']);
 const DETERMINER = new Set(['a', 'an', 'the', 'our', 'my', 'their', 'your']);
 const LEVEL_QUALIFIER = new Set(['below', 'above', 'under', 'over', 'at', 'less', 'more']);
+const FINITE_AUXILIARY = new Set(['is', 'are', 'was', 'were', 'am', 'has', 'have', 'had', 'do', 'does', 'did',
+  'can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would']);
+const FINITE_PREDICATE = new Set(['win', 'won', 'meet', 'met', 'hit', 'slip', 'fail', 'succeed', 'happen', 'work',
+  'go', 'went', 'come', 'came', 'take', 'took', 'make', 'made', 'get', 'got', 'lose', 'lost', 'fall', 'fell',
+  'rise', 'rose', 'churn', 'convert', 'default', 'return', 'respond', 'deliver', 'finish', 'reach', 'miss']);
+const PERSONAL_SUBJECT = new Set(['we', 'i', 'you', 'they', 'it', 'he', 'she']);
+const CLAUSE_START = new Set(['that', 'if', 'whether', 'when']);
+
+/**
+ * A subject + finite verb AFTER the chance measure makes a non-period denominator ambiguous (DL-approved r2).
+ * Nominal "of winning" / "of a failed payment" is not a finite clause; a complementiser opens one.
+ * Plural "chances" counts opportunities ("chances the team creates per match"), not an event's probability.
+ * One linear scan, within the same bounded segment as all other rules.
+ */
+function eventClause(ws: readonly string[]): boolean {
+  const chance = ws.findIndex((w) => CHANCE.has(w) && w !== 'chances');
+  if (chance < 0) return false;
+  let nominal = false; let subject = false; let personal = false;
+  for (let i = chance + 1; i < ws.length; i++) {
+    const w = ws[i]!;
+    if (w === '|') break;
+    if (CLAUSE_START.has(w)) { nominal = false; subject = false; personal = false; continue; }
+    if (w === 'of' || w === 'to') { nominal = true; subject = false; personal = false; continue; }
+    if (nominal) continue;
+    // A denominator's noun phrase is nominal too ("per loan applications"), until an explicit clause opens.
+    if (w === 'per' || w === 'for' || w === 'each' || w === 'every') {
+      nominal = true; subject = false; personal = false; continue;
+    }
+    if (DETERMINER.has(w)) { subject = false; personal = false; continue; }
+    if (PERSONAL_SUBJECT.has(w)) { subject = true; personal = true; continue; }
+    if (w === 'not' || w.endsWith('ly') || w === '%') continue;
+    // A finite auxiliary, inflected predicate, or a pronoun's base-form predicate ("we meet") follows its subject.
+    // A past participle before the subject ("a failed payment") never reaches this arm.
+    if (subject && (FINITE_AUXILIARY.has(w) || FINITE_PREDICATE.has(w) || w.endsWith('s') || w.endsWith('ed') || personal)) return true;
+    subject = true;
+  }
+  return false;
+}
 
 function wordsOf(text: string): string[] {
   const words: string[] = []; let word = '';
@@ -94,17 +133,18 @@ function populationSubject(ws: readonly string[]): boolean {
   return false;
 }
 
-/** Rule 1: a per-unit or per-period marker. */
-function perMarker(ws: readonly string[], population: boolean): boolean {
+/** Rule 1: periods win; other denominators require no event clause. */
+function perMarker(ws: readonly string[], population: boolean, clause: boolean): boolean {
   const nounAfter = (i: number): boolean => {
     const w = ws[i];
     return w !== undefined && w !== '|' && w[0]! >= 'a' && w[0]! <= 'z' && !DETERMINER.has(w) && !CLAUSE_SUBJECT.has(w);
   };
+  const denominator = (i: number): boolean => nounAfter(i) && (isPeriod(ws[i]) || !clause);
   return ws.some((w, i) => w === 'rate' || w === 'rates'
     || (isPeriodWord(w) && (population || CHANCE.has(ws[i + 1] ?? '') || (CHANCE.has(ws[i - 1] ?? '') && i + 1 === ws.length)))
-    || (w === 'per' && nounAfter(i + 1))
-    || (w === 'for' && ws[i + 1] === 'each' && nounAfter(i + 2))
-    || ((w === 'each' || w === 'every') && nounAfter(i + 1) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
+    || (w === 'per' && denominator(i + 1))
+    || (w === 'for' && ws[i + 1] === 'each' && denominator(i + 2))
+    || ((w === 'each' || w === 'every') && denominator(i + 1) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
     || ((w === 'a' || w === 'an') && isPeriod(ws[i + 1]) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
     || (w === '%' && ws[i + 1] === 'of' && MEMBERS.has(ws[i + 2] ?? '')));
 }
@@ -122,8 +162,9 @@ export function readRateAsQuantity(text: string): RateReading {
   if (text.length > 400) return { kind: 'chance', rule: 4 };
   const ws = wordsOf(text);
   const population = populationSubject(ws);
-  if (perMarker(ws, population)) return { kind: 'quantity', rule: 1 };
+  const clause = eventClause(ws);
+  if (perMarker(ws, population, clause)) return { kind: 'quantity', rule: 1 };
   if (population) return { kind: 'quantity', rule: 2 };
-  if (oneOffEvent(ws)) return { kind: 'chance', rule: 3 };
+  if (clause || oneOffEvent(ws)) return { kind: 'chance', rule: 3 };
   return { kind: 'chance', rule: 4 };
 }
