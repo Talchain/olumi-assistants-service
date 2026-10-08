@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts (11 tests | 1 failed | 10 skipped) 62ms
+     × F r1 #6: price → MRR and independent developer departure → MRR are 2 relationships, 1 likelihood 41ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > F r1 #6: price → MRR and independent developer departure → MRR are 2 relationships, 1 likelihood
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:72:75
+     70|   it('F r1 #6: price → MRR and independent developer departure → MRR a…
+     71|     const graph = model();
+     72|     expect(goalChanceEstimateLinkCount(graph, ['raise', 'keep'], 'goal…
+       |                                                                           ^
+     73|     expect(goalChanceLicenceOf(envelope, graph, 'goal')).toMatchObject…
+     74|       olumi_estimate_link_count: 2, olumi_estimate_likelihood_count: 1,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  15:26:16
+   Duration  17.08s (transform 13.05s, setup 253ms, import 16.43s, tests 62ms, environment 0ms)
+

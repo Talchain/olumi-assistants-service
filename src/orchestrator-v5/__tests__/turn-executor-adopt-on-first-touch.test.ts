@@ -31,6 +31,9 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { GraphV3 } from '../../schemas/cee-v3.js';
+import { parseRequestExtensions } from '../boundary/request-extensions.js';
+import { goalChanceEstimateLikelihoods } from '../agent-lane/goal-chance-estimate-attribution.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -178,6 +181,63 @@ beforeEach(() => {
 
 afterEach(() => {
   setTestSink(null);
+});
+
+describe('FIX-2 C: first-touch client graph cannot author an Olumi event warrant', () => {
+  const clientGraph = () => {
+    const graph = clone(ECHO_GRAPH_STATE) as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+    graph.nodes.push({
+      id: 'risk_key_developer', kind: 'risk', label: 'Key developer departure',
+      event_risk: { version: 1, occurrence: { p_low: 0.05, p_high: 0.18, basis: 'olumi' }, horizon: { months: 12 } },
+      event_risk_basis_text: 'Invented reference class',
+    });
+    graph.edges.push({ from: 'risk_key_developer', to: 'goal_q3_delivery', strength: { mean: -0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' });
+    return graph;
+  };
+
+  it('r1 #4: request extension ingress strips invented basis before any first-touch or edit consumer', () => {
+    const graph = clientGraph();
+    const parsed = parseRequestExtensions({ graph_state: graph }, 'fix2-client-event-warrant');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('Expected valid graph_state');
+    const risk = parsed.value.graphState?.nodes.find(n => n.id === 'risk_key_developer');
+    expect(risk?.event_risk).toEqual(graph.nodes.at(-1)?.event_risk);
+    expect(risk?.event_risk_basis_text).toBeUndefined();
+    expect(graph.nodes.at(-1)?.event_risk_basis_text).toBe('Invented reference class');
+  });
+
+  it('strips client warrant text on an options mirror as well as nodes', () => {
+    const graph = { ...clientGraph(), options: [{ id: 'opt_hire_local', label: 'Hire Two Senior Engineers Locally', event_risk_basis_text: 'Invented mirror reference class' }] };
+    const parsed = parseRequestExtensions({ graph_state: graph }, 'fix2-client-event-mirror');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('Expected valid graph_state');
+    expect((parsed.value.graphState?.options?.[0] as Record<string, unknown>).event_risk_basis_text).toBeUndefined();
+    expect(graph.options[0]?.event_risk_basis_text).toBe('Invented mirror reference class');
+  });
+
+  it('r1 #4: the production path (request parser, then executor first-touch) never persists or shows an invented basis', async () => {
+    const graph = clientGraph();
+    // One strip point: route-v2 hands the executor `extensions.graphState` from parseRequestExtensions (preflight).
+    const parsed = parseRequestExtensions({ graph_state: graph }, 'fix2-first-touch-basis');
+    if (!parsed.ok) throw new Error('Expected valid graph_state');
+    await runTurnExecutor(payload('any thoughts?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaac04'), 'req-fix2-first-touch-basis', {
+      routingAdapter: textRoutingAdapter('Here is what I see.'), graphState: parsed.value.graphState as never,
+    });
+    expect(appendCalls).toHaveLength(1);
+    const persisted = currentPersistedGraph as { nodes: Record<string, unknown>[] };
+    const risk = persisted.nodes.find(n => n.id === 'risk_key_developer');
+    expect(risk?.event_risk).toEqual(graph.nodes.at(-1)?.event_risk);
+    expect(risk?.event_risk_basis_text).toBeUndefined();
+    expect(JSON.stringify(goalChanceEstimateLikelihoods(persisted))).not.toContain('Invented reference class');
+    expect(graph.nodes.at(-1)?.event_risk_basis_text).toBe('Invented reference class');
+  });
+
+  it('CONTROL: stored graph read schema retains a CEE warrant', () => {
+    const graph = clientGraph();
+    graph.nodes.at(-1)!.event_risk_basis_text = 'Stored CEE staff-turnover reference class';
+    const parsed = GraphV3.parse(graph);
+    expect(parsed.nodes.find(n => n.id === 'risk_key_developer')?.event_risk_basis_text).toBe('Stored CEE staff-turnover reference class');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,13 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+impact-pct timing whitespace readStatedEventRisk: small 6.58 ms -> large 61.67 ms (x497): 9.37x; per-call 20k 0.124 ms
+impact-pct timing whitespace readStatedLikelihoodWithoutWindow: small 6.76 ms -> large 59.58 ms (x556): 8.82x; per-call 20k 0.107 ms
+impact-pct timing by-percent readStatedEventRisk: small 7.26 ms -> large 56.24 ms (x31): 7.75x; per-call 20k 1.814 ms
+impact-pct timing by-percent readStatedLikelihoodWithoutWindow: small 4.76 ms -> large 47.94 ms (x27): 10.08x; per-call 20k 1.776 ms
+
+ Test Files  2 passed (2)
+      Tests  355 passed (355)
+   Start at  15:42:36
+   Duration  12.14s (transform 1.75s, setup 135ms, import 2.23s, tests 9.52s, environment 0ms)
+

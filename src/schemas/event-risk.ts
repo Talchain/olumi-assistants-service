@@ -76,6 +76,19 @@ export const EventRiskV1 = z
   );
 export type EventRiskV1T = z.infer<typeof EventRiskV1>;
 
+/** A readable warrant belongs only to a valid Olumi occurrence on a risk node. */
+export function readOlumiEventRiskBasisText(node: {
+  readonly kind?: unknown;
+  readonly event_risk?: unknown;
+  readonly event_risk_basis_text?: unknown;
+}): string | undefined {
+  if (node.kind !== 'risk' || typeof node.event_risk_basis_text !== 'string') return undefined;
+  const occurrence = EventRiskV1.safeParse(node.event_risk);
+  if (!occurrence.success || occurrence.data.occurrence.basis !== 'olumi') return undefined;
+  const text = node.event_risk_basis_text.trim();
+  return text === '' ? undefined : text;
+}
+
 export interface EventRiskIssue {
   readonly node_id: string;
   readonly path: string;

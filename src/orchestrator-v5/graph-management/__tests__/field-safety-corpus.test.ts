@@ -83,6 +83,7 @@ function addNode(screened: Record<string, unknown>) {
 const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
   // event_risk.v1 slice 2a: pipeline-owned occurrence.
   'event_risk',
+  'event_risk_basis_text',
   'relies_on', // RC3: server-authored precondition stamp.
   // src/schemas/cee-v3.ts — NodeV3
   'provenance',
@@ -391,5 +392,14 @@ describe('event_risk.v1 slice 2a — field safety', () => {
     expect(PIPELINE_OWNED_ROOTS.has('event_risk')).toBe(true);
     expect(nodeUpdate('event_risk', block).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
     expect(addNode({ event_risk: block }).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+  });
+
+  it('FIX-1: edit_graph/patch cannot author an Olumi occurrence basis sidecar', () => {
+    expect(PIPELINE_OWNED_ROOTS.has('event_risk_basis_text')).toBe(true);
+    expect(nodeUpdate('event_risk_basis_text', 'A fabricated reference class').blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+    expect(nodeUpdate('observed_state', { value: 0.3, event_risk_basis_text: 'Nested fabricated basis' }).blocker?.code)
+      .toBe(PIPELINE_OWNED_FIELD);
+    expect(addNode({ event_risk_basis_text: 'A fabricated reference class' }).blocker?.code)
+      .toBe(PIPELINE_OWNED_FIELD);
   });
 });

@@ -1,0 +1,44 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts (7 tests | 1 failed) 76ms
+     × two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "user",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.2,
+    "p_low": 0.2,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:31:37
+     29|   it('two figures in one comma fragment cannot bind an unmodelled even…
+     30|     const result = admit(candidate(), `${LABEL}: probably 10% and Supp…
+     31|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     32|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     33|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 29 passed (30)
+   Start at  15:41:00
+   Duration  2.29s (transform 1.15s, setup 129ms, import 1.74s, tests 191ms, environment 0ms)
+

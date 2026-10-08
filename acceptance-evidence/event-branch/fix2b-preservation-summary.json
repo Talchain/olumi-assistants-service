@@ -1,0 +1,39 @@
+{
+  "head": "5f54ca8740095fb744ab1f2717a886fc5e3f5c66",
+  "branch": "dl/event-risk-olumi-occurrence",
+  "existing_non_owned_files_unchanged": 93,
+  "protected_files_unchanged": [
+    "src/orchestrator-v5/turn-executor.ts",
+    "tests/unit/contracts/controlled-factor-authority.guard.test.ts",
+    "tests/unit/contracts/controlled-factor-authority.scan.ts"
+  ],
+  "head_branch_index_unchanged": true,
+  "no_supabase_changes": true,
+  "incremental_typescript_files": [
+    "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "src/orchestrator-v5/agent-lane/admit-model.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts"
+  ],
+  "source_sha256": {
+    "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts": "3efc08072aec5982fedded2992417a034e36c2eeade365fa6f1cee27ebf7ca64",
+    "src/orchestrator-v5/agent-lane/admit-model.ts": "b17eb572af143f48769e17effee39755764954f18b035a35b14ef553efd9a341",
+    "src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts": "5268eae5a27065bf2b0484d9247d4b644f2fa2939006e42c34c32b0762319761"
+  },
+  "final_diff_check_passed": true,
+  "report": "acceptance-evidence/event-branch/REPORT-FIX2b.md",
+  "incremental_artifacts": [
+    "acceptance-evidence/event-branch/REPORT-FIX2b.md",
+    "acceptance-evidence/event-branch/fix2b-changed-files.json",
+    "acceptance-evidence/event-branch/fix2b-eslint-summary.json",
+    "acceptance-evidence/event-branch/fix2b-eslint.log",
+    "acceptance-evidence/event-branch/fix2b-green.log",
+    "acceptance-evidence/event-branch/fix2b-incremental.patch",
+    "acceptance-evidence/event-branch/fix2b-mutant-no-log.log",
+    "acceptance-evidence/event-branch/fix2b-mutant-summary.json",
+    "acceptance-evidence/event-branch/fix2b-preservation-summary.json",
+    "acceptance-evidence/event-branch/fix2b-red.log",
+    "acceptance-evidence/event-branch/fix2b-restored-green.log",
+    "acceptance-evidence/event-branch/fix2b-tsc-full.log",
+    "acceptance-evidence/event-branch/fix2b-tsc-summary.json"
+  ]
+}

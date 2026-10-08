@@ -1,0 +1,46 @@
+Mutant: horizon-mismatch-admitted
+Command: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t "r1 #5" < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts (4 tests | 1 failed | 3 skipped) 69ms
+     × r1 #5: a three-month estimate stays a placeholder beside a stated twelve-month goal 67ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts > FIX-2 D: the goal horizon governs Olumi event occurrences > r1 #5: a three-month estimate stays a placeholder beside a stated twelve-month goal
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 3,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts:29:29
+     27|   it('r1 #5: a three-month estimate stays a placeholder beside a state…
+     28|     const { result, risk } = admit(12, 3);
+     29|     expect(risk.event_risk).toBeUndefined();
+       |                             ^
+     30|     expect(risk.event_risk_basis_text).toBeUndefined();
+     31|     expect(result.loss.some(entry => /3.*12|12.*3/.test(entry.reason) …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  15:30:46
+   Duration  4.78s (transform 3.44s, setup 229ms, import 4.28s, tests 69ms, environment 0ms)
+

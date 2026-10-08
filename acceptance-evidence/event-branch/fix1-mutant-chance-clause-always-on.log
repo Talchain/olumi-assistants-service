@@ -1,0 +1,28 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (44 tests | 1 failed | 43 skipped) 53ms
+     × 5b50b4c8 hedge drops with the exact interim sentence and no auto-apply 52ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > 5b50b4c8 hedge drops with the exact interim sentence and no auto-apply
+AssertionError: expected [ …(8) ] to include 'You said ‘Key developer departure: pr…'
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:76:44
+     74|     expect(risk(result).event_risk).toBeUndefined();
+     75|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+     76|     expect(result.loss.map(l => l.reason)).toContain("You said ‘Key de…
+       |                                            ^
+     77|     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).…
+     78|     expect(result.loss.some(l => /so the chance doesn't include this r…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 43 skipped (44)
+   Start at  14:45:24
+   Duration  2.40s (transform 1.58s, setup 127ms, import 2.10s, tests 53ms, environment 0ms)
+

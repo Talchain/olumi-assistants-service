@@ -1,0 +1,15 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+impact-pct timing whitespace readStatedEventRisk: small 6.10 ms -> large 55.11 ms (x464): 9.03x; per-call 20k 0.119 ms
+impact-pct timing whitespace readStatedLikelihoodWithoutWindow: small 6.61 ms -> large 62.02 ms (x546): 9.39x; per-call 20k 0.114 ms
+impact-pct timing by-percent readStatedEventRisk: small 5.59 ms -> large 57.60 ms (x32): 10.30x; per-call 20k 1.800 ms
+impact-pct timing by-percent readStatedLikelihoodWithoutWindow: small 6.16 ms -> large 62.13 ms (x35): 10.09x; per-call 20k 1.775 ms
+
+ Test Files  2 passed (2)
+      Tests  408 passed (408)
+   Start at  14:21:04
+   Duration  10.12s (transform 227ms, setup 134ms, import 241ms, tests 9.52s, environment 0ms)
+

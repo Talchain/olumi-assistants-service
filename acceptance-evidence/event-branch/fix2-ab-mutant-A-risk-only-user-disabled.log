@@ -1,0 +1,120 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (23 tests | 4 failed) 127ms
+     × r1 #1 exact: lexical leave/departure binds a risk-only user 10% / six months over drafted 90% / twelve 58ms
+     × a signed explicit +10% uses the existing reader for a risk-only user likelihood 14ms
+     × reads each event/figure separately when both risks are modelled 2ms
+     × reuses cancellation lexical equivalence for risk-only user likelihood 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #1 exact: lexical leave/departure binds a risk-only user 10% / six months over drafted 90% / twelve
+AssertionError: expected undefined to match object { …(2) }
+
+- Expected:
+{
+  "horizon": {
+    "months": 6,
+  },
+  "occurrence": {
+    "basis": "user",
+    "p_high": 0.1,
+    "p_low": 0.1,
+  },
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:32:37
+     30|   it('r1 #1 exact: lexical leave/departure binds a risk-only user 10% …
+     31|     const result = admit(draft(), 'The key developer has a 10% chance …
+     32|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     33|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     34|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > a signed explicit +10% uses the existing reader for a risk-only user likelihood
+AssertionError: expected undefined to match object { …(2) }
+
+- Expected:
+{
+  "horizon": {
+    "months": 6,
+  },
+  "occurrence": {
+    "basis": "user",
+    "p_high": 0.1,
+    "p_low": 0.1,
+  },
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:37:37
+     35|   it('a signed explicit +10% uses the existing reader for a risk-only …
+     36|     const result = admit(draft(), 'The key developer has a +10% chance…
+     37|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     38|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     39|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > reads each event/figure separately when both risks are modelled
+AssertionError: expected undefined to match object { …(2) }
+
+- Expected:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "user",
+    "p_high": 0.2,
+    "p_low": 0.2,
+  },
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:77:47
+     75|       `${LABEL}: probably 10% within 6 months, Supplier outage has a 2…
+     76|     expect(risk(result).event_risk).toBeUndefined();
+     77|     expect(risk(result, supplier).event_risk).toMatchObject({ occurren…
+       |                                               ^
+     78|   });
+     79|   it('reuses cancellation lexical equivalence for risk-only user likel…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > reuses cancellation lexical equivalence for risk-only user likelihood
+AssertionError: expected undefined to be 'user' // Object.is equality
+
+- Expected:
+"user"
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:84:62
+     82|     const result = admit({ ...c, risks: [{ ...c.risks[0]!, label }], l…
+     83|       'The largest client has a 10% chance it cancels within 6 months.…
+     84|     expect(risk(result, label).event_risk?.occurrence.basis).toBe('use…
+       |                                                              ^
+     85|   });
+     86|   it('ambiguous event name binding under-claims', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  4 failed | 26 passed (30)
+   Start at  15:40:28
+   Duration  2.52s (transform 1.23s, setup 141ms, import 1.91s, tests 214ms, environment 0ms)
+

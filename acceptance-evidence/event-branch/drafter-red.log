@@ -1,0 +1,101 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts (5 tests | 5 failed) 45ms
+     × accepts occurrence on a risk and preserves legacy recordings without one 28ms
+     × strict output requires the occurrence key while null says this risk has no event likelihood 2ms
+     × allows percentages only from 0 to 100 and requires the complete event estimate 12ms
+     × puts the agreed instruction directly after the unchanged user-risk floor, exactly once 1ms
+     × restricts the occurrence carrier to discrete risks, leaving outcomes and P44 links alone 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts > discrete event drafter contract > accepts occurrence on a risk and preserves legacy recordings without one
+AssertionError: [{"instancePath":"","schemaPath":"#/additionalProperties","keyword":"additionalProperties","params":{"additionalProperty":"occurrence"},"message":"must NOT have additional properties"}]: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts:23:80
+     21|     const validate = new Ajv({ strict: false }).compile(riskSchema());
+     22|     expect(validate(risk), JSON.stringify(validate.errors)).toBe(true);
+     23|     expect(validate({ ...risk, occurrence }), JSON.stringify(validate.…
+       |                                                                                ^
+     24|     expect(validate({ ...risk, occurrence: null }), JSON.stringify(val…
+     25|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts > discrete event drafter contract > strict output requires the occurrence key while null says this risk has no event likelihood
+AssertionError: expected [ 'label', 'provenance', 'unit', …(1) ] to include 'occurrence'
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts:29:29
+     27|   it('strict output requires the occurrence key while null says this r…
+     28|     const schema = riskSchema(true);
+     29|     expect(schema.required).toContain('occurrence');
+       |                             ^
+     30|     const validate = new Ajv({ strict: false }).compile(schema);
+     31|     const framed = { ...risk, unit: null, plausible_max: null };
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts > discrete event drafter contract > allows percentages only from 0 to 100 and requires the complete event estimate
+AssertionError: [{"instancePath":"","schemaPath":"#/additionalProperties","keyword":"additionalProperties","params":{"additionalProperty":"occurrence"},"message":"must NOT have additional properties"}]: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts:39:80
+     37|   it('allows percentages only from 0 to 100 and requires the complete …
+     38|     const validate = new Ajv({ strict: false }).compile(riskSchema());
+     39|     expect(validate({ ...risk, occurrence }), JSON.stringify(validate.…
+       |                                                                                ^
+     40|     for (const invalid of [
+     41|       { ...occurrence, p_low_pct: -1 },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts > discrete event drafter contract > puts the agreed instruction directly after the unchanged user-risk floor, exactly once
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts:52:90
+     50|     const at = BUILD_INSTRUCTIONS.indexOf(userFloor);
+     51|     expect(at).toBeGreaterThanOrEqual(0);
+     52|     expect(BUILD_INSTRUCTIONS.slice(at + userFloor.length).startsWith(…
+       |                                                                                          ^
+     53|     expect(BUILD_INSTRUCTIONS.split(exactInstruction)).toHaveLength(2);
+     54|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts > discrete event drafter contract > restricts the occurrence carrier to discrete risks, leaving outcomes and P44 links alone
+TypeError: .toMatch() expects to receive a string, but got undefined
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts:59:34
+     57|     const schema = buildCandidateSchema() as CandidateSchema;
+     58|     const carrier = schema.properties.risks.items.properties.occurrenc…
+     59|     expect(carrier?.description).toMatch(/discrete.*event/i);
+       |                                  ^
+     60|     expect(schema.properties.outcomes.items.properties).not.toHaveProp…
+     61|     expect(schema.properties.links.items.properties).not.toHavePropert…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed (5)
+   Start at  13:57:40
+   Duration  2.40s (transform 1.62s, setup 133ms, import 2.08s, tests 45ms, environment 0ms)
+

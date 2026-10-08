@@ -1,0 +1,6 @@
+{
+  "eslint_exit_code": 0,
+  "files_submitted": 95,
+  "typescript_files": 22,
+  "non_code_files": "No ESLint configuration applies to Markdown, logs, JSON or Python; --no-warn-ignored suppresses ignored-file notices."
+}

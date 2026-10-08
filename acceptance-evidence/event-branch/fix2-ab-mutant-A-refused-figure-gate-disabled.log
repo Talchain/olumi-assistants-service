@@ -1,0 +1,283 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (23 tests | 11 failed) 130ms
+     × a refused signed percentage -10% never permits an Olumi occurrence 8ms
+     × a refused signed percentage −10% never permits an Olumi occurrence 23ms
+     × duplicate probability factors cannot call a hedged user figure Olumi-drafted 2ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true 2ms
+     × any refused user figure 15% blocks a different drafted factor and occurrence 1ms
+     × any refused user figure 110% blocks a different drafted factor and occurrence 1ms
+     × any refused user figure 10.5% blocks a different drafted factor and occurrence 2ms
+     × any refused user figure 0.15 blocks a different drafted factor and occurrence 1ms
+     × any refused user figure .15 blocks a different drafted factor and occurrence 3ms
+     × reads each event/figure separately when both risks are modelled 3ms
+     × ambiguous event name binding under-claims 2ms
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts (7 tests | 4 failed) 90ms
+     × comma context with refused phrase estimated retains the user figure without Olumi occurrence 54ms
+     × comma context with refused phrase at most retains the user figure without Olumi occurrence 19ms
+     × two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk 8ms
+     × an ambiguous probability factor quotes the user figure without assigning it to either risk 3ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > a refused signed percentage -10% never permits an Olumi occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > a refused signed percentage −10% never permits an Olumi occurrence
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:42:37
+     40|   it.each(['-10%', '−10%'])('a refused signed percentage %s never perm…
+     41|     const result = admit(draft(), `${LABEL}: probably ${figure} within…
+     42|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     43|     expect(result.loss.some(l => /You said/.test(l.reason))).toBe(true…
+     44|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > duplicate probability factors cannot call a hedged user figure Olumi-drafted
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:49:37
+     47|     const result = admit({ ...c, factors: [...c.factors, { ...c.factor…
+     48|       `${LABEL}: probably 10% within 6 months.`);
+     49|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     50|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     51|     expect(result.loss.some(l => /You said/.test(l.reason))).toBe(true…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:58:37
+     56|     const withDraft = { ...c, risks: [{ ...c.risks[0]!, occurrence: { …
+     57|     const result = admit(withDraft, 'Key developer departure: probably…
+     58|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     59|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     60|     expect(result.loss.some(l => /You said.*probably 10% within 6 mont…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 15% blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 110% blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 10.5% blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 0.15 blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure .15 blocks a different drafted factor and occurrence
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:65:37
+     63|   it.each(['15%', '110%', '10.5%', '0.15', '.15'])('any refused user f…
+     64|     const result = admit(factor(draft()), `${LABEL}: probably ${figure…
+     65|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     66|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     67|     expect(result.loss.some(l => /You said/.test(l.reason))).toBe(true…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > reads each event/figure separately when both risks are modelled
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:76:37
+     74|       links: [...c.links, { ...c.links[0]!, from: supplier }] },
+     75|       `${LABEL}: probably 10% within 6 months, Supplier outage has a 2…
+     76|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     77|     expect(risk(result, supplier).event_risk).toMatchObject({ occurren…
+     78|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > ambiguous event name binding under-claims
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:90:96
+     88|     const result = admit({ ...c, risks: [...c.risks, { ...c.risks[0]!,…
+     89|       'Key developer departure has a 10% chance within 6 months.');
+     90|     expect(result.nodes.filter(n => n.kind === 'risk').every(n => n.ev…
+       |                                                                                                ^
+     91|   });
+     92|   it('no figure about the event leaves Olumi admission intact', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > comma context with refused phrase estimated retains the user figure without Olumi occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > comma context with refused phrase at most retains the user figure without Olumi occurrence
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:23:37
+     21|   it.each(['estimated', 'at most'])('comma context with refused phrase…
+     22|     const result = admit(candidate(), `${LABEL}, ${hedge} 10% within 6…
+     23|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     24|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     25|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:31:37
+     29|   it('two figures in one comma fragment cannot bind an unmodelled even…
+     30|     const result = admit(candidate(), `${LABEL}: probably 10% and Supp…
+     31|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     32|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     33|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/15]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > an ambiguous probability factor quotes the user figure without assigning it to either risk
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:60:96
+     58|     };
+     59|     const result = admit(draft, `${LABEL}: probably 10% within 6 month…
+     60|     expect(result.nodes.filter(n => n.kind === 'risk').every(n => n.ev…
+       |                                                                                                ^
+     61|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     62|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/15]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  15 failed | 15 passed (30)
+   Start at  15:40:31
+   Duration  2.53s (transform 1.23s, setup 153ms, import 1.89s, tests 221ms, environment 0ms)
+

@@ -1,0 +1,9 @@
+{
+  "command": "NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit",
+  "diagnostic_count": 290,
+  "incremental_changed_file_diagnostics": [],
+  "all_working_tree_changed_file_diagnostics": [],
+  "other_file_diagnostic_count": 290,
+  "exit_code": 2,
+  "diagnostic_lines_match_existing_fix2_evidence": true
+}

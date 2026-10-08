@@ -1,0 +1,13 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+20,000-char whitespace timing: 1.264 ms
+20,000-char repeated Olumi nine of the timing: 5.115 ms
+
+ Test Files  2 passed (2)
+      Tests  138 passed (138)
+   Start at  14:04:13
+   Duration  3.39s (transform 1.67s, setup 130ms, import 2.95s, tests 74ms, environment 0ms)
+

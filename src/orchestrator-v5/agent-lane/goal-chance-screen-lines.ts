@@ -44,7 +44,12 @@ export interface GoalChanceScreenLine {
   readonly shortfall_note?: string;
   /** GP §(i): this point's link-size count, from RC4 only; its full labelled sentence is owed. */
   readonly olumi_estimate_link_count?: number;
+  /** Event occurrence estimates are a separate kind and never increase the relationship count. */
+  readonly olumi_estimate_likelihood_count?: number;
 }
+
+export const hasEstimatePointAttribution = (line: GoalChanceScreenLine): boolean =>
+  line.olumi_estimate_link_count !== undefined || line.olumi_estimate_likelihood_count !== undefined;
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -61,8 +66,9 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
       : `${shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)}, in this model`;
   // §(i) amendment: RC4 owns k. Reuse its existing goal-path signal inputs, never a second sizing/count rule.
   // Specialised deadline points keep their existing chance words and option-specific time/pace disclosures.
+  const likelihoods = facts.goal_chance_display === undefined ? 0 : facts.goal_chance_licence?.olumi_estimate_likelihood_count ?? 0;
   const k = facts.goal_chance_display === undefined ? 0
-    : facts.goal_chance_licence?.olumi_estimate_link_count ?? goalChanceEstimateLinkCount(graph);
+    : facts.goal_chance_licence?.olumi_estimate_link_count ?? (likelihoods > 0 ? 0 : goalChanceEstimateLinkCount(graph));
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
@@ -75,15 +81,22 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
     const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
     const estimates = shareOptionEstimateWords(graph, optionId);
-    const estimateRelationships = point && k > 0 ? `, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)` : '';
+    const kinds = [
+      ...(k > 0 ? [`${k} ${k === 1 ? 'relationship' : 'relationships'}`] : []),
+      ...(likelihoods > 0 ? [`${likelihoods} ${likelihoods === 1 ? 'likelihood' : 'likelihoods'}`] : []),
+    ];
+    const estimateRelationships = !point || kinds.length === 0 ? '' : likelihoods > 0
+      ? `, on Olumi's estimates (${kinds.join(', ')}) (see Check estimates)`
+      : `, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)`;
     return [{ option_id: optionId, label, figure,
       chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}${estimateRelationships}.`
         + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
-      ...(estimateRelationships === '' ? {} : { olumi_estimate_link_count: k }),
+      ...(estimateRelationships === '' || k === 0 ? {} : { olumi_estimate_link_count: k }),
+      ...(estimateRelationships === '' || likelihoods === 0 ? {} : { olumi_estimate_likelihood_count: likelihoods }),
       ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
       ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
   };
-  const points = (k > 0 || facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null) && facts.goal_chance_display !== undefined
+  const points = (k > 0 || likelihoods > 0 || facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null) && facts.goal_chance_display !== undefined
     ? facts.goal_chance_licence!.option_ids.flatMap((id) => {
       const figure = facts.goal_chance_display![id];
       return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '',
@@ -121,7 +134,7 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
  * so the route can type it as this finding's leading evidence. Never the canonical sentence (typed already).
  */
 export function chanceInOwnWords(sentence: string, l: GoalChanceScreenLine): boolean {
-  if (l.olumi_estimate_link_count !== undefined) return false;
+  if (hasEstimatePointAttribution(l)) return false;
   // EXACTLY "<label>: <figure>." (quotes/emphasis aside): the sentence IS this option's figure, never a share or a range
   // that mentions it, never a longer label that starts with this one (Codex r on 297d1f1b, P1).
   const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -163,7 +176,7 @@ function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
   // B19 r3: only this complete canonical unit pays a shortfall option; quote folding preserves source offsets.
   if (l.shortfall_note !== undefined) return foldQuotes(text).includes(foldQuotes(l.chance));
   if (sameWordsIn(text, l.chance)) return true;
-  if (l.olumi_estimate_link_count !== undefined) {
+  if (hasEstimatePointAttribution(l)) {
     const sentence = estimatePointSentence(l);
     if (!sameWordsIn(text, sentence)) return false;
     if (l.spread_note === undefined) return true;
@@ -217,9 +230,9 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
   // keep their exact bytes while applying RC4's existing guard to all other narrator text before deterministic assembly.
   const authorised: string[] = [];
   let body = text;
-  if (lines.some(l => l.olumi_estimate_link_count !== undefined)) {
+  if (lines.some(hasEstimatePointAttribution)) {
     for (const l of lines) {
-      const chance = l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l);
+      const chance = hasEstimatePointAttribution(l) ? estimatePointSentence(l) : l.chance;
       for (const sentence of [chance, l.depends].filter(s => s !== '')) {
         const folded = foldQuotes(body), needle = foldQuotes(sentence);
         const positions: number[] = [];
@@ -258,7 +271,7 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
       continue;
     }
     if (l.spread_note !== undefined && !alreadySaid(spreadBody(body), l)
-      && (l.olumi_estimate_link_count === undefined || sameWordsIn(spreadBody(body), estimatePointSentence(l)))) {
+      && (!hasEstimatePointAttribution(l) || sameWordsIn(spreadBody(body), estimatePointSentence(l)))) {
       const chanceOnly = l.chance.slice(0, l.chance.length - l.spread_note.length).trimEnd();
       if (spreadBody(body).includes(chanceOnly)) {
         body = removeSpread(body, l.spread_note);
@@ -269,7 +282,7 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
           return part.replace(chanceOnly, l.chance);
         });
         added += 1;
-      } else if (l.olumi_estimate_link_count === undefined) {
+      } else if (!hasEstimatePointAttribution(l)) {
         // A previously accepted shorthand figure owes only its qualifier. Complete shortfall units remain opaque;
         // neither their shared note words nor a neighbouring option can provide this sentence's insertion point.
         let inserted = false;

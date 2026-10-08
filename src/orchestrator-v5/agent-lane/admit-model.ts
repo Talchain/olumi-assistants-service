@@ -71,6 +71,9 @@ import {
 } from './admit-constraint.js';
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss } from '../goal-target/event-by-date-model.js';
+import type { EventRiskV1T } from '../../schemas/event-risk.js';
+import { prepareDraftEventRisks, finishDraftEventRisks, type DraftEventOccurrence } from './olumi-event-risk-draft.js';
+import { log } from '../../utils/telemetry.js';
 
 const MAX_ID = 100;
 
@@ -207,7 +210,10 @@ export interface CandidateModel {
    * `analysis_participation` is never the drafter's (the strict schema has no such key): only
    * `rerouteExtraParentsOfProductGoal` writes it, on Olumi's risk whose effect the model already carries (DL 5916217417).
    */
-  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded' }[];
+  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded';
+    occurrence?: DraftEventOccurrence | null;
+    /** Host-only admission stamps: never requested from the drafter. */
+    event_risk?: EventRiskV1T; event_risk_basis_text?: string }[];
   readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
   readonly links: readonly CandidateLink[];
   /**
@@ -445,6 +451,8 @@ function constructedLevel(
 }
 
 export interface AdmittedNode {
+  event_risk?: EventRiskV1T;
+  event_risk_basis_text?: string;
   /** A unit attested by this end's own noun in a bound user sentence; strict NodeV3 carrier. */
   unit_reading?: { unit: string; source: 'user_stated' | 'olumi_reading'; source_quote: string };
   /** The full text, when the label had to be shortened to stay editable. */
@@ -3012,7 +3020,17 @@ export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
   };
 }
 
-export function admitCandidateModel(
+export function admitCandidateModel(...args: Parameters<typeof admitModelWithoutEventRisks>): AdmittedModel {
+  const prepared = prepareDraftEventRisks(args[0], args[1] ?? {}, args[2] ?? '');
+  for (const { label, drafted_months, goal_months } of prepared.horizonMismatches) {
+    log.info({ event: 'cee.event_risk.horizon_mismatch', risk_node_id: slugId(label), drafted_months, goal_months },
+      'event risk: drafted horizon differs from the goal horizon; likelihood not used');
+  }
+  const admitted = admitModelWithoutEventRisks(prepared.candidate, prepared.widened, args[2], args[3], args[4], args[5], args[6], args[7]);
+  return finishDraftEventRisks(admitted, prepared);
+}
+
+function admitModelWithoutEventRisks(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
   /** The user's brief, which the decision node's question must be copied from (`decisionEntityFor`). */
@@ -3574,6 +3592,8 @@ function admitOnce(
     ...model.risks.map((r) => {
       const node = {
         ...((framedByRange(r) as { node?: Partial<AdmittedNode> }).node ?? {}),
+        ...(r.event_risk ? { event_risk: r.event_risk,
+          ...(r.event_risk_basis_text ? { event_risk_basis_text: r.event_risk_basis_text } : {}) } : {}),
         ...(r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
       };
       return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
@@ -4030,7 +4050,9 @@ function admitOnce(
     label: n.label, kind: n.kind, scale_frame: n.scale_frame,
     observed_state: n.observed_state as MagnitudeNode['observed_state'],
     goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit,
-    unit: unitById.get(n.id) ?? null, option_levels: optionLevelsById.get(n.id) ?? [],
+    unit: unitById.get(n.id) ?? null,
+    // An event's conditional impact is per 0→1 switch. These are its states, not a fabricated level today.
+    option_levels: n.event_risk ? [0, 1] : optionLevelsById.get(n.id) ?? [],
     ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
     ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
   });
@@ -4152,7 +4174,7 @@ function admitOnce(
     const asNode = (n: AdmittedNode): MagnitudeNode => ({
       label: n.label, kind: n.kind, scale_frame: n.scale_frame, observed_state: n.observed_state as MagnitudeNode['observed_state'],
       goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit, unit: unitById.get(n.id) ?? null,
-      option_levels: optionLevelsById.get(n.id) ?? [],
+      option_levels: n.event_risk ? [0, 1] : optionLevelsById.get(n.id) ?? [],
     });
     if (resolveMagnitudeFrame(asNode(goal)) !== undefined) return undefined;
     // A definition counts only when it is deterministically ±1 between two amounts in the goal's own currency (the check

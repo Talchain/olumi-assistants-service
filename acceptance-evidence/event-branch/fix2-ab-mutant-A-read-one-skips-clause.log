@@ -1,0 +1,199 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (23 tests | 6 failed) 130ms
+     × r1 #1 exact: lexical leave/departure binds a risk-only user 10% / six months over drafted 90% / twelve 57ms
+     × a signed explicit +10% uses the existing reader for a risk-only user likelihood 14ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true 2ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false 2ms
+     × reuses cancellation lexical equivalence for risk-only user likelihood 4ms
+     × ambiguous event name binding under-claims 1ms
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts (7 tests | 1 failed) 81ms
+     × two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #1 exact: lexical leave/departure binds a risk-only user 10% / six months over drafted 90% / twelve
+AssertionError: expected { version: 1, …(2) } to match object { …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "horizon": {
+-     "months": 6,
++     "months": 12,
+    },
+    "occurrence": {
+-     "basis": "user",
+-     "p_high": 0.1,
+-     "p_low": 0.1,
++     "basis": "olumi",
++     "p_high": 0.9473684210526316,
++     "p_low": 0.8181818181818181,
+    },
+  }
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:32:37
+     30|   it('r1 #1 exact: lexical leave/departure binds a risk-only user 10% …
+     31|     const result = admit(draft(), 'The key developer has a 10% chance …
+     32|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     33|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     34|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > a signed explicit +10% uses the existing reader for a risk-only user likelihood
+AssertionError: expected { version: 1, …(2) } to match object { …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "horizon": {
+-     "months": 6,
++     "months": 12,
+    },
+    "occurrence": {
+-     "basis": "user",
+-     "p_high": 0.1,
+-     "p_low": 0.1,
++     "basis": "olumi",
++     "p_high": 0.9473684210526316,
++     "p_low": 0.8181818181818181,
+    },
+  }
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:37:37
+     35|   it('a signed explicit +10% uses the existing reader for a risk-only …
+     36|     const result = admit(draft(), 'The key developer has a +10% chance…
+     37|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     38|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     39|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:58:37
+     56|     const withDraft = { ...c, risks: [{ ...c.risks[0]!, occurrence: { …
+     57|     const result = admit(withDraft, 'Key developer departure: probably…
+     58|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     59|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     60|     expect(result.loss.some(l => /You said.*probably 10% within 6 mont…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:60:92
+     58|     expect(risk(result).event_risk).toBeUndefined();
+     59|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     60|     expect(result.loss.some(l => /You said.*probably 10% within 6 mont…
+       |                                                                                            ^
+     61|     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).…
+     62|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > reuses cancellation lexical equivalence for risk-only user likelihood
+AssertionError: expected 'olumi' to be 'user' // Object.is equality
+
+Expected: "user"
+Received: "olumi"
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:84:62
+     82|     const result = admit({ ...c, risks: [{ ...c.risks[0]!, label }], l…
+     83|       'The largest client has a 10% chance it cancels within 6 months.…
+     84|     expect(risk(result, label).event_risk?.occurrence.basis).toBe('use…
+       |                                                              ^
+     85|   });
+     86|   it('ambiguous event name binding under-claims', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > ambiguous event name binding under-claims
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:90:96
+     88|     const result = admit({ ...c, risks: [...c.risks, { ...c.risks[0]!,…
+     89|       'Key developer departure has a 10% chance within 6 months.');
+     90|     expect(result.nodes.filter(n => n.kind === 'risk').every(n => n.ev…
+       |                                                                                                ^
+     91|   });
+     92|   it('no figure about the event leaves Olumi admission intact', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "user",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.2,
+    "p_low": 0.2,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:31:37
+     29|   it('two figures in one comma fragment cannot bind an unmodelled even…
+     30|     const result = admit(candidate(), `${LABEL}: probably 10% and Supp…
+     31|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     32|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     33|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  7 failed | 23 passed (30)
+   Start at  15:40:37
+   Duration  2.52s (transform 1.28s, setup 142ms, import 1.92s, tests 211ms, environment 0ms)
+

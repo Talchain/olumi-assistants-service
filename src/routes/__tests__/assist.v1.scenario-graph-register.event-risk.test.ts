@@ -53,6 +53,7 @@ import { projectGraphForPersistence } from '../../orchestrator-v5/persisted-grap
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { eventRiskIngressIssues } from '../../schemas/event-risk.js';
 import { sentDigest } from '../../orchestrator-v5/tools/handlers/run-input-snapshot.js';
+import { eventRiskConstructionBasisTextFor, runWithEventRiskConstruction } from '../../orchestrator-v5/agent-lane/event-risk-construction-context.js';
 
 type Rec = Record<string, unknown>;
 const EVENT_RISK = {
@@ -163,5 +164,129 @@ describe('event_risk.v1 — the write door refuses what it cannot carry (422 EVE
   it('CONTROL: a valid block and a graph with none both pass the door', () => {
     expect(eventRiskIngressIssues(graphWith(EVENT_RISK).nodes as Rec[])).toEqual([]);
     expect(eventRiskIngressIssues(graphWith().nodes as Rec[])).toEqual([]);
+  });
+});
+
+describe('FIX-1: CEE-only occurrence basis text at client ingress', () => {
+  it('snapshots the admitted occurrence so callback mutation cannot change the grant', async () => {
+    const eventRisk = { ...EVENT_RISK, horizon: { ...EVENT_RISK.horizon }, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    await runWithEventRiskConstruction(SCENARIO, graph, async () => {
+      expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBe('CEE admitted reference class');
+      eventRisk.horizon.months = 6;
+      expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBeUndefined();
+    });
+    expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBeUndefined();
+  });
+
+  it('closes the construction grant even for async work inherited before completion', async () => {
+    const graph = graphWith({ ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } });
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    let inherited!: Promise<string | undefined>;
+    await runWithEventRiskConstruction(SCENARIO, graph, async () => {
+      inherited = gate.then(() => eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!));
+      expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBe('CEE admitted reference class');
+    });
+    resume();
+    expect(await inherited).toBeUndefined();
+  });
+
+  it.each(['user', 'olumi'])('strips client-supplied sidecar even beside a valid %s occurrence', async (basis) => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'Client supplied fabricated basis' });
+    const res = await register(graph);
+    expect(res.statusCode, res.body).toBe(200);
+    const risk = node(written(), 'risk_supplier');
+    expect(risk.event_risk).toEqual(eventRisk);
+    expect(risk.event_risk_basis_text).toBeUndefined();
+  });
+
+  it('strips an orphan client sidecar before it can be stored or displayed', async () => {
+    const graph = graphWith();
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'Client supplied orphan basis' });
+    const res = await register(graph);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
+  });
+
+  it('FIX-2 C: strips client warrant text on registration options mirrors', async () => {
+    const graph = { ...graphWith(), options: [{ id: 'opt_now', label: 'Status quo', event_risk_basis_text: 'Invented mirror reference class' }] };
+    const res = await register(graph);
+    expect(res.statusCode, res.body).toBe(200);
+    expect((written().options as Rec[])[0]?.event_risk_basis_text).toBeUndefined();
+    expect(graph.options[0]?.event_risk_basis_text).toBe('Invented mirror reference class');
+  });
+
+  it('preserves CEE-admitted Olumi text through the same real registration route', async () => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    const res = await runWithEventRiskConstruction(SCENARIO, graph, () => register(graph));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBe('CEE admitted reference class');
+  });
+
+  it.each(['scenario', 'occurrence', 'text', 'node', 'label', 'description'])('cannot reuse CEE context for a different %s', async (mismatch) => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    const submitted = structuredClone(graph);
+    if (mismatch === 'occurrence') Object.assign(submitted.nodes[1]!, { event_risk: { ...eventRisk, horizon: { months: 6 } } });
+    if (mismatch === 'text') Object.assign(submitted.nodes[1]!, { event_risk_basis_text: 'Client replacement' });
+    if (mismatch === 'label') Object.assign(submitted.nodes[1]!, { label: 'Largest client cancels' });
+    if (mismatch === 'description') Object.assign(submitted.nodes[1]!, { description: 'A client cancellation rather than supplier failure' });
+    if (mismatch === 'node') {
+      Object.assign(submitted.nodes[1]!, { id: 'different_risk' });
+      for (const edge of submitted.edges) {
+        if (edge.from === 'risk_supplier') edge.from = 'different_risk';
+        if (edge.to === 'risk_supplier') edge.to = 'different_risk';
+      }
+    }
+    const res = await runWithEventRiskConstruction(mismatch === 'scenario' ? 'another-scenario' : SCENARIO, graph, () => register(submitted));
+    expect(res.statusCode, res.body).toBe(200);
+    expect((written().nodes as Rec[]).find((n) => n.kind === 'risk')?.event_risk_basis_text).toBeUndefined();
+  });
+
+  it.each(['omitted', 'replaced'])('retains trusted stored basis for an unchanged Olumi occurrence when client text is %s', async (state) => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const stored = graphWith(eventRisk);
+    Object.assign(stored.nodes[1]!, { event_risk_basis_text: 'Stored CEE reference class' });
+    loadGraph.mockResolvedValue(stored);
+    const submitted = graphWith(eventRisk);
+    if (state === 'replaced') Object.assign(submitted.nodes[1]!, { event_risk_basis_text: 'Client replacement' });
+    const res = await register(submitted);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBe('Stored CEE reference class');
+  });
+
+  it('clears stored Olumi text when the occurrence is converted to the user basis', async () => {
+    const stored = graphWith({ ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } });
+    Object.assign(stored.nodes[1]!, { event_risk_basis_text: 'Stored CEE reference class' });
+    loadGraph.mockResolvedValue(stored);
+    const res = await register(graphWith(EVENT_RISK));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk).toEqual(EVENT_RISK);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
+  });
+
+  it.each(['label', 'description'])('FIX-2 C r1 #8: clears stored staff-turnover warrant when the event %s changes', async (changed) => {
+    const eventRisk = { version: 1, occurrence: { p_low: 0.05, p_high: 0.18, basis: 'olumi' }, horizon: { months: 12 } };
+    const stored = graphWith(eventRisk);
+    Object.assign(stored.nodes[1]!, {
+      label: 'Key developer departure', description: 'The key developer leaves the team',
+      event_risk_basis_text: 'Typical annual key-staff turnover in small software teams',
+    });
+    loadGraph.mockResolvedValue(stored);
+    const submitted = structuredClone(stored);
+    if (changed === 'label') Object.assign(submitted.nodes[1]!, { label: 'Largest client cancels' });
+    if (changed === 'description') Object.assign(submitted.nodes[1]!, { description: 'The largest client cancels its subscription' });
+    const res = await register(submitted);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk).toEqual(eventRisk);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
   });
 });

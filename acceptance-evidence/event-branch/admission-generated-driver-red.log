@@ -1,0 +1,46 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (27 tests | 1 failed | 26 skipped) 33ms
+     × an option-generated driver cannot bypass the event root gate 32ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > an option-generated driver cannot bypass the event root gate
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:128:39
+    126|     const c = candidate();
+    127|     c.options = [{ label: 'Prevent departure', provenance: 'explicit',…
+    128|     expect(risk(admit(c)).event_risk).toBeUndefined();
+       |                                       ^
+    129|   });
+    130|   it.each([0, -1, 601, Number.NaN])('invalid horizon %s stays a placeh…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 skipped (27)
+   Start at  14:19:11
+   Duration  1.75s (transform 1.22s, setup 108ms, import 1.49s, tests 33ms, environment 0ms)
+

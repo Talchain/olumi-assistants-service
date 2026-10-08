@@ -1,0 +1,114 @@
+[
+  {
+    "mutant": "A-risk-only-user-disabled",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-risk-only-user-disabled.log"
+  },
+  {
+    "mutant": "A-refused-figure-gate-disabled",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-refused-figure-gate-disabled.log"
+  },
+  {
+    "mutant": "A-drafted-value-only",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-drafted-value-only.log"
+  },
+  {
+    "mutant": "A-read-one-skips-clause",
+    "source": "src/orchestrator-v5/routing/stated-event-risk.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-read-one-skips-clause.log"
+  },
+  {
+    "mutant": "A-ambiguous-event-applied",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-ambiguous-event-applied.log"
+  },
+  {
+    "mutant": "A-unitless-figures-ignored",
+    "source": "src/orchestrator-v5/routing/stated-event-risk.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-unitless-figures-ignored.log"
+  },
+  {
+    "mutant": "B-rename-before-classifying",
+    "source": "src/orchestrator-v5/agent-lane/keep-options-apart.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-B-rename-before-classifying.log"
+  },
+  {
+    "mutant": "B-suffix-only",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-B-suffix-only.log"
+  },
+  {
+    "mutant": "B-factor-retained",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-B-factor-retained.log"
+  },
+  {
+    "mutant": "B-removal-undisclosed",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-B-removal-undisclosed.log"
+  },
+  {
+    "mutant": "A-comma-context-refusal-off",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-comma-context-refusal-off.log"
+  },
+  {
+    "mutant": "A-same-fragment-figures-collapsed",
+    "source": "src/orchestrator-v5/routing/stated-event-risk.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-same-fragment-figures-collapsed.log"
+  },
+  {
+    "mutant": "A-orphan-factor-predicate-off",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-orphan-factor-predicate-off.log"
+  },
+  {
+    "mutant": "A-leading-decimal-boundary-off",
+    "source": "src/orchestrator-v5/routing/stated-event-risk.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-leading-decimal-boundary-off.log"
+  },
+  {
+    "mutant": "A-signed-figures-ignored",
+    "source": "src/orchestrator-v5/routing/stated-event-risk.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-signed-figures-ignored.log"
+  },
+  {
+    "mutant": "A-duplicate-factor-predicate-off",
+    "source": "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ab-mutant-A-duplicate-factor-predicate-off.log"
+  }
+]

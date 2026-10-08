@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (23 tests | 1 failed) 118ms
+     × r1 #3 exact: option/factor same probability label cannot become a continuous probability level 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > r1 #3 exact: option/factor same probability label cannot become a continuous probability level
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:108:78
+    106|     const c = factor(draft(false), label);
+    107|     const apart = keepOptionsAndQuantitiesApart({ ...c, options: [{ la…
+    108|     expect(apart.renamed.some(r => r.kind === 'factor' && r.from === l…
+       |                                                                              ^
+    109|     const result = admit(apart.model);
+    110|     expect(result.nodes.some(n => n.kind === 'factor' && /probability/…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 29 passed (30)
+   Start at  15:40:46
+   Duration  2.34s (transform 1.18s, setup 129ms, import 1.79s, tests 194ms, environment 0ms)
+

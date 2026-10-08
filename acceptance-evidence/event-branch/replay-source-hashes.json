@@ -1,0 +1,587 @@
+{
+  "version": 1,
+  "method": "Hashes reconstructed read-only from the 116 exact source paths in replay.test.ts; each brief hash checked against its recording. Historical replay-base/replay-after rows were absent at FIX-1 start, so this is source identity evidence only.",
+  "sources": 116,
+  "rows": [
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout1-d1.json",
+      "source_sha256": "39f219e2d86469f433ef665e7ef0e966bbf491734a15c71149bf1e11fdc857e2",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout1-d2.json",
+      "source_sha256": "894a016eb94939a96b520379e6776a26d1d77ee62410cfd64dbfcc7e344cc91f",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout1-d3.json",
+      "source_sha256": "2631e84e7d32131a10c6dbad1d3d647cdf290c4da9f39e52d4e4b1764296ce84",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout1-d4.json",
+      "source_sha256": "2084a76f9f89d81cde1a299cc96a9638f90097332f1ad51fd4e4d3a454ce43bc",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout1-d5.json",
+      "source_sha256": "4743d77a96db5d9a4b1f474af9016c04a3c1a9bfec3f1ac8f2ebc15d37296646",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout2-d1.json",
+      "source_sha256": "0bf680686c0d9a5881f48dd4de133df61284be018b0ad9a4e5d4ed83992dd922",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout2-d2.json",
+      "source_sha256": "d03bc6546997cfe48b19892dd8e5c5338648d1382b1411380e9823f67acce238",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout2-d3.json",
+      "source_sha256": "214b5304dff38ed9b88ae4ea406f1d639b2daf9387a6ce6997de7fdafcab4ad4",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout2-d4.json",
+      "source_sha256": "8a3c83faf6ed18ef1133e0aadb7ef1959f2f57ac1cde615a5822b2f204f95196",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout2-d5.json",
+      "source_sha256": "402efe6f04999d80effb980527994c97bde8844073368f51fee9280183147759",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout3-d1.json",
+      "source_sha256": "c061f2db533cdb84db42f52cc7f0e24f80f8962202dcc444bdc33e438de24453",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout3-d2.json",
+      "source_sha256": "b2ee0aa0c2f66da563b7d9547a88585124fa420fe9fa7991f2fc9ec3a089dcd6",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout3-d3.json",
+      "source_sha256": "3aebd3fe52709dae55f83ee90ef82df384014167188148fee663dab68a54e769",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout3-d4.json",
+      "source_sha256": "925b44324a2c4f5940d4f42b6cd302f1de64ce80b59ec1d6540e13a9de0084a3",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/heldout3-d5.json",
+      "source_sha256": "6e6d4db6c98dbe10d914e0ba18743367d5ab4ec2bcdd944cdb3e42ab62b840ce",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/sealed-d1.json",
+      "source_sha256": "331d9e2b4621e4321b5a5e832717ea8983ad43b914909de6ddde30b5ffcc2457",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/sealed-d2.json",
+      "source_sha256": "ef97e27c72f8f599d9ed2810a5dd187dc393f1602ecfd102a7ff6369a6dd69df",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/sealed-d3.json",
+      "source_sha256": "fc68c48e207ec96c2ee7a131e3551190c6504bae817f309f87f0a36530923f92",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/sealed-d4.json",
+      "source_sha256": "b05850c250b78e238413c42d070fbe334d64ad2875c51b5b04454d4bd14eeb4e",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/baseline-terra-low/sealed-d5.json",
+      "source_sha256": "73be25e8e691e976364dc34b04032b362bbe7d438de4f3318c7dd55c38db9eb1",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout1-d1.json",
+      "source_sha256": "3d6ed6d4b6606d502303b6d64194f8d33f102a77db1ebb2303c0a0a751ba4bd0",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout1-d2.json",
+      "source_sha256": "f958a9246a769346e030734faa6d31f1ccabd838a1b2c14b0c926a804a176a35",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout1-d3.json",
+      "source_sha256": "ba8fc0633f53b420a9265f3e80f33ab27e44780d7535e1d71cb011ad094edbe3",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout1-d4.json",
+      "source_sha256": "73f4ea253adbc1b1d816ecc8807e7054edaa15a2141c644ef95c1770d6fee0fb",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout1-d5.json",
+      "source_sha256": "4f4cce297f9fb0a7f05a69dde5faab60cc717a4a1392ce1aac5de13f7ff54116",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout2-d1.json",
+      "source_sha256": "d3675e6034f8f96c7d4edd344dfa5b4c5e469a0f949e4b4ac592c3c7eb28ff2c",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout2-d2.json",
+      "source_sha256": "3a2e777381eafed2e97722221b3175c6d9da6921f7e1d999d2227bcf7ebcf486",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout2-d3.json",
+      "source_sha256": "719937f9287ee333b9003b909222c875c3d0c2dae428ebfedefb8fbb2323c2d6",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout2-d4.json",
+      "source_sha256": "b702406133d3376cecc673a32226be0559e9c2a13073ba7cacb9db24d4e8edaa",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout2-d5.json",
+      "source_sha256": "7e107014ed407c67d20456ef096084e5ff377bc763ad5525f1836264d509ca5b",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout3-d1.json",
+      "source_sha256": "a79f95f761ad7a88e96c650830d1853821c3f33eab6347858fff80fca46a7c4f",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout3-d2.json",
+      "source_sha256": "edf7c0b5e092689ff6522c3ab27dd2b40951af3dae9552a999cd2aa4fe22a4db",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout3-d3.json",
+      "source_sha256": "8b544fbe66c48fa18f45a21dc12c297f3ae6ec1dc26d25e3c3705de4d43a1ad3",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout3-d4.json",
+      "source_sha256": "f7e89253058968609e1cc1f27fac476000b14e33a45ea78591fba9ff3735bd48",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/heldout3-d5.json",
+      "source_sha256": "c29dc7d34c6f03b633d54d30873b5e6f4ab99cfa83f7d590665aa2f516b013f1",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/sealed-d1.json",
+      "source_sha256": "3a868a31c2c197d70430abbd6efb5f426a085bf753288af49bc2ea0bc7470fa5",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/sealed-d2.json",
+      "source_sha256": "c5e560170ea4db758bab2198ea81d411e553aea27a13191c899e67bc44c8f47b",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/sealed-d3.json",
+      "source_sha256": "033fc190074af45b8130ab3450fe528d48ccd44a994044ea0530b8743c3a5866",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/sealed-d4.json",
+      "source_sha256": "51876c368eff6a74ae5717faf51a8334e1721627cf403663c167788b7419ef46",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/sol-6.1-low/sealed-d5.json",
+      "source_sha256": "b4f996c12c6d5281d52233c805c37a2c57bbba125af69e16995d3fe2d0b1fc9d",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout1-d1.json",
+      "source_sha256": "e481d75be60ab2a04cb35474a3f40373e27a89e1b7b0278e0d5e35f5fdb235ba",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout1-d2.json",
+      "source_sha256": "d19028e3a2f0163994ae97e74e94a82f95edf94065efb194bdbc61396f612b18",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout1-d3.json",
+      "source_sha256": "877aae67179efb6e683bcf45d1c762364239d5c844ca545dfbda6e7f0700bcec",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout1-d4.json",
+      "source_sha256": "a353062efa92fd685c5cf49df0caab5072dc8833b6e451b2ef21a120d3ef632b",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout1-d5.json",
+      "source_sha256": "83fe993392355d0f05cde97e881ad958a58d6ee65795d0a39e79f5d6cb976678",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout2-d1.json",
+      "source_sha256": "60cd3f9790b7d51257daead591d83f16fd5ea2a73124a64db4f68016a19fbc6b",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout2-d2.json",
+      "source_sha256": "6bceaf35221851811b9b128725ddfc365ca2b96400fc7f75c833e42bcb3649cd",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout2-d3.json",
+      "source_sha256": "c80a4c647caff486413bd76bae8b2ad6944dd4084c0237847b1f681309c841c8",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout2-d4.json",
+      "source_sha256": "ad3d40819305aae9a1c6ee0a66d2ba72683b9b1e8e8471f8cb488cfb2e0621ba",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout2-d5.json",
+      "source_sha256": "4a3ab6351a1abaca121ac44edb3c6a98ab9062466fd6a6ba886b5e0383bcf516",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout3-d1.json",
+      "source_sha256": "8dae4f32928140625512bfd575218f1c7a6ef6c8361b84153fc41d6e252b6223",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout3-d2.json",
+      "source_sha256": "3a1eb9eb6e54b0ae5179962cc5f53d8fb46833116756cbaa85f172f588e0aae5",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout3-d3.json",
+      "source_sha256": "45811d7ff0ef505e6bd8d7b7023a32ebe38af1ac8c1f210572e25bf28b50c14a",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout3-d4.json",
+      "source_sha256": "d6d1d96f976d0e6f3a9fd1f352ed6a3ed7afe96073f01c53672cb31117eeb159",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/heldout3-d5.json",
+      "source_sha256": "03a29c47e99bfe72b84b8d204bf2bf82b4491c67629107e1926e0da0a78e1833",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/sealed-d1.json",
+      "source_sha256": "4e444b24da699357e8e8040c608f9367d1712d315fb551648faeb18c42cbce05",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/sealed-d2.json",
+      "source_sha256": "0f2d2862105a7f47d66cc7f7ac009c2c74f7f2d7d15e6a8fd94058cb4b75773c",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/sealed-d3.json",
+      "source_sha256": "29cd67c8e70c6a7319f4bf97ce3753d51f6e46b54fe3da948c6864e70b2a2d94",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/sealed-d4.json",
+      "source_sha256": "0198398ad36df664b1448f2bfed495f050e6c68b806a5265592c099c555d0e1b",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/astra-6-low/sealed-d5.json",
+      "source_sha256": "694c30a93ea6695244586ff98182cb42aee0258c6f0ad75586b59eb263cda18b",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armB-v2/heldout1-d1.json",
+      "source_sha256": "7e8a06fe6bba5dabbf62704c004afd7678f554b525e31447b30feef2fb941418",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armB-v2/heldout2-d1.json",
+      "source_sha256": "66d2c65257a0c0e99aa8f1f37a16fccf500542ad043a6de05d817624014d7979",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armB-v2/heldout3-d1.json",
+      "source_sha256": "1c6f353dbeff4c1607412e2989e4750c396d3d89944cedb4c93c67f5db7aa22d",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armB-v2/sealed-d1.json",
+      "source_sha256": "20170a895a072b86cce39b76fab2785a1a5c9ebda95d28ac508d0daa9e0a24f2",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2/heldout1-d1.json",
+      "source_sha256": "3b91009f74e7d985221e6f7e4d04365c50ccf641279f4a9e1be9bfb475ae425e",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2/heldout2-d1.json",
+      "source_sha256": "768f315ca8edb2773f6f475eb10b75153f4d98d136bd4dca29b467d2e014b197",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2/heldout3-d1.json",
+      "source_sha256": "5489f68020a162a04ec49eea78994de7290d98caa5ab38250b6c9948ae2e4c6e",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2/sealed-d1.json",
+      "source_sha256": "3313f668e4dc0a471abae412f3bdab4c2babe2de8d4370633a567dee04254013",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout1-d1.json",
+      "source_sha256": "5705fae5ed9b7913c72743c539e2f33856b1ad9a930b29cd8e8a47618b353c02",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout1-d2.json",
+      "source_sha256": "618b3820b26657f1c044ea900316cabe7eb8ee8d121a7377fa66f34e2fcd19f3",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout1-d3.json",
+      "source_sha256": "4d12ecf11b04f4cdaa6e75ebb8995937f0c8d18e8f399838baadae617484e0ae",
+      "brief_sha256": "a131c16fc2ce430ad2d0c6b0bab596aa4e1400521e71c7aad67f30ed88a263d4"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout2-d1.json",
+      "source_sha256": "006f0fab58b5a264fa10bce8248ac4202e46b077d7e390ac114fc20ed50d8547",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout2-d2.json",
+      "source_sha256": "ef16f9b7149f8f5325974b80f3679224d7695987bd76a2e2b1dbb3732cc99ebb",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout2-d3.json",
+      "source_sha256": "e1e74432241e64f1c5bb4b488c5408b4943f7ad44d82ac8bcba96d561e8a8ca9",
+      "brief_sha256": "0c72993003683cda1bbe06c17c38f52c7932dc659c6b37feaa0bc395a7ae33c5"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout3-d1.json",
+      "source_sha256": "70793ff0cf624e9b19cb1ecc7f8fc203a2c305696005b7a00eff6302a8f2fd0f",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout3-d2.json",
+      "source_sha256": "3bffeb085a541340a25adf2052039f483b5f97b5764156d4b3b611d5f9d6a472",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/heldout3-d3.json",
+      "source_sha256": "ec223bf486b9d5224957c6dd7b4ad45677a04dd2db29508458ef97f0c076a17b",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/sealed-d1.json",
+      "source_sha256": "507939e4d26cacc98c4d3a5723e42f21406497c0fc8677f7e9566c6ab25b22dd",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/sealed-d2.json",
+      "source_sha256": "5afe085de0a86baaf8713299f4cc1753c9438482f7cbf534216ec05551159cea",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/lab-runs/construct-20261006T1642Z/armC-v2-confirm/sealed-d3.json",
+      "source_sha256": "299a545df20d1ddf34b55c6daed29b308a29f9d22fcdf0fe2164be9fab753ba7",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/B1-d1.json",
+      "source_sha256": "3cd37aa68cbe82a0da5f13cb78c5abace526d56d8f33ba819a6eb6e9d44464cf",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/B1-d2.json",
+      "source_sha256": "23b70e0566e192a19428fccf3ad971bc5f6d7547b06d506b3201d44088dd5f4a",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/B1-d3.json",
+      "source_sha256": "b09c409c7ad0cfc8fe997d24355f6c87d14ea004dee8440687369ed1d97f9cab",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/heldout3-d1.json",
+      "source_sha256": "4de98e7f8bec33010a60e9f6669ca03b4fa79589b510169c923b410ea3c3efe2",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/heldout3-d2.json",
+      "source_sha256": "e1d065a40f9e4435e9cda7a8da13c8c716f4d54fcb3f6e58344c0a2c52f14bb5",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/heldout3-d3.json",
+      "source_sha256": "54d513345a2552709935b5b0e9a57f43b34947dd8f6aaa60d8fb6894550e6261",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/sealed-d1.json",
+      "source_sha256": "fb32d9809146d3d04334364dcc9bd48d04f542af28e1b0f665aab8e6315e8be9",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/sealed-d2.json",
+      "source_sha256": "941b4eeceb8ca87ddb612c98990edca9afdf576b750695b110393755e89f808e",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/sealed-d3.json",
+      "source_sha256": "2bb8a4facab64b5a56396087735d13d59e887d8b9148cdf65680c7ef6d6b2d5f",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d1.json",
+      "source_sha256": "15ff9c5078ff5d089c9438c8e075dc2deba38bf471f0ada42866fe9b01934a4d",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d2.json",
+      "source_sha256": "ce27d2a0555ebd189858b7de02a0f5f690fb1456adcaed87288eabe9d39a3c05",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/B1-d3.json",
+      "source_sha256": "781402e6450b67ac845daf84fd0838247ae21764685caf601596acddf13f686f",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d1.json",
+      "source_sha256": "3e1d7cfb2c961146f555ddc9d32c16aca6d3fa75554542b35815144b1df54d1b",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d2.json",
+      "source_sha256": "3051e99a21c0abdddb2a561a7721b4d47b690441f841f076e5dfa0ae8900d013",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json",
+      "source_sha256": "5fd541ec60688df44a98b8f2561725706f9125957cbee47fbc065185344963c9",
+      "brief_sha256": "11049114f5a00f2f95d525712a4c03517a8d735201a4623affc653d6e840ea3d"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d1.json",
+      "source_sha256": "bec46e335fe4d51ab7aa0959312593dac4fd756f508f32bab38627e1581e4067",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d2.json",
+      "source_sha256": "9a26eb583cceae5d538488983ec35dce6f0e313f9846a724b87ae75f58754ca3",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-lab-two-risks-20261008/arm2-floor-plus-line/sealed-d3.json",
+      "source_sha256": "cf369ddafe8846b071d6226f7d5ab1e2f05ee42994ec40f4b7e0f55b94f0328b",
+      "brief_sha256": "a37cb536506205eb1b5c92d28e5a01ee4c258341ba42e026392c35d60c47d77b"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/B1-d1.json",
+      "source_sha256": "00e388aa22ed055f82de393879e452fc4a6d875a4ad3cdc9a8ff90eadb58d3fb",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/B1-d2.json",
+      "source_sha256": "f1f36e8602e587fc7eadb7bd8ed8a14911ac3c2200344ed7579aa91c7c8b63b8",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/B1-d3.json",
+      "source_sha256": "4b60a97822e547033496f39d6adb33ccc6960b68fc5c0505f293ff1e2779de74",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/B3-d1.json",
+      "source_sha256": "6554a3ae4324d6e332c4dfc87dbf6a20fd617220313633defdd385ceaad6911e",
+      "brief_sha256": "3fa637a765cb37c0672626f838747d3047da6e88db12f8146943b5c382dd4e5c"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/B3-d2.json",
+      "source_sha256": "0a24fe3f2f4533941a0a68a13dee69481e4d66e91f1310746c5bd343e97a8868",
+      "brief_sha256": "3fa637a765cb37c0672626f838747d3047da6e88db12f8146943b5c382dd4e5c"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/B3-d3.json",
+      "source_sha256": "726c6757214ef9d05a231deb8edcc8c81bf27699b297e1ce431f4109546fbe01",
+      "brief_sha256": "3fa637a765cb37c0672626f838747d3047da6e88db12f8146943b5c382dd4e5c"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/sealedR-d1.json",
+      "source_sha256": "39f1f494f397f976178fb9dab434edc93ecce06aa0ec785b0042889240815193",
+      "brief_sha256": "f2734f6dd842b4438b334664f821f06ffb4a78cac522db338514297c68798598"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/sealedR-d2.json",
+      "source_sha256": "0726386ab78fcf28ddfb0ed6fecb93806b937cf970610c6531ac821a27c338b1",
+      "brief_sha256": "f2734f6dd842b4438b334664f821f06ffb4a78cac522db338514297c68798598"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/sealedR-d3.json",
+      "source_sha256": "168c2040c310e230b4d28b615a886c874ccf176b1edcafac58651666b786bdac",
+      "brief_sha256": "f2734f6dd842b4438b334664f821f06ffb4a78cac522db338514297c68798598"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/B1-d1.json",
+      "source_sha256": "95ec6a98e2c40e5186e5fa6d1d19427fad1a9a7651ac796d66c951e7e3bd3d09",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/B1-d2.json",
+      "source_sha256": "df5a50678be90fc8795caf7f3b7a75540ded95f2d0eee294d76c5e3b5ca446d3",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/B1-d3.json",
+      "source_sha256": "baffc5d4cb7c12225679fd0a59de669ab8f30c9885d2af32f4dac5bb7ca6a86a",
+      "brief_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/B3-d1.json",
+      "source_sha256": "66ca293a6aad52ff8edfe8e5753dd08c7f7b9dd3b4556e3d461eb33cb820c02c",
+      "brief_sha256": "3fa637a765cb37c0672626f838747d3047da6e88db12f8146943b5c382dd4e5c"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/B3-d2.json",
+      "source_sha256": "50b7b0ae224f4245f2a311bd07016b06358064db8891a50caa4288543abe1fb4",
+      "brief_sha256": "3fa637a765cb37c0672626f838747d3047da6e88db12f8146943b5c382dd4e5c"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/B3-d3.json",
+      "source_sha256": "2cb793c31527cc2d6f41bb1e1d3e20a4b2ea8ccf1d61b4fc1293bef9a156c2bd",
+      "brief_sha256": "3fa637a765cb37c0672626f838747d3047da6e88db12f8146943b5c382dd4e5c"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/sealedR-d1.json",
+      "source_sha256": "d90b0107729d92618a6739d320dcff49fab393df09df83273e76b78add6486aa",
+      "brief_sha256": "f2734f6dd842b4438b334664f821f06ffb4a78cac522db338514297c68798598"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/sealedR-d2.json",
+      "source_sha256": "890fcaf58a07a59d242b3a143b2d8580c05e09ac3f5426a222e4981b7f73834f",
+      "brief_sha256": "f2734f6dd842b4438b334664f821f06ffb4a78cac522db338514297c68798598"
+    },
+    {
+      "source": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/evidence/p44-mq-task2-mechanism-arm-20261008/rerun-2842/sealedR-d3.json",
+      "source_sha256": "13a2a23f07bf8969f918d628fce080aebf1fa1b852e031276afb0f2ce1638ea6",
+      "brief_sha256": "f2734f6dd842b4438b334664f821f06ffb4a78cac522db338514297c68798598"
+    }
+  ]
+}

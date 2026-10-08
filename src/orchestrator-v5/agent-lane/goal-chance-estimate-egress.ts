@@ -1,5 +1,5 @@
 import { agentLicenceRecordOf } from '../goal-target/goal-chance-licence.js';
-import { goalChanceScreenLinesForAgent } from './goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, hasEstimatePointAttribution } from './goal-chance-screen-lines.js';
 import { foldQuotes } from './quote-normalisation.js';
 
 type Rec = Record<string, unknown>;
@@ -18,9 +18,9 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   userAuthoredTexts?: readonly string[];
 }): T {
   const licence = agentLicenceRecordOf(context.analysisResult);
-  if (!context.current || typeof body.assistant_text !== 'string'
-    || typeof licence?.olumi_estimate_link_count !== 'number' || !Number.isSafeInteger(licence.olumi_estimate_link_count)
-    || licence.olumi_estimate_link_count <= 0) return body;
+  const positiveCount = (value: unknown): boolean => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+  if (!context.current || licence === undefined || typeof body.assistant_text !== 'string'
+    || (!positiveCount(licence.olumi_estimate_link_count) && !positiveCount(licence.olumi_estimate_likelihood_count))) return body;
   const nodes = rec(context.graph)?.nodes;
   const goals = (Array.isArray(nodes) ? nodes : []).map(rec).filter(n => n?.kind === 'goal');
   // Run identity comes ONLY from analysis_result: the producer captures snapshot.goal_node_id on the licence.
@@ -34,7 +34,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
   const lines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, true)
-    .filter(l => l.olumi_estimate_link_count !== undefined);
+    .filter(hasEstimatePointAttribution);
   if (lines.length === 0) return body;
   // Specialized goals (for example launching by a recorded date) carry their own producer-owned predicate.
   // Match that goal wording rather than assuming every licence says 'meeting your goal'.

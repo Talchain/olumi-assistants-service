@@ -8,10 +8,18 @@ export interface Item {
   readonly goal_distance: number;
 }
 
+/** Held event occurrence, with its producer-owned words and warrant rather than a fabricated factor value. */
+export interface LikelihoodEstimate {
+  readonly id: string;
+  readonly label: string;
+  readonly words: string;
+}
+
 export interface OlumiEstimates {
   readonly count: number;
   readonly values: Item[];
   readonly links: Item[];
+  readonly likelihoods?: readonly LikelihoodEstimate[];
   readonly accepted: number;
   readonly placeholderLinks: number;
   /** The caller supplies only this Run's licensed, measured driver/sensitivity order. */
@@ -23,6 +31,8 @@ export interface OlumiEstimates {
 export function olumiEstimatesFeedingResult(input: {
   goalPathFactors: readonly GoalPathFactor[];
   goalPathLinks: readonly GoalPathLink[];
+  /** Independent event occurrences whose impact reaches the same scored goal. */
+  goalPathLikelihoods?: readonly LikelihoodEstimate[];
   /** Graph-bound reader of the real validatedDefinition predicate; keeps this census pure. */
   validatedDefinitionForLink?: (linkId: string) => string | undefined;
   /** Distinct, on-goal-path option settings; observed-state authorship cannot stand in for these. */
@@ -37,6 +47,7 @@ export function olumiEstimatesFeedingResult(input: {
 }): OlumiEstimates {
   const values: Item[] = [];
   const links: Item[] = [];
+  const likelihoods = [...new Map((input.goalPathLikelihoods ?? []).map(l => [l.id, l])).values()];
   let accepted = 0;
   let placeholderLinks = 0;
   const factorIds = new Set<string>();
@@ -78,7 +89,8 @@ export function olumiEstimatesFeedingResult(input: {
     || (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0),
   ).slice(0, 3);
   return {
-    count: values.length + links.length, values, links, accepted, placeholderLinks,
+    count: values.length + links.length + likelihoods.length, values, links, accepted, placeholderLinks,
+    ...(likelihoods.length === 0 ? {} : { likelihoods }),
     ordered: top.length > 0 && top.every(item => driverRank.has(item.id)), top,
   };
 }
@@ -88,14 +100,17 @@ export function sayOlumiEstimates(e: OlumiEstimates): string[] {
   const kinds: string[] = [];
   if (e.values.length > 0) kinds.push(`${e.values.length} ${e.values.length === 1 ? 'value' : 'values'}`);
   if (e.links.length > 0) kinds.push(`${e.links.length} ${e.links.length === 1 ? 'link size' : 'link sizes'}`);
+  const likelihoods = e.likelihoods ?? [];
+  if (likelihoods.length > 0) kinds.push(`${likelihoods.length} ${likelihoods.length === 1 ? 'likelihood' : 'likelihoods'}`);
   const lines = [e.count === 0
     ? "None of the figures behind this result are Olumi's estimates."
     : `Olumi supplied ${e.count} of the figures behind this result: ${kinds.join(' and ')}.`];
-  if (e.count > 3) lines.push(`${e.count} in total; here are 3.`);
+  if (e.count > 3 && likelihoods.length === 0) lines.push(`${e.count} in total; here are 3.`);
   if (e.top.length > 0) {
     lines.push(e.ordered ? (e.top.length === 1 ? 'The one that matters most:' : `The ${e.top.length} that matter most:`) : 'For example:');
     lines.push(...e.top.map(item => `${item.label} (${item.kind === 'value' ? 'value' : 'link size'})`));
   }
+  lines.push(...likelihoods.map(l => `${l.label}: ${l.words}`));
   if (e.accepted > 0) lines.push(`${e.accepted} you accepted from Olumi's suggestions.`);
   if (e.placeholderLinks > 0) lines.push(`${e.placeholderLinks} links have no size yet.`);
   return lines;
@@ -112,6 +127,7 @@ const COUNT_KINDS = new Set([
   'value', 'values', 'figure', 'figures', 'input', 'inputs', 'assumption', 'assumptions',
   'estimate', 'estimates', 'number', 'numbers', 'link', 'links', 'relationship', 'relationships',
   'size', 'sizes', 'strength', 'strengths',
+  'likelihood', 'likelihoods',
 ]);
 const FILLERS = new Set(['of', 'the', 'olumi', 's', 'its', 'their', 'own', 'underlying', 'estimated', 'starting', 'these', 'those']);
 const CONJUNCTIONS = new Set(['and', 'but', 'while', 'whereas']);

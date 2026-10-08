@@ -7,7 +7,7 @@ const words = (text: string): string[] => [...text.toLowerCase().matchAll(WORD)]
   .map((m) => m[0].replace(/s$/, ''));
 
 export function holdStatedEventRisks<
-  N extends { readonly id: string; readonly kind?: unknown; readonly label?: unknown },
+  N extends { readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly event_risk_basis_text?: unknown },
   E extends { readonly from: string; readonly to: string },
 >(nodes: readonly N[], edges: readonly E[], brief: string): {
   nodes: readonly (N & { event_risk?: EventRiskV1T })[];
@@ -51,7 +51,11 @@ export function holdStatedEventRisks<
   }
   if (held.length === 0) return { nodes, edges, held, refused };
   return {
-    nodes: nodes.map((node) => blocks.has(node.id) ? { ...node, event_risk: blocks.get(node.id)! } : node),
+    nodes: nodes.map((node) => {
+      if (!blocks.has(node.id)) return node;
+      const { event_risk_basis_text: _olumiBasis, ...rest } = node;
+      return { ...rest, event_risk: blocks.get(node.id)! } as N & { event_risk: EventRiskV1T };
+    }),
     // Science Q7: occurrence is the uncertainty; impact existence is 1. Its size,
     // defaulted marker and provenance remain Olumi's unsized placeholder.
     edges: edges.map((edge) => blocks.has(edge.from) ? { ...edge, exists_probability: 1 } : edge),
@@ -61,8 +65,16 @@ export function holdStatedEventRisks<
 
 /** The shared occurrence words for draft disclosures and held approval cards. */
 export function eventRiskLikelihoodWords(block: EventRiskV1T): string {
-  const low = Number((block.occurrence.p_low * 100).toFixed(6));
-  const high = Number((block.occurrence.p_high * 100).toFixed(6));
+  const figure = (p: number): number => {
+    if (block.occurrence.basis !== 'olumi') return Number((p * 100).toFixed(6));
+    const rounded = Math.round(p * 100);
+    // Rounded words must not turn a small possibility into impossibility or a high chance into certainty.
+    if (p > 0 && rounded === 0) return Number((p * 100).toPrecision(2));
+    if (p < 1 && rounded === 100) return Number((100 - Number(((1 - p) * 100).toPrecision(2))).toPrecision(12));
+    return rounded;
+  };
+  const low = figure(block.occurrence.p_low);
+  const high = figure(block.occurrence.p_high);
   const likelihood = low === high ? `${low}%` : `${low}–${high}%`;
   const months = block.horizon.months;
   const horizon = months === 1 ? 'a month' : `${months} months`;
@@ -70,7 +82,13 @@ export function eventRiskLikelihoodWords(block: EventRiskV1T): string {
 }
 
 /** The approval card's likelihood line: one string for the card record AND the confirm chip the user sees. */
-export function eventRiskCardLine(block: EventRiskV1T): string {
+export function eventRiskCardLine(block: EventRiskV1T, basisText?: string): string {
+  if (block.occurrence.basis === 'olumi') {
+    const basis = basisText?.trim();
+    if (!basis) return 'May happen; its likelihood still needs a basis.';
+    return `May happen: ${eventRiskLikelihoodWords(block)} (Olumi's estimate, based on ${basis}).`;
+  }
+  if (block.occurrence.basis === 'reference') return `May happen: ${eventRiskLikelihoodWords(block)} (reference figure).`;
   return `It may happen: ${eventRiskLikelihoodWords(block)}, as you said.`;
 }
 

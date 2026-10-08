@@ -38,7 +38,7 @@ import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
-import { goalChanceEstimateLinkCount } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { goalChanceEstimateLinkCount, goalChanceEstimateLikelihoodCount } from '../agent-lane/goal-chance-estimate-attribution.js';
 import {
   displayedPctAt, displayRoundingFor, goalChanceDisplayClass, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
   type GoalChanceDisplayRounding, type GoalChanceDriver, type GoalChanceNoDriverReason, type GoalChancePrecision,
@@ -112,6 +112,8 @@ export interface GoalChanceLicence {
   readonly option_labels_by_option?: Readonly<Record<string, string>>;
   /** RC4's unaccepted link-size count for this scored Run; definitions are excluded. */
   readonly olumi_estimate_link_count?: number;
+  /** Olumi event occurrences feeding this scored goal, counted separately from relationship sizes. */
+  readonly olumi_estimate_likelihood_count?: number;
   /** The options whose chance was withheld for their own path (model order); present only when non-empty. Form is `each`. */
   readonly withheld_option_ids?: readonly string[];
   /** `similar` only: the options within 10 displayed points of the top, in the model's order (≥ 2). */
@@ -260,6 +262,7 @@ export function goalChanceLicenceOf(
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
   const estimateLinks = goalChanceEstimateLinkCount(graph, option_ids, goalId);
+  const estimateLikelihoods = goalChanceEstimateLikelihoodCount(graph, goalId);
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -275,6 +278,7 @@ export function goalChanceLicenceOf(
       return typeof label === 'string' && label.trim() !== '' ? [[id, label]] : [];
     })),
     ...(estimateLinks > 0 ? { olumi_estimate_link_count: estimateLinks } : {}),
+    ...(estimateLikelihoods > 0 ? { olumi_estimate_likelihood_count: estimateLikelihoods } : {}),
     ...(spread === undefined && Object.keys(shortfall).length === 0 ? {} : { sent_threshold: sentThreshold }),
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
@@ -643,6 +647,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
   shortfall_note_by_option?: Readonly<Record<string, string>>;
   olumi_estimate_link_count?: number;
+  olumi_estimate_likelihood_count?: number;
   goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
 } | undefined {
   if (!isRec(result)) return undefined;
@@ -697,6 +702,8 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ) } : {}),
     ...(typeof r.olumi_estimate_link_count === 'number' && Number.isSafeInteger(r.olumi_estimate_link_count)
       && r.olumi_estimate_link_count > 0 ? { olumi_estimate_link_count: r.olumi_estimate_link_count } : {}),
+    ...(typeof r.olumi_estimate_likelihood_count === 'number' && Number.isSafeInteger(r.olumi_estimate_likelihood_count)
+      && r.olumi_estimate_likelihood_count > 0 ? { olumi_estimate_likelihood_count: r.olumi_estimate_likelihood_count } : {}),
     ...(validSent && sent !== undefined ? { sent_threshold: {
       value: sent.value as number,
       field: sent.field as SentGoalThreshold['field'],

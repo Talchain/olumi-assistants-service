@@ -1,0 +1,26 @@
+{
+  "exit_code": 0,
+  "changed_typescript_file_count": 20,
+  "files": [
+    "src/orchestrator-v5/__tests__/turn-executor-adopt-on-first-touch.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts",
+    "src/orchestrator-v5/agent-lane/actions/state.ts",
+    "src/orchestrator-v5/agent-lane/admit-model.ts",
+    "src/orchestrator-v5/agent-lane/event-risk-construction-context.ts",
+    "src/orchestrator-v5/agent-lane/goal-chance-estimate-attribution.ts",
+    "src/orchestrator-v5/agent-lane/keep-options-apart.ts",
+    "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts",
+    "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+    "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts",
+    "src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts",
+    "src/orchestrator-v5/boundary/request-extensions.ts",
+    "src/orchestrator-v5/routing/stated-event-risk.ts",
+    "src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts",
+    "src/routes/assist.v1.scenario-graph-register.ts"
+  ]
+}

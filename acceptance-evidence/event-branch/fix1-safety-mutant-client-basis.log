@@ -1,0 +1,57 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts (26 tests | 3 failed | 23 skipped) 112ms
+     × strips client-supplied sidecar even beside a valid user occurrence 97ms
+     × strips client-supplied sidecar even beside a valid olumi occurrence 7ms
+     × strips an orphan client sidecar before it can be stored or displayed 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts > FIX-1: CEE-only occurrence basis text at client ingress > strips client-supplied sidecar even beside a valid user occurrence
+ FAIL  src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts > FIX-1: CEE-only occurrence basis text at client ingress > strips client-supplied sidecar even beside a valid olumi occurrence
+AssertionError: expected 'Client supplied fabricated basis' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"Client supplied fabricated basis"
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts:205:40
+    203|     const risk = node(written(), 'risk_supplier');
+    204|     expect(risk.event_risk).toEqual(eventRisk);
+    205|     expect(risk.event_risk_basis_text).toBeUndefined();
+       |                                        ^
+    206|   });
+    207|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts > FIX-1: CEE-only occurrence basis text at client ingress > strips an orphan client sidecar before it can be stored or displayed
+AssertionError: expected 'Client supplied orphan basis' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"Client supplied orphan basis"
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts:213:68
+    211|     const res = await register(graph);
+    212|     expect(res.statusCode, res.body).toBe(200);
+    213|     expect(node(written(), 'risk_supplier').event_risk_basis_text).toB…
+       |                                                                    ^
+    214|   });
+    215|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 23 skipped (26)
+   Start at  14:43:08
+   Duration  5.49s (transform 3.82s, setup 111ms, import 5.15s, tests 112ms, environment 0ms)
+

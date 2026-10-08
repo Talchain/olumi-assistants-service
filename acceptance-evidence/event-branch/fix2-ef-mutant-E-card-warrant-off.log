@@ -1,0 +1,49 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts (11 tests | 3 failed | 8 skipped) 19ms
+     × E basis-less occurrence card undefined is a placeholder without Olumi attribution 13ms
+     × E basis-less occurrence card "" is a placeholder without Olumi attribution 1ms
+     × E basis-less occurrence card "   " is a placeholder without Olumi attribution 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E basis-less occurrence card undefined is a placeholder without Olumi attribution
+AssertionError: expected 'May happen: about 5–18% within 12 mon…' not to contain 'Olumi\'s estimate'
+
+Expected: "Olumi's estimate"
+Received: "May happen: about 5–18% within 12 months (Olumi's estimate, based on undefined)."
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:59:22
+     57|   it.each([undefined, '', '   '])('E basis-less occurrence card %j is …
+     58|     const line = eventRiskCardLine(event, text);
+     59|     expect(line).not.toContain("Olumi's estimate");
+       |                      ^
+     60|     expect(line).not.toContain('5–18%');
+     61|     expect(line).toContain('basis');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E basis-less occurrence card "" is a placeholder without Olumi attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E basis-less occurrence card "   " is a placeholder without Olumi attribution
+AssertionError: expected 'May happen: about 5–18% within 12 mon…' not to contain 'Olumi\'s estimate'
+
+Expected: "Olumi's estimate"
+Received: "May happen: about 5–18% within 12 months (Olumi's estimate, based on )."
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:59:22
+     57|   it.each([undefined, '', '   '])('E basis-less occurrence card %j is …
+     58|     const line = eventRiskCardLine(event, text);
+     59|     expect(line).not.toContain("Olumi's estimate");
+       |                      ^
+     60|     expect(line).not.toContain('5–18%');
+     61|     expect(line).toContain('basis');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 8 skipped (11)
+   Start at  15:25:26
+   Duration  14.63s (transform 11.04s, setup 323ms, import 14.09s, tests 19ms, environment 0ms)
+

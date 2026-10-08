@@ -1,0 +1,86 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (26 tests | 3 failed | 22 skipped) 51ms
+     × invalid probability percentages never survive as continuous factors 17ms
+     × a conflicting probability factor cannot silently replace the risk estimate 3ms
+     × a widener causal driver leaves the discrete event ordinary 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > invalid probability percentages never survive as continuous factors
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:100:67
+     98|   it('invalid probability percentages never survive as continuous fact…
+     99|     const result = admit(probability(candidate(), `${LABEL} probabilit…
+    100|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+       |                                                                   ^
+    101|     expect(risk(result).event_risk).toBeUndefined();
+    102|     expect(result.loss.some(l => /isn't used/.test(l.reason))).toBe(tr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a conflicting probability factor cannot silently replace the risk estimate
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:109:83
+    107|     expect(Math.round(risk(result).event_risk!.occurrence.p_low * 100)…
+    108|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+    109|     expect(result.loss.some(l => /different likelihood estimate/.test(…
+       |                                                                                   ^
+    110|     expect(result.loss.some(l => /Converted/.test(l.reason))).toBe(fal…
+    111|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a widener causal driver leaves the discrete event ordinary
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:118:67
+    116|     const result = admitCandidateModel(c, { proposed_links: [{ from: '…
+    117|       direction: 'negative', provenance: 'ai_proposed' }] });
+    118|     expect(result.nodes.find(n => n.kind === 'risk')!.event_risk).toBe…
+       |                                                                   ^
+    119|   });
+    120|   it('a raw drafted cause leaves the discrete event ordinary', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed | 22 skipped (26)
+   Start at  14:09:24
+   Duration  1.96s (transform 1.34s, setup 146ms, import 1.63s, tests 51ms, environment 0ms)
+

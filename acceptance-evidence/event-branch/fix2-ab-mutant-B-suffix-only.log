@@ -1,0 +1,39 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (23 tests | 4 failed) 120ms
+     × token probability in the middle survives no label gate 7ms
+     × token likelihood in the middle survives no label gate 2ms
+     × token chance in the middle survives no label gate 1ms
+     × token odds in the middle survives no label gate 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token probability in the middle survives no label gate
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token likelihood in the middle survives no label gate
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token chance in the middle survives no label gate
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token odds in the middle survives no label gate
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:116:57
+    114|   it.each(['probability', 'likelihood', 'chance', 'odds'])('token %s i…
+    115|     const result = admit(factor(draft(false), `${LABEL} ${word} level`…
+    116|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+       |                                                         ^
+    117|     expect(result.loss.some(l => /isn't used/.test(l.reason))).toBe(tr…
+    118|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  4 failed | 26 passed (30)
+   Start at  15:40:49
+   Duration  2.46s (transform 1.29s, setup 149ms, import 1.88s, tests 192ms, environment 0ms)
+

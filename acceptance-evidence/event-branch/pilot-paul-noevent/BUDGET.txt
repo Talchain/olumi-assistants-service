@@ -1,0 +1,1 @@
+BUDGET: EVENT branch; exactly 2 live draws; at most 4 provider attempts total (one existing construction repair per draw); checked-in construction baseline model/effort; no configuration/store writes; stop on first 429.

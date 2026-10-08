@@ -1,0 +1,11 @@
+Mutant: horizon-mismatch-disclosure-off
+Command: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t "r1 #5" < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 3 skipped (4)
+   Start at  15:31:00
+   Duration  2.33s (transform 1.64s, setup 133ms, import 2.03s, tests 45ms, environment 0ms)
+

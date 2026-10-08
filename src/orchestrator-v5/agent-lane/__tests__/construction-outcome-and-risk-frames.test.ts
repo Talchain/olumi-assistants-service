@@ -187,14 +187,17 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     const sent = new Ajv({ strict: false, allErrors: true }).compile(strictForTheDrafter(buildCandidateSchema()));
     expect(sent(recorded.candidate)).toBe(false);
     expect(onFrames(sent.errors).map((e) => (e as { params?: { missingProperty?: string } }).params?.missingProperty).sort())
-      .toEqual(['plausible_max', 'plausible_max', 'unit', 'unit']);
+      .toEqual(['occurrence', 'plausible_max', 'plausible_max', 'unit', 'unit']);
   });
 
   it('what is SENT requires both keys on every outcome and risk; every other object is sent byte for byte as the contract', async () => {
     const { sent } = await registered(recorded.candidate);
     expect(sent.length).toBeGreaterThanOrEqual(1);
     const items = (s: Record<string, unknown>, k: string) => ((s.properties as Record<string, { items: { required: string[] } }>)[k]!.items);
-    for (const s of sent) for (const k of ['risks', 'outcomes']) expect(items(s, k).required).toEqual(['label', 'provenance', 'unit', 'plausible_max']);
+    for (const s of sent) {
+      expect(items(s, 'outcomes').required).toEqual(['label', 'provenance', 'unit', 'plausible_max']);
+      expect(items(s, 'risks').required).toEqual(['label', 'provenance', 'unit', 'plausible_max', 'occurrence']);
+    }
     // The link's `definitional` (DL 5916504679) and `basis` (#2848, Science §(p)(1)) are the other keys optional in the
     // contract and required when sent.
     for (const s of sent) expect(items(s, 'links').required.slice(-2)).toEqual(['definitional', 'basis']);

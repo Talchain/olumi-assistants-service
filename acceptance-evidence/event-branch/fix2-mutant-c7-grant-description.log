@@ -1,0 +1,38 @@
+MUTANT: c7-grant-description
+SOURCE: src/orchestrator-v5/agent-lane/event-risk-construction-context.ts
+REPLACE: && trusted.label === node.label && trusted.description === node.description
+WITH: && trusted.label === node.label
+COMMAND: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts --testNamePattern='cannot reuse CEE context for a different description' --maxWorkers=1 --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts (31 tests | 1 failed | 30 skipped) 112ms
+     × cannot reuse CEE context for a different description 110ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 skipped (31)
+   Start at  15:36:16
+   Duration  8.66s (transform 6.20s, setup 161ms, import 8.06s, tests 112ms, environment 0ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts > FIX-1: CEE-only occurrence basis text at client ingress > cannot reuse CEE context for a different description
+AssertionError: expected 'CEE admitted reference class' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"CEE admitted reference class"
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts:251:94
+    249|     const res = await runWithEventRiskConstruction(mismatch === 'scena…
+    250|     expect(res.statusCode, res.body).toBe(200);
+    251|     expect((written().nodes as Rec[]).find((n) => n.kind === 'risk')?.…
+       |                                                                                              ^
+    252|   });
+    253|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

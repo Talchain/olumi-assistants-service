@@ -1,0 +1,21 @@
+{
+  "scripts/census/event-branch-pilot-runner.py": "9d16747ae8f468adaea44d20a5fdd8487d53f6741681190a23cc9ed701879f7f",
+  "scripts/census/event-branch-replay-summary.py": "ff19767058defd628255fe470cc3ba510b7b2fb597acf5131c5514e2cc36a8ba",
+  "src/orchestrator-v5/agent-lane/__tests__/construction-outcome-and-risk-frames.test.ts": "632f97c2b4b9d009665a1eca77073ee007f30bf90687daa9fa4091834ce17a7a",
+  "src/orchestrator-v5/agent-lane/__tests__/event-branch-construction.test.ts": "fed16e46899195f1633b5bfc62cc3367a5b6dfc27e6310c068d23575de3ce560",
+  "src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts": "bb3b26f897168ebb58eb804b17ee6bbc0e2251e1355d3ba81ad583ab2e036096",
+  "src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts": "7d95672a44082fd41c177dae2021cc5affc846e103f39f13ada5252845abc36b",
+  "src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts": "f6f256bd68b6001190f241014e88f8eb0a4a706176b26cb82418e352aa674a0c",
+  "src/orchestrator-v5/agent-lane/actions/state.ts": "86677cde1b746d431429cd3cb09a40084585f6dd9d729b335b0fc51da26d6f72",
+  "src/orchestrator-v5/agent-lane/admit-model.ts": "1a81235f821a7c6b05c9643685707a85db6c6032f9372048783b4cfcc4688e8e",
+  "src/orchestrator-v5/agent-lane/goal-chance-estimate-attribution.ts": "c091730b361d85773236437a7a8ef8219646a882fed1db04559dc479180d564e",
+  "src/orchestrator-v5/agent-lane/goal-chance-estimate-egress.ts": "522bcfa9fdbb07185c8b191c5ccfb0afa5ea022baff853c59b55d995b6c5b8b6",
+  "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": "f65b651393e82d3a19ce02800aff98b076c649324fe5d29fc0b95ea087e18e51",
+  "src/orchestrator-v5/agent-lane/olumi-estimates-feeding-result.ts": "f3566e07c1d32ad6f51d2bdd69a0a17731e4989ee7840eaf03abfc8697be4857",
+  "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts": "0a415e0e108d46ee747af1d6959dda8ca54f551b3fbf82212c6334cb2d50ab3a",
+  "src/orchestrator-v5/agent-lane/runtime/build-model.ts": "0dad38bad33880bc5d2afa669ab91d1d7a7b7a92b44191d848b7f8a06e204350",
+  "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "a10171a1eaf0f7fc9754033f7f63a7591c0b9e25baf2b1032d8b14fdd7015acf",
+  "src/orchestrator-v5/goal-target/goal-chance-licence.ts": "aeae52a70b46267c7e31cc9fef5a1cc6211ff10dba70135c650c797cd01d7f1d",
+  "src/orchestrator-v5/routing/stated-event-risk.ts": "de8a17a52e15609e34be5ef51d159e88a911704c7f248d7c649e0900973627b2",
+  "src/schemas/cee-v3.ts": "8716e33e408424d9a2ef88278b3a41c46f3f3a2dbde092567fee9592c4f19479"
+}

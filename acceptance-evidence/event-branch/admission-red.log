@@ -1,0 +1,232 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (17 tests | 13 failed) 82ms
+     × 10% 5 widens by odds ÷2…×2 28ms
+     × 50% 33 widens by odds ÷2…×2 12ms
+     × 90% 82 widens by odds ÷2…×2 1ms
+     × 2% 1 widens by odds ÷2…×2 1ms
+     × keeps a range wider than the odds minimum 3ms
+     × user likelihood and its own six-month horizon beat Olumi 14ms
+     × explicit 10% chance converts to the named risk as user, removes factor and its links 3ms
+     × 5b50b4c8 hedge drops with the author-resolved exact disclosure 3ms
+     × a probability absent from the brief with no basis is dropped and disclosed 2ms
+     × a 0–1 chance factor converts using the risk occurrence basis and horizon 1ms
+     × unmatched and ambiguous probability factors never feed the goal 1ms
+     × Client cancels Revenue impact existence is 1 2ms
+     × does not overwrite a user-sized impact 5ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > 10% 5 widens by odds ÷2…×2
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > 50% 33 widens by odds ÷2…×2
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > 90% 82 widens by odds ÷2…×2
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > 2% 1 widens by odds ÷2…×2
+AssertionError: expected undefined to be 'olumi' // Object.is equality
+
+- Expected:
+"olumi"
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:34:47
+     32|   it.each([[10, 5, 18], [50, 33, 67], [90, 82, 95], [2, 1, 4]])('%s%% …
+     33|     const node = risk(admit(candidate(p)));
+     34|     expect(node.event_risk?.occurrence.basis).toBe('olumi');
+       |                                               ^
+     35|     expect(Math.round(node.event_risk!.occurrence.p_low * 100)).toBe(l…
+     36|     expect(Math.round(node.event_risk!.occurrence.p_high * 100)).toBe(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > keeps a range wider than the odds minimum
+AssertionError: expected undefined to match object { p_low: 0.1, p_high: 0.9 }
+
+- Expected:
+{
+  "p_high": 0.9,
+  "p_low": 0.1,
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:44:51
+     42|     (c.risks[0] as any).occurrence.p_low_pct = 10;
+     43|     (c.risks[0] as any).occurrence.p_high_pct = 90;
+     44|     expect(risk(admit(c)).event_risk?.occurrence).toMatchObject({ p_lo…
+       |                                                   ^
+     45|   });
+     46|   it.each(['', '  '])('basis-less Olumi occurrence %j stays a placehol…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > user likelihood and its own six-month horizon beat Olumi
+AssertionError: expected undefined to match object { …(2) }
+
+- Expected:
+{
+  "horizon": {
+    "months": 6,
+  },
+  "occurrence": {
+    "basis": "user",
+    "p_high": 0.1,
+    "p_low": 0.1,
+  },
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:58:37
+     56|   it('user likelihood and its own six-month horizon beat Olumi', () =>…
+     57|     const result = admit(candidate(90), 'Key developer departure has a…
+     58|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     59|     expect((risk(result) as any).event_risk_basis_text).toBeUndefined(…
+     60|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > explicit 10% chance converts to the named risk as user, removes factor and its links
+AssertionError: expected undefined to match object { …(2) }
+
+- Expected:
+{
+  "horizon": {
+    "months": 6,
+  },
+  "occurrence": {
+    "basis": "user",
+    "p_high": 0.1,
+    "p_low": 0.1,
+  },
+}
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:63:37
+     61|   it('explicit 10% chance converts to the named risk as user, removes …
+     62|     const result = admit(probability(candidate()), 'Key developer depa…
+     63|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     64|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+     65|     expect(result.edges.every(e => result.nodes.some(n => n.id === e.f…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > 5b50b4c8 hedge drops with the author-resolved exact disclosure
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:71:67
+     69|     const result = admit(probability(candidate()), 'Key developer depa…
+     70|     expect(risk(result).event_risk).toBeUndefined();
+     71|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+       |                                                                   ^
+     72|     expect(result.loss.map(l => l.reason)).toContain("Olumi had drafte…
+     73|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a probability absent from the brief with no basis is dropped and disclosed
+AssertionError: expected [ …(11) ] to include 'Olumi had drafted ‘Key developer depa…'
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:77:44
+     75|     const result = admit(probability(candidate()), 'A key developer co…
+     76|     expect(risk(result).event_risk).toBeUndefined();
+     77|     expect(result.loss.map(l => l.reason)).toContain("Olumi had drafte…
+       |                                            ^
+     78|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+     79|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a 0–1 chance factor converts using the risk occurrence basis and horizon
+AssertionError: expected undefined to be 'olumi' // Object.is equality
+
+- Expected:
+"olumi"
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:84:55
+     82|     c.risks = candidate().risks;
+     83|     const result = admit(c);
+     84|     expect(risk(result).event_risk?.occurrence.basis).toBe('olumi');
+       |                                                       ^
+     85|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     86|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > unmatched and ambiguous probability factors never feed the goal
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:90:69
+     88|     for (const c of [probability({ ...candidate(), risks: [] }), proba…
+     89|       const result = admit(c);
+     90|       expect(result.nodes.some(n => /probability$/i.test(n.label))).to…
+       |                                                                     ^
+     91|       expect(result.loss.some(l => /isn't used/.test(l.reason))).toBe(…
+     92|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > Client cancels Revenue impact existence is 1
+AssertionError: expected 0.8 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0.8
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:97:131
+     95|     const c = candidate();
+     96|     c.risks = [{ ...c.risks[0]!, label }]; c.links = [{ ...c.links[0]!…
+     97|     expect(admit(c).edges.find(e => e.from === 'client_cancels_revenue…
+       |                                                                                                                                   ^
+     98|   });
+     99|   it('does not overwrite a user-sized impact', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/13]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > does not overwrite a user-sized impact
+AssertionError: expected 'olumi_placeholder' to be 'user_stated' // Object.is equality
+
+Expected: "user_stated"
+Received: "olumi_placeholder"
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:105:42
+    103|       () => false, () => null, () => true);
+    104|     const impact = result.edges.find(e => e.from === 'key_developer_de…
+    105|     expect(impact.provenance?.magnitude).toBe('user_stated');
+       |                                          ^
+    106|     expect(impact.provenance?.natural_effect?.amount).toBe(-2000);
+    107|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/13]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  13 failed | 4 passed (17)
+   Start at  13:59:28
+   Duration  1.91s (transform 1.27s, setup 117ms, import 1.57s, tests 82ms, environment 0ms)
+

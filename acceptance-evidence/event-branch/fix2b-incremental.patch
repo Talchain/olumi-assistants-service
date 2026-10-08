@@ -1,0 +1,102 @@
+--- a/src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts
++++ b/src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts
+@@ -59,9 +59,13 @@
+   }, horizon: { months } };
+ }
+ 
+-type Prepared = { candidate: CandidateModel; widened: WidenerAdditions; loss: RepairEntry[] };
++type Prepared = {
++  candidate: CandidateModel; widened: WidenerAdditions; loss: RepairEntry[];
++  horizonMismatches: { label: string; drafted_months: number; goal_months: number }[];
++};
+ export function prepareDraftEventRisks(input: CandidateModel, widened: WidenerAdditions, brief: string): Prepared {
+   const loss: RepairEntry[] = [];
++  const horizonMismatches: Prepared['horizonMismatches'] = [];
+   const removed = new Set<string>();
+   const probability = new Map<number, { label: string; value: number }>();
+   const eventLabels = input.risks.map(r => r.label);
+@@ -158,6 +162,8 @@
+     if (!user && !quoted && !incoming.has(key(r.label)) && horizonMismatch) {
+       loss.push({ field_path: `nodes[${r.label}].event_risk`, before: r.occurrence!.horizon_months, after: null,
+         severity: 'warn', reason: `${r.label}: the drafted occurrence is for ${r.occurrence!.horizon_months} months, but the goal's horizon is ${candidate.goal.horizon_months} months, so its likelihood isn't used.` } as RepairEntry);
++      horizonMismatches.push({ label: r.label, drafted_months: r.occurrence!.horizon_months,
++        goal_months: candidate.goal.horizon_months! });
+     }
+     const occurrence = user ?? olumi;
+     if (quoted) {
+@@ -183,7 +189,7 @@
+   return { candidate: { ...candidate, risks }, widened: { ...widened,
+     ...(widened.proposed_factors ? { proposed_factors: widened.proposed_factors.filter(f => !removed.has(key(f.label))) } : {}),
+     ...(widened.proposed_links ? { proposed_links: widened.proposed_links.filter(survives) } : {}),
+-  }, loss };
++  }, loss, horizonMismatches };
+ }
+ 
+ export function finishDraftEventRisks(model: AdmittedModel, prepared: Prepared): AdmittedModel {
+--- a/src/orchestrator-v5/agent-lane/admit-model.ts
++++ b/src/orchestrator-v5/agent-lane/admit-model.ts
+@@ -71,6 +71,7 @@
+ import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss } from '../goal-target/event-by-date-model.js';
+ import type { EventRiskV1T } from '../../schemas/event-risk.js';
+ import { prepareDraftEventRisks, finishDraftEventRisks, type DraftEventOccurrence } from './olumi-event-risk-draft.js';
++import { log } from '../../utils/telemetry.js';
+ 
+ const MAX_ID = 100;
+ 
+@@ -3019,6 +3020,10 @@
+ 
+ export function admitCandidateModel(...args: Parameters<typeof admitModelWithoutEventRisks>): AdmittedModel {
+   const prepared = prepareDraftEventRisks(args[0], args[1] ?? {}, args[2] ?? '');
++  for (const { label, drafted_months, goal_months } of prepared.horizonMismatches) {
++    log.info({ event: 'cee.event_risk.horizon_mismatch', risk_node_id: slugId(label), drafted_months, goal_months },
++      'event risk: drafted horizon differs from the goal horizon; likelihood not used');
++  }
+   const admitted = admitModelWithoutEventRisks(prepared.candidate, prepared.widened, args[2], args[3], args[4], args[5], args[6], args[7]);
+   return finishDraftEventRisks(admitted, prepared);
+ }
+--- a/src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts
++++ b/src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts
+@@ -1,4 +1,5 @@
+-import { describe, expect, it } from 'vitest';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { log } from '../../../utils/telemetry.js';
+ import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+ import { BUILD_INSTRUCTIONS } from '../runtime/build-model.js';
+ 
+@@ -24,6 +25,9 @@
+ }
+ 
+ describe('FIX-2 D: the goal horizon governs Olumi event occurrences', () => {
++  beforeEach(() => { vi.spyOn(log, 'info').mockImplementation(() => undefined as never); });
++  afterEach(() => { vi.restoreAllMocks(); });
++
+   it('r1 #5: a three-month estimate stays a placeholder beside a stated twelve-month goal', () => {
+     const { result, risk } = admit(12, 3);
+     expect(risk.event_risk).toBeUndefined();
+@@ -33,6 +37,11 @@
+       reason: expect.stringMatching(/drafted occurrence is for 3 months.*goal's horizon is 12 months/),
+     }));
+     expect(result.loss.some(entry => entry.field_path.endsWith('.event_risk') && /Olumi.s estimate/i.test(entry.reason))).toBe(false);
++    expect(log.info).toHaveBeenCalledTimes(1);
++    expect(log.info).toHaveBeenCalledWith({
++      event: 'cee.event_risk.horizon_mismatch', risk_node_id: 'key_developer_departure',
++      drafted_months: 3, goal_months: 12,
++    }, 'event risk: drafted horizon differs from the goal horizon; likelihood not used');
+   });
+ 
+   it('admits the unchanged estimate when its own horizon matches the stated goal', () => {
+@@ -41,12 +50,14 @@
+     expect(risk.event_risk?.occurrence.p_low).toBeCloseTo(0.1 / 1.9);
+     expect(risk.event_risk?.occurrence.p_high).toBeCloseTo(0.2 / 1.1);
+     expect(risk.event_risk_basis_text).toBe(BASIS);
++    expect(log.info).not.toHaveBeenCalled();
+   });
+ 
+   it('admits the drafted six-month horizon when the goal states no horizon', () => {
+     const { risk } = admit(null, 6);
+     expect(risk.event_risk).toMatchObject({ occurrence: { basis: 'olumi' }, horizon: { months: 6 } });
+     expect(risk.event_risk_basis_text).toBe(BASIS);
++    expect(log.info).not.toHaveBeenCalled();
+   });
+ 
+   it('asks for another period only when the goal states no horizon', () => {

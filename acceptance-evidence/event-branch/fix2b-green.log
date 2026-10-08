@@ -1,0 +1,15 @@
+Load gate: 9.9404296875 < 25
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+{"level":"info","time":1791471284136,"pid":76240,"hostname":"Mac.net","event":"cee.event_risk.horizon_mismatch","risk_node_id":"key_developer_departure","goal_months":12,"msg":"event risk: drafted horizon differs from the goal horizon; likelihood not used"}
+{"level":"info","time":1791471284215,"pid":76240,"hostname":"Mac.net","event":"cee.event_risk.horizon_mismatch","risk_node_id":"key_developer_departure","drafted_months":0,"goal_months":12,"msg":"event risk: drafted horizon differs from the goal horizon; likelihood not used"}
+{"level":"info","time":1791471284216,"pid":76240,"hostname":"Mac.net","event":"cee.event_risk.horizon_mismatch","risk_node_id":"key_developer_departure","drafted_months":-1,"goal_months":12,"msg":"event risk: drafted horizon differs from the goal horizon; likelihood not used"}
+{"level":"info","time":1791471284217,"pid":76240,"hostname":"Mac.net","event":"cee.event_risk.horizon_mismatch","risk_node_id":"key_developer_departure","drafted_months":601,"goal_months":12,"msg":"event risk: drafted horizon differs from the goal horizon; likelihood not used"}
+{"level":"info","time":1791471284218,"pid":76240,"hostname":"Mac.net","event":"cee.event_risk.horizon_mismatch","risk_node_id":"key_developer_departure","drafted_months":null,"goal_months":12,"msg":"event risk: drafted horizon differs from the goal horizon; likelihood not used"}
+
+ Test Files  2 passed (2)
+      Tests  48 passed (48)
+   Start at  15:54:38
+   Duration  6.48s (transform 4.07s, setup 254ms, import 5.70s, tests 223ms, environment 0ms)
+

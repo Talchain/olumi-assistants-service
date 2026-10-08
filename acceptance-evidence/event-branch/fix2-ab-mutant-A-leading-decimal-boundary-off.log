@@ -1,0 +1,44 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (23 tests | 1 failed) 135ms
+     × any refused user figure .15 blocks a different drafted factor and occurrence 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure .15 blocks a different drafted factor and occurrence
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:65:37
+     63|   it.each(['15%', '110%', '10.5%', '0.15', '.15'])('any refused user f…
+     64|     const result = admit(factor(draft()), `${LABEL}: probably ${figure…
+     65|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     66|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     67|     expect(result.loss.some(l => /You said/.test(l.reason))).toBe(true…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 29 passed (30)
+   Start at  15:41:06
+   Duration  2.85s (transform 1.53s, setup 142ms, import 2.26s, tests 213ms, environment 0ms)
+

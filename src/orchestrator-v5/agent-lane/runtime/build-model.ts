@@ -37,6 +37,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
  */
 
 import { createHash } from 'node:crypto';
+import { runWithEventRiskConstruction } from '../event-risk-construction-context.js';
 import { verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
@@ -271,7 +272,16 @@ export function buildCandidateSchema(): Record<string, unknown> {
     // out of an outcome or a risk can be read, so a goal they feed could never be sized in its own unit.
     // ⛔ OPTIONAL HERE, REQUIRED ONLY WHERE IT IS SENT (DL 5916270318, option D): a candidate recorded before the frames
     // existed still validates against this contract, and `strictForTheDrafter` requires both keys of the drafter itself.
-    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
+    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME,
+      occurrence: { description:
+        'For a discrete event that either happens or does not: its likelihood range over a stated horizon, with a specific one-line reference-class basis. null for a continuous risk or when no defensible likelihood exists. Put the impact on its outgoing link in the affected quantity\u2019s own units, never in a probability factor.',
+        anyOf: [{ type: 'null' }, obj({
+          p_low_pct: { type: 'number', minimum: 0, maximum: 100 },
+          p_high_pct: { type: 'number', minimum: 0, maximum: 100 },
+          horizon_months: { type: 'number', exclusiveMinimum: 0 },
+          basis_text: { type: 'string' },
+        }, ['p_low_pct', 'p_high_pct', 'horizon_months', 'basis_text'])] },
+    }, ['label', 'provenance']) },
     outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
     links: { type: 'array', description:
       'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk \u2014 link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.',
@@ -386,6 +396,7 @@ export const BUILD_INSTRUCTIONS = [
   // K3 precedence (Codex CR @5d3841dc, DL 9d9666): seven user-named risks cannot fit "up to 4 to 6 outcomes and risks",
   // so the envelope and K3 contradicted each other. The user's risks win; Olumi's own additions give way first.
   + 'A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named, even when that takes the model past 6 outcomes and risks. '
+  + "A RISK THAT EITHER HAPPENS OR DOES NOT (a discrete event, such as a key person leaving, a client cancelling or a release slipping) carries its likelihood ON THE RISK: give `occurrence` with a low and a high percentage over the goal's horizon in months (if the goal states no horizon, the period you mean) and a one-line basis from a reference class, and size its impact on the link to what it threatens, in that quantity's own units. Never draw that likelihood as a separate factor such as '… probability'. "
   + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   // ⛔ THE COUNT IS THE GATE'S (AIQ #70 5858990481 item 5: the first draft's budget is the truth-safe lever). The rule
@@ -2195,12 +2206,12 @@ export async function buildModelFromBrief(
    * committed, now meets `GRAPH_STALE` rather than a replayed receipt. It is recovered below exactly as the
    * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
    */
-  const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
+  const reg = await runWithEventRiskConstruction(scenarioId, graph, () => dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
     graph,
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
     expected_graph_identity_hash: null,
-  });
+  }));
   const regCode = (reg.json.details as { code?: unknown } | undefined)?.code;
   if (reg.status === 409 && regCode === 'GRAPH_STALE') {
     const prior = await findConstructionVersion(dispatch, scenarioId, brief);

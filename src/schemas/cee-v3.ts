@@ -658,6 +658,8 @@ export const NodeV3 = z.object({
    * (`eventRiskIngressIssues`) refuses it (422). Absent ⇒ today's risk node, byte-identically.
    */
   event_risk: EventRiskV1.optional().catch(undefined),
+  /** CEE-owned readable warrant; readOlumiEventRiskBasisText ignores it without a valid Olumi occurrence on a risk. */
+  event_risk_basis_text: z.string().trim().min(1).optional().catch(undefined),
   /**
    * RC3 (a′): server-authored identity of the option whose precondition this risk describes.
    * `inertRiskBranch` reads a valid stamp with an existing option and NO incident edges to leave

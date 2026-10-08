@@ -1,0 +1,46 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (27 tests | 1 failed | 26 skipped) 56ms
+     × user likelihood and its own six-month horizon beat Olumi 55ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > user likelihood and its own six-month horizon beat Olumi
+AssertionError: expected { version: 1, …(2) } to match object { …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "horizon": {
+-     "months": 6,
++     "months": 12,
+    },
+    "occurrence": {
+-     "basis": "user",
+-     "p_high": 0.1,
+-     "p_low": 0.1,
++     "basis": "olumi",
++     "p_high": 0.9473684210526316,
++     "p_low": 0.8181818181818181,
+    },
+  }
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:58:37
+     56|   it('user likelihood and its own six-month horizon beat Olumi', () =>…
+     57|     const result = admit(candidate(90), 'Key developer departure has a…
+     58|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     59|     expect((risk(result) as any).event_risk_basis_text).toBeUndefined(…
+     60|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 skipped (27)
+   Start at  14:24:55
+   Duration  1.65s (transform 1.11s, setup 103ms, import 1.38s, tests 56ms, environment 0ms)
+

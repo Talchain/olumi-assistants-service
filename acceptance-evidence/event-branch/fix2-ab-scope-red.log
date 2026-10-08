@@ -1,0 +1,119 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts (7 tests | 6 failed) 109ms
+     × comma context with refused phrase estimated retains the user figure without Olumi occurrence 65ms
+     × comma context with refused phrase at most retains the user figure without Olumi occurrence 19ms
+     × two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk 12ms
+     × orphan probability factor with invalid baseline=false quotes the user figure and does not call it Olumi-drafted 4ms
+     × orphan probability factor with invalid baseline=true quotes the user figure and does not call it Olumi-drafted 2ms
+     × an ambiguous probability factor quotes the user figure without assigning it to either risk 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > comma context with refused phrase estimated retains the user figure without Olumi occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > comma context with refused phrase at most retains the user figure without Olumi occurrence
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:23:37
+     21|   it.each(['estimated', 'at most'])('comma context with refused phrase…
+     22|     const result = admit(candidate(), `${LABEL}, ${hedge} 10% within 6…
+     23|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     24|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     25|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > two figures in one comma fragment cannot bind an unmodelled event likelihood to the modelled risk
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "user",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.2,
+    "p_low": 0.2,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:31:37
+     29|   it('two figures in one comma fragment cannot bind an unmodelled even…
+     30|     const result = admit(candidate(), `${LABEL}: probably 10% and Supp…
+     31|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     32|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     33|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > orphan probability factor with invalid baseline=false quotes the user figure and does not call it Olumi-drafted
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > orphan probability factor with invalid baseline=true quotes the user figure and does not call it Olumi-drafted
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:46:119
+     44|     const result = admit(draft, `${LABEL}: probably 10% within 6 month…
+     45|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     46|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+       |                                                                                                                       ^
+     47|     expect(result.loss.some(l => l.reason.includes('Olumi had drafted'…
+     48|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts > FIX2 Class A: every figure scope and every probability factor uses the same user-claim guard > an ambiguous probability factor quotes the user figure without assigning it to either risk
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-claim-scope.test.ts:58:96
+     56|     draft.links.push({ from: factorLabel, to: 'Revenue', direction: 'n…
+     57|     const result = admit(draft, `${LABEL}: probably 10% within 6 month…
+     58|     expect(result.nodes.filter(n => n.kind === 'risk').every(n => n.ev…
+       |                                                                                                ^
+     59|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     60|     expect(result.loss.some(l => l.reason.includes('You said') && l.re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 1 passed (7)
+   Start at  15:33:35
+   Duration  3.28s (transform 2.27s, setup 214ms, import 2.76s, tests 109ms, environment 0ms)
+
