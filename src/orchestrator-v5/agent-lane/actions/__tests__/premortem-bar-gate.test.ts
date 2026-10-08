@@ -11,7 +11,9 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { actionFactsOf, type ActionRead } from '../state.js';
 import { actionBarOf, DISABLED, type ActionBarV1 } from '../rank.js';
 import { approvalChipIdFor } from '../../approval-chips.js';
-import type { PendingAction } from '../../../session/pending-action.js';
+import { parsePendingAction, type PendingAction } from '../../../session/pending-action.js';
+import { computeProposalId } from '../../proposal.js';
+import { proposalPendingAction } from '../../durable-proposal.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const SCENARIO = '7d2e3f40-5b6c-4d7e-8f90-a1b2c3d4e5f6';
@@ -27,11 +29,21 @@ const ran = (graph: unknown): ActionRead => {
     optionParticipation: [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }],
   };
 };
-const approval = (graph: unknown, overrides: Partial<PendingAction> = {}): PendingAction => ({
-  id: 'pending', scenario_id: SCENARIO, chip_id: approvalChipIdFor('prop_0123456789ab'),
-  action: { kind: 'apply_proposed_change', proposal_ref: 'prop_0123456789ab', inline_patch: {}, public_label: 'Approve', public_message: 'Approve the held change.' },
-  preconditions: { graph_hash: hashOf(graph) }, expires_at_turn_count: 12, expires_at_iso: '2099-01-01T00:00:00.000Z', emitted_at_iso: AT, ...overrides,
-});
+/**
+ * A REAL waiting card, built by the production writer (`proposalPendingAction`) from a hashed Agent proposal, so the
+ * strict persisted read accepts it (Codex r1 P2 on #2799: a hand-made carrier with proposal_ref != chip_id is refused
+ * by `parsePendingAction`, so no egress could ever see it).
+ */
+const approval = (graph: unknown, overrides: Partial<PendingAction> = {}): PendingAction => {
+  const content = { scenario_id: SCENARIO, user_id: null, base_graph_identity_hash: hashOf(graph),
+    operations: [{ op: 'set', path: 'nodes/f/observed_state/value', value: 0.4 }],
+    provenance: { authored_by: 'model_proposed', basis: 'estimate' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+    public_label: 'Approve the change' };
+  const id = computeProposalId(content as never);
+  const carrier = proposalPendingAction({ ...content, proposal_id: id } as never,
+    { id: approvalChipIdFor(id), label: 'Approve', message: 'Approve the held change.' } as never, { scenario_id: SCENARIO, emitted_at_iso: AT });
+  return { ...carrier, ...overrides };
+};
 const bar = (read: ActionRead) => actionBarOf(actionFactsOf(read));
 const offers = (b: ActionBarV1) => [...b.priority, ...b.standard, ...b.more];
 const premortem = (b: ActionBarV1) => offers(b).find((o) => o.action_id === 'pre_mortem');
@@ -57,9 +69,11 @@ describe('P02 bar gate: no fresh pre-mortem press while its card waits', () => {
     expect(premortem(bar({ ...ran(D1.graph), pending: [approval(D1.graph, { preconditions: { graph_hash: 'f'.repeat(16) } })] }))).toMatchObject({ enabled: true });
   });
 
-  it('the live bar and the reload bar agree: same facts → byte-identical bar', () => {
-    const read = { ...ran(D1.graph), pending: [approval(D1.graph)] };
-    expect(JSON.stringify(bar(read))).toBe(JSON.stringify(bar(read)));
+  it('the waiting card is one the strict persisted read accepts (both egresses read pending through it)', () => {
+    const card = approval(D1.graph);
+    expect(parsePendingAction(JSON.parse(JSON.stringify(card)))).not.toBeNull();
+    const reread = parsePendingAction(JSON.parse(JSON.stringify(card)))!;
+    expect(premortem(bar({ ...ran(D1.graph), pending: [reread] }))).toMatchObject({ enabled: false, disabled_reason: DISABLED.already_waiting });
   });
 
   it('the reason names the waiting card, never a ranking or a recommendation', () => {
