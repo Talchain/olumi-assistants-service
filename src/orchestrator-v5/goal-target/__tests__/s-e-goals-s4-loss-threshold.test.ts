@@ -52,6 +52,16 @@ function withGrowth(g = model()): Rec {
     observed_state: { value: 0.05, raw_value: 5, cap: 100, unit: '%' } });
   return g;
 }
+function pricingModel(): Rec {
+  const g = model('Monthly churn rate');
+  g.nodes[1].label = 'Plan';
+  g.nodes[3].label = 'Hold at £49';
+  g.nodes[4].label = 'Raise to £59';
+  g.nodes.push({ id: 'c', kind: 'option', label: 'Lower to £39', interventions: {} },
+    { id: 'pro-plan-price', kind: 'factor', label: 'Pro plan price', category: 'controllable', quantity_frame: 'level',
+      observed_state: { value: 0.49, raw_value: 49, cap: 100, unit: '£/month', source: 'user_override' } });
+  return g;
+}
 function world(initial = model()) {
   let bytes = JSON.stringify(assignEntityRefs(projectGraphForPersistence(initial), { nodes: [], edges: [] }).graph);
   const graph = (): Rec => JSON.parse(bytes);
@@ -96,6 +106,75 @@ function world(initial = model()) {
 afterEach(() => { port.store = undefined; });
 
 describe('S4 loss threshold: inclusive ceiling from this message, subject to approval', () => {
+  it.each([
+    PAUL,
+    'Our churn is 4%, and annual price rises would at least increase it 1%; above 6% we lose money',
+    MODEL_ONLY,
+    "anything over 6% and we're losing money",
+    'past 6% churn we lose money',
+    'we lose money once churn tops 6%',
+  ])('r2 realistic pricing model: %s', async text => {
+    const g = pricingModel();
+    expect(readNewLimit(g, text, 6)).toMatchObject({ node_id: CHURN, operator: '<=', raw_value: 6,
+      unit: '%', value_frame: 'level', source_quote: text });
+    const w = world(g); const r = await w.propose(text, 6, 'Monthly churn rate');
+    expect(r).toMatchObject({ ok: true, mutated: false, public_label: 'Keep monthly churn rate at most 6%?' });
+    expect(w.proposals.get(r.proposal_id as string)?.operations).toEqual([{ op: 'add_limit', path: CHURN,
+      value: expect.objectContaining({ node_id: CHURN, operator: '<=', raw_value: 6, unit: '%', source_quote: text }) }]);
+    expect(w.chips(r).map(c => c.label)).toEqual(['Yes', 'Change']);
+    expect(w.writes).toHaveLength(0);
+  });
+  it.each([
+    ['Our churn is 4% of customers. If it goes above 6%, we lose money', false],
+    ['Our growth is 4% of revenue. churn above 6% of customers we lose money', true],
+  ] as const)('r2 the bound percentage keeps its own base: %s', (text, otherBase) => {
+    const g = pricingModel(); g.nodes[2].observed_state.unit = '% of customers';
+    if (otherBase) {
+      g.nodes.push({ id: 'growth', kind: 'outcome', label: 'Growth', quantity_frame: 'level',
+        observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '% of revenue' } });
+    }
+    expect(readNewLimit(g, text, 6)).toMatchObject({ node_id: CHURN, operator: '<=', raw_value: 6,
+      unit: '% of customers', value_frame: 'level', source_quote: text });
+  });
+  it.each([
+    'Our annual churn is 4%. If it goes above 6%, we lose money',
+    'Our churn is 4% a year. If it goes above 6%, we lose money',
+  ])('r2 the bound antecedent period cannot change the monthly quantity: %s', text => {
+    const g = pricingModel(); g.nodes[2].observed_state.unit = '%/month';
+    expect(readNewLimit(g, text, 6)).toBeNull();
+  });
+  it.each([
+    ['Acme churn is 4%. Our churn above 6% we lose money', '%'],
+    ['Our churn is 4% of customers. Our churn above 6% of revenue we lose money', '% of revenue'],
+  ])('r2 an explicitly owned quantity in the production binds that reading: %s', (text, unit) => {
+    const g = model(); g.nodes[2].observed_state.unit = unit;
+    expect(readNewLimit(g, text, 6)).toMatchObject({ node_id: CHURN, operator: '<=', raw_value: 6,
+      unit, value_frame: 'level', source_quote: text });
+  });
+  it('r2 same-base eligibility scopes a shared quantity label before production binding', () => {
+    const g = model('Monthly churn rate'); g.nodes[2].observed_state.unit = '% of customers';
+    g.nodes.push({ id: 'revenue-churn-rate', kind: 'outcome', label: 'Revenue churn rate', quantity_frame: 'level',
+      observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '% of revenue' } });
+    const text = 'churn above 6% of customers we lose money';
+    expect(readNewLimit(g, text, 6)).toMatchObject({ node_id: CHURN, operator: '<=', raw_value: 6,
+      unit: '% of customers', value_frame: 'level', source_quote: text });
+  });
+  it.each([
+    'Our churn annually is 4%. If it goes above 6%, we lose money',
+    'Our churn a year is 4%. If it goes above 6%, we lose money',
+  ])('r2 a period between the antecedent mention and its figure remains binding: %s', text => {
+    const g = model(); g.nodes[2].observed_state.unit = '%/month';
+    expect(readNewLimit(g, text, 6)).toBeNull();
+  });
+  it('r2 a shared period label word alone does not name another quantity', () => {
+    const g = model('Monthly churn'); g.nodes[2].observed_state.unit = '% of customers';
+    g.nodes.push({ id: 'monthly-growth', kind: 'outcome', label: 'Monthly growth', quantity_frame: 'level',
+      observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '% of revenue' } });
+    const text = 'Our monthly churn is 4%. If it goes above 6%, we lose money';
+    expect(readNewLimit(g, text, 6)).toMatchObject({ node_id: CHURN, operator: '<=', raw_value: 6,
+      unit: '% of customers', value_frame: 'level', source_quote: text });
+  });
+
   // Verbatim DL corpus: these rows originate outside the implementation author.
   it.each([
     ['named earlier in this message', 'Our current churn is 4%. if it goes above 6%, we start to lose money', model()],
@@ -126,6 +205,8 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
   it.each([
     ["if it goes above 6% we'll celebrate", model()],
     ['above 6% growth would be great', withGrowth()],
+    ["if it goes above 6% we'll celebrate", pricingModel()],
+    ['above 6% growth would be great', withGrowth(pricingModel())],
     [MODEL_ONLY, withGrowth()],
     ['Churn and growth matter; above 6% we lose money', withGrowth()],
     ['do we lose money above 6%?', model()],
@@ -146,8 +227,10 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     ['churn above 6% we lose money once churn tops 8%', model()],
     ['is churn above 6% unprofitable', model()],
     ['Their churn is 4%. If it goes above 6%, we lose money', model()],
-    ['Our growth is 4%. If it goes above 6%, we lose money', (() => {
-      const g = withGrowth(); g.nodes[5].observed_state.unit = 'fraction'; return g;
+    ['Acme churn is 4%. If it goes above 6%, we lose money', pricingModel()],
+    ['Our Pro plan price is £59. If it goes above 6%, we lose money', pricingModel()],
+    ['Our churn is 4% of customers. If it goes above 6%, we lose money', (() => {
+      const g = pricingModel(); g.nodes[2].observed_state.unit = '% of revenue'; return g;
     })()],
     ['does churn above 6% mean we lose money', model()],
     ['will churn above 6% be unprofitable', model()],
@@ -169,15 +252,30 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
   it.each(['His', 'Her', 'Its', "Acme's", 'Competitor', 'Rival'])('it preserves the antecedent owner: %s', owner => {
     expect(readNewLimit(model(), `${owner} churn is 4%. If it goes above 6%, we lose money`, 6)).toBeNull();
   });
+  // Explicit "it" retains the nearest quantity, including ineligible quantities.
   it.each([
+    ['Our growth is 4%. If it goes above 6%, we lose money', false],
     ['Our churn is 4%. Our growth is 4%. If it goes above 6%, we lose money', false],
     ['Our growth is 4%. Our churn is 4%. If it goes above 6%, we lose money', true],
-    ['Their growth and our churn is 4%. If it goes above 6%, we lose money', true],
+    ['Their growth and our churn is 4%. If it goes above 6%, we lose money', false],
     ['Our churn and their growth is 4%. If it goes above 6%, we lose money', false],
-  ] as const)('it uses the nearest quantity across units: %s', (text, admitted) => {
+  ] as const)('the nearest quantity selects the antecedent, with its bound ownership: %s', (text, admitted) => {
     const g = withGrowth(); g.nodes[5].observed_state.unit = 'fraction';
     if (admitted) expect(readNewLimit(g, text, 6)).toMatchObject({ node_id: CHURN, raw_value: 6 });
     else expect(readNewLimit(g, text, 6)).toBeNull();
+  });
+  it.each([
+    ['Our churn is 4%. Our growth is 4%. If it goes above 6%, we lose money', 'growth'],
+    ['Our growth is 4%. Our churn is 4%. If it goes above 6%, we lose money', CHURN],
+    ['Acme churn is 4%. Our churn is 4%. If it goes above 6%, we lose money', CHURN],
+  ])('the nearest eligible occurrence binds without an earlier mention overriding it: %s', (text, node_id) => {
+    expect(readNewLimit(withGrowth(), text, 6)).toMatchObject({ node_id, raw_value: 6 });
+  });
+  it.each(['percentage points', 'customers'])('a bound antecedent in %s cannot supply a percent level', unit => {
+    expect(readNewLimit(model(), `Our churn is 4 ${unit}. If it goes above 6%, we lose money`, 6)).toBeNull();
+  });
+  it('a later mention cannot supply the explicit antecedent', () => {
+    expect(readNewLimit(withGrowth(), 'If it goes above 6%, we lose money. Our churn is 4%', 6)).toBeNull();
   });
 
   it.each(['change_abs', 'change_rel', 'change'])('a % quantity in %s frame is not a level ceiling', frame => {

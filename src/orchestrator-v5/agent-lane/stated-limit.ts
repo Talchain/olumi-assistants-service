@@ -34,7 +34,7 @@ const has = (ws: readonly string[], phrase: string): boolean => {
 };
 const ceilings = ['within', 'only have', 'budget', 'at most', 'up to', 'no more than', 'can t spend more than', 'cannot spend more than'];
 /** Words that may stand before a budget cue: first-party, neutral, or a period word ("Our monthly budget", "Budget:"). */
-const budgetSubjects = ['our', 'we', 'i', 'my', 'us', 'the', 'a', 'an', 'total', 'overall', 'have', 've', 'got', 'has', 'can', 'only', 'so', 'and', 'project'];
+const budgetSubjects = ['our', 'we', 'i', 'my', 'us', 'the', 'a', 'an', 'total', 'overall', 'have', 've', 'got', 'has', 'can', 'only', 'so', 'and', 'project', 'current', 'keep'];
 /** A reserve the user takes back in the same breath ("keep back £20k — actually no"). */
 const reserveRejections = ['no', 'forget', 'ignore', 'scratch'];
 const notLimits = ['competitor', 'rival', 'their', 'his', 'her', 'its', 'unless', 'provided', 'when', 'last year', 'if', 'suppose', 'imagine', 'would', 'could', 'used to', 'previously', 'spent', 'not', 'never', 'isn t', 'was', 'had', 'don t', 'doesn t'];
@@ -104,6 +104,28 @@ function foreignPossessive(text: string): boolean {
     if (!['it', 'that', 'there', 'here', 'what'].includes(lower.slice(start, i))) return true;
   }
   return false;
+}
+/** The budget ownership rule also governs a bound percentage mention. Callers may
+ * advance it one token at a time, so repeated mentions never rescan a prefix. */
+function ownsLimitMention(ws: readonly string[], text: string, labelWords: readonly string[] = []): boolean {
+  return !foreignPossessive(text) && ws.every(w => budgetSubjects.includes(w) || periodAdverb(w) !== null
+    || labelWords.some(label => sameWord(label, w)));
+}
+/** The shared reader retains percentage periods in its base/qualifiers. Keep the
+ * base separate from those period words, for both the model and stated figures. */
+function percentMeaning(parts: NonNullable<ReturnType<typeof readUnitParts>>): { base: string; periods: string[] } {
+  const baseWords = parts.base ?? [];
+  const periodAt = baseWords.findIndex(w => isPeriodConnector(w) || periodAdverb(w) !== null);
+  return { base: baseWords.slice(0, periodAt < 0 ? baseWords.length : periodAt).join(' '),
+    periods: [...new Set([...(parts.period === null ? [] : [parts.period]),
+      ...(parts.base ?? parts.qualifiers ?? []).flatMap(w => periodAdverb(w) ?? periodNoun(w) ?? [])])] };
+}
+/** One complete period slot, using the unit reader's vocabulary. */
+function limitPeriodAt(ws: readonly string[], at: number): { length: number; period: string } | null {
+  const adverb = periodAdverb(ws[at] ?? '');
+  if (adverb !== null) return { length: 1, period: adverb };
+  const noun = periodNoun(ws[at + 1] ?? '');
+  return isPeriodConnector(ws[at] ?? '') && noun !== null ? { length: 2, period: noun } : null;
 }
 /** Genuine absence only: a statement/currency rejection never means its quantity is missing. */
 export function hasLimitQuantity(raw: Record<string, unknown>, askedLabel: string): boolean {
@@ -175,36 +197,107 @@ function readLossThreshold(raw: Record<string, unknown>, text: string, value: nu
   if (value > 100 || !amounts.some(a => a.kind !== 'currency' && a.magnitude === value)) return null;
   const nodes = Array.isArray(raw.nodes) ? raw.nodes as Record<string, unknown>[] : [];
   const quantities = nodes.flatMap(node => {
-    if (!['factor', 'outcome', 'goal', 'risk'].includes(String(node.kind)) || typeof node.label !== 'string' || typeof node.id !== 'string') return [];
+    if (!['factor', 'outcome'].includes(String(node.kind)) || typeof node.label !== 'string' || typeof node.id !== 'string') return [];
     const unit = limitQuantityUnit(raw, node); const parts = readUnitParts(unit);
-    const level = typeof unit === 'string' && parts?.kind === 'percent' && ['factor', 'outcome'].includes(String(node.kind))
+    const meaning = typeof unit === 'string' && parts?.kind === 'percent'
       && (node.quantity_frame === undefined || node.quantity_frame === 'level')
-      && !(parts.qualifiers !== null && (isRelativeChangePercentUnit(unit, 1) || isRelativeChangePercentUnit(unit, -1)));
-    const words = limitWords(node.label);
-    const scope = { options: nodes.filter(o => o.kind === 'option' && typeof o.label === 'string').map(o => String(o.label)),
-      others: nodes.filter(o => o !== node && typeof o.label === 'string').map(o => String(o.label)) };
-    const decisive = words.filter(w => factorTheUserNamed(node.label as string, w, scope));
-    return [{ node, id: node.id, label: node.label, unit, parts, level, words, decisive }];
+      && (parts.qualifiers === null || (!isRelativeChangePercentUnit(unit, 1) && !isRelativeChangePercentUnit(unit, -1)))
+      ? percentMeaning(parts) : null;
+    return [{ id: node.id, label: node.label, unit, words: limitWords(node.label), meaning }];
   });
-  const eligible = quantities.filter(n => n.level);
+  type ModelQuantity = typeof quantities[number];
+  const eligible = quantities.filter((n): n is ModelQuantity & { unit: string; meaning: NonNullable<ModelQuantity['meaning']> } =>
+    typeof n.unit === 'string' && n.meaning !== null);
   if (eligible.length === 0) return null;
-  type Quantity = typeof quantities[number];
+  type Quantity = typeof eligible[number];
+  const compatible = (n: ModelQuantity, base: string, periods: readonly string[]): boolean =>
+    n.meaning !== null && (base === '' || base === n.meaning.base) && n.meaning.periods.length <= 1
+    && periods.length <= 1 && (periods.length === 0 || periods[0] === n.meaning.periods[0]);
   const matchesAt = (ws: readonly string[], at: number, phrase: readonly string[]): boolean => phrase.every((w, j) => ws[at + j] === w);
   const sentences = limitSentences(text, amounts).map(s => ({ ...s, tokens: lossTokens(text, s) }));
-  const mentions: { at: number; quantity: Quantity; foreign: boolean }[] = [];
-  const named = new Set<Quantity>(); const foreignNamed = new Set<Quantity>();
+  // Explicit "it" retains every quantity mention; bare crossings select named
+  // eligible percentages separately. Each occurrence keeps its own validity.
+  const named = new Map<ModelQuantity, Map<string, boolean>>();
+  type Antecedent = { quantity: ModelQuantity; at: number; valid: boolean };
+  const antecedents = new Map<number, readonly Antecedent[]>();
+  let nearest: Antecedent[] = [];
+  const decisiveWords = (n: ModelQuantity, scope: readonly ModelQuantity[]): string[] => n.words.filter(w =>
+    factorTheUserNamed(n.label, w, { options: [], others: scope.filter(o => o !== n).map(o => o.label) }));
+  const namedIn = (n: Quantity, scope: readonly Quantity[]): boolean[] => {
+    const evidence = named.get(n);
+    return evidence === undefined ? [] : ['', ...decisiveWords(n, scope)]
+      .flatMap(w => evidence.has(w) ? [evidence.get(w)!] : []);
+  };
   for (const s of sentences) {
-    let foreign = false;
+    const prefixes = new Map(quantities.map(n => [n, { owned: true, periods: [] as string[] }]));
+    const pending = new Map<ModelQuantity, { periods: string[]; keys: Set<string>; antecedents: Antecedent[] }>();
     for (let at = 0; at < s.tokens.length; at += 1) {
       const t = s.tokens[at]!;
-      if (['our', 'my', 'we', 'i'].includes(t.word)) foreign = false;
-      if (['competitor', 'rival', 'their', 'his', 'her', 'its'].includes(t.word)
-        || foreignPossessive(text.slice(t.start, t.end + 2))) foreign = true;
+      if (t.word === 'it') antecedents.set(t.start, nearest);
+      if ([',', ':'].includes(t.word)) {
+        for (const prefix of prefixes.values()) { prefix.owned = true; prefix.periods = []; }
+        pending.clear(); continue;
+      }
+      if (t.amount !== undefined) {
+        // A bounded tail keeps the shared reader linear even with many figures.
+        const tailTokens = s.tokens.slice(at + 1, at + 9);
+        const end = tailTokens.find(tail => [',', ':'].includes(tail.word))?.start
+          ?? s.tokens[Math.min(s.tokens.length, at + 9)]?.start ?? s.end;
+        const tailText = text.slice(t.start, end);
+        const parts = statedTailParts(tailText, { ...t.amount, index: 0 });
+        if (parts?.kind === 'percent') {
+          const meaning = percentMeaning(parts);
+          const tailWords = tailTokens.map(token => token.word);
+          let unitAt = 0;
+          if (t.amount.kind !== 'percent') {
+            for (let k = 3; k > 0; k -= 1) if (shareKind(tailWords.slice(0, k).join(' ')) === 'percent') { unitAt = k; break; }
+          }
+          if (tailWords[unitAt] === 'of' && meaning.base !== '') unitAt += 2;
+          const periods: string[] = [];
+          let period = limitPeriodAt(tailWords, unitAt);
+          while (period !== null) {
+            if (!periods.includes(period.period)) periods.push(period.period);
+            unitAt += period.length; period = limitPeriodAt(tailWords, unitAt);
+          }
+          for (const [n, mention] of pending) {
+            const statedPeriods = [...new Set([...mention.periods, ...periods])];
+            const evidence = named.get(n)!;
+            for (const key of mention.keys) evidence.set(key, evidence.get(key)! && compatible(n, meaning.base, statedPeriods));
+            for (const antecedent of mention.antecedents) antecedent.valid = antecedent.valid && compatible(n, meaning.base, statedPeriods);
+          }
+        } else if (parts !== null) {
+          for (const mention of pending.values()) for (const antecedent of mention.antecedents) antecedent.valid = false;
+        }
+        pending.clear();
+      }
       for (const n of quantities) {
+        const prefix = prefixes.get(n)!;
         const ws = s.tokens.slice(Math.max(0, at - n.words.length + 1), at + 1).map(x => x.word);
-        if (!n.decisive.some(w => sameWord(w, t.word)) && !(ws.length === n.words.length && matchesAt(ws, 0, n.words))) continue;
-        mentions.push({ at: t.start, quantity: n, foreign }); named.add(n);
-        if (foreign) foreignNamed.add(n);
+        const keys = n.words.filter(w => sameWord(w, t.word));
+        if (ws.length === n.words.length && matchesAt(ws, 0, n.words)) keys.push('');
+        if (keys.length > 0) {
+          const evidence = named.get(n) ?? new Map<string, boolean>();
+          const mention = pending.get(n) ?? { periods: [...prefix.periods], keys: new Set<string>(), antecedents: [] as Antecedent[] };
+          for (const key of keys) {
+            evidence.set(key, (evidence.get(key) ?? true) && prefix.owned && compatible(n, '', prefix.periods));
+            mention.keys.add(key);
+          }
+          if (keys.includes('') || keys.some(w => decisiveWords(n, quantities).includes(w))) {
+            const antecedent = { quantity: n, at: t.end, valid: prefix.owned && compatible(n, '', prefix.periods) };
+            if (nearest[0]?.at !== t.end) nearest = [];
+            nearest.push(antecedent); mention.antecedents.push(antecedent);
+          }
+          named.set(n, evidence); pending.set(n, mention);
+        }
+        prefix.owned = prefix.owned && ownsLimitMention([t.word], text.slice(t.start, t.end + 2), n.words);
+        const period = periodAdverb(t.word)
+          ?? (isPeriodConnector(s.tokens[at - 1]?.word ?? '') ? periodNoun(t.word) : null);
+        if (period !== null && !n.words.some(w => sameWord(w, t.word))) {
+          if (!prefix.periods.includes(period)) prefix.periods.push(period);
+          const mention = pending.get(n);
+          if (mention !== undefined && !mention.periods.includes(period)) mention.periods.push(period);
+          if (mention !== undefined) for (const antecedent of mention.antecedents) antecedent.valid = antecedent.valid && compatible(n, '', mention.periods);
+        }
       }
     }
   }
@@ -220,6 +313,11 @@ function readLossThreshold(raw: Record<string, unknown>, text: string, value: nu
       for (let k = 3; k > 0; k -= 1) if (shareKind(ws.slice(tailAt, tailAt + k).join(' ')) === 'percent') { length = k; break; }
       if (length === 0) continue; tailAt += length;
     }
+    const statedParts = statedTailParts(text.slice(s.start, s.end), { ...a, index: a.index - s.start });
+    if (statedParts?.kind !== 'percent') continue;
+    const statedBase = percentMeaning(statedParts).base;
+    if (ws[tailAt] === 'of' && statedBase !== '') tailAt += 2;
+    const candidates = eligible.filter(n => compatible(n, statedBase, []));
     const subject = (from: number, end: number): { quantity?: Quantity; itAt?: number; periods: string[] } | null => {
       const said = ws.slice(from, end);
       if (said.length === 0) return { periods: [] };
@@ -227,12 +325,7 @@ function readLossThreshold(raw: Record<string, unknown>, text: string, value: nu
       let first = 0;
       if (['our', 'my', 'the'].includes(said[first] ?? '')) first += 1;
       if (said[first] === 'current') first += 1;
-      const periodAt = (at: number): { length: number; period: string } | null => {
-        const adverb = periodAdverb(said[at] ?? '');
-        if (adverb !== null) return { length: 1, period: adverb };
-        const noun = periodNoun(said[at + 1] ?? '');
-        return isPeriodConnector(said[at] ?? '') && noun !== null ? { length: 2, period: noun } : null;
-      };
+      const periodAt = (at: number) => limitPeriodAt(said, at);
       const matches: { quantity: Quantity; periods: string[] }[] = [];
       // A named phrase is one contiguous portion of the held label, with at most one complete period on either side.
       for (const prefix of [null, periodAt(first)]) {
@@ -241,10 +334,13 @@ function readLossThreshold(raw: Record<string, unknown>, text: string, value: nu
           const suffix = periodAt(nameEnd);
           if (nameEnd !== said.length && (suffix === null || nameEnd + suffix.length !== said.length)) continue;
           const phrase = said.slice(nameAt, nameEnd);
-          for (const n of quantities) {
-            const namedHere = phrase.some(w => n.decisive.some(q => sameWord(q, w))) || phrase.join(' ') === n.words.join(' ');
+          const periods = [prefix?.period, nameEnd === said.length ? undefined : suffix?.period].filter((p): p is string => p !== undefined);
+          const scope = candidates.filter(n => compatible(n, statedBase, [...new Set(periods)]));
+          for (const n of scope) {
+            const namedHere = phrase.some(w => decisiveWords(n, scope).some(q => sameWord(q, w))) || phrase.join(' ') === n.words.join(' ');
             if (!namedHere || !n.words.some((_, i) => i + phrase.length <= n.words.length && phrase.every((w, j) => sameWord(w, n.words[i + j]!)))) continue;
-            matches.push({ quantity: n, periods: [prefix?.period, nameEnd === said.length ? undefined : suffix?.period].filter((p): p is string => p !== undefined) });
+            if (!ownsLimitMention(said.slice(0, first), text.slice(ts[from]!.start, ts[from + nameAt]!.start), n.words)) continue;
+            matches.push({ quantity: n, periods });
           }
         }
       }
@@ -272,10 +368,8 @@ function readLossThreshold(raw: Record<string, unknown>, text: string, value: nu
           const after = subject(tailAt, end);
           if (after === null || after.itAt !== undefined) continue;
           let at = end; let statedPeriod: string | null = null;
-          if (periodAdverb(ws[at] ?? '') !== null) { statedPeriod = periodAdverb(ws[at]!); at += 1; }
-          else if (isPeriodConnector(ws[at] ?? '') && periodNoun(ws[at + 1] ?? '') !== null) {
-            statedPeriod = periodNoun(ws[at + 1]!); at += 2;
-          }
+          const period = limitPeriodAt(ws, at);
+          if (period !== null) { statedPeriod = period.period; at += period.length; }
           if (form.forward) {
             if (ws[at] === ',') at += 1;
             if (['and', 'then'].includes(ws[at] ?? '')) at += 1;
@@ -283,27 +377,30 @@ function readLossThreshold(raw: Record<string, unknown>, text: string, value: nu
           } else if (at !== ts.length) continue;
           let n = before.quantity ?? after.quantity;
           if (before.quantity !== undefined && after.quantity !== undefined && before.quantity !== after.quantity) continue;
+          const periods = [...new Set([...before.periods, ...after.periods, ...(statedPeriod === null ? [] : [statedPeriod])])];
           if (before.itAt !== undefined) {
-            let low = 0; let high = mentions.length;
-            while (low < high) {
-              const middle = Math.floor((low + high) / 2);
-              if (mentions[middle]!.at < before.itAt) low = middle + 1; else high = middle;
+            const earlier = antecedents.get(before.itAt) ?? [];
+            if (earlier.length > 1) continue;
+            const antecedent = earlier[0];
+            if (antecedent !== undefined) {
+              const bound = eligible.find(q => q === antecedent.quantity);
+              if (!antecedent.valid || bound === undefined || (n !== undefined && n !== bound)) continue;
+              n = bound;
+            } else if (n === undefined) {
+              const scope = candidates.filter(q => compatible(q, statedBase, periods));
+              if (scope.length !== 1) continue;
+              n = scope[0]!;
             }
-            const nearest = mentions[low - 1];
-            if (nearest !== undefined) {
-              if (mentions[low - 2]?.at === nearest.at || nearest.foreign || (n !== undefined && n !== nearest.quantity)) continue;
-              n = nearest.quantity;
-            } else if (named.size !== 0) continue;
           }
           if (n === undefined) {
-            const choices = named.size === 0 ? eligible : [...named];
-            if (choices.length !== 1) continue; n = choices[0]!;
-            if (foreignNamed.has(n)) continue;
+            const scope = candidates.filter(q => compatible(q, statedBase, periods));
+            const choices = scope.filter(q => namedIn(q, scope).length > 0);
+            const resolved = choices.length === 0 ? scope : choices;
+            if (resolved.length !== 1 || namedIn(resolved[0]!, scope).some(owned => !owned)) continue;
+            n = resolved[0]!;
           }
-          if (!n.level || typeof n.unit !== 'string' || (askedLabel !== undefined && limitWords(askedLabel).join(' ') !== limitWords(n.label).join(' '))) continue;
-          const periods = [...new Set([...before.periods, ...after.periods, ...(statedPeriod === null ? [] : [statedPeriod])])];
-          const ownPeriods = [...new Set((n.parts?.qualifiers ?? []).flatMap(w => periodAdverb(w) ?? periodNoun(w) ?? []))];
-          if (ownPeriods.length > 1 || periods.length > 1 || (periods.length === 1 && periods[0] !== ownPeriods[0])) continue;
+          if (!compatible(n, statedBase, periods)
+            || (askedLabel !== undefined && limitWords(askedLabel).join(' ') !== limitWords(n.label).join(' '))) continue;
           const boundStart = originalAt[a.index]!; const boundEnd = originalAt[a.index + a.matchedText.length - 1]! + 1;
           if (boundEnd - boundStart > 200) return null;
           const quoteStart = Math.max(0, boundStart - Math.floor((200 - (boundEnd - boundStart)) / 2));
@@ -338,6 +435,8 @@ export function readNewLimit(raw: Record<string, unknown>, text: string, value: 
     && eligible.some(n => n.reading.currencyCode === a.currencyCode && a.magnitude === value * n.reading.multiplier);
   // Reject incompatible figures before sentence, unit and entity work.
   if (!amounts.some(compatible)) return null;
+  let selected: { node: typeof eligible[number]; amount: typeof amounts[number]; sentence: LimitSentence;
+    statedUnit: NonNullable<ReturnType<typeof statedTailParts>>; rawValue: number } | undefined;
   for (const sentence of limitSentences(text, amounts)) {
     const clauses = sentence.clauses.map(span => {
       const clause = text.slice(span.start, span.end); const ws = limitWords(clause);
@@ -353,73 +452,89 @@ export function readNewLimit(raw: Record<string, unknown>, text: string, value: 
     for (let clauseAt = 0; clauseAt < clauses.length; clauseAt += 1) {
       const span = clauses[clauseAt]!;
       if (span.rejected || qualifiedAfter[clauseAt]) continue;
-      const candidates = span.amounts.filter(compatible);
-      // Two compatible figures in one clause do not identify one ceiling.
-      if (candidates.length !== 1) continue;
-      const a = candidates[0]!; const { clause, ws } = span;
-      const left = limitWords(text.slice(span.start, a.index));
-      const right = limitWords(text.slice(a.index + a.matchedText.length, span.end));
-      if (!(ceilings.some(p => has(left, p)) || has(right, 'is all we have'))) continue;
-      // Shared readers see this clause and its relative amount, never the whole message per figure.
-      const localAmount = { ...a, index: a.index - span.start };
-      const tail = statedTailParts(clause, localAmount);
-      const leftPeriods = [...new Set(left.flatMap(w => periodAdverb(w) ?? []))];
-      if (leftPeriods.length > 1 || (leftPeriods.length === 1 && tail?.period != null && tail.period !== leftPeriods[0])) continue;
-      const statedUnit = tail === null ? null : { ...tail, period: tail.period ?? leftPeriods[0] ?? null };
-      const cueAt = left.findIndex((_, i) => [...ceilings, 'spend'].some(p => has(left.slice(i, i + p.split(' ').length), p)));
-      const subject = (w: string) => budgetSubjects.includes(w) || periodAdverb(w) !== null;
-      const ownedBudget = cueAt >= 0 ? left.slice(0, cueAt).every(subject) : left.every(subject) && has(right, 'is all we have');
-      const matches = eligible.filter(n => {
-        if (n.reading.currencyCode !== a.currencyCode || a.magnitude !== value * n.reading.multiplier) return false;
-        const ownUnit = readUnitParts(n.unit);
-        if (ownUnit === null || statedUnit === null || ownUnit.period !== statedUnit.period
-          || JSON.stringify(ownUnit.per) !== JSON.stringify(statedUnit.per)) return false;
-        const labelWords = limitWords(n.label);
-        const explicitlyNamed = has(ws, labelWords.join(' '));
-        const totalCost = ['total cost', 'total costs', 'overall cost', 'overall costs'].includes(labelWords.join(' '));
-        const budgetNamesCost = totalCost && ownedBudget && (has(left, 'budget') || has(left, 'spend') || has(left, 'only have') || has(right, 'is all we have'));
-        if (!explicitlyNamed && !budgetNamesCost) return false;
-        const targets = [n.label, ...(budgetNamesCost ? ['budget', 'spend', 'only have', 'all we have'] : [])];
-        const others = money.filter(o => o !== n).map(o => o.label);
-        if (sentenceNamesOtherQuantity(clause, n.unit, { target: targets, others })) return false;
-        return figureTheUserWroteFor(value, n.unit, clause, { target: targets, others, at: localAmount.index });
-      });
-      if (matches.length !== 1) continue;
-      const n = matches[0]!;
-      if (askedLabel !== undefined && limitWords(askedLabel).join(' ') !== limitWords(n.label).join(' ')) return null;
-      const frame = n.node.quantity_frame;
-      if (frame !== undefined && frame !== 'level') return null;
-      const result: NewLimitValue = { node_id: n.id, operator: '<=', raw_value: value, unit: n.unit, source_quote: '', value_frame: 'level' };
-      // Disjoint local windows: each amount and its reserve words advance once within this sentence.
-      const reserves = sentence.amounts.flatMap((r, i) => {
-        if (r.index <= a.index || r.kind !== 'currency' || r.currencyCode !== a.currencyCode) return [];
-        const previous = sentence.amounts[i - 1]!; const next = sentence.amounts[i + 1];
-        const local = text.slice(Math.max(sentence.start, previous.index + previous.matchedText.length), Math.min(sentence.end, next?.index ?? sentence.end));
-        const words = limitWords(local);
-        return ['held back', 'hold back', 'keep back', 'set aside'].some(p => has(words, p)) ? [{ amount: r, words, local }] : [];
-      });
-      let quoteEnd = a.index + a.matchedText.length;
-      const candidate = reserves.length === 1 ? reserves[0] : undefined; const boundStart = originalAt[a.index]!;
-      if (candidate !== undefined && candidate.amount.magnitude < a.magnitude
-        && ![...notLimits, ...reserveRejections].some(p => has(candidate.words, p)) && !foreignPossessive(candidate.local)
-        && originalAt[candidate.amount.index + candidate.amount.matchedText.length - 1]! + 1 - boundStart <= 200) {
-        const reserveUnit = statedTailParts(text.slice(sentence.start, sentence.end), { ...candidate.amount, index: candidate.amount.index - sentence.start });
-        if (reserveUnit !== null && reserveUnit.period === statedUnit!.period) {
-          const reserve = candidate.amount.magnitude / n.reading.multiplier;
-          quoteEnd = candidate.amount.index + candidate.amount.matchedText.length;
-          const alternative = value - reserve; const figure = limitFigure(alternative, n.unit);
-          result.reserve = { amount: reserve, alternative, label: `Use ${figure}`, message: `Use ${figure} instead.`,
-            detail: `You said you'd keep ${limitFigure(reserve, n.unit)} back. Use ${figure} instead?` };
-        }
+      const { ws } = span;
+      if (!ceilings.some(p => has(ws, p)) && !has(ws, 'is all we have')) continue;
+      // Each figure's neighbouring text advances once. Read all ceilings before
+      // comparing the requested value, coalescing equivalent interpretations.
+      for (let amountAt = 0; amountAt < span.amounts.length; amountAt += 1) {
+        const a = span.amounts[amountAt]!;
+        if (a.kind !== 'currency') continue;
+        const previous = span.amounts[amountAt - 1]; const next = span.amounts[amountAt + 1];
+        const start = previous === undefined ? span.start : previous.index + previous.matchedText.length;
+        const end = next?.index ?? span.end;
+        const local = text.slice(start, end);
+        const left = limitWords(text.slice(start, a.index));
+        const right = limitWords(text.slice(a.index + a.matchedText.length, end));
+        if (!(ceilings.some(p => has(left, p)) || has(right, 'is all we have'))) continue;
+        const localAmount = { ...a, index: a.index - start };
+        const tail = statedTailParts(local, localAmount);
+        const leftPeriods = [...new Set(left.flatMap(w => periodAdverb(w) ?? []))];
+        if (leftPeriods.length > 1 || (leftPeriods.length === 1 && tail?.period != null && tail.period !== leftPeriods[0])) continue;
+        const statedUnit = tail === null ? null : { ...tail, period: tail.period ?? leftPeriods[0] ?? null };
+        const cueAt = left.findIndex((_, i) => [...ceilings, 'spend'].some(p => has(left.slice(i, i + p.split(' ').length), p)));
+        const ownedBudget = ownsLimitMention(cueAt >= 0 ? left.slice(0, cueAt) : left,
+          text.slice(start, a.index)) && (cueAt >= 0 || has(right, 'is all we have'));
+        const matches = eligible.filter(n => {
+          if (n.reading.currencyCode !== a.currencyCode) return false;
+          const ownUnit = readUnitParts(n.unit);
+          if (ownUnit === null || statedUnit === null || ownUnit.period !== statedUnit.period
+            || JSON.stringify(ownUnit.per) !== JSON.stringify(statedUnit.per)) return false;
+          const labelWords = limitWords(n.label);
+          const explicitlyNamed = has(limitWords(local), labelWords.join(' '));
+          const totalCost = ['total cost', 'total costs', 'overall cost', 'overall costs'].includes(labelWords.join(' '));
+          const budgetNamesCost = totalCost && ownedBudget && (has(left, 'budget') || has(left, 'spend') || has(left, 'only have') || has(right, 'is all we have'));
+          if (!explicitlyNamed && !budgetNamesCost) return false;
+          if (explicitlyNamed) {
+            const leftAt = left.findIndex((_, i) => labelWords.every((w, j) => left[i + j] === w));
+            const rightAt = right.findIndex((_, i) => labelWords.every((w, j) => right[i + j] === w));
+            const prefix = leftAt >= 0 ? left.slice(0, leftAt) : right.slice(0, rightAt);
+            if (!ownsLimitMention(prefix, local, labelWords)) return false;
+          }
+          const targets = [n.label, ...(budgetNamesCost ? ['budget', 'spend', 'only have', 'all we have'] : [])];
+          const others = money.filter(o => o !== n).map(o => o.label);
+          if (sentenceNamesOtherQuantity(local, n.unit, { target: targets, others })) return false;
+          return figureTheUserWroteFor(a.magnitude / n.reading.multiplier, n.unit, local, { target: targets, others, at: localAmount.index });
+        });
+        if (matches.length > 1) return null;
+        if (matches.length === 0 || statedUnit === null) continue;
+        const n = matches[0]!; const rawValue = a.magnitude / n.reading.multiplier;
+        if (n.node.quantity_frame !== undefined && n.node.quantity_frame !== 'level') return null;
+        if (selected !== undefined && (selected.node.id !== n.id || selected.rawValue !== rawValue || selected.node.unit !== n.unit)) return null;
+        selected ??= { node: n, amount: a, sentence, statedUnit, rawValue };
       }
-      const boundEnd = originalAt[quoteEnd - 1]! + 1;
-      if (originalAt[a.index + a.matchedText.length - 1]! + 1 - boundStart > 200) return null;
-      const quoteStart = Math.max(0, boundStart - Math.floor((200 - (boundEnd - boundStart)) / 2));
-      result.source_quote = original.slice(quoteStart, quoteStart + 200);
-      return result;
     }
   }
-  return null;
+  if (selected === undefined || selected.rawValue !== value) return null;
+  const { node: n, amount: a, sentence, statedUnit } = selected;
+  if (askedLabel !== undefined && limitWords(askedLabel).join(' ') !== limitWords(n.label).join(' ')) return null;
+  const result: NewLimitValue = { node_id: n.id, operator: '<=', raw_value: value, unit: n.unit, source_quote: '', value_frame: 'level' };
+  // Disjoint local windows: each amount and its reserve words advance once within this sentence.
+  const reserves = sentence.amounts.flatMap((r, i) => {
+    if (r.index <= a.index || r.kind !== 'currency' || r.currencyCode !== a.currencyCode) return [];
+    const previous = sentence.amounts[i - 1]!; const next = sentence.amounts[i + 1];
+    const local = text.slice(Math.max(sentence.start, previous.index + previous.matchedText.length), Math.min(sentence.end, next?.index ?? sentence.end));
+    const words = limitWords(local);
+    return ['held back', 'hold back', 'keep back', 'set aside'].some(p => has(words, p)) ? [{ amount: r, words, local }] : [];
+  });
+  let quoteEnd = a.index + a.matchedText.length;
+  const candidate = reserves.length === 1 ? reserves[0] : undefined; const boundStart = originalAt[a.index]!;
+  if (candidate !== undefined && candidate.amount.magnitude < a.magnitude
+    && ![...notLimits, ...reserveRejections].some(p => has(candidate.words, p)) && !foreignPossessive(candidate.local)
+    && originalAt[candidate.amount.index + candidate.amount.matchedText.length - 1]! + 1 - boundStart <= 200) {
+    const reserveUnit = statedTailParts(text.slice(sentence.start, sentence.end), { ...candidate.amount, index: candidate.amount.index - sentence.start });
+    if (reserveUnit !== null && reserveUnit.period === statedUnit.period) {
+      const reserve = candidate.amount.magnitude / n.reading.multiplier;
+      quoteEnd = candidate.amount.index + candidate.amount.matchedText.length;
+      const alternative = value - reserve; const figure = limitFigure(alternative, n.unit);
+      result.reserve = { amount: reserve, alternative, label: `Use ${figure}`, message: `Use ${figure} instead.`,
+        detail: `You said you'd keep ${limitFigure(reserve, n.unit)} back. Use ${figure} instead?` };
+    }
+  }
+  const boundEnd = originalAt[quoteEnd - 1]! + 1;
+  if (originalAt[a.index + a.matchedText.length - 1]! + 1 - boundStart > 200) return null;
+  const quoteStart = Math.max(0, boundStart - Math.floor((200 - (boundEnd - boundStart)) / 2));
+  result.source_quote = original.slice(quoteStart, quoteStart + 200);
+  return result;
 }
 
 /** Preserve figures and internal punctuation; normalise only case, whitespace and trailing sentence punctuation. */

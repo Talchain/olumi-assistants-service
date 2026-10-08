@@ -274,6 +274,27 @@ describe('D-07: one approved limit on the quantity the user names', () => {
     expect(w.proposals.get(r.proposal_id as string)?.operations[0]).toMatchObject({ op: 'add_limit', path: COST });
     expect(w.chips(r).map(c => c.label)).toEqual(['Yes', 'Change']);
   });
+  it('r2 equivalent money ceilings coalesce into one £200,000 proposal', async () => {
+    const text = 'Our budget is £200k and £200k is all we have';
+    expect(readNewLimit(model(), text, 200000)).toMatchObject({ node_id: COST, operator: '<=', raw_value: 200000,
+      unit: '£', value_frame: 'level', source_quote: text });
+    const w = world(); const r = await w.propose(text);
+    expect(r).toMatchObject({ ok: true, mutated: false, public_label: 'Keep total cost within £200,000?' });
+    expect(w.proposals.get(r.proposal_id as string)?.operations).toEqual([{ op: 'add_limit', path: COST,
+      value: expect.objectContaining({ node_id: COST, operator: '<=', raw_value: 200000, unit: '£', source_quote: text }) }]);
+    expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(1);
+    expect(w.chips(r).map(c => c.label)).toEqual(['Yes', 'Change']);
+    expect(w.writes).toHaveLength(0);
+  });
+  it('r2 genuinely different money ceilings do not coalesce', async () => {
+    const text = 'Our budget is £200k and £300k is all we have';
+    for (const value of [200000, 300000]) {
+      expect(readNewLimit(model(), text, value)).toBeNull();
+      const w = world(); const r = await w.propose(text, value);
+      expect(r.ok).toBe(false); expect(w.chips(r)).toEqual([]);
+      expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+    }
+  });
   it.each(['the competitor spent £200,000', 'is £200,000 enough?', 'last year we spent £200,000', 'if we had £200,000…',
     'if our budget is £200,000', 'the competitor budget is £200,000', 'we have £200,000 in total cost today', 'our budget is not £200,000', 'we do not only have £200,000'])('must not fire: %s', async text => {
     const w = world(); const r = await w.propose(text); expect(r.ok).toBe(false); expect(w.chips(r)).toEqual([]);
