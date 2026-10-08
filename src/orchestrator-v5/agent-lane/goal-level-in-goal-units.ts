@@ -16,6 +16,12 @@ export const GOAL_LEVEL_FROM_IDENTITY_INPUTS = 'GOAL_LEVEL_FROM_IDENTITY_INPUTS'
 /** ISL's template (robustness_analyzer_v2.py): `{level:,.2f} in its own units;`. Bounded: no backtracking run. */
 const OWN_UNITS = /: (-?\d{1,3}(?:,\d{3}){0,6}(?:\.\d{1,6})?) in its own units;/;
 
+/** ISL's two third-person phrasings in this template (robustness_analyzer_v2.py `whose`), said to the user. Exact only. */
+const SECOND_PERSON: readonly (readonly [string, string])[] = [
+  ["every input's level today is the user's, so this is the user's base", "every input's level today is yours, so this is your base"],
+  [", not the user's.", ', not yours.'],
+];
+
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 
@@ -45,12 +51,15 @@ function sayGoalLevels(warnings: unknown, graph: unknown): unknown {
     if (r?.code !== GOAL_LEVEL_FROM_IDENTITY_INPUTS || typeof r.message !== 'string') return w;
     const m = OWN_UNITS.exec(r.message);
     const value = m === null ? NaN : Number(m[1]!.replace(/,/g, ''));
-    if (!Number.isFinite(value)) return w;
     const id = typeof r.node_id === 'string' ? r.node_id : undefined;
     const goal = Array.isArray(nodes)
       ? nodes.map(rec).find((n) => n !== undefined && (id !== undefined ? n.id === id : n.kind === 'goal')) : undefined;
+    const inUnits = Number.isFinite(value) ? r.message.replace(OWN_UNITS, `: ${goalLevelWords(value, goal)};`) : r.message;
+    // The user reads this sentence: ISL's third person ("not the user's") is said to them (DL 58e392, 8 Oct, P02's note).
+    const message = SECOND_PERSON.reduce((words, [from, to]) => words.split(from).join(to), inUnits);
+    if (message === r.message) return w;
     changed = true;
-    return { ...r, message: r.message.replace(OWN_UNITS, `: ${goalLevelWords(value, goal)};`) };
+    return { ...r, message };
   });
   return changed ? next : warnings;
 }

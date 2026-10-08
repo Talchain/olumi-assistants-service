@@ -20,9 +20,16 @@ describe('the goal’s derived level in the goal’s own units', () => {
   it('RED (served): "12,250.00 in its own units" → "£12,250 a month"; every other word, and every other warning, unchanged', () => {
     const out = withGoalLevelInGoalUnits(served.analysis_result, served.graph);
     const warnings = out.enrichment.inference_warnings;
-    expect(warnings.find((w) => w.code === 'GOAL_LEVEL_FROM_IDENTITY_INPUTS')!.message).toBe(SERVED_WORDS.replace('12,250.00 in its own units', '£12,250 a month'));
+    expect(warnings.find((w) => w.code === 'GOAL_LEVEL_FROM_IDENTITY_INPUTS')!.message).toBe(SERVED_WORDS.replace('12,250.00 in its own units', '£12,250 a month').replace(", not the user's.", ', not yours.'));
     expect(warnings.filter((w) => w.code !== 'GOAL_LEVEL_FROM_IDENTITY_INPUTS')).toEqual(
       served.analysis_result.enrichment.inference_warnings.filter((w) => w.code !== 'GOAL_LEVEL_FROM_IDENTITY_INPUTS'));
+  });
+
+  it('RED (P02 note, 8 Oct): ISL\'s third person is said to the user — both of its phrasings, this template only', () => {
+    const user = { ...SERVED, message: "MRR has no level stated for today, so the chance of reaching the goal is measured from the level its inputs give today: 12,250.00 in its own units; every input's level today is the user's, so this is the user's base." };
+    const out = withGoalLevelInGoalUnits({ inference_warnings: [user, { code: 'OTHER', message: "x, not the user's." }] }, served.graph);
+    expect(out.inference_warnings[0]!.message).toBe("MRR has no level stated for today, so the chance of reaching the goal is measured from the level its inputs give today: £12,250 a month; every input's level today is yours, so this is your base.");
+    expect(out.inference_warnings[1]!.message, 'another warning keeps its words').toBe("x, not the user's.");
   });
 
   it('CONTROL (unreadable unit): the bare number, WITHOUT "in its own units"; no unit is invented', () => {
