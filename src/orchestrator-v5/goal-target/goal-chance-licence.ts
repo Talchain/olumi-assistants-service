@@ -27,7 +27,11 @@ import { shareGoalChanceWords } from './share-goal-chance-words.js';
  *      `each`                       an option withheld for its own path: each option's line, in the model's order.
  *    ORDER COUNTS AS A SUPERLATIVE (d5 6005640764): only the two `highest` forms license an order by goal chance.
  */
-import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import {
+  GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  readOptionResultSources,
+} from '../../orchestrator/context/option-result-source.js';
+import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
@@ -67,6 +71,31 @@ export const SPREAD_NOTE_WITHOUT_DOWNSIDE = 'Its typical result falls short of y
 const SPREAD_NOTE_RETIRED = 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+const SHORTFALL_TEMPLATE = 'In its worst 1 in 20 runs of this model, ‘<label>’ falls short of your target by <figure> or more.';
+const TYPICAL_SHORTFALL_TEMPLATE = 'In this model, ‘<label>’ falls short of your target in almost every run, typically by about <figure>.';
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const shortfallPatterns = [SHORTFALL_TEMPLATE, TYPICAL_SHORTFALL_TEMPLATE].map(template =>
+  new RegExp(`^${template.split(/(<label>|<figure>)/).map(part =>
+    part === '<label>' ? '([^\\r\\n]+)' : part === '<figure>' ? '[^\\r\\n]+' : escapeRegex(part)).join('')}$`));
+
+/** Only the two ruled templates; the screen reader also binds the captured label to this option's graph label. */
+export function shortfallNoteLabel(note: unknown): string | undefined {
+  if (typeof note !== 'string') return undefined;
+  for (const pattern of shortfallPatterns) {
+    const match = pattern.exec(note);
+    if (match !== null && match[0] === note) return match[1];
+  }
+  return undefined;
+}
+
+/** DOWN to two significant figures, including exact decimal/power-of-ten boundaries without division error. */
+export function floorSig2(value: number): number {
+  if (!finite(value) || value <= 0) return 0;
+  const [mantissa, exponent] = value.toExponential().split('e');
+  const digits = mantissa!.replace('.', '').slice(0, 2).padEnd(2, '0');
+  return Number(`${digits}e${Number(exponent) - 1}`);
+}
+
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
   readonly severity: 'info';
@@ -85,6 +114,7 @@ export interface GoalChanceLicence {
   /** The Run's unambiguous scoring threshold, retained even when there is no spread reversal. */
   readonly sent_threshold?: SentGoalThreshold;
   readonly spread_note_by_option?: Readonly<Record<string, string>>;
+  readonly shortfall_note_by_option?: Readonly<Record<string, string>>;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
   readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string; readonly by_date?: string };
   /**
@@ -221,6 +251,7 @@ export function goalChanceLicenceOf(
     }
   }
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
+  const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -229,8 +260,9 @@ export function goalChanceLicenceOf(
     form,
     option_ids,
     pct_by_option: pct,
-    ...(spread === undefined ? {} : { sent_threshold: sentThreshold }),
+    ...(spread === undefined && Object.keys(shortfall).length === 0 ? {} : { sent_threshold: sentThreshold }),
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
+    ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
@@ -321,6 +353,73 @@ function spreadNotesOf(
     Object.defineProperty(notes, b, { enumerable: true, value: SPREAD_NOTE_WITHOUT_DOWNSIDE });
   }
   return notes;
+}
+
+/**
+ * B19 ruling (1): downside.p05 is normalised, outcome percentiles are raw. Only a verified zero-offset map in the
+ * recorded delta frame licenses a goal-relative difference; each failed option loses only its own line.
+ */
+function shortfallNotesOf(
+  sent: SentGoalThreshold | undefined, goal: Rec | undefined, nodes: Rec[], licensed: string[],
+  pct: Record<string, number>, records: Map<string, Rec>, comparator: GoalChanceComparator, form: GoalChanceForm,
+  unit: string, graph: unknown, envelope: Rec,
+): Record<string, string> {
+  const notes: Record<string, string> = {};
+  // goalChanceScreenLinesForAgent shows no per-option point under `similar` or a superlative.
+  if (form !== 'each' || comparator !== 'at_least' || sent === undefined || sent.frame !== 'delta'
+    || !finite(sent.value) || goal === undefined || !['goal_threshold', 'goal_threshold_raw'].includes(sent.field)
+    || goal[sent.field] !== sent.value || correlationBlockOn(graph) || correlationBlockOn(envelope)) return notes;
+  const cap = goal.goal_threshold_cap;
+  const raw = goal.goal_threshold_raw;
+  const t = goal.goal_threshold;
+  if (!finite(cap) || cap <= 0 || !finite(raw) || !finite(t) || !finite(t * cap)
+    || Math.abs(t * cap - raw) > 1e-9 * Math.abs(raw)) return notes;
+  const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings.filter(isRec) : [];
+  for (const id of licensed) {
+    if (!Object.hasOwn(pct, id) || pct[id] === 100 || warnings.some(w =>
+      (w.code === 'GOAL_CHANCE_RANGE' && isRec(w.range_by_option) && Object.hasOwn(w.range_by_option, id))
+      || (typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+        && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
+          || !Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(id))))) continue;
+    const r = records.get(id)!;
+    const downside = isRec(r.downside) ? r.downside : undefined;
+    const outcome = isRec(r.outcome) ? r.outcome : undefined;
+    if (!finite(downside?.p05) || !finite(outcome?.p10)) continue;
+    const q05 = downside.p05 * cap;
+    if (!finite(q05) || q05 > outcome.p10 + 1e-6 * Math.abs(outcome.p10) || q05 >= raw) continue;
+    const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
+    if (typeof label !== 'string' || label.trim() === '' || /[\r\n]/.test(label)) continue;
+    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 : NaN) : q05);
+    if (!finite(difference) || difference <= 0) continue;
+    const amount = pct[id] === 0 ? Number(difference.toPrecision(2)) : floorSig2(difference);
+    if (!finite(amount) || amount <= 0) continue;
+    // The target's shared formatter keeps four decimal places. Never turn a small positive shortfall into a displayed
+    // zero, or round a conservative tail bound UP while saying "or more".
+    if (amount < 0.0001 || (pct[id] !== 0 && Math.round(amount * 1e4) / 1e4 > amount)) continue;
+    const figure = sayFigureAsWritten(amount, unit);
+    // A two-state unit may format a difference as "on"; a shortfall requires a numeric amount.
+    if (!/\d/.test(figure)) continue;
+    const template = pct[id] === 0 ? TYPICAL_SHORTFALL_TEMPLATE : SHORTFALL_TEMPLATE;
+    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : figure) });
+  }
+  return notes;
+}
+
+/**
+ * The Run's correlation_model is kept verbatim (compose.ts); graph fields survive the sent-graph transformations.
+ * A present, non-empty block silences the whole Run, including correlation blocks nested in unknown graph carriers.
+ * Empty/null blocks and scalar diagnostic flags (e.g. factor_evppi.correlation_active: false) are not blocks.
+ */
+function correlationBlockOn(value: unknown, seen = new Set<object>()): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  const found = Object.entries(value).some(([key, child]) =>
+    (/correlat/i.test(key) && child !== null && typeof child === 'object' && Object.keys(child).length > 0)
+    || (key === 'correlation_model' && child !== undefined && child !== null && !isRec(child))
+    || correlationBlockOn(child, seen));
+  seen.delete(value);
+  return found;
 }
 
 /**
@@ -527,6 +626,7 @@ export function agentLicenceRecordOf(result: unknown): Rec | undefined {
 export function goalChanceLicenceForAgent(result: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
+  shortfall_note_by_option?: Readonly<Record<string, string>>;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -561,6 +661,14 @@ export function goalChanceLicenceForAgent(result: unknown): {
     && Object.entries(notes).every(([id, note]) => optionIds.includes(id) && !withheld?.includes(id)
       && isRec(r.pct_by_option) && finite(r.pct_by_option[id])
       && (note === SPREAD_NOTE_WITHOUT_DOWNSIDE || note === SPREAD_NOTE_RETIRED));
+  const shortfall = isRec(r.shortfall_note_by_option) ? r.shortfall_note_by_option : undefined;
+  const validShortfall = form === 'each' && validSent && sent?.frame === 'delta'
+    && isRec(r.target) && r.target.comparator === 'at_least'
+    && shortfall !== undefined && Object.keys(shortfall).length > 0
+    && Object.entries(shortfall).every(([id, note]) => optionIds.includes(id) && !withheld?.includes(id)
+      && isRec(r.pct_by_option) && Number.isInteger(r.pct_by_option[id])
+      && (r.pct_by_option[id] as number) >= 0 && (r.pct_by_option[id] as number) < 100
+      && shortfallNoteLabel(note) !== undefined);
   return {
     form,
     option_ids: optionIds,
@@ -572,6 +680,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
       ...(typeof sent.status_quo_option_id === 'string' ? { status_quo_option_id: sent.status_quo_option_id } : {}),
     } satisfies SentGoalThreshold } : {}),
     ...(validSpread ? { spread_note_by_option: Object.fromEntries(Object.keys(notes!).map((id) => [id, SPREAD_NOTE_WITHOUT_DOWNSIDE])) } : {}),
+    ...(validShortfall ? { shortfall_note_by_option: shortfall as Record<string, string> } : {}),
     ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),

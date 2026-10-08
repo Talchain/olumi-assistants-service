@@ -12,7 +12,7 @@
 
 export interface CallBudget {
   readonly model: string;
-  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret';
+  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret' | 'narrate';
   readonly max_output_tokens: number;
   /** Omitted means "model default", which is what the banked sessions used. */
   readonly reasoning_effort?: 'low' | 'medium' | 'high';
@@ -138,6 +138,23 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
       'history to the last 4 turns saved ~0.5 s more and was NOT taken (prompt rules and cache unchanged).',
   },
   {
+    model: 'gpt-6.1-sol',
+    role: 'narrate',
+    max_output_tokens: 3400,
+    // P44 S1 (DL 58e392 GO, 7 Oct): the call after a hop that only HELD proposals (`hopOnlyHeldProposals`) states the
+    // held change and asks for the yes; the decision was the hop before. Effort only, as AI HARNESS 2a did for interpret.
+    reasoning_effort: 'low',
+    evidence:
+      'P44 S1, 7 Oct, live API, the SERVED narration bytes captured in-process at CEE 7bb033d3 (prompt_sha256 8c743f05, ' +
+      'tools_sha256 ae038f5f, both equal to staging turn f1c55ab0 #5), propose_new_risk result in its success shape, 2 risks ' +
+      'x 2 reps per arm: high 7.3/6.0/5.8/7.5 s (median 6.7 s, 128-194 reasoning tokens) vs low 3.7/3.4/2.5/2.9 s (median ' +
+      '3.1 s, 0 reasoning). Truth rows 8/8 at both: not claimed added, what it threatens, drivers, placeholder strength, asks ' +
+      'for the yes, no proposal id; the double-count warning (existing junior ramp-up risk) kept 2/2 at low. Low paraphrased ' +
+      'the risk label 2/2 on one case (medium too, 0/2), so the narrating call ends with NARRATE_LABEL_LINE (agent-loop.ts): ' +
+      're-test at low, same bytes + that line, 2 x 2: exact quoted label 4/4, every other row 4/4, double-count kept 2/2, ' +
+      '5.3/3.8/4.3/3.5 s (median 4.1 s). Bank: output/dl-0df0e1/inflight/accel/status/P44.md.',
+  },
+  {
     model: 'gpt-5.6-sol',
     role: 'conversation',
     max_output_tokens: 3400,
@@ -169,6 +186,19 @@ export function budgetFor(model: string, role: CallBudget['role']): CallBudget {
  */
 export function conversationBudgetFor(knownEmptyModel: boolean): CallBudget {
   return budgetFor(knownEmptyModel ? 'gpt-5.6-terra' : 'gpt-6.1-sol', 'conversation');
+}
+
+/**
+ * P44 S1: the effort for a narrating call (`reasoning_role: 'narrate'`) on this budget's model: its banked `narrate`
+ * entry, else the budget's own effort unchanged. Only a measured model is lowered.
+ */
+export function narrateEffortFor(budget: CallBudget): CallBudget['reasoning_effort'] {
+  return BANKED_BUDGETS.find((b) => b.model === budget.model && b.role === 'narrate')?.reasoning_effort ?? budget.reasoning_effort;
+}
+
+/** The effort one call is sent at: `narrateEffortFor` when the loop tags it `reasoning_role: 'narrate'`, else the budget's. */
+export function callEffortFor(budget: CallBudget, req: { readonly reasoning_role?: 'narrate' }): CallBudget['reasoning_effort'] {
+  return req.reasoning_role === 'narrate' ? narrateEffortFor(budget) : budget.reasoning_effort;
 }
 
 /** The Run button's one interpreting call (fast path 3, and the result-first follow-up that explains a Run). */

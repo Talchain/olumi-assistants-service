@@ -26,7 +26,7 @@
  */
 
 import type { ToolResult } from './runtime/agent-tools.js';
-import { proposalsAwaitingApproval } from './approval-chips.js';
+import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
@@ -379,6 +379,14 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
 
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
+  // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
+  // The narrating call's approval never reached the store, so the held change still awaits the user's yes — unless the
+  // turn then withdrew it (Codex #2781 r4 P2): the words follow the approve chip's own rule (`pending`), never the refusal.
+  // It speaks for that change only (r5 P2): an earlier approval this turn may have saved, so no turn-wide "nothing changed";
+  // a withdrawn change has no line of its own.
+  if (name === 'authorise_change' && r.ok === false && r.refusal === NOT_ON_NARRATION) {
+    return pending !== null ? 'The change above is waiting for your approval.' : '';
+  }
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
