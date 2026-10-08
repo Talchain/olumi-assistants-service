@@ -63,17 +63,51 @@ const PRESENCE_ROWS = diffRunInputSnapshots(snapshot(), snapshot({ links: [
   { from: 'risk', to: 'mrr', mean: -0.5 }, { from: 'price', to: 'risk', mean: -0.5 },
 ] }));
 const ENTERED = [
-  'A link from ‘Feature release slips’ to ‘MRR’ entered the model.',
-  'A link from ‘Pro plan price’ to ‘Feature release slips’ entered the model.',
+  'The link from ‘Feature release slips’ to ‘MRR’ is now part of the analysis.',
+  'The link from ‘Pro plan price’ to ‘Feature release slips’ is now part of the analysis.',
 ];
 
-/** Resolve literal kinds/fields at the producer's constructors, including spreads and conditional kinds. */
-function emittedPairs(): string[] {
+/** Resolve literal kinds/fields at the producer's constructors; helper references must be direct calls, never aliases. */
+function emittedPairs(variant?: (source: string) => string): string[] {
   const path = fileURLToPath(new URL('../../coaching/run-input-changes.ts', import.meta.url));
-  const program = ts.createProgram([path], { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true });
+  const options = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true };
+  const host = ts.createCompilerHost(options);
+  const readFile = host.readFile;
+  host.readFile = (file) => {
+    const source = readFile(file);
+    return file === path && source !== undefined && variant !== undefined ? variant(source) : source;
+  };
+  const program = ts.createProgram([path], options, host);
   const source = program.getSourceFile(path)!;
   const checker = program.getTypeChecker();
+  const producer = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'diffRunInputs');
+  if (producer === undefined || !ts.isFunctionDeclaration(producer) || producer.body === undefined) throw new Error('Missing diffRunInputs');
+  const changeRow = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'changeRow');
+  const pushPair = producer.body.statements.filter(ts.isVariableStatement).flatMap((node) => node.declarationList.declarations)
+    .find((node) => ts.isIdentifier(node.name) && node.name.text === 'pushPair');
+  if (changeRow === undefined || !ts.isFunctionDeclaration(changeRow) || changeRow.name === undefined || pushPair === undefined) {
+    throw new Error('Missing row helpers');
+  }
+  const helpers = new Map([
+    [checker.getSymbolAtLocation(changeRow.name)!, 'changeRow'],
+    [checker.getSymbolAtLocation(pushPair.name)!, 'pushPair'],
+  ]);
+  const checkHelperReferences = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      const parent = node.parent;
+      const symbol = ts.isShorthandPropertyAssignment(parent)
+        ? checker.getShorthandAssignmentValueSymbol(parent) : checker.getSymbolAtLocation(node);
+      const resolved = symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+      if (helpers.has(resolved!)) {
+        expect(ts.isVariableDeclaration(parent) && parent.name === node
+          || ts.isFunctionDeclaration(parent) && parent.name === node
+          || ts.isCallExpression(parent) && parent.expression === node, 'row helpers must be called directly').toBe(true);
+      }
+    }
+    ts.forEachChild(node, checkHelperReferences);
+  };
+  checkHelperReferences(source);
   const pairs = new Set<string>();
   let writes = 0;
   const strings = (type: ts.Type): string[] => {
@@ -95,10 +129,10 @@ function emittedPairs(): string[] {
       expect(declaration?.parent.parent.getText(source)).toMatch(/^push\s*=/u);
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const name = node.expression.text;
-      if (name === 'push') expect(node.arguments[0] && ts.isCallExpression(node.arguments[0])
+      if (node.expression.text === 'push') expect(node.arguments[0] && ts.isCallExpression(node.arguments[0])
         && node.arguments[0].expression.getText(source) === 'changeRow').toBe(true);
-      if (name === 'changeRow' || name === 'pushPair') {
+      const name = helpers.get(checker.getSymbolAtLocation(node.expression)!);
+      if (name !== undefined) {
         const argument = node.arguments[0]!;
         const declaration = ts.isIdentifier(argument) ? checker.getSymbolAtLocation(argument)?.valueDeclaration : undefined;
         if (declaration !== undefined && ts.isParameter(declaration)) {
@@ -118,8 +152,6 @@ function emittedPairs(): string[] {
     }
     ts.forEachChild(node, visit);
   };
-  const producer = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'diffRunInputs');
-  if (producer === undefined || !ts.isFunctionDeclaration(producer) || producer.body === undefined) throw new Error('Missing diffRunInputs');
   visit(producer.body);
   expect(writes).toBe(1);
   expect(pairs.size).toBeGreaterThan(0);
@@ -127,17 +159,41 @@ function emittedPairs(): string[] {
 }
 
 describe('Q4: every recorded row is spoken or accounted for', () => {
-  it('Paul\'s risk → MRR and price → risk presence rows name both links entering the model', () => {
+  it.each(['changeRow', 'pushPair'])('exhaustiveness: an alias of %s cannot bypass row discovery', (helper) => {
+    const ends = helper === 'changeRow' ? 'null, { raw: true }' : '[null, { raw: true }]';
+    expect(() => emittedPairs((source) => (helper === 'changeRow'
+      ? source.replace('const byId', 'const emit = changeRow;\n\nconst byId')
+      : source.replace('  // ── option settings', '  const emit = pushPair;\n  // ── option settings'))
+      .replace('  // ── option settings',
+        `  emit({ entity_kind: 'link', entity_id: 'new', field: 'presence', link: { from: 'risk', to: 'mrr' } }, ${ends});\n  // ── option settings`)))
+      .toThrow('row helpers must be called directly');
+  }, 20_000);
+
+  it.each(['changeRow', 'pushPair'])('exhaustiveness: a shorthand reference to %s cannot bypass row discovery', (helper) => {
+    const ends = helper === 'changeRow' ? 'null, { raw: true }' : '[null, { raw: true }]';
+    expect(() => emittedPairs((source) => (helper === 'changeRow'
+      ? source.replace('const byId', 'const emitters = { changeRow };\n\nconst byId')
+      : source.replace('  // ── option settings', '  const emitters = { pushPair };\n  // ── option settings'))
+      .replace('  // ── option settings',
+        `  emitters.${helper}({ entity_kind: 'link', entity_id: 'new', field: 'presence', link: { from: 'risk', to: 'mrr' } }, ${ends});\n  // ── option settings`)))
+      .toThrow('row helpers must be called directly');
+  }, 20_000);
+
+  it('exhaustiveness: an exported helper reference is rejected', () => {
+    expect(() => emittedPairs((source) => `${source}\nexport { changeRow };\n`)).toThrow('row helpers must be called directly');
+  }, 20_000);
+
+  it('Paul\'s risk → MRR and price → risk presence rows name both links now part of the analysis', () => {
     const p = plan({ ...PAIRED, input_changes: PRESENCE_ROWS })!;
     expect(p.changes).toEqual([ENTERED[1], ENTERED[0]]);
     expect(p.codeLine).not.toContain(RERUN_NO_CHANGE_LINES.unknown);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
-  it('a link leaving the model says left, with both endpoint labels', () => {
+  it('a link leaving the calculation inputs says no longer part of the analysis, with both endpoint labels', () => {
     const rows = diffRunInputSnapshots(snapshot({ links: [{ from: 'risk', to: 'mrr', mean: -0.5 }] }), snapshot());
     const p = plan({ ...PAIRED, input_changes: rows })!;
-    expect(p.changes).toEqual(['A link from ‘Feature release slips’ to ‘MRR’ left the model.']);
+    expect(p.changes).toEqual(['The link from ‘Feature release slips’ to ‘MRR’ is no longer part of the analysis.']);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
@@ -174,17 +230,35 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
     const rows = [...diffRunInputSnapshots(prior, current), ...diffRunInputSnapshots(prior, { ...prior, goal: null })];
     const probes = new Map(rows.map((row) => [`${row.entity_kind}:${row.field}`, row]));
     expect([...probes.keys()].sort(), 'a new producer pair needs a behavioural row').toEqual(emittedPairs());
+    const sentences: Record<string, string | undefined> = {
+      'option_setting:value': 'You changed Pro plan price: 49 GBP → 59 GBP.',
+      'option:presence': 'You changed New option.',
+      'factor_value:value': 'You changed Pro plan price: 49 GBP → 59 GBP.',
+      'goal:value': "Today's level of ‘MRR’ was recorded: 59 GBP.",
+      'goal:target': 'You changed the target for ‘MRR’: 55000 GBP → 60000 USD.',
+      'goal:unit': '‘MRR’ is now measured in USD.',
+      'goal:operator': 'You changed MRR: >= → >.',
+      'goal:direction': 'You changed MRR: maximize → minimize.',
+      'goal:presence': 'You changed MRR.',
+      'constraint:target': 'You changed Price limit: 50 GBP → 60 GBP.',
+      'constraint:operator': 'You changed Price limit: <= → <.',
+      'link:presence': ENTERED[1],
+      'link:sizing': "You accepted Olumi's estimate for how much Feature release slips changes MRR.",
+      'link:strength': undefined,
+      'link:effect': undefined,
+    };
+    expect(Object.keys(sentences).sort(), 'every pair needs exact words or an exact skipped-row disclosure').toEqual([...probes.keys()].sort());
     for (const [pair, row] of probes) {
-      const spoken = pair !== 'link:effect' && pair !== 'link:strength';
+      const sentence = sentences[pair];
       const alone = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [row] })!;
-      expect(alone.changes.length, pair).toBe(spoken ? 1 : 0);
+      expect(alone.changes, pair).toEqual(sentence === undefined ? [] : [sentence]);
+      expect(alone.codeLine, pair).toBe(sentence === undefined ? RERUN_NO_CHANGE_LINES.unknown : `${sentence} ${RERUN_FALLBACK_LINES.C0}`);
       const beside = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, row] })!;
-      expect(beside.changes.length, pair).toBe(spoken ? 2 : 1);
-      expect(beside.codeLine.endsWith(spoken ? RERUN_FALLBACK_LINES.C0 : RERUN_FALLBACK_LINES.other), pair).toBe(true);
-      if (!spoken) {
-        expect(alone.codeLine, pair).toBe(RERUN_NO_CHANGE_LINES.unknown);
+      expect(beside.changes, pair).toEqual(sentence === undefined ? [SAID_AI] : [SAID_AI, sentence]);
+      expect(beside.codeLine, pair).toBe(sentence === undefined
+        ? `${SAID_AI} ${RERUN_FALLBACK_LINES.other}` : `${SAID_AI} ${sentence} ${RERUN_FALLBACK_LINES.C0}`);
+      if (sentence === undefined) {
         expect(beside.inputs.attribution_case, pair).toBe('C2_unpaired');
-        expect(beside.codeLine, pair).not.toContain(RERUN_FALLBACK_LINES.C0);
       }
       const unnamed = { ...row, label_before: undefined, label_after: undefined,
         ...(row.link !== undefined ? { link: { from: 'gone', to: row.link.to } } : {}) };

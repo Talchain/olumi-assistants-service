@@ -167,7 +167,8 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
       const entered = row.before === null && rec(row.after)?.raw === true;
       const left = rec(row.before)?.raw === true && row.after === null;
       if (from === undefined || to === undefined || (!entered && !left)) { skipped += 1; continue; }
-      out.push(`A link from ‘${from}’ to ‘${to}’ ${entered ? 'entered' : 'left'} the model.`);
+      // Presence records calculation inputs: an edit or retained-node participation can change membership.
+      out.push(`The link from ‘${from}’ to ‘${to}’ is ${entered ? 'now' : 'no longer'} part of the analysis.`);
       continue;
     }
     if (row.entity_kind === 'link' && link !== undefined && row.field === 'effect') {
@@ -302,9 +303,11 @@ export function rerunExplanationPlan(
   // where a difference is RECORDED (an unnamed recorded row; engine drift C3; sample-budget drift C4). `partial` means
   // "can't verify every sent input was the same" (an end may simply predate the residual), and C5 is unattributed: both
   // say "Olumi can't confirm nothing else differed".
-  const coverageComplete = d.input_coverage === 'complete' && skipped === 0;
+  // A missing or filtered row record cannot prove there were no other changes.
+  const rowRecordComplete = Array.isArray(d.input_changes) && rows.length === d.input_changes.length;
+  const coverageComplete = rowRecordComplete && d.input_coverage === 'complete' && skipped === 0;
   const differenceUnknown = skipped === 0
-    && (d.input_coverage !== 'complete' || d.attribution_case === 'C5_unattributed');
+    && (!rowRecordComplete || d.input_coverage !== 'complete' || d.attribution_case === 'C5_unattributed');
   const wireCase = coverageComplete ? d.attribution_case : 'coverage_incomplete';
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
   const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
@@ -318,6 +321,7 @@ export function rerunExplanationPlan(
   const checkedCase = !priorWithheld && wireCase === 'C1_attributable' && !movementAttributable ? 'C2_unpaired' : wireCase;
   const inputs: MethodInputs = {
     change_labels: changes,
+    changes_unsaid: !coverageComplete,
     attribution_case: checkCase(checkedCase),
     leader_licensed: leaderLicensed,
     ...(noise !== undefined ? { noise_verdict: noise } : {}),

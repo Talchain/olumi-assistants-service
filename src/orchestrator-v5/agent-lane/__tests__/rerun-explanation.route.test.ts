@@ -117,8 +117,8 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     const response = await explainTurn(id, first);
     expect(response.statusCode).toBe(200);
     const explained = response.json() as Body;
-    const entered = ['A link from ‘Feature release slips’ to ‘MRR’ entered the model.',
-      'A link from ‘Pro plan price’ to ‘Feature release slips’ entered the model.'];
+    const entered = ['The link from ‘Feature release slips’ to ‘MRR’ is now part of the analysis.',
+      'The link from ‘Pro plan price’ to ‘Feature release slips’ is now part of the analysis.'];
     for (const line of entered) {
       expect(explained.assistant_text).toContain(line);
       expect(JSON.stringify(rows)).toContain(line);
