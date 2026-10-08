@@ -411,7 +411,7 @@ try {
   }
   const missingPointLabels = (r: Rec): boolean => {
     if (!r.shown || r.k < 1) return false;
-    const suffix = `using Olumi's estimates for ${r.k} ${r.k === 1 ? 'link' : 'links'} (see Check estimates)`;
+    const suffix = `using Olumi's estimates for ${r.k} ${r.k === 1 ? 'relationship' : 'relationships'} (see Check estimates)`;
     // The licence names POINT options. A range on a different option has its own
     // existing words and must not be mistaken for an unlabelled estimate point.
     return Object.keys(r.licence.pct_by_option).some(id => !r.screenLines.some((line: Rec) =>

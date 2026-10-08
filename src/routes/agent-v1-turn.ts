@@ -144,7 +144,7 @@ import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, set
 import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
-  settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
+  settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
   widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
@@ -561,12 +561,11 @@ const MUTATION_INSTRUCTION =
 const RECENT_REPLIES_READ = 20;
 
 type RecentRowsReader = { readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null; readonly user_message?: string | null }[]> };
+type RecentTextRows = Awaited<ReturnType<NonNullable<RecentRowsReader['readRecent']>>>;
 
-/** Protect visible user sentences after a restart, without treating stored messages as authority for graph writes. */
-async function userTextsForEgress(store: RecentRowsReader, scenarioId: string, typed: readonly string[]): Promise<string[]> {
-  if (typeof store.readRecent !== 'function') return [...typed];
-  const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
-  return [...typed, ...rows.filter(isAgentAnswerRow).flatMap(row => typeof row.user_message === 'string' ? [row.user_message] : [])];
+/** Reuse history this turn already read. Missing history leaves only known typed words protected, with no I/O at egress. */
+function userTextsForEgress(typed: readonly string[], knownRows?: RecentTextRows): string[] {
+  return [...typed, ...(knownRows ?? []).filter(isAgentAnswerRow).flatMap(row => typeof row.user_message === 'string' ? [row.user_message] : [])];
 }
 
 /**
@@ -1983,7 +1982,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const forwardedBody = withEstimateGoalPointsAtEgress(forwarded.json, {
         analysisResult: forwardedState?.analysisResult, graph: forwardedState?.graph,
         current: (forwardedState?.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
-        userAuthoredTexts: await userTextsForEgress(getSessionStore(), scenarioId,
+        userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedByUser(body) ? [message] : [])]),
       });
       /**
@@ -2092,6 +2091,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * unverifiable scenario.
      */
     const store = getSessionStore();
+    let recentRowsForEgress: RecentTextRows | undefined;
+    // Existing readers keep their own fail-open contracts and windows. Egress only consumes rows they already obtained.
+    const historyReader: RecentRowsReader = typeof store.readRecent === 'function' ? {
+      readRecent: async (sid, limit) => {
+        const rows = await store.readRecent(sid, limit);
+        recentRowsForEgress = rows;
+        return rows;
+      },
+    } : {};
     try {
       const owner = await store.ensureScenarioExists(scenarioId, userId);
       if (scenarioAccessDecision(owner.user_id, userId) !== 'allow') {
@@ -2145,6 +2153,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (records.length === 0) return new Map();
       try {
         const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
+        recentRowsForEgress = rows;
         return await issuedTurnIdsForProposalRecords(proposalIssuances(records, pending), rows, CONVERSATION_ROWS_READ, typeof store.readCommittedTurn === 'function'
           ? id => store.readCommittedTurn!(scenarioId, id) : undefined);
       }
@@ -2222,7 +2231,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // unavailable reply). The SAME owner as the live turn, never a model call.
         const review = decisionReviewFor(scenarioId, { ...state,
           factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id)), recentReplies: await repliesToCheckAsks(
-          [goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)?.say], store, scenarioId, turnId) });
+          [goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)?.say], historyReader, scenarioId, turnId) });
         // S-B (Codex r1 P2-3 on #2751): an unbound review replays the live press's typed "can't yet" and its working exit.
         const pressed = review.bound ? null : decidePress({ id: DECISION_REVIEW_PRESS_ID }, actionFactsOf({ scenarioId, graph: state.graph,
           graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady, analysisResult: state.analysisResult,
@@ -2288,7 +2297,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (askNow !== null) owedNow.push(askNow);
           // ⭐ NEVER RE-ASK (G1b d4): the live Run turn's own rule, on the answers before the turn being replayed, at the live
           // turn's own stage: before the root line and the basis, which the live turn adds after it (Codex r1 on #2664 P2).
-          askEachOnce(owedNow, await repliesToCheckAsks(owedNow, store, scenarioId, turnId));
+          askEachOnce(owedNow, await repliesToCheckAsks(owedNow, historyReader, scenarioId, turnId));
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const reasonNow = thresholdReasonLine(state.graph, state.analysisResult);
           if (reasonNow !== null) owedNow.push(reasonNow);
@@ -2301,7 +2310,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             if (basis !== null) owedNow.push(basis);
           }
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
-          const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
+          const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, historyReader, scenarioId, turnId);
           // The live post-gate goal-chance producer appends its say after the ordinary decision lines.
           let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow.filter(line => line !== say), ...lines,
             ...(typeof say === 'string' && say.trim() !== '' ? [say] : [])]);
@@ -2386,7 +2395,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready'
         ? replayScopedDraftForRun : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
-        await guidedSizingHistory(store, scenarioId, turnId));
+        await guidedSizingHistory(historyReader, scenarioId, turnId));
       replayActions.push(...replayGuidedActions);
       const replayGuided = bindGuidedSizing(replayGuidedDraft, replayGuidedActions, {
         graph_hash: state.graphHash ?? '', run_key: replayNarration?.run_key ?? '',
@@ -2403,7 +2412,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // different shape. So the shape rides only when the composed replay IS the stored words the user first saw; any
       // other replay ships the rebuilt text whole, as before 2b-0 (the structural-challenge replay's rule).
       // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
-      const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, store, scenarioId, turnId);
+      const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, historyReader, scenarioId, turnId);
       const replayEstimates = replayObligations === undefined ? null : actionFactsOf({ scenarioId, graph: state.graph,
         graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady,
         analysisResult: state.analysisResult, optionParticipation: state.optionParticipation, identityEvaluated: state.identityEvaluated }).olumiEstimates;
@@ -2475,8 +2484,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
         current: (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
-        userAuthoredTexts: await userTextsForEgress(store, scenarioId,
-          [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])]),
+        userAuthoredTexts: userTextsForEgress(
+          [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])], recentRowsForEgress),
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
@@ -2734,7 +2743,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let earlierWordsKnown = !needsDurableSeed(held);
     if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
       try {
-        const durable = historyFromDurableTurns(await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ));
+        // Egress reuses the conversation seed; it never widens or repeats the producer's read.
+        const durableSeedRows = await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ);
+        recentRowsForEgress = durableSeedRows;
+        const durable = historyFromDurableTurns(durableSeedRows);
         if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
         earlierWordsKnown = true;
       } catch (err) {
@@ -3013,7 +3025,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
       const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult, st.graph);
       const goalChanceAskedOnce = goalChanceRead === undefined ? ''
-        : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], store, scenarioId, undefined));
+        : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], historyReader, scenarioId, undefined));
       const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
       const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
         { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
@@ -3610,7 +3622,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (!chipPairChecked) {
         // An unresolved sizing chip is terminal: never let label resolution choose another link.
         fastPath = 'method';
-        result = { assistant_text: 'That sizing link could not be checked against the current model. Nothing was changed.',
+        result = { assistant_text: 'That sizing could not be checked against the current model. Nothing was changed.',
           items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
             provider_calls: 0, tool_calls: 0, hops: 0 } };
@@ -3907,7 +3919,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ];
     // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
     // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
-    askEachOnce(owed, await repliesToCheckAsks(owed, store, scenarioId, undefined));
+    askEachOnce(owed, await repliesToCheckAsks(owed, historyReader, scenarioId, undefined));
     // The search control for each query the Agent offered THIS turn (each query once).
     const researchOffered = [...new Map(result.tool_results.flatMap((r) => {
       const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
@@ -3927,7 +3939,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (decisionReviewRequested) {
       decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead,
         factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id)), recentReplies: await repliesToCheckAsks(
-        [goalChanceWithheldForAgent(composedRead.analysisResult, composedRead.graph)?.say], store, scenarioId, undefined) });
+        [goalChanceWithheldForAgent(composedRead.analysisResult, composedRead.graph)?.say], historyReader, scenarioId, undefined) });
       text = decisionReviewTurn.reply;
       result = { ...result, assistant_text: text };
     }
@@ -4153,6 +4165,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
+    // Only propose_identity produces this stored operation; the pre-turn carrier excludes settled-card re-presses.
+    const identityResolved = result.tool_calls.some(c => c.ok === true && typeof c.proposal_id === 'string'
+      && (c.name === 'authorise_change' || (c.name === WITHDRAW_PROPOSAL && c.proposal_id === declinedHold))
+      && heldAtStart.some(h => {
+        const proposal = agentProposalOf(h);
+        return proposal !== undefined && proposal.proposal_id === c.proposal_id && proposal.operations.length === 1
+          && proposal.operations[0]?.op === 'confirm_identity';
+      }));
+    const thin = thinDraftOffer(readbackGraph, identityResolved
+      || result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true));
+    if (thin !== null && heldCardOffer.length === 0 && approvals.length === 0 && carriedApproval.length === 0
+      && fastPath !== 'method' && (fastPath !== 'approve' || identityResolved)) {
+      nextStepOffers.offered.splice(0, nextStepOffers.offered.length, ...firstOfEachId([
+        ...nextStepOffers.offered.filter(c => c.id === RUN_OFFER_CHIP.id), thin.press, ...nextStepOffers.offered,
+      ]).slice(0, 3));
+    }
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // The same selected Run as the words; the warning owns N. Re-check present sizing and never-reask before offering.
     // Reconcile the commit receipt's words to the FINAL stored read, including a concurrent second sizing.
@@ -4162,7 +4190,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
     const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,
-      guidedDraft === undefined ? [] : await guidedSizingHistory(store, scenarioId, undefined));
+      guidedDraft === undefined ? [] : await guidedSizingHistory(historyReader, scenarioId, undefined));
     offeredNow.push(...guidedActions);
     const guidedSizing = bindGuidedSizing(guidedDraft, guidedActions, {
       graph_hash: graphHash ?? '',
@@ -4410,7 +4438,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
     };
     // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
-    const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, store, scenarioId, undefined);
+    const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined);
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     const linkAsk = decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
@@ -4540,7 +4568,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
       const goalLines = [goalChanceOwed];
-      askEachOnce(goalLines, await repliesToCheckAsks(goalLines, store, scenarioId, undefined));
+      askEachOnce(goalLines, await repliesToCheckAsks(goalLines, historyReader, scenarioId, undefined));
       owed.push(...goalLines);
       wireBody = { ...wireBody, assistant_text: withDisclosures(wireBody.assistant_text, goalLines) };
     }
@@ -4731,8 +4759,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     wireBody = withEstimateGoalPointsAtEgress(wireBody, {
       analysisResult, graph: readbackGraph ?? null,
       current: selectedRunCurrent,
-      userAuthoredTexts: await userTextsForEgress(store, scenarioId,
-        [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])]),
+      userAuthoredTexts: userTextsForEgress(
+        [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
     });
     /**
      * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a
@@ -4839,7 +4867,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
-      const a7Repeat = await a7SaidLastTurn(readbackGraph, store, scenarioId, turnId);
+      const a7Repeat = await a7SaidLastTurn(readbackGraph, historyReader, scenarioId, turnId);
       const estimates = actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady,
         analysisResult, optionParticipation, identityEvaluated, guidance: guidanceHistory, pending: durablePending }).olumiEstimates;
       const controlsOnReply = (wireBody.suggested_actions ?? []) as readonly OfferedAction[];

@@ -7,9 +7,9 @@ const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object'
 const plain = (s: string): string => foldQuotes(s).replace(/['"`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
 
 /**
- * The shared live, stored-answer replay and conversation-reload boundary. Only a current licence's own percentage
- * AND an unambiguous option identify a goal point. A recorded scored goal additionally binds goal-only narration;
- * a legacy licence without that snapshot binds its named option and exact value itself. All other sentence bytes and whitespace stay untouched.
+ * The shared live, stored-answer replay and conversation-reload boundary. A named licensed option and its goal
+ * bind any narrated percentage, so a wrong figure cannot escape the producer's attribution. Goal-only narration
+ * still needs one exact licensed value; explicit other subjects and exact user-authored spans stay untouched.
  * The screen producer owns the replacement, including its attribution and notes; each option is said once.
  */
 export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unknown }>(body: T, context: {
@@ -36,6 +36,12 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const lines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, true)
     .filter(l => l.olumi_estimate_link_count !== undefined);
   if (lines.length === 0) return body;
+  // Specialized goals (for example launching by a recorded date) carry their own producer-owned predicate.
+  // Match that goal wording rather than assuming every licence says 'meeting your goal'.
+  const producerGoalPredicates = lines.flatMap(l => {
+    const match = plain(l.chance).match(/\bchance of (.+?), in this model\b/);
+    return match === null ? [] : [match[1]!];
+  });
   // Also resolve explicitly named unlicensed options: they cannot fall through to another option's goal-only tuple.
   const labelsById = new Map((Array.isArray(nodes) ? nodes : []).map(rec).flatMap(n =>
     n?.kind === 'option' && typeof n.id === 'string' && typeof n.label === 'string' ? [[n.id, n.label] as const] : []));
@@ -132,9 +138,45 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         // Parse the percentage expression, including stacked approximation/comparison qualifiers, never a reply shape.
         const percentages = [...figures.matchAll(/((?:(?:(?:no\s+)?(?:less|more|greater)\s+than|at\s+(?:least|most)|up\s+to|under|over|below|above|[<>]=?|[≤≥]|about|roughly|around|approximately|circa)\s*)*)([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*(?:%|\bpercent\b|\bper\s+cent\b)/g)];
         // A named option binds its ID, even when another option licenses this percentage. A named other goal conflicts.
-        const namedOptions = optionLabels.filter(o => names(subject, o.label));
+        const namedOptions = optionLabels.filter(o => names(subject, o.label) || names(subject, o.id));
         if (namedOptions.length > 1 || (goalId !== undefined && goals.some(g => g?.id !== goalId
           && typeof g?.label === 'string' && names(subject, g.label)))) continue;
+        if (percentages.length === 0) continue;
+        let withoutFigures = subject;
+        for (const p of percentages) withoutFigures = withoutFigures.replace(p[0], ' ');
+        const bareChance = /^this gives (?:a )?chance[.!?]?$/.test(withoutFigures.replace(/\s+/g, ' ').trim());
+        // A bare pronoun supplies no option identity. A sole option resolves it; beside every complete producer
+        // point it is only an unlabelled duplicate, so remove it without guessing which option the pronoun means.
+        if (namedOptions.length === 0 && bareChance) {
+          if (lines.length === 1) {
+            const [l] = lines;
+            const replacement = said.has(l!.option_id) ? '' : l!.chance;
+            said.add(l!.option_id);
+            edits.push({ start, end, replacement });
+          } else if (lines.every(l => said.has(l.option_id))) edits.push({ start, end, replacement: '' });
+          continue;
+        }
+        const genericGoalPoint = /\b(?:chance|probability|likelihood) (?:of |to )?(?:meet(?:ing)?|reach(?:ing)?|achiev(?:e|ing)|hit(?:ting)?) (?:your|the|our|this) (?:goal|target)\b/.test(subject);
+        const goalSubject = typeof goalLabel === 'string' && plain(goalLabel).trim() !== ''
+          ? subject.split(plain(goalLabel).trim()).join('__scored_goal__') : subject;
+        const namedGoalPoint = /\b(?:chance|probability|likelihood) (?:of |to )?(?:meet(?:ing)?|reach(?:ing)?|achiev(?:e|ing)|hit(?:ting)?) (?:the )?__scored_goal__\b/.test(goalSubject)
+          || (/\b__scored_goal__ (?:meets|reaches|achieves|hits) (?:its |the |your )?(?:goal|target)\b/.test(goalSubject)
+            && /\bruns\b/.test(subject))
+          || (/\b(?:meets|reaches|achieves|hits) (?:the )?__scored_goal__ (?:in|on)\b/.test(goalSubject)
+            && /\bruns\b/.test(subject));
+        const producerGoalPoint = producerGoalPredicates.some(predicate =>
+          ['chance', 'probability', 'likelihood'].some(word => names(subject, `${word} of ${predicate}`)));
+        let shorthand = withoutFigures;
+        for (const o of namedOptions) {
+          shorthand = shorthand.split(plain(o.label).trim()).join('').split(plain(o.id).trim()).join('');
+        }
+        shorthand = shorthand.replace(/^\s*[-•]\s*/, '').replace(/\bin this model\b/g, '')
+          .replace(/[:;,.!?]/g, '').replace(/\s+/g, ' ').trim();
+        // The familiar option: percentage display and recorded option chance imply the licensed goal. Any named
+        // alternate subject (supplier failure, competitor launch, market share) prevents this shorthand binding.
+        const optionGoalPoint = namedOptions.length === 1 && (genericGoalPoint || namedGoalPoint || producerGoalPoint
+          || shorthand === '' || /^(?:has|gives) (?:a )?chance$/.test(shorthand)
+          || /^(?:the )?recorded (?:chance|figure|probability) for (?:is|was)$/.test(shorthand));
         const matched = lines.filter(l => {
           const pct = rec(licence.pct_by_option)?.[l.option_id];
           const valueMatches = percentages.some(p => {
@@ -146,10 +188,10 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
               : (pct === 0 && value === 1 && ['<', 'less than'].includes(prefix))
                 || (pct === 100 && value === 99 && ['>', 'more than'].includes(prefix));
           });
-          return valueMatches && (namedOptions.length === 1 ? namedOptions[0]!.id === l.option_id
-            : goalId !== undefined && typeof goalLabel === 'string' && names(subject, goalLabel));
+          return namedOptions.length === 1 ? optionGoalPoint && namedOptions[0]!.id === l.option_id
+            : valueMatches && goalId !== undefined && namedGoalPoint;
         });
-        // Goal-only narration must resolve exactly one (option_id, scored goal_id, displayed value), never guess a tie.
+        // Goal-only narration still needs one exact (option_id, scored goal_id, displayed value), never a guessed tie.
         if (matched.length !== 1) continue;
         const replacement = matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ');
         edits.push({ start, end, replacement });

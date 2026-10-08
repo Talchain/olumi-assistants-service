@@ -114,8 +114,45 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     expect(out).toBe(noRange);
     expect(warning(out)).toEqual(warning(envelope));
     expect(warning(out)!.say).toBe(oldSay);
-    expect(goalChanceWithheldForAgent({ enrichment: out }, graph)).toEqual(goalChanceWithheldForAgent({ enrichment: noRange }));
+    if (name === 'unseen-1') {
+      // Amendment (A): the old case-(c) estimate asks convert; only the fit-out placeholder still blocks.
+      const verdict = targetTestabilityOf(graph, envelope.identity_evaluations);
+      expect(verdict).toMatchObject({ kind: 'not_testable', failures: [
+        { code: 'goal_path_placeholder', links: [{ from: 'fourth_shop_fit_out_spend', to: 'monthly_profit' }] },
+      ] });
+      for (const from of ['loyalty_app_gross_profit_uplift', 'loyalty_app_operating_cost', 'fourth_shop_net_profit_contribution']) {
+        const edge = graph.edges.find((e: Rec) => e.from === from && e.to === 'monthly_profit');
+        expect(convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph))).toBe(true);
+      }
+      expect(goalChanceWithheldForAgent({ enrichment: out }, graph)?.say).toBe(
+        "The chance isn't shown yet: the model doesn't yet say how strongly ‘Fourth-shop fit-out spend’ affects ‘monthly profit’, so any figure would be a guess. Give a rough strength for it to see the chance.",
+      );
+      expect(goalChanceWithheldForAgent({ enrichment: noRange })?.say).toContain(oldSay);
+    } else {
+      expect(goalChanceWithheldForAgent({ enrichment: out }, graph)).toEqual(goalChanceWithheldForAgent({ enrichment: noRange }));
+    }
   });
+
+  if (name === 'unseen-1') it.each(['placeholder', 'non-converting estimate'])(
+    `${name}: NO range amendment (A) CONTRAST: %s still blocks the old estimate's link`, (kind) => {
+      const refused = structuredClone(graph);
+      const edge = refused.edges.find((e: Rec) => e.from === 'loyalty_app_gross_profit_uplift' && e.to === 'monthly_profit');
+      expect(convertingOlumiEstimate(edge, graph, scoredGoalIdOf(graph))).toBe(true);
+      if (kind === 'placeholder') edge.provenance.magnitude = 'olumi_placeholder';
+      else delete edge.provenance.natural_effect;
+      expect(convertingOlumiEstimate(edge, refused, scoredGoalIdOf(refused))).toBe(false);
+      const verdict = targetTestabilityOf(refused, envelope.identity_evaluations);
+      expect(verdict.kind === 'not_testable' && verdict.failures.flatMap(f => f.links ?? [])).toContainEqual(
+        { from: edge.from, to: edge.to },
+      );
+      const noRange = { ...envelope, inference_warnings: warnings(envelope).filter(w => w.code !== GOAL_CHANCE_RANGE) };
+      expect(scopeTargetNotTestableWithRanges(noRange, refused)).toBe(noRange);
+      const say = goalChanceWithheldForAgent({ enrichment: noRange }, refused)!.say;
+      expect(say).not.toContain('Give a rough strength');
+      expect(say).toContain(kind === 'placeholder' ? 'Loyalty-app gross-profit uplift'
+        : "Olumi has it as a band, which can't be turned into your goal's units.");
+    },
+  );
 
   it(`${name}: all options ranged removes target warning (RED at base)`, () => {
     const range = warning(envelope, GOAL_CHANCE_RANGE)!;

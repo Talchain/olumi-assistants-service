@@ -28,6 +28,8 @@ import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store
 import { isProvenanceOnlyEdgeConfirmation } from '../../../src/orchestrator-v5/system-events/edge-strength-edit.js';
 import { edgeBandStd } from '../../../src/orchestrator-v5/format/edge-strength-bands.js';
 import { log } from '../../../src/utils/telemetry.js';
+import { goalChanceRangeOf, withGoalChanceRange } from '../../../src/orchestrator-v5/goal-target/goal-chance-range.js';
+import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../../../src/orchestrator-v5/agent-lane/goal-certainty.js';
 
 function buildPersistedGraph() {
   return {
@@ -319,7 +321,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     llmChatMock.mockClear();
   });
 
-  it('GUIDED INSPECTOR WIRE: committed stored graph supplies M=2, words and identity-bound presses survive strict egress', async () => {
+  it.each([false, true])('GUIDED INSPECTOR WIRE: M=2 retains strict identity-bound presses; eligible G0 range evidence=%s', async rangeEvidence => {
     const capture = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8'));
     const graph = structuredClone(capture.graph);
     const third = graph.edges.find((e: Record<string, unknown>) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
@@ -329,6 +331,22 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     persisted = graph;
     const beforeHash = computeAnalysisAffectingGraphHash(graph)!;
     const prior = successfulRunFact(beforeHash);
+    if (rangeEvidence) {
+      const optionId = 'raise_pro_price_to_59';
+      const goalId = 'mrr';
+      const goalPaths = unsizedLeaderGoalPaths(graph, [optionId]);
+      const block = { drivers: [{ kind: 'link_strength', quantity_id: 'pro_plan_price->mrr_lost_to_price_sensitivity',
+        from: 'pro_plan_price', to: 'mrr_lost_to_price_sensitivity', status: 'resolved', spread: 0.4,
+        p_goal_if_low: 0.234, p_goal_if_high: 0.876, n_low: 4000, n_high: 40 }] };
+      const inputs = { driversByOption: new Map([[optionId, block]]), goalPaths, plotWithheld: false, goalId };
+      const enrichment = withGoalChanceRange({ analysis_status: 'computed',
+        option_comparison: [{ option_id: optionId, probability_of_goal_drivers: block }],
+        inference_warnings: [placeholderGoalWarning(graph, goalPaths, 'GOAL_FIGURES_PLACEHOLDER_PATH')],
+      }, graph, inputs);
+      // A carrier alone is insufficient: this same stored graph and retained evidence must pass G0.
+      expect(goalChanceRangeOf(enrichment, graph, optionId, inputs)).not.toBeNull();
+      prior.result.enrichment = stampRunAnalysisProjection(enrichment);
+    }
     readScenarioRunAnalysisFactsForMock.mockResolvedValue({ facts: [{ fact: prior,
       fact_row_id: '44444444-4444-4444-8444-444444444444', fact_created_at: prior.result.computed_at }], total_count: 1 });
     const runKey = runExplanationChip(SCENARIO_ID, { graphHash: beforeHash,
@@ -340,7 +358,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     }), 'a1') });
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
-    const progress = '2 more to go; with 1 left, Olumi can show a range.';
+    const progress = rangeEvidence ? '2 more to go; with 1 left, Olumi can show a range.' : '2 more to go.';
     expect(body.assistant_text).not.toContain('failed validation');
     expect(body.assistant_text.endsWith(progress)).toBe(true);
     expect(body.graph_hash).toMatch(/^[0-9a-f]{16}$/u);

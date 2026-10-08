@@ -75,11 +75,11 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
     const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
     const estimates = shareOptionEstimateWords(graph, optionId);
-    const estimateLinks = point && k > 0 ? `, using Olumi's estimates for ${k} ${k === 1 ? 'link' : 'links'} (see Check estimates)` : '';
+    const estimateRelationships = point && k > 0 ? `, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)` : '';
     return [{ option_id: optionId, label, figure,
-      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}${estimateLinks}.`
+      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}${estimateRelationships}.`
         + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
-      ...(estimateLinks === '' ? {} : { olumi_estimate_link_count: k }),
+      ...(estimateRelationships === '' ? {} : { olumi_estimate_link_count: k }),
       ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
       ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
   };

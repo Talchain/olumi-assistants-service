@@ -141,8 +141,8 @@ describe('GUIDED PATH round 6 — Paul 632b92b9, without graph repair', () => {
     expect(census.links).toHaveLength(2);
     const points = goalChanceScreenLinesForAgent(wordRun, graph, true);
     expect(points.map(p => p.chance)).toEqual([
-      "‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi's estimates for 2 links (see Check estimates).",
-      "‘Test £54 Pro price’: about 45% chance of meeting your goal, in this model, using Olumi's estimates for 2 links (see Check estimates).",
+      "‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi's estimates for 2 relationships (see Check estimates).",
+      "‘Test £54 Pro price’: about 45% chance of meeting your goal, in this model, using Olumi's estimates for 2 relationships (see Check estimates).",
     ]);
     expect(points.map(p => p.olumi_estimate_link_count)).toEqual([2, 2]);
     const reply = withScreenLinesOwed('This Run is ready.', points);

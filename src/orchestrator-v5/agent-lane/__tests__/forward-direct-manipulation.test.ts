@@ -20,6 +20,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 
 const ENV = ['AGENT_LANE_ENABLED', 'AGENT_LANE_PREVIEW'] as const;
+const { sessionStoreRead } = vi.hoisted(() => ({ sessionStoreRead: vi.fn(() => { throw new Error('conversation store unavailable'); }) }));
+vi.mock('../../session/index.js', () => ({ getSessionStore: sessionStoreRead }));
 
 /**
  * ⛔ ONE APP PER MODE, BUILT ONCE — and the reason is measured, not stylistic.
@@ -81,8 +83,10 @@ describe('direct manipulation is forwarded, not refused', () => {
   beforeEach(() => { seen.length = 0; });
 
   it('delivers the payload to the handlers BYTE-IDENTICALLY', async () => {
+    const readsBefore = sessionStoreRead.mock.calls.length;
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: CANVAS_EDIT });
     expect(res.statusCode).toBe(200);
+    expect(sessionStoreRead.mock.calls.length, 'forward egress never needs the conversation store').toBe(readsBefore);
     // ⭐ Bound by IDENTITY, not by "a call happened": the handler must receive
     // the user's own event unchanged, or the edit it applies is not theirs.
     expect(seen).toHaveLength(1);

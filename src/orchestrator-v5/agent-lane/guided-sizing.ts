@@ -58,15 +58,6 @@ export function guidedSizingSentence(draft: Pick<GuidedSizingDraft, 'total' | 'l
     ? ` Give a rough strength for ${draft.total === 1 ? 'it' : 'each'} to see the chance.` : ''}`;
 }
 
-/** Adapt retained GP prose without rewriting the factor labels inside it. */
-export function withoutGuidedSizingJargon(words: string, labels: readonly string[] = []): string {
-  const kept = ['‘[^’]*’', ...labels.filter(Boolean).sort((a, b) => b.length - a.length)
-    .map(label => label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))];
-  return words.split(new RegExp(`(${kept.join('|')})`, 'u')).map((part, i) => i % 2 === 1 ? part : part
-    .replace(/\b(the|This|this|for \d+) (link|links)\b/gu, (_match, prefix: string, noun: string) => `${prefix} effect${noun === 'links' ? 's' : ''}`)
-    .replace(/\bstand-ins\b/gu, 'rough strengths')).join('');
-}
-
 /** The warning reader alone establishes a legacy Run's sole-placeholder cause set before calling this helper. */
 export function legacyGuidedSizingReplyText(draft: GuidedSizingDraft | undefined): string | null {
   return draft !== undefined && draft.total >= 1 ? guidedSizingSentence(draft) : null;
@@ -151,8 +142,7 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
   const ordered = [...goalOrderedLinks(graph, placeholders, true), ...goalOrderedLinks(graph, carveouts, true)];
   const goalId = verdict.kind === 'no_goal' ? undefined : verdict.goal_id;
   return { v: 1, total: placeholders.length, target_verdict: verdict, ...(goalId !== undefined ? { scored_goal_id: goalId } : {}),
-    ...(recovery !== null ? { recovery_line: withoutGuidedSizingJargon(recovery,
-      [...byId.values()].flatMap(n => typeof n.label === 'string' ? [n.label] : [])) } : {}),
+    ...(recovery !== null ? { recovery_line: recovery } : {}),
     links: ordered.map((l, order) => {
       const matches = (Array.isArray(edges) ? edges.map(record) : []).filter(e => e?.from === l.from && e.to === l.to);
       const id = matches.length === 1 && typeof matches[0]?.id === 'string' ? matches[0].id : undefined;

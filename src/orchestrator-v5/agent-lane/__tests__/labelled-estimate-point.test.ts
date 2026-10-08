@@ -27,6 +27,8 @@ const result = (): Json => ({ type: 'analysis_result', enrichment: { inference_w
   code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance of meeting your goal is licensed on this Run.',
   form: 'each', option_ids: ['raise', 'hold'], pct_by_option: { raise: 67, hold: 43 },
   target: { comparator: 'at_least', value: 20000, unit: '£/month' },
+  goal_node_id: 'mrr', goal_label: 'MRR',
+  option_labels_by_option: { raise: 'Raise to £59', hold: 'Keep £49' },
 }] } });
 const estimatesOf = (g: Json) => {
   const signals = assembleGuidanceSignals({ request: 'run_result', graph: g, offeredSpecific: [],
@@ -34,7 +36,7 @@ const estimatesOf = (g: Json) => {
   return olumiEstimatesFeedingResult({ validatedDefinitionForLink: validatedDefinitionForGraph(g),
     goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'] });
 };
-const wanted = (label: string, pct: number, k = 1): string => `‘${label}’: about ${pct}% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'link' : 'links'} (see Check estimates).`;
+const wanted = (label: string, pct: number, k = 1): string => `‘${label}’: about ${pct}% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates).`;
 
 describe('GP round 4: a point shown with goal-path estimates carries the RC4 label', () => {
   it('singular, same existing option prefix and licensed order: 1 link, not values, accepted, placeholders or off-path estimates', () => {
@@ -46,7 +48,7 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
       wanted('Raise to £59', 67), wanted('Keep £49', 43),
     ]);
   });
-  it('plural: two on-path unaccepted Olumi estimates use "for 2 links"', () => {
+  it('plural: two on-path unaccepted Olumi estimates use "for 2 relationships"', () => {
     const g = graph(); g.edges[1].provenance = { magnitude: 'olumi_estimate' };
     expect(goalChanceScreenLinesForAgent(result(), g, true)[0]!.chance).toBe(wanted('Raise to £59', 67, 2));
   });
@@ -55,7 +57,7 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     Object.assign(r.enrichment.inference_warnings[0].target,
       { unit: '% of the feature launch', value: 100, by_date: '2027-04-07' });
     expect(goalChanceScreenLinesForAgent(r, g, true)[0]!.chance).toBe(
-      "‘Raise to £59’: about 67% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 link (see Check estimates).");
+      "‘Raise to £59’: about 67% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 relationship (see Check estimates).");
   });
   it.each(['highest', 'highest_all_likely_to_miss', 'all_likely_to_miss', 'similar'])(
     '%s licence: every licensed generic point carries the label without changing form or percentages', form => {
@@ -115,7 +117,8 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     ]);
   });
   it.each(['Raise to £59 has a 67% chance of meeting your goal.', 'MRR reaches its target in 67% of model runs.',
-    'Raise to £59: about 67 % in this model.'])(
+    'Raise to £59: about 67 % in this model.', 'This gives a 67% chance.', 'This gives a 68% chance.',
+    'This gives a 67 % chance.'])(
     'Explain replaces a licence-bound point even beside an already complete labelled point: %s', bare => {
     const g = graph(), run = result();
     run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
@@ -127,13 +130,55 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     expect(text.match(/67% chance/g)).toHaveLength(1);
     for (const line of lines) expect(text).toContain(line.chance);
   });
-  it.each(['This gives a 67% chance.', 'Raise to £59 has a 68% chance.', 'The chance of supplier failure is 10%.'])(
-    'preserves a sentence without the licence value and subject together: %s', sentence => {
+  it.each(['The chance of supplier failure is 10%.', 'Raise to £59 has a 67% chance a competitor launches first.',
+    'Raise to £59: about 67% market share.'])(
+    'preserves an explicit unrelated subject even when its option and value coincide: %s', sentence => {
     const g = graph(), run = result();
     run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
     const lines = goalChanceScreenLinesForAgent(run, g, true);
     const text = `${sentence}\n\n${lines.map(l => l.chance).join(' ')}`;
     expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: run, graph: g, current: true }).assistant_text).toBe(text);
+  });
+  it.each(['Raise to £59 has a 68% chance of reaching MRR.',
+    'Raise to £59 has a 68% chance of meeting your goal.', 'raise has a 68% chance of reaching MRR.',
+    'Raise to £59: about 68%.', 'Raise to £59 has a 68% chance.',
+    "Raise to £59 has a 68% chance of reaching MRR, using Olumi's estimates for 1 relationship (see Check estimates)."])(
+    'R16 RED: any percentage on the licensed option and goal uses the producer figure: %s', sentence => {
+      const g = graph(), run = result();
+      run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+      expect(withEstimateGoalPointsAtEgress({ assistant_text: sentence }, {
+        analysisResult: run, graph: g, current: true,
+      }).assistant_text).toBe(wanted('Raise to £59', 67));
+    });
+  it('R16 RED: the licensed deadline predicate binds a wrong or unlabelled point without taking a competitor launch', () => {
+    const run = result(); run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    Object.assign(run.enrichment.inference_warnings[0].target,
+      { unit: '% of the feature launch', value: 100, by_date: '2027-04-07' });
+    const g = graph(), wanted = goalChanceScreenLinesForAgent(run, g, true)[0]!.chance;
+    for (const figure of [67, 68]) {
+      const text = `Raise to £59 has a ${figure}% chance of launching by 7 April 2027.`;
+      expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+        analysisResult: run, graph: g, current: true,
+      }).assistant_text).toBe(wanted);
+    }
+    const competitor = 'Raise to £59 has a 68% chance a competitor launches first.';
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: competitor }, {
+      analysisResult: run, graph: g, current: true,
+    }).assistant_text).toBe(competitor);
+  });
+  it('R16 CONTROL: an ambiguous standalone bare chance cannot invent an option', () => {
+    const run = result(); run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    const text = 'This gives a 68% chance.';
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+      analysisResult: run, graph: graph(), current: true,
+    }).assistant_text).toBe(text);
+  });
+  it('R16 CONTROL: exact user-authored goal figures remain their words', () => {
+    const run = result(); run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    const text = 'Raise to £59 has a 68% chance of reaching MRR.';
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+      analysisResult: run, graph: graph(), current: true, userAuthoredTexts: [text],
+    }).assistant_text).toBe(text);
   });
   it('RC4 producer, not a second count: the sentence reads exactly the producer’s link-size result', () => {
     const census = olumiEstimatesFeedingResult;
@@ -148,7 +193,7 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     } finally { spy.mockRestore(); }
   });
   it('the existing RC4 guard removes even a correct narrator k, then deterministic assembly supplies the one labelled point', () => {
-    const narration = "Olumi's estimates feed 99 links. Raise to £59: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 link (see Check estimates).";
+    const narration = "Olumi's estimates feed 99 links. Raise to £59: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).";
     const guarded = narratorCountGuard(narration, estimatesOf(graph()));
     expect(guarded.removed).toHaveLength(2);
     const out = withScreenLinesOwed(narration, goalChanceScreenLinesForAgent(result(), graph(), true));

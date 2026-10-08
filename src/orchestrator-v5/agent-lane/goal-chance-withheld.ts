@@ -27,7 +27,7 @@ import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.
 
 import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
 import { guidedSizingActions, guidedSizingForRun, guidedSizingOnlyPlaceholders, guidedSizingReplyText,
-  legacyGuidedSizingReplyText, withoutGuidedSizingJargon, withoutStaleGuidedSizingWords, type GuidedSizingDraft } from './guided-sizing.js';
+  legacyGuidedSizingReplyText, withoutStaleGuidedSizingWords, type GuidedSizingDraft } from './guided-sizing.js';
 import { notTargetTestableSentence, untestableTargetTail, type TargetTestability } from '../admission/target-testability.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
@@ -158,7 +158,8 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   ...scopedDraft: [] | [GuidedSizingDraft | undefined] | [GuidedSizingDraft | undefined, string | null]): GoalChanceWithheld | undefined {
   // An explicitly supplied empty draft also owns the scope; do not fall back to another read.
   const guided = scopedDraft.length > 0 ? scopedDraft[0] : guidedSizingForRun(result, graph);
-  const suppliedGuidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : guidedSizingReplyText(guided).guided;
+  // The default words depend on the complete cause set below, including warning-only legacy Runs.
+  const suppliedGuidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : null;
   // A one-pair explanation changes words only; the established offer/hook eligibility stays with `guided`.
   const single = guided === undefined ? guidedSizingForRun(result, graph, true) : undefined;
   const wordDraft = guided ?? (single?.total === 1 ? single : undefined);
@@ -173,14 +174,6 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
     // Science R3: an explicitly empty scoped say leaves this target reason on the panel, with no chat sentence.
     .filter(w => !(opening === RANGE_OPENING && w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && w.say === ''));
   if (sourceWarnings.length === 0) return undefined;
-  const graphNodes = recordOf(graph)?.nodes;
-  const factorLabels = [...(Array.isArray(graphNodes) ? graphNodes.map(recordOf) : [])
-    .flatMap(n => typeof n?.label === 'string' ? [n.label] : []),
-  ...(wordDraft?.links.flatMap(l => [l.from_label, l.to_label]) ?? [])];
-  const reply = (value: GoalChanceWithheld): GoalChanceWithheld => wordDraft === undefined
-    && !sourceWarnings.some(w => w.code === GOAL_FIGURES_PLACEHOLDER_PATH) ? value : {
-      ...value, say: withoutGuidedSizingJargon(value.say, factorLabels),
-    };
   const levelAsk = (w: Record<string, unknown>): string | undefined => {
     if (typeof w.level_only_say === 'string' && w.level_only_say.trim() !== '') return w.level_only_say.trim();
     const words = typeof w.say === 'string' && w.say.trim() !== '' ? w.say : typeof w.message === 'string' ? w.message : '';
@@ -217,23 +210,23 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   });
   // S-E GOALS (Codex buddy r1 on #2742): a chance goal's withhold speaks ALONE, ahead of every other cause, identical arms too.
   const chance = warnings.filter((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
-  if (chance.length > 0) return reply(goalChanceFromWarnings(chance, opening, guidedText));
+  if (chance.length > 0) return goalChanceFromWarnings(chance, opening, guidedText);
   // Gate 1 v2 (Codex #2574 P1): identical options keep their own reason and scope, alone or beside any other withhold.
   const identical = warnings.filter((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
   const others = warnings.filter((w) => w.code !== GOAL_FIGURES_OPTIONS_IDENTICAL);
-  if (identical.length === 0) return reply(goalChanceFromWarnings(others, opening, guidedText));
+  if (identical.length === 0) return goalChanceFromWarnings(others, opening, guidedText);
   const words = identical.map((w) => (typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : ''))
     .find((m) => m !== '') ?? '';
   const ids = [...new Set(identical.flatMap((w) => (Array.isArray(w.option_ids) ? w.option_ids : []))
     .filter((id): id is string => typeof id === 'string'))];
   if (others.length === 0) {
-    return reply({ withheld: true, say: words === '' ? opening : words, node_ids: [], note: OPTIONS_IDENTICAL_NOTE, option_ids: ids });
+    return { withheld: true, say: words === '' ? opening : words, node_ids: [], note: OPTIONS_IDENTICAL_NOTE, option_ids: ids };
   }
   // Mixed: the other cause keeps its own reader, note and words; the identical reason is added, and a scoped withhold
   // widens to the identical options too (an every-option withhold already covers them).
   const base = goalChanceFromWarnings(others, opening, guidedText);
-  return reply({ ...base, say: words === '' ? base.say : `${base.say} ${words}`,
-    ...(base.option_ids === undefined ? {} : { option_ids: [...new Set([...base.option_ids, ...ids])] }) });
+  return { ...base, say: words === '' ? base.say : `${base.say} ${words}`,
+    ...(base.option_ids === undefined ? {} : { option_ids: [...new Set([...base.option_ids, ...ids])] }) };
 }
 
 /**

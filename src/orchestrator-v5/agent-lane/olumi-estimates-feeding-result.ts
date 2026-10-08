@@ -110,7 +110,8 @@ const TENS = new Set(['twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 
 const UNITS = new Set(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']);
 const COUNT_KINDS = new Set([
   'value', 'values', 'figure', 'figures', 'input', 'inputs', 'assumption', 'assumptions',
-  'estimate', 'estimates', 'number', 'numbers', 'link', 'links', 'size', 'sizes', 'strength', 'strengths',
+  'estimate', 'estimates', 'number', 'numbers', 'link', 'links', 'relationship', 'relationships',
+  'size', 'sizes', 'strength', 'strengths',
 ]);
 const FILLERS = new Set(['of', 'the', 'olumi', 's', 'its', 'their', 'own', 'underlying', 'estimated', 'starting', 'these', 'those']);
 const CONJUNCTIONS = new Set(['and', 'but', 'while', 'whereas']);

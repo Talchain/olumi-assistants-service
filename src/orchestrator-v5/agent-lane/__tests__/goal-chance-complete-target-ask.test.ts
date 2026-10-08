@@ -41,7 +41,6 @@ const fixture = (file: string): CapturedRun => {
 const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
 const PLACEHOLDER = 'GOAL_FIGURES_PLACEHOLDER_PATH';
 const TARGET = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
-const gpReason = (words: string): string => words.replace(/\blinks\b/gu, 'effects').replace(/\blink\b/gu, 'effect');
 // DL r14 changes the invitation only when placeholders are the complete cause set.
 const GUIDED_TWO_HEADER = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, so any figure would be a guess.";
 const GUIDED_TWO = "The chance isn't shown yet: the model doesn't yet say how strongly ‘Monthly churn’ affects ‘Paying Pro subscribers’ or how strongly ‘Pro plan price’ affects ‘MRR lost to price sensitivity’, so any figure would be a guess. Give a rough strength for each to see the chance.";
@@ -59,7 +58,8 @@ describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more, h
   const warnings = block.enrichment.inference_warnings;
   const placeholder = warnings.find((w) => w.code === PLACEHOLDER)!;
   const target = warnings.find((w) => w.code === TARGET)!;
-  const complete = `${gpReason(target.say!)} ${header}`;
+  // The unknown legacy cause set keeps its separate recorded target requirement byte-for-byte.
+  const complete = `${target.say!} ${header}`;
 
   it('PRECONDITION: the captured wire carries both warnings with distinct claim and option scopes', () => {
     expect(warnings.map((w) => w.code)).toEqual(['FACTOR_EVPPI_NOT_COMPUTED', PLACEHOLDER, TARGET]);
@@ -122,7 +122,7 @@ describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more, h
     const { say: _say, ...withoutSay } = target;
     const older = warnings.map((w) => w.code === TARGET ? withoutSay : w);
     expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: older } })?.say)
-      .toBe(`${gpReason(target.message.replace(/^Not shown\.\s*/, ''))} ${header}`);
+      .toBe(`${target.message.replace(/^Not shown\.\s*/, '')} ${header}`);
   });
 });
 
@@ -132,7 +132,7 @@ it('independent identity reasons remain beside the complete target ask, under th
   const warnings = rows[0]!.captured.analysis_result.enrichment.inference_warnings;
   const chance = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [...warnings, identity] } })!;
   const target = warnings.find(w => w.code === TARGET)!;
-  expect(chance.say).toBe(`${gpReason(identity.message.replace(/^Not shown\.\s*/, ''))} ${gpReason(target.say!)} ${rows[0]!.header}`);
+  expect(chance.say).toBe(`${identity.message.replace(/^Not shown\.\s*/, '')} ${target.say!} ${rows[0]!.header}`);
   expect(chance.say).not.toContain('Give a rough strength');
   expect(chance.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
   expect(chance.node_ids).toEqual([...new Set(warnings.concat(identity).flatMap((w) => w.node_ids ?? []))]);
@@ -151,7 +151,7 @@ describe('R2 DL composition: draw-2 level ask before the ONE guided list', () =>
     expect(target.say).toContain('a size for the links from');
     const chance = goalChanceWithheldForAgent({ enrichment: { inference_warnings: warnings } }, draw2.graph)!;
     expect(chance.say).toBe(COMPLETE);
-    expect(chance.say).not.toContain('a size for the effects from');
+    expect(chance.say).not.toContain('a size for the links from');
     expect(chance.say).not.toContain('Give a rough strength');
     expect(goalChanceLineOwed([{ ran: true, goal_chance: chance }], GUIDED_TWO)).toBe(COMPLETE);
   });
@@ -247,7 +247,7 @@ describe('R13 exact cause-set contrast beside two placeholder presses', () => {
     expect(chance.say).toContain("Olumi has it as a band, which can't be turned into your goal's units.");
     expect(chance.say).toContain(GUIDED_TWO_HEADER);
     expect(chance.say).not.toContain('Roughly how much');
-    expect(chance.say).not.toContain('a size for the effects from');
+    expect(chance.say).not.toContain('a size for the links from');
     expect(chance.say).not.toContain('Give a rough strength');
   });
 });
@@ -298,7 +298,7 @@ describe('R13 residual causes retain their words without a guided promise', () =
     expect(draft?.links).toHaveLength(2);
     expect(guidedSizingActions(draft, graph)).toEqual([]);
     const chance = goalChanceWithheldForAgent(run, graph)!;
-    expect(chance.say).toContain(gpReason(target.say!));
+    expect(chance.say).toContain(target.say!);
     expect(chance.say).not.toContain('Give a rough strength');
   });
 
