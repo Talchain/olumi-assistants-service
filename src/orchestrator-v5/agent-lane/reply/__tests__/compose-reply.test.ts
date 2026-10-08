@@ -874,8 +874,8 @@ describe('the producer half: one shape rule for every model', () => {
   });
 });
 
-describe('timing: every regex on the path scales linearly (20k -> 80k, min of 7 batches, ratio < 8x)', () => {
-  // P51's calibrated helper (min of 7 batches, LARGE sample >= ~60 ms). Linear ~ 4x, quadratic ~ 16x; the bar stays < 8x.
+describe('timing: every regex on the path scales linearly (20k -> 160k, min of 7 batches, ratio < 22x)', () => {
+  // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
   // Measured locally 8 Oct: terminators 20k 0.19 ms -> 80k 0.69 ms -> 320k 2.74 ms per call (linear); CI read 8.32x once.
   const shapes: [string, (n: number) => string][] = [
     ['whitespace', (n) => `Lead.${' '.repeat(n)}Next. ${'\t'.repeat(n)}`],
@@ -884,12 +884,12 @@ describe('timing: every regex on the path scales linearly (20k -> 80k, min of 7 
   ];
   it.each(shapes)('%s', (_name, make) => {
     const small = make(20_000);
-    const large = make(80_000);
+    const large = make(160_000);
     expect(large.length).toBeGreaterThanOrEqual(small.length * 3);
     const runLarge = (): void => { composeReplyShape({ text: large }); };
     const runSmall = (): void => { composeReplyShape({ text: small }); };
     const growth = scalingRatio(runSmall, runLarge);
-    expect(growth.ratio, growth.detail).toBeLessThan(8);
+    expect(growth.ratio, growth.detail).toBeLessThan(22);
   });
 });
 

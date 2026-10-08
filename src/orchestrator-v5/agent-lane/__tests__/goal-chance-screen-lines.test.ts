@@ -37,6 +37,32 @@ const withoutRange = (body: Json): Json => {
 const T1B_LEAD = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
 
 describe('S4c: the lines are the SCREEN’s, word for word, in its order', () => {
+  it.each(['months_to_finish', 'share_per_month'])('P1-c: stated_time %s describes slow to fast without causal doubt', quantity => {
+    const graph = { nodes: [
+      { id: 'status_quo', kind: 'option', label: 'Carry on as now' },
+      { id: 'team_share', label: 'Team launch share', observed_state: { stated_time: {
+        quantity, low: quantity === 'months_to_finish' ? 6 : 10,
+        high: quantity === 'months_to_finish' ? 10 : 16, unit: quantity === 'months_to_finish' ? 'months' : '% of launch per month',
+      } } },
+      { id: 'launch_share', label: 'Launch share' },
+    ] };
+    const result = { inference_warnings: [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stated time.',
+      option_ids: ['status_quo'], target: { comparator: 'at_least', value: 100, unit: '% of launch', by_date: '2027-04-07' },
+      range_by_option: { status_quo: { kind: 'stated_time', basis: 'stated_time', quantity,
+        stated_estimate: { low: quantity === 'months_to_finish' ? 6 : 10, high: quantity === 'months_to_finish' ? 10 : 16,
+          unit: quantity === 'months_to_finish' ? 'months' : '% of launch per month' },
+        low: 0, high: 1, low_pct: 0, high_pct: 100, low_rounding: 'whole', high_rounding: 'whole',
+        from: 'team_share', to: 'launch_share', among: 'all' } },
+    }] };
+    const lines = goalChanceScreenLinesForAgent(result, graph, true);
+    expect(lines).toHaveLength(1);
+    // DL #2762 r3 (lens 1 P2s): the ruled "launching by", and a stated time read at its two ends ("if it takes …").
+    expect(whole(lines[0]!)).toBe(quantity === 'months_to_finish'
+      ? '‘Carry on as now’: less than 1% chance of launching by 7 April 2027 if it takes 10 months, and more than 99% if it takes 6 months, in this model.'
+      : '‘Carry on as now’: between less than 1% and more than 99% chance of launching by 7 April 2027, in this model, from the slow end of your 10–16% of launch per month to the fast end.');
+    expect(lines[0]!.depends).toBe('');
+    expect(whole(lines[0]!)).not.toMatch(/affects|assumed|best|leader/);
+  });
   it('served ranges (b4-1, b4-2, b3-2 readback): every line equals the line the UI drew', () => {
     expect(linesOf(B4_RUN1).map(whole)).toEqual(screenFor('unseen-b4-1'));
     expect(linesOf(B4_RUN2).map(whole)).toEqual(screenFor('unseen-b4-2'));

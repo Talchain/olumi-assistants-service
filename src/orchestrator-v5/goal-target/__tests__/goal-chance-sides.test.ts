@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_WITHHELD_CODES } from '../../../orchestrator/context/option-result-source.js';
 import { goalChanceSideOf } from '../goal-chance-sides.js';
+import { goalChanceRangeDisplayForAgent } from '../goal-chance-range-agent.js';
 
 const licence = (pct: unknown = 45, rounding?: unknown) => ({ code: 'GOAL_CHANCE_LICENSED', form: 'each',
   option_ids: ['opt-a', 'opt-b'], pct_by_option: { 'opt-a': pct, 'opt-b': 70 },
@@ -13,6 +14,31 @@ const stored = (warnings: unknown[], location: 'enrichment' | 'result' = 'enrich
   ? { enrichment: { inference_warnings: warnings } } : { inference_warnings: warnings };
 
 describe('goalChanceSideOf — each Run’s own stored display licence', () => {
+  it.each(['enrichment', 'result'] as const)('P2-f: stated_time without basis fails closed in both readers at %s', location => {
+    const warning = { ...range, range_by_option: { 'opt-a': { ...range.range_by_option['opt-a'],
+      kind: 'stated_time', quantity: 'months_to_finish', low: 0.25, high: 0.61 } } };
+    const result = stored([warning], location), graph = { nodes: [{ id: 'factor', label: 'Team' }, { id: 'goal', label: 'Launch' }] };
+    expect(goalChanceRangeDisplayForAgent(result, graph)).toBeUndefined();
+    expect(goalChanceSideOf(result, 'opt-a')).toEqual({ kind: 'withheld' });
+  });
+  it.each([
+    ['valid', {}, 'range'],
+    ['equal displayed endpoints', { low_pct: 25, high_pct: 25, low: 0.249, high: 0.251 }, 'withheld'],
+    ['wrong basis', { basis: 'link_strength' }, 'withheld'],
+    ['wrong quantity', { quantity: 'days_to_finish' }, 'withheld'],
+    ['missing exact endpoint', { low: undefined }, 'withheld'],
+    ['non-finite endpoint', { high: Infinity }, 'withheld'],
+    ['rounding disagrees', { high: 0.8 }, 'withheld'],
+  ] as const)('P2-e/P2-f: stated-time reader parity — %s', (_name, change, expected) => {
+    const warning = { ...range, range_by_option: { 'opt-a': { ...range.range_by_option['opt-a'],
+      kind: 'stated_time', basis: 'stated_time', quantity: 'months_to_finish', stated_estimate: { low: 6, high: 10, unit: 'months' }, low: 0.25, high: 0.61, ...change } } };
+    const graph = { nodes: [{ id: 'factor', label: 'Team' }, { id: 'goal', label: 'Launch' }] };
+    for (const location of ['enrichment', 'result'] as const) {
+      const result = stored([warning], location);
+      expect(goalChanceSideOf(result, 'opt-a').kind).toBe(expected);
+      expect(goalChanceRangeDisplayForAgent(result, graph)?.['opt-a'] !== undefined).toBe(expected === 'range');
+    }
+  });
   it.each(['enrichment', 'result'] as const)('reads point and range licences at %s', (location) => {
     expect(goalChanceSideOf(stored([licence(45, 'nearest_5')], location), 'opt-a'))
       .toStrictEqual({ kind: 'point', pct: 45, rounding: 'nearest_5' });

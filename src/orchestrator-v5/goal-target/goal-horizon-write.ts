@@ -1,3 +1,4 @@
+import { draftedTeamPartOf, withEventShareDate } from './event-by-date-model.js';
 /**
  * ⭐ S-E GOALS — THE GOAL'S DEADLINE, WRITTEN AS A DATE (lane GOALS, DL 0fd71f, 7 Oct; Science ruling §3; Paul's prod test
  * item 6). The one CEE writer of `NodeV3.goal_horizon` (schemas 0.69.0 `{deadline: YYYY-MM-DD}`), which DGAI's goal card
@@ -35,6 +36,7 @@ export interface ApprovedGoalHorizon {
   readonly deadline: string;
   /** The date the goal held when the card was made; `null` when it held none. */
   readonly expected_deadline: string | null;
+  readonly reference_date?: string;
 }
 
 export type GoalHorizonRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goal' | 'date_invalid' | 'deadline_changed';
@@ -68,7 +70,11 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
   if (held === approved.deadline) return { kind: 'unchanged' };
   if (held !== approved.expected_deadline) return { kind: 'refused', reason: 'deadline_changed' };
 
-  const graph = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
+  const part = draftedTeamPartOf(persistedGraph);
+  if (part !== null && (approved.reference_date === undefined || !isCalendarDate(approved.reference_date)
+    || approved.reference_date >= approved.deadline)) return { kind: 'refused', reason: 'date_invalid' };
+  const graph = (part !== null ? withEventShareDate(persistedGraph, approved.deadline, approved.reference_date!)
+    : structuredClone(persistedGraph)) as Rec & { nodes: unknown[] };
   const goal = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.goal_id)!;
   goal.goal_horizon = { deadline: approved.deadline };
 
@@ -84,21 +90,29 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
       status: 'applied',
       operations_count: 1,
       affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
-      // The date is outside the analysis hash: the revision does not move, and no earlier result is out of date.
-      graph_hash_before: hash,
+      // A conventional horizon is outside the hash; materialising forecast shares moves the analysis revision.
+      graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: hash,
       safe_summary: summary.length <= 80 ? summary : 'Set the deadline',
       impact: 'low',
-      rerun_recommended: false,
+      rerun_recommended: part !== null,
     },
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: `Your deadline for "${label}" is now ${sayDate(approved.deadline)}.` };
 }
 
-/** Only `goal_horizon` on the one goal node differs between `before` and `after`; every other byte is equal. */
-export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, goalId: string): boolean {
+/** A conventional deadline changes only its horizon; a forecast date also refreshes its own defined shares. */
+export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, goalId: string, expectedReference?: string): boolean {
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
+  const part = draftedTeamPartOf(before), goal = (after.nodes as Rec[]).find(n => n.id === goalId);
+  if (part !== null && part.goal.id === goalId && goal !== undefined) {
+    const reference = (after.nodes as Rec[]).find(n => n.observed_state && isRec(n.observed_state)
+      && isRec(n.observed_state.extra_share_by_date))?.observed_state as Rec | undefined;
+    const date = goalDeadlineOf(goal), ref = expectedReference ?? (reference?.extra_share_by_date as Rec | undefined)?.reference_date;
+    return typeof date === 'string' && typeof ref === 'string'
+      && isDeepStrictEqual(withEventShareDate(before, date, ref), after);
+  }
   const strip = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as unknown[]).map((n) => {
     if (!isRec(n) || n.id !== goalId) return n;
     const { goal_horizon: _h, ...rest } = n;
