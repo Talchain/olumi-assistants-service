@@ -350,10 +350,15 @@ describe('RC4: narrator count egress guard', () => {
     expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
   });
 
-  it('decimal/grouped fragments do not masquerade as standalone integer counts', () => {
-    for (const text of ['Olumi supplied 9.0 values.', 'Olumi supplied 1,000 values.']) {
-      expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
+  it('buddy r2: grouped, decimal and emphasised figures are still counts of Olumi\'s figures, so they are removed', () => {
+    for (const text of ['Olumi supplied 9.0 values.', 'Olumi supplied 1,000 values.', 'Olumi supplied **9** values.', 'Olumi supplied _nine_ values.']) {
+      expect(narratorCountGuard(text, null).removed, text).toEqual([text])
     }
+  });
+
+  it('a kept sentence keeps its original bytes (emphasis and separators untouched)', () => {
+    const text = 'Olumi estimated **£1,000** for the price.';
+    expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
   });
 
   it('20,000-char whitespace input runs in less than 50 ms', () => {

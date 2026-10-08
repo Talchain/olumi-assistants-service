@@ -236,7 +236,10 @@ export function narratorCountGuard(text: string, _e: OlumiEstimates | null): { t
   const kept: string[] = [];
   const append = (end: number): void => {
     const sentence = text.slice(start, end);
-    if (attributedCount(sentence)) removed.push(sentence.trim());
+    // Read a normalised copy (buddy r2): Markdown emphasis never hides a count ("**9** values"), and a grouped or
+    // decimal figure is one count ("1,000 values"). The kept text is the original bytes.
+    const plain = sentence.replace(/[*_`~]/g, '').replace(/(\d)[,.](?=\d)/g, '$1');
+    if (attributedCount(plain)) removed.push(sentence.trim());
     else kept.push(sentence);
     start = end;
   };
