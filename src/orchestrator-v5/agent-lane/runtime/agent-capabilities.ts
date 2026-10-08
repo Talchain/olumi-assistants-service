@@ -2423,9 +2423,12 @@ export function createAgentCapabilities(
       const into = after!.edges.filter((e) => e.to === rid);
       // Opens `Added "<label>"` exactly as the option sentence does: an unquoted "Added the …" is a model-style completion
       // claim the write narrator strips (`write-outcome.ts` CLAIM_OPENER), which dropped this whole sentence (measured).
-      sentences.push(`Added "${String(risk.label ?? rid)}" as a risk, affecting ${out.map((e) => labelOf(e.to)).join(', ')}`
-        + (into.length > 0 ? ` and driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : '')
-        + `; ${howStronglyWords([...out, ...into])}`);
+      // Only the ties it HAS are said (DL 58e392, 8 Oct; Paul's try-guide step 12 read "affecting ;" for a precondition
+      // risk with no out-link): no empty list, and no "how strongly" with no link to size.
+      const ties = [out.length > 0 ? `affecting ${out.map((e) => labelOf(e.to)).join(', ')}` : '',
+        into.length > 0 ? `driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : ''].filter((t) => t !== '');
+      sentences.push(`Added "${String(risk.label ?? rid)}" as a risk${ties.length > 0 ? `, ${ties.join(' and ')}` : ''}`
+        + (out.length + into.length > 0 ? `; ${howStronglyWords([...out, ...into])}` : '.'));
     }
     // ⭐ PJ-E-FIG: the factors the add-factor door added, each with the user's figure (`GM_HELD_USER_TODAY_KEY`).
     const userTodayMember = readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) ?? [];

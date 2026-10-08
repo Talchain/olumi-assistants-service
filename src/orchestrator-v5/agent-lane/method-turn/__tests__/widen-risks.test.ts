@@ -137,6 +137,17 @@ describe('S-C risks gate: grounded, attached, distinct — by identity', () => {
 });
 
 describe('S-C risks reply: the named method, what each hits, nothing added, ONE gap question', () => {
+  it('step-11 casing (DL 58e392, Paul try-guide 8 Oct: "relies on Delivering…"): the precondition reads mid-sentence through the shared midSentence helper; an acronym stays', () => {
+    const t = turnOn(fixture('v1'));
+    const draft = appendix(TURN2).replace(/"relies_on":\s*"filling both developer roles quickly"/, '"relies_on": "Delivering new features before the higher price takes effect"')
+      .replace(/"relies_on":\s*"a Tech Lead removing the main delivery blocker"/, '"relies_on": "MRR holding while the team grows"');
+    expect(draft, 'control: the arranged draft carries both capitalised preconditions').toContain('Delivering new features');
+    const reply = settleRisksTurn(t, `Sure!\n${draft}`).reply;
+    expect(reply).toContain('relies on delivering new features before the higher price takes effect.');
+    expect(reply).not.toContain('relies on Delivering');
+    expect(reply).toContain('relies on MRR holding while the team grows.');
+  });
+
   it('RR-1 (served turn #2 → after): deterministic reply; one Add per item, then Something else; never "None has been added" prose', () => {
     const settled = settleRisksTurn(turnOn(fixture('v1')), `Sure!\n${appendix(TURN2)}`);
     expect(settled.reply.split('\n')).toEqual([
