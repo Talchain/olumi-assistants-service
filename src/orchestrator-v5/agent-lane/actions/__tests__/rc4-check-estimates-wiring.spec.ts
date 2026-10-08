@@ -60,6 +60,23 @@ function censusGraph(sizes: readonly ('olumi_estimate' | 'olumi_placeholder' | '
   };
 }
 
+function priceGraph(source: unknown, factorId = 'price'): Graph {
+  return {
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'MRR', observed_state: { unit: 'GBP' } },
+      { id: 'a', kind: 'option', label: 'Raise price', interventions: { [factorId]: { value: 59, source } } },
+      { id: 'b', kind: 'option', label: 'Keep price', interventions: { price: { value: 49, source: 'user_specified' } } },
+      { id: 'price', kind: 'factor', label: 'Price', observed_state: { value: 49, unit: 'GBP', source: 'user_edited' } },
+      { id: 'off', kind: 'factor', label: 'Off path', observed_state: { value: 99, unit: 'GBP', source: 'user_edited' } },
+      { id: 'other', kind: 'outcome', label: 'Other outcome' },
+    ],
+    edges: [
+      { from: 'price', to: 'goal', strength: { mean: 0.7, std: 0.1 }, provenance: { source: 'user_specified', magnitude: 'user_stated' } },
+      { from: 'off', to: 'other', strength: { mean: 0.7, std: 0.1 }, provenance: { source: 'user_specified', magnitude: 'user_stated' } },
+    ],
+  };
+}
+
 const estimateOfferIds = (bar: ActionBarV1) => [...bar.priority, ...bar.standard, ...bar.more]
   .filter(o => o.action_id === 'check_estimates' || o.action_id === 'bias_anchoring').map(o => o.action_id);
 
@@ -72,6 +89,78 @@ function replyFor(action: EstimateAction, facts: ActionFacts, bar?: ActionBarV1)
 }
 
 describe('RC4: Check estimates uses the same bound census as its producer', () => {
+  it.each(['cee_hypothesis', 'user_specified', 'brief_extraction'] as const)('%s option setting: its own provenance controls the distinct price estimate', source => {
+    const read = ran(priceGraph(source));
+    const expected = olumiEstimatesFeedingResult({ ...censusInput(read), optionSettings: [
+      { id: 'a:price', label: 'Price under Raise price', authorship: source === 'cee_hypothesis' ? 'olumi_estimate' : 'user' },
+      { id: 'b:price', label: 'Price under Keep price', authorship: 'user' },
+    ] });
+    const facts = actionFactsOf(read);
+    expect(facts.runBound).toBe(true);
+    expect(facts.olumiEstimates).toEqual(expected);
+    expect(expected).toMatchObject({ count: source === 'cee_hypothesis' ? 1 : 0, accepted: 0, placeholderLinks: 0 });
+    expect(estimatePointsOf(facts)).toEqual([]);
+    expect(estimateOfferIds(actionBarOf(facts))).toEqual(source === 'cee_hypothesis' ? ['check_estimates'] : []);
+    if (source === 'cee_hypothesis') {
+      const reply = replyFor('check_estimates', facts);
+      expect(reply).toEqual({ text: sayOlumiEstimates(expected).join('\n'), exits: [], outcome: 'ran' });
+      expect(reply.text).toContain('Price under Raise price (value)');
+    }
+  });
+
+  it('an Olumi option setting on an off-path factor is excluded', () => {
+    const facts = actionFactsOf(ran(priceGraph('cee_hypothesis', 'off')));
+    expect(facts.olumiEstimates).toMatchObject({ count: 0, values: [], accepted: 0, placeholderLinks: 0 });
+    expect(estimateOfferIds(actionBarOf(facts))).toEqual([]);
+  });
+
+  it.each(['olumi_accepted', undefined, 17])('unknown or malformed intervention source %s is skipped', source => {
+    const facts = actionFactsOf(ran(priceGraph(source)));
+    expect(facts.olumiEstimates).toMatchObject({ count: 0, values: [], accepted: 0, placeholderLinks: 0 });
+    expect(estimateOfferIds(actionBarOf(facts))).toEqual([]);
+  });
+
+  it('only settings of options analysed by the bound Run are counted', () => {
+    const graph = priceGraph('cee_hypothesis');
+    graph.nodes.find(n => n.id === 'b')!.interventions = { price: { value: 69, source: 'cee_hypothesis' } };
+    const bound = ran(graph);
+    const read = { ...bound, analysisResult: { ...(bound.analysisResult as object), enrichment: {
+      option_comparison: [{ option_id: 'a' }], results: [{ option_id: 'b' }],
+    } } };
+    const expected = olumiEstimatesFeedingResult({ ...censusInput(read), optionSettings: [
+      { id: 'a:price', label: 'Price under Raise price', authorship: 'olumi_estimate' },
+    ] });
+    const facts = actionFactsOf(read);
+    expect(facts.olumiEstimates).toEqual(expected);
+    expect(expected.count).toBe(1);
+    expect(estimateOfferIds(actionBarOf(facts))).toEqual(['check_estimates']);
+    expect(replyFor('check_estimates', facts)).toEqual({ text: sayOlumiEstimates(expected).join('\n'), exits: [], outcome: 'ran' });
+  });
+
+  it.each([false, true])('dangling edge = %s: unreadable signals stay null; readable control keeps the census', dangling => {
+    const graph = priceGraph('cee_hypothesis');
+    if (dangling) graph.edges.push({ from: 'price', to: 'ghost' });
+    const read = ran(graph);
+    const facts = actionFactsOf(read);
+    expect(facts.runBound).toBe(true);
+    if (dangling) {
+      expect(facts.olumiEstimates).toBeNull();
+      expect(estimateOfferIds(actionBarOf(facts))).toEqual([]);
+      const reply = replyFor('check_estimates', facts);
+      expect(reply).toEqual({ text: 'I can’t show the estimates yet: it needs a current analysis first.', reason: 'needs_current_analysis', exits: [{ kind: 'run' }] });
+      expect(reply.text).not.toContain('None');
+    } else {
+      const expected = olumiEstimatesFeedingResult({ ...censusInput(read), optionSettings: [
+        { id: 'a:price', label: 'Price under Raise price', authorship: 'olumi_estimate' },
+        { id: 'b:price', label: 'Price under Keep price', authorship: 'user' },
+      ] });
+      expect(facts.olumiEstimates).toEqual(expected);
+      expect(expected.count).toBe(1);
+      expect(estimateOfferIds(actionBarOf(facts))).toEqual(['check_estimates']);
+      expect(replyFor('check_estimates', facts)).toEqual({ text: sayOlumiEstimates(expected).join('\n'), exits: [], outcome: 'ran' });
+    }
+  });
+
   it("Paul's shape: 1 value + 8 link sizes + 2 placeholders + 1 accepted; exact producer reply", () => {
     const bound = ran(censusGraph([
       ...Array.from({ length: 8 }, () => 'olumi_estimate' as const), 'olumi_placeholder', 'olumi_placeholder', 'olumi_accepted',

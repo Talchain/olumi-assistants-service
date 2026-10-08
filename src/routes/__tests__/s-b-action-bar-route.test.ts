@@ -27,6 +27,8 @@ import type { PendingAction } from '../../orchestrator-v5/session/pending-action
 import { estimateGraph, estimateLicence } from '../../orchestrator-v5/agent-lane/actions/__tests__/estimate-fixture.js';
 import { resolveDskClaimProvenance } from '../../orchestrator-v5/compose/dsk-claim-record.js';
 import { actionFactsOf, estimatePointsOf } from '../../orchestrator-v5/agent-lane/actions/state.js';
+import { assembleGuidanceSignals } from '../../orchestrator-v5/agent-lane/turn-context/guidance-signals.js';
+import { olumiEstimatesFeedingResult, sayOlumiEstimates } from '../../orchestrator-v5/agent-lane/olumi-estimates-feeding-result.js';
 
 const { port, source, identity, logs } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -522,17 +524,16 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     const points = estimatePointsOf(actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
       analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY }));
     expect(points.map(p => p.factor_id)).toEqual(['far', 'near', 'znear']);
+    const signals = assembleGuidanceSignals({ request: 'turn', offeredSpecific: [], graph: source.graph,
+      analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result,
+      identityEvaluations: [], guidance: {}, explicitRequest: null, leaderLicensed: false });
+    const expectedCensus = olumiEstimatesFeedingResult({ goalPathFactors: signals['model.goal_path_factors'],
+      goalPathLinks: signals['model.goal_path_links'], driverIds: [] });
     const expected = id === 'bias_anchoring' ? [
       "A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
       ...[['Far', '25%'], ['Near', '15%'], ['Extra', '10%']].map(([label, figure]) => `- Olumi put ‘${label}’ at ${figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
       'Which of these would you check first?',
-    ].join('\n') : [
-      "Olumi's estimates that this result rests on:",
-      "- ‘Far’: 25%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Near’: 15%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Extra’: 10%. That's Olumi's estimate, not a measured figure.",
-      "If you have your own figure for any of these, tell me and I'll propose it for you to approve.",
-    ].join('\n');
+    ].join('\n') : sayOlumiEstimates(expectedCensus).join('\n');
     expect(b.assistant_text).toBe(expected);
     expect(b.assistant_text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
     expect(b.suggested_actions).toEqual([]);
