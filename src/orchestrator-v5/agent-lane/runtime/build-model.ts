@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
@@ -45,7 +45,7 @@ import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-te
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -55,7 +55,8 @@ import {
   nodeIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
-import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
@@ -453,8 +454,8 @@ export const BUILD_INSTRUCTIONS = [
 ].join(' ');
 
 /** Only a brief attested by the deterministic reader may delegate its empty event forecast to admission. */
-export function buildInstructionsForBrief(brief: string): string {
-  return briefAttestsEventByDate(brief)
+export function buildInstructionsForBrief(brief: string, construction?: ConstructionAdmission): string {
+  return (construction?.event_by_date_prompted ?? briefAttestsEventByDate(brief))
     ? `${BUILD_INSTRUCTIONS} The deterministic reader attests an event by a date. The event-share parts replace ordinary causal goal links. When no stated facts belong in these collections, leave its factors, risks, outcomes, links and identities empty for this slice. Keep every stated limit, factor, risk, option setting and link; admission will disclose any link the deadline forecast cannot use.`
     : BUILD_INSTRUCTIONS;
 }
@@ -1486,7 +1487,8 @@ export async function buildModelFromBrief(
   observeConstruction?: (t: ConstructionTrace) => void,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
-  const buildInstructions = buildInstructionsForBrief(brief);
+  const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
+  const buildInstructions = buildInstructionsForBrief(brief, construction);
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
   // at output_tokens 6000 exactly and the refusal carried a SyntaxError). Same user words (`construction_failed`).
@@ -1512,10 +1514,10 @@ export async function buildModelFromBrief(
     }
     // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
     candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
-    if (candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
+    if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
       candidate = { ...candidate, goal: { ...candidate.goal, kind: null } };
     }
-    if (candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
+    if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
       && candidate.factors.length === 0 && candidate.risks.length === 0 && candidate.outcomes.length === 0 && candidate.links.length === 0) {
       return { ok: false, mutated: false, refusal: 'construction_needs_redraft',
         detail: 'That draft has no usable model for this brief. Ask me to draft it again with the factors and links that explain the outcome.' };
@@ -1576,8 +1578,26 @@ export async function buildModelFromBrief(
    * throughout, so a cut there would only take a risk the user can see (DL #75 5916217417, Paul 30 Sep: "new models have
    * fewer risks"; `construction-keeps-drafted-risks.test.ts`) and change no result.
    */
+  // Keep the existing repair route available to an ordinary draft before deciding that a failed event
+  // admission must refuse. These intermediate graphs are never registered without the final structural gate.
+  const eventFallbackRefusals = new WeakMap<AdmittedModel, string>();
+  const admitForBuild = (model: CandidateModel, levelCandidate = model): AdmittedModel => {
+    const args = [model, {}, brief, goalLevelTheUserWrote(levelCandidate, brief), writtenAgain,
+      (c: CandidateModel) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] as const;
+    const result = admitCandidateModel(...args, construction);
+    const refusal = eventByDateRefusalOf(result);
+    if (refusal === null) return result;
+    try {
+      const ordinary = admitOrdinaryCandidateModel(...args);
+      eventFallbackRefusals.set(ordinary, refusal);
+      return ordinary;
+    } catch {
+      eventFallbackRefusals.set(result, refusal);
+      return result;
+    }
+  };
   const trialGraph = (c: CandidateModel) => {
-    const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
+    const a = admitForBuild(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, c);
     return { nodes: a.nodes, edges: a.edges };
   };
   const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
@@ -1598,7 +1618,7 @@ export async function buildModelFromBrief(
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
-  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
+  let admitted = admitForBuild(firstIdentity.model, candidate);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1729,7 +1749,7 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
+        const retryAdmitted = admitForBuild(retryIdentity.model, retryCandidate);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1814,6 +1834,11 @@ export async function buildModelFromBrief(
     }
   }
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
+  const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
+  if (eventFallbackRefusal !== undefined && draftedTeamPartOf(admitted) === null
+    && !validateGraphStructure(admitted as unknown as GraphV3T, { leaveOutInertRisks: true }).valid) {
+    return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
+  }
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {

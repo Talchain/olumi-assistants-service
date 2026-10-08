@@ -35,7 +35,9 @@ import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-adm
 import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
-import type { InterventionV3T } from '../../schemas/cee-v3.js';
+import type { InterventionV3T, GraphV3T } from '../../schemas/cee-v3.js';
+import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
+import { log } from '../../utils/telemetry.js';
 import { admitInterventionRange } from '../intervention-range.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
@@ -70,7 +72,7 @@ import {
   type AdmittedConstraint,
 } from './admit-constraint.js';
 
-import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss } from '../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 
 const MAX_ID = 100;
 
@@ -3012,6 +3014,11 @@ export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
   };
 }
 
+/** Owned by construction, outside the drafter schema. The verdict that selected the prompt is never re-read. */
+export interface ConstructionAdmission {
+  readonly event_by_date_prompted?: boolean;
+}
+
 export function admitCandidateModel(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
@@ -3047,29 +3054,73 @@ export function admitCandidateModel(
    * bound. Absent ⇒ none (the size reads as before).
    */
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
+  construction: ConstructionAdmission = {},
 ): AdmittedModel {
-  if (candidateModel.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidateModel.goal)) {
+  const prompted = construction.event_by_date_prompted === true;
+  // A failed event slice must not cost the user a working ordinary model. Validate the same reachability
+  // gate as Run, but return the untouched ordinary result: no new ledger entry, projection or event semantics.
+  const failedEvent = (detail: typeof EVENT_BY_DATE_REFUSALS[number]): AdmittedModel => {
+    try {
+      const ordinary = admitOrdinaryCandidateModel(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
+      if (validateGraphStructure(ordinary as unknown as GraphV3T, { leaveOutInertRisks: true }).valid) {
+        log.info({ event: 'cee.event_by_date.fallback_kept', missing_piece: detail.slice("Olumi couldn't connect your options to the launch date yet: ".length, -1) },
+          'cee.event_by_date.fallback_kept');
+        return ordinary;
+      }
+    } catch {
+      // Malformed ordinary input cannot authorise a fallback.
+    }
+    return refusedEventByDate(detail);
+  };
+  if (prompted) {
+    try {
+      const refusal = eventByDateAdmissionRefusal(candidateModel);
+      if (refusal !== null) return failedEvent(refusal);
+    } catch {
+      return failedEvent(EVENT_BY_DATE_REFUSALS[1]);
+    }
+  }
+  if (!prompted && candidateModel.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidateModel.goal)) {
     candidateModel = { ...candidateModel, goal: { ...candidateModel.goal, kind: null } };
   }
-  if (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal)) {
-    const event = admitEventByDate(candidateModel);
-    const hasContext = candidateModel.constraints.length + candidateModel.factors.length + candidateModel.risks.length
-      + candidateModel.outcomes.length + candidateModel.links.length + (candidateModel.identities?.length ?? 0) > 0
-      || candidateModel.options.some(o => (o.interventions?.length ?? 0) + (o.changes?.length ?? 0) > 0);
-    if (!hasContext) return withEventNumberLoss(event, brief ?? '');
-    // Limits can name a quantity even when no causal factor was drafted for it. Keep that named quantity, without a
-    // fabricated current value, and let the established constraint/scale admitters carry its limit and option settings.
-    const named = new Set([...candidateModel.factors, ...candidateModel.risks, ...candidateModel.outcomes].map(n => canonicalLabel(n.label)));
-    const limitFactors: CandidateModel['factors'][number][] = candidateModel.constraints
-      .filter(c => !named.has(canonicalLabel(c.metric)) && canonicalLabel(c.metric) !== canonicalLabel(candidateModel.goal.metric))
-      .map(c => ({ label: c.metric, role: 'observable', baseline_known: false, baseline_value: null,
-        unit: c.unit ?? null, provenance: c.provenance }));
-    const context = admitOnce(withQuantityFrames({ ...candidateModel, factors: [...candidateModel.factors, ...limitFactors] }),
-      widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
-    return withEventNumberLoss(carryEventReasoningContext(event, context, candidateModel), brief ?? '');
+  if (prompted || (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal))) {
+    try {
+      const event = admitEventByDate(candidateModel);
+      const hasContext = candidateModel.constraints.length + candidateModel.factors.length + candidateModel.risks.length
+        + candidateModel.outcomes.length + candidateModel.links.length + (candidateModel.identities?.length ?? 0) > 0
+        || candidateModel.options.some(o => (o.interventions?.length ?? 0) + (o.changes?.length ?? 0) > 0);
+      if (!hasContext) return withEventNumberLoss(event, brief ?? '');
+      // Limits can name a quantity even when no causal factor was drafted for it. Keep that named quantity, without a
+      // fabricated current value, and let the established constraint/scale admitters carry its limit and option settings.
+      const named = new Set([...candidateModel.factors, ...candidateModel.risks, ...candidateModel.outcomes].map(n => canonicalLabel(n.label)));
+      const limitFactors: CandidateModel['factors'][number][] = candidateModel.constraints
+        .filter(c => !named.has(canonicalLabel(c.metric)) && canonicalLabel(c.metric) !== canonicalLabel(candidateModel.goal.metric))
+        .map(c => ({ label: c.metric, role: 'observable', baseline_known: false, baseline_value: null,
+          unit: c.unit ?? null, provenance: c.provenance }));
+      const context = admitOnce(withQuantityFrames({ ...candidateModel, factors: [...candidateModel.factors, ...limitFactors] }),
+        widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
+      return withEventNumberLoss(carryEventReasoningContext(event, context, candidateModel, prompted), brief ?? '');
+    } catch (err) {
+      if (!prompted) throw err;
+      return failedEvent(EVENT_BY_DATE_REFUSALS[1]);
+    }
   }
   if (candidateModel.goal.kind === 'event_by_date' && candidateModel.factors.length === 0 && candidateModel.risks.length === 0
     && candidateModel.outcomes.length === 0 && candidateModel.links.length === 0) throw new Error('event_goal_needs_redraft');
+  return admitOrdinaryCandidateModel(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
+}
+
+/** The existing ordinary path, also used internally by construction before its bounded repair is complete. */
+export function admitOrdinaryCandidateModel(
+  candidateModel: CandidateModel,
+  widened: WidenerAdditions = {},
+  brief?: string,
+  goalLevelStated: (value: number, unit: unknown) => boolean = () => false,
+  targetFigureWrittenAgain: (value: number, unit: unknown) => boolean = () => false,
+  goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null = () => null,
+  sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean = () => false,
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
+): AdmittedModel {
   candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
@@ -3122,7 +3173,7 @@ export function admitCandidateModel(
 }
 
 /** Preserve the reasoning around an event forecast without silently adding another term to its defined capacity sum. */
-function carryEventReasoningContext(event: AdmittedModel, context: AdmittedModel, candidate: CandidateModel): AdmittedModel {
+function carryEventReasoningContext(event: AdmittedModel, context: AdmittedModel, candidate: CandidateModel, prompted = false): AdmittedModel {
   const goal = context.nodes.find(n => n.kind === 'goal');
   const ids = new Map<string, string>();
   for (const n of context.nodes) {
@@ -3143,7 +3194,7 @@ function carryEventReasoningContext(event: AdmittedModel, context: AdmittedModel
       const mapped = ids.get(target);
       return mapped ? [[mapped, { ...setting, ...(setting.target_match ? { target_match: { ...setting.target_match, node_id: mapped } } : {}) }]] : [];
     }));
-    return { ...n, interventions: { ...n.interventions, ...settings } };
+    return { ...n, ...(prompted && old.description ? { description: old.description } : {}), interventions: { ...n.interventions, ...settings } };
   });
   for (const n of context.nodes) {
     const id = ids.get(n.id);
@@ -3171,11 +3222,45 @@ function carryEventReasoningContext(event: AdmittedModel, context: AdmittedModel
     after: null, severity: 'warn', reason: `The link from "${l.from}" to "${l.to}" is not used. ${l.detail}` } as RepairEntry));
   const contextLoss = context.loss.filter(l => !goal || !l.field_path.startsWith(`nodes[${goal.id}]`))
     .map(l => ({ ...l, field_path: remapPath(l.field_path) }));
-  return { ...event, nodes, edges: [...event.edges, ...edges],
+  const carried: AdmittedModel = { ...event, nodes, edges: [...event.edges, ...edges],
     goal_constraints: context.goal_constraints.flatMap(c => { const id = ids.get(c.node_id); return id ? [{ ...c, node_id: id }] : []; }),
     inference_classes: { ...event.inference_classes, ...Object.fromEntries(Object.entries(context.inference_classes)
       .flatMap(([id, value]) => ids.has(id) ? [[ids.get(id)!, value]] : [])) },
     loss: [...event.loss, ...contextLoss, ...omittedGoalLinks, ...omittedIdentities, ...unattachedLimits, ...withheldLinks], withheld: context.withheld };
+  return prompted ? retainEventContextForReview(carried, candidate) : carried;
+}
+
+/** Keep the reasoning sketch visible, without adding its unsupported terms to the option-level capacity forecast. */
+function retainEventContextForReview(model: AdmittedModel, candidate: CandidateModel): AdmittedModel {
+  const limitIds = model.goal_constraints.map(c => c.node_id);
+  const protectedIds = new Set([...limitIds, ...limitSinkBranch(model.nodes, model.edges, limitIds)]);
+  const excluded = new Set(model.nodes.filter(n => n.id.startsWith('event_context_') && !protectedIds.has(n.id)).map(n => n.id));
+  if (excluded.size === 0) return model;
+  const loss: RepairEntry[] = model.nodes.filter(n => excluded.has(n.id)).map(n => ({
+    field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: n, after: 'retained_excluded', severity: 'warn',
+    reason: `"${n.label}" is kept as reasoning context; this deadline forecast uses option-level added capacity.`,
+  } as RepairEntry));
+  const nodes = model.nodes.map(n => {
+    if (excluded.has(n.id)) return { ...n, analysis_participation: 'retained_excluded' as const };
+    if (n.kind !== 'option' || !n.interventions) return n;
+    const held = Object.entries(n.interventions).filter(([id]) => excluded.has(id));
+    if (held.length === 0) return n;
+    const option = candidate.options[Number(n.id.slice('event_option_'.length)) - 1];
+    const descriptions = held.map(([id, setting]) => {
+      const factor = model.nodes.find(f => f.id === id)!;
+      const original = option?.interventions?.find(iv => canonicalLabel(iv.factor_label) === canonicalLabel(factor.description ?? factor.label));
+      const value = original?.value ?? setting.raw_value ?? setting.value;
+      const unit = original?.unit ?? setting.unit ?? factor.observed_state?.unit ?? '';
+      const author = setting.source === 'brief_extraction' ? 'Your stated setting' : 'Drafted option setting';
+      const detail = `${author}: ${factor.description ?? factor.label} = ${value}${unit ? ` ${unit}` : ''}. Kept for review; the deadline forecast uses this option's added-capacity estimate.`;
+      loss.push({ field_path: `nodes[${n.id}].event_forecast_not_modelled`, before: { factor, setting, original },
+        after: { description: detail }, severity: 'warn', reason: detail } as RepairEntry);
+      return detail;
+    });
+    return { ...n, description: [n.description ?? n.label, ...descriptions].join('\n'),
+      interventions: Object.fromEntries(Object.entries(n.interventions).filter(([id]) => !excluded.has(id))) };
+  });
+  return { ...model, nodes, loss: [...model.loss, ...loss] };
 }
 
 function admitOnce(

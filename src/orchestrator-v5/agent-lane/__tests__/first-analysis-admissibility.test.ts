@@ -106,11 +106,12 @@ const HELD_OUT = (): CandidateModel => ({
 
 /** The canonical Pro plan brief: a price is the user's only when the brief states it (`withdrawUnstatedBaselineStamps`). */
 const PRO_PLAN_BRIEF = 'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?';
+const UNFLAGGED_PRO_PLAN_BRIEF = PRO_PLAN_BRIEF.replace('with the next AI feature release', 'with the next AI capability');
 
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown>; scale_frame?: number };
 type Graph = { nodes: Node[]; edges: { from: string; to: string; origin?: string }[] };
 
-async function registered(model: CandidateModel, brief = 'A decision brief.'): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+async function constructed(model: CandidateModel, brief = 'A decision brief.') {
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify({ ...model, unknowns: [] }) })) as unknown as CallStructuredModel;
   const d: InternalDispatch = async (path, body) => {
@@ -121,6 +122,11 @@ async function registered(model: CandidateModel, brief = 'A decision brief.'): P
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
   const out = await buildModelFromBrief('66666666-6666-4666-8666-666666666666', brief, d, call) as Record<string, unknown>;
+  return { graph, out };
+}
+
+async function registered(model: CandidateModel, brief = 'A decision brief.'): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+  const { graph, out } = await constructed(model, brief);
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { graph: GraphV3.parse(graph) as unknown as Graph, out };
 }
@@ -174,8 +180,8 @@ describe('a freshly built model is admissible for a provisional first analysis (
     expect(graph.edges.filter((e) => e.from === 'keep_the_current_price' && e.to !== 'decision_monthly_recurring_revenue')).toEqual([]);
   });
 
-  it('PRICING ("Status quo: stay at £49", one price arm): held and ready — and the Run floor now counts the held status quo, so it proceeds', async () => {
-    const { graph } = await registered(PRICING_STATUS_QUO(), PRO_PLAN_BRIEF);
+  it.each([PRO_PLAN_BRIEF, UNFLAGGED_PRO_PLAN_BRIEF])('PRICING one price arm: reachable ordinary fallback still runs (%s)', async brief => {
+    const { graph } = await registered(PRICING_STATUS_QUO(), brief);
     // ⭐ Changed on purpose (Delivery Lead 5842717741; MG 5842710702). The floor used to count only options
     // WITH a level, so a held status quo (no stored copy, #1902) beside one price arm refused "nothing to
     // compare" — Paul's own question could not run. The floor now fingerprints the set the run SUBMITS, in
@@ -191,11 +197,11 @@ describe('a freshly built model is admissible for a provisional first analysis (
     expect(graph.nodes.find((n) => n.id === 'pro_plan_price')?.observed_state?.source).toBe('brief_extraction');
   });
 
-  it('PRICING ("Status quo: stay at £49", two price arms): proceeds; the stated price stays the user’s', async () => {
+  it.each([PRO_PLAN_BRIEF, UNFLAGGED_PRO_PLAN_BRIEF])('PRICING two price arms: reachable ordinary fallback still runs (%s)', async brief => {
     const m = PRICING_STATUS_QUO();
     const two = { ...m, options: [m.options[0]!, { label: 'Raise to £55', provenance: 'explicit', changes: [],
       interventions: [{ factor_label: 'Pro plan price', value: 55, unit: 'GBP', provenance: 'explicit' }] }, m.options[1]!] } as CandidateModel;
-    const { graph } = await registered(two, PRO_PLAN_BRIEF);
+    const { graph } = await registered(two, brief);
     // ⚠ `comparative_leader`, by the UNCHANGED claim policy: the user's stated £49
     // is in the comparison's substrate, so "partly user-stated" licenses naming a
     // leader even though churn and subscribers are Olumi's. Pinned, not endorsed —

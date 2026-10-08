@@ -26,6 +26,7 @@
  */
 
 import type { ToolResult } from './runtime/agent-tools.js';
+import { eventByDateRefusalDetail } from '../goal-target/event-by-date-model.js';
 import { NOT_ON_NARRATION, proposalsAwaitingApproval } from './approval-chips.js';
 import { sayFigureExactly, sayFigureRead } from './say-figure.js';
 
@@ -399,6 +400,10 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
         : 'What I proposed above is not made until you approve it.';
       return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r)]
         .map((line) => line.trim()).filter((line) => line !== '').join(' ');
+    }
+    if (r.refusal === 'event_goal_unadmitted') {
+      const detail = eventByDateRefusalDetail(r.detail);
+      if (detail !== null) return detail;
     }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
     if (unconfirmed !== undefined) return unconfirmed;

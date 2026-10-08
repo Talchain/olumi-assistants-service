@@ -81,6 +81,7 @@
 
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
 import { inertRiskBranch, preconditionRiskIds } from '../graph/inert-risk.js';
+import { draftedTeamPartOf } from '../orchestrator-v5/goal-target/event-by-date-model.js';
 import { NodeV3, type GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
@@ -389,6 +390,16 @@ export function validateGraphStructure(
   const leftOut = opts.leaveOutInertRisks === true
     ? inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph))
     : preconditionRiskIds(graph.nodes, graph.edges, limitIdsOf(graph));
+  // A canonical event forecast keeps its reasoning sketch beside the option-level capacity sum. Only context
+  // explicitly excluded by admission is left out of readiness; active settings and limits remain structural blockers.
+  if (opts.leaveOutInertRisks === true && draftedTeamPartOf(graph) !== null) {
+    const targets = new Set(graph.nodes.filter(n => n.kind === 'option').flatMap(n => Object.keys(n.interventions ?? {})));
+    const limits = limitIdsOf(graph);
+    for (const node of graph.nodes) {
+      if (node.id.startsWith('event_context_') && ['factor', 'risk', 'outcome'].includes(node.kind)
+        && node.analysis_participation === 'retained_excluded' && !targets.has(node.id) && !limits.has(node.id)) leftOut.add(node.id);
+    }
+  }
 
   checkRequiredNodeKinds(graph, violations);
   violations.push(...preconditionRiskLinkViolations(graph));
