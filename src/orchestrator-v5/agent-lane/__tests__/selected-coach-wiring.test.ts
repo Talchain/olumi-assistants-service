@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
+import { NARRATE_LABEL_LINE } from '../runtime/agent-loop.js';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
 
@@ -18,7 +19,9 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // AI HARNESS (2 Oct, RC 5950124321): none_measurable makes no claim; the sentence it was told to say is gone: 913872bf… → cd04fd8c….
 // AI HARNESS W3 (6 Oct evening, Paul's headline ruling): the per-option headline is the chance of meeting the goal, never
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
-const HOST_SHA = '0732df33cd12e02033edebb64ebc4e733ce7a6ce0ec87071d8a25df08a7d351d';
+// S-E GOALS S2b (7 Oct): #34 and #35 gain the share-by-date sentences (goal_chance_words; a stated_time range says slow to
+// fast end, never causal doubt): 22,393 → 23,075 bytes (+682, exactly the two added sentences). 0732df33… → a9c847ef….
+const HOST_SHA = 'a9c847ef37063cd1e5e25c6b8810cbe9b6f16aef83f188dce728923d5ea46add';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -38,10 +41,12 @@ const HOST_SHA = '0732df33cd12e02033edebb64ebc4e733ce7a6ce0ec87071d8a25df08a7d35
 // + S-A REPLY_SHAPE_INSTRUCTION joined after the reply-length sentence (lane COPY-SHAPE, 7 Oct; Paul: "the three bullets
 //   as a construct"; AIE #87 6037293086 §5: under 75 words, one move, one ask): 33,758 → 34,302 bytes (+1 space +543 =
 //   exactly the sentence's bytes). Derived from the SENT body.
+// + S-E GOALS S2b share-by-date sentences in the host contract (7 Oct): +682 bytes, the host delta. Derived from the SENT body.
 // #2783 (B15): + 193 bytes = exactly " " + MODEL_RELATIVE_NAMING_INSTRUCTION's new last sentence ("When the result gives
 // options' chances of meeting the goal, lead with those chances …; never open with the share."), nothing else.
-const RENDERED_SHA = '6dc488622ac3597afcdf016801e3f9191b00cf965f887a291b8937db07fd30cf';
-const RENDERED_BYTES = 34_495;
+// Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
+const RENDERED_SHA = '915133bab1213750f377f06c8db09e70d750dac20e633c55711cee65d7dfda7e';
+const RENDERED_BYTES = 35_177;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
@@ -55,8 +60,8 @@ const runFixture = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
 };
 const runBlock = runFixture.turns.t2.analysis_result;
 
-type Sent = { model: string; instructions: string; reasoning?: { effort?: string }; max_output_tokens: number;
-  input?: unknown; tools?: { name?: string }[]; tool_choice?: unknown; text?: { format?: { name?: string } } };
+type Sent = { model: string; instructions: string; reasoning?: { effort?: string }; max_output_tokens: number; input?: unknown;
+  tools?: { name?: string }[]; tool_choice?: unknown; text?: { format?: { name?: string } } };
 const sent: Sent[] = [];
 const registeredAtCall: boolean[] = [];
 let scripted: Record<string, unknown>[][] = [];
@@ -218,14 +223,21 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent[0]!.instructions).toContain(NAMING_RULE_FORM);
   });
 
-  it('keeps the same selected prompt and budget on a tool-followup conversation', async () => {
+  it('keeps the same selected prompt on a tool-followup conversation; the narrating hop is low effort (P44 S1)', async () => {
     await sendTurn('Timing strongly shapes how the price lands, so add that link.',
       [proposeLink, say('The proposed link is ready for approval.')]);
     expect(sent).toHaveLength(2);
     for (const body of sent) {
-      selected(body);
+      expect(body.model).toBe('gpt-6.1-sol');
+      expect(body.max_output_tokens).toBe(3400);
       expect(sha256(body.instructions)).toBe(RENDERED_SHA);
     }
+    // The deciding call stays high; the call after a held proposal only states it and asks for the yes.
+    expect(sent[0]!.reasoning?.effort).toBe('high');
+    expect(JSON.stringify(sent[0]!.input)).not.toContain(NARRATE_LABEL_LINE);
+    expect(sent[1]!.reasoning?.effort).toBe('low');
+    const narrateInput = sent[1]!.input as { content?: { text?: string }[] }[];
+    expect(narrateInput.at(-1)?.content?.[0]?.text).toBe(NARRATE_LABEL_LINE);
   });
 
   it('uses selected coach bytes as the prefix of the typed Run interpretation', async () => {

@@ -1,3 +1,4 @@
+import { shareGoalChanceWords } from './share-goal-chance-words.js';
 /**
  * ⭐ D3 MILESTONE 1, STEP 2 — EACH OPTION'S CHANCE OF MEETING THE GOAL, AND WHAT MAY BE SAID ABOUT IT (DL 0df0e1 #87
  * 6005048156 + plan 6006078553; Science d5 6005138341 / 6005279728 / 6005640764; Wording c6 6005196947 + rulings 6 Oct).
@@ -26,13 +27,19 @@
  *      `each`                       an option withheld for its own path: each option's line, in the model's order.
  *    ORDER COUNTS AS A SUPERLATIVE (d5 6005640764): only the two `highest` forms license an order by goal chance.
  */
-import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import {
+  GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  readOptionResultSources,
+} from '../../orchestrator/context/option-result-source.js';
+import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
+import { isEventShareForecast } from './event-by-date-model.js';
+import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import {
-  displayedPctAt, displayRoundingFor, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
+  displayedPctAt, displayRoundingFor, goalChanceDisplayClass, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
   type GoalChanceDisplayRounding, type GoalChanceDriver, type GoalChanceNoDriverReason, type GoalChancePrecision,
 } from './goal-chance-driver.js';
 
@@ -64,6 +71,31 @@ export const SPREAD_NOTE_WITHOUT_DOWNSIDE = 'Its typical result falls short of y
 const SPREAD_NOTE_RETIRED = 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+const SHORTFALL_TEMPLATE = 'In its worst 1 in 20 runs of this model, ‘<label>’ falls short of your target by <figure> or more.';
+const TYPICAL_SHORTFALL_TEMPLATE = 'In this model, ‘<label>’ falls short of your target in almost every run, typically by about <figure>.';
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const shortfallPatterns = [SHORTFALL_TEMPLATE, TYPICAL_SHORTFALL_TEMPLATE].map(template =>
+  new RegExp(`^${template.split(/(<label>|<figure>)/).map(part =>
+    part === '<label>' ? '([^\\r\\n]+)' : part === '<figure>' ? '[^\\r\\n]+' : escapeRegex(part)).join('')}$`));
+
+/** Only the two ruled templates; the screen reader also binds the captured label to this option's graph label. */
+export function shortfallNoteLabel(note: unknown): string | undefined {
+  if (typeof note !== 'string') return undefined;
+  for (const pattern of shortfallPatterns) {
+    const match = pattern.exec(note);
+    if (match !== null && match[0] === note) return match[1];
+  }
+  return undefined;
+}
+
+/** DOWN to two significant figures, including exact decimal/power-of-ten boundaries without division error. */
+export function floorSig2(value: number): number {
+  if (!finite(value) || value <= 0) return 0;
+  const [mantissa, exponent] = value.toExponential().split('e');
+  const digits = mantissa!.replace('.', '').slice(0, 2).padEnd(2, '0');
+  return Number(`${digits}e${Number(exponent) - 1}`);
+}
+
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
   readonly severity: 'info';
@@ -82,8 +114,9 @@ export interface GoalChanceLicence {
   /** The Run's unambiguous scoring threshold, retained even when there is no spread reversal. */
   readonly sent_threshold?: SentGoalThreshold;
   readonly spread_note_by_option?: Readonly<Record<string, string>>;
+  readonly shortfall_note_by_option?: Readonly<Record<string, string>>;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
-  readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string };
+  readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string; readonly by_date?: string };
   /**
    * ⭐ D3 cut 5 (DL 0df0e1; Science d5 #87 6008242694 / 6008252938): present iff a USER-STATED link on a licensed option's
    * path to the goal carries an existence probability below 1 — the chances then also count Olumi's own assumption that
@@ -133,6 +166,9 @@ export function goalChanceLicenceOf(
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const share = shareByDateGoalForChanceOf(graph);
+  if (shareChanceInputFailure(graph) !== null) return null;
+  if (share === null && isEventShareForecast(graph)) return null;
   const target = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
   // A LEVEL target only: a target stated as a change ("cut by 20%") has no ruled sentence yet.
   if (target === null || (target.frame !== undefined && target.frame !== 'level')) return null;
@@ -148,24 +184,33 @@ export function goalChanceLicenceOf(
   const recordOf = new Map<string, Rec>();
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
+  const exactExtremes = new Set<string>();
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
     recordOf.set(id, r);
     const p = r.probability_of_goal;
     option_ids.push(id);
+    const precision = goalChancePrecisionOf(r);
+    const step = precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision));
+    const shareGate = share !== null && share.goal.id === goalId
+      ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
+    if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) { withheld.push(id); continue; }
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
     licensed.push(id);
     // ⭐ Ruling 5: the displayed step follows the figure's own precision; no precision block → whole, as before.
-    const precision = goalChancePrecisionOf(r);
     if (precision !== null) {
       precisionOf.set(id, precision);
-      rounding[id] = displayRoundingFor(precisionHalfWidthPoints(precision));
+      rounding[id] = step;
     }
-    pct[id] = displayedPctAt(p, rounding[id] ?? 'whole');
+    // The licence is the sole producer of the exact-extreme display; the raw Run evidence stays intact.
+    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined) {
+      pct[id] = shareGate.exact_extreme * 100;
+      exactExtremes.add(id);
+    } else pct[id] = displayedPctAt(p, step);
   }
   if (option_ids.length < 2 || licensed.length === 0) return null;
 
@@ -199,25 +244,30 @@ export function goalChanceLicenceOf(
   const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
   if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
     for (const id of licensed) {
+      if (exactExtremes.has(id)) { noDrivers[id] = 'none'; continue; } // drivers are moot at a ruled extreme
       const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
       if ('driver' in claim) drivers[id] = claim.driver;
       else noDrivers[id] = claim.no_driver;
     }
   }
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
+  const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
-    message: 'Each option’s chance of meeting your goal is licensed on this Run.',
+    message: `Each option’s ${share === null ? 'chance of meeting your goal'
+      : shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)} is licensed on this Run.`,
     form,
     option_ids,
     pct_by_option: pct,
-    ...(spread === undefined ? {} : { sent_threshold: sentThreshold }),
+    ...(spread === undefined && Object.keys(shortfall).length === 0 ? {} : { sent_threshold: sentThreshold }),
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
+    ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
-    target: { comparator, value: target.value, unit: target.unit },
+    target: { comparator, value: target.value, unit: target.unit,
+      ...(share !== null && share.goal.id === goalId ? { by_date: share.deadline } : {}) },
     ...(existence !== undefined ? { user_link_existence: existence } : {}),
     ...(priorOnPath ? { summary_withheld: { cause: 'olumi_existence_assumption' as const, form: summary as Exclude<GoalChanceForm, 'each'> } } : {}),
     ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}),
@@ -303,6 +353,73 @@ function spreadNotesOf(
     Object.defineProperty(notes, b, { enumerable: true, value: SPREAD_NOTE_WITHOUT_DOWNSIDE });
   }
   return notes;
+}
+
+/**
+ * B19 ruling (1): downside.p05 is normalised, outcome percentiles are raw. Only a verified zero-offset map in the
+ * recorded delta frame licenses a goal-relative difference; each failed option loses only its own line.
+ */
+function shortfallNotesOf(
+  sent: SentGoalThreshold | undefined, goal: Rec | undefined, nodes: Rec[], licensed: string[],
+  pct: Record<string, number>, records: Map<string, Rec>, comparator: GoalChanceComparator, form: GoalChanceForm,
+  unit: string, graph: unknown, envelope: Rec,
+): Record<string, string> {
+  const notes: Record<string, string> = {};
+  // goalChanceScreenLinesForAgent shows no per-option point under `similar` or a superlative.
+  if (form !== 'each' || comparator !== 'at_least' || sent === undefined || sent.frame !== 'delta'
+    || !finite(sent.value) || goal === undefined || !['goal_threshold', 'goal_threshold_raw'].includes(sent.field)
+    || goal[sent.field] !== sent.value || correlationBlockOn(graph) || correlationBlockOn(envelope)) return notes;
+  const cap = goal.goal_threshold_cap;
+  const raw = goal.goal_threshold_raw;
+  const t = goal.goal_threshold;
+  if (!finite(cap) || cap <= 0 || !finite(raw) || !finite(t) || !finite(t * cap)
+    || Math.abs(t * cap - raw) > 1e-9 * Math.abs(raw)) return notes;
+  const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings.filter(isRec) : [];
+  for (const id of licensed) {
+    if (!Object.hasOwn(pct, id) || pct[id] === 100 || warnings.some(w =>
+      (w.code === 'GOAL_CHANCE_RANGE' && isRec(w.range_by_option) && Object.hasOwn(w.range_by_option, id))
+      || (typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+        && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
+          || !Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(id))))) continue;
+    const r = records.get(id)!;
+    const downside = isRec(r.downside) ? r.downside : undefined;
+    const outcome = isRec(r.outcome) ? r.outcome : undefined;
+    if (!finite(downside?.p05) || !finite(outcome?.p10)) continue;
+    const q05 = downside.p05 * cap;
+    if (!finite(q05) || q05 > outcome.p10 + 1e-6 * Math.abs(outcome.p10) || q05 >= raw) continue;
+    const label = nodes.find(n => n.id === id && n.kind === 'option')?.label;
+    if (typeof label !== 'string' || label.trim() === '' || /[\r\n]/.test(label)) continue;
+    const difference = raw - (pct[id] === 0 ? (finite(outcome.p50) ? outcome.p50 : NaN) : q05);
+    if (!finite(difference) || difference <= 0) continue;
+    const amount = pct[id] === 0 ? Number(difference.toPrecision(2)) : floorSig2(difference);
+    if (!finite(amount) || amount <= 0) continue;
+    // The target's shared formatter keeps four decimal places. Never turn a small positive shortfall into a displayed
+    // zero, or round a conservative tail bound UP while saying "or more".
+    if (amount < 0.0001 || (pct[id] !== 0 && Math.round(amount * 1e4) / 1e4 > amount)) continue;
+    const figure = sayFigureAsWritten(amount, unit);
+    // A two-state unit may format a difference as "on"; a shortfall requires a numeric amount.
+    if (!/\d/.test(figure)) continue;
+    const template = pct[id] === 0 ? TYPICAL_SHORTFALL_TEMPLATE : SHORTFALL_TEMPLATE;
+    Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : figure) });
+  }
+  return notes;
+}
+
+/**
+ * The Run's correlation_model is kept verbatim (compose.ts); graph fields survive the sent-graph transformations.
+ * A present, non-empty block silences the whole Run, including correlation blocks nested in unknown graph carriers.
+ * Empty/null blocks and scalar diagnostic flags (e.g. factor_evppi.correlation_active: false) are not blocks.
+ */
+function correlationBlockOn(value: unknown, seen = new Set<object>()): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  const found = Object.entries(value).some(([key, child]) =>
+    (/correlat/i.test(key) && child !== null && typeof child === 'object' && Object.keys(child).length > 0)
+    || (key === 'correlation_model' && child !== undefined && child !== null && !isRec(child))
+    || correlationBlockOn(child, seen));
+  seen.delete(value);
+  return found;
 }
 
 /**
@@ -414,6 +531,19 @@ export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<str
   return out;
 }
 
+/** Both Agent doors carry the licence's extreme instead of its raw normal point (including retained r3 Runs).
+ * A licensed nearest-5 replacement is checked as displayed, preserving the card's deliberate coarse rounding.
+ */
+export function goalChancePointForAgent(p: number, display: string | undefined, nearestFive?: number): number | undefined {
+  if (!Number.isFinite(p) || p < 0 || p > 1) return undefined;
+  const projected = nearestFive ?? p;
+  if (display === undefined) return projected; // legacy permission remains the caller's existing rule
+  const expectedClass = display === 'less than 1%' ? 'less_than_1' : display === 'more than 99%' ? 'more_than_99' : 'interior';
+  if (expectedClass === 'less_than_1') return 0;
+  if (expectedClass === 'more_than_99') return 1;
+  return goalChanceDisplayClass(projected) === expectedClass ? projected : undefined;
+}
+
 /** Screen copy (goalChanceCopy.ts): the licence's displayed percentage, including its non-certainty edge words. */
 export function goalChanceDisplayForAgent(result: unknown): Readonly<Record<string, string>> | undefined {
   const licence = agentLicenceRecordOf(result);
@@ -496,6 +626,7 @@ export function agentLicenceRecordOf(result: unknown): Rec | undefined {
 export function goalChanceLicenceForAgent(result: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
+  shortfall_note_by_option?: Readonly<Record<string, string>>;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -530,6 +661,14 @@ export function goalChanceLicenceForAgent(result: unknown): {
     && Object.entries(notes).every(([id, note]) => optionIds.includes(id) && !withheld?.includes(id)
       && isRec(r.pct_by_option) && finite(r.pct_by_option[id])
       && (note === SPREAD_NOTE_WITHOUT_DOWNSIDE || note === SPREAD_NOTE_RETIRED));
+  const shortfall = isRec(r.shortfall_note_by_option) ? r.shortfall_note_by_option : undefined;
+  const validShortfall = form === 'each' && validSent && sent?.frame === 'delta'
+    && isRec(r.target) && r.target.comparator === 'at_least'
+    && shortfall !== undefined && Object.keys(shortfall).length > 0
+    && Object.entries(shortfall).every(([id, note]) => optionIds.includes(id) && !withheld?.includes(id)
+      && isRec(r.pct_by_option) && Number.isInteger(r.pct_by_option[id])
+      && (r.pct_by_option[id] as number) >= 0 && (r.pct_by_option[id] as number) < 100
+      && shortfallNoteLabel(note) !== undefined);
   return {
     form,
     option_ids: optionIds,
@@ -541,6 +680,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
       ...(typeof sent.status_quo_option_id === 'string' ? { status_quo_option_id: sent.status_quo_option_id } : {}),
     } satisfies SentGoalThreshold } : {}),
     ...(validSpread ? { spread_note_by_option: Object.fromEntries(Object.keys(notes!).map((id) => [id, SPREAD_NOTE_WITHOUT_DOWNSIDE])) } : {}),
+    ...(validShortfall ? { shortfall_note_by_option: shortfall as Record<string, string> } : {}),
     ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
