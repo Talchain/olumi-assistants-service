@@ -1,0 +1,8 @@
+{
+  "old_return_restored_temporarily": "if (option_ids.length < 2 || licensed.length === 0) return null;",
+  "gate_exit": 0,
+  "test_exit": 1,
+  "source_restored": true,
+  "restored_sha256": "4d89b261863472a2161d2d576db2acb0790389a3db1b814510247ace99e8614c",
+  "mutant_killed": true
+}

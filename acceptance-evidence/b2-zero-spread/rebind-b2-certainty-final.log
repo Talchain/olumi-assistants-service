@@ -1,0 +1,103 @@
+Load gate exit: 0
+{"load":3.7109375,"threshold":25}
+node_modules/.bin/vitest run src/routes/__tests__/b2-zero-spread.test.ts src/orchestrator-v5/agent-lane/__tests__/zero-spread-certainty.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts (17 tests | 3 failed) 66ms
+     × all-withheld Run: preserves Keep’s reason and why without any licensed point claim 24ms
+     × Starter-point control: byte-identical to staging except Keep’s canonical cell gains its zero-spread reason and why 6ms
+     × selector row: changing the no-carrier + horizon selector changes only Keep’s line 15ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/b2-zero-spread.test.ts > B2 d2: zero spread when no option has a licensed point > all-withheld Run: preserves Keep’s reason and why without any licensed point claim
+AssertionError: expected { kind: 'withheld', …(3) } to deeply equal { kind: 'withheld', …(3) }
+
+- Expected
++ Received
+
+@@ -5,7 +5,7 @@
+      {
+        "code": "zero_spread",
+        "message": "Not shown yet: needs month-by-month changes",
+      },
+    ],
+-   "why": "Not shown yet: needs month-by-month changes",
++   "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?",
+  }
+
+ ❯ expectKeepZeroSpread src/routes/__tests__/b2-zero-spread.test.ts:94:26
+     92| const expectKeepZeroSpread = (view: Rec): void => {
+     93|   expectNoGenericCellCopy(view);
+     94|   expect(keepCell(view)).toEqual({ kind: 'withheld',
+       |                          ^
+     95|     reasons: [{ code: 'zero_spread', message: LINE }], face: 'Chance n…
+     96|   expect(keepCell(view).why).toBe('Not shown yet: needs month-by-month…
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts:138:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/routes/__tests__/b2-zero-spread.test.ts > B2 d2: zero spread when no option has a licensed point > Starter-point control: byte-identical to staging except Keep’s canonical cell gains its zero-spread reason and why
+AssertionError: expected { kind: 'withheld', …(3) } to deeply equal { kind: 'withheld', …(3) }
+
+- Expected
++ Received
+
+@@ -5,7 +5,7 @@
+      {
+        "code": "zero_spread",
+        "message": "Not shown yet: needs month-by-month changes",
+      },
+    ],
+-   "why": "Not shown yet: needs month-by-month changes",
++   "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?",
+  }
+
+ ❯ expectKeepZeroSpread src/routes/__tests__/b2-zero-spread.test.ts:94:26
+     92| const expectKeepZeroSpread = (view: Rec): void => {
+     93|   expectNoGenericCellCopy(view);
+     94|   expect(keepCell(view)).toEqual({ kind: 'withheld',
+       |                          ^
+     95|     reasons: [{ code: 'zero_spread', message: LINE }], face: 'Chance n…
+     96|   expect(keepCell(view).why).toBe('Not shown yet: needs month-by-month…
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts:190:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/routes/__tests__/b2-zero-spread.test.ts > B2 d2: zero spread when no option has a licensed point > selector row: changing the no-carrier + horizon selector changes only Keep’s line
+AssertionError: expected { enrichment: { …(11) }, …(4) } to deeply equal { enrichment: { …(11) }, …(4) }
+
+- Expected
++ Received
+
+@@ -65,11 +65,11 @@
+              {
+                "code": "zero_spread",
+                "message": "Falls short of £126,000 a month if today’s figures hold.",
+              },
+            ],
+-           "why": "Falls short of £126,000 a month if today’s figures hold.",
++           "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?",
+          },
+          "main_driver": {
+            "kind": "not_recorded",
+          },
+          "option_id": "keep_current_pricing",
+
+ ❯ src/routes/__tests__/b2-zero-spread.test.ts:261:21
+    259|       keepCell(expected.canonical_view).reasons[0].message = alternate;
+    260|       keepCell(expected.canonical_view).why = alternate;
+    261|       expect(after).toEqual(expected);
+       |                     ^
+    262|       expect(keepCell(after.canonical_view).face).toBe('Chance not sho…
+    263|       expect(keepCell(after.canonical_view).why).toBe(alternate);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  3 failed | 20 passed (23)
+   Start at  22:03:16
+   Duration  3.15s (transform 1.64s, setup 139ms, import 2.69s, tests 97ms, environment 0ms)
+
