@@ -34,7 +34,7 @@ import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '
 import { openQuestionsSegment } from '../decision-input-ask.js';
 import { withoutProposalIds } from '../display-ids.js';
 import { WIDENED_RISK_MARKER_DOWN as WIDENED_RISK_MARKER_TOO_HIGH,
-  WIDENED_RISK_MARKER_MOVE as WIDENED_RISK_MARKER_MAY_MOVE } from '../runtime/widen-draft.js';
+  WIDENED_RISK_MARKER_MOVE as WIDENED_RISK_MARKER_MAY_MOVE } from '../widened-risk-markers.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 
 export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
