@@ -1,0 +1,38 @@
+Load gate exit: 0
+{"load":4.63427734375,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t 'class 3' < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (19 tests | 1 failed | 17 skipped) 19ms
+     × class 3: an unsized churn feed withholds X moving inflow, while Y keeps its own chance 15ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > class 3: an unsized churn feed withholds X moving inflow, while Y keeps its own chance
+AssertionError: expected [ 'x', 'y' ] to deeply equal [ 'y' ]
+
+- Expected
++ Received
+
+  [
++   "x",
+    "y",
+  ]
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:142:26
+    140|       links: [{ from: 'u', to: 'churn_per_month' }] }]);
+    141|     const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal'…
+    142|     expect(chances(out)).toEqual(['y']);
+       |                          ^
+    143|     expect(out.option_comparison.find((r: Rec) => r.option_id === 'y')…
+    144|     expect(warning(out)?.option_ids).toEqual(['x']);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 17 skipped (19)
+   Start at  18:43:11
+   Duration  4.01s (transform 2.83s, setup 121ms, import 3.76s, tests 19ms, environment 0ms)
+
