@@ -226,6 +226,9 @@ export interface LinkStatement {
   readonly direction: 'positive' | 'negative';
   readonly effect_amount?: number | null;
   readonly effect_per_source_change?: number | null;
+  /** A stated spread in the TARGET's natural units, for the same source change as effect_amount.
+   * Converted by D2 before D4's domain check; absent retains Olumi's point-estimate spread. */
+  readonly effect_std?: number;
   /** True when the USER stated the size (never overridden, D7). */
   readonly user_stated: boolean;
   /**
@@ -444,8 +447,12 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   const sourceFrame = resolveMagnitudeFrame(source);
   const amount = link.effect_amount;
   const per = link.effect_per_source_change;
+  const statedStd = link.user_stated ? link.effect_std : undefined;
   const stated = finite(amount) && finite(per);
   const beta = stated ? convertLinkEffect(amount, per, targetFrame, sourceFrame) : null;
+  const sigmaFromStatement = statedStd === undefined ? undefined
+    : finite(statedStd) && statedStd > 0 && finite(per)
+      ? convertLinkEffect(statedStd, per, targetFrame, sourceFrame) : null;
   const statement = stated ? statementWords(amount, per, source, target, sourceFrame, targetFrame) : undefined;
   // A4: a size read from one end of a range the user wrote is said WITH the range, never as their single figure (R3 C1).
   const range = link.user_stated ? link.stated_range : undefined;
@@ -490,11 +497,12 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     : null);
 
   let problem: LinkSizeProblem | undefined;
-  if (stated && beta === null) problem = 'unconvertible';
+  if (statedStd !== undefined && (sigmaFromStatement === null || !finite(sigmaFromStatement) || sigmaFromStatement === 0)) problem = 'unconvertible';
+  else if (stated && beta === null) problem = 'unconvertible';
   else if (beta !== null && (beta === 0 || Math.sign(beta) !== sign)) problem = 'sign_conflict';
 
   if (beta !== null && problem === undefined) {
-    const sigma = Math.abs(beta) / 2;
+    const sigma = sigmaFromStatement === undefined ? Math.abs(beta) / 2 : Math.abs(sigmaFromStatement!);
     const outOfDomain = judge !== null && !withinDomain(domainBand(judge.baseline, beta, sigma, judge.swing), judge.domain);
     const issue: LinkSizeProblem | undefined = outOfDomain ? 'out_of_domain' : Math.abs(beta) > 1 ? 'not_representable' : undefined;
     if (link.user_stated) {

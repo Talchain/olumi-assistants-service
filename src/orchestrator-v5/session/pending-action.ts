@@ -52,6 +52,7 @@
 // hand-mirrored here. `clarify-v2/rubric.ts` is itself a zero-dependency
 // leaf module, so this import keeps pending-action.ts dependency-light
 // and cycle-free.
+import { isLinkEffectFloor, type LinkEffectFloor } from '../agent-lane/link-effect-lower-bound.js';
 import { isClarifyDimension } from '../clarify-v2/rubric.js';
 
 import { GoalScopeReconciliationSchema, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
@@ -272,6 +273,26 @@ export type PendingActionAction =
       readonly figures?: readonly string[];
       readonly figure_quote?: string;
       readonly confirmation?: 'choice' | 'figure';
+    }
+  | {
+      /** A refused statement and its open question. Context only; its quote never licenses a size. */
+      readonly kind: 'elicit_link_effect_clarification';
+      /** Stable identity of the first ask, preserved when its question or reading changes. Absent on legacy rows. */
+      readonly lineage_id?: string;
+      /** Legacy metadata is retained as context, never as figure authority. */
+      readonly statement_classification?: 'asserted';
+      readonly source_text?: string;
+      readonly from_id: string;
+      readonly to_id: string;
+      readonly from_label: string;
+      readonly to_label: string;
+      /** The user's verbatim statement, never an Agent restatement. */
+      readonly quote: string;
+      readonly question: string;
+      readonly refusal: string;
+      readonly value_text?: string;
+      readonly resolved_reading?: 'points' | 'relative';
+      readonly floor?: LinkEffectFloor;
     }
   | GoalScopeReconciliation
   | {
@@ -617,6 +638,7 @@ export type PendingActionKind = PendingActionAction['kind'];
  */
 export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   'elicit_goal_current_level',
+  'elicit_link_effect_clarification',
   'reconcile_goal_scope',
   'set_factor_value',
   'run_analysis',
@@ -918,6 +940,7 @@ export const PENDING_ACTION_ASK_WALL_TTL_MS = 30 * 60 * 1000;
  */
 export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = {
   elicit_goal_current_level: true,
+  elicit_link_effect_clarification: false, // Agent-only: its own six typed turns / 24 h lifecycle.
   reconcile_goal_scope: false, // issue lifetime and answer-binding lifetime are deliberately separate
   // Recorded questions. Answerable only by a bare number or a menu index, and
   // every bind path re-checks the live graph before it binds.
@@ -1271,6 +1294,7 @@ export type ElicitTargetBaselinePending = PendingAction & {
  */
 export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean> = {
   elicit_goal_current_level: false, // Agent-only: requires units or a recorded figure confirmation.
+  elicit_link_effect_clarification: false, // Only the same-link reading clarification may bind this answer.
   reconcile_goal_scope: false, // only the scoped answer gate may bind this question
   // The asks whose natural answer IS a bare number, or a bare menu index.
   // "What does this option cost?" -> "95000" / "£95,000". TRUE so a lone
@@ -1546,6 +1570,18 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (a.figure_quote !== undefined && !bounded(a.figure_quote, 2000)) return null;
     if (a.figures !== undefined && (typeof a.figure_quote !== 'string' || !a.figures.every((f: string) => (a.figure_quote as string).includes(f)))) return null;
     if (a.confirmation !== undefined && a.figures === undefined) return null;
+  }
+  if (a.kind === 'elicit_link_effect_clarification') {
+    const bounded = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+    if (!bounded(a.from_id, 200) || !bounded(a.to_id, 200)
+      || !bounded(a.from_label, 500) || !bounded(a.to_label, 500)
+      || !bounded(a.quote, 8000) || !bounded(a.question, 2000) || !bounded(a.refusal, 100)) return null;
+    if (a.lineage_id !== undefined && !bounded(a.lineage_id, 200)) return null;
+    if (a.statement_classification !== undefined && a.statement_classification !== 'asserted') return null;
+    if (a.source_text !== undefined && !bounded(a.source_text, 8000)) return null;
+    if (a.value_text !== undefined && !bounded(a.value_text, 2000)) return null;
+    if (a.resolved_reading !== undefined && a.resolved_reading !== 'points' && a.resolved_reading !== 'relative') return null;
+    if (a.floor !== undefined && !isLinkEffectFloor(a.floor)) return null;
   }
   if (a.kind === 'reconcile_goal_scope' && !GoalScopeReconciliationSchema.safeParse(a).success) return null;
   if (a.kind === 'set_factor_value') {

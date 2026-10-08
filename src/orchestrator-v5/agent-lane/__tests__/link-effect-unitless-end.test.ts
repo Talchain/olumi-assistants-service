@@ -70,6 +70,15 @@ const expectedMarginPercentQuestion = 'Nothing was prepared. Tell the user exact
   + `to “${MARGIN}”, and under “How strong is this effect?” choose Slight, Moderate, Strong or Very strong. `
   + 'That records how strong you judge the link, not your figure."';
 
+const expectedBestGuess = (quote: string): string =>
+  `You said ‘${quote}’. What's your best single guess, and the lowest and highest it could plausibly be?`;
+function expectCarriedBestGuess(r: Json, quote: string, refusal: string): void {
+  expect(r.question).toBe(expectedBestGuess(quote));
+  expect(r.link_effect_clarifications).toEqual([{ kind: 'elicit_link_effect_clarification', source_text: quote,
+    from_id: SOURCE, to_id: TARGET, from_label: FOOTFALL, to_label: MARGIN, quote,
+    question: expectedBestGuess(quote), refusal }]);
+}
+
 /** A refusal binds the exact typed reason, no offer, and the identified stored link's unchanged provenance. */
 function expectRefused(r: Json, refusal: string, why: string | undefined, store: ProposalStore, graph: Json,
   before: Json, from = SOURCE, to = TARGET) {
@@ -221,21 +230,23 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
   // link's end. The step-3 build had moved these staging refusals to "card offered"; a card there offers a wrong reading,
   // so each is ONE typed question naming the figure (PR Review's guards restored without the direction vocabulary).
   it.each([
-    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.', 'source_figure_a_level',
-      'Is 5% a change in \u201cFootfall lost from price rise\u201d, or its level today?'],
-    ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.', 'source_figure_a_level',
-      'Is 5% a change in \u201cFootfall lost from price rise\u201d, or its level today?'],
-    ['a target level', 'When footfall goes up by 5%, gross margin of 2 percentage points is our target.', 'target_figure_a_level',
-      'Is 2 a change in \u201cGross margin\u201d, or its level today?'],
-    ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level.", 'target_figure_a_level',
-      'Is 2 a change in \u201cGross margin\u201d, or its level today?'],
+    // RC2a Rule 3 (rc2a.md:9; Science §(h), 8 Oct amendment): unsizable words carry the best-guess/current-extremes ask.
+    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.', 'source_figure_a_level'],
+    // RC2a Rule 3 (rc2a.md:9; Science §(h), 8 Oct amendment): unsizable words carry the best-guess/current-extremes ask.
+    ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.', 'source_figure_a_level'],
+    // RC2a Rule 3 (rc2a.md:9; Science §(h), 8 Oct amendment): unsizable words carry the best-guess/current-extremes ask.
+    ['a target level', 'When footfall goes up by 5%, gross margin of 2 percentage points is our target.', 'target_figure_a_level'],
+    // RC2a Rule 3 (rc2a.md:9; Science §(h), 8 Oct amendment): unsizable words carry the best-guess/current-extremes ask.
+    ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level.", 'target_figure_a_level'],
+    // RC2a Rule 3 (rc2a.md:9; Science §(h), 8 Oct amendment): unsizable words carry the best-guess/current-extremes ask.
     ['net margin while gross margin stays steady', 'A 5% fall in footfall would cost us about 2 percentage points of net margin while gross margin stays steady.',
-      'figure_of_another_quantity', 'What is that as a change in \u201cGross margin\u201d? 2 percentage points of net margin reads as a figure for net margin. If \u201cGross margin\u201d does not change, the link stays as it is.'],
-  ] as const)('B2-level %s → ONE typed question about that figure, never a card, nothing stored', async (_name, said, why, question) => {
+      'figure_of_another_quantity'],
+  ] as const)('B2-level %s → ONE typed question about that figure, never a card, nothing stored', async (_name, said, why) => {
     const { caps, store, graph, commits } = world();
     const before = structuredClone(linkOf(graph).provenance);
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
-    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'not_the_users_statement', why, question });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'not_the_users_statement', why, question: expectedBestGuess(said) });
+    expectCarriedBestGuess(r, said, 'not_the_users_statement');
     expect(r).not.toHaveProperty('proposal_id');
     expect(store.outstanding(SCENARIO, null)).toEqual([]);
     expect(commits).toEqual([]);
@@ -245,6 +256,7 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
   it.each([
     ['a question', 'Does a 5% rise in footfall lost cost about 2 percentage points of gross margin?', 'not_the_users_statement', 'question'],
     ['a negation', "A 5% rise in footfall lost wouldn't cost 2 percentage points of gross margin.", 'not_the_users_statement', 'denied'],
+    // RC2a Rule 3 (rc2a.md:9; Science §(h), 8 Oct amendment): unsizable words carry the best-guess/current-extremes ask.
     ['a third figure', 'A 5% fall in footfall would cost us about 2, maybe 3 percentage points of gross margin.', 'not_the_users_statement', 'unclear_figure'],
     ['a corrected figure', 'An 8%, no, a 5% fall in footfall costs about 2 percentage points of gross margin.', 'not_the_users_statement', 'denied'],
     ['no figures', 'Footfall lost from price rise matters a lot for gross margin.', 'not_the_users_figure', undefined],
@@ -254,7 +266,7 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
     expectRefused(r, refusal, why, store, graph, before);
     if (why === 'unclear_figure') {
-      expect(r.question).toBe(`What single change in “${MARGIN}” do you mean, rather than a range?`);
+      expectCarriedBestGuess(r, said, 'not_the_users_statement');
       expect(String(r.detail).replace("How strong is this effect?", "How strong is this effect").match(/\?/g)).toHaveLength(1);
     }
   });

@@ -4,14 +4,17 @@ import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-read
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { afterChangeWord, denominatorWords, isChangeWord, levelDenominatorOf, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { afterChangeWord, denominatorWords, directionTheWordsSay, figureTheUserWroteForSpan, isChangeWord, levelDenominatorOf, linkEffectStatementNamesEndpoints, linkEffectTheUserStated, namesSourceOf, sameWord, statingSentenceOf, wordsOf } from '../agent-lane/stated-by-user.js';
 import { singular, words } from '../agent-lane/same-unit.js';
-import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
+import { boundedLinkEffectText, findLinkEffectAmounts, findLinkEffectBounds, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
 import { isPercentageLevelUnit, resolveMagnitudeFrame, sourceUnitWords } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
 import { mediatorReadings } from '../agent-lane/mediator-reading.js';
 import { canAdoptLabelUnit, labelHeadUnit } from '../agent-lane/label-head-unit.js';
+import { readLinkEffectCurrentGuess, type LinkEffectFloor } from '../agent-lane/link-effect-lower-bound.js';
+
+import { linkEffectBestGuessQuestion } from '../agent-lane/link-effect-question.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -21,6 +24,228 @@ export interface LinkEffectUnitReading {
   readonly node_id: string;
   readonly unit_reading: { readonly unit: string; readonly source: 'user_stated'; readonly source_quote: string };
 }
+/** A current-turn answer; a carried statement supplies context, never any of these figures. */
+export interface LinkEffectClarificationReading {
+  readonly node_id: string;
+  readonly quote: string;
+  readonly answer: string;
+  readonly current_turn?: true;
+  readonly reading?: 'points' | 'relative';
+  readonly statement_classification?: 'asserted';
+  readonly source_text?: string;
+  readonly from_id?: string;
+  readonly to_id?: string;
+  readonly from_label?: string;
+  readonly to_label?: string;
+  /** Legacy carrier content is ignored. No stored figure participates in admission or sizing. */
+  readonly floor?: LinkEffectFloor;
+  readonly lower?: number;
+  readonly upper?: number;
+}
+
+const pointsUnit = (unit: string): boolean => /^(?:(?:percentage\s+)?points?|pp)$/i.test(unit.trim());
+const relativeUnit = (unit: string): boolean => /^(?:%|(?:relative\s+)?percent|per\s+cent)$/i.test(unit.trim());
+const answerUnitKey = (unit: string): string | undefined => unitComparisonKey(unit.trim().replace(/\s+a\s+(day|week|month|year)$/i, ' per $1'));
+
+type CurrentEffectEnds = { readonly source: string; readonly target: string };
+type CurrentEffectScope = Parameters<typeof linkEffectTheUserStated>[3];
+/** Partition only at another named link statement, never at a provider-selected quote boundary. */
+export function currentEffectText(current: string, ends: CurrentEffectEnds | undefined, scope: CurrentEffectScope | undefined): string | null {
+  if (ends === undefined) return current;
+  const quantities = [...new Set([ends.source, ends.target, ...(scope?.quantities ?? [])])];
+  const clauses: { start: number; text: string }[] = [];
+  let start = 0;
+  for (const boundary of current.matchAll(/[;!?\n]|(?<!\d)\.|\.(?!\d)/g)) {
+    clauses.push({ start, text: current.slice(start, boundary.index) });
+    start = boundary.index! + boundary[0].length;
+  }
+  clauses.push({ start, text: current.slice(start) });
+  const statements = clauses.filter(clause => quantities.some(source => quantities.some(target => source !== target
+    && linkEffectStatementNamesEndpoints(clause.text, { source, target }))));
+  if (statements.length < 2 || findLinkEffectBounds(current.slice(0, statements[0]!.start)).length > 0) return current;
+  const matching = statements.filter(statement => linkEffectStatementNamesEndpoints(statement.text, ends));
+  if (matching.length > 1) return null;
+  if (matching.length !== 1) return current;
+  const selected = matching[0]!;
+  const next = statements[statements.indexOf(selected) + 1];
+  return current.slice(selected.start, next?.start).trim().replace(/;$/, '').trimEnd();
+}
+function isCurrentClarification(clarification: LinkEffectClarificationReading | undefined, effect: LinkEffectStatement, quote: string): clarification is LinkEffectClarificationReading {
+  return isRec(clarification) && clarification.current_turn === true && clarification.quote === quote
+    && clarification.answer === quote && clarification.source_text === quote && quote.length <= 8000
+    && clarification.statement_classification === 'asserted' && typeof clarification.from_id === 'string'
+    && typeof clarification.to_id === 'string' && clarification.node_id === clarification.to_id
+    && Number.isFinite(effect.per_source_change) && effect.per_source_change !== 0 && Number.isFinite(effect.amount) && effect.amount !== 0
+    && typeof effect.amount_unit === 'string' && typeof effect.per_source_change_unit === 'string';
+}
+
+/** Admission and spread use only the current quoted guess and current plausible extremes. */
+export function readLinkEffectCurrentAnswer(
+  clarification: LinkEffectClarificationReading | undefined, effect: LinkEffectStatement, quote: string,
+  ends?: CurrentEffectEnds, scope?: CurrentEffectScope,
+): ReturnType<typeof readLinkEffectCurrentGuess> {
+  const question = linkEffectBestGuessQuestion({ quote });
+  const refuse = (refusal = 'unreadable_current_answer'): ReturnType<typeof readLinkEffectCurrentGuess> => ({ ok: false, refusal, question });
+  if (!isCurrentClarification(clarification, effect, quote)) return refuse();
+  const namedEnds = ends ?? (typeof clarification.from_label === 'string' && typeof clarification.to_label === 'string'
+    ? { source: clarification.from_label, target: clarification.to_label } : undefined);
+  const statedScope = scope ?? (namedEnds === undefined ? undefined : { quantities: [namedEnds.source, namedEnds.target] });
+  const current = currentEffectText(quote, namedEnds, statedScope);
+  if (current === null) return refuse('ambiguous_current_statement');
+  quote = current;
+  const reading = pointsUnit(effect.amount_unit) ? 'points' : relativeUnit(effect.amount_unit) ? 'relative' : 'absolute';
+  const targetWords = wordsOf(ends?.target ?? clarification.to_label ?? '');
+  const pointQualifiers = targetWords.length === 0 ? '' : `(?:(?:${targetWords.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s+){0,${targetWords.length}}`;
+  const currentPointsUnit = `${pointQualifiers}((?:percentage\\s+)?points?|pp)`;
+  // A percent symbol does not revoke a resolved points reading. An explicit current relative answer can correct it.
+  if (reading === 'relative' && clarification.reading === 'points' && !/\brelative\b/i.test(quote)) return refuse('unit_mismatch');
+  const currentSuffix = (amount: StatedAmount): string => quote.slice(amount.index + amount.matchedText.length)
+    .replace(/^\s*(?:fewer|less|lower|down|more|extra|additional|higher|up)(?:\s+|$)/i, '');
+  const currentUnit = (amount: StatedAmount): boolean => {
+    const after = currentSuffix(amount);
+    if (reading === 'points') return amount.kind === 'plain' && new RegExp(`^\\s*${currentPointsUnit}\\b`, 'i').test(after);
+    if (reading === 'relative') return amount.kind === 'percent' || /^\s*(?:relative\s+)?(?:percent|per\s+cent|%)(?:\b|$)/i.test(after);
+    if (amount.kind === 'currency') return unitComparisonKey(amount.currencyCode ?? '') === answerUnitKey(effect.amount_unit)?.split('/')[0];
+    const unit = effect.amount_unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^\\s*${unit}(?:\\b|$)`, 'i').test(after);
+  };
+  const permitsUnit = (amount: StatedAmount): boolean => currentUnit(amount)
+    // A stored points reading can settle a bare current figure, never overwrite an explicit current unit.
+    || reading === 'points' && clarification.reading === 'points' && amount.kind === 'plain'
+      && /^\s*(?:[;,.!?]|$)/.test(currentSuffix(amount));
+  const matchesProvider = (answer: ReturnType<typeof readLinkEffectCurrentGuess>): boolean => answer.ok
+    && answer.guess === effect.amount
+    && (clarification.lower === undefined || answer.lower === clarification.lower)
+    && (clarification.upper === undefined || answer.upper === clarification.upper);
+  const namedCurrentStatement = namedEnds !== undefined && linkEffectStatementNamesEndpoints(quote, namedEnds);
+  // A full named statement binds its target figure; its first source figure is never a short-answer guess.
+  const short = namedCurrentStatement ? refuse('unreadable_current_guess')
+    : readLinkEffectCurrentGuess(quote, { reading, unit: effect.amount_unit }, question);
+  if (short.ok) {
+    // A short answer never borrows the denominator from the recorded words.
+    const first = findLinkEffectAmounts(quote)[0];
+    if (first === undefined || !permitsUnit(first)) return refuse('unit_mismatch');
+    return effect.per_source_change === 1 && matchesProvider(short) ? short : refuse('not_the_users_figure');
+  }
+  const firstCurrentAmount = findLinkEffectAmounts(quote)[0];
+  if (short.refusal !== 'unreadable_current_guess' && short.refusal !== 'incomplete_current_range'
+    && firstCurrentAmount !== undefined && permitsUnit(firstCurrentAmount)) return short;
+  const namedFigure = (current: string): StatedAmount | undefined => {
+    if (namedEnds === undefined || statedScope === undefined) return undefined;
+    const sentence = statingSentenceOf(current, effect, namedEnds, statedScope);
+    if (sentence === null) return undefined;
+    const start = quote.indexOf(sentence);
+    if (start < 0) return undefined;
+    const candidates = findLinkEffectAmounts(sentence).filter(amount => amount.magnitude === Math.abs(effect.amount)
+      && (reading === 'points' ? amount.kind === 'plain' : reading === 'relative' ? amount.kind === 'plain' || amount.kind === 'percent'
+        : amount.kind === 'plain' || amount.kind === 'currency'));
+    const target = candidates.length === 1 ? candidates[0] : candidates.find(amount =>
+      figureTheUserWroteForSpan(effect.amount, effect.amount_unit, sentence, { target: [namedEnds.target],
+        others: statedScope.quantities.filter(label => label !== namedEnds.target), strict: true, at: amount.index }) !== null);
+    return target === undefined ? undefined : { ...target, index: start + target.index };
+  };
+  const bounds = findLinkEffectBounds(quote);
+  if (bounds.length > 0) {
+    if (bounds.length !== 2 || bounds[0]!.direction !== 'lower' || bounds[1]!.direction !== 'upper') return short;
+    const firstBound = bounds[0]!;
+    const main = quote.slice(0, firstBound.start).replace(/[;,.]\s*(?:and\s+)?(?:the\s+)?$/i, '').trim();
+    const currentPoint = namedEnds !== undefined && linkEffectStatementNamesEndpoints(main, namedEnds)
+      ? refuse('unreadable_current_guess') : readLinkEffectCurrentGuess(main, { reading, unit: effect.amount_unit }, question);
+    const guessAmount = currentPoint.ok ? findLinkEffectAmounts(main)[0] : namedFigure(main);
+    if (guessAmount === undefined || !permitsUnit(guessAmount)) return refuse('unit_mismatch');
+    const sourceStated = currentPoint.ok ? effect.per_source_change === 1 && currentPoint.guess === effect.amount : true;
+    if (!sourceStated) return short;
+    // Extract the user's target figure and its unit, independently of whether the source clause comes before or after it.
+    const sign = /[+−-]\s*$/.exec(quote.slice(0, guessAmount.index));
+    const start = sign?.index ?? guessAmount.index;
+    const end = guessAmount.index + guessAmount.matchedText.length;
+    const direction = '(?:(?:fewer|less|lower|down|more|extra|additional|higher|up)\\s+)?';
+    const unit = reading === 'points' ? currentPointsUnit : reading === 'relative' ? '(?:relative\\s+)?(?:percent|per\\s+cent|%)'
+      : effect.amount_unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const suffix = new RegExp(`^\\s*${direction}(?:${unit})(?:\\b|$)`, 'i').exec(quote.slice(end))
+      ?? /^\s*(?:fewer|less|lower|down|more|extra|additional|higher|up)\b/i.exec(quote.slice(end));
+    const normalizedSuffix = reading === 'points' && suffix?.[1] !== undefined
+      ? `${/^\s*(?:fewer|less|lower|down|more|extra|additional|higher|up)\b/i.exec(suffix[0])?.[0] ?? ''} ${suffix[1]}` : suffix?.[0] ?? '';
+    let guessText = quote.slice(start, end) + normalizedSuffix;
+    if (!currentPoint.ok && sign === null && !/^\s*(?:fewer|less|lower|down)\b/i.test(normalizedSuffix)) {
+      // The binder has located this target figure. Read its nearest movement after the preceding figure, so a
+      // source decrease cannot negate a target increase. Normalize current movement words, never a provider's sign.
+      const prior = findLinkEffectAmounts(main).filter(amount => amount.index < guessAmount.index).at(-1);
+      const targetPrefix = quote.slice(prior === undefined ? 0 : prior.index + prior.matchedText.length, guessAmount.index);
+      // A movement word inside the target's whole name ("Daily costs") is a noun, not its current direction.
+      const name = wordsOf(namedEnds?.target ?? '');
+      const prefixWords = [...targetPrefix.matchAll(/[\p{L}\p{N}]+/gu)];
+      const names = prefixWords.flatMap((word, i) => name.length > 0 && name.every((part, k) => {
+        const token = prefixWords[i + k];
+        return token !== undefined && sameWord(part, token[0].toLowerCase())
+          && (k === 0 || /^[\s-]+$/.test(targetPrefix.slice(prefixWords[i + k - 1]!.index! + prefixWords[i + k - 1]![0].length, token.index)));
+      }) ? [{ start: word.index!, end: prefixWords[i + name.length - 1]!.index! + prefixWords[i + name.length - 1]![0].length }] : []);
+      const movement = [...targetPrefix.matchAll(/\b(?:rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|ris(?:e|es|ing)|rose|gain(?:s|ed|ing)?|add(?:s|ed|ing)?|decreas(?:e|es|ed|ing)|lowe?r(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|cut(?:s|ting)?|los(?:e|es|ing|t)|loss|cost(?:s|ing)?)\b/gi)]
+        .filter(word => !names.some(span => word.index! >= span.start && word.index! < span.end)).at(-1)?.[0];
+      if (movement !== undefined) {
+        const negative = /^(?:decreas|lower|reduc|fall|fell|drop|cut|los|cost)/i.test(movement);
+        if (directionTheWordsSay(negative ? 'decreases' : 'increases') === 'negative') guessText = `-${guessText}`;
+      }
+    }
+    // Normalize labels only, retaining every numerical byte in the current target and its current extremes.
+    let rangeTail = quote.slice(firstBound.start);
+    for (const bound of [...bounds].reverse()) {
+      const comparatorStart = bound.comparator_start - firstBound.start;
+      const comparatorEnd = bound.comparator_end - firstBound.start;
+      rangeTail = rangeTail.slice(0, comparatorStart) + (bound.direction === 'lower' ? 'lowest' : 'highest') + rangeTail.slice(comparatorEnd);
+    }
+    const range = readLinkEffectCurrentGuess(`${guessText}; ${rangeTail}`, { reading, unit: effect.amount_unit }, question);
+    if (!range.ok) return range;
+    if (range.lower !== undefined && !bounds[0]!.inclusive && range.guess === range.lower
+      || range.upper !== undefined && !bounds[1]!.inclusive && range.guess === range.upper) return refuse('outside_stated_bounds');
+    return matchesProvider(range) ? range : refuse('not_the_users_figure');
+  }
+  if (readSimpleCurrentEffectAnswer(clarification, effect, quote)) return { ok: true, guess: effect.amount };
+  if (namedEnds === undefined || clarification.lower !== undefined || clarification.upper !== undefined) return short;
+  const guessAmount = namedFigure(quote);
+  if (guessAmount === undefined) return short;
+  if (!permitsUnit(guessAmount)) return refuse('unit_mismatch');
+  return { ok: true, guess: effect.amount };
+}
+
+/** Compatibility name for older callers; recorded floors are deliberately never read. */
+export const readLinkEffectCurrentFloorAnswer = readLinkEffectCurrentAnswer;
+
+export function readLinkEffectClarificationAnswer(
+  clarification: LinkEffectClarificationReading | undefined, effect: LinkEffectStatement, quote: string,
+  ends?: CurrentEffectEnds, scope?: CurrentEffectScope,
+): boolean {
+  return readLinkEffectCurrentAnswer(clarification, effect, quote, ends, scope).ok;
+}
+
+function readSimpleCurrentEffectAnswer(
+  clarification: LinkEffectClarificationReading, effect: LinkEffectStatement, quote: string,
+): boolean {
+  if (effect.per_source_change !== 1 || quote.length > 400) return false;
+  if (clarification.lower !== undefined || clarification.upper !== undefined || boundedLinkEffectText(quote) !== undefined) return false;
+  const amounts = findLinkEffectAmounts(quote);
+  const amount = amounts.length === 1 ? amounts[0] : undefined;
+  if (amount === undefined || amount.magnitude !== Math.abs(effect.amount) || amount.kind === 'percent') return false;
+  const prefix = quote.slice(0, amount.index).trim();
+  if (!/^(?:(?:my|the|our)\s+)?(?:(?:best(?:\s+single)?\s+)?(?:guess|estimate)(?:\s+is|\s*:)?\s*)?(?:(?:about|around|roughly|approximately)\s*)?[+−-]?$/i.test(prefix)) return false;
+  const tail = quote.slice(amount.index + amount.matchedText.length).trim().replace(/[.!]$/, '').trim();
+  const direction = /^(?:fewer|less|lower|down)\b/i.test(tail) || /[−-]\s*$/.test(prefix) ? -1 : 1;
+  if (Math.sign(effect.amount) !== direction) return false;
+  const saidUnit = tail.replace(/^(?:fewer|less|lower|down|more|extra|additional|higher|up)\s+/i, '');
+  if (pointsUnit(effect.amount_unit)) return pointsUnit(saidUnit) || saidUnit === '' && clarification.reading === 'points';
+  if (amount.kind === 'currency') {
+    const period = saidUnit.replace(/^(?:a|per)\s+/i, '/');
+    return answerUnitKey(`${amount.currencyCode ?? ''}${period === '' ? '' : period}`) === answerUnitKey(effect.amount_unit);
+  }
+  return saidUnit !== '' && answerUnitKey(saidUnit) === answerUnitKey(effect.amount_unit);
+}
+
+/** A unit-only reply can guide the next question; it never supplies an effect figure. */
+export function isRelativeLinkEffectAnswer(answer: string): boolean {
+  const reply = answer.trim().replace(/^(?:I mean|I meant|it['’]?s|that['’]?s)\s+/i, '').replace(/[.!]$/, '').trim();
+  return /^relative(?:\s+(?:change|increase|decrease))?$/i.test(reply);
+}
+
 export interface PreparedLinkEffectUnitReadings {
   readonly unit_readings: readonly LinkEffectUnitReading[];
   /** % level ends whose change is points in the user's own terms: at a TYPED 0, a bare % can only be points (Science F1);
@@ -316,12 +541,18 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
 
 export function prepareLinkEffectUnitReadings(
   graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string,
-  options?: { readonly link_selected?: boolean },
+  options?: { readonly link_selected?: boolean; readonly clarification?: LinkEffectClarificationReading },
 ): PreparedLinkEffectUnitReadings {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return { unit_readings: [] };
   const nodes = graph.nodes.filter(isRec);
   const source = nodes.find(n => n.id === from); const target = nodes.find(n => n.id === to);
   if (source === undefined || target === undefined) return { unit_readings: [] };
+  const currentEnds = { source: String(source.label ?? from), target: String(target.label ?? to) };
+  const currentScope = { quantities: nodes.map(node => String(node.label ?? node.id)) };
+  const currentAnswer = readLinkEffectClarificationAnswer(options?.clarification, effect, quote, currentEnds, currentScope);
+  const currentText = currentEffectText(quote, currentEnds, currentScope);
+  if (currentText === null) return { unit_readings: [], ask: linkEffectBestGuessQuestion({ quote }) };
+  quote = currentText;
   const edges = graph.edges.filter(isRec);
   const current = edges.find(e => e.from === from && e.to === to);
   const amounts = findLinkEffectAmounts(quote);
@@ -397,6 +628,10 @@ export function prepareLinkEffectUnitReadings(
     } else {
       unit_readings.push({ node_id: String(node.id), unit_reading: { unit, source: 'user_stated', source_quote: one!.clause } });
     }
+  }
+  // A definite unit settles the reading only. It never makes an explicit lower/upper bound a point estimate.
+  if (boundedLinkEffectText(quote) !== undefined && !currentAnswer && asks.length === 0) {
+    asks.push(`You said “${boundedLinkEffectText(quote)}”. What single change in “${String(target.label ?? target.id)}” do you mean, rather than a bound?`);
   }
   // One question even when both ends need clarification.
   return { unit_readings, ...(points_at_zero.length > 0 ? { points_at_zero } : {}), ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };

@@ -36,12 +36,14 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { readLinkEffectClarificationAnswer, readLinkEffectCurrentAnswer, prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero,
+  type LinkEffectClarificationReading, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
-import { centreRangeOfQuote } from '../agent-lane/stated-by-user.js';
+import { centreRangeOfQuote, linkEffectStatementClassification, linkEffectTheUserStated, ownUnitsOf } from '../agent-lane/stated-by-user.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
+import { boundedLinkEffectText } from '../agent-lane/link-effect-figures.js';
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, unknown>;
@@ -73,6 +75,8 @@ export interface ApplyLinkEffectEditParams {
   readonly effect: LinkEffectStatement;
   /** End units inferred from the displayed, literal user statement; approval binds each exact reading. */
   readonly unit_readings?: readonly LinkEffectUnitReading[];
+  /** The user's own answer to the stored statement's same-endpoint reading question. */
+  readonly clarification?: LinkEffectClarificationReading;
   /** A reversal is written only when the card explicitly disclosed both the old and proposed directions. */
   readonly reversal?: LinkEffectReversal;
   /** Grounded canvas selection, supplied by the request and bound into this approval reading. */
@@ -405,12 +409,15 @@ export function linkEffectReadingToken(reading: {
   readonly effect: LinkEffectStatement;
   readonly quote: string;
   readonly unit_readings?: readonly LinkEffectUnitReading[];
+  readonly clarification?: LinkEffectClarificationReading;
   readonly reversal?: LinkEffectReversal;
   readonly link_selected?: true;
 }): string {
   const { amount, amount_unit, per_source_change, per_source_change_unit } = reading.effect;
+  const { floor: _legacyFloor, ...currentClarification } = reading.clarification ?? {};
   const bound = { from: reading.from, to: reading.to, effect: { amount, amount_unit, per_source_change, per_source_change_unit }, quote: reading.quote,
     ...(reading.unit_readings?.length ? { unit_readings: reading.unit_readings } : {}),
+    ...(reading.clarification !== undefined ? { clarification: currentClarification } : {}),
     ...(reading.reversal !== undefined ? { reversal: reading.reversal } : {}),
     ...(reading.link_selected === true ? { link_selected: true } : {}) };
   return `reading:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
@@ -435,7 +442,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (typeof params.quote !== 'string' || params.quote.trim() === '' || params.quote.length > QUOTE_MAX) return refuse('quote_invalid');
   if (typeof params.reading_token !== 'string'
     || params.reading_token !== linkEffectReadingToken({ from, to, effect, quote: params.quote, unit_readings: params.unit_readings,
-      reversal: params.reversal, link_selected: params.link_selected })) {
+      clarification: params.clarification, reversal: params.reversal, link_selected: params.link_selected })) {
     return refuse('reading_not_confirmed');
   }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
@@ -446,6 +453,25 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const found = linkEffectTargetOf(graph, from, to);
   if (found.kind === 'refused') return refuse(found.reason);
   const edge = found.edge;
+  const clarification = params.clarification;
+  if (clarification !== undefined && (clarification.current_turn !== true
+    || clarification.statement_classification !== 'asserted' || clarification.source_text !== params.quote
+    || clarification.answer !== params.quote || clarification.quote !== params.quote
+    || clarification.from_id !== from || clarification.to_id !== to || clarification.node_id !== to)) return refuse('unit_mismatch');
+  const statedEnds = { source: String(nodes.find(n => n.id === from)?.label ?? from),
+    target: String(nodes.find(n => n.id === to)?.label ?? to) };
+  const statedScope = { quantities: nodes.map(n => String(n.label ?? n.id)), target_units: ownUnitsOf(nodes.find(n => n.id === to)!) };
+  // A first current triplet needs the same parser as a reply. Ordinary points also need a current unit witness;
+  // this marker contains current words and endpoint identity only, with no carried reading or numerical fields.
+  const hasCurrentBounds = boundedLinkEffectText(params.quote) !== undefined;
+  const ordinaryPoints = typeof effect.amount_unit === 'string' && /^(?:(?:percentage\s+)?points?|pp)$/i.test(effect.amount_unit.trim());
+  const currentClarification: LinkEffectClarificationReading | undefined = clarification
+    ?? (hasCurrentBounds || ordinaryPoints ? { current_turn: true, statement_classification: 'asserted',
+      node_id: to, from_id: from, to_id: to, from_label: statedEnds.source, to_label: statedEnds.target,
+      source_text: params.quote, quote: params.quote, answer: params.quote } : undefined);
+  const shortAnswer = readLinkEffectClarificationAnswer(clarification, effect, params.quote, statedEnds, statedScope);
+  if (!shortAnswer && linkEffectStatementClassification(params.quote, params.quote, statedEnds) !== 'asserted') return refuse('unit_mismatch');
+  if (clarification !== undefined && !shortAnswer && linkEffectTheUserStated(params.quote, effect, statedEnds, statedScope) !== null) return refuse('unit_mismatch');
 
   // ── REVISION-SAFE: the analysis revision AND every byte of this link are what the ask was prepared against ─────────
   if (computeAnalysisAffectingGraphHash(params.persistedGraph as never) !== expected.graph_hash
@@ -459,8 +485,16 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // Unit readings are identity content, outside the analysis hash: independently re-check eligibility against the
   // persisted node and its other sized links. A level or governing unit added since approval makes adoption stale.
   const unitReadings = params.unit_readings ?? [];
+  const currentAnswer = currentClarification === undefined ? undefined
+    : readLinkEffectCurrentAnswer(currentClarification, effect, params.quote, statedEnds, statedScope);
+  // Bounds are writable only when all three figures were stated in this turn.
+  if (hasCurrentBounds && currentAnswer?.ok !== true) return refuse('unit_mismatch');
+  if (clarification !== undefined && currentAnswer?.ok !== true) return refuse('unit_mismatch');
   const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote,
-    { link_selected: params.link_selected === true });
+    { link_selected: params.link_selected === true, clarification: currentClarification });
+  // Existing literal-percent Science readings (the user's typed zero or own denominator) still settle points.
+  if (clarification === undefined && ordinaryPoints && currentAnswer?.ok !== true
+    && !prepared.points_at_zero?.includes(to)) return refuse('unit_mismatch');
   if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)
     // A % at the user's own 0 is stored in points, exactly as its card said (Science F1); never as a bare %.
     || stableStringify(withPointsAtZero(effect, prepared.points_at_zero, from, to)) !== stableStringify(effect)) {
@@ -541,9 +575,11 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // ⭐ G1b answer door: the range the user wrote around their figure in the quoted sentence (`centreRangeOfQuote`, the
   // door's own reading, bound by the reading token through the quote) is carried exactly as construction carries the same
   // sentence from a brief (`natural_effect.stated_range`, `end: 'centre'`), so the chat and the brief size it alike.
-  const centre = centreRangeOfQuote(params.quote, effect);
+  const centre = currentAnswer?.ok === true && currentAnswer.std !== undefined ? undefined : centreRangeOfQuote(params.quote, effect);
+  const currentStd = currentAnswer?.ok === true ? currentAnswer.std : undefined;
   const sizing = sizeLink(
     { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true,
+      ...(currentStd !== undefined ? { effect_std: currentStd } : {}),
       ...(centre !== undefined ? { stated_range: centre } : {}) },
     sourceNode,
     targetNode,
@@ -583,14 +619,18 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       ? { amount_unit: effect.amount_unit } : {}),
   };
   // The confirmed reading is identity content, outside the analysis hash; every other provenance key (not Olumi's) survives.
-  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect,
+  const { stated_effect_floor: _oldFloor, stated_effect_lower: _oldLower, stated_effect_upper: _oldUpper, stated_effect_std: _oldFloorStd, ...keptWithoutFloor } = keptProvenance;
+  edge.provenance = { ...keptWithoutFloor, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect,
+    ...(currentAnswer?.ok === true && currentAnswer.lower !== undefined && currentAnswer.upper !== undefined
+      ? { stated_effect_lower: currentAnswer.lower, stated_effect_upper: currentAnswer.upper, stated_effect_std: currentAnswer.std } : {}),
     source_quote: params.quote, reading: 'agent_proposed_user_confirmed' };
   edge.provenance_display = 'user_set';
   // A6e: `defaulted` is whole-edge; the statement sizes the strength only, so existence stays Olumi's per field.
   if (edge.defaulted === true) edge.exists_defaulted = true;
   delete edge.defaulted;
   // A6f: a natural effect states the size, not its spread — the std is the sizing's, still not the user's.
-  edge.std_defaulted = true;
+  if (currentStd === undefined) edge.std_defaulted = true;
+  else delete edge.std_defaulted;
   if (gaugeEdge !== undefined) {
     // The gauge: sized, never the user's (MIXED), never a placeholder or a projected mean, never Olumi's old size or why.
     const kept = isRec(gaugeEdge.provenance) ? gaugeEdge.provenance : {};

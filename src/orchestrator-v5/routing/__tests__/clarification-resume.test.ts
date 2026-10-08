@@ -485,6 +485,7 @@ describe('tryClarificationResume — kind classification regression', () => {
     // Graph-mutating today.
     set_factor_value: 'mutating',
     elicit_goal_current_level: 'mutating',
+    elicit_link_effect_clarification: 'mutating',
     // GO(A) — answering "what does <option> cost, in <unit>?" WRITES a native
     // quantity onto an option->factor cell, so it fails closed as mutating for
     // the same reason its model-unit sibling does.

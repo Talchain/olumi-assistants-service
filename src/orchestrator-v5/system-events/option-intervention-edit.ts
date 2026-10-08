@@ -86,7 +86,7 @@ import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.j
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
-import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import type { LinkEffectClarificationReading, LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-reading.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
@@ -572,6 +572,7 @@ export interface ApprovedLinkEffect {
   readonly reading_token: string;
   /** Each disclosed end-unit reading, bound into the approval token and written atomically with this link. */
   readonly unit_readings?: readonly LinkEffectUnitReading[];
+  readonly clarification?: LinkEffectClarificationReading;
   readonly reversal?: LinkEffectReversal;
   readonly link_selected?: true;
 }
@@ -783,7 +784,7 @@ async function applyApprovedLinkEffects(
     if (!graphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable', linkIndex: i };
     const written = applyLinkEffectEdit({ persistedGraph: working, from: link.from, to: link.to, effect: link.effect,
       expected: { graph_hash: graphHash, edge_token: link.edge_token }, quote: link.quote, reading_token: link.reading_token,
-      unit_readings: link.unit_readings,
+      unit_readings: link.unit_readings, clarification: link.clarification,
       reversal: link.reversal, link_selected: link.link_selected,
       lastRunIdentityUse: ctx.lastRunIdentityUse });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: i };
@@ -1008,7 +1009,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
       expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
-      reading_token: linkEffect.reading_token, unit_readings: linkEffect.unit_readings,
+      reading_token: linkEffect.reading_token, unit_readings: linkEffect.unit_readings, clarification: linkEffect.clarification,
       reversal: linkEffect.reversal, link_selected: linkEffect.link_selected,
       lastRunIdentityUse: input.lastRunIdentityUse ?? null, frameRefit: true });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };

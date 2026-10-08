@@ -26,9 +26,10 @@ import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 import { linkEffectSourceLevels } from './link-effect-figures.js';
-import { namesSourceOf } from './stated-by-user.js';
+import { namesSourceOf, linkEffectStatementClassification, linkEffectTheUserStated } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
-import { statedInOneOf } from '../system-events/link-effect-edit.js';
+import { statedInOneOf, type LinkEffectStatement } from '../system-events/link-effect-edit.js';
+import { readLinkEffectClarificationAnswer, readLinkEffectCurrentAnswer, type LinkEffectClarificationReading } from '../system-events/link-effect-unit-reading.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -413,7 +414,7 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
-      quote?: unknown; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
+      quote?: unknown; clarification?: LinkEffectClarificationReading; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
@@ -501,6 +502,24 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     const perWords = e.per_source_change < 0 ? signed(e.per_source_change, e.per_source_change_unit) : unsigned(e.per_source_change, e.per_source_change_unit);
     disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${perWords} `
       + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
+  }
+  if (op.clarification !== undefined) {
+    const clarification = op.clarification;
+    if (clarification.current_turn !== true || clarification.statement_classification !== 'asserted'
+      || clarification.source_text !== op.quote || clarification.from_id !== op.from || clarification.to_id !== op.to
+      || clarification.quote !== op.quote || clarification.answer !== op.quote || clarification.node_id !== op.to) return undefined;
+    const statedEnds = { source: labels.from, target: labels.to };
+    const statedScope = { quantities: [labels.from, labels.to] };
+    const shortAnswer = readLinkEffectClarificationAnswer(clarification, e as LinkEffectStatement, op.quote, statedEnds, statedScope);
+    if (!shortAnswer && (linkEffectStatementClassification(op.quote, op.quote, { source: labels.from, target: labels.to }) !== 'asserted'
+      || linkEffectTheUserStated(op.quote, e as LinkEffectStatement, { source: labels.from, target: labels.to }, { quantities: [labels.from, labels.to] }) !== null)) return undefined;
+    const answer = readLinkEffectCurrentAnswer(clarification, e as LinkEffectStatement, op.quote, statedEnds, statedScope);
+    if (!answer.ok || answer.guess !== e.amount) return undefined;
+    if (answer.lower !== undefined && answer.upper !== undefined) {
+      disclosures.push(`Your plausible extremes are ${signed(answer.lower, e.amount_unit)} and ${signed(answer.upper, e.amount_unit)}; your best guess is ${signed(answer.guess, e.amount_unit)}.`);
+    } else disclosures.push('No range was supplied.');
+    // AIQ: words pending
+    disclosures.push(`Your clarification: “${op.clarification.answer}”.`);
   }
   disclosures.push(...mediated);
   // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.

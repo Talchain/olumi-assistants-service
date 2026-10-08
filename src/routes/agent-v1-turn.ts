@@ -1,3 +1,5 @@
+import { LINK_EFFECT_TOOL, reviseLinkEffectClarification, linkEffectAnswerFirstCall, linkEffectClarificationLineage, linkEffectClarificationOnRefusal, linkEffectClarificationsForAnswerRow, liveLinkEffectClarifications, type LinkEffectClarificationPending, type LinkEffectClarificationAction } from '../orchestrator-v5/agent-lane/link-effect-clarification.js';
+import { linkEffectFloorDisclosures } from '../orchestrator-v5/agent-lane/link-effect-lower-bound.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
@@ -2687,9 +2689,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
+    let effectAsks: LinkEffectClarificationPending[] = [];
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
       try {
-        levelAsk = latestCurrentLevelAsk(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), scenarioId, userId);
+        const pendingAtStart = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+        levelAsk = latestCurrentLevelAsk(pendingAtStart, scenarioId, userId);
+        effectAsks = pendingAtStart.filter((p): p is LinkEffectClarificationPending => p.action.kind === 'elicit_link_effect_clarification' && p.scenario_id === scenarioId);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: current-level ask unreadable — ordinary routing');
       }
@@ -2919,7 +2924,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
         option_participation: st.optionParticipation, run_option_set: st.runOptionSet,
         identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
-      }, selectedPermissions);
+      }, selectedPermissions, liveLinkEffectClarifications(effectAsks, scenarioId, st.graph));
       // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
       const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult, st.graph);
       const goalChanceAskedOnce = goalChanceRead === undefined ? ''
@@ -3403,6 +3408,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let briefReadingOpen = false;
     let levelAnswerTool: typeof CURRENT_LEVEL_TOOL | undefined;
+    let effectAnswerTool: typeof LINK_EFFECT_TOOL | undefined;
     /**
      * ⭐ S-B (§D5): A RECOGNISED PRESS NEVER BECOMES AN ORDINARY AGENT TURN. Every typed path above has had its turn; a press
      * none of them took (a chip with an unexpected `action_type`, a handler that declined) is answered here, typed.
@@ -3505,8 +3511,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: current-level ask unreadable — ordinary routing');
           }
         }
+        effectAnswerTool = linkEffectAnswerFirstCall(st, effectAsks, typedNow,
+          hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null || levelAnswerTool !== undefined
+          || withheldToolsOf(body).includes(LINK_EFFECT_TOOL));
         // AI Harness: a TYPED sentence saying how strong ONE existing link is forces that link's door first (link-sentence-route.ts).
-        linkSentenceTool = linkSentenceFirstCall(st, typedNow, hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null || levelAnswerTool !== undefined);
+        linkSentenceTool = linkSentenceFirstCall(st, typedNow, hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null || levelAnswerTool !== undefined || effectAnswerTool !== undefined);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
       }
@@ -3537,6 +3546,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Before the widen and chip forcings below, which win if both were ever set.
           ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
           ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
+          ...(effectAnswerTool !== undefined ? { firstCallTool: effectAnswerTool } : {}),
           ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
@@ -4047,15 +4057,59 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredApprove = offeredNow.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
     const offeredProposal = offeredApprove !== undefined ? proposals.get(typedApprovalOf({ chip: { id: offeredApprove.id } }) as string) : undefined;
     const emittedAtIso = new Date().toISOString();
+    const effectNext: LinkEffectClarificationPending[] = [];
+    const effectSources: LinkEffectClarificationPending[] = [];
+    const effectObservedLineages: string[] = [];
+    const effectConsumedLineages: string[] = [];
+    const effectLatestFigureLines: string[] = [];
+    for (let i = 0; i < result.tool_calls.length; i++) {
+      if (result.tool_calls[i]?.name !== LINK_EFFECT_TOOL) continue;
+      const toolResult = result.tool_results[i] as { link_effect_clarifications?: LinkEffectClarificationAction[];
+        link_effect_clarification_sources?: LinkEffectClarificationPending[];
+        resolved_link_effects?: { from_id: string; to_id: string }[]; resolved_link_effect_lineages?: string[];
+        link_effect_latest_figure_disclosures?: string[] } | undefined;
+      for (const source of toolResult?.link_effect_clarification_sources ?? []) {
+        const pending = parsePendingAction(source);
+        if (pending?.scenario_id === scenarioId && pending.action.kind === 'elicit_link_effect_clarification') {
+          effectSources.push(pending as LinkEffectClarificationPending);
+        }
+      }
+      for (const action of toolResult?.link_effect_clarifications ?? []) {
+        if (action.lineage_id !== undefined) effectObservedLineages.push(action.lineage_id);
+        const fresh = linkEffectClarificationOnRefusal({ action,
+          message: [message, ...effectAsks.map(p => p.action.quote), ...effectSources.map(p => p.action.quote)].join('\n'),
+          scenarioId, graph: readbackGraph, emittedAtIso });
+        if (fresh !== null) {
+          const previous = [...effectSources, ...effectAsks].filter(p => p.action.from_id === action.from_id
+            && p.action.to_id === action.to_id && p.action.quote === action.quote
+            && (action.lineage_id === undefined || linkEffectClarificationLineage(p) === action.lineage_id))
+            .sort((a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso))[0];
+          effectNext.push(previous === undefined ? fresh : reviseLinkEffectClarification(previous, fresh.action, emittedAtIso));
+        }
+      }
+      // The capability names the exact ask it read, which may be newer than this request's start snapshot.
+      // Legacy tool-result fixtures can settle only the snapshot asks, never newly armed questions.
+      effectConsumedLineages.push(...(toolResult?.resolved_link_effect_lineages ?? effectAsks
+        .filter(ask => toolResult?.resolved_link_effects?.some(link => link.from_id === ask.action.from_id && link.to_id === ask.action.to_id))
+        .map(linkEffectClarificationLineage)));
+      if (result.tool_calls[i]?.ok) effectLatestFigureLines.push(...toolResult?.link_effect_latest_figure_disclosures ?? []);
+    }
+    const consumedEffectLineages = [...new Set(effectConsumedLineages)];
+    let carriedEffects = mode === 'full' ? linkEffectClarificationsForAnswerRow({ prior: [...effectAsks, ...effectSources], next: effectNext,
+      consumedLineages: consumedEffectLineages, graph: readbackGraph, graphHash, nowMs: Date.parse(emittedAtIso), typedByUser: typedByUser(body) }) : [];
+    const effectLapseLines: string[] = [];
+    // AIQ: words pending
+    const effectLapseSentence = (action: LinkEffectClarificationAction): string => `I've set aside your earlier statement about how ‘${action.from_label}’ affects ‘${action.to_label}’; say it again whenever you want it in the model.`;
     // S-D: preserve a stored carrier's revision. Each proposal has its own pending item.
     const existingApprovalCarrier = offeredProposal !== undefined
       ? liveHolds.find(h => heldProposalId(h) === offeredProposal.proposal_id) : undefined;
-    const approvalCarrier = offeredApprove !== undefined && offeredProposal !== undefined
+    let approvalCarrier = offeredApprove !== undefined && offeredProposal !== undefined
       ? existingApprovalCarrier
         ?? refreshedHold(proposalPendingAction(offeredProposal, offeredApprove, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso }), Date.now()) : undefined;
-    if (approvalCarrier !== undefined && !liveHolds.some(h => h.chip_id === approvalCarrier.chip_id)) {
-      liveHolds = [...liveHolds, approvalCarrier];
-      const r = proposalRecord(approvalCarrier, readbackGraph);
+    const offeredCarrier = approvalCarrier;
+    if (offeredCarrier !== undefined && !liveHolds.some(h => h.chip_id === offeredCarrier.chip_id)) {
+      liveHolds = [...liveHolds, offeredCarrier];
+      const r = proposalRecord(offeredCarrier, readbackGraph);
       if (r !== undefined) heldRecords.push(r);
     }
     /**
@@ -4064,18 +4118,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * write the figure the user has just corrected, and the newer card on screen is that same change, restated. Only
      * OLDER holds are replaced, so re-offering an old card never drops a newer one.
      */
-    const offeredAgent = approvalCarrier !== undefined ? agentProposalOf(approvalCarrier) : undefined;
-    if (offeredAgent !== undefined && approvalCarrier !== undefined) {
+    const offeredAgent = offeredCarrier !== undefined ? agentProposalOf(offeredCarrier) : undefined;
+    if (offeredAgent !== undefined && offeredCarrier !== undefined) {
       const targets = new Set(offeredAgent.operations.map((o) => o.path));
       const replaced = liveHolds.filter((h) => {
         const older = agentProposalOf(h);
-        return h.chip_id !== approvalCarrier.chip_id && older !== undefined && older.operations.length > 0
-          && h.emitted_at_iso < approvalCarrier.emitted_at_iso && older.operations.every((o) => targets.has(o.path));
+        return h.chip_id !== offeredCarrier.chip_id && older !== undefined && older.operations.length > 0
+          && h.emitted_at_iso < offeredCarrier.emitted_at_iso && older.operations.every((o) => targets.has(o.path));
       });
       for (const h of replaced) proposals.discard(heldProposalId(h));
       // DL 7 Oct: recorded as superseded (log + the saved answer's words), never silently dropped.
       if (replaced.length > 0) {
-        log.info({ event: 'agent_lane.held_superseded', scenario_id: scenarioId, superseded: replaced.map((h) => heldProposalId(h)), by: approvalCarrier.chip_id },
+        log.info({ event: 'agent_lane.held_superseded', scenario_id: scenarioId, superseded: replaced.map((h) => heldProposalId(h)), by: offeredCarrier.chip_id },
           'agent-lane: a newer offer for the same targets replaced older held proposals');
         heldLapseLines = [...heldLapseLines, ...replaced.map((h) => heldLapseSentence(heldChangeName(h), 'superseded'))];
       }
@@ -4102,24 +4156,36 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
      */
     /*
-     * ⭐ S-D: the row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). Scope issues go first, then the approval
-     * this answer offers or carries (the card the user is looking at; Codex r1 P1 on #2743), then the held proposals,
-     * oldest first. A held proposal that does not fit is SAID as set aside, never dropped in silence, and its card and
-     * fields are withdrawn from this answer with it.
+     * ⭐ S-D: the row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). Scope issues and the approval this answer
+     * offers or carries (the card the user is looking at; Codex r1 P1 on #2743), then held proposals, oldest first,
+     * outrank carried clarifications. A held proposal that does not fit follows the existing named-lapse lifecycle;
+     * overflowing clarifications lapse oldest first, with their statements explicitly named.
      */
     {
+      // A card cannot be offered without room for its durable carrier. The existing over-cap lifecycle names its lapse.
+      if (retainedScopeIssues.length >= PENDING_ACTIONS_PER_TURN_CAP) approvalCarrier = undefined;
       const holdRoom = Math.max(0, PENDING_ACTIONS_PER_TURN_CAP - retainedScopeIssues.length - (approvalCarrier !== undefined ? 1 : 0));
       const otherHolds = liveHolds.filter(h => h.chip_id !== approvalCarrier?.chip_id);
       if (otherHolds.length > holdRoom) {
+        const cut = otherHolds.slice(holdRoom);
+        const withdrawnCardIds = new Set(heldRecords.filter(r => cut.some(h => heldProposalId(h) === r.proposal_id))
+          .flatMap(r => [r.approve_action.id, r.decline_action.id]));
         for (const h of otherHolds.slice(holdRoom)) if (agentProposalOf(h) !== undefined) proposals.discard(heldProposalId(h));
         heldLapseLines = [...heldLapseLines, ...otherHolds.slice(holdRoom).map((h) => heldLapseSentence(heldChangeName(h), 'over_cap'))];
         liveHolds = liveHolds.filter(h => h.chip_id === approvalCarrier?.chip_id || otherHolds.slice(0, holdRoom).includes(h));
         heldRecords = heldRecords.filter((r) => liveHolds.some((h) => heldProposalId(h) === r.proposal_id));
-        // The re-offered card belongs to the OLDEST hold; if even that one did not fit, its card goes with it.
-        if (heldCardOffer.length > 0 && !heldRecords.some((r) => r.approve_action.id === heldCardOffer[0]!.id)) {
-          const cardIds = new Set(heldCardOffer.map((c) => c.id));
-          for (let i = offeredNow.length - 1; i >= 0; i -= 1) if (cardIds.has(offeredNow[i]!.id)) offeredNow.splice(i, 1);
+        // A withdrawn hold takes its fresh or re-offered card with it. Amendment is useful only beside a remaining card.
+        const anyCardRemains = heldRecords.some(r => offeredNow.some(a => a.id === r.approve_action.id));
+        for (let i = offeredNow.length - 1; i >= 0; i -= 1) {
+          if (withdrawnCardIds.has(offeredNow[i]!.id) || (!anyCardRemains && offeredNow[i]!.id === AMEND_CHIP.id)) offeredNow.splice(i, 1);
         }
+      }
+      const effectRoom = Math.max(0, PENDING_ACTIONS_PER_TURN_CAP - retainedScopeIssues.length - liveHolds.length);
+      carriedEffects.sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso));
+      if (carriedEffects.length > effectRoom) {
+        const cut = carriedEffects.splice(0, carriedEffects.length - effectRoom);
+        // AIQ: words pending
+        effectLapseLines.push(...cut.map(p => effectLapseSentence(p.action)));
       }
     }
     // Remembered only once the row's capacity is settled, so a card withdrawn above is never remembered as offered.
@@ -4136,10 +4202,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const pendingCandidates = [
       ...retainedScopeIssues,
       ...[...liveHolds].sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso)),
+      ...carriedEffects,
       ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
     ];
-    // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK): scope issues, the offered approval, the held proposals
-    // (sized above so none is cut here), then the Run offer. What still does not fit is logged.
+    // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK): scope issues, held proposals, carried stated
+    // effects (all sized above so none is cut here), then the Run offer. What still does not fit is logged.
     if (pendingCandidates.length > PENDING_ACTIONS_PER_TURN_CAP) {
       log.warn({ scenario_id: scenarioId, dropped: pendingCandidates.slice(PENDING_ACTIONS_PER_TURN_CAP).map((pa) => pa.action.kind) },
         'agent-lane: pending actions over the per-row cap — the lowest-priority items are not carried');
@@ -4474,13 +4541,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view', ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
     })();
-    // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
-    // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
-    // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
-    if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
-      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
-      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
-    }
     let pendingPreview: ProposalPreview | undefined;
     /**
      * ⭐ T2 — THE GUIDANCE ROW (M1; `turn-context/guidance-wire.ts`): at most one coaching row (+ one edits row) from this
@@ -4567,6 +4627,79 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
       wireBody = { ...wireBody, assistant_text: resting.includes(freshScopeQuestion) ? resting : `${resting} ${freshScopeQuestion}`.trim() };
     }
+    const effectQuestions = liveLinkEffectClarifications(effectNext, scenarioId, readbackGraph)
+      .filter(p => carriedEffects.some(c => c.action.from_id === p.action.from_id && c.action.to_id === p.action.to_id))
+      .map(p => p.action);
+    if (!leaderFreeEnvelope && effectQuestions.length > 0) {
+      let resting = textAtRest(String(wireBody.assistant_text ?? ''));
+      const pairKey = (action: Pick<LinkEffectClarificationAction, 'from_id' | 'to_id'>): string => JSON.stringify([action.from_id, action.to_id]);
+      const questionOwners = new Map<string, Set<string>>();
+      for (const { action } of [...effectAsks, ...effectNext]) {
+        for (const words of [action.question, ...sentencesOf(action.question)]) {
+          const owners = questionOwners.get(words) ?? new Set<string>();
+          owners.add(pairKey(action)); questionOwners.set(words, owners);
+        }
+      }
+      const failedPairs = new Set(effectQuestions.map(pairKey));
+      // Deictic reading/size questions can inherit a pair only from this turn's one structured failed effect.
+      // Their whole vocabulary must concern that reading; a label or bound phrase never grants a replacement licence.
+      const effectVocabulary = new Set(('what which how much do does did can could would should is are was were '
+        + 'you we i me us your our it its this that these those the a an as for of to or and mean meant read reading '
+        + 'treat record use choose expect expecting supply give propose think say said single change changes figure '
+        + 'figures size effect guess best range most least plausibly upper lower end increase decrease rise fall cut '
+        + 'point points percentage percent relative absolute current today todays level one two three four five '
+        + 'six seven eight nine ten by in at than less more no').split(' '));
+      const effectOnlyWords = (sentence: string): boolean => {
+        const tokens = sentence.toLowerCase().replace(/[’']s\b/g, 's').match(/[a-z]+|\d+(?:\.\d+)?|%/g) ?? [];
+        return tokens.length > 0 && tokens.length <= 35
+          && tokens.every(token => /^\d|^%$/.test(token) || effectVocabulary.has(token));
+      };
+      const readingOrSizeCue = /\b(?:(?:single|best)\s+(?:change|figure|size|guess)|effect|reading|percentage\s+points?|relative|absolute)\b/i;
+      const entityNodes = parsedGraphOrNull(readbackGraph)?.nodes ?? [];
+      const hasOtherSubject = (words: string, ask: LinkEffectClarificationAction): boolean => entityNodes.some(node =>
+        node.id !== ask.from_id && node.id !== ask.to_id && typeof node.label === 'string'
+        && words.toLowerCase().includes(node.label.toLowerCase()));
+      const questionBelongsTo = (sentence: string, previous: string | undefined, ask: LinkEffectClarificationAction): boolean => {
+        const key = pairKey(ask), owners = questionOwners.get(sentence);
+        if (owners !== undefined) return owners.size === 1 && owners.has(key);
+        if (failedPairs.size !== 1 || !failedPairs.has(key) || !effectOnlyWords(sentence) || !readingOrSizeCue.test(sentence)
+          || hasOtherSubject([previous, sentence].filter(Boolean).join(' '), ask)) return false;
+        // A deictic follow-up to another topic has no effect identity, even when its words ask for a single figure.
+        if (previous !== undefined) {
+          const priorOwners = questionOwners.get(previous);
+          if (priorOwners !== undefined) return priorOwners.size === 1 && priorOwners.has(key);
+          if (!effectOnlyWords(previous) || !readingOrSizeCue.test(previous)) return false;
+        }
+        return true;
+      };
+      for (const ask of effectQuestions) {
+        if (resting.includes(ask.question)) continue;
+        // Replacement is keyed by the producer's exact directed pair; unidentified or other-pair questions remain.
+        resting = sentencesOf(resting).filter((sentence, i, all) => !sentence.includes('?')
+          || !questionBelongsTo(sentence, all[i - 1], ask)).join(' ');
+        resting = `${resting} ${ask.question}`.trim();
+      }
+      wireBody = { ...wireBody, assistant_text: resting };
+    }
+    if (effectLapseLines.length > 0) {
+      wireBody = { ...wireBody, assistant_text: withB3LinesAtRest(String(wireBody.assistant_text ?? ''), effectLapseLines) };
+    }
+    // A requested or failed Run, even beside an earlier readback result, has no new analysis to qualify.
+    const completedAnalysisThisTurn = lastRun?.status === 200
+      && lastRun.blocks?.some(block => (block as { type?: unknown } | null)?.type === 'analysis_result') === true;
+    const effectRunFloorLines = completedAnalysisThisTurn ? linkEffectFloorDisclosures(readbackGraph, carriedEffects) : [];
+    const effectFloorLines = [...effectRunFloorLines,
+      ...new Set(effectLatestFigureLines)];
+    if (effectFloorLines.length > 0) {
+      wireBody = { ...wireBody, assistant_text: withB3LinesAtRest(String(wireBody.assistant_text ?? ''), effectFloorLines) };
+    }
+    // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
+    // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
+    // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
+    if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
+      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
+      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
+    }
     /**
      * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a
      * better length before with the three bullets as a construct"; `agent-lane/reply/compose-reply.ts`). HERE, after every
@@ -4588,7 +4721,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
       const reply = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
-      const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
+      const asks = [...decisionLines, askLine, freshScopeQuestion, ...effectQuestions.map(a => a.question), ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
       // this same final body, plus the paragraph the gate appended and every fixed no-leader sentence present.
@@ -4599,6 +4732,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || closingReason === WITHHELD_SEPARATION_UNAVAILABLE || closingReason === WITHHELD_LEADER_CAUSE_UNRECORDED
         ? coHold?.subjects : undefined;
       const obligations: FaceObligation[] = [
+        ...effectLapseLines.map((text) => ({ role: 'caveat' as const, text })),
+        ...effectRunFloorLines.map((text) => ({ role: 'caveat' as const, text })),
+        ...effectLatestFigureLines.map((text) => ({ role: 'host' as const, text })),
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
         ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
         ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
@@ -4755,9 +4891,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
           // ⭐ S-D: held proposals are reconciled again against the latest row just before the append: one another request
           // declined meanwhile is never resurrected, and one another request minted meanwhile is never erased.
-          heldProposals: { isHeld: isHeldProposal, seenByThisRequest: heldSeenThisTurn,
+          heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set([...heldSeenThisTurn,
+            ...effectAsks.map(linkEffectClarificationLineage), ...effectSources.map(linkEffectClarificationLineage),
+            ...effectObservedLineages, ...consumedEffectLineages]),
             offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
-            onReconciled: (write, overCap) => {
+            onReconciled: (write, overCap, overCapClarifications) => {
               reconciledPending = write.pending_actions ?? [];
               heldRecords = (write.pending_actions ?? []).flatMap(p => {
                 const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
@@ -4765,7 +4903,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               overCapAtAppend = overCap;
               // ⛔ The reply composer is the ONE last writer of the reply (#2748): a lapse found HERE, after composing, is
               // said at the start of this scenario's next reply (`owedHeldLapses`), never appended to this one.
-              overCapSaid = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
+              overCapSaid = [...overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap')),
+                ...overCapClarifications.flatMap(p => p.action.kind === 'elicit_link_effect_clarification' ? [effectLapseSentence(p.action)] : [])];
               const actions = (wireBeforeFloor.suggested_actions as OfferedAction[] | undefined ?? []).filter(a => {
                 const approved = typedApprovalOf({ chip: { id: a.id } }); const declined = declinedProposalOf(a.id);
                 return approved !== undefined ? heldRecords.some(r => r.proposal_id === approved)

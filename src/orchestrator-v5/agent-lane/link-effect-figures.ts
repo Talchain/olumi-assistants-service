@@ -2,6 +2,9 @@
 import { findStatedAmounts, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 
+/** Shared with the statement binder: a figure followed by one of these words describes a change. */
+export const LINK_EFFECT_CHANGE_AFTER = /^\s*(?:(?:percentage\s+)?points?\s+)?(?:rises?|increases?|cuts?|drops?|falls?|jumps?|hikes?|reductions?|decreases?|gains?|loss|more|fewer|less|extra|additional|higher|lower|up|down|off|changes?|swings?)\b/i;
+
 function normalised(quote: string): { text: string; starts: number[]; ends: number[] } {
   const re = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})(?:\\s+and\\s+a\\s+half)?\\b|\\bhalf(?:\\s+a)?(?=\\s+(?:percentage\\s+)?points?\\b)|\\ba(?=\\s+(?:percentage\\s+)?points?\\b)`, 'giu');
   let text = ''; const starts: number[] = []; const ends: number[] = [];
@@ -84,6 +87,7 @@ const fractionOfAFigure = new RegExp(`\\b(?:${FRACTION}|half)\\s+of\\s+(?:(?:a|a
 
 /** Ranges cannot license either endpoint or a midpoint as a single user's figure. */
 export function hasLinkEffectRange(quote: string): boolean {
+  if (boundedLinkEffectText(quote) !== undefined) return true;
   if (fractionOfANumber.test(quote) || fractionOfAUnit.test(quote) || fractionOfAFigure.test(quote) || digitsAndAFraction.test(quote)
     || new RegExp(`\\bpoint\\s+(?:${CARDINAL_AMOUNT_SOURCE}|\\d)\\b`, 'iu').test(quote)) return true;
   const amounts = findLinkEffectAmounts(quote);
@@ -94,4 +98,81 @@ export function hasLinkEffectRange(quote: string): boolean {
     return /^\s*(?:,?\s*(?:maybe|or)|[-–—]|to)\s*$/i.test(between) && !/\bfrom\s*$/i.test(quote.slice(0, a.index))
       || /^\s*and\s*$/i.test(between) && /\bbetween\s*$/i.test(quote.slice(0, a.index));
   });
+}
+
+export interface LinkEffectBound {
+  readonly direction: 'lower' | 'upper';
+  readonly inclusive: boolean;
+  readonly amount: StatedAmount;
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+  /** Only the comparator words, allowing a source-warrant check without changing either figure or its units. */
+  readonly comparator_start: number;
+  readonly comparator_end: number;
+}
+
+// One vocabulary for every link-size reader. Prefix and suffix forms remain attached to their particular amount.
+const LOWER_EXTREME_WORDS = 'lowest(?:\\s+it\\s+could\\s+plausibly\\s+be)?|at\\s+the\\s+low\\s+end';
+const UPPER_EXTREME_WORDS = 'highest(?:\\s+it\\s+could\\s+plausibly\\s+be)?|at\\s+the\\s+high\\s+end';
+const LOWER_BOUND_WORDS = `at least|no less than|no fewer than|at minimum|(?:a |the )?minimum(?: of)?|upwards? of|more than|over|above|${LOWER_EXTREME_WORDS}`;
+const UPPER_BOUND_WORDS = `at most|no more than|no greater than|no higher than|no larger than|at maximum|(?:a |the )?maximum(?: of)?|up to|less than|under|below|${UPPER_EXTREME_WORDS}`;
+const BOUND_BEFORE = new RegExp(`\\b(${LOWER_BOUND_WORDS}|${UPPER_BOUND_WORDS})(?:\\s+|\\s*:\\s*)`
+  + '(?:(?:increase|decrease|rise|fall|change|by|about|around|roughly|approximately|a|an|is)\\s+)*(?::\\s*)?[+−-]?\\s*$', 'i');
+const LOWER_BOUND = new RegExp(`^(?:${LOWER_BOUND_WORDS})$`, 'i');
+const EXTREME = new RegExp(`^(?:${LOWER_EXTREME_WORDS}|${UPPER_EXTREME_WORDS})$`, 'i');
+const STRICT_BOUND = /^(?:more than|over|above|less than|under|below)$/i;
+// Units may be a short count or currency-period phrase; punctuation or a second figure cannot be crossed.
+const BOUND_AFTER = /^\s*(?:[\p{L}]+(?:\/[\p{L}]+)?\s+){0,5}(or\s+(?:more|less|fewer))\b/iu;
+const CHANGE_WORDS = /\b(?:increas(?:e|es|ing|ed)|decreas(?:e|es|ing|ed)|rais(?:e|es|ing|ed)|ris(?:e|es|ing)|fall(?:s|ing)?|fell|cut(?:s|ting)?|drop(?:s|ped|ping)?|add(?:s|ed|ing)?|los(?:e|es|ing|t)|reduce(?:s|d)?|gain(?:s|ed)?|change(?:s|d)?)\b/i;
+
+/**
+ * All one-sided bounds attached to stated figures. By default only a CHANGE is returned, so a bounded current level
+ * elsewhere cannot turn a separate definite effect into a range. Context classification also reads level comparators:
+ * the "no" in "no less than 30%" is a bound rather than a denial.
+ */
+export function findLinkEffectBounds(quote: string, options?: { readonly changesOnly?: boolean }): readonly LinkEffectBound[] {
+  return findLinkEffectAmounts(quote).flatMap(amount => {
+    const amountEnd = amount.index + amount.matchedText.length;
+    const before = quote.slice(0, amount.index);
+    const after = quote.slice(amountEnd);
+    const prefix = BOUND_BEFORE.exec(before);
+    const suffix = BOUND_AFTER.exec(after);
+    if (prefix === null && suffix === null) return [];
+    const start = prefix?.index ?? amount.index;
+    // The amount scanner omits a leading sign; it belongs to this figure, not the words proving it is a change.
+    const lead = (before.slice(0, prefix?.index ?? amount.index).split(/[,;.!?\n]/).at(-1) ?? '').replace(/[+−-]\s*$/, '');
+    const changes = prefix !== null && (CHANGE_WORDS.test(prefix[0]) || EXTREME.test(prefix[1]!))
+      || /(?:\bby|\bevery|\beach|\bper)\s*$/i.test(lead)
+      || CHANGE_WORDS.test(lead.match(/(?:[\p{L}]+\s*){1,3}$/u)?.[0] ?? '')
+      || LINK_EFFECT_CHANGE_AFTER.test(after);
+    if (options?.changesOnly !== false && !changes) return [];
+    const found: LinkEffectBound[] = [];
+    if (prefix !== null) {
+      found.push({ direction: LOWER_BOUND.test(prefix[1]!) ? 'lower' : 'upper', inclusive: !STRICT_BOUND.test(prefix[1]!), amount,
+        text: quote.slice(start, amountEnd).trim(), start, end: amountEnd,
+        comparator_start: start, comparator_end: start + prefix[1]!.length });
+    }
+    if (suffix !== null) {
+      const comparatorStart = amountEnd + suffix[0].lastIndexOf(suffix[1]!);
+      const end = comparatorStart + suffix[1]!.length;
+      found.push({ direction: /^or\s+more$/i.test(suffix[1]!) ? 'lower' : 'upper', inclusive: true, amount,
+        text: quote.slice(amount.index, end).trim(), start: amount.index, end,
+        comparator_start: comparatorStart, comparator_end: end });
+    }
+    return found;
+  });
+}
+
+/** Attached bound words are not denials; stripping them never supplies a point estimate. */
+export function withoutLinkEffectBoundComparators(quote: string): string {
+  const spans = findLinkEffectBounds(quote, { changesOnly: false })
+    .map(bound => ({ start: bound.comparator_start, end: bound.comparator_end }))
+    .sort((a, b) => b.start - a.start);
+  return spans.reduce((text, span) => text.slice(0, span.start) + ' '.repeat(span.end - span.start) + text.slice(span.end), quote);
+}
+
+/** A one-sided change bound, never a bounded current level elsewhere in the sentence. */
+export function boundedLinkEffectText(quote: string): string | undefined {
+  return findLinkEffectBounds(quote)[0]?.text;
 }

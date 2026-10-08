@@ -43,8 +43,7 @@ const onlyReads = (w: ReturnType<typeof world>) => {
 };
 
 describe('⭐ the served correction reads exactly as the same sentence without its "not" tail', () => {
-  // The served sentence's "1%" on a source measured in % then gets the points-or-share question (U3): the SAME answer its
-  // tail-free twin gets, never the denial it got on 13149d8 ("How much does … move …, using the figures you wrote?").
+  // RC2a Rule 3 (rc2a.md:9): keep the initial points/relative question; the carrier retains each exact statement.
   const TWIN = 'Each 1% price rise adds £600 a month to monthly recurring revenue.';
   it.each(['%', 'percentage points'])('one link, per-change unit %s: served sentence ≡ its twin, never a denial', async (unit) => {
     const run = async (said: string) => {
@@ -57,6 +56,11 @@ describe('⭐ the served correction reads exactly as the same sentence without i
     expect(served.r.why, JSON.stringify(served.r)).not.toBe('denied');
     expect({ ok: served.r.ok, refusal: served.r.refusal, question: served.r.question })
       .toEqual({ ok: twin.r.ok, refusal: twin.r.refusal, question: twin.r.question });
+    for (const [result, quote] of [[served.r, SAID], [twin.r, TWIN]] as const) {
+      expect(result.question).toBe('Is that a 1-point rise in “Price rise” (say 10% → 11%), or 1% of today’s level?');
+      expect(result.link_effect_clarifications[0].question).toBe(result.question);
+      expect(result.link_effect_clarifications[0].quote).toBe(quote);
+    }
     onlyReads(served.w);
   });
 });

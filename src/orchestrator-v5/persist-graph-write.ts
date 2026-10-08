@@ -108,7 +108,8 @@
  *   narrower claim than one storage generation.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
+import { linkEffectClarificationLineage, liveLinkEffectClarifications, type LinkEffectClarificationPending } from './agent-lane/link-effect-clarification.js';
+import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -118,6 +119,7 @@ import {
 } from './persisted-graph-invariants.js';
 import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
 import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
+import { isAgentAnswerRow } from './session/conversation-as-seen.js';
 import { preconditionRiskLinkViolations } from '../orchestrator/graph-structure-validator.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -197,12 +199,19 @@ export interface CheckedGraphAppendParams {
   /** Only successful, user-authorised scope withdrawals may retire this durable issue. */
   readonly withdrawnGoalScopeChipIds?: readonly string[];
   /**
+   * Clarifications this ordinary/inner turn saw before dispatch. Unlike its own newly minted asks, these carriers
+   * are lineage ids and may survive only while the latest row still carries that lineage. Inner Run commits reconcile
+   * against that row without entering the conditional RPC, whose authority is limited to final non-graph Agent answers.
+   */
+  readonly clarificationSeenByThisRequest?: ReadonlySet<string>;
+  /**
    * ⭐ S-D (lane EDIT-PANEL; Codex r1 P1-3 + r2 P1-2 on #2743): held proposals are reconciled against the latest row read
    * HERE, just before the append, not only against the caller's earlier read. A request that reconciled its held
    * proposals and then took seconds to answer must neither put back one another request approved or declined meanwhile
    * (a supplied held item is kept only while the latest row still holds it) nor erase one another request minted
-   * meanwhile (a held item on the latest row that this request never saw is carried). `seenByThisRequest`: every held
-   * item this request read, so the ones it settled itself (approved, declined, lapsed: each said) are never re-added.
+   * meanwhile (a held item on the latest row that this request never saw is carried). The same arrival obligation
+   * applies to live link-effect clarifications. `seenByThisRequest`: every held item and clarification this request
+   * handled (held chip ids; clarification lineage ids), so the ones it settled itself are never re-added.
    * S-D.1b compares the identity of this read inside the conditional append RPC,
    * then rereads and repeats this reconciliation on contention (three attempts).
    */
@@ -210,8 +219,9 @@ export interface CheckedGraphAppendParams {
     readonly isHeld: (pending: PendingAction) => boolean;
     readonly seenByThisRequest: ReadonlySet<string>;
     readonly offeredChipIds?: ReadonlySet<string>;
-    /** Re-project the answer sidecar and say capacity lapses from this final pending read, before the append. */
-    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[]) => SessionTurnWrite;
+    /** Re-project the answer sidecar and owe named capacity lapses from this final read; held cards keep their existing lifecycle. */
+    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[],
+      overCapClarifications: readonly PendingAction[]) => SessionTurnWrite;
   };
 }
 
@@ -387,6 +397,14 @@ export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
   const { store, writesGraph, source } = params;
+  const reconcileClarifications = params.heldProposals !== undefined || params.clarificationSeenByThisRequest !== undefined;
+  // The production conditional RPC has no graph, handler, fence or version authority. A latest-row reconciliation
+  // must not select that RPC for an inner Run/draft/edit commit just because its clarification seen-set is present.
+  const requestWrite = params.write;
+  const canConditionallyAppend = reconcileClarifications && !writesGraph && requestWrite.graph == null
+    && requestWrite.modelVersion === undefined && requestWrite.briefText == null && requestWrite.coaching_state == null
+    && requestWrite.turn_class === 'direct_answer' && requestWrite.handler_id === null && requestWrite.response_emitted
+    && !requestWrite.turn_id.endsWith(':claim') && isAgentAnswerRow(requestWrite);
   for (let attempt = 0; ; attempt += 1) {
     // Always reconcile the ORIGINAL request against each fresh row. Reusing the
     // previous attempt would retain obsolete scope issues or permanently drop holds.
@@ -396,32 +414,78 @@ export async function appendCheckedGraphWrite(
     // Only this sidecar is extended here; graph bytes and both hashes remain exactly as prepared.
     if (typeof store.readMostRecentPendingActions === 'function') {
       const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict',
-        ...(params.heldProposals !== undefined ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
+        ...(canConditionallyAppend ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
       if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
       let supplied = write.pending_actions ?? [];
       // Per attempt: what did not fit is said from THIS read's reconciliation only (S-D slice 2 x S-D.1b).
       const heldOverCap: PendingAction[] = [];
-      if (params.heldProposals !== undefined) {
-        const { isHeld, seenByThisRequest } = params.heldProposals;
-        const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
-        const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
-        const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
+      const clarificationOverCap: PendingAction[] = [];
+      const arriving = new Set<string>();
+      // Clarification-only inner commits protect consent carriers without importing full card projection or lifecycle rules.
+      const isPriorityHeld = params.heldProposals?.isHeld ?? ((p: PendingAction) => p.action.kind === 'apply_proposed_change');
+      const heldPriority = (p: PendingAction): number => p.action.kind === 'reconcile_goal_scope' ? 0
+        : isPriorityHeld(p) && params.heldProposals?.offeredChipIds?.has(p.chip_id) ? 1
+          : arriving.has(p.chip_id) ? 2 : isPriorityHeld(p) ? 3
+            : p.action.kind === 'elicit_link_effect_clarification' ? 4 : 5;
+      const capWithHeldPriority = (pending: readonly PendingAction[]): PendingAction[] => {
+        const merged = [...pending].sort((a, b) => heldPriority(a) - heldPriority(b)
+          // RC2: holds outrank clarification questions; the oldest question lapses when the row fills.
+          || (a.action.kind === 'elicit_link_effect_clarification' && b.action.kind === 'elicit_link_effect_clarification'
+            ? b.emitted_at_iso.localeCompare(a.emitted_at_iso) : a.emitted_at_iso.localeCompare(b.emitted_at_iso)));
+        const dropped = merged.slice(PENDING_ACTIONS_PER_TURN_CAP);
+        heldOverCap.push(...dropped.filter(p => params.heldProposals?.isHeld(p)));
+        clarificationOverCap.push(...dropped.filter(p => p.action.kind === 'elicit_link_effect_clarification'));
+        if (dropped.length > 0) log.warn({ scenario_id: write.scenario_id, source, dropped: dropped.map(p => p.chip_id) },
+          '[persist] concurrent pending actions exceed the row cap; named capacity lapses are owed on the next reply');
+        return merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP).sort((a, b) =>
+          Number(b.action.kind === 'reconcile_goal_scope') - Number(a.action.kind === 'reconcile_goal_scope')
+          || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
+      };
+      if (reconcileClarifications) {
+        const isHeld = params.heldProposals?.isHeld ?? (() => false);
+        const seenByThisRequest = params.heldProposals?.seenByThisRequest ?? params.clarificationSeenByThisRequest!;
+        const identity = (p: PendingAction): string => p.action.kind === 'elicit_link_effect_clarification'
+          ? linkEffectClarificationLineage(p as LinkEffectClarificationPending) : p.chip_id;
+        const onLatest = new Set(prior.filter(p => isHeld(p) || p.action.kind === 'elicit_link_effect_clarification')
+          .map(identity));
+        // Seen questions obey the same consumption check as held cards on EVERY fresh read, including a CAS retry.
+        let kept = supplied.filter(n => (!isHeld(n) && n.action.kind !== 'elicit_link_effect_clarification')
+          || onLatest.has(identity(n)) || !seenByThisRequest.has(identity(n)));
+        const graph = writesGraph ? write.graph : params.baseGraphForInvariants;
+        const shapedGraph = graph !== null && typeof graph === 'object' && !Array.isArray(graph)
+          && Array.isArray((graph as { nodes?: unknown }).nodes) && Array.isArray((graph as { edges?: unknown }).edges);
+        // A missing graph read cannot establish resolution. Carry those words without granting an answer licence.
+        const liveClarifications = shapedGraph ? liveLinkEffectClarifications(prior, write.scenario_id, graph)
+          : prior.filter(p => p.action.kind === 'elicit_link_effect_clarification' && !isPendingActionExpired(p, Date.now()));
+        const sameClarificationLink = (a: PendingAction, b: PendingAction): boolean =>
+          a.action.kind === 'elicit_link_effect_clarification' && b.action.kind === 'elicit_link_effect_clarification'
+          && a.action.from_id === b.action.from_id && a.action.to_id === b.action.to_id;
+        const sameClarificationSource = (a: PendingAction, b: PendingAction): boolean =>
+          sameClarificationLink(a, b) && a.action.kind === 'elicit_link_effect_clarification'
+          && b.action.kind === 'elicit_link_effect_clarification' && a.action.quote === b.action.quote;
+        const arrivingClarifications = liveClarifications.filter(p => (!seenByThisRequest.has(identity(p))
+          // A newer durable revision of a carried lineage still wins; consuming that lineage supplies no carrier.
+          || kept.some(n => n.action.kind === 'elicit_link_effect_clarification' && identity(n) === identity(p)))
+          && !kept.some(n => n.chip_id === p.chip_id)
+          // A consumed newer question must not license an older arrival either; compare BEFORE presence pruning too.
+          && ![...supplied, ...liveClarifications].some(n => sameClarificationLink(n, p)
+            && (Date.parse(n.emitted_at_iso) > Date.parse(p.emitted_at_iso)
+              || (supplied.includes(n) && Date.parse(n.emitted_at_iso) === Date.parse(p.emitted_at_iso)
+                && (!sameClarificationSource(n, p) || n.chip_id === p.chip_id)))));
+        // Newer questions replace only their exact pair. Equal-time revisions of the same source favour the latest
+        // durable row: overlapping updates can mint distinct revisions in one millisecond. Distinct statements retain
+        // the prepared answer's precedence on a tie.
+        kept = kept.filter(p => p.action.kind !== 'elicit_link_effect_clarification'
+          || !arrivingClarifications.some(n => sameClarificationLink(n, p)
+            && (Date.parse(n.emitted_at_iso) > Date.parse(p.emitted_at_iso)
+              || (Date.parse(n.emitted_at_iso) === Date.parse(p.emitted_at_iso)
+                && sameClarificationSource(n, p) && n.chip_id !== p.chip_id))));
+        const arrivingHolds = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
+        const arrived = [...arrivingHolds, ...arrivingClarifications];
         if (kept.length !== supplied.length || arrived.length > 0) {
-          const merged = [...kept, ...arrived];
-          const arriving = new Set(arrived.map(p => p.chip_id));
+          for (const p of arrivingHolds) arriving.add(p.chip_id);
           // A concurrently arriving offer keeps its room alongside this answer's offer. Other holds remain oldest first.
-          const priority = (p: PendingAction): number => p.action.kind === 'reconcile_goal_scope' ? 0
-            : isHeld(p) && params.heldProposals?.offeredChipIds?.has(p.chip_id) ? 1
-              : arriving.has(p.chip_id) ? 2 : isHeld(p) ? 3 : 4;
-          merged.sort((a, b) => priority(a) - priority(b) || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
-          if (merged.length > PENDING_ACTIONS_PER_TURN_CAP) {
-            heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(isHeld));
-            log.warn({ scenario_id: write.scenario_id, source, dropped: merged.slice(PENDING_ACTIONS_PER_TURN_CAP).map((p) => p.chip_id) },
-              '[persist] held proposal another request added does not fit the row; the lowest-priority items are not carried');
-          }
-          supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP).sort((a, b) =>
-            Number(b.action.kind === 'reconcile_goal_scope') - Number(a.action.kind === 'reconcile_goal_scope')
-            || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
+          supplied = capWithHeldPriority([...kept, ...arrived]);
           write = { ...write, pending_actions: supplied };
         }
       }
@@ -431,10 +495,10 @@ export async function appendCheckedGraphWrite(
         .flatMap(p => { const kept = refreshScopePending(p, writesGraph ? write.graph : params.baseGraphForInvariants); return kept ? [kept] : []; });
       if (missing.length > 0) {
         const merged = [...missing, ...supplied];
-        if (params.heldProposals !== undefined) heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(params.heldProposals.isHeld));
-        write = { ...write, pending_actions: merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
+        write = { ...write, pending_actions: !reconcileClarifications
+          ? merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) : capWithHeldPriority(merged) };
       }
-      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
+      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap, clarificationOverCap);
     }
     if (writesGraph) assertNoScopedIdentityConflict(write.graph);
 

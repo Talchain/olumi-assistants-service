@@ -49,6 +49,7 @@ import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
+import { linkEffectClarificationLineage, type LinkEffectClarificationPending } from './agent-lane/link-effect-clarification.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -1634,6 +1635,9 @@ export async function commitDirectAnswer(
     writesGraph,
     baseGraphForInvariants: metadata.baseGraphForInvariants,
     source: metadata.handler_id ?? undefined,
+    clarificationSeenByThisRequest: new Set((metadata.priorPendingActions ?? [])
+      .filter((p): p is LinkEffectClarificationPending => p.action.kind === 'elicit_link_effect_clarification')
+      .map(linkEffectClarificationLineage)),
     write: {
       scenario_id: metadata.scenario_id,
       turn_id: metadata.turn_id,

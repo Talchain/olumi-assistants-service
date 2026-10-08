@@ -136,6 +136,10 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
     case 'elicit_goal_current_level':
       return { ...base, action: { kind, goal_id: 'goal_revenue', goal_label: 'Revenue', user_id: null,
         question: 'What is revenue today?' } };
+    case 'elicit_link_effect_clarification':
+      return { ...base, action: { kind, from_id: 'fac_price', to_id: 'goal_revenue',
+        from_label: 'Price', to_label: 'Revenue', quote: 'Raising price increases revenue by 5%.',
+        question: 'Do you mean points or a relative percent?', refusal: 'unit_mismatch' } };
     case 'set_factor_value':
       return { ...base, action: { kind, factor_id: 'fac_x', value: 1, operator: 'set' } };
     case 'edit_graph_add_risk':
@@ -292,6 +296,7 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     // Same reasoning again: a bare "yes" answers no "what value counts as
     // success?" question. An elicitation, never a proposal.
     ['elicit_goal_target', 0],
+    ['elicit_link_effect_clarification', 0],
     ['run_analysis', 0],
     ['what_would_flip', 0],
   ])('a single live %s → confirmationExpectingLiveCount %d, but always counted live', (kind, expected) => {
