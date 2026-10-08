@@ -9,6 +9,10 @@
  * (`RunDeltaInputChangeObjectSchema`, `win_probabilities_unavailable`).
  */
 import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
+import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { diffRunInputSnapshots } from '../../coaching/run-input-changes.js';
 import { checkMethodTurn } from '../guidance/index.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
@@ -23,6 +27,9 @@ const LABELS: Record<string, string> = {
   ai_reporting_module_availability: 'AI reporting module availability',
   integration_step_bug_resolution: 'Integration-step bug resolution',
   qualified_leads: 'Qualified leads per month',
+  risk: 'Feature release slips',
+  mrr: 'MRR',
+  price: 'Pro plan price',
 };
 const labelOf = (id: string) => LABELS[id];
 const OPTIONS = ['AI Reporting Module Sprint', 'Integration Bug Fix Sprint', 'Split Sprint Capacity', 'Continue Current Plan'];
@@ -47,6 +54,147 @@ const plan = (delta: unknown, licensed = false) => rerunExplanationPlan(delta, l
 
 const LINE = `${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.unwithheld}`;
 const PAIRED = { ...UNWITHHELD, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] };
+
+const snapshot = (over: Partial<RunInputSnapshot> = {}): RunInputSnapshot => ({
+  snapshot_version: 1, sent_digest: 'a'.repeat(64), residual_digest: 'b'.repeat(64),
+  goal: null, options: [], options_not_sent: [], factors: [], constraints: [], links: [], ...over,
+});
+const PRESENCE_ROWS = diffRunInputSnapshots(snapshot(), snapshot({ links: [
+  { from: 'risk', to: 'mrr', mean: -0.5 }, { from: 'price', to: 'risk', mean: -0.5 },
+] }));
+const ENTERED = [
+  'A link from ‘Feature release slips’ to ‘MRR’ entered the model.',
+  'A link from ‘Pro plan price’ to ‘Feature release slips’ entered the model.',
+];
+
+/** Resolve literal kinds/fields at the producer's constructors, including spreads and conditional kinds. */
+function emittedPairs(): string[] {
+  const path = fileURLToPath(new URL('../../coaching/run-input-changes.ts', import.meta.url));
+  const program = ts.createProgram([path], { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true });
+  const source = program.getSourceFile(path)!;
+  const checker = program.getTypeChecker();
+  const pairs = new Set<string>();
+  let writes = 0;
+  const strings = (type: ts.Type): string[] => {
+    if (type.isUnion()) return type.types.flatMap(strings);
+    if (type.isStringLiteral()) return [type.value];
+    throw new Error(`Unresolved producer row type: ${checker.typeToString(type)}`);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === 'rows') {
+      const parent = node.parent;
+      expect(ts.isVariableDeclaration(parent) && parent.name === node
+        || ts.isPropertyAccessExpression(parent) && parent.expression === node && parent.name.text === 'push'
+        || ts.isShorthandPropertyAssignment(parent), 'row writes must not bypass the constructor guard').toBe(true);
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText(source) === 'rows') {
+      expect(node.getText(source), 'rows must enter through the checked constructors').toBe('rows.push(r)');
+      writes += 1;
+      const declaration = checker.getSymbolAtLocation(node.arguments[0]!)?.valueDeclaration;
+      expect(declaration?.parent.parent.getText(source)).toMatch(/^push\s*=/u);
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const name = node.expression.text;
+      if (name === 'push') expect(node.arguments[0] && ts.isCallExpression(node.arguments[0])
+        && node.arguments[0].expression.getText(source) === 'changeRow').toBe(true);
+      if (name === 'changeRow' || name === 'pushPair') {
+        const argument = node.arguments[0]!;
+        const declaration = ts.isIdentifier(argument) ? checker.getSymbolAtLocation(argument)?.valueDeclaration : undefined;
+        if (declaration !== undefined && ts.isParameter(declaration)) {
+          expect(name).toBe('changeRow');
+          expect(node.getText(source)).toBe('changeRow(base, pair[0], pair[1])');
+          expect(declaration.parent.parent.getText(source)).toMatch(/^pushPair\s*=/u);
+        } else {
+          const type = checker.getTypeAtLocation(argument);
+          const values = (key: string) => {
+            const property = type.getProperty(key);
+            if (property === undefined) throw new Error(`Missing ${key}: ${node.getText(source)}`);
+            return strings(checker.getTypeOfSymbolAtLocation(property, argument));
+          };
+          for (const kind of values('entity_kind')) for (const field of values('field')) pairs.add(`${kind}:${field}`);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  const producer = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'diffRunInputs');
+  if (producer === undefined || !ts.isFunctionDeclaration(producer) || producer.body === undefined) throw new Error('Missing diffRunInputs');
+  visit(producer.body);
+  expect(writes).toBe(1);
+  expect(pairs.size).toBeGreaterThan(0);
+  return [...pairs].sort();
+}
+
+describe('Q4: every recorded row is spoken or accounted for', () => {
+  it('Paul\'s risk → MRR and price → risk presence rows name both links entering the model', () => {
+    const p = plan({ ...PAIRED, input_changes: PRESENCE_ROWS })!;
+    expect(p.changes).toEqual([ENTERED[1], ENTERED[0]]);
+    expect(p.codeLine).not.toContain(RERUN_NO_CHANGE_LINES.unknown);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it('a link leaving the model says left, with both endpoint labels', () => {
+    const rows = diffRunInputSnapshots(snapshot({ links: [{ from: 'risk', to: 'mrr', mean: -0.5 }] }), snapshot());
+    const p = plan({ ...PAIRED, input_changes: rows })!;
+    expect(p.changes).toEqual(['A link from ‘Feature release slips’ to ‘MRR’ left the model.']);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it.each(['from', 'to'] as const)('an unknown %s end stays skipped, alone and beside a named presence row', (end) => {
+    const known = PRESENCE_ROWS.find((r) => r.link?.from === 'risk')!;
+    const unknown = { ...known, link: { ...known.link!, [end]: 'gone' } };
+    expect(plan({ ...PAIRED, input_changes: [unknown] })!.codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
+    const p = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [known, unknown] })!;
+    expect(p.changes).toEqual([ENTERED[0]]);
+    expect(p.codeLine).toBe(`${ENTERED[0]} ${RERUN_FALLBACK_LINES.other}`);
+    expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.C0);
+    expect(p.inputs.attribution_case).toBe('C2_unpaired');
+  });
+
+  it('exhaustiveness: every producer pair has a sentence or a skipped-row disclosure, never a silent omission', () => {
+    const prior = snapshot({
+      goal: { node_id: 'mrr', label: 'MRR', target_raw: 55000, unit: 'GBP', operator: '>=', direction: 'maximize' },
+      factors: [{ factor_id: 'mrr', label: 'MRR', raw: 40000, unit: 'GBP', encoded: 0.4 },
+        { factor_id: 'price', label: 'Pro plan price', raw: 49, unit: 'GBP', encoded: 49 }],
+      options: [{ option_id: 'o', label: 'Raise price', settings: [{ factor_id: 'price', label: 'Pro plan price', raw: 49, unit: 'GBP', encoded: 49 }] }],
+      constraints: [{ constraint_id: 'c', node_id: 'price', label: 'Price limit', raw: 50, unit: 'GBP', operator: '<=' }],
+      links: [{ from: 'risk', to: 'mrr', mean: 0.4, band: 'moderate', sizing: 'placeholder',
+        natural_effect: { amount: 2, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'days' } }],
+    });
+    const current = snapshot({
+      goal: { ...prior.goal!, target_raw: 60000, unit: 'USD', operator: '>', direction: 'minimize' },
+      factors: prior.factors.map((f) => ({ ...f, raw: 59, encoded: 59 })),
+      options: [{ ...prior.options[0]!, settings: [{ ...prior.options[0]!.settings[0]!, raw: 59, encoded: 59 }] },
+        { option_id: 'new', label: 'New option', settings: [] }],
+      constraints: [{ ...prior.constraints[0]!, raw: 60, operator: '<' }],
+      links: [{ ...prior.links[0]!, mean: 0.8, band: 'strong', sizing: 'olumi_accepted',
+        natural_effect: { ...prior.links[0]!.natural_effect!, amount: 3 } }, { from: 'price', to: 'risk', mean: -0.5 }],
+    });
+    const rows = [...diffRunInputSnapshots(prior, current), ...diffRunInputSnapshots(prior, { ...prior, goal: null })];
+    const probes = new Map(rows.map((row) => [`${row.entity_kind}:${row.field}`, row]));
+    expect([...probes.keys()].sort(), 'a new producer pair needs a behavioural row').toEqual(emittedPairs());
+    for (const [pair, row] of probes) {
+      const spoken = pair !== 'link:effect' && pair !== 'link:strength';
+      const alone = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [row] })!;
+      expect(alone.changes.length, pair).toBe(spoken ? 1 : 0);
+      const beside = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, row] })!;
+      expect(beside.changes.length, pair).toBe(spoken ? 2 : 1);
+      expect(beside.codeLine.endsWith(spoken ? RERUN_FALLBACK_LINES.C0 : RERUN_FALLBACK_LINES.other), pair).toBe(true);
+      if (!spoken) {
+        expect(alone.codeLine, pair).toBe(RERUN_NO_CHANGE_LINES.unknown);
+        expect(beside.inputs.attribution_case, pair).toBe('C2_unpaired');
+        expect(beside.codeLine, pair).not.toContain(RERUN_FALLBACK_LINES.C0);
+      }
+      const unnamed = { ...row, label_before: undefined, label_after: undefined,
+        ...(row.link !== undefined ? { link: { from: 'gone', to: row.link.to } } : {}) };
+      const unsaid = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, unnamed] })!;
+      expect(unsaid.changes, pair).toEqual([SAID_AI]);
+      expect(unsaid.codeLine, pair).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
+      expect(unsaid.inputs.attribution_case, pair).toBe('C2_unpaired');
+    }
+  }, 20_000);
+});
 
 describe('the plan: Olumi\'s code line from the typed rows, the check inputs', () => {
   it('RED (the investor moment): two Accepts → RC\'s two sentences with the graph\'s labels + the UNWITHHELD line; prior_withheld is typed', () => {
@@ -80,8 +228,8 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     expect(plan({ ...UNWITHHELD, input_changes: [accept('gone_a', 'gone_b')] })!.codeLine).not.toContain(RERUN_NO_CHANGE_LINES.nothing);
   });
 
-  it('a change no template can name (a link presence row) beside a named Accept: never "Nothing else changed", checked as unpaired (Codex pre-review P2)', () => {
-    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'qualified_leads', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
+  it('an unknown-end link presence row beside a named Accept: never "Nothing else changed", checked as unpaired (Codex pre-review P2)', () => {
+    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'gone', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
     const p = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, presence] })!;
     expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
     expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.C0);
@@ -228,7 +376,7 @@ describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown d
   });
 
   it('CONTROL: a RECORDED row no template can name, under PARTIAL coverage, is an observed difference → "Other things also differed"', () => {
-    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'qualified_leads', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
+    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'gone', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
     expect(plan({ ...PAIRED, input_coverage: 'partial', input_changes: [AI, presence] })!.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
   });
 

@@ -141,7 +141,7 @@ const bandWord = (v: unknown): string | undefined => {
 
 /**
  * The change sentences: one per link (its sizing + strength rows together), one per other row. `skipped` counts rows no
- * template can name (unknown link ends, a link `presence` row, a row with no label): those changes happened but go unsaid,
+ * template can name (unknown link ends, a row with no label): those changes happened but go unsaid,
  * so the line never says "Nothing else changed" beside them (Codex pre-review e1c7c788 P2).
  * ⛔ A BAND MOVE IS THE USER'S CHANGE ONLY WITH THEIR WRITE IN THE PAIR (cut 6; DL 0df0e1 + Science d5 on #2631, 6 Oct).
  * A band also moves when Olumi refits a frame or a goal's level re-frames it, and the snapshot carries no frames, so a
@@ -162,6 +162,14 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
   const saidLinks = new Set<string>();
   for (const row of rows) {
     const link = rec(row.link);
+    if (row.entity_kind === 'link' && link !== undefined && row.field === 'presence') {
+      const from = labelOf(String(link.from)); const to = labelOf(String(link.to));
+      const entered = row.before === null && rec(row.after)?.raw === true;
+      const left = rec(row.before)?.raw === true && row.after === null;
+      if (from === undefined || to === undefined || (!entered && !left)) { skipped += 1; continue; }
+      out.push(`A link from ‘${from}’ to ‘${to}’ ${entered ? 'entered' : 'left'} the model.`);
+      continue;
+    }
     if (row.entity_kind === 'link' && link !== undefined && row.field === 'effect') {
       effects.set(`${String(link.from)}->${String(link.to)}`, row);
       continue;
