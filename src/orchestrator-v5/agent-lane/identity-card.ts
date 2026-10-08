@@ -25,11 +25,18 @@ export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
 /** The stored reading a `confirm_identity` proposal carries, or `undefined` for any other proposal. */
 export function identityReadingOf(proposal: StructuredProposal): IdentityProposal | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === CONFIRM_IDENTITY_OP ? proposal.operations[0]! : undefined;
-  const v = (op?.value ?? {}) as { outcome_id?: unknown; operation?: unknown; factor_ids?: unknown; words?: unknown };
+  const v = (op?.value ?? {}) as { outcome_id?: unknown; operation?: unknown; factor_ids?: unknown; words?: unknown; part_level?: unknown };
   if (op === undefined || typeof v.outcome_id !== 'string' || v.outcome_id !== op.path || v.operation !== 'product'
     || !Array.isArray(v.factor_ids) || v.factor_ids.length !== 2 || !v.factor_ids.every((f) => typeof f === 'string' && f !== '')
     || typeof v.words !== 'string' || v.words.trim() === '') return undefined;
-  return { outcome_id: v.outcome_id, operation: 'product', factor_ids: [v.factor_ids[0] as string, v.factor_ids[1] as string], words: v.words };
+  const level = v.part_level;
+  if (level !== undefined && (typeof level !== 'object' || level === null || Array.isArray(level))) return undefined;
+  const part = level as { part_id?: unknown; raw_value?: unknown; unit?: unknown } | undefined;
+  if (part !== undefined && (typeof part.part_id !== 'string' || !v.factor_ids.includes(part.part_id)
+    || typeof part.raw_value !== 'number' || !Number.isFinite(part.raw_value) || part.raw_value <= 0
+    || typeof part.unit !== 'string' || part.unit.trim() === '')) return undefined;
+  return { outcome_id: v.outcome_id, operation: 'product', factor_ids: [v.factor_ids[0] as string, v.factor_ids[1] as string], words: v.words,
+    ...(part !== undefined ? { part_level: { part_id: part.part_id as string, raw_value: part.raw_value as number, unit: part.unit as string } } : {}) };
 }
 
 /**
@@ -42,7 +49,7 @@ export const identityApproveMessage = (words: string): string => `${IDENTITY_APP
 export function readingOfIdentityApproval(message: unknown): string | undefined {
   if (typeof message !== 'string' || !message.startsWith(IDENTITY_APPROVE_PREFIX)) return undefined;
   const words = message.slice(IDENTITY_APPROVE_PREFIX.length);
-  return words.startsWith('Is “') || (words.startsWith('Olumi reads ‘') && words.endsWith('’. Is that how you work it out?'))
+  return words.startsWith('Is “') || (words.startsWith('Olumi reads ‘') && words.endsWith('. Is that how you work it out?'))
     ? words : undefined;
 }
 
@@ -58,7 +65,9 @@ export function identityIssuedText(issued: unknown): string {
 
 /** What the Agent is told when a Run's stored model holds a reading to confirm. */
 export const IDENTITY_CARD_NOTE =
-  'Olumi has a reading of the goal for the user to confirm. Call propose_identity (no arguments), then ask the user its '
+  'Olumi has a reading of the goal for the user to confirm. Call propose_identity with no arguments when all its parts '
+  + 'already have the user’s figures. If the user just typed a figure for a part the model asked for, pass part_label, '
+  + 'value and unit together, using only that figure. Then ask the user its '
   + '`words` exactly as returned, and tell them to confirm on the button. Never state the reading as fact, never change its '
   + 'figures, and never run the analysis again yourself.';
 

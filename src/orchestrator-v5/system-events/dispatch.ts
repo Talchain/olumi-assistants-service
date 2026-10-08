@@ -3363,7 +3363,9 @@ export type CommitOptionLevelsInput = {
     readonly factor_ids: readonly string[];
     /** The card's displayed sentence. */
     readonly words: string;
-    /** `identityConfirmReadingToken({outcome_id, factor_ids, words})` of the reading the approval card SHOWED. */
+    /** The user's just-typed figure for an asked part, inside this single approval. */
+    readonly part_level?: import('../agent-lane/identity-proposal.js').IdentityPartLevel;
+    /** `identityConfirmReadingToken({outcome_id, factor_ids, words, part_level})` of the reading the approval card SHOWED. */
     readonly reading_token: string;
   };
   /**
@@ -3462,7 +3464,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
-      reading_token: input.identity_confirm.reading_token } } : {}),
+      reading_token: input.identity_confirm.reading_token,
+      ...(input.identity_confirm.part_level !== undefined ? { part_level: input.identity_confirm.part_level } : {}) } } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),

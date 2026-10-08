@@ -6,6 +6,7 @@
  * carries the user's carrier and a new revision; the same card pressed again → no second write.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
@@ -129,6 +130,24 @@ describe('⭐ a user-confirmed product is ONE commit through the real level door
     expect(res).toMatchObject({ status: 'refused', reason: 'identity_reading_not_confirmed' });
     expect(rows.size).toBe(0);
     expect(nodeOf('mrr').nonlinear_identity).toBeUndefined();
+  });
+
+  it('ONE WRITE: an asked outcome figure travels inside identity_confirm through append and reload', async () => {
+    const fixture = JSON.parse(readFileSync('src/orchestrator-v5/system-events/__tests__/fixtures/b1-828d87ac-stored-graph.json', 'utf8'));
+    fixture.nodes.find((n: { id: string }) => n.id === 'mrr').nonlinear_identity.stated_in_brief = false;
+    persisted = fixture;
+    const edgesBefore = structuredClone(fixture.edges);
+    const reading = { outcome_id: 'mrr', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'],
+      words: 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’ (300, your figure). Is that how you work it out?',
+      part_level: { part_id: 'pro_paying_subscribers', raw_value: 300, unit: 'subscribers' } };
+    const res = await commitOptionLevelsInProcess(input({}, reading), 'req-ic-part-figure');
+    expect(res.status, JSON.stringify(res)).toBe('committed');
+    expect(rows.size).toBe(1);
+    const reloaded = GraphV3.parse(projectGraphForPersistence(persisted));
+    expect(reloaded.nodes.find(n => n.id === 'pro_paying_subscribers')?.observed_state)
+      .toMatchObject({ raw_value: 300, source: 'user_override', unit: 'subscribers' });
+    expect(reloaded.nodes.find(n => n.id === 'mrr')?.nonlinear_identity?.stated_in_brief).toBe(true);
+    expect((persisted as { edges: unknown }).edges).toEqual(edgesBefore);
   });
 
   it('NO WRITE: the card\'s token with OTHER words (or other factors) is refused', async () => {

@@ -27,6 +27,13 @@ import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
+/** The figure just typed for an asked product part, carried inside its one confirmation. */
+export interface IdentityPartLevel {
+  readonly part_id: string;
+  readonly raw_value: number;
+  readonly unit: string;
+}
+
 export interface IdentityProposal {
   readonly outcome_id: string;
   readonly operation: 'product';
@@ -34,6 +41,7 @@ export interface IdentityProposal {
   readonly factor_ids: readonly [string, string];
   /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
+  readonly part_level?: IdentityPartLevel;
 }
 
 /** The approved-card door's limit on the displayed words (Canonical #2292). */

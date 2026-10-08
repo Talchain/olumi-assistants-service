@@ -480,6 +480,8 @@ export function goalLevelTheUserWrote(
  * factors' nouns ("Hire Two Developers" vs "Developers hired"), so they would make the target's own word ambiguous.
  */
 export interface EntityScope {
+  /** The asked identity figure must be exact, not an approximation such as "300-ish". Other readers keep their rule. */
+  readonly exactFigure?: true;
   readonly target: readonly string[];
   readonly others: readonly string[];
   /**
@@ -670,6 +672,8 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
+    if (scope.exactFigure === true && (/\b(?:about|around|roughly|approximately|circa)\s*$/i.test(before)
+      || /^(?:[-\s]*ish\b|\s*or so\b)/i.test(after))) return false;
     const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
     const endAt = after.search(/[.!?;,:\n\u2013\u2014]/);
     const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;

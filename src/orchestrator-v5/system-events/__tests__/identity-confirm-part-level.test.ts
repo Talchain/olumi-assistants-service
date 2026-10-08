@@ -39,9 +39,9 @@ describe('no Yes over a part with no level (stored 828d87ac)', () => {
     const r = pressYes(beforeYes());
     expect(r.kind).toBe('refused');
     expect(r.kind === 'refused' ? r.reason : r.kind).toBe('operand_level_missing');
-    // An OUTCOME has no level writer (`LEVEL_WRITER_KINDS`), so the user is never invited to give a figure Olumi can't save.
-    expect(r.kind === 'refused' ? r.detail : r.kind).toBe('Olumi can’t work out ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’ yet: '
-      + '‘Pro paying subscribers’ has no figure in the model, and Olumi can’t record one for it yet, so there is nothing for you to confirm.');
+    // The identity writer can save an OUTCOME's asked figure inside the one confirmation.
+    expect(r.kind === 'refused' ? r.detail : r.kind).toBe('To work out ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, '
+      + 'I need ‘Pro paying subscribers’: what is it today?');
   });
 
   it('⭐ RED: no door offers the card (the Run hint and the re-offer read the same predicate)', () => {
