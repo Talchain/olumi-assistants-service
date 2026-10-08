@@ -356,7 +356,16 @@ interface NodeProjection {
 function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
-  if (horizonSteadyAttested(r)) out.horizon_basis = { basis: r.horizon_basis, source: r.horizon_basis_source, months: r.horizon_basis_months };
+  // The stored attestation bytes are hashed as written (no scenario id here, so no validity reading): a press or a
+  // goal-meaning edit moves the hash, and the Run reads validity itself.
+  if (typeof r.horizon_basis_key === 'string') {
+    out.horizon_basis = { basis: r.horizon_basis, source: r.horizon_basis_source, months: r.horizon_basis_months };
+    out.horizon_basis_key = r.horizon_basis_key;
+    out.horizon_basis_goal_meaning = [
+      typeof r.label === 'string' ? r.label.trim().toLowerCase().replace(/\s+/g, ' ') : null,
+      r.goal_threshold_unit ?? null, r.goal_horizon_months ?? null,
+    ];
+  }
   const scope = goalScopeAnalysisMeaning(r.goal_scope);
   if (scope !== undefined) out.goal_scope = scope;
 

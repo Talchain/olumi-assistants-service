@@ -219,9 +219,10 @@ export function displayedGoalPct(p: number): number {
  * only where the Run's own goal certainty earned it (`earned`; 0.63.0): the transport strips an unearned one, so a licence
  * over it would quote a figure the user is never shown. No certainty decision ⇒ unearned (fail closed).
  */
+/** The stored graph owns the temporal attestation, before Run removes any calculation carriers. */
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
-  sentThreshold?: SentGoalThreshold,
+  sentThreshold?: SentGoalThreshold, scenarioId?: string, storedGraph: unknown = graph,
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -321,7 +322,7 @@ export function goalChanceLicenceOf(
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
-    ...(horizonSteadyAttested(goal) ? { horizon_basis: { basis: 'steady_attested' as const, source: 'user_stated' as const,
+    ...(horizonSteadyAttested(storedGraph, scenarioId) ? { horizon_basis: { basis: 'steady_attested' as const, source: 'user_stated' as const,
       months: goal!.horizon_basis_months as number, why: steadyHorizonWhy(String(goal!.label), goal!.horizon_basis_months as number) } } : {}),
     message: `Each option’s ${share === null ? 'chance of meeting your goal'
       : shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)} is licensed on this Run.`,
@@ -579,9 +580,9 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
-  sentThreshold?: SentGoalThreshold,
+  sentThreshold?: SentGoalThreshold, scenarioId?: string, storedGraph: unknown = graph,
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold);
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, scenarioId, storedGraph);
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;

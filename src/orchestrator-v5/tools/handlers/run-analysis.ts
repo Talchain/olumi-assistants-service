@@ -2853,7 +2853,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance), args.scenario_id, snapshot.rawPersistedGraph ?? snapshot.graph);
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
@@ -3137,8 +3137,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const chanceCells = projectCanonicalAnalysisCells(horizonResult, horizonGraph, factCandidate.result.goal_certainty)
       .map(option => option.cell);
     factCandidate.result.enrichment = withShortHorizonBesideChance(
-      withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells, accumulationDrift.warnings.length > 0),
-      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0);
+      withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells, accumulationDrift.warnings.length > 0, args.scenario_id),
+      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0, args.scenario_id);
 
     // --- 7. Zod-validate the fact ----------------------------------------
     //

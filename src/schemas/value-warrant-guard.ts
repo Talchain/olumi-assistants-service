@@ -799,6 +799,20 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "not read as its warrant. It is a DURATION, not a level of the goal metric: " +
       "out of the analysis hash and outside `carriesValue` / `NODE_QUANTITY_FIELDS`.",
   },
+  // ── SCOPE-AMBIGUOUS: the user's steady-goal attestation (declared 9 Oct 2026, Science §(ad), CEE #2887) ─────
+  {
+    id: "scope-ambiguous:cee.NodeV3::horizon_basis_months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — not a quantity but a BINDING: it records which `goal_horizon_months` the user's steady-goal " +
+      "attestation was given for, and `horizonSteadyAttested` (goal-target/horizon-basis.ts) honours the four fields " +
+      "only when months match and `horizon_basis_key` binds the scenario, goal id, label, unit and months; any accumulation " +
+      "carrier takes precedence. A changed goal meaning, deadline or scenario voids the attestation. Its UNIT is its " +
+      "name (whole months) and its attestation is its sibling `horizon_basis_source` ('user_stated'), written together " +
+      "with `horizon_basis` and `horizon_basis_key` by ONE writer: the user's press on the attest_goal_steady card (`applyGoalSteadyEdit`). " +
+      "Client graph doors strip all four (register + normalisation + field-safety); never defaulted. Not an analysis input " +
+      "(the engine never reads it); it licenses the goal-chance line only.",
+  },
   // ── UNWARRANTED, ADJUDICATED: a link size's written range (declared 30 Sep 2026, A4, CEE #2409) ──────────
   {
     id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.low",

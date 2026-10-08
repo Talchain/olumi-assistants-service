@@ -342,10 +342,11 @@ export const NodeV3 = z.object({
    */
   goal_direction: z.enum(['>=', '<=', '>', '<']).optional().catch(undefined),
   goal_horizon_months: z.number().int().positive().optional().catch(undefined),
-  /** Science §(ad)(3): optional user-card judgement, bound to the month answered; never defaulted. */
+  /** Science §(ad)(3): optional user-card judgement, bound to the scenario, goal meaning and month answered; never defaulted. */
   horizon_basis: z.literal('steady_attested').optional().catch(undefined),
   horizon_basis_source: z.enum(['user_stated', 'olumi_reading']).optional().catch(undefined),
   horizon_basis_months: z.number().int().positive().optional().catch(undefined),
+  horizon_basis_key: z.string().optional().catch(undefined),
   /**
    * ⛔ THE DEADLINE AS THE BRIEF STATES IT (goal nodes only; PJ-E-A2 part 2, MG #72 5867208469, Canonical 5867397963).
    * The brief's own words, verbatim, at most 60 characters ("by Q3"). NOT a month count: turning "by Q3" into months

@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { EditGraphHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { horizonSteadyAttested } from './horizon-basis.js';
+import { horizonSteadyAttested, steadyAttestationKey } from './horizon-basis.js';
 
 type Rec = Record<string, unknown>;
 const record = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -12,7 +12,7 @@ export interface ApprovedGoalSteady {
   readonly months: number;
 }
 
-export function applyGoalSteadyEdit(persistedGraph: unknown, approved: ApprovedGoalSteady):
+export function applyGoalSteadyEdit(persistedGraph: unknown, approved: ApprovedGoalSteady, scenarioId: string):
   | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string } {
@@ -25,13 +25,14 @@ export function applyGoalSteadyEdit(persistedGraph: unknown, approved: ApprovedG
   if (!Number.isInteger(approved.months) || approved.months <= 0 || approved.months !== goal.goal_horizon_months) {
     return { kind: 'refused', reason: 'goal_month_changed' };
   }
-  if (horizonSteadyAttested(goal)) return { kind: 'unchanged' };
+  if (horizonSteadyAttested(persistedGraph, scenarioId)) return { kind: 'unchanged' };
   const graph = structuredClone(persistedGraph);
   const written = (graph.nodes as Rec[]).find(n => n.id === approved.goal_id)!;
   // Stamp authorship here, never copy a producer's source from the operation.
   written.horizon_basis = 'steady_attested';
   written.horizon_basis_source = 'user_stated';
   written.horizon_basis_months = approved.months;
+  written.horizon_basis_key = steadyAttestationKey(goal, scenarioId);
   const label = String(goal.label ?? 'the goal');
   const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false,
     result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
@@ -44,8 +45,8 @@ export function applyGoalSteadyEdit(persistedGraph: unknown, approved: ApprovedG
 }
 
 /** No unrelated graph bytes may move in this approval. */
-export function goalSteadyPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedGoalSteady): boolean {
-  const expected = applyGoalSteadyEdit(before, approved);
+export function goalSteadyPostimageIsScoped(before: unknown, after: unknown, approved: ApprovedGoalSteady, scenarioId: string): boolean {
+  const expected = applyGoalSteadyEdit(before, approved, scenarioId);
   return expected.kind !== 'refused'
     && isDeepStrictEqual(expected.kind === 'mutated' ? expected.mutatedGraph : before, after);
 }

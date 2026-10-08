@@ -1111,10 +1111,10 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     }
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
-    const written = applyGoalSteadyEdit(before, goalSteady);
+    const written = applyGoalSteadyEdit(before, goalSteady, input.scenarioId);
     if (written.kind !== 'mutated') return written;
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !goalSteadyPostimageIsScoped(before, graph, goalSteady)) {
+    if (!isEditableGraph(graph) || !goalSteadyPostimageIsScoped(before, graph, goalSteady, input.scenarioId)) {
       return { kind: 'refused', reason: 'goal_steady_scope_mismatch' };
     }
     const hash = computeAnalysisAffectingGraphHash(graph);

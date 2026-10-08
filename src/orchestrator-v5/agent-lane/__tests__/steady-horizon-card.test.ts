@@ -74,7 +74,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 import { steadyHorizonCard, STEADY_HORIZON_ANSWER } from '../steady-horizon-card.js';
-import { horizonSteadyAttested } from '../../goal-target/horizon-basis.js';
+import { horizonSteadyAttested, steadyAttestationKey } from '../../goal-target/horizon-basis.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
@@ -86,10 +86,10 @@ type Chip = { id: string; label: string; message: string; detail?: string; actio
 const fixture = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as Rec;
 const seed = (): Rec => {
   const graph = structuredClone(fixture.graph_with_target);
-  graph.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon_months = 9;
+  graph.nodes.find((n: Rec) => n.id === 'monthly_cancellations').goal_horizon_months = 9;
   return assignEntityRefs(projectGraphForPersistence(graph), null).graph as Rec;
 };
-const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.kind === 'goal');
+const goalOf = (g: Rec): Rec => g.nodes.find((n: Rec) => n.id === 'monthly_cancellations');
 const offered = (graph: Rec, over = {}) => steadyHorizonCard({ graph, graphHash: computeAnalysisAffectingGraphHash(graph as never) ?? undefined,
   scenarioId: SCENARIO, userId: null, runReply: true, approvalHeld: false, ...over });
 const jsonbGraph = (): Rec => graphOf.get(SCENARIO) as Rec;
@@ -118,7 +118,7 @@ describe('steady horizon: one held card through the existing approved batch door
       runs += 1;
       const graph = jsonbGraph();
       const env = withUntestedHorizonWarning(withGoalChanceLicence({ option_comparison: [
-        { option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, graph, goalOf(graph).id), graph);
+        { option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, graph, goalOf(graph).id, undefined, undefined, SCENARIO), graph, [], false, SCENARIO);
       return { assistant_text: 'Analysis complete.', blocks: [{ type: 'analysis_result', data: env }],
         analysis_ready: { status: 'ready', may_run: true }, tool_results: [{ name: 'run_analysis', ran: true }], ...env };
     });
@@ -161,7 +161,7 @@ describe('steady horizon: one held card through the existing approved batch door
     modelTool = { type: 'function_call', name: 'run_analysis', call_id: 'requested_run', arguments: '{}' };
     cardOf(await turn({ message: 'Run analysis again.' }));
     expect(runs).toBe(1);
-    expect(horizonSteadyAttested(goalOf(jsonbGraph()))).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
   });
   it('press → one persisted USER triple → predicate/licence/Why; no implicit Run; separate Run accepted', async () => {
     const baseHash = computeAnalysisAffectingGraphHash(jsonbGraph() as never);
@@ -169,7 +169,8 @@ describe('steady horizon: one held card through the existing approved batch door
     const tid = randomUUID();
     const reply = await press(card, { turn_id: tid });
     expect(goalOf(jsonbGraph())).toMatchObject({ horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: 9 });
-    expect(horizonSteadyAttested(goalOf(jsonbGraph()))).toBe(true);
+    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(true);
+    expect(goalOf(jsonbGraph()).horizon_basis_key).toBe(steadyAttestationKey(goalOf(jsonbGraph()), SCENARIO));
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(computeAnalysisAffectingGraphHash(jsonbGraph() as never)).not.toBe(baseHash);
     expect(runs).toBe(1);
@@ -180,17 +181,26 @@ describe('steady horizon: one held card through the existing approved batch door
     const rerun = await run();
     expect(runs).toBe(2);
     expect((rerun.suggested_actions as Chip[]).some(c => c.label === STEADY_HORIZON_ANSWER)).toBe(false);
-    const licence = withGoalChanceLicence({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, jsonbGraph(), goalOf(jsonbGraph()).id);
-    const clean = withUntestedHorizonWarning(licence, jsonbGraph());
+    const licence = withGoalChanceLicence({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, jsonbGraph(), goalOf(jsonbGraph()).id, undefined, undefined, SCENARIO);
+    const clean = withUntestedHorizonWarning(licence, jsonbGraph(), [], false, SCENARIO);
     expect(clean.inference_warnings).toEqual(expect.arrayContaining([expect.objectContaining({ horizon_basis: expect.objectContaining({ source: 'user_stated', months: 9, why: `You said ‘${goalOf(jsonbGraph()).label}’ stays about where it is over 9 months unless you act, so this is its chance once each option is in effect.` }) })]));
     expect(clean.inference_warnings.some((w: { code: string }) => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
+  });
+  it('real press then metric edit at the same months voids; copied stored bytes are void in another scenario', async () => {
+    await press(cardOf(await run()));
+    const graph = jsonbGraph();
+    expect(horizonSteadyAttested(graph, SCENARIO)).toBe(true);
+    expect(horizonSteadyAttested(graph, randomUUID())).toBe(false);
+    goalOf(graph).label = 'Annual recurring revenue';
+    expect(goalOf(graph).goal_horizon_months).toBe(9);
+    expect(horizonSteadyAttested(graph, SCENARIO)).toBe(false);
   });
   it('bare yes text plus model authorise_change output cannot consume the card or write', async () => {
     const card = cardOf(await run());
     const before = JSON.stringify(jsonbGraph());
     modelTool = { type: 'function_call', name: 'authorise_change', call_id: 'forged_yes', arguments: JSON.stringify({ proposal_id: card.id.split(':')[1] }) };
     await turn({ message: 'yes' });
-    expect(horizonSteadyAttested(goalOf(jsonbGraph()))).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
     expect(JSON.stringify(jsonbGraph())).toBe(before);
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
     expect(agentProposals.get(card.id.split(':')[1]!)).toBeDefined();
@@ -200,7 +210,7 @@ describe('steady horizon: one held card through the existing approved batch door
     goalOf(jsonbGraph()).goal_horizon_months = 12;
     await press(card);
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
-    expect(horizonSteadyAttested(goalOf(jsonbGraph()))).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
   });
   it('offer requires Run, positive H, no attestation, no other approval and no admitted carrier', () => {
     const graph = seed();
@@ -210,6 +220,7 @@ describe('steady horizon: one held card through the existing approved batch door
     goalOf(graph).goal_horizon_months = 0;
     expect(offered(graph)).toBeNull();
     Object.assign(goalOf(graph), { goal_horizon_months: 9, horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: 9 });
+    goalOf(graph).horizon_basis_key = steadyAttestationKey(goalOf(graph), SCENARIO);
     expect(offered(graph)).toBeNull();
     delete goalOf(graph).horizon_basis;
     graph.nodes.push({ id: 'stock_at_9', kind: 'outcome', label: 'Stock at month 9', nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'churn', 'inflow'], horizon_months: 9, rate_scale: 0.01, stated_in_brief: true } });

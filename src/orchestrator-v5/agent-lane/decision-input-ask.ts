@@ -60,6 +60,7 @@ export function goalHasStatedTarget(goal: Rec, graph?: unknown): boolean {
 }
 
 export interface DecisionInputAskContext {
+  readonly scenarioId?: string;
   /**
    * The reply AS IT RESTS ON SCREEN without these lines (`textAtRest` of the composed text: the model's words, the owed
    * lines and the host status). Any ask there, the model's or the host's, is the turn's one ask (CODEX 5923981385).
@@ -224,10 +225,10 @@ export const CHANCE_FREE_HORIZON_PREFIX = "This model doesn't yet say whether an
 const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 
 /** One horizon form for the reply and stored Run, from the same cells the UI reads. */
-export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): string | null {
-  if (horizonSteadyAttested(goalOf(graph)) || goalProjectedAtItsMonth(graph)) return null;
+export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[], scenarioId?: string): string | null {
+  if (horizonSteadyAttested(graph, scenarioId) || goalProjectedAtItsMonth(graph)) return null;
   const shown = cells.filter(cell => cell.kind === 'figure' || cell.kind === 'range').length;
-  if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1 });
+  if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1, scenarioId });
   if (goalKindOf(graph) === 'share_by_date') return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
@@ -251,8 +252,8 @@ export function statedTargetWords(graph: unknown): string | null {
  * function supplies byte-stable identities for formatting and old-copy normalization; the cell rule above owns
  * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
  */
-export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean }): string | null {
-  if (horizonSteadyAttested(goalOf(graph)) || goalKindOf(graph) === 'share_by_date' || goalProjectedAtItsMonth(graph)) return null;
+export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean; scenarioId?: string }): string | null {
+  if (horizonSteadyAttested(graph, opts?.scenarioId) || goalKindOf(graph) === 'share_by_date' || goalProjectedAtItsMonth(graph)) return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
@@ -277,11 +278,11 @@ export const GOAL_CHANCE_RANGE_HORIZON_CONFLICT = 'GOAL_CHANCE_RANGE_HORIZON_CON
  * A withdrawn accumulation retains that sentence even with no deadline or a duration limit.
  */
 export function withUntestedHorizonWarning<E>(
-  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] | boolean = [], accumulationWithdrawn = false,
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] | boolean = [], accumulationWithdrawn = false, scenarioId?: string,
 ): E {
   // Retain staging's pre-cell third-argument form for callers that only carry the withdrawal fact.
   return withCellHorizonWarning(envelope, graph, typeof cells === 'boolean' ? [] : cells,
-    typeof cells === 'boolean' ? cells : accumulationWithdrawn);
+    typeof cells === 'boolean' ? cells : accumulationWithdrawn, scenarioId);
 }
 
 /**
@@ -289,9 +290,9 @@ export function withUntestedHorizonWarning<E>(
  * keeps any point licence's horizon_line in agreement. The presence/order of a licence or warning chooses no form.
  */
 export function withShortHorizonBesideChance<E>(
-  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = [], accumulationWithdrawn = false,
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = [], accumulationWithdrawn = false, scenarioId?: string,
 ): E {
-  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn);
+  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn, scenarioId);
 }
 
 /** A horizon is tested only along the selected goal's Run-attested identity dependencies. */
@@ -317,14 +318,14 @@ function accumulationTestedAtGoalHorizon(graph: unknown, envelope: Rec): boolean
 
 /** Replace any intermediate wording with the final cell form; the warning and licence stay in agreement. */
 function withCellHorizonWarning<E>(
-  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[], accumulationWithdrawn: boolean,
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[], accumulationWithdrawn: boolean, scenarioId?: string,
 ): E {
   if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const env = envelope as Rec;
   const warnings: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
   const goal = goalOf(graph);
-  const line = horizonSteadyAttested(goal) || (!accumulationWithdrawn && accumulationTestedAtGoalHorizon(graph, env)) ? null
-    : untestedHorizonLineForCells(graph, cells) ?? (accumulationWithdrawn && goal !== undefined
+  const line = horizonSteadyAttested(graph, scenarioId) || (!accumulationWithdrawn && accumulationTestedAtGoalHorizon(graph, env)) ? null
+    : untestedHorizonLineForCells(graph, cells, scenarioId) ?? (accumulationWithdrawn && goal !== undefined
       ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const hasRange = cells.some(cell => cell.kind === 'range');
@@ -404,7 +405,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
   const leftOut = leftOutLines(graph, label);
-  const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
+  const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? [], ctx.scenarioId);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
   const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
@@ -448,7 +449,7 @@ export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): 
 export function withA7AfterGate(
   text: string,
   graph: unknown,
-  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan' | 'chanceCells'>,
+  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan' | 'chanceCells' | 'scenarioId'>,
   statusText: string | null,
 ): string {
   // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.

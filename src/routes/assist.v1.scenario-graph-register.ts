@@ -3,6 +3,7 @@
  * Only valid initial imports may create a scenario; deleted-scenario fencing remains.
  * Payload, CAS, stored-fact carry and write-error contracts remain in this handler. */
 
+import { stripSteadyAttestation } from '../orchestrator-v5/goal-target/horizon-basis.js';
 import { assertShareByDatePreserved, ShareByDateOwnershipError } from '../orchestrator-v5/goal-target/share-by-date-carrier.js';
 import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -1023,6 +1024,7 @@ export default async function route(app: FastifyInstance) {
         log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
         return unavailable();
       }
+      stripSteadyAttestation(graphToRegister, baseGraphForInvariants);
       const projected = projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",

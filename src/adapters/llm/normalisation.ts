@@ -194,7 +194,7 @@ export const CEE_MINTED_GOAL_FIELDS = [
 
 /** USER consent fields are also unwriteable by a draft; they are not threshold-enricher fields. */
 const MODEL_AUTHORED_GOAL_FIELDS_TO_STRIP = [...CEE_MINTED_GOAL_FIELDS,
-  'horizon_basis', 'horizon_basis_source', 'horizon_basis_months',
+  'horizon_basis', 'horizon_basis_source', 'horizon_basis_months', 'horizon_basis_key',
 ] as const;
 
 /** What a strip actually removed — returned so the caller can log it, never silent. */
