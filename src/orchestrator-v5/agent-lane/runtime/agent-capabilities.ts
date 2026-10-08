@@ -54,7 +54,7 @@ import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitRea
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
-import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
+import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
@@ -3926,7 +3926,15 @@ export function createAgentCapabilities(
       if (g === null) {
         return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
       }
-      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => scopeIssueBlocks(p.action))) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
+      const pendingNow = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+      if (pendingNow.some(p => scopeIssueBlocks(p.action))) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
+      // ⛔ ONE held-change predicate at ISSUANCE, for every door (the Agent's tool call, a Run's hint, the re-offer and the bar
+      // press): an identity card is never issued while another held change waits for its yes (GOAL-REACH, DL #2802 P1:
+      // path-only supersession would discard it before either is decided). The identity card itself does not block its re-offer.
+      if (heldChangeBlocksIdentity(pendingNow)) {
+        return { ok: false, mutated: false, refusal: 'held_change_waiting',
+          detail: 'A suggested change is waiting for your yes. Approve it, or change something first. Nothing was offered.' };
+      }
       const card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
