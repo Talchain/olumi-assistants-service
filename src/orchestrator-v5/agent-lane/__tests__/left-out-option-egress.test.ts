@@ -4,7 +4,7 @@
  * no negation logic. Paul's served bullet (scenario 632b92b9, turn 1) is quoted verbatim; the other texts are arranged.
  */
 import { readFileSync } from 'node:fs';
-import { performance } from 'node:perf_hooks';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 import { describe, expect, it } from 'vitest';
 import { type LeftOutRunOption, type RecordedRunOption } from '../../tools/handlers/option-participation.js';
 import {
@@ -128,21 +128,23 @@ describe('Q6 egress carriers', () => {
 
 describe('Q6 timing', () => {
   for (const [name, regex] of Object.entries(LEFT_OUT_COPY_REGEXES)) {
-    it.each([' '.repeat(20_000), '£54 '.repeat(20_000)])(`${name}: 20k whitespace / figure repeats < 50 ms`, text => {
-      regex.lastIndex = 0;
-      const start = performance.now();
-      if (regex.global) void [...text.matchAll(regex)];
-      else regex.test(text);
-      const elapsed = performance.now() - start;
-      regex.lastIndex = 0;
-      expect(elapsed).toBeLessThan(50);
+    it.each([' ', '£54 '])(`${name}: 5k → 20k %s repeats, ratio < 8`, shape => {
+      const run = (text: string) => {
+        regex.lastIndex = 0;
+        if (regex.global) void [...text.matchAll(regex)];
+        else regex.test(text);
+        regex.lastIndex = 0;
+      };
+      const [small, large] = [5_000, 20_000].map(n => shape.repeat(n));
+      const m = scalingRatio(() => run(small), () => run(large));
+      process.stdout.write(`Q6 timing ${name} ${JSON.stringify(shape)}: ${m.detail}\n`);
+      expect(m.ratio, m.detail).toBeLessThan(8);
     });
   }
   it('the whole correction scales linearly: 20k → 160k "the £54 test " under 22×', () => {
-    const time = (n: number) => { const t = 'the £54 test '.repeat(n); const s = performance.now(); correct(t); return performance.now() - s; };
-    time(2_000);
-    const small = Math.min(...Array.from({ length: 5 }, () => time(1_540)));
-    const large = Math.min(...Array.from({ length: 5 }, () => time(12_310)));
-    expect(large / small).toBeLessThan(22);
+    const [small, large] = [1_540, 12_310].map(n => 'the £54 test '.repeat(n));
+    const m = scalingRatio(() => correct(small), () => correct(large));
+    process.stdout.write(`Q6 timing whole correction: ${m.detail}\n`);
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
