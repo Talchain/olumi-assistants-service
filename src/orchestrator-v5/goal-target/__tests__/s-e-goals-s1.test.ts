@@ -26,6 +26,7 @@ import { assignEntityRefs } from '../../graph/entity-refs.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
+import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../goal-horizon-write.js';
 import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
@@ -231,12 +232,22 @@ function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z'), opts: { rea
     if (unconfirm) return { status: 'unconfirmed' };
     return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   };
-  const dispatch: InternalDispatch = async (path) => {
+  const targetEvents: Rec[] = [];
+  const dispatch: InternalDispatch = async (path, body) => {
+    if (path === '/orchestrate/v2/turn') {
+      const payload = body as Rec;
+      targetEvents.push(structuredClone(payload));
+      const out = await applyGoalTargetEdit({ payload: payload as never, event: payload.event as never,
+        requestId: 'deadline-real-target', persistedGraph: graph(), priorFacts: [] });
+      if (out.kind !== 'mutated') throw new Error(`Real target write did not apply: ${JSON.stringify(out)}`);
+      graphJson = JSON.stringify(out.mutatedGraph);
+      return { status: 200, json: out.response };
+    }
     if (!path.endsWith('/graph')) throw new Error(`Unexpected dispatch: ${path}`);
     const read = graph();
     return { status: 200, json: { graph: read, graph_hash: computeAnalysisAffectingGraphHash(read as never) } };
   };
-  return { caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels, now: () => now }), proposals, commits, graph,
+  return { caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels, now: () => now }), proposals, commits, targetEvents, graph,
     commitOptionLevels };
 }
 const stored = (g: Rec = servedGraph()): Rec => assignEntityRefs(projectGraphForPersistence(g), { nodes: [], edges: [] }).graph as Rec;
@@ -402,9 +413,57 @@ describe('P17 (Codex r1 #2780): a RATE goal in a chance-named unit takes its own
       { goal_label: 'Monthly churn', value: 5, unit: '% churn probability per month', user_stated: true }) as Rec;
     expect(own.refusal).toBeUndefined();
   });
-  it('a £ target is never a rate’s target ("conversion probability per visitor"); a % target is', async () => {
+  it.each([
+    ['% per month', true], ['% per year', false],
+  ] as const)('reviewer r1: a monthly probability rate takes today’s level in its own percent period only (%s)', async (unit, accepted) => {
+    const w = world(rateGoal('probability (%) per month'));
+    const before = w.graph();
+    const result = await w.caps.proposeGoalCurrentLevel!(ctxSaying(`Our monthly churn is 5${unit} today.`),
+      { goal_label: 'Monthly churn', value: 5, unit, user_stated: true }) as Rec;
+    if (accepted) {
+      expect(result, JSON.stringify(result)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      expect(w.proposals.get(String(result.proposal_id))?.operations).toEqual([
+        expect.objectContaining({ path: GOAL_ID, value: expect.objectContaining({
+          goal_current_level: expect.objectContaining({ raw_value: 5, unit: 'probability (%) per month' }),
+        }) }),
+      ]);
+    } else {
+      expect(result, JSON.stringify(result)).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
+      expect(w.proposals.get(String(result.proposal_id))).toBeUndefined();
+    }
+    expect(w.graph()).toEqual(before);
+  });
+  it('a £ target is never a rate’s target ("conversion probability per visitor")', async () => {
     const pounds = await world(rateGoal('conversion probability per visitor')).caps.proposeGoalTarget!(ctxSaying('We want at least £50 per visitor.'),
       { constraint_type: 'at_least', value: 50, unit: '£', rationale: 'x' }) as Rec;
     expect(pounds).toEqual(expect.objectContaining({ ok: false, refusal: 'target_unit_mismatch' }));
+  });
+  it('reviewer r1: a % target is proposed for the rate, approved and read back with the same goal identity, value and unit', async () => {
+    const w = world(rateGoal('conversion probability per visitor'));
+    const before = w.graph();
+    const proposal = await w.caps.proposeGoalTarget!(ctxSaying('We want monthly churn to be at most 3%.'),
+      { constraint_type: 'at_most', value: 3, unit: '%', rationale: 'The user stated their rate target.' }) as Rec;
+    expect(proposal, JSON.stringify(proposal)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(w.proposals.get(String(proposal.proposal_id))?.operations).toEqual([
+      { op: 'set_goal_target', path: GOAL_ID, value: { constraint_type: 'at_most', raw_value: 3, unit: '%' } },
+    ]);
+    expect(w.graph()).toEqual(before);
+    expect(w.targetEvents).toEqual([]);
+    const chips = approvalChipsFor([{ name: 'propose_goal_target', ok: true, mutated: false, proposal_id: String(proposal.proposal_id) }],
+      (id) => ({ proposal: w.proposals.get(id), result: proposal as never })).filter((chip) => chip.id.startsWith('agent-approve-proposal:'));
+    expect(chips).toHaveLength(1);
+    const approval = await w.caps.authoriseChange({ ...ctxSaying(chips[0]!.message), typed_approval_of: String(proposal.proposal_id),
+      typed_approval_words: chips[0]!.message }, { proposal_id: String(proposal.proposal_id) }) as Rec;
+    expect(approval, JSON.stringify(approval)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(w.targetEvents).toHaveLength(1);
+    expect(w.targetEvents[0]!.event).toEqual(expect.objectContaining({ kind: 'goal_target_edit', goal_node_id: GOAL_ID,
+      constraint_type: 'at_most', raw_value: 3, unit: '%' }));
+    const after = w.graph();
+    expect(after.goal_node_id).toBe(GOAL_ID);
+    expect(goalOf(after)).toEqual(expect.objectContaining({ id: GOAL_ID, kind: 'goal', label: 'Monthly churn' }));
+    expect(after.goal_constraints.filter((row: Rec) => row.node_id === GOAL_ID)).toEqual([
+      expect.objectContaining({ node_id: GOAL_ID, operator: '<=', value: 3, unit: '%', value_frame: 'level' }),
+    ]);
+    expect(approval.follow_up).toBe('The goal "Monthly churn" now has the target at most 3%, as you stated it.');
   });
 });

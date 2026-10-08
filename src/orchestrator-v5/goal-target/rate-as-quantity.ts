@@ -23,11 +23,7 @@ const POPULATION = new Set([
   'churn', 'churns', 'churned', 'churning', 'conversion', 'conversions', 'convert', 'converts', 'converted', 'converting',
   'retention', 'retained', 'clickthrough', 'clickthroughs', 'attrition',
 ]);
-/**
- * Rule 2's nouns that are also everyday words ("the OPEN tender", "a RETURN on investment", "by DEFAULT"): a population
- * noun only beside the chance word ("default probability", "probability of default") or with a member named
- * ("probability a customer returns").
- */
+/** The remaining ruling nouns can also be everyday words; all population words need the same subject check. */
 const POPULATION_IF_SUBJECT = new Set([
   'default', 'defaults', 'defaulted', 'defaulting', 'open', 'opens', 'opened', 'response', 'responses', 'respond',
   'responds', 'responded', 'return', 'returns', 'returned', 'returning',
@@ -43,12 +39,15 @@ const EVENT = new Set([
 const WINDOW = new Set(['within', 'in', 'by', 'before', 'after', 'for']);
 /** …and "a month FROM NOW" / "a year AWAY" is a date. */
 const DATE_AFTER = new Set(['from', 'away', 'later', 'ago', 'out', 'time', 'after', 'before', 'into', 'since']);
+const CLAUSE_SUBJECT = new Set(['we', 'i', 'you', 'they', 'it', 'that']);
+const DETERMINER = new Set(['a', 'an', 'the', 'our', 'my', 'their', 'your']);
+const LEVEL_QUALIFIER = new Set(['below', 'above', 'under', 'over', 'at', 'less', 'more']);
 
 function wordsOf(text: string): string[] {
   const words: string[] = []; let word = '';
   for (const c of text.toLowerCase()) {
     if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) word += c;
-    // "%" is a word; "|" is the boundary between a goal's unit and its label, so no word is read as "beside" one across it.
+    // "%" is a word; "|" cannot be part of a noun phrase.
     else if (c === '%' || c === '|') { if (word !== '') words.push(word); words.push(c); word = ''; }
     else if (word !== '') { words.push(word); word = ''; }
   }
@@ -60,34 +59,71 @@ function wordsOf(text: string): string[] {
 }
 
 const isPeriod = (w: string | undefined): boolean => w !== undefined && periodNoun(w) !== null;
+// The unit alphabet also reads metric aliases (MRR/ARR/pcm/pa). Only actual period words govern a probability.
+const isPeriodWord = (w: string | undefined): boolean => w !== undefined && periodAdverb(w) !== null
+  && (w.endsWith('ly') || w === 'annual');
+const populationWord = (w: string): boolean => POPULATION.has(w) || POPULATION_IF_SUBJECT.has(w);
+
+/** A population word must head the measured subject, never modify "target", "tender", "deposit", etc. */
+function populationSubject(ws: readonly string[]): boolean {
+  const chance = ws.findIndex((w) => CHANCE.has(w));
+  const start = chance < 0 ? 0 : chance + (ws[chance + 1] === 'of' ? 2 : 1);
+  let clause = false; let memberAt = -1; let firstWord = -1;
+  for (let i = 0; i < ws.length; i++) {
+    const w = ws[i]!;
+    // A noun immediately before the chance measure heads it ("churn probability").
+    if (i + 1 === chance && populationWord(w) && !clause) return true;
+    if (i >= start) {
+      if (firstWord < 0 && !DETERMINER.has(w)) firstWord = i;
+      const next = ws[i + 1];
+      const tail = next === undefined || next === '%' || LEVEL_QUALIFIER.has(next)
+        || (next[0]! >= '0' && next[0]! <= '9') || (isPeriodWord(next) && i + 2 === ws.length);
+      // Read a nominal head ("of churn", "of net churn") or a member's own act ("a trial user converts").
+      // A member followed by another lexical word is an event clause, not a licence for a later population word.
+      const nominalLabel = chance < 0 && POPULATION.has(w) && !w.endsWith('s') && !w.endsWith('ed') && !w.endsWith('ing');
+      const subject = nominalLabel || (chance >= 0 && ws[chance + 1] === 'of') || firstWord === i || memberAt === i - 1;
+      if (populationWord(w) && tail && subject && !clause) return true;
+      if (MEMBER_WORDS.has(w)) memberAt = i;
+      else if (!DETERMINER.has(w)) {
+        if (CLAUSE_SUBJECT.has(w) || EVENT.has(w) || w === '|' || w === 'by' || w === 'on'
+          || (chance >= 0 && (w === 'to' || w === 'and' || memberAt >= 0
+            || w.endsWith('ing') || w.endsWith('ed') || w.endsWith('es')))) clause = true;
+      }
+    } else if (CLAUSE_SUBJECT.has(w) || EVENT.has(w) || w === '|') clause = true;
+  }
+  return false;
+}
 
 /** Rule 1: a per-unit or per-period marker. */
-function perMarker(ws: readonly string[]): boolean {
+function perMarker(ws: readonly string[], population: boolean): boolean {
+  const nounAfter = (i: number): boolean => {
+    const w = ws[i];
+    return w !== undefined && w !== '|' && w[0]! >= 'a' && w[0]! <= 'z' && !DETERMINER.has(w) && !CLAUSE_SUBJECT.has(w);
+  };
   return ws.some((w, i) => w === 'rate' || w === 'rates'
-    || periodAdverb(w) !== null
-    || (w === 'per' && (isPeriod(ws[i + 1]) || MEMBERS.has(ws[i + 1] ?? '')))
-    || ((w === 'a' || w === 'each' || w === 'every') && isPeriod(ws[i + 1]) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
+    || (isPeriodWord(w) && (population || CHANCE.has(ws[i + 1] ?? '') || (CHANCE.has(ws[i - 1] ?? '') && i + 1 === ws.length)))
+    || (w === 'per' && nounAfter(i + 1))
+    || (w === 'for' && ws[i + 1] === 'each' && nounAfter(i + 2))
+    || ((w === 'each' || w === 'every') && nounAfter(i + 1) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
+    || ((w === 'a' || w === 'an') && isPeriod(ws[i + 1]) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
     || (w === '%' && ws[i + 1] === 'of' && MEMBERS.has(ws[i + 2] ?? '')));
 }
 
 /** Rule 3: a one-off event, "on time", or "by <date or period>". */
 function oneOffEvent(ws: readonly string[]): boolean {
   return ws.some((w, i) => EVENT.has(w) || (w === 'on' && ws[i + 1] === 'time') || (w === 'ontime')
-    || (w === 'by' && ws[i + 1] !== undefined));
+    || (w === 'by' && ws[i + 1] !== undefined)
+    || (CHANCE.has(w) && (CLAUSE_SUBJECT.has(ws[i + 1] ?? '') || DETERMINER.has(ws[i + 1] ?? '')
+      || (ws[i + 1] === 'of' && ws[i + 2]?.endsWith('ing')))));
 }
 
-/** Science ruling (b)'s four rules, in order, over the words a goal is written in (its unit, then its label). */
+/** Science ruling (b)'s four rules, in order, over ONE unit or label segment. */
 export function readRateAsQuantity(text: string): RateReading {
   if (text.length > 400) return { kind: 'chance', rule: 4 };
   const ws = wordsOf(text);
-  if (perMarker(ws)) return { kind: 'quantity', rule: 1 };
-  // The member must be the SUBJECT: named within the three words before ("a customer returns"), never after
-  // ("Return the customer deposit", buddy r2).
-  const subject = (i: number): boolean => [ws[i - 1], ws[i - 2], ws[i - 3]].some((n) => n !== undefined && MEMBER_WORDS.has(n));
-  if (ws.some((w, i) => POPULATION.has(w) || (POPULATION_IF_SUBJECT.has(w)
-    && (subject(i) || [ws[i - 1], ws[i + 1], ws[i - 2], ws[i + 2]].some((n) => n !== undefined && CHANCE.has(n)))))) {
-    return { kind: 'quantity', rule: 2 };
-  }
+  const population = populationSubject(ws);
+  if (perMarker(ws, population)) return { kind: 'quantity', rule: 1 };
+  if (population) return { kind: 'quantity', rule: 2 };
   if (oneOffEvent(ws)) return { kind: 'chance', rule: 3 };
   return { kind: 'chance', rule: 4 };
 }

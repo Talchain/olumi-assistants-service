@@ -20,6 +20,7 @@
 
 import { readRateAsQuantity } from './rate-as-quantity.js';
 import { shareKind } from '../../utils/unit-alphabet.js';
+import { readPercentUnit, readUnitParts, words } from '../agent-lane/same-unit.js';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
@@ -63,19 +64,52 @@ export function unitNamesAChance(unit: unknown): boolean {
 
 /**
  * P17: a RATE goal measured in a chance-named unit ("probability (%)", "conversion probability per visitor") is a share.
- * For the unit-family check a figure in pounds, people or months is never it, so the unit reads as "%". Only for a unit
- * written in % ("probability (%)", "% churn probability") is a stated "%" figure the rate's own; a 0–1 or bare
- * "probability" unit keeps its own words (a "5%" is then refused, never silently re-scaled).
+ * For the unit-family check a figure in pounds, people or months is never it, so the unit reads as a percent rate. Only
+ * for a unit written in % ("probability (%)", "% churn probability") is a stated percent figure the rate's own; a 0–1
+ * or bare "probability" unit keeps its own words (a "5%" is then refused, never silently re-scaled). The denominator
+ * stays on that percent rate: today's "% per month" is never re-read as "% per year".
  */
 export function rateUnitForFamily(unit: unknown): string | undefined {
-  return unitNamesAChance(unit) ? '%' : undefined;
+  return unitNamesAChance(unit) && typeof unit === 'string' ? ratePercentFrame(unit) ?? '%' : undefined;
 }
 export function rateUnitInPercent(unit: unknown, stated: unknown): string | undefined {
-  // Only a BARE percent figure is re-read ("5%"); a figure stated in the rate's own words keeps today's path (buddy r2).
-  if (typeof stated !== 'string' || shareKind(stated.trim()) !== 'percent') return undefined;
+  // A bare percent or a percent RATE is re-read. Subject words in the stated unit keep the own-unit path (buddy r2).
+  const percent = readPercentUnit(stated);
+  if (percent === null || percent.base !== null) return undefined;
+  const statedRate = readUnitParts(`rate ${(percent.qualifiers ?? []).join(' ')}`);
+  if (statedRate?.kind !== 'count' || statedRate.noun?.join(' ') !== 'rate') return undefined;
   if (!unitNamesAChance(unit) || typeof unit !== 'string') return undefined;
-  const lower = unit.toLowerCase();
-  return lower.includes('%') || lower.includes('percent') ? '%' : undefined;
+  return ratePercentFrame(unit, true);
+}
+
+/** Read the stored rate's denominator through the full unit reader, with its chance measure and scale kept separate. */
+function ratePercentFrame(unit: string, requireExplicitPercent = false): string | undefined {
+  let explicitPercent = false;
+  const ws = words(unit.replace(SCALE_NOTE, (note) => {
+    const scale = note.slice(1, -1).trim();
+    const percent = readPercentUnit(scale);
+    if (percent !== null && percent.base === null && percent.qualifiers === null) explicitPercent = true;
+    // Existing numeric scale notes ("[0–100%]") name the percent scale, too; a 0–1 annotation never does.
+    if (scale.endsWith('%')) {
+      const bounds = scale.slice(0, -1).replaceAll('–', '-').replaceAll('—', '-').split('-');
+      if (bounds.length === 2 && Number(bounds[0]) === 0 && Number(bounds[1]) === 100) explicitPercent = true;
+    }
+    return ' ';
+  }));
+  const measure: string[] = [];
+  for (let i = 0; i < ws.length; i += 1) {
+    let scaleLength = Math.min(3, ws.length - i);
+    while (scaleLength > 0 && shareKind(ws.slice(i, i + scaleLength).join(' ')) === null) scaleLength -= 1;
+    const scaleKind = scaleLength > 0 ? shareKind(ws.slice(i, i + scaleLength).join(' ')) : null;
+    if (scaleKind === 'points') return undefined;
+    if (scaleKind === 'percent') { explicitPercent = true; i += scaleLength - 1; }
+    else measure.push(ws[i]!);
+  }
+  if (requireExplicitPercent && !explicitPercent) return undefined;
+  const rate = readUnitParts(measure.join(' '));
+  if (rate?.kind !== 'count') return undefined;
+  return `%${rate.per !== null && rate.per.length > 0 ? ` per ${rate.per.join(' ')}` : ''}`
+    + `${rate.period !== null ? ` per ${rate.period}` : ''}`;
 }
 
 /** The unit the goal is measured in: its target's unit, else its level's. */
@@ -101,10 +135,12 @@ export function goalKindOf(goal: unknown, graph?: unknown): GoalKind {
   const os = isRec(goal.observed_state) ? goal.observed_state.unit : undefined;
   const chanceUnits = [goal.goal_threshold_unit, os].filter(unitNamesAChance) as string[];
   // P17, Science ruling (b): a population RATE written as a probability ("churn probability", "conversion probability per
-  // visitor") is a quantity. Its unit, then its label, are read by the ruling's four rules; a one-off event stays a chance.
+  // visitor") is a quantity. Read each unit and the label independently: subjects and denominators never cross a join.
+  // Rules 1 and 2 precede either chance rule, so any segment's quantity reading wins over rules 3/4 elsewhere.
   if (chanceUnits.length > 0
-    // Each part is cut to 401 characters first, so an over-long one falls to rule 4 without building a long string.
-    && readRateAsQuantity([...chanceUnits, typeof goal.label === 'string' ? goal.label : ''].map((t) => t.slice(0, 401)).join(' | ')).kind === 'chance') {
+    // Each part is cut to 401 characters BEFORE the classifier receives it; an over-long segment falls to rule 4.
+    && ![...chanceUnits, typeof goal.label === 'string' ? goal.label : '']
+      .map((t) => readRateAsQuantity(t.slice(0, 401))).some((r) => r.kind === 'quantity')) {
     return 'chance_of_event';
   }
   const share = graph === undefined ? null : shareByDateGoalOf(graph);
