@@ -400,7 +400,7 @@ describe('R2 identity-bound regression rows', () => {
     expect(carry).not.toContain("new team's pace");
     // The Tech lead's existing P40 range keeps its named estimates; only the two licensed POINTS carry k.
     for (const optionId of ['event_option_2', 'event_option_3']) expect(lines.find(l => l.option_id === optionId)?.chance)
-      .toContain(", using Olumi's estimates for 2 links (see Check estimates).");
+      .toContain(", using Olumi's estimates for 2 relationships (see Check estimates).");
     expect(lines.find(l => l.option_id === 'event_option_1')?.chance).not.toContain('(see Check estimates)');
   });
   it('WORDS share range names the deliverable and date in screen and chat', () => {

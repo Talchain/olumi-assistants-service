@@ -190,7 +190,7 @@ describe("the conversation, when asked", () => {
     loadGraphAndBriefText.mockResolvedValue({ graph, briefText: "Improve revenue." });
     const bare = "‘Raise to £59’: about 67% in this model.";
     const preserved = "The chance of supplier failure is 10%.\n\tSupplier delivery has about 67% probability.  Keep this spacing.";
-    const labelled = "‘Raise to £59’: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 link (see Check estimates).";
+    const labelled = "‘Raise to £59’: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).";
     readRecent.mockResolvedValue([row(1, "What was the recorded chance?", `${bare}\n${preserved}\n${labelled}`)]);
     const app = await buildApp();
     const response = await read(app, SCENARIO, { include_conversation_turns: true });

@@ -383,7 +383,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(modelBodies).toHaveLength(0);
     expect(linkDoorEntries).toHaveLength(0);
     expect(opened._agent.tool_calls).toEqual([]);
-    expect(opened.assistant_text).toContain('That sizing link could not be checked against the current model. Nothing was changed.');
+    expect(opened.assistant_text).toContain('That sizing could not be checked against the current model. Nothing was changed.');
   });
 
   it('a press binds its edge ids into canonical selection; labels do not select a different link', async () => {

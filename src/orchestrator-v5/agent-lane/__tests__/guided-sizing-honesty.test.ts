@@ -248,10 +248,10 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     const run = pointWordRun(measured.graph);
     const lines = goalChanceScreenLinesForAgent(run, measured.graph, true);
     expect(lines).toHaveLength(2);
-    expect(lines[0]!.chance).toBe('‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 link (see Check estimates).');
+    expect(lines[0]!.chance).toBe('‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 1 relationship (see Check estimates).');
     const reply = withScreenLinesOwed('This Run is ready.', lines);
     expect(reply.text).toContain(lines[0]!.chance);
-    expect(reply.text).toContain('using Olumi\'s estimates for 1 link (see Check estimates)');
+    expect(reply.text).toContain('using Olumi\'s estimates for 1 relationship (see Check estimates)');
   });
 
   it('MUTANT: relaxed case(c), but the narrator gave the unlabelled chance → RED', () => {
@@ -262,8 +262,31 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     const bare = '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.';
     const owed = withScreenLinesOwed(bare, [lines[0]!]).text;
     const text = withEstimateGoalPointsAtEgress({ assistant_text: owed }, { analysisResult: run, graph, current: true }).assistant_text;
-    expect(text).toContain('using Olumi\'s estimates for 1 link (see Check estimates)');
+    expect(text).toContain('using Olumi\'s estimates for 1 relationship (see Check estimates)');
     expect(text).not.toContain(bare);
+  });
+
+  it.each([1, 2])('R16 K_WORDS: producer, screen and reply name %i estimated relationship(s)', k => {
+    const graph = byDoor.natural!.graph;
+    const base = estimatesFor(graph);
+    const sentinel = { ...base, links: Array.from({ length: k }, (_, i) => ({
+      kind: 'link' as const, id: `k-words-${i}`, label: 'Estimated relationship', goal_distance: 0,
+    })) };
+    const spy = vi.spyOn(estimateProducer, 'olumiEstimatesFeedingResult').mockReturnValue(sentinel);
+    try {
+      const run = pointWordRun(graph);
+      const lines = goalChanceScreenLinesForAgent(run, graph, true);
+      const exact = `using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)`;
+      expect(lines[0]!.olumi_estimate_link_count).toBe(k);
+      expect(lines[0]!.chance).toContain(exact);
+      const screenReply = withScreenLinesOwed('This Run is ready.', lines).text;
+      const egressReply = withEstimateGoalPointsAtEgress({ assistant_text: '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.' },
+        { analysisResult: run, graph, current: true }).assistant_text;
+      for (const reply of [screenReply, egressReply]) {
+        expect(reply).toContain(exact);
+        expect(reply).not.toMatch(/using Olumi's estimates for \d+ links? \(see Check estimates\)/);
+      }
+    } finally { spy.mockRestore(); }
   });
 
   it('MUTANT: placeholder with an estimate tag and a natural effect is STILL a placeholder → RED', () => {
@@ -297,7 +320,7 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
       const run = pointWordRun(graph); // RC4 attribution is stored by the Run producer, before either renderer reads it.
       const lines = goalChanceScreenLinesForAgent(run, graph, true);
       expect(spy).toHaveBeenCalled();
-      expect(lines[0]!.chance).toBe(`‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'link' : 'links'} (see Check estimates).`);
+      expect(lines[0]!.chance).toBe(`‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates).`);
     } finally { spy.mockRestore(); }
   });
 });

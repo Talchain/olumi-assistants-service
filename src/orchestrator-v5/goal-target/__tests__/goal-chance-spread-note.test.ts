@@ -246,7 +246,7 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     const lines = goalChanceScreenLinesForAgent(attributed, g, true);
     for (const line of lines) {
       expect(line.olumi_estimate_link_count).toBe(2);
-      expect(line.chance).toContain("using Olumi's estimates for 2 links (see Check estimates).");
+      expect(line.chance).toContain("using Olumi's estimates for 2 relationships (see Check estimates).");
     }
     const bare = 'Raise prices by 10% has a 55% chance of meeting your goal.';
     const owed = withScreenLinesOwed(bare, lines).text;

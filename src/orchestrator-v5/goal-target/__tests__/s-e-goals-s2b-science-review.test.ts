@@ -132,7 +132,7 @@ describe('SCIENCE review rows and controls', () => {
     const carry = goalChanceScreenLinesForAgent(saved(graph()), graph(), true).find(l => l.option_id === 'carry')?.chance;
     expect(carry).not.toContain('hiring time');
     expect(carry).not.toContain("new team's pace");
-    expect(carry).toContain(", using Olumi's estimates for 1 link (see Check estimates).");
+    expect(carry).toContain(", using Olumi's estimates for 1 relationship (see Check estimates).");
   });
   it('S2-FAILING-INPUT: invalid Olumi lead names hiring time, not user team time', () => {
     const g = graph(); g.nodes[2].observed_state.extra_share_by_date.lead_high = 1;
@@ -159,7 +159,7 @@ describe('SCIENCE review rows and controls', () => {
     const licence = goalChanceLicenceOf(out, g, 'goal')!;
     const carryLine = goalChanceScreenLinesForAgent({ enrichment: withGoalChanceLicence(out, g, 'goal') }, g, true)
       .find(l => l.option_id === 'carry');
-    expect(carryLine?.chance).toBe("‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 link (see Check estimates).");
+    expect(carryLine?.chance).toBe("‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 relationship (see Check estimates).");
     expect(carryLine?.figure).toBe('less than 1%');
     expect(licence.pct_by_option.carry).toBe(0);
     expect(licence.withheld_option_ids).toBeUndefined();
@@ -182,7 +182,7 @@ describe('SCIENCE review rows and controls', () => {
     const g = graph(low, 10), block = saved(g, before);
     expect(block.enrichment.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_LICENSED).pct_by_option.carry).toBe(0);
     expect(goalChanceScreenLinesForAgent(block, g, true).find(l => l.option_id === 'carry')?.chance)
-      .toBe("‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 link (see Check estimates).");
+      .toBe("‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 relationship (see Check estimates).");
     expect(warning(block.enrichment)).toBeUndefined();
   });
   it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS %s door: fresh carry-on carries the licence extreme and no raw point', async door => {
@@ -204,7 +204,7 @@ describe('SCIENCE review rows and controls', () => {
     expect(goalChanceLicenceOf(result(), graph(), 'goal')?.pct_by_option.hire).toBe(39);
     expect(gate(HIRE, 1).form).toBe('point');
     expect(goalChanceScreenLinesForAgent(saved(graph()), graph(), true).find(l => l.option_id === 'hire')?.chance)
-      .toBe("‘Hire two developers’: about 39% chance of launching by 7 April 2027, in this model, using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month), using Olumi's estimates for 1 link (see Check estimates).");
+      .toBe("‘Hire two developers’: about 39% chance of launching by 7 April 2027, in this model, using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month), using Olumi's estimates for 1 relationship (see Check estimates).");
   });
   it.each([6.2, 6.3, 6.4].flatMap(low => (['Run', 'saved-read'] as const).map(door => ({ low, door }))))('S4-P40-CLASS $door door: low=$low projects the licensed extreme, including the 20/4000 producer', async ({ low, door }) => {
       const g = graph(low, 10), parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low, high: 10 } };
@@ -221,7 +221,7 @@ describe('SCIENCE review rows and controls', () => {
       expect(view.goal_chance_display.carry).toBe('less than 1%');
       expect(JSON.stringify(view)).not.toContain(String(p));
       expect(goalChanceScreenLinesForAgent(block, g, true).find(l => l.option_id === 'carry')?.chance)
-        .toBe("‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 link (see Check estimates).");
+        .toBe("‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 relationship (see Check estimates).");
     });
   it('S4-P40-CLASS same-class control: producer 0.0039 licenses a point without an override', () => {
     const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 6.4, high: 10 } };
@@ -247,7 +247,7 @@ describe('SCIENCE review rows and controls', () => {
     expect(agentRows(view).find(r => r.option_id === 'carry')?.probability_of_goal).toBe(1);
     expect(view.goal_chance_display.carry).toBe('more than 99%');
     expect(goalChanceScreenLinesForAgent(block, g, true).find(l => l.option_id === 'carry')?.chance)
-      .toBe("‘Carry on’: more than 99% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 link (see Check estimates).");
+      .toBe("‘Carry on’: more than 99% chance of launching by 7 April 2027, in this model, using Olumi's estimates for 1 relationship (see Check estimates).");
   });
   it('S4-P40-CLASS exact-extreme drivers are moot on the licence', () => {
     const before = result(); before.option_comparison[0].probability_of_goal_drivers = { invalid_rows_dropped: 1 };

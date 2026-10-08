@@ -300,9 +300,14 @@ describe('RC4: narrator count egress guard', () => {
     expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
   });
 
+  it.each([1, 2])('R16 K_WORDS: a narrated %i-relationship attribution still needs the producer', k => {
+    const sentence = `Raise to £59: about 67% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates).`;
+    expect(narratorCountGuard(sentence, null)).toEqual({ text: '', removed: [sentence] });
+  });
+
   it.each([
-    'values', 'figures', 'inputs', 'assumptions', 'estimates', 'numbers', 'links', 'sizes', 'strengths',
-    'value', 'figure', 'input', 'assumption', 'estimate', 'number', 'link', 'size', 'strength', 'link sizes',
+    'values', 'figures', 'inputs', 'assumptions', 'estimates', 'numbers', 'links', 'relationships', 'sizes', 'strengths',
+    'value', 'figure', 'input', 'assumption', 'estimate', 'number', 'link', 'relationship', 'size', 'strength', 'link sizes',
   ])('digits and %s work with Olumi before or after the count', noun => {
     for (const sentence of [`Olumi supplied 6 ${noun}.`, `6 ${noun} came from Olumi.`]) {
       expect(narratorCountGuard(sentence, census(9))).toEqual({ text: '', removed: [sentence] });

@@ -13,7 +13,7 @@ const clean = (text: string, pct = 67): string => withEstimateGoalPointsAtEgress
   analysisResult: result(pct), graph, current: true,
 }).assistant_text;
 
-describe('r10: estimate points require the licence value and its subject', () => {
+describe('r16: a licensed option and its goal bind any narrated percentage', () => {
   const bare = [
     'Raise to £59: about 67%.',
     '‘Raise to £59’: about 67%.',
@@ -24,7 +24,11 @@ describe('r10: estimate points require the licence value and its subject', () =>
     'Raise to £59: 67%.',
     'Raise to £59 has about 67% chance of meeting your goal.',
     'MRR meets the target in 67% of runs.',
-    'Raise to £59: approximately 67% market share.',
+    'Raise to £59: 68%.',
+    'Raise to £59 has a 68% chance of reaching MRR.',
+    'Raise to £59 has a 68% chance of meeting your goal.',
+    'This gives a 67% chance.',
+    'This gives a 68% chance.',
   ];
   it.each(bare)('replaces the bound point: %s', sentence => {
     expect(clean(sentence)).toBe(line().chance);
@@ -37,8 +41,9 @@ describe('r10: estimate points require the licence value and its subject', () =>
     expect(out).not.toContain(sentence);
   });
   it.each(['About 67%.', 'The chance is about 67%.', 'The chance of meeting your goal is about 67%.',
-    'Raise to £59: less than 1%.', 'Raise to £59: more than 99%.', 'Raise to £59: about 33% market share.',
-    'Costs are about 67% of revenue.'])('preserves the unbound sentence byte for byte: %s', sentence => {
+    'Raise to £59: about 67% market share.', 'Raise to £59: about 33% market share.',
+    'Raise to £59: the chance of supplier failure is 67%.',
+    'Raise to £59: there is a 68% chance a competitor launches first.', 'Costs are about 67% of revenue.'])('preserves the unbound sentence byte for byte: %s', sentence => {
     const text = `  ${sentence}\t\n${line().chance}`;
     expect(clean(text)).toBe(text);
   });
