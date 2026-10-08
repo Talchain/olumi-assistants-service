@@ -77,7 +77,7 @@ import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js'
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
@@ -2038,11 +2038,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
     /** Live turns and replays resolve issuance exactly as reload does, from one bounded recent window. */
-    const proposalIssuers = async (records: readonly ProposalRecord[]): Promise<ReadonlyMap<string, string>> => {
+    const proposalIssuers = async (records: readonly ProposalRecord[], pending: readonly PendingAction[]): Promise<ReadonlyMap<string, string>> => {
       if (records.length === 0) return new Map();
       try {
         const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
-        return await issuedTurnIdsForProposalRecords(records, rows, CONVERSATION_ROWS_READ, typeof store.readCommittedTurn === 'function'
+        return await issuedTurnIdsForProposalRecords(proposalIssuances(records, pending), rows, CONVERSATION_ROWS_READ, typeof store.readCommittedTurn === 'function'
           ? id => store.readCommittedTurn!(scenarioId, id) : undefined);
       }
       catch (err) {
@@ -2081,7 +2081,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso))
         // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record.
         .map(r => priorRecords.find(old => old.proposal_id === r.proposal_id) ?? r);
-      const replayIssuers = await proposalIssuers(replayRecords);
+      const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
       /**
@@ -4748,7 +4748,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
       'PREMORTEM_WORKSHEET_WITHHELD');
     }
-    const issuedTurnIds = await proposalIssuers(heldRecords);
+    const issuedTurnIds = await proposalIssuers(heldRecords, [...durablePending, ...liveHolds]);
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),

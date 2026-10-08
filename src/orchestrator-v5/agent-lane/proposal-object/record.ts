@@ -128,7 +128,6 @@ export interface ProposalRecord<F extends ProposalField = ProposalField> {
    */
   readonly revision: string;
   /** Carrier time for bounded issuance lookup only; excluded from the displayed digest and wire. */
-  readonly emitted_at_iso: string;
   /**
    * What the panel SHOWED, bound: the card's words, every field (its ends, their labels, direction, value and whose it
    * is) and the missing data, hashed. Edits name it and the door re-derives it from the stored hold on the stored model,
@@ -293,7 +292,6 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
   return {
     proposal_id: pa.chip_id,
     revision: pa.id,
-    emitted_at_iso: pa.emitted_at_iso,
     digest,
     dialect: 'product_hold',
     base_graph_hash: pin,
@@ -353,7 +351,7 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
   }
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
   const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [] });
-  return { proposal_id: p.proposal_id, revision: pa.id, emitted_at_iso: pa.emitted_at_iso, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
+  return { proposal_id: p.proposal_id, revision: pa.id, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
     approve_action: approve, decline_action: decline, operations: p.operations, fields, missing: [] };
 }
 /** One envelope, with a reader for each stored dialect. */
@@ -413,8 +411,19 @@ function proposalRowTimestamp(value: string | undefined, shiftSeconds = 0): stri
  * Tied timestamps, a hold predating this window and unverifiable rows stay unknown. Claim markers and conversation
  * the user did not see never issue cards. Neither graph nor stored conversation changes.
  */
+/** Each record's revision with the emission time of the held action that carries it; a record without one is skipped. */
+export function proposalIssuances(records: readonly ProposalRecord[], pending: readonly PendingAction[]): readonly ProposalIssuance[] {
+  return records.flatMap((r) => {
+    const pa = pending.find((p) => p.id === r.revision);
+    return pa === undefined ? [] : [{ revision: r.revision, emitted_at_iso: pa.emitted_at_iso }];
+  });
+}
+
+/** What locating an issuing answer needs; deliberately NOT part of the record (its shape and digest stay as shown). */
+export interface ProposalIssuance { readonly revision: string; readonly emitted_at_iso: string }
+
 export async function issuedTurnIdsForProposalRecords(
-  records: readonly ProposalRecord[],
+  records: readonly ProposalIssuance[],
   rows: readonly ProposalIssuingRow[],
   windowSize: number,
   readCommittedTurn?: (turnId: string) => Promise<{ readonly pending_actions?: readonly unknown[] } | null>,

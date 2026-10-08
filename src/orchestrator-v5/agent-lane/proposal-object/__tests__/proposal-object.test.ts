@@ -12,7 +12,7 @@ import { hypothesisEdgeValue } from '../../../routing/add-option-transaction.js'
 import { tryShortConfirmResume } from '../../../routing/deterministic-short-confirm.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { amendHeldOperations, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../amend.js';
-import { FIELD_CLASS_BY_OP, declinedProposalOf, heldChangeName, issuedTurnIdsForProposalRecords, productHoldRecord, proposalFieldsWire, proposalRecord, type ProposalIssuingRow } from '../record.js';
+import { FIELD_CLASS_BY_OP, declinedProposalOf, heldChangeName, issuedTurnIdsForProposalRecords, proposalIssuances, productHoldRecord, proposalFieldsWire, proposalRecord, type ProposalIssuingRow } from '../record.js';
 import { PROPOSAL_IDLE_TTL_MS, reconcileHeldProposals, refreshedHold } from '../lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../reply.js';
 
@@ -71,14 +71,14 @@ describe('P53 bounded issuing-answer lookup', () => {
       { ...answer('z-issuer', 0, [pending]), created_at: '2026-10-08 00:45:38.000100+00' },
       { ...answer('predecessor', 0, []), created_at: '2026-10-08T00:45:35.999999Z' },
     ];
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, 200);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBe('z-issuer');
   });
 
   it('P53-r2-b: the oldest carry within +1 s stays unknown when the loaded window is full', async () => {
     const pending = hold(); const record = proposalRecord(pending, graph)!;
     const rows = [answer('later-carry', 2000, [pending]), answer('oldest-carry', 1000, [pending])];
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, rows.length);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, rows.length);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
   });
 
@@ -89,14 +89,14 @@ describe('P53 bounded issuing-answer lookup', () => {
       { ...answer('a-carry', 0, [pending]), created_at: '2026-10-08T00:45:38.445629Z' },
       { ...answer('z-issuer', 0, [pending]), created_at: '2026-10-08 00:45:38.445629+00' },
     ];
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, 200);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
   });
 
   it('P53-r2-d: complete history binds an issuer that is its first public answer', async () => {
     const pending = hold(); const record = proposalRecord(pending, graph)!;
     const rows = [answer('later-carry', 1000, [pending]), answer('first-issuer', 0, [pending])];
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, 200);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBe('first-issuer');
   });
 
@@ -107,7 +107,7 @@ describe('P53 bounded issuing-answer lookup', () => {
       { ...answer('issuer', 0, [pending]), created_at: '2026-10-08 00:45:36.000100+00' },
       { ...answer('predecessor', 0, []), created_at: '2026-10-08T00:45:36.000099Z' },
     ];
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, 200);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBe('issuer');
   });
 
@@ -115,7 +115,7 @@ describe('P53 bounded issuing-answer lookup', () => {
     const pending = hold(); const record = proposalRecord(pending, graph)!;
     const rows = [answer('candidate', 0), answer('a-predecessor', -3000, [pending]), answer('z-predecessor', -3000, [])];
     const read = vi.fn(async () => ({ pending_actions: [pending] }));
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, 200, read);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200, read);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
     expect(read).not.toHaveBeenCalled();
   });
@@ -124,7 +124,7 @@ describe('P53 bounded issuing-answer lookup', () => {
     const pending = hold(); const record = proposalRecord(pending, graph)!;
     const rows = [answer('issuer', 0, [pending]), answer('claim:claim', 1000),
       { ...answer('internal', -3000), request_hash: 'sha256:internal' }];
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, rows.length);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, rows.length);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
   });
 
@@ -139,7 +139,7 @@ describe('P53 bounded issuing-answer lookup', () => {
         if (state === 'missing carriers') return {};
         return { pending_actions: state === 'carrying' ? [pending] : [] };
       });
-      const issued = await issuedTurnIdsForProposalRecords([record], rows, rows.length, read);
+      const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, rows.length, read);
       expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id)
         .toBe(state === 'not carrying' ? 'candidate' : null);
       expect(read.mock.calls).toEqual([['candidate'], ['predecessor']]);
@@ -152,7 +152,7 @@ describe('P53 bounded issuing-answer lookup', () => {
       answer('claim:claim', -1500), { ...answer('internal', -1750), request_hash: 'sha256:internal' }];
     const read = vi.fn(async (turnId: string) => ({ pending_actions: turnId === 'too-early' ? [] : [pending] }));
     const before = JSON.stringify({ record, rows });
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, 200, read);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200, read);
     expect([...issued]).toEqual([[record.revision, 'skew-boundary']]);
     expect(read.mock.calls).toEqual([['skew-boundary'], ['too-early']]);
     const bound = proposalFieldsWire([record], HASH, issued)!;
@@ -166,7 +166,7 @@ describe('P53 bounded issuing-answer lookup', () => {
     const pending = hold(); const record = proposalRecord(pending, graph)!;
     const other = hold({ id: '22222222-2222-4222-8222-222222222222' });
     const read = vi.fn(async (turnId: string) => ({ pending_actions: turnId === 'first' ? [other] : [pending] }));
-    const issued = await issuedTurnIdsForProposalRecords([record], [answer('later', 5000), answer('first', 0)], 200, read);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), [answer('later', 5000), answer('first', 0)], 200, read);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
     expect(read.mock.calls).toEqual([['first']]);
   });
@@ -180,7 +180,7 @@ describe('P53 bounded issuing-answer lookup', () => {
       if (turnId === 'first') throw new Error('Exact row unavailable');
       return { pending_actions: [first, second] };
     });
-    const issued = await issuedTurnIdsForProposalRecords(records,
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances(records, [first, second]),
       [answer('later', 20_000), answer('second', 10_000), answer('second-predecessor', 7000, [first]), answer('first', 0)], 200, read);
     expect(proposalFieldsWire(records, HASH, issued)!.proposals.map(p => [p.revision, p.issued_turn_id]))
       .toEqual([[first.id, null], [second.id, 'second']]);
@@ -200,7 +200,7 @@ describe('P53 bounded issuing-answer lookup', () => {
   ] as const)('%s stays unknown with zero verification reads', async (_reason, emittedAt, rows) => {
     const pending = hold({ emitted_at_iso: emittedAt }); const record = proposalRecord(pending, graph)!;
     const read = vi.fn(async () => ({ pending_actions: [pending] }));
-    const issued = await issuedTurnIdsForProposalRecords([record], rows, 200, read);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), rows, 200, read);
     expect(proposalFieldsWire([record], HASH, issued)!.proposals[0]!.issued_turn_id).toBeNull();
     expect(read).not.toHaveBeenCalled();
   });
@@ -208,9 +208,9 @@ describe('P53 bounded issuing-answer lookup', () => {
   it('inline carriers verify without a store read, and an empty inline candidate never retries a later carrier', async () => {
     const pending = hold(); const record = proposalRecord(pending, graph)!;
     const read = vi.fn(async () => ({ pending_actions: [pending] }));
-    const issued = await issuedTurnIdsForProposalRecords([record], [answer('later', 5000, [pending]), answer('first', 0, [pending])], 200, read);
+    const issued = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), [answer('later', 5000, [pending]), answer('first', 0, [pending])], 200, read);
     expect([...issued]).toEqual([[record.revision, 'first']]);
-    const unmatched = await issuedTurnIdsForProposalRecords([record], [answer('later', 5000, [pending]), answer('first', 0, [])], 200, read);
+    const unmatched = await issuedTurnIdsForProposalRecords(proposalIssuances([record], [pending]), [answer('later', 5000, [pending]), answer('first', 0, [])], 200, read);
     expect(proposalFieldsWire([record], HASH, unmatched)!.proposals[0]!.issued_turn_id).toBeNull();
     expect(read).not.toHaveBeenCalled();
   });
