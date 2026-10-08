@@ -37,6 +37,30 @@ describe('Q6 narrator inclusion about an option the Run left out', () => {
     expect(edit(text, [], [...SENT, TEST]).text, 'CONTROL: same words, £54 sent').toBe(text);
   });
 
+  describe('Codex r2 on #2810 (verbatim repros)', () => {
+    it('P1-1 fronted inclusion: a colon never separates the predicate from its referent', () => {
+      for (const text of ['Included for comparison: £59 and the £54 test.', 'Included for comparison: £59 and Test £54 Pro price.']) {
+        expect(edit(text).text, text).toBe(LINE);
+        expect(edit(text, [], [...SENT, TEST]).text, `CONTROL sent: ${text}`).toBe(text);
+      }
+    });
+    it('P1-2 a sent label’s own punctuation is never a sentence end', () => {
+      const packaging = { option_id: 'packaging', label: 'Test £54 Pro price incl. revised packaging' };
+      const text = 'We analysed ‘Test £54 Pro price incl. revised packaging’.';
+      expect(edit(text, [TEST], [...SENT, packaging]).text).toBe(text);
+    });
+    it('P1-3 a sent option’s assessment is not the left-out option’s; its “with … awaiting” clause stays', () => {
+      const text = 'Raise Pro price to £59 was assessed and stayed below the churn limit, with the £54 test still awaiting your approval.';
+      expect(edit(text).text).toBe(text);
+    });
+    it('P1-4 “not yet included” keeps its negation', () => {
+      const text = 'Raise Pro price to £59 was assessed; we have not yet included the £54 test.';
+      expect(edit(text).text).toBe(text);
+      // Positive control in the same shape: the inclusion clause without its negation still strikes.
+      expect(edit('Raise Pro price to £59 was assessed; we have also included the £54 test.').text).toBe(LINE);
+    });
+  });
+
   it.each([
     'We also compared the £54 test.',
     'The analysis covers Keep £49, Raise to £59 and Test £54 Pro price.',

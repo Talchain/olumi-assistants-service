@@ -13,7 +13,7 @@ export const LEFT_OUT_COPY_REGEXES = {
   figureSpace: /[ \t]{1,3}/g,
   inclusion: /\b(?:(?:includ|compar|analy[sz]|evaluat)(?:e|es|ed|ing)|assess(?:es|ed|ing)?|cover(?:s|ed|ing)?)\b|\btested\b|\bconsider(?:s|ed|ing)?[ \t]{1,4}(?:in\b|as[ \t]{1,4}part[ \t]{1,4}of\b)|\bpart[ \t]{1,4}of\b|\bin[ \t]{1,4}(?:the|this)[ \t]{1,4}(?:run|analysis|comparison)\b|\balongside\b|\bruns?[ \t]{1,4}with\b/i,
   negation: /\b(?:not|never|excluded|without)\b|n['’]t\b|\bleft[ \t]{1,4}out\b/i,
-  clauseBoundary: /[;:—–]|,[ \t]{0,4}(?:and|but|while|whereas|although|though|yet)\b|\b(?:but|whereas|yet|however)\b/gi,
+  clauseBoundary: /[;:—–]|,[ \t]{0,4}(?:and|but|while|whereas|although|though|yet|with)\b|\b(?:but|whereas|however)\b/gi,
   bullet: /^[ \t]{0,8}(?:[-*•]|\d{1,3}[.)])[ \t]{1,4}/,
   word: /[\p{L}\p{N}_]/u,
   wordToken: /[\p{L}\p{N}_]{1,128}(?:[-‐‑][\p{L}\p{N}_]{1,128}){0,16}/gu,
@@ -54,15 +54,15 @@ const maskLabelIn = (text: string, label: string): string => {
 };
 
 /** An option name's own punctuation is part of its referent; only punctuation outside names separates assertions. */
-function clausesOf(text: string, labels: readonly string[]): string[] {
+function clausesOf(text: string, labels: readonly string[]): { readonly text: string; readonly beforeColon: boolean }[] {
   const outsideNames = labels.reduce(maskLabelIn, text);
-  const clauses: string[] = [];
+  const clauses: { text: string; beforeColon: boolean }[] = [];
   let start = 0;
   for (const boundary of outsideNames.matchAll(LEFT_OUT_COPY_REGEXES.clauseBoundary)) {
-    clauses.push(text.slice(start, boundary.index!));
+    clauses.push({ text: text.slice(start, boundary.index!), beforeColon: boundary[0] === ':' });
     start = boundary.index! + boundary[0].length;
   }
-  clauses.push(text.slice(start));
+  clauses.push({ text: text.slice(start), beforeColon: false });
   return clauses;
 }
 
@@ -124,8 +124,12 @@ export function leftOutOptionSentence(o: LeftOutRunOption & { label: string }): 
 
 interface TextUnit { readonly start: number; readonly end: number; readonly text: string }
 /** A bullet is one unit; prose is cut only at a sentence end, never at a decimal's dot. */
-function unitsOf(text: string): TextUnit[] {
+function unitsOf(text: string, names: readonly Span[] = []): TextUnit[] {
   const out: TextUnit[] = [];
+  // One pass marks every position inside a name (its last character may still end a sentence): linear, never span × dot.
+  const inName = new Uint8Array(text.length);
+  for (const n of names) inName.fill(1, n.start, Math.max(n.start, n.end - 1));
+  const insideName = (at: number): boolean => inName[at] === 1;
   let lineStart = 0;
   while (lineStart < text.length) {
     const newline = text.indexOf('\n', lineStart);
@@ -137,6 +141,8 @@ function unitsOf(text: string): TextUnit[] {
       let start = lineStart;
       for (let at = start; at < lineEnd; at += 1) {
         if (!'.!?'.includes(text[at]!)) continue;
+        // An option name's own punctuation ('… incl. revised packaging') is never a sentence end (Codex r2 on #2810).
+        if (insideName(at)) continue;
         if (text[at] === '.' && '0123456789'.includes(text[at - 1] ?? '') && text[at - 1] !== undefined
           && '0123456789'.includes(text[at + 1] ?? '') && text[at + 1] !== undefined) continue;
         let end = at + 1;
@@ -172,17 +178,33 @@ export function removeLeftOutOptionInclusionClaims(
   const leftOutLabels = options.map((o) => o.folded).sort((a, b) => b.length - a.length);
   const removed: TextUnit[] = [];
   const named = new Set<string>();
-  for (const unit of unitsOf(text)) {
+  // Where every option name sits in the text, so segmentation cannot cut one (fold keeps offsets for these scripts).
+  const foldedText = fold(text);
+  const nameSpans: Span[] = foldedText.length !== text.length ? [] : [...sentLabels, ...leftOutLabels].flatMap((label) => {
+    const spans: Span[] = [];
+    for (let at = foldedText.indexOf(label); at !== -1; at = foldedText.indexOf(label, at + Math.max(1, label.length))) {
+      if (exactLabelAt(foldedText, label, at)) spans.push({ start: at, end: at + label.length });
+    }
+    return spans;
+  });
+  for (const unit of unitsOf(text, nameSpans)) {
     // Mask SENT full labels before ANY search or split, including longer names containing a left-out name.
     const foldedUnit = sentLabels.reduce(maskLabelIn, fold(unit.text));
     const clauses = clausesOf(foldedUnit, leftOutLabels);
     let strike = false;
-    for (const clause of clauses) {
+    // A FRONTED predicate ("Included for comparison: £59 and the £54 test.") names no option before its colon; its
+    // inclusion carries to the list after it (Codex r2 on #2810). A colon after a named option stays a boundary.
+    let frontedInclusion = false;
+    for (const { text: clause, beforeColon } of clauses) {
       // A word inside an exact option name (e.g. “Expand without debt”) does not negate “was analysed”.
       const figures = figureContextsOf(clause);
       const referents = options.map((option) => ({ option, ...referentIn(clause, option, figures) }));
       const outsideNames = maskSpans(leftOutLabels.reduce(maskLabelIn, clause), referents.flatMap((r) => r.spans));
-      if (!LEFT_OUT_COPY_REGEXES.inclusion.test(outsideNames) || LEFT_OUT_COPY_REGEXES.negation.test(outsideNames)) continue;
+      const carried = frontedInclusion;
+      const noOptionNamed = referents.every((r) => !r.referred) && figures.length === 0;
+      frontedInclusion = beforeColon && noOptionNamed && LEFT_OUT_COPY_REGEXES.inclusion.test(outsideNames)
+        && !LEFT_OUT_COPY_REGEXES.negation.test(outsideNames);
+      if (!(carried || LEFT_OUT_COPY_REGEXES.inclusion.test(outsideNames)) || LEFT_OUT_COPY_REGEXES.negation.test(outsideNames)) continue;
       for (const referent of referents) {
         if (!referent.referred) continue;
         named.add(referent.option.option_id);
