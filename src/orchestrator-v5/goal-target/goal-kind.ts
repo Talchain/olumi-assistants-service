@@ -4,7 +4,7 @@
  *
  * Every producer and consumer of a goal asks THIS module what kind of goal it holds, and so what may be asked, written
  * and said about it. Kinds:
- *  · `chance_of_event` — the goal's unit names the CHANCE of an event ("% likelihood of on-time launch"). INVALID as a
+ *  · `chance_of_event` — the goal's unit, or its label with a bare percent unit, names the CHANCE of an event. INVALID as a
  *    quantity: Olumi computes that chance, so it is never propagated, never asked for ("today's level" of it, D-06), and
  *    never given a target. Every goal figure is withheld with ONE sentence, and the one question is the deadline.
  *  · `change`          — a target stated as a change from today (`goal_threshold_frame` `change_abs` / `change_rel`).
@@ -13,11 +13,16 @@
  *  · `share_by_date` — a forecast pure sum of held share parts, with a fixed date;
  *    recognised only with the graph, since a node cannot attest its incoming links.
  *
- * The chance predicate reads the goal's UNIT only (the ruling's wording: "a goal unit naming a chance of an event"),
- * whole words, bounded: must-fire "% likelihood of on-time launch", "chance of hitting the date", "probability of launch
- * on time", "% likely"; must-not-fire "% of launch done", "% of customers", "churn %".
+ * Chance words are read whole and bounded in the unit, and also in the label when the stored unit is a bare percent.
+ * "Risk" in that label names a chance only when followed by "of" or "that", never in a compound risk metric.
+ * Science (b)'s rate reader decides whether that segment names a population quantity or a one-off chance: must-fire
+ * "% likelihood of on-time launch", "On-time feature-launch probability" in "%"; must-not-fire "% of launch done",
+ * "% of customers", "churn %", "Monthly churn probability" in "%".
  */
 
+import { readRateAsQuantity, riskChanceWord } from './rate-as-quantity.js';
+import { shareKind } from '../../utils/unit-alphabet.js';
+import { readPercentUnit, readUnitParts, words } from '../agent-lane/same-unit.js';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
@@ -38,6 +43,8 @@ export type GoalKind = 'chance_of_event' | 'change' | 'level' | 'share_by_date';
 export const UNIT_HEAD_CUT = /[ \t]{1,4}(?:of|per|for|on|in|by|to)(?:[ \t]{1,4}|$)/i;
 /** A bracketed scale note, bounded: "(0-1)", "(%)", "[0–100%]". */
 export const SCALE_NOTE = /\([^()]{0,40}\)|\[[^[\]]{0,40}\]/g;
+/** Words that open a clause after a chance word: "probability THAT …", "chance WE …", "chance A user …". */
+const CLAUSE_OPENERS = new Set(['that', 'we', 'i', 'you', 'they', 'it', 'a', 'an', 'the', 'our', 'my', 'their', 'each', 'any', 'every']);
 export const CHANCE_WORD = /^(?:likelihoods?|likeliness|chances?|probabilit(?:y|ies)|odds|likely)$/i;
 
 /** True when a goal unit names the chance of an event (Science ruling §2). Units over 200 characters are not read. */
@@ -48,7 +55,65 @@ export function unitNamesAChance(unit: unknown): boolean {
   const measure = (cut === null ? unit : unit.slice(0, cut.index)).replace(SCALE_NOTE, ' ')
     .replace(/[()[\]%,.;:]/g, ' ').trim();
   const words = measure.split(/[ \t]+/).filter((w) => w !== '');
-  return words.length > 0 && CHANCE_WORD.test(words[words.length - 1]!);
+  if (words.length > 0 && CHANCE_WORD.test(words[words.length - 1]!)) return true;
+  // P17: a chance word opening a clause is the measure too ("probability we hit the launch date", "the chance a trial
+  // user converts"); before, the clause's last word was read as the head and the goal read as a plain level.
+  // A counted per-unit clause ("chances the team creates per match") stays a level. DL-approved r2: a singular chance
+  // with an event clause and non-period denominator ("chance the launch slips per management") must reach the reader.
+  if (cut !== null && cut[0].trim().toLowerCase() === 'per') {
+    return words.some((w) => CHANCE_WORD.test(w)) && readRateAsQuantity(unit).kind === 'chance';
+  }
+  return words.some((w, i) => CHANCE_WORD.test(w) && CLAUSE_OPENERS.has((words[i + 1] ?? '').toLowerCase()));
+}
+
+/**
+ * P17: a RATE goal measured in a chance-named unit ("probability (%)", "conversion probability per visitor") is a share.
+ * For the unit-family check a figure in pounds, people or months is never it, so the unit reads as a percent rate. Only
+ * for a unit written in % ("probability (%)", "% churn probability") is a stated percent figure the rate's own; a 0–1
+ * or bare "probability" unit keeps its own words (a "5%" is then refused, never silently re-scaled). The denominator
+ * stays on that percent rate: today's "% per month" is never re-read as "% per year".
+ */
+export function rateUnitForFamily(unit: unknown): string | undefined {
+  return unitNamesAChance(unit) && typeof unit === 'string' ? ratePercentFrame(unit) ?? '%' : undefined;
+}
+export function rateUnitInPercent(unit: unknown, stated: unknown): string | undefined {
+  // A bare percent or a percent RATE is re-read. Subject words in the stated unit keep the own-unit path (buddy r2).
+  const percent = readPercentUnit(stated);
+  if (percent === null || percent.base !== null) return undefined;
+  const statedRate = readUnitParts(`rate ${(percent.qualifiers ?? []).join(' ')}`);
+  if (statedRate?.kind !== 'count' || statedRate.noun?.join(' ') !== 'rate') return undefined;
+  if (!unitNamesAChance(unit) || typeof unit !== 'string') return undefined;
+  return ratePercentFrame(unit, true);
+}
+
+/** Read the stored rate's denominator through the full unit reader, with its chance measure and scale kept separate. */
+function ratePercentFrame(unit: string, requireExplicitPercent = false): string | undefined {
+  let explicitPercent = false;
+  const ws = words(unit.replace(SCALE_NOTE, (note) => {
+    const scale = note.slice(1, -1).trim();
+    const percent = readPercentUnit(scale);
+    if (percent !== null && percent.base === null && percent.qualifiers === null) explicitPercent = true;
+    // Existing numeric scale notes ("[0–100%]") name the percent scale, too; a 0–1 annotation never does.
+    if (scale.endsWith('%')) {
+      const bounds = scale.slice(0, -1).replaceAll('–', '-').replaceAll('—', '-').split('-');
+      if (bounds.length === 2 && Number(bounds[0]) === 0 && Number(bounds[1]) === 100) explicitPercent = true;
+    }
+    return ' ';
+  }));
+  const measure: string[] = [];
+  for (let i = 0; i < ws.length; i += 1) {
+    let scaleLength = Math.min(3, ws.length - i);
+    while (scaleLength > 0 && shareKind(ws.slice(i, i + scaleLength).join(' ')) === null) scaleLength -= 1;
+    const scaleKind = scaleLength > 0 ? shareKind(ws.slice(i, i + scaleLength).join(' ')) : null;
+    if (scaleKind === 'points') return undefined;
+    if (scaleKind === 'percent') { explicitPercent = true; i += scaleLength - 1; }
+    else measure.push(ws[i]!);
+  }
+  if (requireExplicitPercent && !explicitPercent) return undefined;
+  const rate = readUnitParts(measure.join(' '));
+  if (rate?.kind !== 'count') return undefined;
+  return `%${rate.per !== null && rate.per.length > 0 ? ` per ${rate.per.join(' ')}` : ''}`
+    + `${rate.period !== null ? ` per ${rate.period}` : ''}`;
 }
 
 /** The unit the goal is measured in: its target's unit, else its level's. */
@@ -72,7 +137,25 @@ export function goalKindOf(goal: unknown, graph?: unknown): GoalKind {
   }
   if (!isRec(goal)) return 'level';
   const os = isRec(goal.observed_state) ? goal.observed_state.unit : undefined;
-  if (unitNamesAChance(goal.goal_threshold_unit) || unitNamesAChance(os)) return 'chance_of_event';
+  const chanceUnits = [goal.goal_threshold_unit, os].filter(unitNamesAChance) as string[];
+  // P17, Science ruling (b): a population RATE written as a probability ("churn probability", "conversion probability per
+  // visitor") is a quantity. Read each unit and the label independently: subjects and denominators never cross a join.
+  // Rules 1 and 2 precede either chance rule, so any segment's quantity reading wins over rules 3/4 elsewhere.
+  if (chanceUnits.length > 0
+    // Each part is cut to 401 characters BEFORE the classifier receives it; an over-long segment falls to rule 4.
+    && ![...chanceUnits, typeof goal.label === 'string' ? goal.label : '']
+      .map((t) => readRateAsQuantity(t.slice(0, 401))).some((r) => r.kind === 'quantity')) {
+    return 'chance_of_event';
+  }
+  // Outside-corpus P17: a bare percent carries no subject, so a chance word in the LABEL must reach the same reader.
+  // Keep named-unit readings above intact; within the label, Science (b)'s quantity rules still precede chance rules.
+  const unit = goalUnitOf(goal);
+  const label = typeof goal.label === 'string' ? goal.label.slice(0, 401) : '';
+  if (chanceUnits.length === 0 && unit !== undefined && shareKind(unit) === 'percent'
+    && label.toLowerCase().split(/[^a-z]+/i).some((w, i, ws) => CHANCE_WORD.test(w) || riskChanceWord(ws, i))
+    && readRateAsQuantity(label).kind === 'chance') {
+    return 'chance_of_event';
+  }
   const share = graph === undefined ? null : shareByDateGoalOf(graph);
   if (share !== null && share.goal.id === goal.id) return 'share_by_date';
   const frame = goal.goal_threshold_frame;

@@ -213,7 +213,7 @@ import { meetsLimit } from '../limit-operator-words.js';
 import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
 import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
-import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
+import { goalDeadlineOf, goalKindOf, rateUnitForFamily } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
@@ -4413,7 +4413,7 @@ export function createAgentCapabilities(
       // The writer would not refuse it: it re-denominates the goal and re-derives its scale, silently.
       const trio = pickGoalThresholdTrio(goal as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
       const goalUnit = (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit ?? factorUnitOf(g.raw, goal);
-      if (unitsConflict(unit, goalUnit) !== null) {
+      if (unitsConflict(unit, rateUnitForFamily(goalUnit) ?? goalUnit) !== null) {
         return { ok: false, mutated: false, refusal: 'target_unit_mismatch',
           detail: `The goal "${goal.label}" is measured in ${String(goalUnit)}, and ${figure} is a different kind of figure, so nothing was prepared. `
             + 'Ask the user for the target in the goal’s own units, and never record a figure given for something else as this goal’s target.' };

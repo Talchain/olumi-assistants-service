@@ -21,7 +21,9 @@ describe('the goal warning keeps its reason and its question’s identity inside
     // S-E GOALS (#2742): a unit naming a chance ("probability of launch …", Codex's r2 unit) is now a chance goal, which
     // asks no level at all; the carrier row keeps a long unit of the same length that measures a level.
     ['a long unit (the question alone is ~308 characters)', 'hours of onboarding per enterprise account (hours)'],
-    ['CONTROL: a short unit', '%'],
+    // P17 (#2780): with a bare '%' unit this label ("Likelihood of completing … before the next feature-launch deadline")
+    // is a one-off chance under Science ruling (b), so it asks no level; the short-unit control uses a level unit instead.
+    ['CONTROL: a short unit', 'hours'],
   ])('%s', (_what, unit) => {
     const g = graphWith(unit);
     const w = placeholderGoalWarning(g, [{ option_id: 'hire', links: g.edges }] as never, 'GOAL_FIGURES_PLACEHOLDER_PATH');
