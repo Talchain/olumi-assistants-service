@@ -1,0 +1,584 @@
+{
+ "_source": "R3 accept-paul (Paul brief 3b047ee4) on served staging fbfc63d, programme-docs b604253c7a7b2c00ba3aca6613429d6700544637 r3-science/evidence-20260930/succ-996ec64d/accept-paul/base-1449Z: 01-brief (turn 1 reply), 02-cold-after-build (graph), 04-cold-after-run1 (graph + analysis_result), 05-answer (answer reply). Graphs trimmed to ids and stored figures; texts verbatim.",
+ "brief": "I need to accelerate securing funding within the next 2 months. We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK. We'll keep sending cold emails and trying to find warm connections, but I want to explore alternatives to support the funding process, as we'll run out of money soon. For example, angel investors might be able to provide a small amount of funding quicker to buy us more time, but we would need to decide whether the overhead would be worth it.",
+ "turn1": {
+  "reply": "I’ve mapped the funding decision around the two‑month window.\n\n• It compares current outreach, an angel bridge approach, and an Olumi-suggested angel pilot; continuing as now holds today’s values.\n• The first pass is **provisional**, built on Olumi assumptions: 30 UK firms contacted/month, 4 warm introductions/month, 8 hours/week process overhead, and £75,000 per qualified conversation. These are not measurements.\n• It can be analysed, but the key missing business facts are your cash runway/minimum bridge amount and whether the goal includes all funding sources or only firm-and-angel outreach.\n\nWhich scope did you mean for “securing funding”: all possible sources, or just investment-firm and angel outreach?\n\nThe model was saved. Questions this model does not answer yet: The brief does not say whether your \"securing funding\" goal covers funding secured through investment-firm and angel outreach over the next 2 months or funding secured from all possible sources, so the model measures it for funding secured through investment-firm and angel outreach over the next 2 months. Which did you mean? Does \"securing funding\" get there within 2 months? The model holds the deadline; no result answers that yet. (2 of 8 shown.) No option changes UK investment-firm outreach or Warm introductions, so I held them as fixed context rather than levers — tell me if one of the options should change them.",
+  "graph": {
+   "nodes": [
+    {
+     "id": "decision_securing_funding",
+     "kind": "decision",
+     "label": "Decision: securing funding"
+    },
+    {
+     "id": "securing_funding",
+     "kind": "goal",
+     "label": "securing funding",
+     "goal_threshold_unit": "£",
+     "goal_horizon_months": 2
+    },
+    {
+     "id": "current_outreach",
+     "kind": "option",
+     "label": "Current outreach"
+    },
+    {
+     "id": "angel_bridge_outreach",
+     "kind": "option",
+     "label": "Angel bridge outreach",
+     "interventions": {
+      "angel_investor_outreach": {
+       "unit": "prospects/month",
+       "value": 0.2,
+       "source": "cee_hypothesis",
+       "raw_value": 40,
+       "target_match": {
+        "node_id": "angel_investor_outreach",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "funding_process_overhead": {
+       "unit": "hours/week",
+       "value": 0.2,
+       "source": "cee_hypothesis",
+       "raw_value": 16,
+       "target_match": {
+        "node_id": "funding_process_overhead",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "angel_outreach_pilot",
+     "kind": "option",
+     "label": "Angel outreach pilot",
+     "interventions": {
+      "angel_investor_outreach": {
+       "unit": "prospects/month",
+       "value": 0.1,
+       "source": "cee_hypothesis",
+       "raw_value": 20,
+       "target_match": {
+        "node_id": "angel_investor_outreach",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "funding_process_overhead": {
+       "unit": "hours/week",
+       "value": 0.15,
+       "source": "cee_hypothesis",
+       "raw_value": 12,
+       "target_match": {
+        "node_id": "funding_process_overhead",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "uk_investment_firm_outreach",
+     "kind": "factor",
+     "label": "UK investment-firm outreach",
+     "observed_state": {
+      "unit": "prospects/month",
+      "value": 0.15,
+      "source": "cee_inference",
+      "raw_value": 30,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "warm_introductions",
+     "kind": "factor",
+     "label": "Warm introductions",
+     "observed_state": {
+      "unit": "introductions/month",
+      "value": 0.08,
+      "source": "cee_inference",
+      "raw_value": 4,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "angel_investor_outreach",
+     "kind": "factor",
+     "label": "Angel investor outreach",
+     "observed_state": {
+      "unit": "prospects/month",
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "funding_process_overhead",
+     "kind": "factor",
+     "label": "Funding process overhead",
+     "observed_state": {
+      "unit": "hours/week",
+      "value": 0.1,
+      "source": "cee_inference",
+      "raw_value": 8,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "fundraising_distraction",
+     "kind": "risk",
+     "label": "Fundraising distraction"
+    },
+    {
+     "id": "qualified_investor_conversations",
+     "kind": "outcome",
+     "label": "Qualified investor conversations"
+    }
+   ],
+   "edges": [
+    {
+     "from": "decision_securing_funding",
+     "to": "current_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "decision_securing_funding",
+     "to": "angel_bridge_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "decision_securing_funding",
+     "to": "angel_outreach_pilot",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_bridge_outreach",
+     "to": "angel_investor_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_bridge_outreach",
+     "to": "funding_process_overhead",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_outreach_pilot",
+     "to": "angel_investor_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_outreach_pilot",
+     "to": "funding_process_overhead",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "current_outreach",
+     "to": "angel_investor_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "current_outreach",
+     "to": "funding_process_overhead",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "uk_investment_firm_outreach",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "warm_introductions",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "angel_investor_outreach",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "funding_process_overhead",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "funding_process_overhead",
+     "to": "fundraising_distraction",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "fundraising_distraction",
+     "to": "securing_funding",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "qualified_investor_conversations",
+     "to": "securing_funding",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    }
+   ]
+  }
+ },
+ "answer": {
+  "message": "We have about £180k in the bank and spend roughly £45k a month, so about 4 months of runway. We have secured £0 so far and need at least £1 million.",
+  "reply": "I’ll set the funding goal to **at least £1,000,000**, using your stated target.\n\nYour £0 secured is also the current level of that goal; the £180k balance and roughly £45k monthly spend imply about four months’ runway, but runway is not yet represented in the model.\n\nApprove this target change, and I’ll then record the current £0 level.",
+  "graph": {
+   "nodes": [
+    {
+     "id": "decision_securing_funding",
+     "kind": "decision",
+     "label": "Decision: securing funding"
+    },
+    {
+     "id": "securing_funding",
+     "kind": "goal",
+     "label": "securing funding",
+     "goal_threshold_unit": "£",
+     "goal_horizon_months": 2
+    },
+    {
+     "id": "current_outreach",
+     "kind": "option",
+     "label": "Current outreach"
+    },
+    {
+     "id": "angel_bridge_outreach",
+     "kind": "option",
+     "label": "Angel bridge outreach",
+     "interventions": {
+      "angel_investor_outreach": {
+       "unit": "prospects/month",
+       "value": 0.2,
+       "source": "cee_hypothesis",
+       "raw_value": 40,
+       "target_match": {
+        "node_id": "angel_investor_outreach",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "funding_process_overhead": {
+       "unit": "hours/week",
+       "value": 0.2,
+       "source": "cee_hypothesis",
+       "raw_value": 16,
+       "target_match": {
+        "node_id": "funding_process_overhead",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "angel_outreach_pilot",
+     "kind": "option",
+     "label": "Angel outreach pilot",
+     "interventions": {
+      "angel_investor_outreach": {
+       "unit": "prospects/month",
+       "value": 0.1,
+       "source": "cee_hypothesis",
+       "raw_value": 20,
+       "target_match": {
+        "node_id": "angel_investor_outreach",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "funding_process_overhead": {
+       "unit": "hours/week",
+       "value": 0.15,
+       "source": "cee_hypothesis",
+       "raw_value": 12,
+       "target_match": {
+        "node_id": "funding_process_overhead",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "uk_investment_firm_outreach",
+     "kind": "factor",
+     "label": "UK investment-firm outreach",
+     "observed_state": {
+      "unit": "prospects/month",
+      "value": 0.15,
+      "source": "cee_inference",
+      "raw_value": 30,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "warm_introductions",
+     "kind": "factor",
+     "label": "Warm introductions",
+     "observed_state": {
+      "unit": "introductions/month",
+      "value": 0.08,
+      "source": "cee_inference",
+      "raw_value": 4,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "angel_investor_outreach",
+     "kind": "factor",
+     "label": "Angel investor outreach",
+     "observed_state": {
+      "unit": "prospects/month",
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "funding_process_overhead",
+     "kind": "factor",
+     "label": "Funding process overhead",
+     "observed_state": {
+      "unit": "hours/week",
+      "value": 0.1,
+      "source": "cee_inference",
+      "raw_value": 8,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "fundraising_distraction",
+     "kind": "risk",
+     "label": "Fundraising distraction"
+    },
+    {
+     "id": "qualified_investor_conversations",
+     "kind": "outcome",
+     "label": "Qualified investor conversations"
+    }
+   ],
+   "edges": [
+    {
+     "from": "decision_securing_funding",
+     "to": "current_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "decision_securing_funding",
+     "to": "angel_bridge_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "decision_securing_funding",
+     "to": "angel_outreach_pilot",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_bridge_outreach",
+     "to": "angel_investor_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_bridge_outreach",
+     "to": "funding_process_overhead",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_outreach_pilot",
+     "to": "angel_investor_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "angel_outreach_pilot",
+     "to": "funding_process_overhead",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "current_outreach",
+     "to": "angel_investor_outreach",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "current_outreach",
+     "to": "funding_process_overhead",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "exists_probability": 1
+    },
+    {
+     "from": "uk_investment_firm_outreach",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "warm_introductions",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "angel_investor_outreach",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "funding_process_overhead",
+     "to": "qualified_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "funding_process_overhead",
+     "to": "fundraising_distraction",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "fundraising_distraction",
+     "to": "securing_funding",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "exists_probability": 0.8
+    },
+    {
+     "from": "qualified_investor_conversations",
+     "to": "securing_funding",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "exists_probability": 0.8
+    }
+   ]
+  },
+  "analysis_result": {
+   "win_probabilities": {
+    "Current outreach": 0.4891,
+    "Angel bridge outreach": 0.5109
+   },
+   "summary": "Angel bridge outreach scored highest in 51% of runs of this model, but the analysis treats this as a close call. The analysis was not told which way your goal points, so it assumed a higher value is better, and it could not test whether any option reaches your goal. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled. 'Current outreach' was analysed as no change — the factors it compares against were held at the values your model records today. I supplied 15 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies."
+  }
+ }
+}
