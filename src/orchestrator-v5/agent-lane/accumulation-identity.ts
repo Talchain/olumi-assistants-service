@@ -117,7 +117,11 @@ export function admitAccumulationIdentities(
       refuse('the brief states no deadline to work it out to'); continue;
     }
     const unit = typeof rate.observed_state?.unit === 'string' ? rate.observed_state.unit : undefined;
-    if (unit === undefined || !isPercentScaledUnit(unit) || OF_TODAY.test(unit) || OTHER_PERIOD.test(unit)) {
+    // Science 393023 (a): per year is ASKED for per month, never converted ("30% a year" is ambiguous).
+    if (unit !== undefined && isPercentScaledUnit(unit) && OTHER_PERIOD.test(unit)) {
+      refuse(`"${String(rate.label)}" is given per ${/quarter/i.test(unit) ? 'quarter' : /week/i.test(unit) ? 'week' : /day|daily/i.test(unit) ? 'day' : 'year'}, not per month; give it per month and Olumi can use it`); continue;
+    }
+    if (unit === undefined || !isPercentScaledUnit(unit) || OF_TODAY.test(unit)) {
       refuse(`"${String(rate.label)}" is not stated as a percentage per month`); continue;
     }
     const s0 = levelOf(stock);
@@ -126,7 +130,7 @@ export function admitAccumulationIdentities(
     const unknown = [[stock, s0], [rate, c], [inflow, add]].find(([, v]) => v === undefined);
     if (unknown !== undefined) { refuse(`today's level of "${String((unknown[0] as NodeLike).label)}" is not known`); continue; }
     if ((s0 as number) < 0 || (add as number) < 0 || (c as number) < 0 || (c as number) >= 100) {
-      refuse('its levels today are outside what a stock, a monthly rate and a monthly amount can be'); continue;
+      refuse('its levels today are outside what a count, a monthly rate and a monthly amount can be'); continue;
     }
     carriers.set(outcome.id, {
       operation: 'accumulation',

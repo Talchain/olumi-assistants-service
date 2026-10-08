@@ -52,7 +52,7 @@ describe('admitAccumulationIdentities', () => {
     ['a repeated factor', [nodes, edges, [decl({ factors: ['Pro subscribers', 'Monthly churn', 'Monthly churn'] })]], /not all different/],
     ['an unknown label', [nodes, edges, [decl({ factors: ['Pro subscribers', 'Churn', 'New Pro subscribers per month'] })]], /"Churn" is not in the model/],
     ['an input not a direct parent', [nodes, edges.filter((e) => e.from !== 'adds'), [decl()]], /does not feed directly/],
-    ['churn per year', [nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 0.3, raw_value: 30, unit: '% per year' } } : n)), edges, [decl()]], /percentage per month/],
+    ['churn per year', [nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 0.3, raw_value: 30, unit: '% per year' } } : n)), edges, [decl()]], /"Monthly churn" is given per year, not per month; give it per month and Olumi can use it/],
     ['churn as a fraction', [nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 0.03, unit: 'fraction' } } : n)), edges, [decl()]], /percentage per month/],
     ['churn in % of today', [nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 100, unit: '% of today' } } : n)), edges, [decl()]], /percentage per month/],
     ['no level today', [nodes.map((n) => (n.id === 'adds' ? { ...n, observed_state: undefined } : n)), edges, [decl()]], /today's level of "New Pro subscribers per month"/],
