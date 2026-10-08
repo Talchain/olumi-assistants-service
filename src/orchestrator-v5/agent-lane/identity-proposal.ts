@@ -23,6 +23,7 @@ import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
  */
 import { GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, sameUnit, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
+import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
@@ -109,7 +110,8 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   if (listed !== undefined && !(Array.isArray(listed) && listed.length === 0)) return null;
   const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
   const parts = ids.map(id => byId.get(id));
-  if (parts.some(n => n === undefined || n.kind !== 'factor' || n.analysis_participation === 'retained_excluded')) return null;
+  // Science §(e) addendum 6: an operand of the DECLARED product the drafter typed as an OUTCOME reads as a factor.
+  if (parts.some(n => n === undefined || (n.kind !== 'factor' && n.kind !== 'outcome') || n.analysis_participation === 'retained_excluded')) return null;
   // Condition 2: the reading's factors are both direct parents (and therefore on the goal path).
   if (!ids.every(id => edges.some(e => e.edge_type !== 'bidirected' && e.from === id && e.to === goalId))) return null;
   const reachesGoal = (from: string): boolean => {
@@ -131,7 +133,22 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   // Science §(e) addendum 2: every OTHER direct parent of the goal is part of what the Run computes. A drafter-made
   // definitional addend (edge provenance.definitional, node not the user's) joins the reading's words; anything else — a
   // user-authored or non-definitional risk or factor straight into the goal — means the goal is not this product: null.
-  const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
+  /**
+ * Science §(e) addendum 6 (8 Oct, P48 552acb7d): an operand with NO stored unit may take its count unit from its own
+ * label, only when the full reader reads ONE count (no period, no per-denominator) and the label carries no money, rate
+ * or share word ("Pro paying subscribers" → a count; "Pro subscriber revenue" → nothing). A stored unit always wins (the
+ * caller reads it first). Never credited as the user's: the card's words name no unit.
+ */
+const NOT_A_COUNT = /\b(?:revenue|income|sales|price|prices|cost|costs|fee|fees|spend|spending|budget|mrr|arr|arpu|margin|profit|value|rate|rates|ratio|share|percent|percentage|churn|conversion)\b|[%£$€¥]|\d/i;
+function labelCountUnit(n: Rec): string | undefined {
+  if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
+  const label = text(n.label);
+  if (label === undefined || NOT_A_COUNT.test(label)) return undefined;
+  const parts = readUnitParts(label);
+  return parts?.kind === 'count' && parts.per === null && parts.period === null && (parts.noun?.length ?? 0) > 0 ? label : undefined;
+}
+
+const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
   const addends: string[] = [];
   for (const e of edges) {
     if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') continue;
@@ -145,7 +162,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     addends.push(`${negative ? 'less' : 'plus'} ‘${text(n.label) ?? String(n.id)}’`);
   }
   const [a, b] = parts as [Rec, Rec];
-  const level = (n: Rec) => ({ unit: isRec(n.observed_state) ? text(n.observed_state.unit) : undefined, label: String(n.id) });
+  const level = (n: Rec) => ({ unit: (isRec(n.observed_state) ? text(n.observed_state.unit) : undefined) ?? labelCountUnit(n), label: String(n.id) });
   const goalUnit = text(goal.goal_threshold_unit);
   // Condition 3: use the existing unit reader, including Science's £/month × count confirmation form.
   if (readMoneyTotal(goalUnit, goalLabel) === null || unitsCompose(goalUnit, goalLabel, level(a), level(b)).kind === 'no') return null;

@@ -28,6 +28,7 @@ interface ModelShape {
   readonly factors: readonly { readonly label: string; readonly unit: string | null; readonly baseline_known: boolean; readonly baseline_value: number | null }[];
   readonly links: readonly Link[];
   readonly risks?: readonly { readonly label: string; readonly provenance?: string; readonly analysis_participation?: 'retained_excluded' }[];
+  readonly outcomes?: readonly { readonly label: string; readonly unit?: string | null }[];
   readonly identities?: readonly { readonly outcome: string; readonly operation: string; readonly factors: readonly string[] }[];
 }
 
@@ -70,7 +71,12 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
   const factor = (label: string) => model.factors.find((f) => key(f.label) === key(label));
   const rates = ident.factors.filter((f) => isMoney(factor(f)?.unit));
   const rate = rates.length === 1 ? factor(rates[0]!) : undefined;
-  const volume = rate === undefined ? undefined : factor(ident.factors.find((f) => key(f) !== key(rate.label))!);
+  // Science goals §(e) addendum 6 (8 Oct, P48 552acb7d): a DECLARED product's operand the drafter typed as an OUTCOME is
+  // still its volume (the identity says so); only its label and unit are read here. The rate stays a factor (its level).
+  const outcome = (label: string) => (model.outcomes ?? []).find((o) => key(o.label) === key(label));
+  const volumeLabel = rate === undefined ? undefined : ident.factors.find((f) => key(f) !== key(rate.label));
+  const volume: { readonly label: string; readonly unit?: string | null } | undefined = volumeLabel === undefined ? undefined
+    : factor(volumeLabel) ?? outcome(volumeLabel);
   const reaches = (from: string, skip: Link): string | undefined => {
     const seen = new Set<string>([key(from)]);
     const queue = [key(from)];
