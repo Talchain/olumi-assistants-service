@@ -41,6 +41,7 @@
 
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk, type UserEventRisk } from '../routing/stated-event-risk.js';
 import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
+import { hasRiskPreconditionChoice } from '../agent-lane/chat-risk-precondition-choice.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
@@ -564,6 +565,8 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
 // ---------------------------------------------------------------------------
 
 export interface GmHeldExecuteInput {
+  /** Durable carrier on every product resume. Pure operation callers have no retained hold. */
+  readonly heldPending?: PendingAction;
   readonly operations: readonly ValidatedPatchOperation[];
   /** (A) — the hold's recorded typed cap (`readGmHeldResume`); absent → default. */
   readonly envelopeCap?: number;
@@ -594,6 +597,10 @@ export interface GmHeldExecuteInput {
 }
 
 export type GmHeldExecuteOutcome =
+  | {
+      /** This interpretation is still unresolved; retain the hold and re-show its choices. */
+      readonly status: 'choice_required';
+    }
   | {
       /** Re-referee blocked the batch — a "yes" never overrides integrity. */
       readonly status: 'referee_blocked';
@@ -723,6 +730,11 @@ function preconditionLinkRefusalOf(err: unknown): string | undefined {
  * storage; never throws.
  */
 export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOutcome {
+  // The authority for EVERY approval door: no confirmation applies an ordinary risk while its meaning is unresolved.
+  // Presence deliberately fails closed even when the marker's presentation cannot be read.
+  if (input.heldPending !== undefined && hasRiskPreconditionChoice(input.heldPending)) {
+    return { status: 'choice_required' };
+  }
   // ValidatedPatchOperation (Zod output) is structurally assignable to the
   // pipeline's PatchOperation — a plain widening copy, no unsafe cast.
   const operations: PatchOperation[] = [...input.operations];

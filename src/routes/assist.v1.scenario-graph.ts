@@ -234,6 +234,7 @@ import { isAgentAnswerRow } from "../orchestrator-v5/session/conversation-as-see
 import type { AnswerOffersRead } from '../orchestrator-v5/session/store.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { answerOffersForReload } from '../orchestrator-v5/agent-lane/answer-offers-reload.js';
+import { hasRiskPreconditionChoice, riskPreconditionChoiceActions, riskPreconditionChoiceTurnId } from '../orchestrator-v5/agent-lane/chat-risk-precondition-choice.js';
 import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
 import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
@@ -345,7 +346,7 @@ async function readConversationTurns(
   store: { readRecent(scenarioId: string, limit?: number): Promise<readonly (ProposalIssuingRow & { readonly created_at: string })[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
   scenarioId: string,
   requestId: string,
-  authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
+  authority: { userId: string | null; graphHash: string | undefined; graph: unknown; latest: readonly PendingAction[];
     analysisState: unknown; analysisResult: unknown; analysisReady: unknown; modelExists: boolean },
 ): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[]; proposalRows: readonly ProposalIssuingRow[] } | null> {
   try {
@@ -376,6 +377,22 @@ async function readConversationTurns(
         }
       } catch { /* Offers unavailable: retain the existing response. */ }
     }
+    // The risk ambiguity is a choice about a held change, rather than a next step for a Run. Its own durable
+    // carrier keeps the exact presses (including RC3's identity-bound ids) outside the plain-text offers envelope.
+    // Restore them only on the answer that first offered this still-held choice; no ordinary card is armed yet.
+    const choiceSets = new Map<number, SuggestedAction[]>();
+    for (const hold of authority.latest) {
+      if (hold.scenario_id !== scenarioId || !hasRiskPreconditionChoice(hold)) continue;
+      const turnId = riskPreconditionChoiceTurnId(hold);
+      const index = turns.findIndex(turn => turn.turn_id === turnId);
+      if (index < 0) continue;
+      const actions = riskPreconditionChoiceActions(hold, authority.graph);
+      if (actions.length > 0) {
+        const restored = choiceSets.get(index) ?? [];
+        choiceSets.set(index, [...restored, ...actions]);
+      }
+    }
+    for (const [index, actions] of choiceSets) turns[index] = { ...turns[index]!, suggested_actions: actions };
     return { turns, heldOffers, proposalRows: rows };
   } catch (err) {
     log.warn(
@@ -720,6 +737,7 @@ export default async function route(app: FastifyInstance) {
           userId: resolved.identity.mode === 'verified' ? resolved.identity.userId : null,
           // EXACTLY the graph_hash the Agent turn reads from this route, not identity.v1's different projection.
           graphHash: (graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null) ?? undefined,
+          graph: graphPresent ? graph : null,
           latest: latestPending,
           analysisState: analysis.analysis_state,
           analysisResult: analysis.analysis_result,
@@ -758,7 +776,8 @@ export default async function route(app: FastifyInstance) {
        * Agent's own internal reads stay byte-identical.
        */
       const heldProposalRecords = conversationRequested && graphPresent
-        ? latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }) : [];
+        ? latestPending.filter(pa => !hasRiskPreconditionChoice(pa))
+          .flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }) : [];
       const proposalRows = conversationRead?.proposalRows ?? [];
       const issuedTurnIds = await issuedTurnIdsForProposalRecords(proposalIssuances(heldProposalRecords, latestPending), proposalRows, CONVERSATION_ROWS_READ,
         typeof store.readCommittedTurn === 'function' ? turnId => store.readCommittedTurn!(scenarioId, turnId) : undefined);

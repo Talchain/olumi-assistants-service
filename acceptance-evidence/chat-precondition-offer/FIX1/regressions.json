@@ -1,0 +1,34 @@
+[
+  {
+    "name": "RC3-widen-regressions",
+    "files": [
+      "src/orchestrator-v5/agent-lane/__tests__/widen-risks-seam.test.ts",
+      "src/orchestrator-v5/agent-lane/method-turn/__tests__/widen-risks.test.ts"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "RC3-incident-and-left-out",
+    "files": [
+      "src/orchestrator-v5/agent-lane/__tests__/rc3-precondition-incident-edge-seam.test.ts",
+      "src/orchestrator-v5/tools/handlers/__tests__/rc3-precondition-left-out.test.ts"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "RC3-counterfactual-and-real-commit",
+    "files": [
+      "src/orchestrator-v5/tools/handlers/__tests__/rc3-counterfactual-left-out.test.ts",
+      "src/orchestrator-v5/tools/handlers/__tests__/rc3-real-commit-run-invariance.test.ts"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "RC3-ownership-and-offer-unit",
+    "files": [
+      "src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch-rc3-stamp-ownership.test.ts",
+      "src/orchestrator-v5/routing/__tests__/chat-risk-precondition-offer.test.ts"
+    ],
+    "exit": 0
+  }
+]

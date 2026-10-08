@@ -107,6 +107,7 @@ import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLines
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { hasRiskPreconditionChoice, isRiskMrrChoicePress, riskMrrChoiceHoldFor, riskPreconditionChoiceActions, riskPreconditionChoiceHasPress, riskPreconditionChoiceLine, riskPreconditionChoiceOfferedTurnId, riskPreconditionChoiceTurnId, RISK_PRECONDITION_CHOICE_REFUSED_REPLY, withRiskPreconditionChoiceOffer, withoutRiskPreconditionChoice } from '../orchestrator-v5/agent-lane/chat-risk-precondition-choice.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
@@ -586,7 +587,8 @@ async function decisionLinesAskedOnce(
 async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string[]> {
   if (typeof store.readRecent !== 'function') return [];
   return (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
-    .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
+    .filter((t) => isAgentAnswerRow(t) && typeof t.assistant_message === 'string'
+      && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
     .slice(0, RECENT_REPLIES_READ)
     .map((t) => t.assistant_message)
     .filter((m): m is string => typeof m === 'string');
@@ -2139,10 +2141,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const r = proposalRecord(p, read.graph, Number.isFinite(emittedAt) ? emittedAt : Date.now());
         return r && r.base_graph_hash === read.graphHash ? [r] : [];
       });
-      const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
+      const replayChoices = currentPending.filter(p => turnId !== undefined && riskPreconditionChoiceTurnId(p) === turnId)
+        .flatMap(p => riskPreconditionChoiceActions(p, read.graph));
+      const replayRecords = currentPending.filter(p => !hasRiskPreconditionChoice(p)).flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
         .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso))
-        // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record.
-        .map(r => priorRecords.find(old => old.proposal_id === r.proposal_id) ?? r);
+        .map(r => {
+          // Only a marked prior hold hides its ordinary card: after choosing, this handle must show today's revision.
+          // Every other hold keeps the exact card this turn rendered, with its original consent binding (P53).
+          const choiceWasRequired = (prior.pending_actions ?? []).some(p => p.chip_id === r.proposal_id && hasRiskPreconditionChoice(p));
+          return priorRecords.find(old => old.proposal_id === r.proposal_id
+            && (!choiceWasRequired || (old.revision === r.revision && old.digest === r.digest))) ?? r;
+        });
       const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
@@ -2333,13 +2342,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const replayCard = replayRecords[0];
-      const replayActions = firstOfEachId([...stillValid, ...boundControl]);
+      const replayActions = replayChoices.length > 0 ? firstOfEachId(replayChoices) : firstOfEachId([...stillValid, ...boundControl]);
       const methodTerminalReplay = approvedProposal === undefined && (whatChangesReplay || isMethodPress(explanationId)
         || widenTargetOf(explanationId, message) !== null || isWidenAddPressId(explanationId) || pressedChipIsStructural
         || actionPressOf(body['chip']) !== null
         || (chiplessRetry && (prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
-      if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
+      if (replayChoices.length === 0 && !decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: replayComposed !== null ? replayComposed.text : withoutProposalIds(replayText),
@@ -2552,6 +2561,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let lastRun: CapturedAnalysis | undefined;
     /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
     let constructionTrace: ConstructionTrace | undefined;
+    let riskChoiceExpectedRowId: string | undefined;
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, (reqBody) => callStructured(reqBody, constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
@@ -2605,7 +2615,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
           writesDispatched += 1;
-          return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
+          return readCache.around(() => input.choice_binding === undefined
+            ? holdAddRiskInProcess(input, String(req.id))
+            : riskChoiceExpectedRowId === undefined ? Promise.resolve({ status: 'stale' as const })
+              : runAsAgentSubturn(input.scenario_id, () => holdAddRiskInProcess({ ...input,
+                choice_expected_latest_row_id: riskChoiceExpectedRowId }, String(req.id))));
         },
         // ⭐ PJ-E-FIG (DL #72 5866036457): the add-factor door — ONE held change carrying the user's figures, in-process.
         holdAddFactor: async (input) => {
@@ -2683,7 +2697,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { typed_approval_of: approvedProposal,
         ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
-    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    const riskChoiceAnswerTurnId = turnId ?? randomUUID();
+    const toolCtx: AgentToolContext = { precondition_choice_turn_id: riskChoiceAnswerTurnId, ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
@@ -2730,7 +2745,44 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let runOutcomeKind: RunOutcome['kind'] | undefined;
     /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
     let runOutcomeText: string | undefined;
+    let riskChoiceToReoffer: PendingAction | undefined;
+    let riskOptionChoiceFailed = false;
+    let riskChoiceRefused = false;
+    let riskChoiceObservedRowId: string | null | undefined;
+    let riskChoiceReofferActions: OfferedAction[] | null = null;
+    // A later ordinary row can retain the exact same revision/digest. Consent still belongs to the answer that
+    // offered the choices, whose identity the existing conditional append must compare through to its final check.
+    const choiceOfferedRow = async (hold: PendingAction | undefined, latestRowId: string | null | undefined): Promise<string | undefined> => {
+      const offeredTurn = hold === undefined ? undefined : riskPreconditionChoiceOfferedTurnId(hold);
+      if (offeredTurn === undefined || latestRowId == null || typeof store.readCommittedTurn !== 'function') return undefined;
+      try {
+        const offered = await store.readCommittedTurn(scenarioId, offeredTurn);
+        return offered?.id === latestRowId ? latestRowId : undefined;
+      } catch { return undefined; }
+    };
     let result: AgentTurnResult | undefined;
+    // Terminal host-bound choice: re-offer the SAME held card, never call the risk proposer or a model again.
+    const riskChoicePressId = (body['chip'] as { id?: unknown } | undefined)?.id;
+    if (isRiskMrrChoicePress(riskChoicePressId)) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      let latestRowId: string | null | undefined;
+      const latest = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } });
+      riskChoiceObservedRowId = latestRowId;
+      riskChoiceToReoffer = riskMrrChoiceHoldFor(riskChoicePressId, message, latest, rb.graph);
+      riskChoiceExpectedRowId = await choiceOfferedRow(riskChoiceToReoffer, latestRowId);
+      riskChoiceRefused = riskChoiceExpectedRowId === undefined;
+      if (riskChoiceRefused) riskChoiceToReoffer = undefined;
+      const record = riskChoiceToReoffer === undefined ? undefined : proposalRecord(riskChoiceToReoffer, rb.graph);
+      const text = record?.approve_action.detail
+        ?? RISK_PRECONDITION_CHOICE_REFUSED_REPLY;
+      riskChoiceReofferActions = record === undefined ? latest.filter(hasRiskPreconditionChoice).flatMap(h => riskPreconditionChoiceActions(h, rb.graph))
+        : [record.approve_action as OfferedAction, AMEND_CHIP, record.decline_action as OfferedAction];
+      fastPath = 'method';
+      result = { assistant_text: text, items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0,
+        stopped_reason: 'answered', timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0,
+          tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
+
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
         (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
@@ -3331,12 +3383,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // no model call — it never falls through to ordinary generation with every door open.
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
-      const call = widenAddCallOf(pressedChipId, message, rb);
+      let latestRowId: string | null | undefined;
+      const latest = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } });
+      riskChoiceObservedRowId = latestRowId;
+      let call = widenAddCallOf(pressedChipId, message, rb, latest);
+      const choiceHold = latest.find(h => riskPreconditionChoiceHasPress(h, pressedChipId, message));
+      // The host's precondition Add words select only the refusal copy, never authority. This still discloses a
+      // retired choice after its issuing row has aged out; every accepted Add continues to use the bound door.
+      const oldChoice = call === null && (choiceHold !== undefined || (message.startsWith('Add the risk ‘')
+        && message.endsWith(': that option relies on this not happening. The Run leaves it out until it can apply to that option alone.')));
+      if (call?.choice_binding !== undefined) {
+        riskChoiceExpectedRowId = await choiceOfferedRow(choiceHold, latestRowId);
+        if (riskChoiceExpectedRowId === undefined) { riskChoiceRefused = true; call = null; }
+      } else if (oldChoice) riskChoiceRefused = true;
       const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args),
-        call.relies_on === undefined ? toolCtx : { ...toolCtx, widen_relies_on: { option_id: call.relies_on.option_id } }, capabilities, mode);
+        call.relies_on === undefined ? toolCtx : { ...toolCtx, widen_relies_on: { option_id: call.relies_on.option_id },
+          ...(call.choice_binding === undefined ? {} : { widen_choice_binding: call.choice_binding }) }, capabilities, mode);
       const held = issued?.ok === true && typeof issued.proposal_id === 'string';
+      riskOptionChoiceFailed = call?.choice_binding !== undefined && !held;
+      if (riskChoiceRefused || riskOptionChoiceFailed) riskChoiceReofferActions = latest.filter(hasRiskPreconditionChoice)
+        .flatMap(h => riskPreconditionChoiceActions(h, rb.graph));
       // A held card is NEVER worded as a refusal: the door's own reply, else what is held (served sc-plus-1 defect).
-      const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? riskHeldReply(call!) : RISK_ADD_REFUSED_REPLY;
+      const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? riskHeldReply(call!)
+        : riskChoiceRefused || riskOptionChoiceFailed ? RISK_PRECONDITION_CHOICE_REFUSED_REPLY : RISK_ADD_REFUSED_REPLY;
       fastPath = 'method';
       widenAdd = { actions: held ? [] : [RISKS_PRESS] };
       result = {
@@ -3741,7 +3810,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (runStillCurrent !== undefined) dispatchLedger.push({ path: 'store:run-currentness', ms: Date.now() - runCheckStarted, status: runStillCurrent ? 200 : 409 });
     /** A successful bound narration check reuses its read; recomputed methods must see other writers after the wait. */
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested || premortemInitialRead !== undefined
+      : await readBackState(riskChoiceRefused || riskOptionChoiceFailed || fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested || premortemInitialRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
     const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet } = finalRead;
@@ -3783,7 +3852,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
           heldLapseLines = [...setAside.map((h) => heldDeclineSentence(heldChangeLabel(h))), ...heldLapseLines];
         }
-        heldRecords = liveHolds.flatMap((h) => { const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r]; });
+        if (riskChoiceToReoffer !== undefined) liveHolds = liveHolds.map(h =>
+          riskMrrChoiceHoldFor(riskChoicePressId, message, [h], readbackGraph) !== undefined ? withoutRiskPreconditionChoice(h) : h);
+        heldRecords = liveHolds.filter(h => !hasRiskPreconditionChoice(h)).flatMap((h) => { const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r]; });
       } catch (err) {
         log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: refusing to erase unresolved scope or approval on a failed pending read');
         throw err;
@@ -3923,10 +3994,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     })();
     const approvalCalls = callsThatCanConsumeProposals(result.tool_calls);
     // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
-    const approvals = approvalChipsFor(
+    let approvals = approvalChipsFor(
       approvalCalls,
       (id) => ({ proposal: proposals.get(id), result: result.tool_results.find((r) => r.proposal_id === id) }),
     );
+    // Rendering reads the marker already committed WITH the hold. Assembly can never unlock it.
+    const preconditionOfferCards = liveHolds.filter(hasRiskPreconditionChoice)
+      .filter(h => result.tool_results.some(r => r.ok === true && r.proposal_id === heldProposalId(h))
+        || result.tool_results.some(r => r.refusal === 'precondition_choice_required' && r.proposal_id === heldProposalId(h)))
+      .map(h => ({ actions: riskPreconditionChoiceActions(h, readbackGraph), line: riskPreconditionChoiceLine(h), proposalId: heldProposalId(h) }));
+    const riskChoiceTurnId = turnId ?? (preconditionOfferCards.length > 0 ? riskChoiceAnswerTurnId : undefined);
+    const choiceHoldForAnswer = (hold: PendingAction): PendingAction => {
+      return riskChoiceToReoffer !== undefined && riskMrrChoiceHoldFor(riskChoicePressId, message, [hold], readbackGraph) !== undefined
+        ? withoutRiskPreconditionChoice(hold) : hold;
+    };
+    liveHolds = liveHolds.map(choiceHoldForAnswer);
+    heldRecords = liveHolds.filter(h => !hasRiskPreconditionChoice(h)).flatMap(h => {
+      const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r];
+    });
+    if (riskChoiceRefused) heldRecords = [];
+    const preconditionOfferActions = liveHolds.filter(h => preconditionOfferCards.some(c => c.proposalId === heldProposalId(h)))
+      .flatMap(h => riskPreconditionChoiceActions(h, readbackGraph));
+    approvals = approvals.filter(a => !liveHolds.some(h => hasRiskPreconditionChoice(h) && a.id === approvalChipIdFor(heldProposalId(h))));
+
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
@@ -3962,7 +4052,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
-    const offeredSpecific: OfferedAction[] = fastPath === 'method' && actionReply !== null
+    const offeredSpecific: OfferedAction[] = riskChoiceReofferActions !== null ? riskChoiceReofferActions : fastPath === 'method' && actionReply !== null
       // S-B, terminal: a typed "can't yet" offers its working exits (or the waiting card it re-offers), nothing else.
       ? firstOfEachId(actionReplyChips)
       : fastPath === 'method' && tippingTurn !== null
@@ -3986,6 +4076,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? firstOfEachId(decisionReviewChips(decisionReviewTurn))
       : firstOfEachId([
       ...approvals,
+      ...preconditionOfferActions,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
@@ -4040,7 +4131,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
-    const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
+    const offeredNow: OfferedAction[] = preconditionOfferActions.length > 0 ? firstOfEachId(preconditionOfferActions)
+      : firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
     // must not drop what a restart needs to find it).
@@ -4292,7 +4384,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
-      assistant_text: fastPath === 'method' ? narration.text
+      assistant_text: preconditionOfferCards.length > 0 ? preconditionOfferCards.map(c => c.line).join('\n')
+        : fastPath === 'method' ? narration.text
         : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText),
           [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
@@ -4584,6 +4677,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * uses coaching, with its first host part whole as the headline.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
      */
+    let composeFinalReply: (sourceBody: typeof wireBody, supersededText?: string) => typeof wireBody;
+    let finalReplyComposition: Record<string, unknown> | undefined;
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
@@ -4659,7 +4754,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
       const a7Repeat = await a7SaidLastTurn(readbackGraph, store, scenarioId, turnId);
-      const composedReply = composeReplyShape({
+      const originalReplyInput: Parameters<typeof composeReplyShape>[0] = {
         text: reply,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
         obligations: withA7AsDetail(obligations, a7Repeat, reply),
@@ -4667,22 +4762,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
           : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const } : {}),
-      });
-      const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
-      // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a
-      // body with no `assistant_text` at all) ships byte-identical, as before.
-      wireBody = (composedReply.shape !== null || composedReply.text !== reply
-        ? { ...unshaped, assistant_text: composedReply.text,
-          ...(composedReply.shape !== null ? { _answer_shape: composedReply.shape } : {}) }
-        : unshaped) as OlumiResponse & Record<string, unknown>;
-      log.info({
-        event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
-        outcome: composedReply.outcome, ...(composedReply.reason !== undefined ? { reason: composedReply.reason } : {}),
-        fast_path: fastPath ?? 'agent', profile,
-        narrator_model: narratorModel,
-        obligations: obligations.length,
-        ...(composedReply.measure ?? {}),
-      }, 'agent-lane: the reply passed the one composer');
+      };
+      // The latest-row floor can discover that a displayed choice moved. That outcome is an input to this SAME
+      // composer, never a later prose write. Each reconciliation starts from the original input, so a failed CAS
+      // attempt cannot leave its refusal beside a later successful presentation.
+      composeFinalReply = (sourceBody, supersededText) => {
+        const input: Parameters<typeof composeReplyShape>[0] = supersededText === undefined ? originalReplyInput
+          : { text: supersededText, obligations: [], detailLines: [], graph: readbackGraph,
+            profile: 'method_step', keepWhole: 'host_composed' };
+        const composedReply = composeReplyShape(input);
+        const { _answer_shape: _priorShape, ...unshaped } = sourceBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
+        // An unchanged ordinary reply keeps its bytes; a substituted floor outcome always uses the composer's text.
+        const composedBody = (supersededText !== undefined || composedReply.shape !== null || composedReply.text !== input.text
+          ? { ...unshaped, assistant_text: composedReply.text,
+            ...(composedReply.shape !== null ? { _answer_shape: composedReply.shape } : {}) }
+          : unshaped) as OlumiResponse & Record<string, unknown>;
+        finalReplyComposition = {
+          event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
+          outcome: composedReply.outcome, ...(composedReply.reason !== undefined ? { reason: composedReply.reason } : {}),
+          fast_path: fastPath ?? 'agent', profile: input.profile,
+          narrator_model: supersededText === undefined ? narratorModel : null,
+          obligations: input.obligations?.length ?? 0,
+          ...(composedReply.measure ?? {}),
+        };
+        return composedBody;
+      };
+      wireBody = composeFinalReply(wireBody, riskChoiceRefused ? RISK_PRECONDITION_CHOICE_REFUSED_REPLY : undefined);
     }
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
@@ -4711,11 +4816,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       else if (at >= 0) durablePending.splice(at, 1, nextLevelAsk);
       else log.warn({ scenario_id: scenarioId }, 'agent-lane: current-level ask could not fit beside live holds');
     }
-    const sentItems = fastPath === 'method'
-      ? methodTurnItems(history, message, sentText)
-      : historyWithSentText(result.items, sentText);
-    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
-
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
      * replayed from. No graph rides on it (the Agent's writes carry their own
@@ -4737,9 +4837,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
-    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
+    const rowTurnId = riskChoiceTurnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
+        if (riskOptionChoiceFailed) throw new Error('The option choice could not be recorded against the current held revision.');
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
         // S-D x S-D.1b: the floor may reconcile more than once (it re-reads when the latest row moved). Every attempt starts
@@ -4751,17 +4852,49 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           store,
           writesGraph: false,
           source: 'agent_turn',
+          ...(riskChoiceToReoffer === undefined && !riskChoiceRefused ? {} : { allowUnconditionalFallback: false }),
+          ...(riskChoiceToReoffer !== undefined ? { expectedLatestRowId: riskChoiceExpectedRowId }
+            : riskChoiceRefused && typeof riskChoiceObservedRowId === 'string' ? { expectedLatestRowId: riskChoiceObservedRowId } : {}),
           baseGraphForInvariants: readbackGraph,
           withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
           // ⭐ S-D: held proposals are reconciled again against the latest row just before the append: one another request
           // declined meanwhile is never resurrected, and one another request minted meanwhile is never erased.
           heldProposals: { isHeld: isHeldProposal, seenByThisRequest: heldSeenThisTurn,
             offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
-            onReconciled: (write, overCap) => {
+            onReconciled: (write, overCap, latest) => {
+              // The decline consents to one displayed revision, while RC3 replaces the same gmh_ handle.
+              // Bind this presentation update to the floor's CAS read; a newer same-handle hold wins.
+              const reofferSuperseded = riskChoiceToReoffer !== undefined
+                && riskMrrChoiceHoldFor(riskChoicePressId, message, latest, readbackGraph) === undefined;
+              const triggerSuperseded = preconditionOfferCards.some(c => {
+                const supplied = durablePending.find(p => heldProposalId(p) === c.proposalId);
+                const current = latest.find(p => heldProposalId(p) === c.proposalId);
+                const expected = supplied === undefined ? undefined : proposalRecord(supplied, readbackGraph);
+                const actual = current === undefined ? undefined : proposalRecord(current, readbackGraph);
+                return actual === undefined || expected?.revision !== actual.revision || expected?.digest !== actual.digest;
+              });
+              write = { ...write, pending_actions: (write.pending_actions ?? []).map(p => {
+                const guarded = hasRiskPreconditionChoice(p) || riskChoiceToReoffer?.chip_id === p.chip_id;
+                if (!guarded) return choiceHoldForAnswer(p);
+                const current = latest.find(h => h.chip_id === p.chip_id);
+                // Renew only the authoritative marked carrier, never a supplied same-handle older revision.
+                // The refusal answer records a new offer while leaving the consent gate and operations intact.
+                if (riskChoiceRefused && current !== undefined) return hasRiskPreconditionChoice(current)
+                  ? withRiskPreconditionChoiceOffer(current, readbackGraph, rowTurnId) : current;
+                const suppliedRecord = proposalRecord(p, readbackGraph);
+                const currentRecord = current === undefined ? undefined : proposalRecord(current, readbackGraph);
+                if (current !== undefined && (suppliedRecord?.revision !== currentRecord?.revision
+                  || suppliedRecord?.digest !== currentRecord?.digest)) {
+                  return current;
+                }
+                return reofferSuperseded && riskChoiceToReoffer?.chip_id === p.chip_id && current !== undefined
+                  ? current : choiceHoldForAnswer(p);
+              }) };
               reconciledPending = write.pending_actions ?? [];
-              heldRecords = (write.pending_actions ?? []).flatMap(p => {
+              heldRecords = (write.pending_actions ?? []).filter(p => !hasRiskPreconditionChoice(p)).flatMap(p => {
                 const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
               });
+              if (riskChoiceRefused) heldRecords = [];
               overCapAtAppend = overCap;
               // ⛔ The reply composer is the ONE last writer of the reply (#2748): a lapse found HERE, after composing, is
               // said at the start of this scenario's next reply (`owedHeldLapses`), never appended to this one.
@@ -4778,8 +4911,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 && fastPath !== 'method' && !decisionReviewRequested
                 && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
                   || heldRecords.some(r => r.proposal_id === approvedProposal))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
-              wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
+              const choiceSuperseded = reofferSuperseded || triggerSuperseded;
+              if (choiceSuperseded || riskChoiceRefused) actions.splice(0, actions.length,
+                ...(write.pending_actions ?? []).filter(hasRiskPreconditionChoice).flatMap(h => riskPreconditionChoiceActions(h, readbackGraph)));
+              wireBody = composeFinalReply({ ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) },
+                choiceSuperseded || riskChoiceRefused ? RISK_PRECONDITION_CHOICE_REFUSED_REPLY : undefined);
               return { ...write,
+                assistantMessage: String(wireBody.assistant_text ?? text),
                 pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
                 suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message })) };
             } },
@@ -4834,8 +4972,30 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // worse. It is returned, flagged as not durable, and logged loudly.
         log.error({ err: String(err), scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');
         durability = 'not_recorded';
+        if (riskChoiceToReoffer !== undefined || riskOptionChoiceFailed || riskChoiceRefused) {
+          // The durable hold still requires the choice. An unrecorded choice never presents its approval as unlocked.
+          heldRecords = []; // The final sidecar must not re-create an approval that failed to become durable.
+          const { _proposal_fields: _unrecordedFields, ...stillHeldBody } = wireBody;
+          let waitingChoices: SuggestedAction[] = [];
+          try {
+            const current = await readBackState((path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }), scenarioId);
+            waitingChoices = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }))
+              .filter(hasRiskPreconditionChoice).flatMap(h => riskPreconditionChoiceActions(h, current.graph));
+          } catch { /* Unreadable authority stays closed. */ }
+          wireBody = composeFinalReply({ ...stillHeldBody, suggested_actions: waitingChoices } as typeof wireBody,
+            RISK_PRECONDITION_CHOICE_REFUSED_REPLY);
+        }
       }
     }
+
+    // The persistence floor may have supplied a superseded-choice outcome to the composer. History remembers the
+    // final response's exact bytes, including that outcome, rather than the reply prepared before the final CAS read.
+    if (finalReplyComposition !== undefined) log.info(finalReplyComposition, 'agent-lane: the reply passed the one composer');
+    const finalSentText = String(wireBody.assistant_text ?? text);
+    const sentItems = fastPath === 'method'
+      ? methodTurnItems(history, message, finalSentText)
+      : historyWithSentText(result.items, finalSentText);
+    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
 
     /**
      * ⭐ S-B: THE ACTION BAR THIS ANSWER CARRIES (`action_bar` v1; github-a2 contract amendments 1–11 + v1.1), on EVERY turn,

@@ -41,6 +41,8 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
 /** Every key `proposeNewRisk` returns on success (agent-capabilities.ts): every disclosure is typed in `risk`. */
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
   'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'likelihood', 'note', 'dropped_drivers',
+  // The route keeps this card held unchanged and offers the interpretation choice before exposing approval.
+  'precondition_offers', 'precondition_offer_line',
 ]);
 /**
  * Every key `proposeOptionInterventions` returns on a clean success. Its disclosures (`not_the_users_figure`,

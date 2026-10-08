@@ -42,6 +42,7 @@ import type {
   AtomicCommittedModelVersionReceipt,
   AtomicCommittedModelVersionWrite,
   SessionStore,
+  SessionTurnWrite,
   VersionAuthoredBy,
 } from './session/store.js';
 import { StateCommitFailedError } from './session/store.js';
@@ -49,6 +50,8 @@ import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
+import { hasRiskPreconditionChoice } from './agent-lane/chat-risk-precondition-choice.js';
+import { isHeldProposal, proposalRecord } from './agent-lane/proposal-object/record.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -138,6 +141,13 @@ export interface CommitMetadata {
    * action — see `derive-pending-actions.test.ts`.
    */
   readonly pending_actions?: readonly PendingAction[];
+  /** An option choice replaces only this exact CURRENT marked hold, under a latest-row conditional append. */
+  readonly heldChoiceTransition?: {
+    readonly proposal_id: string;
+    readonly revision: string;
+    readonly digest: string;
+    readonly expected_latest_row_id?: string;
+  };
   /**
    * Optional graph hash threaded into chip-derived pending actions'
    * `preconditions.graph_hash`. The resumer compares the live graph
@@ -1634,6 +1644,26 @@ export async function commitDirectAnswer(
     writesGraph,
     baseGraphForInvariants: metadata.baseGraphForInvariants,
     source: metadata.handler_id ?? undefined,
+    ...(metadata.heldChoiceTransition === undefined ? {} : {
+      allowUnconditionalFallback: false,
+      ...(metadata.heldChoiceTransition.expected_latest_row_id === undefined ? {}
+        : { expectedLatestRowId: metadata.heldChoiceTransition.expected_latest_row_id }),
+      heldProposals: {
+        isHeld: isHeldProposal,
+        seenByThisRequest: new Set((metadata.priorPendingActions ?? []).filter(isHeldProposal).map(p => p.chip_id)),
+        onReconciled: (write: SessionTurnWrite, _overCap: readonly PendingAction[], latest: readonly PendingAction[]) => {
+          const binding = metadata.heldChoiceTransition!;
+          const current = latest.find(p => p.scenario_id === metadata.scenario_id
+            && p.chip_id === binding.proposal_id && hasRiskPreconditionChoice(p));
+          const record = current === undefined ? undefined : proposalRecord(current, metadata.baseGraphForInvariants);
+          if (record === undefined || record.proposal_id !== binding.proposal_id
+            || record.revision !== binding.revision || record.digest !== binding.digest) {
+            throw new StateCommitFailedError('That option choice no longer matches the current held change.');
+          }
+          return write;
+        },
+      },
+    }),
     write: {
       scenario_id: metadata.scenario_id,
       turn_id: metadata.turn_id,
