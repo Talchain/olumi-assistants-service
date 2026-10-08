@@ -77,7 +77,7 @@ export function goalChanceRangeOf(envelope: unknown, graph: unknown, optionId: s
   const otherOptions = new Set(nodes.filter(n => n.kind === 'option' && n.id !== optionId).map(n => n.id));
   const ownGraph = { ...graph, nodes: nodes.filter(n => !otherOptions.has(n.id)),
     edges: Array.isArray(graph.edges) ? graph.edges.filter(e => isRec(e) && !otherOptions.has(e.from) && !otherOptions.has(e.to)) : [] };
-  const verdict = targetTestabilityOf(ownGraph, Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined);
+  const verdict = targetTestabilityOf(ownGraph, Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined, inputs.goalId);
   if (verdict.kind !== 'not_testable' || verdict.failures.length === 0 || !verdict.failures.every(f =>
     (f.precondition === 'P5' || f.precondition === 'P6') && (f.code === 'goal_path_placeholder' || f.code === 'goal_path_unsized'))) return null;
   const links = [...inputs.goalPaths.filter(p => p.option_id === optionId).flatMap(p => p.links),

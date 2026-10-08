@@ -37,6 +37,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { scopeIssueBlocks } from '../goal-scope.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from '../olumi-estimates-feeding-result.js';
+import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
 import { InterventionV3 } from '../../../schemas/cee-v3.js';
 import { readOptionResultSources } from '../../../orchestrator/context/option-result-source.js';
 
@@ -234,6 +235,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       identityReading,
       canonicalStage: canonicalStageOf(signals['run.kind'], read.graph),
       olumiEstimates: runKey === null || !guidanceModelReadable(read.graph) ? null : olumiEstimatesFeedingResult({
+        validatedDefinitionForLink: validatedDefinitionForGraph(read.graph),
         goalPathFactors: signals['model.goal_path_factors'],
         goalPathLinks: signals['model.goal_path_links'],
         optionSettings: optionSettingsOf(read, signals['model.goal_path_factors']),

@@ -41,6 +41,16 @@ vi.mock("../../utils/telemetry.js", () => ({
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
+const { estimateAnalysis } = vi.hoisted(() => ({ estimateAnalysis: { value: null as unknown } }));
+vi.mock("../scenario-graph-analysis-read.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../scenario-graph-analysis-read.js")>();
+  return {
+    ...actual,
+    readScenarioAnalysis: (...args: Parameters<typeof actual.readScenarioAnalysis>) =>
+      estimateAnalysis.value === null ? actual.readScenarioAnalysis(...args) : Promise.resolve(estimateAnalysis.value),
+  };
+});
+
 // ── The store double ────────────────────────────────────────────────────────
 // `ensureScenarioExists` is the UPSERT. It is a spy here so the suite can
 // assert not just the RESPONSE but whether the row-creating call was reached
@@ -127,6 +137,7 @@ async function read(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  estimateAnalysis.value = null;
   // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
   scenarioExists.mockResolvedValue(true);
   // The signed-in owner is the default caller. Cases about a DIFFERENT user
@@ -158,6 +169,40 @@ const NEWEST_FIRST = [
 beforeEach(() => { readRecent.mockResolvedValue(NEWEST_FIRST); });
 
 describe("the conversation, when asked", () => {
+  it.each([true, false])("r12 reload: replaces a licensed estimate point with or without a scored-goal snapshot (%s), preserving risk bytes", async scored => {
+    const graph = { nodes: [
+      { id: "raise", kind: "option", label: "Raise to £59" },
+      { id: "keep", kind: "option", label: "Keep at £49" },
+      { id: "revenue", kind: "goal", label: "Revenue goal" },
+    ], edges: [] };
+    // Historical labels may come from the graph; a legacy licence binds its named option and exact value itself.
+    const result = { type: "analysis_result", ...(scored ? { input_snapshot: { goal_node_id: "revenue" } } : {}),
+      enrichment: { inference_warnings: [{
+      code: "GOAL_CHANCE_LICENSED", form: "each", option_ids: ["raise", "keep"],
+      pct_by_option: { raise: 67, keep: 30 }, olumi_estimate_link_count: 1,
+      target: { comparator: "at_least", value: 1000, unit: "£" },
+    }] } };
+    estimateAnalysis.value = {
+      analysis_state: { run_state: { kind: "complete_current" }, leader_claim: { permitted: true } },
+      analysis_result: result, current_read: { analysis_ready: { status: "ready", may_run: true }, result },
+      analysis_constraint_verdict_state: null,
+    };
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: "Improve revenue." });
+    const bare = "‘Raise to £59’: about 67% in this model.";
+    const preserved = "The chance of supplier failure is 10%.\n\tSupplier delivery has about 67% probability.  Keep this spacing.";
+    const labelled = "‘Raise to £59’: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).";
+    readRecent.mockResolvedValue([row(1, "What was the recorded chance?", `${bare}\n${preserved}\n${labelled}`)]);
+    const app = await buildApp();
+    const response = await read(app, SCENARIO, { include_conversation_turns: true });
+    expect(response.statusCode).toBe(200);
+    const text = response.json().conversation_turns[0].assistant_message as string;
+    expect(text).not.toContain(bare);
+    expect(text).toContain(labelled);
+    expect(text.split(labelled).length - 1).toBe(1);
+    expect(text).toContain(preserved);
+    await app.close();
+  });
+
   it("RED: include_conversation_turns → the turns oldest first, text only, capped at 50, as stored", async () => {
     const app = await buildApp();
     const res = await read(app, SCENARIO, { include_conversation_turns: true });

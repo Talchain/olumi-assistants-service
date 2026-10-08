@@ -69,14 +69,14 @@ function ownSentence(graph: unknown, verdict: Extract<TargetTestability, { kind:
  * panel's `per_option`.
  */
 export function optionPathsOf(
-  graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[],
+  graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], goalId?: unknown,
 ): Map<string, Array<{ from: string; to: string }>> {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return new Map();
   const nodes = graph.nodes.filter(isRec);
   const { paths } = reachedGoalPaths(asAnalysed({ ...graph, nodes: graph.nodes }), optionIds, new Map(optionIds.map((id) => {
     const option = nodes.find((n) => n.kind === 'option' && n.id === id);
     return [id, isRec(option?.interventions) ? Object.keys(option.interventions) : []] as const;
-  })), identityEvaluations);
+  })), identityEvaluations, goalId);
   return new Map(paths.map((p) => [p.option_id, p.links.flatMap((l) =>
     (typeof l.from === 'string' && typeof l.to === 'string' ? [{ from: l.from, to: l.to }] : []))] as const));
 }
@@ -121,5 +121,5 @@ export function perOptionTargetReasonsForRun(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], identityEvaluations?: readonly unknown[],
 ): Record<string, { readonly message: string }> {
   if (verdict.kind !== 'not_testable') return {};
-  return perOptionTargetReasons(graph, verdict, optionPathsOf(graph, optionIds, identityEvaluations), optionIds);
+  return perOptionTargetReasons(graph, verdict, optionPathsOf(graph, optionIds, identityEvaluations, verdict.goal_id), optionIds);
 }

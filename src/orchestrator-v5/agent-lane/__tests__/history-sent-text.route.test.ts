@@ -209,11 +209,13 @@ describe('ordinary Agent history remembers the final sent text', () => {
     const turnId = randomUUID();
     const first = await editedFirst(turnId);
     const appendsBefore = store.append.mock.calls.length;
+    const readsBefore = store.readRecent.mock.calls.length;
     const replay = await say(USER_WORDS, turnId, first._agent.session_id);
     expect(replay._agent.replayed).toBe(true);
     expect(replay.assistant_text).toBe(first.assistant_text);
     expect(modelInputs).toHaveLength(1);
     expect(store.append.mock.calls.length).toBe(appendsBefore);
+    expect(store.readRecent.mock.calls.length, 'only the base replay sizing-history read; egress reuses it').toBe(readsBefore + 1);
     const input = await nextInput(first._agent.session_id);
     expect(assistants(input).map(textOf)).toEqual([first.assistant_text]);
     expect(input.filter((i) => i.role === 'user').map(textOf)).toEqual([USER_WORDS, FOLLOW_UP]);

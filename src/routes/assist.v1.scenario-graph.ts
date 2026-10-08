@@ -227,6 +227,7 @@ import { log } from "../utils/telemetry.js";
 // ROADMAP 2.1271 — the additive analysis payload. All composition lives in the
 // helper; this route contributes the security ladder and the graph it read.
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
+import { withEstimateGoalPointsAtEgress } from "../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js";
 import { projectAnalysisAdmission } from './analysis-admission-projection.js';
 import { readExecutableHeldProposalOffers, type HeldProposalOfferRead } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -302,7 +303,7 @@ export const CONVERSATION_TURNS_CAP = 50;
  *  claim row and its sub-turns). */
 export const CONVERSATION_ROWS_READ = CONVERSATION_TURNS_CAP * 4;
 
-/** One restored turn: text only, as stored. */
+/** One restored turn: stored text, with the same current-Run estimate attribution gate as live replies. */
 export interface ConversationTurnRead {
   readonly turn_id: string;
   readonly created_at: string;
@@ -346,18 +347,23 @@ async function readConversationTurns(
   scenarioId: string,
   requestId: string,
   authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
-    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; modelExists: boolean },
+    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; graph: unknown; modelExists: boolean },
 ): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[]; proposalRows: readonly ProposalIssuingRow[] } | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
     const answers = rows.filter(isAgentAnswerRow)
       .filter(r => typeof r.user_message === "string" || typeof r.assistant_message === "string").slice(0, CONVERSATION_TURNS_CAP);
+    const current = (authority.analysisState as { run_state?: { kind?: unknown } } | null)?.run_state?.kind === "complete_current";
     const turns: ConversationTurnRead[] = [...answers].reverse()
       .map((r) => ({
         turn_id: r.turn_id,
         created_at: r.created_at,
         user_message: typeof r.user_message === "string" ? r.user_message : null,
-        assistant_message: typeof r.assistant_message === "string" ? r.assistant_message : null,
+        assistant_message: typeof r.assistant_message === "string"
+          ? withEstimateGoalPointsAtEgress({ assistant_text: r.assistant_message }, {
+            analysisResult: authority.analysisResult, graph: authority.graph, current,
+            userAuthoredTexts: answers.flatMap(answer => typeof answer.user_message === 'string' ? [answer.user_message] : []),
+          }).assistant_text : null,
       }))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
@@ -707,8 +713,9 @@ export default async function route(app: FastifyInstance) {
       // OPT-IN, because the Agent reads this route internally on every turn
       // (`turnReadCache`): without `include_conversation_turns: true` the body is
       // byte-identical and no extra query runs. The stored `assistant_message` is the
-      // POST-WIRE text the user saw (AIQ 5907360564), served as stored — never
-      // re-derived. `null` = this leg did not answer, never "no conversation".
+      // POST-WIRE text the user saw (AIQ 5907360564). Its narration passes the
+      // same current-Run estimate attribution gate as live replies and retries;
+      // other stored bytes remain intact. `null` = this leg did not answer, never "no conversation".
       //
       // ⚠ A VIEWER MEMBER GETS THE MODEL AND THE RUN, NEVER THE OWNER'S CONVERSATION. The premise above ("the caller
       // entitled to read the graph is exactly the caller entitled to read its conversation") holds for the owner and
@@ -724,6 +731,7 @@ export default async function route(app: FastifyInstance) {
           analysisState: analysis.analysis_state,
           analysisResult: analysis.analysis_result,
           analysisReady: analysis.current_read.analysis_ready,
+          graph: graphPresent ? graph : null,
           modelExists: graphPresent && typeof graph === 'object'
             && ['nodes', 'edges'].some(key => Array.isArray((graph as Record<string, unknown>)[key])
               && ((graph as Record<string, unknown>)[key] as unknown[]).length > 0),
