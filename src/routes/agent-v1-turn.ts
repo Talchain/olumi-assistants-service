@@ -135,7 +135,7 @@ import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
-import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
+import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
   settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
@@ -4712,8 +4712,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Local carrier, AFTER finalisation and licence egress. If egress changed the prose, the worksheet is withheld.
     const premortemDiagnostics = premortemWorksheetDiagnosticsFor({
       scenarioId, turnId, turn: methodTurn?.kind === 'run' ? methodTurn : null,
-      passed: premortemPassed && premortemReply === wireBody.assistant_text,
-      reply: String(wireBody.assistant_text ?? ''), candidates: premortemCandidates,
+      // Egress may add whole paragraphs around the method reply, never edit it (P02, jw-j1): rows parse that reply.
+      passed: premortemPassed && premortemReply !== undefined && methodReplySurvives(premortemReply, String(wireBody.assistant_text ?? '')),
+      reply: premortemReply ?? '', candidates: premortemCandidates,
       initial: premortemInitialRead, final: composedRead,
     });
     const premortemWorksheet = premortemDiagnostics.worksheet;
