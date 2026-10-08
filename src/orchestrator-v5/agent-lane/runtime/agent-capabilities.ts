@@ -25,7 +25,7 @@ import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
+import { runOptionSetForCopy, readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { reframedNodeIds } from '../refit-frames.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
@@ -1037,6 +1037,8 @@ interface GraphRead {
   readonly goal_certainty?: readonly unknown[];
   /** The selected Run's recorded participation via the canonical reader; absent = not recorded. */
   readonly option_participation?: StoredOptionParticipation;
+  /** SAME selected stored-fact projection; analysis_result does not transport input_snapshot. */
+  readonly run_option_set?: RecordedRunOptionSet;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -2200,6 +2202,8 @@ export function createAgentCapabilities(
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
       ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
+      ...(r.json.analysis_run_option_set !== undefined
+        ? { run_option_set: r.json.analysis_run_option_set as RecordedRunOptionSet } : {}),
     };
   };
 
@@ -8863,7 +8867,9 @@ export function createAgentCapabilities(
           postRunRead = read;
           graphForProduct = read?.raw;
           evaluatedForProduct = read?.identity_evaluated;
-          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts, read?.identity_evaluated);
+          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts, read?.identity_evaluated,
+            new Set((read?.run_option_set ?? runOptionSetForCopy(undefined, read?.option_participation, read?.raw)).leftOut
+              .map(o => o.option_id)));
         } catch { postRunRead = null; graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
       }
       // ⛔ GOAL CERTAINTY (DL 5887593253; MG's producer #2270, stored per Run by #2280): an option at P(goal) exactly 0 or 1 is

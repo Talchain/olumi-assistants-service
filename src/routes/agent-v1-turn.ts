@@ -39,7 +39,7 @@ import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-s
 const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
+import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
@@ -124,6 +124,7 @@ import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigu
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
+import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
@@ -1231,7 +1232,7 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1267,6 +1268,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let goalCertainty: StoredGoalCertainty | undefined;
   /** 52f8cd: the selected run's `analysis_option_participation`, same fact and gates as `analysisResult`. */
   let optionParticipation: StoredOptionParticipation | undefined;
+  /** Q6: the SAME selected fact's complete snapshot/participation projection, produced by the graph reader. */
+  let runOptionSet: RecordedRunOptionSet | undefined;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
@@ -1324,6 +1327,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
       // 52f8cd: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       optionParticipation = readStoredOptionParticipation(after.json.analysis_option_participation);
+      runOptionSet = after.json.analysis_run_option_set as RecordedRunOptionSet | undefined;
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
@@ -1452,7 +1456,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2341,7 +2345,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
-      const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
+      const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
@@ -2354,6 +2358,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }).response, {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const gatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
+        runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
@@ -2879,6 +2887,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow;
       const factsNow = savedRunContextFacts(scenarioId, {
         graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
+        option_participation: st.optionParticipation, run_option_set: st.runOptionSet,
         identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
       }, selectedPermissions);
       // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
@@ -3705,7 +3714,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested || premortemInitialRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
-    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet } = finalRead;
     let liveHolds: readonly PendingAction[] = [];
     let heldLapseLines: string[] = [];
     let heldRecords: ProposalRecord[] = [];
@@ -4426,9 +4435,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // shipped beside a range line. The SAME function and gate clean the view here, where it is built.
     const provisionalViewShown = provisionalView === null ? null : ((): typeof provisionalView => {
       const viewBody: { assistant_text?: unknown; _agent: { provisional_view: typeof provisionalView } } = { _agent: { provisional_view: provisionalView } };
-      return withoutDriverAbsenceClaimsAtEgress(viewBody, {
+      const driverEditedView = withoutDriverAbsenceClaimsAtEgress(viewBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      return withLeftOutOptionCorrectionAtEgress(driverEditedView, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view', ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
     })();
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
@@ -4493,9 +4506,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * never says no assumption is established or most worth investigating; only that clause goes, logged by code.
      */
     {
-      const edited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
+      const driverEdited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const edited = withLeftOutOptionCorrectionAtEgress(driverEdited, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_final', ...(turnId !== undefined ? { turnId } : {}),
       });
       if (edited !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = edited as OlumiResponse & { _answer_shape?: unknown };
