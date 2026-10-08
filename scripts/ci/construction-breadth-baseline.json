@@ -1,5 +1,5 @@
 {
- "_note": "S7 construction-breadth ratchet. narrow may only shrink: remove an id when a construction change makes that draft sufficient. Never add one.",
+ "_note": "S7 construction-breadth ratchet (a floor, not S7's done-definition). narrow may only shrink: a slice that makes drafts sufficient removes their ids and lowers narrow_count. Never add one.",
  "measured_at": "CEE staging 21e51a5f, 8 Oct 2026",
  "narrow_count": 69,
  "narrow_ids": [
