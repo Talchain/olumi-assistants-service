@@ -165,12 +165,13 @@ export function definitionalLinkRefusalText(graph: unknown, link: DefinitionalLi
   // ⭐ CEE #3: an accumulation is never said as a product ("a × b × c"): it is worked out FROM its inputs over the months.
   if (link.operation === 'accumulation') {
     const inputs = `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-    const over = `over ${link.horizon_months} ${link.horizon_months === 1 ? 'month' : 'months'}`;
+    // Science 393023 (goals §(v)): "at steady monthly rates" makes the derivation honest where it is read.
+    const over = `over ${link.horizon_months} ${link.horizon_months === 1 ? 'month' : 'months'}, at steady monthly rates`;
+    const unused = `So this link's strength isn't used in the analysis, and I haven't changed it. Change ${change} instead.`;
     return link.stated_in_brief
-      ? `${carrier} is worked out from ${inputs} ${over}, so this link's strength is not something the analysis uses, `
-        + `and I haven't changed it. Change ${change} instead.`
-      : `Olumi works out ${carrier} from ${inputs} ${over}, so this link's strength isn't used while that holds, and I haven't `
-        + `changed it. Change ${change} instead. That reading is Olumi's, not yours; if ${carrier} isn't worked out that way, say so.`;
+      ? `${carrier} is worked out from ${inputs} ${over}. ${unused}`
+      : `Olumi works out ${carrier} from ${inputs} ${over}. ${unused} That's Olumi's reading, not yours; if ${carrier} `
+        + `isn't worked out that way, say so.`;
   }
   const term = link.operand_ids.map(labelOf).join(link.operation === 'sum' ? ' + ' : ' × ');
   const formula = [term, ...link.addend_ids.map(labelOf)].join(' + ');

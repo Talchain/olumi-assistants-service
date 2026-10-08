@@ -79,13 +79,17 @@ describe('readers treat an accumulation as a definition, never as a product', ()
     const text = definitionalLinkRefusalText(graph, link);
     expect(text).toBe(
       'Olumi works out Pro subscribers at month 12 from Pro subscribers today, Monthly churn and New subscribers per month '
-      + "over 12 months, so this link's strength isn't used while that holds, and I haven't changed it. Change Pro "
-      + "subscribers today, Monthly churn or New subscribers per month instead. That reading is Olumi's, not yours; if Pro "
-      + "subscribers at month 12 isn't worked out that way, say so.",
+      + "over 12 months, at steady monthly rates. So this link's strength isn't used in the analysis, and I haven't changed "
+      + 'it. Change Pro subscribers today, Monthly churn or New subscribers per month instead. That\'s Olumi\'s reading, not '
+      + "yours; if Pro subscribers at month 12 isn't worked out that way, say so.",
     );
     expect(text).not.toContain('×');
     const stated = definitionalLinkRefusalText(graph, { ...link, stated_in_brief: true });
-    expect(stated.startsWith('Pro subscribers at month 12 is worked out from')).toBe(true);
+    expect(stated).toBe(
+      'Pro subscribers at month 12 is worked out from Pro subscribers today, Monthly churn and New subscribers per month '
+      + "over 12 months, at steady monthly rates. So this link's strength isn't used in the analysis, and I haven't changed "
+      + 'it. Change Pro subscribers today, Monthly churn or New subscribers per month instead.',
+    );
     expect(stated).not.toContain("Olumi's");
   });
 
