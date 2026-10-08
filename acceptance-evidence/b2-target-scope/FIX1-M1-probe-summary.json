@@ -1,0 +1,153 @@
+{
+  "fixture": "src/orchestrator-v5/tools/handlers/__tests__/fixtures/r3-m1-card-yes-served-run-20260930.json",
+  "base": "53a68cd6e50eee2a30110cd68e859f8edda3c8be",
+  "head": "a4981a7afc5511fff9bf042573a6c1f158a43af8",
+  "targetVerdictSourceIdentical": true,
+  "pre_target_gate": {
+    "productGate": null,
+    "placeholderPaths": [
+      {
+        "option_id": "59_price",
+        "links": [
+          {
+            "from": "monthly_churn_rate",
+            "to": "paying_subscribers_at_12_months"
+          }
+        ]
+      }
+    ],
+    "shownBeforeEarlierGates": [
+      "59_price",
+      "current_price"
+    ],
+    "shownAtTargetGate": [
+      "current_price"
+    ],
+    "warningCodesAtTargetGate": [
+      "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "GOAL_DIRECTION_UNATTESTED",
+      "GOAL_FIGURES_PLACEHOLDER_PATH"
+    ],
+    "qualification": "Pure earlier gate functions on served M1.graph; not a complete handler/wire witness."
+  },
+  "snapshots": [
+    {
+      "label": "base",
+      "ref": "53a68cd6e50eee2a30110cd68e859f8edda3c8be",
+      "verdict": {
+        "kind": "not_testable",
+        "goal_id": "mrr",
+        "failures": [
+          {
+            "case": "c",
+            "precondition": "P5",
+            "code": "goal_path_placeholder",
+            "links": [
+              {
+                "from": "monthly_churn_rate",
+                "to": "paying_subscribers_at_12_months"
+              }
+            ]
+          }
+        ]
+      },
+      "options": [
+        {
+          "option_id": "59_price",
+          "scoped_failures": [
+            {
+              "case": "c",
+              "precondition": "P5",
+              "code": "goal_path_placeholder",
+              "links": [
+                {
+                  "from": "monthly_churn_rate",
+                  "to": "paying_subscribers_at_12_months"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "option_id": "current_price",
+          "scoped_failures": []
+        },
+        {
+          "option_id": "54_price",
+          "scoped_failures": [
+            {
+              "case": "c",
+              "precondition": "P5",
+              "code": "goal_path_placeholder",
+              "links": [
+                {
+                  "from": "monthly_churn_rate",
+                  "to": "paying_subscribers_at_12_months"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "head",
+      "ref": "a4981a7afc5511fff9bf042573a6c1f158a43af8",
+      "verdict": {
+        "kind": "not_testable",
+        "goal_id": "mrr",
+        "failures": [
+          {
+            "case": "c",
+            "precondition": "P5",
+            "code": "goal_path_placeholder",
+            "links": [
+              {
+                "from": "monthly_churn_rate",
+                "to": "paying_subscribers_at_12_months"
+              }
+            ]
+          }
+        ]
+      },
+      "options": [
+        {
+          "option_id": "59_price",
+          "scoped_failures": [
+            {
+              "case": "c",
+              "precondition": "P5",
+              "code": "goal_path_placeholder",
+              "links": [
+                {
+                  "from": "monthly_churn_rate",
+                  "to": "paying_subscribers_at_12_months"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "option_id": "current_price",
+          "scoped_failures": []
+        },
+        {
+          "option_id": "54_price",
+          "scoped_failures": [
+            {
+              "case": "c",
+              "precondition": "P5",
+              "code": "goal_path_placeholder",
+              "links": [
+                {
+                  "from": "monthly_churn_rate",
+                  "to": "paying_subscribers_at_12_months"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

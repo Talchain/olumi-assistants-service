@@ -91,8 +91,10 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
     const result = await runOn(M1.graph);
     expect(chances(result)).toEqual({ current_price: 0 });
     const w = warningsOf(result).filter((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
-    // The placeholder gate already owns the affected price option; Gate A adds nothing for the clean baseline.
-    expect(w).toEqual([]);
+    // Both reasons remain on the affected price option; neither may spread to the clean baseline.
+    expect(w).toHaveLength(1);
+    expect(w[0].option_ids).toEqual(['59_price']);
+    expect(Object.keys(w[0].per_option)).toEqual(['59_price']);
     const placeholder = warningsOf(result).find(x => x.code === GOAL_FIGURES_PLACEHOLDER_PATH)!;
     expect(placeholder.option_ids).toEqual(['59_price']);
     expect(GOAL_FIGURES_WITHHELD_CODES.has(placeholder.code)).toBe(true);

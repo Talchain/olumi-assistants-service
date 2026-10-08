@@ -125,7 +125,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
   it('R4 producer without ranges: clean arms retain their chances despite fourth-shop failures', () => {
     const { graph, envelope } = capture('unseen-1');
     // Derive from unseen-1: remove TNT and every range/licence record. Retain the separate placeholder withhold;
-    // expose a goal figure for loyalty_app and carry_on_as_now so this gate owns exactly those two options.
+    // expose a goal figure for loyalty_app and carry_on_as_now beside the already-withheld fourth-shop option.
     const noRanges = structuredClone(envelope);
     noRanges.inference_warnings = noRanges.inference_warnings.filter((w: Rec) =>
       ![TARGET, GOAL_CHANCE_RANGE, GOAL_CHANCE_LICENSED].includes(w.code));
@@ -137,8 +137,11 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     const evaluations = noRanges.identity_evaluations;
     const verdict = notTestable(graph, evaluations);
     const produced = withholdGoalFiguresForUntestableTarget(noRanges, graph);
-    expect(produced).toBe(noRanges);
-    expect(produced.inference_warnings.filter((w: Rec) => w.code === TARGET)).toEqual([]);
+    expect(unsizedLinks(verdict)).toEqual([{ from: 'fourth_shop_fit_out_spend', to: 'monthly_profit' }]);
+    const target = warning(produced);
+    expect(target.option_ids).toEqual(['fourth_shop_in_clifton']);
+    expect(Object.keys(target.per_option)).toEqual(['fourth_shop_in_clifton']);
+    expect(target.per_option.fourth_shop_in_clifton.message).toContain('Fourth-shop fit-out spend');
     expect(perOptionTargetReasonsForRun(graph, verdict, ['loyalty_app', 'carry_on_as_now'], evaluations)).toEqual({});
     expect(produced.option_comparison.filter((r: Rec) => ['loyalty_app', 'carry_on_as_now'].includes(r.option_id))
       .map((r: Rec) => r.probability_of_goal)).toEqual([0.5, 0.5]);

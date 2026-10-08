@@ -20,17 +20,10 @@ export function readProductIdentityCarrier(n: Rec): {
 
 /** This Run derived the selected goal's baseline from identity inputs, identified only by typed carriers. */
 export function goalBaselineFromIdentityInputs(
-  nodes: readonly Rec[], goalId: unknown, identityEvaluations?: readonly unknown[], inferenceWarnings?: readonly unknown[],
+  nodes: readonly Rec[], goalId: unknown, identityEvaluations?: readonly unknown[],
 ): boolean {
-  if ((identityEvaluations ?? []).some(e => isRec(e) && e.node_id === goalId && e.level_source === 'identity_inputs'
-    && evaluatedIdentityCarriers(nodes, [e]).has(goalId))) return true;
-  return (inferenceWarnings ?? []).some(w => {
-    if (!isRec(w) || w.code !== GOAL_LEVEL_FROM_IDENTITY_INPUTS) return false;
-    if (w.node_id !== undefined) return w.node_id === goalId;
-    if (w.field !== undefined) return w.field === `nodes[${String(goalId)}].nonlinear_identity`;
-    // The existing warning reader falls back to the goal when no id is carried. Ambiguous goals attest nothing.
-    return nodes.filter(n => n.kind === 'goal').length === 1 && nodes.some(n => n.kind === 'goal' && n.id === goalId);
-  });
+  return (identityEvaluations ?? []).some(e => isRec(e) && e.node_id === goalId && e.level_source === 'identity_inputs'
+    && evaluatedIdentityCarriers(nodes, [e]).has(goalId));
 }
 
 /**

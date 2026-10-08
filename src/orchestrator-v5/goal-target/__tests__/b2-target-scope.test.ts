@@ -53,9 +53,10 @@ describe('B2 Gate A: target withholding follows each option and typed dependenci
       code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'Not shown. Starter links need sizes.', option_ids: ['starter'], severity: 'warning',
     });
     const afterTarget = withholdGoalFiguresForUntestableTarget(afterS, g, 'goal');
-    expect(afterTarget).toBe(afterS);
     expect(chances(afterTarget)).toEqual(['raise', 'keep']);
-    expect(warning(afterTarget)).toBeUndefined();
+    // The earlier placeholder warning does not erase Starter's own target failure.
+    expect(warning(afterTarget)?.option_ids).toEqual(['starter']);
+    expect(Object.keys(warning(afterTarget)?.per_option ?? {})).toEqual(['starter']);
     const ranged = withGoalChanceRange(afterTarget, g, { goalId: 'goal', plotWithheld: false,
       goalPaths: [{ option_id: 'starter', links }], driversByOption: new Map([['starter', { drivers: [{
         kind: 'link_strength', quantity_id: 'middle->goal', from: 'middle', to: 'goal', status: 'resolved', spread: 0.11,
@@ -65,6 +66,7 @@ describe('B2 Gate A: target withholding follows each option and typed dependenci
       .toMatchObject({ low_pct: 40, high_pct: 51 });
     const final = scopeTargetNotTestableWithRanges(withGoalChanceLicence(ranged, g, 'goal'), g, 'goal');
     expect(Object.keys(goalChanceDisplayForAgent(final) ?? {})).toEqual(['raise', 'keep']);
+    expect(warning(final)).toBeUndefined();
     expect(JSON.stringify(final)).not.toContain('needs nothing more of its own');
     expect(final.option_comparison.map((r: Rec) => r.win_probability)).toEqual(afterS.option_comparison.map((r: Rec) => r.win_probability));
   });
@@ -98,17 +100,26 @@ describe('B2 Gate A: target withholding follows each option and typed dependenci
     expect(warning(out)?.per_option.raise.message).toContain('from u to a');
   });
 
-  it.each(['evaluation', 'warning'] as const)('class 2: a %s marking the goal baseline derived from inputs withholds everyone fed by its unsized input', marker => {
+  it('class 2: a self-attested identity_inputs evaluation withholds everyone fed by its unsized input', () => {
     const g = graph(true), body = envelope(), v = failures(g);
-    if (marker === 'evaluation') body.identity_evaluations = [{ node_id: 'goal', evaluated: true,
+    body.identity_evaluations = [{ node_id: 'goal', evaluated: true,
       operation: 'product', factor_ids: ['a', 'b'], level_source: 'identity_inputs' }];
-    else body.inference_warnings.push({ code: 'GOAL_LEVEL_FROM_IDENTITY_INPUTS', field: 'nodes[goal].nonlinear_identity', severity: 'info' });
     const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal');
     expect(chances(out)).toEqual([]);
     expect(warning(out)?.option_ids).toEqual(ids);
     expect(warning(out)?.per_option.keep.message).toContain('from u to a');
     expect(v.failures.every(f => f.case === 'c')).toBe(true);
   });
+
+  it.each([{ node_id: 'goal' }, { field: 'nodes[goal].nonlinear_identity' }, {}])(
+    'a warning-only marker %j cannot establish a derived-baseline dependency', marker => {
+      const g = graph(true), body = envelope();
+      body.inference_warnings.push({ code: 'GOAL_LEVEL_FROM_IDENTITY_INPUTS', ...marker, severity: 'info' });
+      const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal');
+      expect(chances(out)).toEqual(['keep']);
+      expect(warning(out)?.option_ids).toEqual(['raise', 'starter']);
+      expect(Object.keys(warning(out)?.per_option ?? {})).toEqual(['raise', 'starter']);
+    });
 
   it('class 1 is transitive and reaches only products on this goal path, regardless of labels', () => {
     const g = graph(true);
@@ -137,16 +148,19 @@ describe('B2 Gate A: target withholding follows each option and typed dependenci
     expect(chances(withholdGoalFiguresForUntestableTarget(body, g, 'goal'))).toEqual(['keep']);
   });
 
-  it('another goal\'s derived warning and non-input failure cannot hold this baseline', () => {
+  it('another goal\'s derived evaluation and non-input failure cannot hold this baseline', () => {
     const g = graph(true), body = envelope();
-    body.inference_warnings.push({ code: 'GOAL_LEVEL_FROM_IDENTITY_INPUTS', field: 'nodes[other_goal].nonlinear_identity' });
+    g.nodes.push({ ...g.nodes[0], id: 'other_goal' });
+    body.identity_evaluations = [{ node_id: 'other_goal', evaluated: true, operation: 'product',
+      factor_ids: ['a', 'b'], level_source: 'identity_inputs' }];
     expect(chances(withholdGoalFiguresForUntestableTarget(body, g, 'goal'))).toEqual(['keep']);
     // The same derived marker only applies to feeds into the identity inputs, not an additive side branch.
     const side = graph();
     side.nodes[0].nonlinear_identity = { operation: 'product', factor_ids: ['b', 'middle'], stated_in_brief: true };
     side.edges = [edge('raise', 'b'), edge('starter', 'u'), edge('u', 'a', true), edge('a', 'goal'), edge('b', 'goal'), edge('middle', 'goal')];
     const sideBody = envelope();
-    sideBody.inference_warnings.push({ code: 'GOAL_LEVEL_FROM_IDENTITY_INPUTS', node_id: 'goal' });
+    sideBody.identity_evaluations = [{ node_id: 'goal', evaluated: true, operation: 'product',
+      factor_ids: ['b', 'middle'], level_source: 'identity_inputs' }];
     expect(chances(withholdGoalFiguresForUntestableTarget(sideBody, side, 'goal'))).toEqual(['raise', 'keep']);
   });
 

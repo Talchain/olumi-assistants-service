@@ -2111,8 +2111,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // Gate A, Science §(aa): only options with their own target failures lose their goal chances; goal-level failures are every option's.
     // ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8): only the claims against the target go; the leader and the shares stay,
-    // as on a run with no target. Runs after every earlier withhold, and withholds whatever options STILL show a goal
-    // figure: (S) is per option, so "something was withheld" never means "every chance is gone" (AIQ's executed run: m1 +
+    // as on a run with no target. Runs after every earlier withhold, retaining each scored option's own target reason:
+    // (S) is per option, so "something was withheld" never means "every chance is gone" (AIQ's executed run: m1 +
     // one option's placeholder lever kept £59's 0.9929).
     // S-E GOALS: a chance goal's ONE withhold speaks alone (Codex buddy r1 on #2742): no later goal-figure withhold is added.
     if (!chanceGoalWithheld) {
@@ -3870,17 +3870,15 @@ export function withholdGoalFiguresForChanceGoal<E>(response: E, graph: unknown)
 
 export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown, goalId?: unknown): E {
   const { scored, shown } = goalFigureOptions(response);
-  // With no goal figures and no earlier withhold, retain the existing scored-option fallback, now scoped per option.
-  // A run an earlier withhold already emptied keeps that withhold's reason alone.
-  const candidates = shown.length > 0 ? shown : runWithheldGoalFigures(response as Record<string, unknown>) ? [] : scored;
+  // An earlier per-option withhold must not erase that option's own target reason beside the remaining figures.
+  // Scope all scored options; a run an earlier withhold already emptied keeps that withhold's reason alone.
+  const candidates = shown.length > 0 || !runWithheldGoalFigures(response as Record<string, unknown>) ? scored : [];
   if (candidates.length === 0) return response;
   // THIS Run's identity evaluations, as (S) reads them: an inferred product the Run evaluated is exact (Science d5, #2644).
   const evaluations = (response as Record<string, unknown>).identity_evaluations;
   const verdict = targetTestabilityOf(graph, Array.isArray(evaluations) ? evaluations : undefined, goalId);
   if (verdict.kind !== 'not_testable') return response;
-  const warnings = (response as Record<string, unknown>).inference_warnings;
-  const paths = optionPathsOf(graph, candidates, Array.isArray(evaluations) ? evaluations : undefined, verdict.goal_id,
-    Array.isArray(warnings) ? warnings : undefined);
+  const paths = optionPathsOf(graph, candidates, Array.isArray(evaluations) ? evaluations : undefined, verdict.goal_id);
   const labelOf = (id: string): string | undefined => {
     const node = readGraphNodesForCostAsk(graph).find(n => n.id === id);
     return typeof node?.label === 'string' ? node.label : undefined;

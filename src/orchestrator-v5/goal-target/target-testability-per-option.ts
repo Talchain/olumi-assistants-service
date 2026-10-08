@@ -73,7 +73,6 @@ function ownSentence(graph: unknown, verdict: Extract<TargetTestability, { kind:
  */
 export function optionPathsOf(
   graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], goalId?: unknown,
-  inferenceWarnings?: readonly unknown[],
 ): Map<string, Array<{ from: string; to: string }>> {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return new Map();
   const nodes = graph.nodes.filter(isRec);
@@ -98,7 +97,7 @@ export function optionPathsOf(
     const carrier = readProductIdentityCarrier(n);
     return carrier !== null && typeof n.id === 'string' && reachFrom(n.id).has(selectedGoal) ? [carrier] : [];
   });
-  const baselineOperands = goalBaselineFromIdentityInputs(nodes, selectedGoal, identityEvaluations, inferenceWarnings)
+  const baselineOperands = goalBaselineFromIdentityInputs(nodes, selectedGoal, identityEvaluations)
     ? [...exactIdentityOperandLinks(nodes, edges, identityEvaluations)].filter(e => e.to === selectedGoal).map(e => e.from) : [];
   const kindOf = new Map(nodes.map(n => [n.id, n.kind]));
   return new Map(paths.map(p => {
@@ -151,10 +150,9 @@ export function perOptionTargetReasons(
 /** {@link perOptionTargetReasons} over the options' own paths ({@link optionPathsOf}): the Run producer's one call. */
 export function perOptionTargetReasonsForRun(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], identityEvaluations?: readonly unknown[],
-  inferenceWarnings?: readonly unknown[],
 ): Record<string, { readonly message: string }> {
   if (verdict.kind !== 'not_testable') return {};
-  return perOptionTargetReasons(graph, verdict, optionPathsOf(graph, optionIds, identityEvaluations, verdict.goal_id, inferenceWarnings), optionIds);
+  return perOptionTargetReasons(graph, verdict, optionPathsOf(graph, optionIds, identityEvaluations, verdict.goal_id), optionIds);
 }
 
 /** The existing scoped chat writer, shared by the producer and the final range seam. */

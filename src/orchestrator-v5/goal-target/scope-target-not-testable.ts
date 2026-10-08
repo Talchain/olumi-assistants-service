@@ -35,7 +35,7 @@ export function scopeTargetNotTestableWithRanges<E>(envelope: E, graph: unknown,
     // Keep the original target failures; cut only links outside W's paths, using the admission walk and Run identities.
     // ⭐ S-E GOALS S6: ONE path read and ONE per-option scoping for both surfaces — the chat's `say` below and the panel's
     // `per_option` (the Run producer writes the same `per_option` from the same two functions).
-    const pathsByOption = optionPathsOf(graph, remaining, evaluations, verdict.goal_id, warnings);
+    const pathsByOption = optionPathsOf(graph, remaining, evaluations, verdict.goal_id);
     remaining = remaining.filter(id => scopedFailuresFor(verdict.failures, pathsByOption.get(id) ?? [], labelOf).length > 0);
     if (remaining.length === 0) return [];
     const perOption = perOptionTargetReasons(graph, verdict, pathsByOption, remaining);

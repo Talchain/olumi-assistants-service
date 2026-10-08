@@ -1,0 +1,141 @@
+{
+  "tests": 317,
+  "files": 20,
+  "batches": 10,
+  "core_tests": 277,
+  "core_files": 16,
+  "test_gate_refusals": [
+    {
+      "label": "FIX1-final-agent-route",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.route.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/guided-sizing.test.ts"
+      ],
+      "gate_exit": 1,
+      "gate_output": "{\"load\":26.8828125,\"threshold\":25}",
+      "test_exit": null
+    }
+  ],
+  "results": [
+    {
+      "label": "FIX1-final-core",
+      "files": [
+        "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+        "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":18.16552734375,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 27
+    },
+    {
+      "label": "FIX1-final-handlers-final",
+      "files": [
+        "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+        "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":20.04833984375,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts src/orchestrator-v5/tools/handlers/__tests__/run-analysis-goal-certainty.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 23
+    },
+    {
+      "label": "FIX1-final-range-guards",
+      "files": [
+        "src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts",
+        "src/orchestrator-v5/goal-target/__tests__/goal-chance-range.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":21.45947265625,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/s4b-target-not-testable.test.ts src/orchestrator-v5/goal-target/__tests__/goal-chance-range.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 88
+    },
+    {
+      "label": "FIX1-final-agent-target",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/bprime-target-only-goal-chance.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":21.83154296875,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/bprime-target-only-goal-chance.test.ts src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 17
+    },
+    {
+      "label": "FIX1-final-agent-route",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.route.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/guided-sizing.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":17.06591796875,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/target-not-testable-beside-ranges.route.test.ts src/orchestrator-v5/agent-lane/__tests__/guided-sizing.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 42
+    },
+    {
+      "label": "FIX1-final-typed-readers",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/run-evaluated-inferred-product.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/goal-level-in-goal-units.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":15.216796875,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/run-evaluated-inferred-product.test.ts src/orchestrator-v5/agent-lane/__tests__/goal-level-in-goal-units.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 14
+    },
+    {
+      "label": "FIX1-final-carriers",
+      "files": [
+        "src/orchestrator-v5/agent-lane/__tests__/goal-product-carrier.test.ts",
+        "src/orchestrator-v5/admission/__tests__/confirmed-product-baseline.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":16.640625,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/goal-product-carrier.test.ts src/orchestrator-v5/admission/__tests__/confirmed-product-baseline.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 27
+    },
+    {
+      "label": "FIX1-final-goal-contracts",
+      "files": [
+        "src/orchestrator-v5/agent-lane/actions/__tests__/goal-reach-class-guard.test.ts",
+        "src/orchestrator-v5/tools/handlers/__tests__/bprime-target-keeps-ordering.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":20.25390625,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/actions/__tests__/goal-reach-class-guard.test.ts src/orchestrator-v5/tools/handlers/__tests__/bprime-target-keeps-ordering.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 39
+    },
+    {
+      "label": "FIX1-final-ci-static-guided",
+      "files": [
+        "tests/contract/tier3-leak-guard.static.guard.test.ts",
+        "src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":23.99951171875,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run tests/contract/tier3-leak-guard.static.guard.test.ts src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 30
+    },
+    {
+      "label": "FIX1-final-ci-horizon-staging",
+      "files": [
+        "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts",
+        "src/routes/__tests__/convention-frame-source-wire.test.ts"
+      ],
+      "gate_exit": 0,
+      "gate_output": "{\"load\":23.14404296875,\"threshold\":25}",
+      "command": "node_modules/.bin/vitest run src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts src/routes/__tests__/convention-frame-source-wire.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null",
+      "test_exit": 0,
+      "tests": 10
+    }
+  ]
+}

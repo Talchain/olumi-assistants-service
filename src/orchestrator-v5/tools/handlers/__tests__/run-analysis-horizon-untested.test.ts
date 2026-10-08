@@ -114,9 +114,11 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
   });
 
   it('RED: it rides beside the target withhold, never in place of it (two separate facts)', async () => {
-    const codes = warningsOf(await runOn(M1.graph)).map((w) => w.code);
+    const warnings = warningsOf(await runOn(M1.graph));
+    const codes = warnings.map((w) => w.code);
     expect(codes).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
     expect(codes).toContain(GOAL_HORIZON_NOT_TESTED);
+    expect(warnings.find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)?.option_ids).toEqual(['59_price']);
   });
 
   it('RED: a Run that SHOWS the goal chance still says the deadline is untested (the PL\'s distinction)', async () => {
