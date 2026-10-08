@@ -160,14 +160,18 @@ describe('B2 Gate A: target withholding follows each option and typed dependenci
     expect(warning(out)).toBeUndefined();
   });
 
-  it('class 2: a self-attested identity_inputs evaluation withholds everyone fed by its unsized input', () => {
+  // Science 93 §(aa) amendment @c6ccdc4b (8 Oct): the derived-baseline feed binds an option only when that option moves the
+  // feed's SOURCE (or the source varies over the horizon). Keep moves nothing, so u → a at today's level cannot change it;
+  // Starter moves u; Raise still depends on u → a through the product (it moves b).
+  it('class 2: a self-attested identity_inputs evaluation withholds every option that moves, or multiplies, its unsized input', () => {
     const g = graph(true), body = envelope(), v = failures(g);
     body.identity_evaluations = [{ node_id: 'goal', evaluated: true,
       operation: 'product', factor_ids: ['a', 'b'], level_source: 'identity_inputs' }];
     const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal');
-    expect(chances(out)).toEqual([]);
-    expect(warning(out)?.option_ids).toEqual(ids);
-    expect(warning(out)?.per_option.keep.message).toContain('from u to a');
+    expect(chances(out)).toEqual(['keep']);
+    expect(warning(out)?.option_ids).toEqual(['raise', 'starter']);
+    expect(Object.keys(warning(out)?.per_option ?? {})).toEqual(['raise', 'starter']);
+    expect(warning(out)?.per_option.starter.message).toContain('from u to a');
     expect(v.failures.every(f => f.case === 'c')).toBe(true);
   });
 
