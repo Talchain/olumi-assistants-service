@@ -22,11 +22,65 @@ import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
+import { type ObjectiveConfirmState, type PendingAction } from '../session/pending-action.js';
+export { withObjectiveConfirmCarry } from '../session/pending-action.js';
+import type { SuggestedAction } from '../compose/types.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const OBJECTIVE_ASK_QUESTION = 'What should this model help you explore?';
+export const OBJECTIVE_CONFIRM_RANK = 1000;
+export const objectiveConfirmQuestion = (label: string): string => `I've assumed the goal is ‘${withoutProposalIds(label)}’. Is that what you want to improve?`;
+export const objectiveExploreQuestion = OBJECTIVE_ASK_QUESTION;
+export type ObjectiveConfirmPress = { readonly kind: 'yes' | 'change'; readonly goalId: string };
+export type ObjectiveConfirmChipId = `objective-confirm:${ObjectiveConfirmPress['kind']}:${string}`;
+export function objectiveConfirmPress(id: unknown): ObjectiveConfirmPress | null {
+  if (typeof id !== 'string') return null;
+  const match = /^objective-confirm:(yes|change):(.+)$/.exec(id);
+  return match === null ? null : { kind: match[1] as ObjectiveConfirmPress['kind'], goalId: match[2]! };
+}
+export function objectiveConfirmActions(state: ObjectiveConfirmState): (SuggestedAction & { id: ObjectiveConfirmChipId })[] {
+  return [
+    { id: `objective-confirm:yes:${state.goal_id}`, label: 'Yes', message: `Yes — ${objectiveConfirmQuestion(state.goal_label)}` },
+    { id: `objective-confirm:change:${state.goal_id}`, label: 'Change it', message: OBJECTIVE_ASK_QUESTION },
+  ];
+}
+export function objectiveConfirmState(pending: readonly PendingAction[], userId: string | null): ObjectiveConfirmState | null {
+  return pending.map(p => p.action.kind === 'objective_confirm' ? p.action : p.objective_confirm)
+    .find((s): s is ObjectiveConfirmState => s !== undefined && s.user_id === userId) ?? null;
+}
+/** An inferred objective remains eligible on ordinary replies too. Only delivered/answered state stops it permanently. */
+export function objectiveConfirmFor(graph: unknown, prior: ObjectiveConfirmState | null, userId: string | null, userWords?: string): ObjectiveConfirmState | null {
+  const goal = goalOf(graph);
+  if (goal === undefined || typeof goal.id !== 'string' || typeof goal.label !== 'string' || goal.label.trim() === '') return prior;
+  const answer = userWords?.trim().replace(/^(?:(?:my|our|the)\s+)?(?:goal|objective)\s*(?:is\s+|should be\s+|:\s*)/i, '');
+  const clean = (s: string): string => s.replace(/^[‘“'"]+|[.’”'"]+$/g, '').trim().toLowerCase();
+  if (answer !== undefined && answer !== userWords?.trim() && clean(answer) === clean(goal.label)) {
+    return { kind: 'objective_confirm', goal_id: goal.id, goal_label: goal.label.trim(), user_id: userId, state: 'answered', deferred_asks: prior?.deferred_asks ?? [] };
+  }
+  if (prior !== null && prior.goal_id === goal.id) {
+    return goal.provenance !== 'ai_inferred' ? { ...prior, state: 'answered' }
+      : prior.state === 'pending' ? { ...prior, goal_label: goal.label.trim() } : prior;
+  }
+  return goal.provenance !== 'ai_inferred' ? null : {
+    kind: 'objective_confirm', goal_id: goal.id, goal_label: goal.label.trim(), user_id: userId, state: 'pending', deferred_asks: [],
+  };
+}
+export function objectiveProvisionalDetail(state: ObjectiveConfirmState): string {
+  return `I used "${withoutProposalIds(state.goal_label)}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`;
+}
+export function objectiveConfirmEligible(graph: unknown, state: ObjectiveConfirmState | null): boolean {
+  const goal = goalOf(graph);
+  return state?.state === 'pending' && goal?.id === state.goal_id && goal.label === state.goal_label && goal.provenance === 'ai_inferred';
+}
+/** Only the turn that issued the card restores it; a later answer never re-offers an already asked confirm. */
+export function objectiveCardOnTurn(pending: readonly PendingAction[], graph: unknown, userId: string | null, turnId: string): ObjectiveConfirmState | null {
+  const state = objectiveConfirmState(pending, userId);
+  const goal = goalOf(graph);
+  return state?.state === 'asked' && state.issued_turn_id === turnId && goal?.id === state.goal_id && goal.label === state.goal_label && goal.provenance === 'ai_inferred'
+    ? state : null;
+}
 const TARGET_ASK_TAIL = "I'll propose it as your target.";
 
 /** The same exact host-owned words still count as said when the composer places the question apart from its context. */

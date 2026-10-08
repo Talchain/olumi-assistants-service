@@ -108,7 +108,7 @@
  *   narrower claim than one storage generation.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
+import { PENDING_ACTIONS_PER_TURN_CAP, withObjectiveConfirmCarry, type PendingAction } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -435,6 +435,16 @@ export async function appendCheckedGraphWrite(
         write = { ...write, pending_actions: merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
       }
       if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
+      // Asked/answered state is independent of an offer's TTL and of which caller appends the latest row.
+      // Reconcile AFTER consent capacity: a full row carries this state on an item, without evicting an approval.
+      let objective = [...(write.pending_actions ?? []), ...prior]
+        .map(p => p.action.kind === 'objective_confirm' ? p.action : p.objective_confirm).find(s => s !== undefined);
+      if (objective !== undefined) {
+        const graph = (writesGraph ? write.graph : params.baseGraphForInvariants) as { nodes?: { id?: unknown; provenance?: unknown }[] } | null | undefined;
+        const goal = graph?.nodes?.find(n => n.id === objective!.goal_id);
+        if (goal !== undefined && goal.provenance !== 'ai_inferred') objective = { ...objective, state: 'answered' };
+        write = { ...write, pending_actions: withObjectiveConfirmCarry(write.pending_actions ?? [], objective, write.scenario_id, new Date().toISOString()) };
+      }
     }
     if (writesGraph) assertNoScopedIdentityConflict(write.graph);
 

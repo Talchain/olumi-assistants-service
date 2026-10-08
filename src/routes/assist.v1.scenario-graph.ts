@@ -310,6 +310,8 @@ export interface ConversationTurnRead {
   readonly user_message: string | null;
   readonly assistant_message: string | null;
   readonly suggested_actions?: readonly SuggestedAction[];
+  /** Native objective confirm card restored beside its two plain-text presses. */
+  readonly blocks?: readonly { readonly type: 'text'; readonly content: string }[];
 }
 
 function wantsConversationTurns(body: unknown): boolean {
@@ -335,6 +337,7 @@ function wantsConversationTurns(body: unknown): boolean {
  * saw.
  */
 export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/conversation-as-seen.js";
+import { objectiveCardOnTurn, objectiveConfirmActions, objectiveConfirmQuestion } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 
 /**
  * The scenario's turns, OLDEST first, from the last {@link CONVERSATION_TURNS_CAP} rows, each reduced to its id, time
@@ -381,6 +384,13 @@ async function readConversationTurns(
           if (actions.length > 0) turns[turns.length - 1] = { ...last, suggested_actions: actions };
         }
       } catch { /* Offers unavailable: retain the existing response. */ }
+    }
+    // Objective consent is bound to the issuing turn, independently of a Run. Restore its native card and typed presses.
+    for (let i = 0; i < turns.length; i++) {
+      const turn = turns[i]!;
+      const issued = objectiveCardOnTurn(authority.latest, authority.graph, authority.userId, turn.turn_id);
+      if (issued !== null) turns[i] = { ...turn, suggested_actions: [...objectiveConfirmActions(issued), ...(turn.suggested_actions ?? [])],
+        blocks: [{ type: 'text', content: objectiveConfirmQuestion(issued.goal_label) }] };
     }
     return { turns, heldOffers, proposalRows: rows };
   } catch (err) {

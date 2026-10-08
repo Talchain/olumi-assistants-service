@@ -482,6 +482,7 @@ describe('tryClarificationResume — kind classification regression', () => {
     PendingAction['action']['kind'],
     'mutating' | 'non_mutating'
   > = {
+    objective_confirm: 'mutating', // Consent belongs to the Agent's exact goal-bound press, never a bare answer.
     // Graph-mutating today.
     set_factor_value: 'mutating',
     elicit_goal_current_level: 'mutating',

@@ -259,7 +259,46 @@ export interface ElicitEditTargetFields {
   readonly offered_targets: readonly ElicitEditTargetOffer[];
 }
 
+/** Goal identity, consent and displaced asks travel with the latest answer, independently of offer TTLs. */
+export interface ObjectiveConfirmState {
+  readonly kind: 'objective_confirm';
+  readonly goal_id: string;
+  readonly goal_label: string;
+  readonly user_id: string | null;
+  readonly state: 'pending' | 'asked' | 'answered' | 'change_requested';
+  readonly deferred_asks: readonly string[];
+  readonly issued_turn_id?: string;
+  readonly issued_run_key?: string;
+}
+
+export function isObjectiveConfirmState(value: unknown): value is ObjectiveConfirmState {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  const bounded = (s: unknown, max: number): s is string => typeof s === 'string' && s.trim().length > 0 && s.length <= max;
+  return v.kind === 'objective_confirm' && bounded(v.goal_id, 200) && bounded(v.goal_label, 500)
+    && (v.user_id === null || bounded(v.user_id, 200))
+    && ['pending', 'asked', 'answered', 'change_requested'].includes(String(v.state))
+    && Array.isArray(v.deferred_asks) && v.deferred_asks.length <= 8 && v.deferred_asks.every(s => bounded(s, 2000))
+    && (v.issued_turn_id === undefined || bounded(v.issued_turn_id, 200))
+    && (v.issued_run_key === undefined || bounded(v.issued_run_key, 200));
+}
+
+/** Latest-row carry, including a full approval row: no consent hold is evicted to store an ask. */
+export function withObjectiveConfirmCarry(pending: readonly PendingAction[], state: ObjectiveConfirmState | null, scenarioId: string, nowIso: string): PendingAction[] {
+  const out: PendingAction[] = pending.filter(p => p.action.kind !== 'objective_confirm').map(p => {
+    const { objective_confirm: _old, ...rest } = p;
+    return rest;
+  });
+  if (state === null) return out;
+  if (out.length >= PENDING_ACTIONS_PER_TURN_CAP) {
+    out[0] = { ...out[0]!, objective_confirm: state };
+  } else out.push({ id: `objective-confirm:${state.goal_id}`, scenario_id: scenarioId, chip_id: `objective-confirm:yes:${state.goal_id}`,
+    action: state, preconditions: {}, expires_at_turn_count: 0, expires_at_iso: nowIso, emitted_at_iso: nowIso });
+  return out;
+}
+
 export type PendingActionAction =
+  | ObjectiveConfirmState
   | {
       /** The Agent's delivered level question; only its own route resumes it. */
       readonly kind: 'elicit_goal_current_level';
@@ -616,6 +655,7 @@ export type PendingActionKind = PendingActionAction['kind'];
  * For chip-derivation use `CHIP_DERIVABLE_ACTION_TYPES` instead.
  */
 export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
+  'objective_confirm', // Resumed only by the Agent's identity-bound typed presses.
   'elicit_goal_current_level',
   'reconcile_goal_scope',
   'set_factor_value',
@@ -736,6 +776,8 @@ export interface PendingActionPreconditions {
 }
 
 export interface PendingAction {
+  /** When all three slots hold approvals, carry the objective state on a retained item instead of evicting consent. */
+  readonly objective_confirm?: ObjectiveConfirmState;
   readonly id: PendingActionId;
   readonly scenario_id: string;
   /**
@@ -917,6 +959,7 @@ export const PENDING_ACTION_ASK_WALL_TTL_MS = 30 * 60 * 1000;
  * Every non-member keeps the default bounds unchanged.
  */
 export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = {
+  objective_confirm: false,
   elicit_goal_current_level: true,
   reconcile_goal_scope: false, // issue lifetime and answer-binding lifetime are deliberately separate
   // Recorded questions. Answerable only by a bare number or a menu index, and
@@ -1235,6 +1278,7 @@ export const CONFIRMATION_EXPECTING_ACTION_TYPES: ReadonlySet<PendingActionKind>
  *     (wall-clock only, documented there).
  */
 export function isPendingActionExpired(pa: PendingAction, nowMs: number): boolean {
+  if (pa.action.kind === 'objective_confirm') return false;
   if (pa.action.kind === 'reconcile_goal_scope') return false;
   const expiresMs = Date.parse(pa.expires_at_iso);
   if (!Number.isFinite(expiresMs)) return true;
@@ -1270,6 +1314,7 @@ export type ElicitTargetBaselinePending = PendingAction & {
  * the elliptical carry must refuse.
  */
 export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean> = {
+  objective_confirm: false,
   elicit_goal_current_level: false, // Agent-only: requires units or a recorded figure confirmation.
   reconcile_goal_scope: false, // only the scoped answer gate may bind this question
   // The asks whose natural answer IS a bare number, or a bare menu index.
@@ -1535,6 +1580,8 @@ export function parsePendingAction(input: unknown): PendingAction | null {
   const a = action as Record<string, unknown>;
   if (typeof a.kind !== 'string') return null;
   if (!RESUMABLE_ACTION_TYPES.has(a.kind as PendingActionKind)) return null;
+  if (a.kind === 'objective_confirm' && !isObjectiveConfirmState(a)) return null;
+  if (o.objective_confirm !== undefined && !isObjectiveConfirmState(o.objective_confirm)) return null;
   if (a.kind === 'elicit_goal_current_level') {
     const bounded = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
     if (!bounded(a.goal_id, 200) || !bounded(a.goal_label, 500) || !bounded(a.question, 400)) return null;

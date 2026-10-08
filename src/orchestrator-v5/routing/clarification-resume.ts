@@ -267,6 +267,7 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   PendingAction['action']['kind'],
   SafetyClass
 > = {
+  objective_confirm: 'mutating', // Only the Agent's exact goal-bound press may confirm it; no bare short-confirm resume.
   // Graph-mutating: applying the persisted operator/value changes
   // the graph. Hash divergence between emit and resume is unsafe.
   set_factor_value: 'mutating',

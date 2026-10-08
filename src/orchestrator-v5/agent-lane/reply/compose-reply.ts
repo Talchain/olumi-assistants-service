@@ -67,8 +67,9 @@ export const REPLY_SHAPE_INSTRUCTION =
 
 /**
  * A host line by exact typed identity. Lead evidence carries the screen finding; matching subjects bind a withheld
- * reason/caveat to its face figure. Other host parts stay in detail. The last ask question is the one prose next step
- * unless its typed control owns it. With only typed host parts, the first host part is the whole headline.
+ * reason/caveat to its face figure. Other host parts stay in detail. The highest ranked ask is the one next step;
+ * equal ranks keep the last host question unless its typed control owns it. With only typed host parts, the first host
+ * part is the whole headline.
  */
 export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host' | 'detail';
 /** Overlapping obligations are one unit carrying the strongest role among them. */
@@ -77,6 +78,8 @@ export interface FaceObligation {
   readonly role: FaceObligationRole;
   readonly text: string;
   readonly subjects?: readonly string[];
+  /** Ask priority in the one next-step policy; a larger number wins. Unranked asks retain their existing policy. */
+  readonly rank?: number;
   /** The screen finding this separately written depends/spread/shortfall note belongs to. */
   readonly companionOf?: string;
   /** B15: a typed screen goal-chance finding leads when present; its evidence rank is unchanged. */
@@ -141,6 +144,8 @@ export interface ReplyComposition {
   readonly text: string;
   readonly shape: AnswerShape | null;
   readonly outcome: 'already_in_shape' | 'shaped' | 'kept_whole';
+  /** The selected question/invitation, including when its typed card owns it. The route carries displaced asks. */
+  readonly selectedAskText?: string;
   readonly reason?: KeepWholeReason | 'empty' | 'no_headline' | 'obligation_unlocated' | 'face_over_cap' | 'lead_in_split' | 'invariant_failed';
   readonly measure?: ReplyMeasure;
 }
@@ -565,10 +570,16 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const detailLines = [...new Set((input.detailLines ?? []).filter((line) => line.trim() !== ''))];
   const faceHostLines = !faceContract || input.keepWhole !== undefined || input.profile === 'method_step' || input.profile === 'proposal' ? [] : [input.faceContract === 'run' ? input.horizonLine : undefined, input.whatChanges, input.estimatesLine].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
   const sourceText = [input.text, ...faceHostLines.filter((line) => !input.text.includes(line))].filter(Boolean).join('\n\n');
+  const sourceQuestions = detailLines.length === 0 ? null : openQuestionsSegment(sourceText);
   // Move verbatim narrator copies to their typed detail position; never duplicate a risk sentence.
-  const body = detailLines.length === 0 ? sourceText : detailLines.reduce((text, line) => text.replaceAll(line, ''), sourceText)
+  const withoutDetails = (text: string): string => detailLines.reduce((words, line) => words.replaceAll(line, ''), text)
     .replace(/^[ \t]*[-•*][ \t]*$/gm, '').trim();
-  const originalQuestions = detailLines.length === 0 ? null : openQuestionsSegment(body);
+  const body = detailLines.length === 0 ? sourceText : withoutDetails(sourceText);
+  // Removing the toggle's only question can leave an empty marker. Preserve its original position while extracting
+  // the detail, so re-inserting the line cannot put it back inside that marker or lose its obligation's identity.
+  const originalQuestions = detailLines.length === 0 ? null : openQuestionsSegment(body)
+    ?? (sourceQuestions === null ? null : { lead: withoutDetails(sourceQuestions.lead),
+      segment: withoutDetails(sourceQuestions.segment), after: withoutDetails(sourceQuestions.after) });
   // The questions toggle owns its segment; disclosures sit before it, never inside it.
   const originalText = detailLines.length === 0 ? body
     : [originalQuestions?.lead ?? body, ...detailLines, originalQuestions?.segment ?? '', originalQuestions?.after ?? '']
@@ -612,9 +623,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       return proseSegments(o.text, [written]).map((part) => ({ ...o, text: part.text.trim(),
         role: part.role ?? o.role, ...(part.text === written.text ? { lead: true as const } : {}) }));
     })
-    // In this explicit-detail path, questions already in their own toggle stay there.
+    // In this explicit-detail path, the toggle owns every word within it, including a host status after its question.
+    // Explicit detail was inserted before the toggle above; its obligation binds in that new position.
     // Obligations in the ordinary reply remain subject to the same face checks.
-    .filter((o) => originalQuestions === null || o.role !== 'ask'
+    .filter((o) => originalQuestions === null || (o.role === 'detail' && detailLines.some((line) => asWritten(line.trim()) === o.text))
       || originalQuestions.lead.includes(o.text) || originalQuestions.after.includes(o.text))
     .sort((a, b) => b.text.length - a.text.length);
   const once = sayOnce(originalText, originalPresent);
@@ -633,12 +645,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   }).sort((a, b) => b.text.length - a.text.length);
   // Overlapping obligations are ONE unit (the gate's closing can carry the ask): the larger span stands for both, and it
   // is the ask when it holds one, so it closes the face.
-  const owed: { role: FaceObligationRole; text: string; lead?: true; subjects?: readonly string[] }[] = [];
+  const owed: { role: FaceObligationRole; text: string; rank?: number; lead?: true; subjects?: readonly string[] }[] = [];
   for (const o of present) {
     const container = owed.find((k) => k.text.includes(o.text));
     if (container === undefined) owed.push({ ...o });
     else {
       if (ROLE_RANK[o.role] > ROLE_RANK[container.role]) container.role = o.role;
+      if (o.rank !== undefined) container.rank = Math.max(container.rank ?? o.rank, o.rank);
       if (o.lead === true) container.lead = true;
       if (o.subjects !== undefined) container.subjects = [...new Set([...(container.subjects ?? []), ...o.subjects])];
     }
@@ -699,17 +712,50 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const questions = units.filter((u) => eligible(u) && isQuestionUnit(u));
   const hostAsks = units.filter((u) => u.obligation === 'ask');
   const runs = [...new Set(units.filter((u) => u.kind === 'bullet').map((u) => u.run!))];
-  // THE ONE ASK: the host's typed ask, else the reply's last question that is not itself another obligation (a screen
-  // line that ends on its own question is evidence, kept in its place, never moved to close the face). Every other
-  // question goes to detail (D-12).
+  // THE ONE NEXT STEP: highest typed ask rank wins, irrespective of input order. Equal/default ranks retain the
+  // existing policy: a guided finding owns N, else the last host ask, else the last unbound narrator question. A screen
+  // line ending on its own question remains evidence. Every displaced question stays in detail (D-12); the route,
+  // rather than the composer, carries it into a later reply.
   // A control's exact typed question owns the next step. Its prose copies (including a narrator echo in a longer
   // sentence) all remain in detail. This is question identity supplied by the route, never a prose classifier.
 
   const controlAsk = (u: Unit): boolean => controlQuestions.some((question) => foldQuotes(u.text).includes(foldQuotes(question)));
-  const nextStepFinding = !faceContract ? undefined : units.find((u) => !controlAsk(u)
+  const guidedFinding = !faceContract ? undefined : units.find((u) => !controlAsk(u)
     && present.some((o) => o.lead === true && o.ownsNextStep === true && u.text === o.text));
-  const selectedAsk = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
-  const ask = nextStepFinding !== undefined || (selectedAsk !== undefined && controlAsk(selectedAsk)) ? undefined : selectedAsk;
+  const askRank = (u: Unit): number => {
+    const ranks = owed.filter((o) => o.role === 'ask' && u.text.includes(o.text)).map((o) => o.rank ?? 0);
+    return ranks.length === 0 ? 0 : Math.max(...ranks);
+  };
+  interface NextStepCandidate {
+    readonly kind: 'ask' | 'control' | 'guided';
+    readonly text: string;
+    readonly rank: number;
+    /** Only equal ranks use the existing ownership policy; text order settles equal host asks. */
+    readonly tiePriority: number;
+    readonly unit?: Unit;
+  }
+  // A card-only ranked obligation is eligible by the route's typed control identity. It never enters the prose,
+  // its parsed units or the conservation invariant; its card is the sole author of those words.
+  const virtualControls: NextStepCandidate[] = !faceContract ? [] : (input.obligations ?? [])
+    .filter((o) => o.role === 'ask' && o.rank !== undefined && !originalText.includes(asWritten(o.text.trim()))
+      && controlQuestions.some((question) => foldQuotes(question) === foldQuotes(o.text.trim())))
+    .map((o) => ({ kind: 'control', text: sentencesOf(o.text).filter((sentence) => QUESTION_END.test(sentence.trim())).at(-1) ?? o.text,
+      rank: o.rank!, tiePriority: 1 }));
+  const candidates: NextStepCandidate[] = [
+    ...(hostAsks.length > 0 ? hostAsks : questions.filter((u) => u.obligation === undefined)).map((u): NextStepCandidate => ({
+      kind: controlAsk(u) ? 'control' : 'ask', text: u.text, rank: askRank(u), tiePriority: hostAsks.length > 0 ? 1 : 0, unit: u,
+    })),
+    ...(guidedFinding === undefined ? [] : [{ kind: 'guided' as const, text: guidedFinding.text, rank: 0, tiePriority: 2, unit: guidedFinding }]),
+    ...virtualControls,
+  ];
+  const selected = candidates.reduce<NextStepCandidate | undefined>((winner, candidate) =>
+    winner === undefined || candidate.rank > winner.rank
+      || (candidate.rank === winner.rank && candidate.tiePriority >= winner.tiePriority) ? candidate : winner, undefined);
+  const nextStepFinding = selected?.kind === 'guided' ? selected.unit : undefined;
+  const selectedAskText = selected?.text;
+  const ask = selected?.kind === 'ask' ? selected.unit : undefined;
+  const displacedFinding = (u: Unit): boolean => faceContract && u !== nextStepFinding
+    && present.some((o) => o.ownsNextStep === true && u.text === o.text);
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
   const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u)));
@@ -722,17 +768,23 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // Evidence/withheld/ask ranks below remain unchanged. No recognition by wording.
   const hostHeadline = units.every((u) => u.obligation !== undefined) && units[0]!.obligation === 'host'
     ? units[0] : undefined;
+  // A ranked card can displace the narrator's only question. If no prose finding remains, an existing typed receipt
+  // can lead; a fragment of the card's own words cannot become a duplicate prose headline.
+  const rankedControlHostHeadline = selected?.kind === 'control' && selected.rank > 0
+    ? units.find((u) => u.obligation === 'host' && !isQuestionUnit(u) && !displacedFinding(u)
+      && !controlQuestions.some((question) => foldQuotes(question).includes(foldQuotes(u.text)))) : undefined;
   // B15 (DL, 7 Oct): the first PRESENT screen goal-chance finding in text order leads, by identity alone.
   // `present` retains the marker even when overlapping obligations bind as one larger atomic unit. The unit must BE that
   // finding (exact text): a bullet that carries it beside other sentences (a run share) never leads (Codex r1 P1 #2783).
   const goalChanceHeadline = nextStepFinding
-    ?? units.find((u) => !controlAsk(u) && present.some((o) => o.lead === true && u.text === o.text));
+    ?? units.find((u) => !controlAsk(u) && !displacedFinding(u) && present.some((o) => o.lead === true && u.text === o.text));
   // A unit that carries a lead finding beside other words never leads by ANY selector (Codex r2 P2 #2783).
   const mixedLead = (u: Unit): boolean => present.some((o) => o.lead === true && u.text !== o.text && u.text.includes(o.text));
   const headline = goalChanceHeadline ?? hostHeadline ?? leadIn
-    ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && !controlAsk(u) && u !== ask && !isQuestionUnit(u))
+    ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && !controlAsk(u) && !displacedFinding(u) && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading' && eligible(u))
     ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host' && !mixedLead(u)) : undefined)
+    ?? rankedControlHostHeadline
     ?? (units.length === 1 && eligible(units[0]!) && !mixedLead(units[0]!) ? units[0] : undefined);
   if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure: initialMeasure };
   // A frame that introduces CHANCES ("…, chances of meeting it, in this model, are:", "…, on current information:"), never a
@@ -783,7 +835,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     const companions = units.filter((u) => !findingUnits.includes(u) && present.some((o) =>
       o.role === 'evidence' && o.companionOf !== undefined && u.text === o.text
       && findingUnits.some((finding) => subjectsOf(finding).has(o.companionOf!))));
-    const exceptions = units.filter((u) => u !== headline && u !== ask && !companions.includes(u) && !controlAsk(u)
+    const exceptions = units.filter((u) => u !== headline && u !== ask && !companions.includes(u) && !controlAsk(u) && !displacedFinding(u)
       && (u.obligation === 'withheld_reason' || u.obligation === 'caveat')
       && findingUnits.some((finding) => {
         const figureSubjects = subjectsOf(finding);
@@ -851,10 +903,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (!faceContract) {
     // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
     // too little would go behind "More detail" to be worth a click.
-    if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+    if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure, selectedAskText };
     if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS
       // D-12: more than one question never ships whole on the face, however little would go to detail (RC6 can leave that).
-      && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+      && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure, selectedAskText };
     // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
     if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
     // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face
@@ -867,16 +919,16 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) {
     // A contract reply that is already the whole face (≤ budget, at most one question, nothing for the contract to place:
     // no chance, no horizon/W/E line, no card question to move) ships exactly as written, as on staging.
-    return { text, shape: null, outcome: 'already_in_shape', measure };
+    return { text, shape: null, outcome: 'already_in_shape', measure, selectedAskText };
   }
   const detail = [renderDetail(detailUnits, faceContract), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
   // A typed host or goal-chance part can contain several sentences; narrator headlines keep the single-sentence contract.
   // Typed chance findings and their notes can exceed the old three-bullet limit. The coaching contract is bounded
   // by visible words; the legacy cap remains counted in telemetry, never an escape to the whole reply.
   const schema = !faceContract
-    ? (goalChanceHeadline === undefined && hostHeadline === undefined ? AnswerShapeSchema
+    ? (goalChanceHeadline === undefined && hostHeadline === undefined && headline !== rankedControlHostHeadline ? AnswerShapeSchema
       : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) }))
-    : goalChanceHeadline === undefined && hostHeadline === undefined
+    : goalChanceHeadline === undefined && hostHeadline === undefined && headline !== rankedControlHostHeadline
       ? AnswerShapeSchema.extend({ bullets: z.array(z.string().trim().min(1)) })
       : AnswerShapeSchema.extend({ headline: z.string().trim().min(1), bullets: z.array(z.string().trim().min(1)) });
   const parsed = schema.safeParse({ headline: headlineText, bullets: faceBullets.map((u) => u.text), detail });
@@ -887,7 +939,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const b = sentenceMultiset(shaped);
   if (a.length !== b.length || a.some((s, i) => s !== b[i])) return { text: originalText, shape: null, outcome: 'kept_whole', reason: 'invariant_failed',
     measure: { ...measure, said_once_dropped: [] } };
-  return { text: shaped, shape: parsed.data, outcome: 'shaped', measure };
+  return { text: shaped, shape: parsed.data, outcome: 'shaped', measure, selectedAskText };
 }
 
 /** Detail in the reply's own order: sentences of one source line re-joined, bullets and headings on their own lines. */

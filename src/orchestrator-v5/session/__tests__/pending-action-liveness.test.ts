@@ -123,6 +123,9 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
     emitted_at_iso: '2026-07-03T11:59:00.000Z',
   };
   switch (kind) {
+    case 'objective_confirm':
+      return { ...base, action: { kind, goal_id: 'goal_revenue', goal_label: 'Revenue', user_id: null,
+        state: 'pending', deferred_asks: [] } };
     case 'reconcile_goal_scope':
       return { ...base, action: { kind, goal_id: 'goal_revenue', goal_label: 'Revenue', expected: 'scope',
         question: 'Does revenue cover all plans?', operands: [], derivations: [] } };

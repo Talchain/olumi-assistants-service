@@ -1,5 +1,8 @@
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
-import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { parsePendingAction, CONFIRMATION_EXPECTING_ACTION_TYPES } from '../orchestrator-v5/session/pending-action.js';
+import { createApplyOperations, currentModelRevision } from '../orchestrator-v5/apply-operations.js';
+import { objectiveConfirmFor, objectiveConfirmState, objectiveConfirmPress, objectiveConfirmQuestion, objectiveConfirmActions,
+  objectiveProvisionalDetail, objectiveExploreQuestion, withObjectiveConfirmCarry, objectiveCardOnTurn, objectiveConfirmEligible, OBJECTIVE_CONFIRM_RANK } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
 import { currentLevelAskForAnswerRow } from '../orchestrator-v5/agent-lane/current-level-ask-carry.js';
 import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/answer-offers-envelope.js';
@@ -560,7 +563,15 @@ const MUTATION_INSTRUCTION =
  */
 const RECENT_REPLIES_READ = 20;
 
-type RecentRowsReader = { readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null; readonly user_message?: string | null }[]> };
+type RecentRowsReader = {
+  readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null; readonly user_message?: string | null; readonly pending_actions?: readonly PendingAction[] }[]>;
+  readonly readMostRecentPendingActions?: (scenarioId: string, options?: { validation: 'strict' }) => Promise<readonly PendingAction[]>;
+};
+/** Production uses its strict latest-row reader. Older adapters may expose the same sidecar on their latest row. */
+async function objectivePendingFor(store: RecentRowsReader, scenarioId: string): Promise<readonly PendingAction[]> {
+  if (typeof store.readMostRecentPendingActions === 'function') return store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+  try { return (await store.readRecent?.(scenarioId, 1))?.[0]?.pending_actions ?? []; } catch { return []; }
+}
 
 /** Protect visible user sentences after a restart, without treating stored messages as authority for graph writes. */
 async function userTextsForEgress(store: RecentRowsReader, scenarioId: string, typed: readonly string[]): Promise<string[]> {
@@ -596,10 +607,14 @@ async function decisionLinesAskedOnce(
  */
 async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string[]> {
   if (typeof store.readRecent !== 'function') return [];
+  // Conversation rows deliberately omit pending_actions. The latest durable carry owns which detail asks remain unsent.
+  const deferred = (await objectivePendingFor(store, scenarioId))
+      .flatMap(p => p.action.kind === 'objective_confirm' ? p.action.deferred_asks : p.objective_confirm?.deferred_asks ?? []);
   return (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
     .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
     .slice(0, RECENT_REPLIES_READ)
-    .map((t) => t.assistant_message)
+    // A displaced question in More detail has not been asked. Its exact typed carry masks it for every ask-once reader.
+    .map((t) => deferred.reduce((text, ask) => text?.split(ask).join('') ?? text, t.assistant_message))
     .filter((m): m is string => typeof m === 'string');
 }
 
@@ -2187,6 +2202,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
+      const replayObjective = objectiveCardOnTurn(prior.pending_actions ?? [], state.graph, userId, turnId ?? '');
       const replayScopedDraftForRun = guidedSizingForRun(state.analysisResult, state.graph);
       const replayGuidedText = guidedSizingReplyText(replayScopedDraftForRun).guided;
       /**
@@ -2409,15 +2425,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, optionParticipation: state.optionParticipation, identityEvaluated: state.identityEvaluated }).olumiEstimates;
       const replayControlQuestions = replayActions
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
+      if (replayObjective !== null) {
+        const question = objectiveConfirmQuestion(replayObjective.goal_label);
+        replayControlQuestions.push(question);
+        replayActions.unshift(...objectiveConfirmActions(replayObjective));
+        replayObligations = [...(replayObligations ?? []), { role: 'ask', text: question, rank: OBJECTIVE_CONFIRM_RANK },
+          { role: 'detail', text: objectiveProvisionalDetail(replayObjective) }];
+      }
       const replayScreen = replayObligations === undefined ? [] : goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
         (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
       const replayHorizon = replayScreen.length === 0 ? null : untestedHorizonLine(state.graph, { besideChance: true, plural: replayScreen.length > 1 });
       const replayWhatChanges = replayObligations === undefined
         || (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'complete_current'
         ? null : whatChangesFaceLine(state.analysisResult, state.graph);
+      if (replayObjective !== null && prior.assistant_message !== null && replayChip !== null
+        && replayObjective.issued_run_key === replayChip.id.slice(RUN_EXPLANATION_PREFIX.length)) {
+        // The same bound Run and goal card replay the actual delivered order, including the provisional detail.
+        replayText = prior.assistant_message;
+      }
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: withoutProposalIds(replayText), obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayScreen.length > 0), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
-          faceContract: 'run',
+          faceContract: replayObjective !== null && replayScreen.length === 0 ? 'draft' : 'run',
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
@@ -2437,8 +2465,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(replayFields !== undefined ? { _proposal_fields: replayFields } : {}),
         ...(replayNarration !== undefined ? { narration: replayNarration } : {}),
         ...(replayComposed?.shape != null ? { _answer_shape: replayComposed.shape } : {}),
+        ...(replayObjective !== null ? { blocks: [...(state.analysisResult !== undefined ? [state.analysisResult] : []),
+          { type: 'text' as const, content: objectiveConfirmQuestion(replayObjective.goal_label) }] } : {}),
         // The CURRENT result as the live turn carries it: the readback's bound block and its sidecars, same fact.
-        ...(resultFirstReplay && state.analysisResult !== undefined ? { blocks: [state.analysisResult] } : {}),
+        ...(resultFirstReplay && state.analysisResult !== undefined && replayObjective === null ? { blocks: [state.analysisResult] } : {}),
         ...(resultFirstReplay && state.limitVerdicts !== undefined ? { limit_verdicts: state.limitVerdicts } : {}),
         ...(resultFirstReplay && state.goalCertainty !== undefined ? { goal_certainty: state.goalCertainty } : {}),
         ...(resultFirstReplay && state.optionParticipation !== undefined ? { option_participation: state.optionParticipation } : {}),
@@ -2821,6 +2851,55 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
     let runOutcomeText: string | undefined;
     let result: AgentTurnResult | undefined;
+    // The stored card binds a press to this goal's identity and words. Consent writes through the existing edit adapter.
+    let objectiveState = objectiveConfirmState(await objectivePendingFor(store, scenarioId), userId);
+    const objectivePress = objectiveConfirmPress((body['chip'] as { id?: unknown } | undefined)?.id);
+    if (objectivePress !== null) {
+      const read = await readBackState(readCache.dispatch, scenarioId);
+      const nodes = (read.graph as { nodes?: { id?: unknown; kind?: unknown; label?: unknown; provenance?: unknown }[] } | undefined)?.nodes ?? [];
+      const goal = nodes.find(n => n.kind === 'goal' && n.id === objectiveState?.goal_id);
+      const chip = objectiveState === null ? undefined : objectiveConfirmActions(objectiveState).find(a => objectiveConfirmPress(a.id)?.kind === objectivePress.kind);
+      const bound = mode === 'full' && objectiveState?.state === 'asked' && objectivePress.goalId === objectiveState.goal_id
+        && goal?.label === objectiveState.goal_label && goal.provenance === 'ai_inferred' && message === chip?.message;
+      let answer = 'That goal confirmation is no longer available. Check the goal in the current model.';
+      let changed = false;
+      if (bound && objectiveState !== null) {
+        if (objectivePress.kind === 'change') {
+          objectiveState = { ...objectiveState, state: 'change_requested' };
+          answer = objectiveExploreQuestion;
+        } else {
+          const accepted = objectiveState;
+          const editStore = new Proxy(store, { get(target, key) {
+            if (key === 'loadGraph') return async (sid: string) => {
+              const graph = await target.loadGraph(sid);
+              const held = (graph as { nodes?: { id?: unknown; kind?: unknown; label?: unknown; provenance?: unknown }[] } | null)?.nodes?.find(n => n.kind === 'goal' && n.id === accepted.goal_id);
+              if (held?.label !== accepted.goal_label || (held.provenance !== 'ai_inferred' && held.provenance !== 'user_set')) throw new Error('objective confirmation no longer matches the stored goal');
+              return graph;
+            };
+            const value = Reflect.get(target, key);
+            return typeof value === 'function' ? value.bind(target) : value;
+          } });
+          const revision = await currentModelRevision(scenarioId, { store: editStore });
+          if (revision !== null) {
+            const writeId = randomUUID();
+            writesDispatched += 1;
+            const outcome = await readCache.around(() => runAsAgentSubturn(scenarioId, () => runFencedInProcessWrite(scenarioId, writeId,
+              () => createApplyOperations({ scenarioId, requestId: String(req.id), store: editStore })({
+                proposalId: `objective-confirm:${accepted.goal_id}`, idempotencyKey: writeId, modelRevision: revision,
+                operations: [{ kind: 'edit_graph', summary: `Confirm ${accepted.goal_label} as the goal`,
+                  detail: { operations: [{ op: 'update_node', path: `/nodes/${accepted.goal_id}/provenance`, value: 'user_set' }] } }],
+              }), () => ({ ok: false as const, reason: 'The model changed; check the goal again.' }),
+              () => ({ ok: false as const, reason: 'The goal could not be confirmed; try again.' }))));
+            changed = outcome.ok;
+            answer = outcome.ok ? `Confirmed ‘${withoutProposalIds(accepted.goal_label)}’ as the goal.` : outcome.reason;
+            if (outcome.ok) objectiveState = { ...accepted, state: 'answered' };
+          }
+        }
+      }
+      fastPath = 'method';
+      result = { assistant_text: answer, items: [], tool_calls: [], tool_results: [], mutated: changed, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
         (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
@@ -4272,7 +4351,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       log.warn({ scenario_id: scenarioId, dropped: pendingCandidates.slice(PENDING_ACTIONS_PER_TURN_CAP).map((pa) => pa.action.kind) },
         'agent-lane: pending actions over the per-row cap — the lowest-priority items are not carried');
     }
-    const durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP)
+    let durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP)
       .map(p => withApprovalOfferedOnRow(p, offeredNow.some(a => a.id === p.chip_id)));
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
@@ -4410,7 +4489,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
     };
     // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
-    const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, store, scenarioId, undefined);
+    objectiveState = objectiveConfirmFor(readbackGraph, objectiveState, userId, typedNow ?? undefined);
+    const objectivePendingNow = await objectivePendingFor(store, scenarioId);
+    const objectiveAwaitingApproval = awaitingApproval || objectivePendingNow.some(p =>
+      CONFIRMATION_EXPECTING_ACTION_TYPES.has(p.action.kind) && !isPendingActionExpired(p, Date.now()));
+    let objectiveToAsk = objectiveConfirmEligible(readbackGraph, objectiveState) && !objectiveAwaitingApproval ? objectiveState : null;
+    if (objectiveState?.state === 'pending' && objectiveAwaitingApproval) {
+      log.info({ suppressor: 'pending_approval' }, 'cee.objective_confirm.suppressed');
+    }
+    // #2537's provisional framing remains detail. The confirm is a ranked, typed control in the ONE composer below.
+    const decisionLines = (await decisionLinesAskedOnce(readbackGraph, decisionCtx, store, scenarioId, undefined))
+      .filter(line => objectiveState === null || !line.endsWith(objectiveExploreQuestion));
+    const objectiveDetail = objectiveToAsk === null ? null : objectiveProvisionalDetail(objectiveToAsk);
+    if (objectiveDetail !== null && !narrationText.includes(objectiveDetail)) owed.push(objectiveDetail);
+    const carriedAsks = objectiveAwaitingApproval || objectivePress?.kind === 'change' ? [] : [...(objectiveState?.deferred_asks ?? [])];
+    askEachOnce(carriedAsks, await repliesToCheckAsks(carriedAsks, store, scenarioId, undefined));
+    decisionLines.push(...carriedAsks);
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     const linkAsk = decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
@@ -4423,7 +4517,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
-      assistant_text: fastPath === 'method' ? narration.text
+      assistant_text: fastPath === 'method' ? withDisclosures(narration.text, carriedAsks)
         : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText),
           [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
@@ -4753,6 +4847,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
+      if (objectiveToAsk !== null && leaderFreeEnvelope) {
+        log.info({ suppressor: 'leader_free_envelope' }, 'cee.objective_confirm.suppressed');
+        objectiveToAsk = null;
+      }
+      const objectiveQuestion = objectiveToAsk === null ? null : objectiveConfirmQuestion(objectiveToAsk.goal_label);
+      if (objectiveQuestion !== null && objectiveToAsk !== null) {
+        wireBody = { ...wireBody, blocks: [...(wireBody.blocks ?? []), { type: 'text' as const, content: objectiveQuestion }],
+          suggested_actions: [...objectiveConfirmActions(objectiveToAsk), ...(wireBody.suggested_actions ?? [])] };
+      }
       const reply = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
@@ -4761,7 +4864,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const coHold = goalFigureCoHoldOf((wireBody as { blocks?: unknown }).blocks, readbackGraph ?? null, typedNow ?? undefined);
       const faceContract = result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true)
         ? 'draft' as const : fastPath === 'run' || fastPath === 'explain' || screenLines.length > 0 || goalChanceOwed !== null || coHold !== undefined
-          ? 'run' as const : undefined;
+          ? 'run' as const : objectiveQuestion !== null || carriedAsks.length > 0 ? 'draft' as const : undefined;
       const horizonLine = faceContract === 'run' && screenLines.length > 0
         ? untestedHorizonLine(readbackGraph, { besideChance: true, plural: screenLines.length > 1 }) : null;
       const whatChanges = faceContract === 'run' && selectedRunCurrent && (fastPath !== 'explain' || explainsCurrentRun)
@@ -4778,6 +4881,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? [reasonLine === null ? null : sentencesOf(reasonLine)[0], goalChanceOwed, coHold?.why, leaderGateClosing].find((line): line is string =>
           typeof line === 'string' && line !== '' && reply.includes(line)) : undefined);
       const obligations: FaceObligation[] = [
+        ...(objectiveQuestion === null ? [] : [{ role: 'ask' as const, text: objectiveQuestion, rank: OBJECTIVE_CONFIRM_RANK, subjects: [objectiveToAsk!.goal_id] }]),
+        ...carriedAsks.map(text => ({ role: 'ask' as const, text, rank: 1 })),
         ...(withheldRunFinding === undefined ? [] : [{ role: 'withheld_reason' as const, text: withheldRunFinding, lead: true as const,
           ...(guidedRunFinding === undefined ? {} : { ownsNextStep: true as const }) }]),
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
@@ -4825,6 +4930,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           .filter((l): l is string => typeof l === 'string' && l !== '')
           .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
       ];
+      // The old provisional/explore words are detail, never a second ask obligation.
+      for (let i = 0; i < obligations.length; i++) if (obligations[i]!.text === objectiveDetail) obligations[i] = { ...obligations[i]!, role: 'detail' };
       // THE TYPED RESPONSE PROFILE, by the turn's kind (DL, AIE line review 6037446159 item 5): a method press is one
       // structured prompt; a substantive proposal keeps its whole disclosure. The route's automatic identity card
       // owns its confirmation question while the build/Run answer remains coaching. Never chosen by reading words.
@@ -4832,7 +4939,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && c.proposal_id !== automaticIdentityProposalId && c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL);
       // S-C (#2759): the widen Add press is a method press whose ONLY output is its held card's own reply — the `proposal`
       // profile (by identity: `widenAdd` and a made proposal), so the door's words ship whole, never reshaped.
-      const profile: ReplyProfile = widenAdd !== null && madeProposal ? 'proposal'
+      const profile: ReplyProfile = objectiveQuestion !== null || carriedAsks.length > 0 ? 'coaching' : widenAdd !== null && madeProposal ? 'proposal'
         : fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
       // No model wrote words this turn (a card press, an uninterpreted Explain, the action bar's typed reply: S-B #2751's
       // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
@@ -4849,6 +4956,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const question = (pending.action as { question?: unknown }).question;
         if (typeof question === 'string' && controlsOnReply.some((action) => action.id === pending.chip_id)) typedControlQuestions.push(question);
       }
+      if (objectiveQuestion !== null) typedControlQuestions.push(objectiveQuestion);
       const composedReply = composeReplyShape({
         text: reply,
         ...(faceContract === undefined ? {} : { faceContract }),
@@ -4857,13 +4965,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(faceContract !== undefined && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
-        detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
+        detailLines: [...(objectiveDetail === null ? [] : [objectiveDetail]),
+          ...(stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results))],
         obligations: withA7AsDetail(obligations, a7Repeat, reply, faceContract === 'run' && screenLines.length > 0),
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
-          : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const } : {}),
+          : narratorModel === null && !uninterpretedRun && objectiveQuestion === null && carriedAsks.length === 0 ? { keepWhole: 'host_composed' as const } : {}),
       });
+      // Only the composer's selected next step counts as asked. Detail is not a delivery, so displaced questions carry.
+      if (objectiveState !== null) {
+        const selected = composedReply.selectedAskText;
+        const objectiveSelected = objectiveQuestion !== null && selected !== undefined && objectiveQuestion.endsWith(selected);
+        if (objectiveQuestion !== null && !objectiveSelected) log.info({ suppressor: composedReply.reason ?? 'composer_next_step' }, 'cee.objective_confirm.suppressed');
+        if (objectiveQuestion !== null && !objectiveSelected) {
+          // A composer refusal did not deliver this control. Retain pending state for the next reply.
+          wireBody = { ...wireBody, blocks: (wireBody.blocks ?? []).filter(b => b.type !== 'text' || b.content !== objectiveQuestion),
+            suggested_actions: (wireBody.suggested_actions ?? []).filter(a => objectiveConfirmPress(a.id) === null) };
+        }
+        const questions = [...asks, ...reply.split('\n')].flatMap(line => sentencesOf(line.trim().replace(/^[-•*]\s+/, '')))
+          .filter(q => q.endsWith('?') && q !== objectiveExploreQuestion && !objectiveQuestion?.endsWith(q));
+        const deferred = [...new Set([...(objectiveAwaitingApproval || objectivePress !== null ? objectiveState.deferred_asks : carriedAsks), ...questions])]
+          .filter(q => selected === undefined || !(q === selected || q.endsWith(selected))).slice(0, 8);
+        objectiveState = { ...objectiveState, deferred_asks: deferred,
+          ...(objectiveSelected ? { state: 'asked' as const, issued_turn_id: turnId ?? randomUUID(),
+            ...(explanationChip === null ? {} : { issued_run_key: explanationChip.id.slice(RUN_EXPLANATION_PREFIX.length) }) } : {}) };
+        durablePending = withObjectiveConfirmCarry(durablePending, objectiveState, scenarioId, emittedAtIso);
+      }
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a
       // body with no `assistant_text` at all) ships byte-identical, as before.
@@ -4933,7 +5061,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
-    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
+    const rowTurnId = turnId ?? (objectiveToAsk !== null && objectiveState?.state === 'asked' ? objectiveState.issued_turn_id
+      : durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
