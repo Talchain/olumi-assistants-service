@@ -192,6 +192,11 @@ export const CEE_MINTED_GOAL_FIELDS = [
   'goal_baseline_raw',
 ] as const;
 
+/** USER consent fields are also unwriteable by a draft; they are not threshold-enricher fields. */
+const MODEL_AUTHORED_GOAL_FIELDS_TO_STRIP = [...CEE_MINTED_GOAL_FIELDS,
+  'horizon_basis', 'horizon_basis_source', 'horizon_basis_months',
+] as const;
+
 /** What a strip actually removed — returned so the caller can log it, never silent. */
 export interface GoalThresholdStripResult {
   /** Node ids that carried at least one CEE-minted goal field. */
@@ -245,7 +250,7 @@ export function stripModelAuthoredGoalThreshold(raw: unknown): GoalThresholdStri
   for (const node of nodes as any[]) {
     if (!node || typeof node !== 'object') continue;
     let touched = false;
-    for (const field of CEE_MINTED_GOAL_FIELDS) {
+    for (const field of MODEL_AUTHORED_GOAL_FIELDS_TO_STRIP) {
       // `in`, not a truthiness check: an explicit `null` (the shape the old
       // nullable grammar taught) is still a model-authored key, and 0 is a
       // legitimate threshold value that a truthiness test would skip.

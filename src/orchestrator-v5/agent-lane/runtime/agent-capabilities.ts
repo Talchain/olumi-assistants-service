@@ -1,3 +1,4 @@
+import { horizonSteadyAttested } from '../../goal-target/horizon-basis.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -988,6 +989,10 @@ interface GraphRead {
     /** RC3: persisted server-authored option precondition. Inclusion is resolved over the whole graph. */
     relies_on?: unknown;
     goal_scope?: unknown;
+    goal_horizon_months?: unknown;
+    horizon_basis?: unknown;
+    horizon_basis_source?: unknown;
+    horizon_basis_months?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -3178,6 +3183,38 @@ export function createAgentCapabilities(
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
       observed_state: held.team.observed_state,
       ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
+  };
+
+  /** Consume the exact held card through the approved batch, then verify its USER triple from state. */
+  const applyGoalSteady = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const months = (op.value as { months?: unknown } | undefined)?.months;
+    if (ctx.typed_approval_of !== parent.proposal_id || typeof months !== 'number' || !Number.isInteger(months)
+      || months <= 0 || before.nodes.find(n => n.id === op.path && n.kind === 'goal')?.goal_horizon_months !== months
+      || opts.commitOptionLevels === undefined) {
+      return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' };
+    }
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
+      turn_id: authorisationTurnId(parent.proposal_id), links: [], levels: [], goal_steady: { goal_id: op.path, months } });
+    if (res.status === 'stale' || res.status === 'refused') {
+      return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: res.status };
+    }
+    if (res.status === 'unconfirmed') {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
+        detail: 'Your answer was sent but could not be confirmed in the saved model.' };
+    }
+    const check = await readGraph(ctx.scenario_id);
+    if (check === null || !horizonSteadyAttested(check.nodes.find(n => n.id === op.path))
+      || check.nodes.find(n => n.id === op.path)?.horizon_basis_months !== months) {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
+        detail: 'Your answer was sent but could not be confirmed in the saved model.' };
+    }
+    const receipts = res.receipt === null ? [] : [res.receipt];
+    proposals.markApplied(parent.proposal_id, receipts);
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      follow_up: 'Recorded as your judgement. Then run the analysis again.' };
   };
 
   /**
@@ -6202,6 +6239,7 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'attest_goal_steady') return applyGoalSteady(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 

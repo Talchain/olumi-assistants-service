@@ -124,6 +124,9 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
       'goal_scope',
       'goal_sense_reading',
+      'horizon_basis',
+      'horizon_basis_months',
+      'horizon_basis_source',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
       'option_status',
@@ -172,6 +175,9 @@ const SIX_SMUGGLE_NAMES = [
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
   'goal_scope',
   'goal_sense_reading',
+  'horizon_basis',
+  'horizon_basis_months',
+  'horizon_basis_source',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',
   // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority (proposed_by / option_status / participation).

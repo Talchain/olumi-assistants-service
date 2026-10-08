@@ -1,3 +1,4 @@
+import { horizonSteadyAttested } from '../goal-target/horizon-basis.js';
 import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-model.js';
 /**
  * ⭐ OLUMI ASKS FOR THE DECISION INPUT IT LACKS (DL #75 5923918068: R3's dry run D1 "no ask for the minimum amount" + A7
@@ -202,7 +203,7 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
  * Run agree): the user's confirmed goal product binds a confirmed accumulation carrier whose horizon is the goal's
  * held month. Then nothing about the horizon is owed: the model does project over time, to that deadline.
  */
-function goalProjectedAtItsMonth(graph: unknown): boolean {
+export function goalProjectedAtItsMonth(graph: unknown): boolean {
   const goal = goalOf(graph);
   if (goal === undefined || !Number.isInteger(goal.goal_horizon_months)) return false;
   const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
@@ -224,7 +225,7 @@ const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 
 /** One horizon form for the reply and stored Run, from the same cells the UI reads. */
 export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): string | null {
-  if (goalProjectedAtItsMonth(graph)) return null;
+  if (horizonSteadyAttested(goalOf(graph)) || goalProjectedAtItsMonth(graph)) return null;
   const shown = cells.filter(cell => cell.kind === 'figure' || cell.kind === 'range').length;
   if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1 });
   if (goalKindOf(graph) === 'share_by_date') return null;
@@ -251,7 +252,7 @@ export function statedTargetWords(graph: unknown): string | null {
  * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
  */
 export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean }): string | null {
-  if (goalKindOf(graph) === 'share_by_date' || goalProjectedAtItsMonth(graph)) return null;
+  if (horizonSteadyAttested(goalOf(graph)) || goalKindOf(graph) === 'share_by_date' || goalProjectedAtItsMonth(graph)) return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
@@ -322,7 +323,7 @@ function withCellHorizonWarning<E>(
   const env = envelope as Rec;
   const warnings: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
   const goal = goalOf(graph);
-  const line = !accumulationWithdrawn && accumulationTestedAtGoalHorizon(graph, env) ? null
+  const line = horizonSteadyAttested(goal) || (!accumulationWithdrawn && accumulationTestedAtGoalHorizon(graph, env)) ? null
     : untestedHorizonLineForCells(graph, cells) ?? (accumulationWithdrawn && goal !== undefined
       ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');

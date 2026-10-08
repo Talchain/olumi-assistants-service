@@ -17,6 +17,7 @@ import { goalScopeAnalysisMeaning } from '../../schemas/goal-scope.js';
  */
 
 import { createHash } from 'node:crypto';
+import { horizonSteadyAttested } from '../goal-target/horizon-basis.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
@@ -355,6 +356,7 @@ interface NodeProjection {
 function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  if (horizonSteadyAttested(r)) out.horizon_basis = { basis: r.horizon_basis, source: r.horizon_basis_source, months: r.horizon_basis_months };
   const scope = goalScopeAnalysisMeaning(r.goal_scope);
   if (scope !== undefined) out.goal_scope = scope;
 

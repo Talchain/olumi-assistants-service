@@ -91,6 +91,7 @@ import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-readi
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
+import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, type ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { goalDeadlineOf } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -855,6 +856,7 @@ export type OptionInterventionBatchExecutionInput =
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card, the goal's `goal_horizon` only: ONE append, alone (never with anything else). */
     readonly goalHorizon?: ApprovedGoalHorizon;
+    readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
@@ -876,6 +878,13 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       readonly linkIndex?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
+  // A temporal answer is a single approved judgement, never a compound edit.
+  if (input.goalSteady !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
+    || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
+    || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined || input.goalHorizon !== undefined
+    || input.teamTime !== undefined || (input.expectedLinks?.length ?? 0) > 0 || (input.optionGaps?.length ?? 0) > 0)) {
+    return { kind: 'refused', reason: 'goal_steady_not_alone' };
+  }
   const gapInput = parseOptionGapDeclarations(input.optionGaps, Object.hasOwn(input, 'optionGaps'));
   if (gapInput.kind === 'invalid') return { kind: 'refused', reason: gapInput.reason };
   const optionGaps = gapInput.declarations;
@@ -912,7 +921,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, teamTime: _callerTeamTime,
+    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, goalSteady: _callerSteady, teamTime: _callerTeamTime,
     lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
@@ -1096,6 +1105,25 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     valueConfirmations = [written.confirmation];
   }
+  const goalSteady = input.goalSteady;
+  if (goalSteady !== undefined) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const written = applyGoalSteadyEdit(before, goalSteady);
+    if (written.kind !== 'mutated') return written;
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !goalSteadyPostimageIsScoped(before, graph, goalSteady)) {
+      return { kind: 'refused', reason: 'goal_steady_scope_mismatch' };
+    }
+    const hash = computeAnalysisAffectingGraphHash(graph);
+    if (!hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = hash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
   const teamTime = input.teamTime;
   if (teamTime !== undefined) {
     if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || linkEffects.length > 0
@@ -1115,7 +1143,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = [written.confirmation];
   }
   const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
-    + (goalHorizon !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
+    + (goalHorizon !== undefined ? 1 : 0) + (goalSteady !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)

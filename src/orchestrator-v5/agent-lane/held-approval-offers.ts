@@ -12,9 +12,18 @@ import type { StructuredProposal } from './proposal.js';
  * ⛔ A HELD IDENTITY CARD IS SHOWN ONLY WHILE IT IS STILL OFFERABLE (#2851 Codex buddy r1 P1-1): a card held from before
  * the part-level gate, or one whose part lost the user's level, would be restored or carried and then refused on its Yes,
  * which is confirm-then-refuse again. Given the graph the caller read, a `confirm_identity` proposal is executable only
- * while `identityCardOfferable` holds on it. Without a graph nothing changes (the hash check stands alone, as before).
+ * while `identityCardOfferable` holds on it. A steady-state card also requires its held month to still match the goal;
+ * its month is outside the hash before consent. For other proposals the existing identity checks remain.
  */
 export function identityProposalOfferable(proposal: StructuredProposal | undefined, graph: unknown): boolean {
+  const steady = proposal?.operations.find(op => op.op === 'attest_goal_steady');
+  if (steady !== undefined) {
+    if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return false;
+    const nodes = (graph as { nodes?: unknown }).nodes;
+    const goal = Array.isArray(nodes) ? nodes.find(n => n?.kind === 'goal' && n.id === steady.path) : undefined;
+    const months = (steady.value as { months?: unknown } | undefined)?.months;
+    if (typeof months !== 'number' || !Number.isInteger(months) || months <= 0 || goal?.goal_horizon_months !== months) return false;
+  }
   const reading = proposal === undefined ? undefined : identityReadingOf(proposal);
   if (graph === undefined || reading === undefined) return true;
   return identityCardOfferable(graph, reading.part_levels);
@@ -27,7 +36,9 @@ const proposals = agentProposals;
 /** The turn's authorise call, shared verbatim: current analysis-affecting graph hash and verified subject. */
 export function executableProposalId(id: string, scenarioId: string, userId: string | null, graphHash: string | undefined, graph?: unknown): string | undefined {
   if (graphHash === undefined) return undefined;
-  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
+  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash,
+    // Eligibility simulates the exact offered card; this read never consumes it.
+    ...(proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') ? { typed_approval_of: id } : {}) });
   return decision.status === 'execute' && identityProposalOfferable(proposals.get(id), graph) ? id : undefined;
 }
 

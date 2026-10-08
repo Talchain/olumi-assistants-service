@@ -1,3 +1,4 @@
+import { horizonSteadyAttested } from './horizon-basis.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 /**
  * ⭐ D3 MILESTONE 1, STEP 2 — EACH OPTION'S CHANCE OF MEETING THE GOAL, AND WHAT MAY BE SAID ABOUT IT (DL 0df0e1 #87
@@ -104,7 +105,19 @@ export interface GoalChanceZeroSpread {
   readonly line: string;
 }
 
+export interface SteadyHorizonBasis {
+  readonly basis: 'steady_attested';
+  readonly source: 'user_stated';
+  readonly months: number;
+  readonly why: string;
+}
+
+export function steadyHorizonWhy(goal: string, months: number): string {
+  return `You said ‘${goal}’ stays about where it is over ${months} months unless you act, so this is its chance once each option is in effect.`;
+}
+
 export interface GoalChanceLicence {
+  readonly horizon_basis?: SteadyHorizonBasis;
   readonly code: typeof GOAL_CHANCE_LICENSED;
   readonly severity: 'info';
   readonly message: string;
@@ -308,6 +321,8 @@ export function goalChanceLicenceOf(
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
+    ...(horizonSteadyAttested(goal) ? { horizon_basis: { basis: 'steady_attested' as const, source: 'user_stated' as const,
+      months: goal!.horizon_basis_months as number, why: steadyHorizonWhy(String(goal!.label), goal!.horizon_basis_months as number) } } : {}),
     message: `Each option’s ${share === null ? 'chance of meeting your goal'
       : shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)} is licensed on this Run.`,
     form,
@@ -691,12 +706,17 @@ export function goalChanceLicenceForAgent(result: unknown): {
   shortfall_note_by_option?: Readonly<Record<string, string>>;
   olumi_estimate_link_count?: number;
   goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
+  horizon_basis?: SteadyHorizonBasis;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : [])).filter((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED);
   if (records.length !== 1) return undefined;
   const r = records[0]!;
+  const h = isRec(r.horizon_basis) ? r.horizon_basis : undefined;
+  const steady = h?.basis === 'steady_attested' && h.source === 'user_stated'
+    && typeof h.months === 'number' && Number.isInteger(h.months) && h.months > 0
+    && typeof r.goal_label === 'string' && h.why === steadyHorizonWhy(r.goal_label, h.months);
   const ids = (v: unknown): string[] | undefined => (Array.isArray(v) && v.every((x) => typeof x === 'string') ? v as string[] : undefined);
   const forms: readonly string[] = ['highest', 'highest_all_likely_to_miss', 'all_likely_to_miss', 'similar', 'each'];
   const optionIds = ids(r.option_ids);
@@ -736,6 +756,8 @@ export function goalChanceLicenceForAgent(result: unknown): {
   return {
     form,
     option_ids: optionIds,
+    ...(steady && h !== undefined ? { horizon_basis: { basis: 'steady_attested', source: 'user_stated',
+      months: Number(h.months), why: String(h.why) } satisfies SteadyHorizonBasis } : {}),
     ...(typeof r.goal_node_id === 'string' ? { goal_node_id: r.goal_node_id } : {}),
     ...(typeof r.goal_label === 'string' ? { goal_label: r.goal_label } : {}),
     ...(isRec(r.option_labels_by_option) ? { option_labels_by_option: Object.fromEntries(
