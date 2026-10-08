@@ -430,7 +430,12 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       const body = await buffered({ message: BRIEF });
       expect(body._agent.tool_calls, 'control: it built').toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
       expect(readingCalls).toBe(0);
-      expect((body._provider_calls ?? []).map((c) => c.purpose), 'no reading, no prewarm').toEqual(['conversation', 'construction', 'conversation']);
+      // P05b #2854: Olumi's draft-time widening (≤2 passes, same provider, tagged construction) may follow the draft.
+      const purposes = (body._provider_calls ?? []).map((c) => c.purpose);
+      const construction = purposes.filter((p) => p === 'construction').length;
+      expect(construction, 'one draft + at most two widening passes').toBeGreaterThanOrEqual(1);
+      expect(construction).toBeLessThanOrEqual(3);
+      expect(purposes.filter((p, i) => p !== 'construction' || purposes[i - 1] !== 'construction'), 'no reading, no prewarm').toEqual(['conversation', 'construction', 'conversation']);
       todaysPath('buffered');
     });
 

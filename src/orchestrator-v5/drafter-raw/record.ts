@@ -85,7 +85,7 @@ export interface DrafterCallRecord {
  * exactly what the wrapped call did, and the recording itself never throws into the build.
  */
 export function recordingDrafter(inner: CallStructuredModel, calls: DrafterCallRecord[]): CallStructuredModel {
-  return async (req) => {
+  return async (req, deadlineAt) => {
     const seq = calls.length;
     const keep = (out: Awaited<ReturnType<CallStructuredModel>> | null): void => {
       try {
@@ -119,7 +119,7 @@ export function recordingDrafter(inner: CallStructuredModel, calls: DrafterCallR
     };
     let out: Awaited<ReturnType<CallStructuredModel>>;
     try {
-      out = await inner(req);
+      out = await (deadlineAt === undefined ? inner(req) : inner(req, deadlineAt));
     } catch (err) {
       keep(null);
       throw err;

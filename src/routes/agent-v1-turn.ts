@@ -49,6 +49,8 @@ import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v
 import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
+import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
+export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
@@ -112,7 +114,7 @@ import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/go
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
+import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -297,7 +299,6 @@ export const AGENT_TURN_CLAIM_WAIT = {
  * always below 100 s and below the 110 s undici bound. A first analysis cannot start past its own,
  * earlier deadline and says so (`first-analysis.ts`), so it needs no reserve here.
  */
-export const CONSTRUCTION_TAIL_RESERVE_MS = 15_000;
 /** When the construction call must have ended, in a turn that began at `turnStartedAt`. */
 export function constructionDeadline(
   turnStartedAt: number,
@@ -2635,9 +2636,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
     let constructionTrace: ConstructionTrace | undefined;
     const capabilities = createAgentCapabilities(
-      countingDispatch, proposals, (reqBody) => callStructured(reqBody, constructionDeadlineAt), mode,
+      countingDispatch, proposals, (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
+        deadlineAt: constructionDeadlineAt,
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
         /**
          * ⭐ C6-1: THE CANVAS DRAWS THE FIRST MODEL WHEN IT IS REGISTERED, NOT AT THE END OF THE TURN.
@@ -3967,15 +3969,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
       readingWaiting: readbackGraph != null && identityCardOfferable(readbackGraph),
     });
-    if (identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
-      const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
+    const partFigures = identityPartFiguresToIssue({ graph: readbackGraph, userText: typedNow,
+      toolCalls: result.tool_calls, mutated: result.mutated,
+      proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, pending: liveHolds });
+    if (partFigures !== undefined || identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
+      const issued = await dispatchTool('propose_identity', JSON.stringify(partFigures ?? {}), toolCtx, capabilities, mode);
       result = {
         ...result,
         tool_calls: [...result.tool_calls, { name: 'propose_identity', ok: issued.ok === true, mutated: false,
           ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
         tool_results: [...result.tool_results, issued],
       };
-      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal, reoffer }, reoffer
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal, reoffer, part_figures: partFigures !== undefined }, partFigures !== undefined
+        ? 'agent-lane: identity card issued by the route from this typed answer’s part figures'
+        : reoffer
         ? 'agent-lane: identity card re-offered by the route (the reading is unconfirmed, nothing else was proposed)'
         : 'agent-lane: identity card issued by the route after the Run');
     }
