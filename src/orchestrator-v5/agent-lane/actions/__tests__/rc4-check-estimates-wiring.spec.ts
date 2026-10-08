@@ -114,6 +114,27 @@ describe('RC4: Check estimates uses the same bound census as its producer', () =
     expect(estimateOfferIds(actionBarOf(facts))).toEqual([]);
   });
 
+  it('a baseline option mirroring today\'s level is not a setting Olumi filled, even when stamped cee_hypothesis', () => {
+    const graph = priceGraph('user_specified');
+    Object.assign(graph.nodes.find(n => n.id === 'b')!, { is_baseline: true, interventions: { price: { value: 49, source: 'cee_hypothesis' } } });
+    const facts = actionFactsOf(ran(graph));
+    expect(facts.olumiEstimates).toMatchObject({ count: 0, values: [], accepted: 0, placeholderLinks: 0 });
+    expect(estimateOfferIds(actionBarOf(facts))).toEqual([]);
+    // Control: the same cell on a non-baseline option is Olumi's setting.
+    const control = priceGraph('user_specified');
+    control.nodes.find(n => n.id === 'b')!.interventions = { price: { value: 49, source: 'cee_hypothesis' } };
+    expect(actionFactsOf(ran(control)).olumiEstimates).toMatchObject({ count: 1 });
+  });
+
+  it('a historical data.interventions carrier is read when the top-level one is absent', () => {
+    const graph = priceGraph('cee_hypothesis');
+    const a = graph.nodes.find(n => n.id === 'a')!;
+    a.data = { interventions: a.interventions }; delete a.interventions;
+    const facts = actionFactsOf(ran(graph));
+    expect(facts.olumiEstimates).toMatchObject({ count: 1, accepted: 0, placeholderLinks: 0 });
+    expect(estimateOfferIds(actionBarOf(facts))).toEqual(['check_estimates']);
+  });
+
   it.each(['olumi_accepted', undefined, 17])('unknown or malformed intervention source %s is skipped', source => {
     const facts = actionFactsOf(ran(priceGraph(source)));
     expect(facts.olumiEstimates).toMatchObject({ count: 0, values: [], accepted: 0, placeholderLinks: 0 });

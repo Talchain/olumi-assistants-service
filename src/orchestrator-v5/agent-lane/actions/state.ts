@@ -59,8 +59,11 @@ function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFa
   for (const raw of nodes) {
     const option = rec(raw);
     if (option?.kind !== 'option' || typeof option.id !== 'string' || (analysedIds !== undefined && !analysedIds.has(option.id))) continue;
+    // The baseline mirrors today's levels, which the factor's own provenance already counts.
+    if (option.is_baseline === true) continue;
     const optionLabel = typeof option.label === 'string' && option.label !== '' ? option.label : option.id;
-    for (const [factorId, intervention] of Object.entries(rec(option.interventions) ?? {})) {
+    // Historical graphs carry the cells under data.interventions (analysis-ready-helper.ts reads both).
+    for (const [factorId, intervention] of Object.entries(rec(option.interventions) ?? rec(rec(option.data)?.interventions) ?? {})) {
       const factor = factors.get(factorId);
       if (factor === undefined) continue;
       const setting = settingProvenance.safeParse(intervention);
