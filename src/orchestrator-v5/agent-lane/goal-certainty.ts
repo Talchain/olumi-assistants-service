@@ -178,6 +178,11 @@ export function goalCertaintyDecisions(
     // is an interior result and gets no decision.
     const certainty: 0 | 1 | undefined = p === 1 ? 1 : p === 0 ? 0 : undefined;
     if (certainty === undefined) continue;
+    // ⛔ ZERO SPREAD IS NOT A CHANCE (Science §(ab)(2); DL hold on #2858): every draw gave the same result, so the 0 or 1
+    // says only what happens if today's figures hold. B1's Keep £49 read exactly 100% at month 12 with the user's rates
+    // held fixed, and was "earned" here because Keep moves nothing. No decision ⇒ unearned everywhere (the licence
+    // withholds its %, the transport strips the exact figure, the Agent says it cannot be confirmed).
+    if (zeroSpread(r)) continue;
     const option = byId.get(optionId);
     const iv = option !== undefined ? mergeInterventionSourceObjects(option) : {};
     // The goal would move AWAY from its target (P = 1) or TOWARDS it (P = 0) to reverse the certainty.
@@ -297,6 +302,17 @@ function sayMismatch(
       + `‘${label(goal.id)}’, so it can’t follow what ‘${label(found.from)}’ does through it.`
     : `${head}the model links ‘${label(found.through)}’ into ‘${label(goal.id)}’ beside the parts it is worked out from, so it `
       + `can’t check what ‘${label(found.from)}’ does to it.`;
+}
+
+/** Every valid draw gave this option the same goal value: the record's own spread is exactly zero. */
+function zeroSpread(r: Rec): boolean {
+  const o = isRec(r.outcome) ? r.outcome : undefined;
+  if (o === undefined) return false;
+  const std = num(o.std);
+  if (std !== undefined) return std === 0;
+  const p10 = num(o.p10);
+  const p90 = num(o.p90);
+  return p10 !== undefined && p90 !== undefined && p10 === p90;
 }
 
 /**
