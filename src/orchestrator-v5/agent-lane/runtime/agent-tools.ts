@@ -531,6 +531,22 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_risk_likelihood',
+    description:
+      'Update an EXISTING risk with the likelihood and its own time window that the user has just typed. '
+      + 'Use the risk_label exactly as the current model labels it. Never supply a figure in arguments: Olumi reads '
+      + 'only this user message. When propose_new_risk returns same_event_modelled, call this instead of adding a '
+      + 'second risk. A drafted probability factor becomes the event likelihood in ONE held change, naming every '
+      + 'removal. Show both figures with their separate time windows when they differ and ask which to use; '
+      + 'the user must type their chosen figure and window before Apply. Other drivers require a separate choice '
+      + 'to remove their links. Nothing changes before approval.',
+    parameters: obj({
+      risk_label: { type: 'string', description: 'Exactly the label of an existing risk in the current model.' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['risk_label', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_new_risk',
     description:
       'Add a RISK the user has just asked for, when the model does NOT already have it: something that could go wrong and would '
@@ -538,7 +554,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'prepares ONE complete change and returns its id, which you keep for authorise_change: show the user the risk, what it '
       + 'threatens and what drives it, never the id, before asking them to approve. ' + RISK_LINKS_RULE + ' How strongly each '
       + 'link acts is not known yet: Olumi records a placeholder strength, not an estimate \u2014 say so. Use the labels exactly as the '
-      + 'CURRENT MODEL STATE gives them.',
+      + 'CURRENT MODEL STATE gives them. If it returns same_event_modelled, call propose_risk_likelihood with '
+      + 'existing_risk_label to update or convert that event instead.',
     parameters: obj({
       label: { type: 'string', description: 'The risk in the user\u2019s own words (e.g. "Competitive response").' },
       affects: {
@@ -815,7 +832,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_risk_likelihood', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -900,6 +917,8 @@ export interface AgentCapabilities {
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
   }): Promise<ToolResult>;
+  /** Door 1: a stated likelihood on one existing risk, held on the product seam. */
+  proposeRiskLikelihood?(ctx: AgentToolContext, args: { risk_label: string; rationale: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
     label: string; rationale: string;
@@ -1032,6 +1051,10 @@ export async function dispatchTool(
       return caps.proposeOptionStatus !== undefined
         ? caps.proposeOptionStatus(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'An option cannot be taken out or put back here. Nothing was changed.' };
+    case 'propose_risk_likelihood':
+      return caps.proposeRiskLikelihood !== undefined
+        ? caps.proposeRiskLikelihood(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A risk likelihood cannot be updated here. Nothing was changed.' };
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined
         ? caps.proposeNewRisk(ctx, args as never)

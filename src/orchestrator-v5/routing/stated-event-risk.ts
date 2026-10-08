@@ -136,7 +136,46 @@ export function stampUserEventRisk(operations: PatchOperation[], raw: unknown, g
   const { risk_id: id, event_risk } = member;
   const adds = operations.filter((o) => o.op === 'add_node' && o.path === id);
   const node = adds[0]?.value as Record<string, unknown> | undefined;
-  const existing = graph as { nodes?: { id?: string }[]; edges?: { to?: string }[] };
+  if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return undefined;
+  const existing = graph as { nodes?: { id?: string; kind?: string; label?: string; relies_on?: unknown }[]; edges?: { from?: string; to?: string }[] };
+  if (!Array.isArray(existing.nodes) || !Array.isArray(existing.edges)
+    || existing.nodes.some((n) => n === null || typeof n !== 'object' || typeof n.id !== 'string')
+    || existing.edges.some((e) => e === null || typeof e !== 'object' || typeof e.from !== 'string' || typeof e.to !== 'string')) return undefined;
+  // Door 1 updates an exact existing risk through a harmless marker. Occurrence stays outside producer operations
+  // until this confirm-time stamp; only removing the named cause nodes/links can make it an event in v1.
+  if (adds.length === 0) {
+    const risks = existing.nodes.filter((n) => n.id === id);
+    const updates = operations.filter((o) => o.op === 'update_node' && o.path === id);
+    const value = updates[0]?.value;
+    if (risks.length !== 1 || risks[0]!.kind !== 'risk' || risks[0]!.relies_on !== undefined
+      || updates.length !== 1 || value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const marker = value as Record<string, unknown>;
+    if (typeof risks[0]!.label !== 'string' || marker.label !== risks[0]!.label
+      || Object.keys(marker).some((key) => key !== 'label' && key !== 'scale_frame')
+      || (Object.hasOwn(marker, 'scale_frame') && marker.scale_frame !== 1)
+      || operations.some((o) => o.path === id && o !== updates[0])) return undefined;
+    const removedNodes = new Set(operations.filter((o) => o.op === 'remove_node').map((o) => o.path));
+    const removedLinks = new Set(operations.filter((o) => o.op === 'remove_edge').map((o) => o.path));
+    const surviving = (e: { from?: string; to?: string }): boolean => typeof e.from === 'string' && typeof e.to === 'string'
+      && !removedNodes.has(e.from) && !removedNodes.has(e.to) && !removedLinks.has(`${e.from}::${e.to}`);
+    if (existing.edges.some((e) => e.to === id && surviving(e))
+      || operations.some((o) => o.op === 'add_edge' && (o.value as Record<string, unknown> | undefined)?.to === id)
+      || operations.some((o) => (o.op === 'add_node' || o.op === 'update_node')
+        && o.value !== null && typeof o.value === 'object' && Object.hasOwn(o.value, 'event_risk'))) return undefined;
+    // Every surviving conditional impact must have an identity-bound write in this same batch.
+    if (existing.edges.some((e) => e.from === id && surviving(e)
+      && operations.filter((o) => o.op === 'update_edge' && o.path === `${e.from}::${e.to}`).length !== 1)) return undefined;
+    return operations.map((o) => {
+      if (o === updates[0]) return { ...o, value: { ...marker, event_risk } };
+      if (o.op === 'update_edge' && o.path.split('::')[0] === id) {
+        return { ...o, value: { ...(o.value as Record<string, unknown>), exists_probability: 1 } };
+      }
+      if (o.op === 'add_edge' && (o.value as Record<string, unknown> | undefined)?.from === id) {
+        return { ...o, value: { ...(o.value as Record<string, unknown>), exists_probability: 1 } };
+      }
+      return o;
+    });
+  }
   if (adds.length !== 1 || node?.id !== id || node.kind !== 'risk' || node.event_risk !== undefined
     || existing.nodes?.some((n) => n.id === id) || existing.edges?.some((e) => e.to === id)
     || operations.some((o) => o.op === 'add_edge' && (o.value as Record<string, unknown>)?.to === id)) return undefined;

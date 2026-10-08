@@ -42,6 +42,9 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
   'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'likelihood', 'note', 'dropped_drivers',
 ]);
+const RISK_LIKELIHOOD_KEYS: ReadonlySet<string> = new Set([
+  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'impact_path', 'note',
+]);
 /**
  * Every key `proposeOptionInterventions` returns on a clean success. Its disclosures (`not_the_users_figure`,
  * `no_stated_range`, `already_set`, `levels_not_accepted`, `unresolved`, `adds_links_note`, `ambiguous_targets`) each
@@ -434,7 +437,7 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
 export function composeRecoveredProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   const r = recordOf(result);
   // event_risk.v1 slice 2a: this door deterministically carries these user words outside the LLM arguments.
-  const likelihood = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;
+  const likelihood = tool === 'propose_new_risk' || tool === 'propose_risk_likelihood' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;
   // RC3 (a′): a precondition press names its option by label ("Raise Pro price to £59"); the stamp carries that label.
   const precondition = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.relies_on) : undefined;
   const carried = likelihood?.basis === 'user' && nonEmpty(likelihood.quote)
@@ -449,9 +452,15 @@ export function composeHeldResultReply(tool: string, result: unknown): string | 
   const r = recordOf(result);
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
-    : tool === 'propose_link_strengths' ? LINK_SET_KEYS : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_new_factor' ? NEW_FACTOR_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
+    : tool === 'propose_link_strengths' ? LINK_SET_KEYS : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_risk_likelihood' ? RISK_LIKELIHOOD_KEYS : tool === 'propose_new_factor' ? NEW_FACTOR_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
       : tool === 'propose_goal_current_level' ? GOAL_LEVEL_KEYS : tool === 'propose_limit_change' ? LIMIT_CHANGE_KEYS : undefined;
   if (allowed === undefined || Object.keys(r).some((k) => !allowed.has(k))) return null;
+  if (tool === 'propose_risk_likelihood') {
+    const risk = recordOf(r.risk);
+    const likelihood = recordOf(risk?.likelihood);
+    if (!nonEmpty(risk?.label) || !nonEmpty(r.held_detail) || likelihood?.basis !== 'user' || !nonEmpty(likelihood.quote)) return null;
+    return `I've prepared an update to ${q(risk.label)}.\n${r.held_detail}\nApprove this change?`;
+  }
   return tool === 'propose_new_option' ? newOptionReply(r) : tool === 'propose_new_risk' ? newRiskReply(r)
     : tool === 'propose_new_factor' ? newFactorReply(r)
     : tool === 'propose_option_interventions' ? optionLevelsReply(r) : tool === 'propose_goal_current_level' ? goalLevelReply(r)

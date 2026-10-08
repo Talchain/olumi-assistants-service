@@ -76,7 +76,7 @@ import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-cur
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess, holdRiskLikelihoodInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
@@ -2514,6 +2514,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           writesDispatched += 1;
           return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
         },
+        holdRiskLikelihood: async (input) => {
+          writesDispatched += 1;
+          return readCache.around(() => holdRiskLikelihoodInProcess(input, String(req.id)));
+        },
         // ⭐ PJ-E-FIG (DL #72 5866036457): the add-factor door — ONE held change carrying the user's figures, in-process.
         holdAddFactor: async (input) => {
           writesDispatched += 1;
@@ -3491,6 +3495,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? hopLimitText(result)
         : result.assistant_text;
+    // Door 1's ask/removal choice is part of the scientific contract, so it survives an incomplete model restatement.
+    const lastRiskDoor = result.tool_calls.at(-1);
+    const riskDoorResult = result.tool_results.at(-1) as { ok?: unknown; mutated?: unknown; detail?: unknown; preview_detail?: unknown } | undefined;
+    if ((lastRiskDoor?.name === 'propose_risk_likelihood'
+      || (lastRiskDoor?.name === 'propose_new_risk' && lastRiskDoor.refusal === 'same_event_modelled'))
+      && riskDoorResult?.ok === false && riskDoorResult.mutated === false && typeof riskDoorResult.detail === 'string') {
+      text = [riskDoorResult.detail, typeof riskDoorResult.preview_detail === 'string' ? riskDoorResult.preview_detail : '']
+        .filter((line) => line !== '').join('\n');
+    }
     if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
 
     // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback

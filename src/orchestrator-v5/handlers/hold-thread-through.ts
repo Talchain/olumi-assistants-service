@@ -67,6 +67,8 @@ import {
   type PendingAction,
 } from '../session/pending-action.js';
 import { readGmHeldResume } from './gm-held-execute.js';
+import { riskLikelihoodRefereeOperations } from './risk-likelihood-dispatch.js';
+import { stampUserEventRisk } from '../routing/stated-event-risk.js';
 import { toGraphView } from './add-option-dispatch.js';
 import { recheckAddFactorBatch } from '../routing/add-factor-transaction.js';
 import {
@@ -315,8 +317,12 @@ export function threadHoldsThroughMutatingCommit(
       const read = readGmHeldResume(pa);
       if (read.kind === 'ok') {
         // GM hold with an executable batch: VALIDATE against the new graph.
+        const likelihoodOperations = riskLikelihoodRefereeOperations(read.operations, read.riskLikelihoodUpdate, input.graphAfterCommit);
+        const likelihoodStillValid = likelihoodOperations !== undefined && (read.riskLikelihoodUpdate === undefined
+          || (read.userEventRisk?.risk_id === read.riskLikelihoodUpdate.risk_id
+            && stampUserEventRisk(read.operations, read.userEventRisk, input.graphAfterCommit) !== undefined));
         const assessment = assessHeldBatchAgainstGraph({
-          operations: read.operations,
+          operations: likelihoodOperations ?? read.operations,
           ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
           currentGraph: input.graphAfterCommit,
           currentGraphHash: newHash,
@@ -328,7 +334,7 @@ export function threadHoldsThroughMutatingCommit(
         // the new graph — the referee has no name rule, so a node added under a new factor's name would otherwise be
         // re-pinned and the approval would commit a second node by that name. It lapses, with the notice.
         const stillValid =
-          assessment.valid &&
+          assessment.valid && likelihoodStillValid &&
           (read.userToday === undefined ||
             recheckAddFactorBatch(read.operations, toGraphView(input.graphAfterCommit)) === null);
         if (stillValid) {

@@ -19,8 +19,10 @@ import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event
 
 import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
 import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
+import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { parseDrawnLinkPress } from '../drawn-link-press.js';
-import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk } from '../../routing/stated-event-risk.js';
+import { buildRiskLikelihoodConversion, detectSameModelledEvent, GM_HELD_RISK_LIKELIHOOD_KEY, readRiskLikelihoodMember, riskLikelihoodRefereeOperations, stampRiskLikelihoodImpact } from '../../handlers/risk-likelihood-dispatch.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -169,7 +171,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult, HoldRiskLikelihoodInput, HoldRiskLikelihoodResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -974,6 +976,7 @@ interface GraphRead {
     option_status?: unknown;
     /** RC3: persisted server-authored option precondition. Inclusion is resolved over the whole graph. */
     relies_on?: unknown;
+    event_risk?: unknown;
     goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
@@ -1009,6 +1012,8 @@ interface GraphRead {
   readonly goal_scope_reconciliation?: readonly GoalScopeReconciliation[];
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
+  /** Original saved brief, read from the same canonical graph read; never model-authored tool arguments. */
+  readonly brief_text?: string;
   /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
   readonly not_modelled?: NotModelledManifest;
   /** C46 × R3-4: the read's `analysis_identity_evaluated_node_ids` (same fact and gates as its result); absent = not attested. */
@@ -2056,6 +2061,7 @@ export function createAgentCapabilities(
      * ONE `gmh_` hold pinned to the base hash, confirmed by the product's own held resume. Absent ⇒ unavailable.
      */
     readonly holdAddRisk?: (input: HoldAddRiskInput) => Promise<HoldAddRiskResult>;
+    readonly holdRiskLikelihood?: (input: HoldRiskLikelihoodInput) => Promise<HoldRiskLikelihoodResult>;
     /**
      * ⭐ PJ-E-FIG (DL #72 5866036457): the product's add-factor door, reached in-process (`holdAddFactorInProcess`): ONE
      * `gmh_` hold carrying the user's figures, pinned to the base hash, confirmed by the product's own held resume.
@@ -2168,6 +2174,7 @@ export function createAgentCapabilities(
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
       ...(Array.isArray(r.json.goal_scope_reconciliation) ? { goal_scope_reconciliation: r.json.goal_scope_reconciliation as GoalScopeReconciliation[] } : {}),
       raw: g,
+      ...(typeof r.json.brief_text === 'string' ? { brief_text: r.json.brief_text } : {}),
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
@@ -2315,9 +2322,49 @@ export function createAgentCapabilities(
      */
     const heldNodeIds = heldOps.filter((o) => o.op === 'add_node').map((o) => o.path);
     const heldLinks = heldOps.filter((o) => o.op === 'add_edge').map((o) => o.path.split('::') as [string, string]);
+    const heldPatch = (hold.action as { inline_patch?: Record<string, unknown> }).inline_patch ?? {};
+    const rawLikelihoodUpdate = heldPatch[GM_HELD_RISK_LIKELIHOOD_KEY];
+    const likelihoodUpdate = readRiskLikelihoodMember(rawLikelihoodUpdate);
+    const heldEventRisk = readUserEventRiskMember(heldPatch[GM_HELD_USER_EVENT_RISK_KEY]);
+    let expectedRiskOperations: PatchOperation[] | undefined;
+    if (likelihoodUpdate !== undefined && heldEventRisk?.risk_id === likelihoodUpdate.risk_id
+      && riskLikelihoodRefereeOperations(heldOps as PatchOperation[], likelihoodUpdate, before) !== undefined) {
+      const eventStamped = stampUserEventRisk(heldOps as PatchOperation[], heldEventRisk, before);
+      expectedRiskOperations = eventStamped === undefined ? undefined
+        : stampRiskLikelihoodImpact(eventStamped, likelihoodUpdate, before);
+    }
     const holdsAll = (g: { nodes?: unknown; edges?: unknown } | null | undefined): boolean => {
       const nodes = Array.isArray(g?.nodes) ? g.nodes as { id?: unknown }[] : [];
       const edges = Array.isArray(g?.edges) ? g.edges as { from?: unknown; to?: unknown }[] : [];
+      // Door 1 has no added node. Both this confirm's response and the persisted read must hold the EXACT selected
+      // occurrence and conditional impact, and every named removal; node presence alone cannot prove conversion.
+      if (rawLikelihoodUpdate !== undefined) {
+        if (expectedRiskOperations === undefined || likelihoodUpdate === undefined || heldEventRisk === undefined) return false;
+        const risks = nodes.filter((n) => n?.id === likelihoodUpdate.risk_id) as Record<string, unknown>[];
+        if (risks.length !== 1 || risks[0]!.kind !== 'risk' || !isDeepStrictEqual(risks[0]!.event_risk, heldEventRisk.event_risk)
+          || edges.some((e) => e?.to === likelihoodUpdate.risk_id)
+          || edges.some((e) => e?.from === likelihoodUpdate.risk_id && (e as Record<string, unknown>).exists_probability !== 1)) return false;
+        return expectedRiskOperations.every((o) => {
+          if (o.op === 'remove_node') return !nodes.some((n) => n?.id === o.path)
+            && !edges.some((e) => e?.from === o.path || e?.to === o.path);
+          if (o.op === 'remove_edge') {
+            const [from, to] = o.path.split('::');
+            return !edges.some((e) => e?.from === from && e?.to === to);
+          }
+          const value = o.value as Record<string, unknown> | undefined;
+          if (value === undefined) return false;
+          if (o.op === 'update_node') {
+            const n = nodes.find((n) => n?.id === o.path) as Record<string, unknown> | undefined;
+            return n !== undefined && Object.entries(value).every(([key, v]) => isDeepStrictEqual(n[key], v));
+          }
+          if (o.op === 'update_edge' || o.op === 'add_edge') {
+            const [from, to] = o.path.split('::');
+            const e = edges.find((e) => e?.from === from && e?.to === to) as Record<string, unknown> | undefined;
+            return e !== undefined && Object.entries(value).every(([key, v]) => isDeepStrictEqual(e[key], v));
+          }
+          return false;
+        });
+      }
       const optionsLinked = optionIds.length === 0 || (decisionLinks.length >= optionIds.length
         && optionIds.every((id) => nodes.some((x) => x?.id === id))
         && decisionLinks.every(([from, to]) => edges.some((e) => e?.from === from && e?.to === to)));
@@ -2357,6 +2404,10 @@ export function createAgentCapabilities(
         + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });
+    if (likelihoodUpdate !== undefined && heldEventRisk !== undefined) {
+      const risk = after!.nodes.find((n) => n.id === likelihoodUpdate.risk_id)!;
+      sentences.push(`Updated ${quoted(risk.label)}. ${eventRiskCardLine(heldEventRisk.event_risk)}`);
+    }
     // The new switches the hold named (`GM_HELD_SWITCH_FACTORS_KEY`): their today-0 was committed with them, as Olumi's.
     const heldSwitches = (hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_SWITCH_FACTORS_KEY];
     const switchIds = new Set(Array.isArray(heldSwitches) ? heldSwitches.filter((x): x is string => typeof x === 'string') : []);
@@ -8203,6 +8254,53 @@ export function createAgentCapabilities(
      * add-risk door holds it as ONE `gmh_` pending pinned to the model this read saw. Held, or not proposed: the handle
      * must be the product's for THIS risk and, where the store can be read, the hold must add the risk and every link.
      */
+    async proposeRiskLikelihood(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      if (opts.holdRiskLikelihood === undefined) return { ok: false, mutated: false, refusal: 'unavailable',
+        detail: 'A risk likelihood cannot be updated here. Nothing was changed.' };
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found', detail: 'The current model could not be read. Nothing was prepared.' };
+      // Only THIS typed message authors occurrence. Earlier conversation and tool arguments never supply a figure.
+      const userText = ctx.user_turn_text ?? '';
+      const riskLabel = typeof args?.risk_label === 'string' ? args.risk_label : '';
+      const conversion = buildRiskLikelihoodConversion({ currentGraph: g.raw, riskLabel, userText,
+        ...(g.brief_text === undefined ? {} : { briefText: g.brief_text }) });
+      if (!conversion.matched) return { ok: false, mutated: false, refusal: conversion.reason, detail: conversion.detail };
+      if (conversion.requiresChoice) return { ok: false, mutated: false, refusal: 'likelihood_choice_required',
+        risk: { label: conversion.riskLabel }, figure_choices: conversion.figureChoices,
+        detail: [...conversion.detailLines, 'Which should the model use? Pick a figure with its own time window.'].join('\n') };
+      const res = await opts.holdRiskLikelihood({ scenario_id: ctx.scenario_id, turn_id: randomUUID(),
+        base_graph_hash: g.graph_hash, risk_label: conversion.riskLabel, user_turn_text: userText,
+        ...(g.brief_text === undefined ? {} : { brief_text: g.brief_text }) });
+      if (res.status === 'stale') return { ok: false, mutated: false, refusal: 'model_changed',
+        detail: 'The model changed while this was being prepared. Read it again before proposing the likelihood.' };
+      if (res.status !== 'held') return { ok: false, mutated: false, refusal: 'not_prepared', reason: res.reason,
+        detail: 'The likelihood could not be held as one change. Nothing was changed.' };
+      let heldOk = /^gmh_[0-9a-f]{12}$/.test(res.proposal_id) && res.risk_id === conversion.riskId;
+      if (heldOk && opts.readPendingActions !== undefined) {
+        try {
+          const hold = await liveHeldHold(ctx.scenario_id, res.proposal_id);
+          const patch = (hold?.action as { inline_patch?: Record<string, unknown> } | undefined)?.inline_patch;
+          const operations = hold === undefined ? [] : heldOpsOf(hold) as PatchOperation[];
+          const member = readRiskLikelihoodMember(patch?.[GM_HELD_RISK_LIKELIHOOD_KEY]);
+          heldOk = member?.risk_id === conversion.riskId
+            && isDeepStrictEqual(patch?.[GM_HELD_USER_EVENT_RISK_KEY], conversion.userEventRisk)
+            && isDeepStrictEqual(member, conversion.member)
+            && isDeepStrictEqual(operations, conversion.operations)
+            && riskLikelihoodRefereeOperations(operations, member, g.raw) !== undefined;
+        } catch { heldOk = false; }
+      }
+      if (!heldOk) return { ok: false, mutated: false, refusal: 'not_prepared',
+        detail: 'The held likelihood could not be verified. Nothing was offered for approval.' };
+      const stated = conversion.userEventRisk;
+      return { ok: true, mutated: false, proposal_id: res.proposal_id, public_label: res.public_label,
+        held_message: res.held_message, ...(res.detail === undefined ? {} : { held_detail: res.detail }), base_revision: g.graph_hash,
+        risk: { label: conversion.riskLabel, likelihood: { p_low_pct: stated.event_risk.occurrence.p_low * 100,
+          p_high_pct: stated.event_risk.occurrence.p_high * 100, horizon_months: stated.event_risk.horizon.months,
+          basis: 'user', quote: stated.quote } }, impact_path: conversion.impactPath,
+        note: 'Nothing has changed yet. Review the held conversion and likelihood, then approve this one change.' };
+    },
+
     async proposeNewRisk(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       if (opts.holdAddRisk === undefined) {
@@ -8227,6 +8325,26 @@ export function createAgentCapabilities(
       const preconditionOption = precondition === undefined ? undefined : g.nodes.find((n) => n.id === precondition.option_id && n.kind === 'option');
       if (precondition !== undefined && preconditionOption === undefined) {
         return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'The option this risk relies on is no longer in the model. Nothing was prepared.' };
+      }
+      // Door 1: a restated event must update/convert its existing carrier, including a probability factor feeding it.
+      // RC3 option preconditions have their own zero-link contract and are never treated as event likelihoods.
+      if (precondition === undefined) {
+        const targetIds = affects.flatMap((a) => {
+          const resolved = resolveNamed(g, String(a?.target_label ?? ''), (n) => n.kind === 'goal' || n.kind === 'outcome');
+          return resolved.kind === 'one' && a.direction === 'negative' ? [resolved.node.id] : [];
+        });
+        for (const targetId of [...targetIds, undefined]) {
+          const same = detectSameModelledEvent(g.raw, label, targetId, ctx.user_turn_text ?? '');
+          if (same !== undefined) {
+            return { ok: false, mutated: false, refusal: 'same_event_modelled',
+              existing_risk_label: same.existing_risk_label,
+              ...(same.existing_probability_factor_label === undefined ? {} : { existing_probability_factor_label: same.existing_probability_factor_label }),
+              next: 'propose_risk_likelihood',
+              detail: `This event is already modelled as “${same.existing_risk_label}”. `
+                + (same.existing_probability_factor_label === undefined ? 'I can update its likelihood.'
+                  : `I can convert “${same.existing_probability_factor_label}” into that risk’s likelihood in one change.`) };
+          }
+        }
       }
       if (g.nodes.some((n) => norm(n.label) === norm(label))) {
         return { ok: false, mutated: false, refusal: 'risk_exists',

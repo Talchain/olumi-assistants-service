@@ -208,9 +208,11 @@ function safeEchoPath(path: string): string | null {
   return trimmed;
 }
 
-/** What a describer is told beyond the ops: the new 0/1 switches a typed add-option recorded on its hold. */
+/** Typed, validated meanings held alongside the ops, solely for describing them. */
 export interface DescribeOptions {
   readonly switchFactorIds?: readonly string[];
+  /** Door 1's checked member binds each impact op to its natural effect or disclosed placeholder. */
+  readonly riskLikelihoodImpactDescriptions?: readonly { readonly path: string; readonly description: string; readonly subject?: string }[];
 }
 
 const finiteNumber = (x: unknown): number | undefined => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
@@ -368,6 +370,8 @@ function describeOp(
       // Rename: the update carries a new label.
       if (typeof v.label === 'string' && v.label.trim().length > 0) {
         const newLabel = clampLabel(v.label);
+        // Typed risk updates carry the existing label as an identity marker; repeating it is never a rename.
+        if (node.label !== null && newLabel === node.label) return `update ${withKindWord(node.kind, node.label)}`;
         return node.label !== null
           ? `rename '${node.label}' to '${newLabel}'`
           : `rename a part of the model to '${newLabel}'`;
@@ -469,8 +473,15 @@ export function describeChangeset(
     }
   }
   const switchIds = new Set(options?.switchFactorIds ?? []);
-  const items = operations.map((op) => describeOp(op, currentGraph, batchAdds, operations, switchIds));
-  return { items, subject: joinItems(items) };
+  const riskImpactDescriptions = new Map<string, string>(options?.riskLikelihoodImpactDescriptions?.map(({ path, description }) => [path, description]));
+  const riskImpactSubjects = new Map(options?.riskLikelihoodImpactDescriptions?.map(({ path, subject }) => [path, subject]));
+  const items = operations.map((op) => op.op === 'update_edge' && riskImpactDescriptions.has(op.path)
+    ? riskImpactDescriptions.get(op.path)!
+    : describeOp(op, currentGraph, batchAdds, operations, switchIds));
+  // Door 1's complete effect sentence stays on its detail line; prose joins its short verb phrase.
+  const subjectItems = items.map((item, index) => operations[index]!.op === 'update_edge' && riskImpactDescriptions.has(operations[index]!.path)
+    ? riskImpactSubjects.get(operations[index]!.path) ?? item.replace(/\.$/, '') : item);
+  return { items, subject: joinItems(subjectItems) };
 }
 
 /**

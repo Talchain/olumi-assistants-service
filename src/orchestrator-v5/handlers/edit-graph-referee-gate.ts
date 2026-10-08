@@ -75,6 +75,7 @@ import {
   describeChangeset,
   describeHeldOperationsSubject,
   type HeldOpLike,
+  type DescribeOptions,
 } from './describe-changeset.js';
 import { optionIdsAddedWithInterventionIntent } from '../../orchestrator/tools/encode-option-interventions.js';
 import type { HeldProposalBlock } from '@talchain/schemas/boundary';
@@ -147,6 +148,10 @@ export interface EditGmEvaluationInput {
    * copy says the option turns each ON instead of printing its level 1 (C2; AIC #70 5859629053). Describing only.
    */
   readonly switchFactorIds?: readonly string[];
+  /** Copy-only meanings supplied by a typed door after checking its held member against the batch and graph. */
+  readonly changesetOptions?: DescribeOptions;
+  /** A typed proposal door always asks before applying, even when its tunable fields are otherwise admissible. */
+  readonly requireConfirmation?: boolean;
   /**
    * F-3 negation guard (probe P8/P9, 2026-07-20): the CURRENT turn's raw
    * user message, used ONLY for deterministic protection-scope extraction
@@ -964,7 +969,7 @@ function buildHeldPending(
   // generic swept copy when no safe subject is derivable.
   // ONE call gives both the subject and the items it was joined from, so the
   // chip's per-line `detail` can never describe a different change.
-  const heldChangeset = describeChangeset(input.operations, input.currentGraph, { switchFactorIds: input.switchFactorIds });
+  const heldChangeset = describeChangeset(input.operations, input.currentGraph, { switchFactorIds: input.switchFactorIds, ...input.changesetOptions });
   const heldSubject = heldChangeset?.subject ?? null;
   const heldPublicCopy = buildGmHeldPublicCopy(heldSubject, heldChangeset?.items);
   const pending: PendingAction = {
@@ -1058,7 +1063,14 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       input.userMessage ?? null,
       input.currentGraph,
     );
-    const verdicts = protection.verdicts;
+    // A typed proposal's admissibility is still judged above. Consent can only demote would_apply; it never
+    // promotes a rejected, stale or ambiguous operation, and never changes the supplied freshness authority.
+    const verdicts: readonly RefereeVerdict[] = input.requireConfirmation === true && input.dispatchPath !== 'gm_held_resume'
+      ? protection.verdicts.map((v) => v.verdict === 'would_apply'
+        ? { ...v, verdict: 'held' as const, blocker: { code: TUNABLE_APPLY_HELD,
+          readable: 'This change is proposed first — confirm to apply.' } }
+        : v)
+      : protection.verdicts;
     const governing = governingOf(verdicts);
     const verdictCounts = tally(verdicts);
 
@@ -1170,7 +1182,7 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       const heldChangesetSubject = describeHeldOperationsSubject(
         input.operations,
         input.currentGraph,
-        { switchFactorIds: input.switchFactorIds },
+        { switchFactorIds: input.switchFactorIds, ...input.changesetOptions },
       );
       const heldProposalBlock: HeldProposalBlock | null =
         (input.dispatchPath ?? 'edit_graph') === 'edit_graph'

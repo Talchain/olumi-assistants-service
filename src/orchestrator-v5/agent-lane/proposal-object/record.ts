@@ -29,9 +29,10 @@ import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMe
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember } from '../../routing/add-factor-transaction.js';
 import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../../format/influence-bands.js';
-import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../routing/stated-event-risk.js';
+import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk } from '../../routing/stated-event-risk.js';
 import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
+import { GM_HELD_RISK_LIKELIHOOD_KEY, readRiskLikelihoodMember, riskLikelihoodCardLines, riskLikelihoodImpactDescriptions, riskLikelihoodRefereeOperations } from '../../handlers/risk-likelihood-dispatch.js';
 import { whoSized } from '../strength-authorship-words.js';
 import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -254,10 +255,18 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
   let detail: string | undefined;
   try {
     // The changeset lines, re-derived from the held batch; shown ONLY when they re-derive the SAME card words.
-    const changeset = describeChangeset(ops as PatchOperation[], graph, switches !== undefined ? { switchFactorIds: switches } : undefined);
+    const changeset = describeChangeset(ops as PatchOperation[], graph, {
+      switchFactorIds: switches,
+      riskLikelihoodImpactDescriptions: riskLikelihoodImpactDescriptions(patch[GM_HELD_RISK_LIKELIHOOD_KEY], ops as PatchOperation[], graph),
+    });
     const copy = buildGmHeldPublicCopy(changeset?.subject ?? null, changeset?.items);
     if (copy.label === label && copy.message === message) detail = copy.detail;
-  } catch { detail = undefined; }
+    // Door 1 may never replay cached numeric impact copy after its checked natural-effect wording changes.
+    else if (patch[GM_HELD_RISK_LIKELIHOOD_KEY] !== undefined) return undefined;
+  } catch {
+    if (patch[GM_HELD_RISK_LIKELIHOOD_KEY] !== undefined) return undefined;
+    detail = undefined;
+  }
   // The member reader validates the occurrence with EventRiskV1 before any copy is added.
   const eventRisk = readUserEventRiskMember(patch[GM_HELD_USER_EVENT_RISK_KEY]);
   if (eventRisk !== undefined) {
@@ -266,6 +275,10 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
   }
   // This reader rebuilds card detail on reload; the dispatch-only detail would otherwise disappear.
   for (const line of heldReliesOnRiskLines(ops as PatchOperation[], graph)) {
+    detail = detail !== undefined ? `${detail}\n${line}` : line;
+  }
+  for (const line of riskLikelihoodCardLines(patch[GM_HELD_RISK_LIKELIHOOD_KEY], ops as PatchOperation[], graph, eventRisk)) {
+    if (detail?.split('\n').includes(line)) continue;
     detail = detail !== undefined ? `${detail}\n${line}` : line;
   }
   return { id: `${APPROVE_PREFIX}${pa.chip_id}`, label, message, ...(detail !== undefined ? { detail } : {}) };
@@ -280,9 +293,16 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
   const pin = pa.preconditions.graph_hash;
   if (typeof pin !== 'string' || pin === '') return undefined;
   const ops = heldOperationsOf(pa);
-  // SLICE 1: a hold that ADDS something (H1 add-option, H2 add-risk, H3 add-factor). An edge-only or update-only hold
-  // (H4/H5) is confirmed by a landed check that reads added nodes (`confirmHeld` `holdsAll`), so it is not offered (S2).
-  if (!ops.some((o) => o.op === 'add_node')) return undefined;
+  // SLICE 1 holds add something. Door 1 is the narrow update exception: its validated member and selected occurrence
+  // have an exact event/impact/removal landed check in confirmHeld. Other edge-only or update-only holds stay deferred.
+  const patch = (pa.action as { inline_patch?: Rec }).inline_patch ?? {};
+  const likelihoodUpdate = readRiskLikelihoodMember(patch[GM_HELD_RISK_LIKELIHOOD_KEY]);
+  const eventRisk = readUserEventRiskMember(patch[GM_HELD_USER_EVENT_RISK_KEY]);
+  const isLikelihoodUpdate = likelihoodUpdate !== undefined && eventRisk?.risk_id === likelihoodUpdate.risk_id
+    && riskLikelihoodRefereeOperations(ops as PatchOperation[], likelihoodUpdate, graph) !== undefined
+    && stampUserEventRisk(ops as PatchOperation[], eventRisk, graph) !== undefined;
+  if (!ops.some((o) => o.op === 'add_node') && !isLikelihoodUpdate) return undefined;
+  if (patch[GM_HELD_RISK_LIKELIHOOD_KEY] !== undefined && !isLikelihoodUpdate) return undefined;
   const approve = approveActionOf(pa, ops, graph);
   if (approve === undefined) return undefined;
   const labelOf = labelResolver(ops, graph);

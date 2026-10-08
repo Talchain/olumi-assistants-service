@@ -1,0 +1,749 @@
+{
+ "edges": [
+  {
+   "to": "hire_two_developers",
+   "from": "should_we_hire_two_more_developers_now_or_keep_the_team_as_it_is_and_subcontract_overflow_work",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "subcontract_overflow",
+   "from": "should_we_hire_two_more_developers_now_or_keep_the_team_as_it_is_and_subcontract_overflow_work",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "keep_team_as_is",
+   "from": "should_we_hire_two_more_developers_now_or_keep_the_team_as_it_is_and_subcontract_overflow_work",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "hire_one_developer",
+   "from": "should_we_hire_two_more_developers_now_or_keep_the_team_as_it_is_and_subcontract_overflow_work",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_headcount",
+   "from": "hire_two_developers",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "subcontractor_delivery_days",
+   "from": "hire_two_developers",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "incremental_monthly_delivery_cost",
+   "from": "hire_two_developers",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_headcount",
+   "from": "subcontract_overflow",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "subcontractor_delivery_days",
+   "from": "subcontract_overflow",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "incremental_monthly_delivery_cost",
+   "from": "subcontract_overflow",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_headcount",
+   "from": "hire_one_developer",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "subcontractor_delivery_days",
+   "from": "hire_one_developer",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "incremental_monthly_delivery_cost",
+   "from": "hire_one_developer",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developer_headcount",
+   "from": "keep_team_as_is",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "subcontractor_delivery_days",
+   "from": "keep_team_as_is",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "incremental_monthly_delivery_cost",
+   "from": "keep_team_as_is",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "billable_delivery_capacity",
+   "from": "developer_headcount",
+   "strength": {
+    "std": 0.4,
+    "mean": 0.8
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 16,
+     "amount_unit": "days/month",
+     "strength_mean": 0.8,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "developers"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "billable_delivery_capacity",
+   "from": "subcontractor_delivery_days",
+   "strength": {
+    "std": 0.08333333333333334,
+    "mean": 0.16666666666666669
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 1,
+     "amount_unit": "days/month",
+     "strength_mean": 0.16666666666666669,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "days/month"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "monthly_revenue",
+   "from": "billable_delivery_capacity",
+   "strength": {
+    "std": 0.07333333333333333,
+    "mean": 0.14666666666666667
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "reviewed_by_user": {
+     "at": "2026-10-08T03:04:59.343Z",
+     "band": "weak",
+     "intent": "confirm"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "monthly_revenue",
+   "from": "revenue_per_billable_day",
+   "strength": {
+    "std": 0.07333333333333333,
+    "mean": 0.14666666666666667
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_placeholder"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "revenue_lost_to_delivery_cost_pressure",
+   "from": "incremental_monthly_delivery_cost",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "mean_projected": true
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "monthly_revenue",
+   "from": "revenue_lost_to_delivery_cost_pressure",
+   "strength": {
+    "std": 0.13333333333333333,
+    "mean": -0.26666666666666666
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "definitional": true,
+    "natural_effect": {
+     "amount": -1,
+     "amount_unit": "GBP/month",
+     "strength_mean": -0.26666666666666666,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "GBP/month"
+    }
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "expected_revenue_lost_from_largest_client_cut",
+   "from": "largest_client_contract_cut_likelihood",
+   "strength": {
+    "std": 0.14666666666666667,
+    "mean": 0.29333333333333333
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 440,
+     "amount_unit": "GBP/month",
+     "strength_mean": 0.29333333333333333,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "%"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "expected_revenue_lost_from_largest_client_cut",
+   "from": "largest_client_revenue_share",
+   "strength": {
+    "std": 0.36666666666666664,
+    "mean": 0.7333333333333333
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 1100,
+     "amount_unit": "GBP/month",
+     "strength_mean": 0.7333333333333333,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "%"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "monthly_revenue",
+   "from": "expected_revenue_lost_from_largest_client_cut",
+   "strength": {
+    "std": 0.4,
+    "mean": -0.8
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "definitional": true,
+    "natural_effect": {
+     "amount": -1,
+     "amount_unit": "GBP/month",
+     "strength_mean": -0.8,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "GBP/month"
+    }
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "monthly_revenue",
+   "from": "risk_largest_client_contract_cancellation",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 1
+  }
+ ],
+ "nodes": [
+  {
+   "id": "should_we_hire_two_more_developers_now_or_keep_the_team_as_it_is_and_subcontract_overflow_work",
+   "ref": "D1",
+   "kind": "decision",
+   "label": "Should we hire two more developers now, or keep the team as it is and\u2026",
+   "provenance": "from_brief",
+   "description": "Should we hire two more developers now, or keep the team as it is and subcontract overflow work?"
+  },
+  {
+   "id": "monthly_revenue",
+   "ref": "G1",
+   "kind": "goal",
+   "label": "Monthly revenue",
+   "provenance": "from_brief",
+   "unit_reading": {
+    "unit": "GBP",
+    "source": "user_stated",
+    "source_quote": "Our goal is to grow monthly revenue from about \u00a3110,000 today to at least \u00a3150,000 within 9 months"
+   },
+   "goal_direction": ">=",
+   "goal_threshold": 0.8,
+   "observed_state": {
+    "cap": 187500,
+    "unit": "GBP/month",
+    "value": 0.5866666666666667,
+    "source": "brief_extraction",
+    "baseline": 0.5866666666666667,
+    "raw_value": 110000
+   },
+   "threshold_source": "brief_extraction",
+   "goal_threshold_cap": 187500,
+   "goal_threshold_raw": 150000,
+   "goal_horizon_months": 9,
+   "goal_threshold_unit": "GBP/month",
+   "goal_threshold_frame": "level",
+   "goal_threshold_cap_provenance": "target_derived_headroom"
+  },
+  {
+   "id": "hire_two_developers",
+   "ref": "O1",
+   "kind": "option",
+   "label": "Hire two developers",
+   "provenance": "from_brief",
+   "interventions": {
+    "developer_headcount": {
+     "unit": "developers",
+     "value": 0.4666666666666667,
+     "source": "brief_extraction",
+     "raw_value": 14,
+     "target_match": {
+      "node_id": "developer_headcount",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "medium"
+    },
+    "subcontractor_delivery_days": {
+     "unit": "days/month",
+     "value": 0,
+     "source": "cee_hypothesis",
+     "raw_value": 0,
+     "target_match": {
+      "node_id": "subcontractor_delivery_days",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "incremental_monthly_delivery_cost": {
+     "unit": "GBP/month",
+     "value": 0.22,
+     "source": "cee_hypothesis",
+     "raw_value": 11000,
+     "target_match": {
+      "node_id": "incremental_monthly_delivery_cost",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "subcontract_overflow",
+   "ref": "O2",
+   "kind": "option",
+   "label": "Subcontract overflow",
+   "provenance": "from_brief",
+   "interventions": {
+    "developer_headcount": {
+     "unit": "developers",
+     "value": 0.4,
+     "source": "cee_hypothesis",
+     "raw_value": 12,
+     "target_match": {
+      "node_id": "developer_headcount",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "subcontractor_delivery_days": {
+     "unit": "days/month",
+     "value": 0.1,
+     "source": "cee_hypothesis",
+     "raw_value": 10,
+     "target_match": {
+      "node_id": "subcontractor_delivery_days",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "incremental_monthly_delivery_cost": {
+     "unit": "GBP/month",
+     "value": 0.12,
+     "source": "cee_hypothesis",
+     "raw_value": 6000,
+     "target_match": {
+      "node_id": "incremental_monthly_delivery_cost",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "keep_team_as_is",
+   "ref": "O3",
+   "kind": "option",
+   "label": "Keep team as is",
+   "provenance": "ai_inferred",
+   "is_baseline": true
+  },
+  {
+   "id": "hire_one_developer",
+   "ref": "O4",
+   "kind": "option",
+   "label": "Hire one developer",
+   "provenance": "ai_inferred",
+   "interventions": {
+    "developer_headcount": {
+     "unit": "developers",
+     "value": 0.43333333333333335,
+     "source": "cee_hypothesis",
+     "raw_value": 13,
+     "target_match": {
+      "node_id": "developer_headcount",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "subcontractor_delivery_days": {
+     "unit": "days/month",
+     "value": 0,
+     "source": "cee_hypothesis",
+     "raw_value": 0,
+     "target_match": {
+      "node_id": "subcontractor_delivery_days",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "incremental_monthly_delivery_cost": {
+     "unit": "GBP/month",
+     "value": 0.11,
+     "source": "cee_hypothesis",
+     "raw_value": 5500,
+     "target_match": {
+      "node_id": "incremental_monthly_delivery_cost",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "developer_headcount",
+   "ref": "F1",
+   "kind": "factor",
+   "label": "Developer headcount",
+   "category": "controllable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 30,
+    "unit": "developers",
+    "value": 0.4,
+    "source": "brief_extraction",
+    "raw_value": 12,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "subcontractor_delivery_days",
+   "ref": "F2",
+   "kind": "factor",
+   "label": "Subcontractor delivery days",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "observed_state": {
+    "cap": 100,
+    "unit": "days/month",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "incremental_monthly_delivery_cost",
+   "ref": "F3",
+   "kind": "factor",
+   "label": "Incremental monthly delivery cost",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "observed_state": {
+    "cap": 50000,
+    "unit": "GBP/month",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "billable_delivery_capacity",
+   "ref": "F4",
+   "kind": "factor",
+   "label": "Billable delivery capacity",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 600,
+   "observed_state": {
+    "unit": "days/month",
+    "value": 0.32,
+    "source": "cee_inference",
+    "raw_value": 192,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "revenue_per_billable_day",
+   "ref": "F5",
+   "kind": "factor",
+   "label": "Revenue per billable day",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 2000,
+   "observed_state": {
+    "unit": "GBP/day",
+    "value": 0.2865,
+    "source": "cee_inference",
+    "raw_value": 573,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "largest_client_contract_cut_likelihood",
+   "ref": "F6",
+   "kind": "factor",
+   "label": "Largest-client contract-cut likelihood",
+   "category": "external",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 100,
+    "unit": "%",
+    "value": 0.3,
+    "source": "brief_extraction",
+    "raw_value": 30,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "largest_client_revenue_share",
+   "ref": "F7",
+   "kind": "factor",
+   "label": "Largest-client revenue share",
+   "category": "external",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 100,
+    "unit": "%",
+    "value": 0.4,
+    "source": "brief_extraction",
+    "raw_value": 40,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "expected_revenue_lost_from_largest_client_cut",
+   "ref": "R1",
+   "kind": "risk",
+   "label": "Expected revenue lost from largest-client cut",
+   "provenance": "ai_inferred",
+   "scale_frame": 150000
+  },
+  {
+   "id": "revenue_lost_to_delivery_cost_pressure",
+   "ref": "R2",
+   "kind": "risk",
+   "label": "Revenue lost to delivery-cost pressure",
+   "provenance": "ai_inferred",
+   "scale_frame": 50000
+  },
+  {
+   "id": "risk_largest_client_contract_cancellation",
+   "ref": "R3",
+   "kind": "risk",
+   "label": "Largest-client contract cancellation",
+   "event_risk": {
+    "horizon": {
+     "months": 6
+    },
+    "version": 1,
+    "occurrence": {
+     "basis": "user",
+     "p_low": 0.2,
+     "p_high": 0.4,
+     "meaning": "at_least_once_within_horizon"
+    }
+   }
+  }
+ ],
+ "ref_high_water": {
+  "D": 1,
+  "F": 7,
+  "G": 1,
+  "O": 4,
+  "R": 3
+ }
+}

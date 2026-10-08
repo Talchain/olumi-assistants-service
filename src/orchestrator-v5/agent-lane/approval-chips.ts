@@ -66,6 +66,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
+  propose_risk_likelihood: { label: 'Update this risk', message: 'Yes, update that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).
   propose_new_factor: { label: 'Add these factors', message: 'Yes, add them.' },
   // SLICE C2: a new figure for a limit the model already holds, written through the product's limit door.
@@ -75,7 +76,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
 };
 
 /** The proposers whose change is HELD on the product's own seam (`gmh_`): the button carries the product's own words. */
-const HELD_ON_THE_PRODUCT_SEAM: ReadonlySet<string> = new Set(['propose_new_option', 'propose_new_risk', 'propose_new_factor']);
+const HELD_ON_THE_PRODUCT_SEAM: ReadonlySet<string> = new Set(['propose_new_option', 'propose_new_risk', 'propose_risk_likelihood', 'propose_new_factor']);
 
 /**
  * ⛔ ONE APPROVAL CARRIES ONE CHANGE, SO A TURN LEAVES AT MOST ONE PROPOSAL OPEN (AI Conversation #70 5847130065 (a);

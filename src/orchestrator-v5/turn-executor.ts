@@ -341,6 +341,7 @@ const VALUE_BATCH_NOT_APPLIED_WHOLE =
   + 'writing only part of the set would leave the model in a state you never reviewed.';
 import { composeReadinessIntakeResponse } from './routing/readiness-intake.js';
 import { describeHeldOperationsSubject } from './handlers/edit-graph-referee-gate.js';
+import { riskLikelihoodImpactDescriptions } from './handlers/risk-likelihood-dispatch.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { buildOptionEffectBindChipId } from './compose/option-effect-ask-response.js';
@@ -4668,6 +4669,7 @@ export async function runTurnExecutor(
           // ⭐ PJ-E-FIG — the add-factor door's figures, the user's, land in this same apply (DL #72 5866036457).
           ...(read.userToday !== undefined ? { userToday: read.userToday } : {}),
           ...(read.userEventRisk !== undefined ? { userEventRisk: read.userEventRisk } : {}),
+          ...(read.riskLikelihoodUpdate !== undefined ? { riskLikelihoodUpdate: read.riskLikelihoodUpdate } : {}),
           currentGraph: gmBaseGraph,
           currentGraphHash: gmBaseHash,
           freshness: freshness?.freshness ?? 'unknown',
@@ -4725,7 +4727,10 @@ export async function runTurnExecutor(
         // the real configure path (shared builder → deterministic edit-lane
         // route) rather than offering nothing.
         const gmReadiness = buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph);
-        const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph, { switchFactorIds: read.switchFactorIds });
+        const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph, {
+          switchFactorIds: read.switchFactorIds,
+          riskLikelihoodImpactDescriptions: riskLikelihoodImpactDescriptions(read.riskLikelihoodUpdate, read.operations, gmBaseGraph),
+        });
         /**
          * ⭐ S-D: THE OTHER HELD PROPOSALS THREAD THROUGH THIS CONFIRM (HOLD-WIPE's rule, now on the one writer that
          * lacked it). D-08: approving the freelance option moved the model, and the carry-forward's hash rule dropped
@@ -4960,6 +4965,7 @@ export async function runTurnExecutor(
             ...(stepToday !== undefined ? { gradedToday: stepToday } : {}),
             ...(stepUserToday !== undefined ? { userToday: stepUserToday } : {}),
             ...(reads[i]!.userEventRisk !== undefined ? { userEventRisk: reads[i]!.userEventRisk } : {}),
+            ...(reads[i]!.riskLikelihoodUpdate !== undefined ? { riskLikelihoodUpdate: reads[i]!.riskLikelihoodUpdate } : {}),
             currentGraph: preStepGraph,
             currentGraphHash: workingHash,
             freshness: freshness?.freshness ?? 'unknown',
@@ -4994,7 +5000,10 @@ export async function runTurnExecutor(
             chip_id: holds[i]!.chip_id,
             candidate_count: holds.length,
           });
-          const subject = describeHeldOperationsSubject(reads[i]!.operations, preStepGraph, { switchFactorIds: reads[i]!.switchFactorIds });
+          const subject = describeHeldOperationsSubject(reads[i]!.operations, preStepGraph, {
+            switchFactorIds: reads[i]!.switchFactorIds,
+            riskLikelihoodImpactDescriptions: riskLikelihoodImpactDescriptions(reads[i]!.riskLikelihoodUpdate, reads[i]!.operations, preStepGraph),
+          });
           if (subject !== null) appliedSubjects.push(subject);
           appliedFacts.push(outcome.fact);
           consumedRefs.push(holds[i]!.chip_id);

@@ -91,6 +91,7 @@ import { applyPriorRangeEdit } from './prior-range-edit.js';
 import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
 import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
 import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
+import { dispatchRiskLikelihoodTransaction } from '../handlers/risk-likelihood-dispatch.js';
 import { dispatchAddFactorTransaction } from '../handlers/add-factor-dispatch.js';
 import type { UserTodayBasis } from '../routing/add-factor-transaction.js';
 import { buildHeldSupersessionNotice } from '../handlers/edit-graph-referee-gate.js';
@@ -3574,6 +3575,109 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     // The hold could not be persisted, so the confirm would have nothing to resume: never offered.
     log.warn({ ...logBase, err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) } },
       'add-risk hold — commit failed; nothing offered');
+    return { status: 'refused', reason: 'commit_failed' };
+  }
+  return {
+    status: 'held',
+    proposal_id: outcome.chip.id,
+    risk_id: outcome.riskId,
+    public_label: outcome.chip.label,
+    held_message: outcome.chip.message,
+    ...(outcome.chip.detail !== undefined ? { detail: outcome.chip.detail } : {}),
+  };
+}
+
+/** Door 1: one existing risk's conversion/update, held under the same strict reads and CAS confirmation as add-risk. */
+export type HoldRiskLikelihoodInput = {
+  readonly scenario_id: string;
+  readonly turn_id: string;
+  readonly base_graph_hash: string;
+  readonly risk_label: string;
+  /** Bound by the Agent route, never model arguments. */
+  readonly user_turn_text: string;
+  /** Original saved brief from the canonical graph read, used only to disclose the draft's own horizon. */
+  readonly brief_text?: string;
+};
+export type HoldRiskLikelihoodResult = HoldAddRiskResult;
+
+export async function holdRiskLikelihoodInProcess(input: HoldRiskLikelihoodInput, requestId: string): Promise<HoldRiskLikelihoodResult> {
+  const startedAt = Date.now();
+  const logBase = { request_id: requestId, scenario_id: input.scenario_id, event: 'v5.agent.risk_likelihood_hold' };
+  let persistedGraph: unknown;
+  let priorPendings: readonly PendingAction[];
+  try {
+    [persistedGraph, priorPendings] = await Promise.all([
+      loadPersistedGraphStrict(input.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error({ ...logBase, err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) } },
+      'risk-likelihood hold — authoritative graph/pending read failed; nothing held');
+    return { status: 'refused', reason: 'read_failed' };
+  }
+  if (persistedGraph === null || persistedGraph === undefined) return { status: 'refused', reason: 'no_persisted_graph' };
+  let currentHash: string | null;
+  try {
+    currentHash = computeAnalysisAffectingGraphHash(persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+  } catch {
+    currentHash = null;
+  }
+  if (currentHash === null) return { status: 'refused', reason: 'no_graph_hash' };
+  // The model moved since the proposal was built: nothing is held against a model the user did not see.
+  if (currentHash !== input.base_graph_hash) return { status: 'stale' };
+
+  // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
+  let freshness: FrameFreshness = 'unknown';
+  try {
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph);
+  } catch {
+    freshness = 'unknown';
+  }
+
+  const outcome = dispatchRiskLikelihoodTransaction({
+    riskLabel: input.risk_label,
+    userText: input.user_turn_text,
+    ...(input.brief_text !== undefined ? { briefText: input.brief_text } : {}),
+    currentGraph: persistedGraph,
+    currentGraphHash: currentHash,
+    freshness,
+    mode: config.features.graphManagementMode,
+    scenarioId: input.scenario_id,
+    turnId: input.turn_id,
+    requestId,
+    stage: 'frame',
+  });
+  if (outcome.kind === 'refused') {
+    log.info({ ...logBase, reason: outcome.reason }, 'risk-likelihood hold — refused; nothing held');
+    return { status: 'refused', reason: outcome.reason };
+  }
+  // Honest supersession, as the add-option hold says it (route-v2): appended BEFORE the commit so stored == offered.
+  const notice = buildHeldSupersessionNotice(outcome.pendingActions[0]!, priorPendings, Date.now());
+  const response: OlumiResponse = notice === null
+    ? outcome.response
+    : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_risk_likelihood', risk_label: input.risk_label, user_turn_text: input.user_turn_text,
+    brief_text: input.brief_text, base_graph_hash: input.base_graph_hash })).digest('hex').slice(0, 32)}`;
+  try {
+    await commitDirectAnswer(response, {
+      scenario_id: input.scenario_id,
+      turn_id: input.turn_id,
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: requestHash,
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: [],
+      pending_actions: [...outcome.pendingActions],
+      // Prior live holds are carried, never silently wiped (the same-target one is retired by the carry-forward).
+      priorPendingActions: priorPendings,
+      coaching_state: null,
+    });
+  } catch (err) {
+    // The hold could not be persisted, so the confirm would have nothing to resume: never offered.
+    log.warn({ ...logBase, err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) } },
+      'risk-likelihood hold — commit failed; nothing offered');
     return { status: 'refused', reason: 'commit_failed' };
   }
   return {

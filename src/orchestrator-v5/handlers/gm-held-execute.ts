@@ -41,6 +41,7 @@
 
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk, type UserEventRisk } from '../routing/stated-event-risk.js';
 import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
+import { GM_HELD_RISK_LIKELIHOOD_KEY, readRiskLikelihoodMember, riskLikelihoodImpactDescriptions, riskLikelihoodRefereeOperations, stampRiskLikelihoodImpact, type RiskLikelihoodMember } from './risk-likelihood-dispatch.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
@@ -506,6 +507,8 @@ export type GmHeldResumeRead =
       readonly userToday?: readonly UserTodayLevel[];
       /** event_risk.v1 slice 2a: validated hold member. */
       readonly userEventRisk?: UserEventRisk;
+      /** Door 1's identity-bound conversion, removals and conditional impact. */
+      readonly riskLikelihoodUpdate?: RiskLikelihoodMember;
     };
 
 /**
@@ -547,10 +550,17 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   const rawUserEventRisk = patch[GM_HELD_USER_EVENT_RISK_KEY];
   const userEventRisk = rawUserEventRisk === undefined ? undefined : readUserEventRiskMember(rawUserEventRisk);
   if (rawUserEventRisk !== undefined && userEventRisk === undefined) return { kind: 'no_payload' };
+  const rawRiskLikelihoodUpdate = patch[GM_HELD_RISK_LIKELIHOOD_KEY];
+  const riskLikelihoodUpdate = rawRiskLikelihoodUpdate === undefined ? undefined : readRiskLikelihoodMember(rawRiskLikelihoodUpdate);
+  if (rawRiskLikelihoodUpdate !== undefined && (riskLikelihoodUpdate === undefined
+    || userEventRisk?.risk_id !== riskLikelihoodUpdate.risk_id)) return { kind: 'no_payload' };
+  if (userEventRisk !== undefined && parsed.data.some((o) => o.op === 'update_node' && o.path === userEventRisk.risk_id)
+    && riskLikelihoodUpdate === undefined) return { kind: 'no_payload' };
   return {
     kind: 'ok',
     operations: parsed.data,
     ...(userEventRisk !== undefined ? { userEventRisk } : {}),
+    ...(riskLikelihoodUpdate !== undefined ? { riskLikelihoodUpdate } : {}),
     ...(envelopeCap !== undefined ? { envelopeCap } : {}),
     ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
     ...(userStatedNodeIds !== undefined ? { userStatedNodeIds } : {}),
@@ -580,6 +590,8 @@ export interface GmHeldExecuteInput {
   readonly userToday?: readonly UserTodayLevel[];
   /** event_risk.v1 slice 2a: validated hold member. */
   readonly userEventRisk?: UserEventRisk;
+  /** Door 1's validated held conversion member (`readGmHeldResume`). */
+  readonly riskLikelihoodUpdate?: RiskLikelihoodMember;
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -727,7 +739,12 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // pipeline's PatchOperation — a plain widening copy, no unsafe cast.
   const operations: PatchOperation[] = [...input.operations];
   // Re-check the stamp and zero-edge invariant against THIS graph before the normal producer-field referee.
-  const refereeOperations = reliesOnRefereeOperations(operations, input.currentGraph);
+  const likelihoodOperations = riskLikelihoodRefereeOperations(operations, input.riskLikelihoodUpdate, input.currentGraph);
+  if (likelihoodOperations === undefined || (input.riskLikelihoodUpdate !== undefined
+    && input.userEventRisk?.risk_id !== input.riskLikelihoodUpdate.risk_id)
+    || (input.userEventRisk !== undefined && operations.some((o) => o.op === 'update_node' && o.path === input.userEventRisk!.risk_id)
+      && input.riskLikelihoodUpdate === undefined)) return { status: 'apply_failed', reason: 'apply_error' };
+  const refereeOperations = reliesOnRefereeOperations(likelihoodOperations, input.currentGraph);
   if (refereeOperations === undefined) return { status: 'apply_failed', reason: 'apply_error' };
 
   // ── 2. Re-referee (defence-in-depth; redacted telemetry re-emitted) ──
@@ -745,6 +762,9 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     requestId: input.requestId,
     dispatchPath: 'gm_held_resume',
     ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
+    changesetOptions: {
+      riskLikelihoodImpactDescriptions: riskLikelihoodImpactDescriptions(input.riskLikelihoodUpdate, operations, input.currentGraph),
+    },
   });
   if (!confirmationSatisfies(decision.governing)) {
     // A hold minted before the incident-link rule shipped is still refused.
@@ -830,7 +850,8 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // event_risk.v1 slice 2a: pipeline-owned occurrence and conditional impact, after the re-referee.
   const eventRiskStamp = stampUserEventRisk(userTodayStamp.operations, input.userEventRisk, input.currentGraph);
   if (eventRiskStamp === undefined) return { status: 'apply_failed', reason: 'apply_error' };
-  const stampedOperations: PatchOperation[] = eventRiskStamp;
+  const stampedOperations = stampRiskLikelihoodImpact(eventRiskStamp, input.riskLikelihoodUpdate, input.currentGraph);
+  if (stampedOperations === undefined) return { status: 'apply_failed', reason: 'apply_error' };
 
   // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op
