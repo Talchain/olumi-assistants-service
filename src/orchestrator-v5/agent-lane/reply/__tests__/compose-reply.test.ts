@@ -29,6 +29,8 @@ import {
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
 import { openQuestionsSegment, textAtRest, untestedHorizonLine } from '../../decision-input-ask.js';
 import { WIDENED_RISK_MARKER_DOWN, WIDENED_RISK_MARKER_MOVE } from '../../runtime/widen-draft.js';
+import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../../goal-target/zero-spread-horizon-line.js';
+import { goalHorizonSteadyWhyLine, goalHorizonWithholdDetail } from '../../../goal-target/goal-horizon-detail.js';
 
 const face = (c: ReplyComposition): string[] => (c.shape === null ? [] : [c.shape.headline, ...c.shape.bullets]);
 /** Every sentence of `original` is in `shipped`, verbatim (bullet markers aside). */
@@ -1800,6 +1802,46 @@ describe('r5 P05b widening inputs use the typed Draft/Run contract', () => {
     expect(c.shape!.bullets[0]).toBe(widenedLine);
     expect(c.shape!.detail).not.toContain(widenedLine);
     expect(c.shape!.detail).toContain("Olumi's estimates: 5, see Check estimates.");
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+});
+
+describe('Science §(ad) time-bound goal reply details', () => {
+  const graph = { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR', goal_horizon_months: 9 }] };
+  const note = goalHorizonWithholdDetail(graph)!;
+  const context = 'The shared model retains the current evidence and assumptions for review before the team considers which strategic issue to resolve next.';
+
+  it('the horizon cause owns the exact face and its stored detail once, even beside another target failure', () => {
+    const c = composeReplyShape({ faceContract: 'run', graph, text: `Your results are ready.\n\n${note}\n\n${context}`,
+      chanceCells: [{ kind: 'withheld', face: ZERO_SPREAD_NEEDS_MONTHLY_CHANGES, why: note, reasons: [
+        { code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: 'The current level is missing.' },
+        { code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', message: note },
+      ] }],
+      horizonLine: "This model doesn't yet say whether any option gets there within 9 months." });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
+    expect(c.shape!.detail.split(note)).toHaveLength(2);
+    expect(face(c).join('\n')).not.toContain(note);
+    expect(c.text).not.toContain(HORIZON_MARKER);
+    expect(c.text).not.toContain("This model doesn't yet say");
+    expect(c.text).not.toContain('%');
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  it('steady user attestation adds the verbatim Why line once in detail without a horizon disclaimer', () => {
+    const steady = { nodes: [{ ...graph.nodes[0]!, horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: graph.nodes[0]!.goal_horizon_months }] };
+    const chance = 'Starter tier: about 46% chance of meeting your goal, in this model.';
+    const why = goalHorizonSteadyWhyLine(steady)!;
+    const c = composeReplyShape({ faceContract: 'run', graph: steady, text: [chance, context, why].join('\n\n'),
+      chanceCells: [{ kind: 'figure', display: 'about 46%' }],
+      obligations: [{ role: 'evidence', text: chance, lead: true, subjects: ['starter'] }],
+      horizonLine: "This chance uses the model's numbers as they are today." });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect(c.shape!.headline).toBe(chance);
+    expect(c.shape!.detail.split(why)).toHaveLength(2);
+    expect(face(c).join('\n')).not.toContain(why);
+    expect(c.text).not.toContain(HORIZON_MARKER);
+    expect(c.text).not.toContain('This chance uses');
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
   });
 });

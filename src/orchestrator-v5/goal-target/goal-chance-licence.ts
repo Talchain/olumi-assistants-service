@@ -1,4 +1,4 @@
-import { horizonSteadyAttested } from './horizon-basis.js';
+import { goalHorizonVerdict } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -194,10 +194,13 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
  *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
  */
 function zeroSpreadReasons(
-  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown,
+  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
+  scenarioId: string | undefined,
 ): Record<string, GoalChanceZeroSpread> {
-  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
-  const rates = nodes.some((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation');
+  const verdict = goalHorizonVerdict(graph, envelope, scenarioId);
+  const rates = verdict === 'computed_at_h' || (verdict === 'no_horizon'
+    && isRec(graph) && Array.isArray(graph.nodes) && graph.nodes.some(n => isRec(n)
+      && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation'));
   const horizon = goal?.goal_horizon_months;
   const months = typeof horizon === 'number' && Number.isInteger(horizon) && horizon > 0 ? horizon : undefined;
   // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
@@ -205,7 +208,7 @@ function zeroSpreadReasons(
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
     const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
-    const line = !rates && months !== undefined ? zeroSpreadNoCarrierHorizonLine()
+    const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
       : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
     out[id] = { reason: 'zero_spread', side, line };
   }
@@ -221,10 +224,9 @@ export function displayedGoalPct(p: number): number {
  * only where the Run's own goal certainty earned it (`earned`; 0.63.0): the transport strips an unearned one, so a licence
  * over it would quote a figure the user is never shown. No certainty decision ⇒ unearned (fail closed).
  */
-/** The stored graph owns the temporal attestation, before Run removes any calculation carriers. */
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
-  sentThreshold?: SentGoalThreshold, scenarioId?: string, storedGraph: unknown = graph,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, scenarioId?: string,
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -324,7 +326,7 @@ export function goalChanceLicenceOf(
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
-    ...(horizonSteadyAttested(storedGraph, scenarioId) ? { horizon_basis: { basis: 'steady_attested' as const, source: 'user_stated' as const,
+    ...(goalHorizonVerdict(horizonGraph, envelope, scenarioId) === 'steady_attested' ? { horizon_basis: { basis: 'steady_attested' as const, source: 'user_stated' as const,
       months: goal!.horizon_basis_months as number, why: steadyHorizonWhy(String(goal!.label), goal!.horizon_basis_months as number) } } : {}),
     message: licensed.length === 0 ? '' : `Each option’s ${share === null ? 'chance of meeting your goal'
       : shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)} is licensed on this Run.`,
@@ -343,7 +345,7 @@ export function goalChanceLicenceOf(
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(Object.keys(zeroSpreadSide).length > 0
-      ? { withheld_reason_by_option: zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, graph) } : {}),
+      ? { withheld_reason_by_option: zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope, scenarioId) } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit,
@@ -582,9 +584,9 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
-  sentThreshold?: SentGoalThreshold, scenarioId?: string, storedGraph: unknown = graph,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, scenarioId?: string,
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, scenarioId, storedGraph);
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph, scenarioId);
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;

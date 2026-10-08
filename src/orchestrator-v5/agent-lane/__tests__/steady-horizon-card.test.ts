@@ -78,7 +78,8 @@ import { horizonSteadyAttested, steadyAttestationKey } from '../../goal-target/h
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
-import { withUntestedHorizonWarning, goalProjectedAtItsMonth } from '../decision-input-ask.js';
+import { withUntestedHorizonWarning } from '../decision-input-ask.js';
+import { accumulationTestedAtGoalHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { agentProposals, executableProposalId } from '../held-approval-offers.js';
 
 type Rec = Record<string, any>;
@@ -225,7 +226,7 @@ describe('steady horizon: one held card through the existing approved batch door
     delete goalOf(graph).horizon_basis;
     graph.nodes.push({ id: 'stock_at_9', kind: 'outcome', label: 'Stock at month 9', nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'churn', 'inflow'], horizon_months: 9, rate_scale: 0.01, stated_in_brief: true } });
     goalOf(graph).nonlinear_identity = { operation: 'product', factor_ids: ['price', 'stock_at_9'], stated_in_brief: true };
-    expect(goalProjectedAtItsMonth(graph)).toBe(true);
+    expect(accumulationTestedAtGoalHorizon(graph)).toBe(true);
     expect(offered(graph)).toBeNull();
   });
 
@@ -233,7 +234,7 @@ describe('steady horizon: one held card through the existing approved batch door
     const unconfirmed = seed();
     unconfirmed.nodes.push({ id: 'stock_at_9', kind: 'outcome', label: 'Stock at month 9', nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'churn', 'inflow'], horizon_months: 9, rate_scale: 0.01, stated_in_brief: true } });
     goalOf(unconfirmed).nonlinear_identity = { operation: 'product', factor_ids: ['price', 'stock_at_9'], stated_in_brief: false };
-    expect(goalProjectedAtItsMonth(unconfirmed)).toBe(false);
+    expect(accumulationTestedAtGoalHorizon(unconfirmed)).toBe(false);
     expect(offered(unconfirmed)).toBeNull();
     // CONTROL: the same seed without the carrier is offered.
     expect(offered(seed())).not.toBeNull();

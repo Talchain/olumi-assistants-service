@@ -1,4 +1,3 @@
-import { goalProjectedAtItsMonth } from './decision-input-ask.js';
 import { horizonSteadyAttested } from '../goal-target/horizon-basis.js';
 import { approvalChipIdFor } from './approval-chips.js';
 import { createProposal, type StructuredProposal } from './proposal.js';
@@ -21,7 +20,7 @@ export function steadyHorizonCard(input: {
   const months = goal.goal_horizon_months;
   if (typeof goal.id !== 'string' || typeof goal.label !== 'string'
     || typeof months !== 'number' || !Number.isInteger(months) || months <= 0
-    || horizonSteadyAttested(input.graph, input.scenarioId) || goalProjectedAtItsMonth(input.graph)) return null;
+    || horizonSteadyAttested(input.graph, input.scenarioId)) return null;
   // Never beside an accumulation carrier, confirmed or not: there the month is worked out, so confirming that reading is
   // the path (B1 before its Yes). Keying the offer on the Run's own horizon withhold follows a1's §(ad) withhold code.
   if (graph.nodes.some((n) => n !== null && typeof n === 'object'

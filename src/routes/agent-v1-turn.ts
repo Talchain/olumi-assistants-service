@@ -583,11 +583,11 @@ function userTextsForEgress(typed: readonly string[], knownRows?: RecentTextRows
 async function decisionLinesAskedOnce(
   graph: unknown, ctx: DecisionInputAskContext, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined,
 ): Promise<string[]> {
-  const lines = decisionInputLines(graph, { ...ctx, scenarioId });
+  const lines = decisionInputLines(graph, ctx);
   if (!lines.some(isDecisionInputAsk) || typeof store.readRecent !== 'function') return lines;
   try {
     const recentReplies = await recentAgentReplies(store, scenarioId, exceptTurnId);
-    return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies, scenarioId }) : lines;
+    return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies }) : lines;
   } catch (err) {
     log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
     return lines;
@@ -616,10 +616,10 @@ async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, e
 export { withholdDisclosureForCells as withholdDisclosureFor } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 
 /** Normalize only the exact horizon producer identities; the cells select their single replacement form. */
-function withCellHorizon(text: string, graph: unknown, cells: readonly CanonicalAnalysisCell[], scenarioId: string): string {
-  const line = untestedHorizonLineForCells(graph, cells, scenarioId);
-  const variants = [untestedHorizonLine(graph, { scenarioId }), untestedHorizonLine(graph, { besideChance: true, scenarioId }),
-    untestedHorizonLine(graph, { besideChance: true, plural: true, scenarioId }), untestedHorizonLineForCells(graph, [], scenarioId)];
+function withCellHorizon(text: string, graph: unknown, cells: readonly CanonicalAnalysisCell[]): string {
+  const line = untestedHorizonLineForCells(graph, cells);
+  const variants = [untestedHorizonLine(graph, { normalizationOnly: true }), untestedHorizonLine(graph, { besideChance: true, normalizationOnly: true }),
+    untestedHorizonLine(graph, { besideChance: true, plural: true, normalizationOnly: true }), untestedHorizonLineForCells(graph, [], true)];
   for (const variant of new Set(variants)) if (variant !== null && variant !== line) text = text.replaceAll(variant, line ?? '');
   // Narration and the host can each carry a different exact producer form. Once the cells unify them, keep ONE copy
   // in its first place; only this typed horizon identity is deduplicated, never arbitrary repeated reasoning.
@@ -696,7 +696,7 @@ export function withA7AsDetail(obligations: readonly FaceObligation[], a7: strin
 }
 
 async function a7SaidLastTurn(graph: unknown, cells: readonly CanonicalAnalysisCell[], store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string | null> {
-  const a7 = untestedHorizonLineForCells(graph, cells, scenarioId);
+  const a7 = untestedHorizonLineForCells(graph, cells);
   if (a7 === null) return null;
   try {
     const [latest] = await recentAgentReplies(store, scenarioId, exceptTurnId);
@@ -2357,7 +2357,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
           rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
-          replayText = withA7AfterGate(rebuilt, state.graph, { ...atRest, scenarioId }, null);
+          replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           const guidedReplayFinding = replayGuidedText !== null && replayText.includes(replayGuidedText) ? replayGuidedText : null;
           replayObligations = [
             ...(guidedReplayFinding === null ? [] : [{ role: 'host' as const, text: guidedReplayFinding,
@@ -2450,13 +2450,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayControlQuestions = replayActions
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
       const replayHorizon = replayObligations === undefined || !replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
-        ? null : untestedHorizonLineForCells(state.graph, replayChanceCells, scenarioId);
+        ? null : untestedHorizonLineForCells(state.graph, replayChanceCells);
       const replayWhatChanges = replayObligations === undefined
         || (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'complete_current'
         ? null : whatChangesFaceLine(state.analysisResult, state.graph);
-      const replayComposeText = withCellHorizon(withoutProposalIds(replayText), state.graph, replayChanceCells, scenarioId);
+      const replayComposeText = withCellHorizon(withoutProposalIds(replayText), state.graph, replayChanceCells);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
+        : composeReplyShape({ text: replayComposeText, scenarioId, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
           ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
@@ -4770,7 +4770,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
     if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
-      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, { ...decisionTurn, scenarioId }, statusText);
+      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
 
     }
@@ -4879,7 +4879,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
-      let reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells, scenarioId);
+      let reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
@@ -4908,7 +4908,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       reply = String(wireBody.assistant_text ?? '');
       const horizonLine = faceContract === 'run' && chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
-        ? untestedHorizonLineForCells(readbackGraph, chanceCells, scenarioId) : null;
+        ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;
       const whatChanges = faceContract === 'run' && selectedRunCurrent && (fastPath !== 'explain' || explainsCurrentRun)
         ? whatChangesFaceLine(analysisResult, readbackGraph ?? null) : null;
       // The gate's typed cause precedence: a different claim reason does not name the co-held links.
@@ -5000,6 +5000,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       const composedReply = composeReplyShape({
         text: reply,
+        scenarioId,
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
         ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),

@@ -1,5 +1,5 @@
-import { horizonSteadyAttested } from '../goal-target/horizon-basis.js';
 import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-model.js';
+import { chanceShownFor, type OptionChanceCell } from './chance-shown.js';
 /**
  * ⭐ OLUMI ASKS FOR THE DECISION INPUT IT LACKS (DL #75 5923918068: R3's dry run D1 "no ask for the minimum amount" + A7
  * "the deadline neither asked nor scored"; lease 5923944336).
@@ -14,7 +14,9 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
  */
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
-import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
+import { goalHorizonSteadyWhyLine } from '../goal-target/goal-horizon-detail.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
@@ -23,10 +25,8 @@ import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
-import { NodeV3 } from '../../schemas/cee-v3.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
-import { chanceShownFor, type OptionChanceCell } from './chance-shown.js';
 import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view.js';
 
 type Rec = Record<string, unknown>;
@@ -61,7 +61,6 @@ export function goalHasStatedTarget(goal: Rec, graph?: unknown): boolean {
 }
 
 export interface DecisionInputAskContext {
-  readonly scenarioId?: string;
   /**
    * The reply AS IT RESTS ON SCREEN without these lines (`textAtRest` of the composed text: the model's words, the owed
    * lines and the host status). Any ask there, the model's or the host's, is the turn's one ask (CODEX 5923981385).
@@ -152,7 +151,7 @@ const TOGGLE_LABEL_WORDS = 7;
 
 const withinMonths = (goal: Rec): string => {
   const m = goal.goal_horizon_months;
-  return finite(m) && m > 0 ? ` within ${m} ${m === 1 ? 'month' : 'months'}` : '';
+  return finite(m) && Number.isInteger(m) && m > 0 ? ` within ${m} ${m === 1 ? 'month' : 'months'}` : '';
 };
 
 /**
@@ -200,23 +199,6 @@ function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionC
   });
 }
 
-/**
- * The goal is projected AT its own month (graph-only twin of the Run's `accumulationTestedAtGoalHorizon`, so chat and
- * Run agree): the user's confirmed goal product binds a confirmed accumulation carrier whose horizon is the goal's
- * held month. Then nothing about the horizon is owed: the model does project over time, to that deadline.
- */
-export function goalProjectedAtItsMonth(graph: unknown): boolean {
-  const goal = goalOf(graph);
-  if (goal === undefined || !Number.isInteger(goal.goal_horizon_months)) return false;
-  const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
-  if (product?.operation !== 'product' || product.stated_in_brief !== true) return false;
-  const nodes = recordOf(graph)?.nodes;
-  return Array.isArray(nodes) && product.factor_ids.some((id) => {
-    const carrier = NodeV3.shape.nonlinear_identity.safeParse(nodes.map(recordOf).find((n) => n?.id === id)?.nonlinear_identity).data;
-    return carrier?.operation === 'accumulation' && carrier.stated_in_brief === true && carrier.horizon_months === goal.goal_horizon_months;
-  });
-}
-
 /** The exact singular/plural prefixes identify the one horizon fact without interpreting narrator wording. */
 export const UNTESTED_HORIZON_PREFIXES = [
   "This chance uses the model's numbers as they are today",
@@ -226,10 +208,12 @@ export const CHANCE_FREE_HORIZON_PREFIX = "This model doesn't yet say whether an
 const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 
 /** One horizon form for the reply and stored Run, from the same cells the UI reads. */
-export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[], scenarioId?: string): string | null {
-  if (horizonSteadyAttested(graph, scenarioId) || goalProjectedAtItsMonth(graph)) return null;
+export function untestedHorizonLineForCells(
+  graph: unknown, cells: readonly CanonicalAnalysisCell[], normalizationOnly = false,
+): string | null {
+  if (!normalizationOnly && goalHorizonVerdict(graph) !== 'no_horizon') return null;
   const shown = cells.filter(cell => cell.kind === 'figure' || cell.kind === 'range').length;
-  if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1, scenarioId });
+  if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1 });
   if (goalKindOf(graph) === 'share_by_date') return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
@@ -253,8 +237,9 @@ export function statedTargetWords(graph: unknown): string | null {
  * function supplies byte-stable identities for formatting and old-copy normalization; the cell rule above owns
  * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
  */
-export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean; scenarioId?: string }): string | null {
-  if (horizonSteadyAttested(graph, opts?.scenarioId) || goalKindOf(graph) === 'share_by_date' || goalProjectedAtItsMonth(graph)) return null;
+export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean; normalizationOnly?: boolean }): string | null {
+  if (goalKindOf(graph) === 'share_by_date' || (!opts?.normalizationOnly
+    && goalHorizonVerdict(graph) === 'computed_at_h')) return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
@@ -275,8 +260,8 @@ export const GOAL_CHANCE_RANGE_HORIZON_CONFLICT = 'GOAL_CHANCE_RANGE_HORIZON_CON
 
 /**
  * Write the horizon as one typed Run fact after the final current cells are projected. A point/range cell supplies
- * the chance form; otherwise held months supply staging's chance-free form. No figure or licence is inferred here.
- * A withdrawn accumulation retains that sentence even with no deadline or a duration limit.
+ * the legacy no-H chance form; positive H never receives the retired qualifier. No figure or licence is inferred here.
+ * User-attested steady chances carry Science's Why line through a distinct typed info record.
  */
 export function withUntestedHorizonWarning<E>(
   envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] | boolean = [], accumulationWithdrawn = false, scenarioId?: string,
@@ -296,27 +281,6 @@ export function withShortHorizonBesideChance<E>(
   return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn, scenarioId);
 }
 
-/** A horizon is tested only along the selected goal's Run-attested identity dependencies. */
-function accumulationTestedAtGoalHorizon(graph: unknown, envelope: Rec): boolean {
-  const goal = goalOf(graph);
-  const rawNodes = recordOf(graph)?.nodes;
-  if (goal === undefined || !finite(goal.goal_horizon_months) || !Array.isArray(rawNodes)) return false;
-  const nodes = rawNodes.map(recordOf).filter((node): node is Rec => node !== undefined);
-  const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
-  // This reader binds accumulation attestations to their declared month and positional inputs.
-  const evaluated = evaluatedIdentityCarriers(nodes, evaluations);
-  const byId = new Map(nodes.map(node => [node.id, node] as const));
-  const seen = new Set<unknown>();
-  const tested = (id: unknown): boolean => {
-    if (seen.has(id) || !evaluated.has(id)) return false;
-    seen.add(id);
-    const identity = recordOf(byId.get(id)?.nonlinear_identity);
-    if (identity?.operation === 'accumulation') return identity.horizon_months === goal.goal_horizon_months;
-    return Array.isArray(identity?.factor_ids) && identity.factor_ids.some(tested);
-  };
-  return tested(goal.id);
-}
-
 /** Replace any intermediate wording with the final cell form; the warning and licence stay in agreement. */
 function withCellHorizonWarning<E>(
   envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[], accumulationWithdrawn: boolean, scenarioId?: string,
@@ -325,13 +289,22 @@ function withCellHorizonWarning<E>(
   const env = envelope as Rec;
   const warnings: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
   const goal = goalOf(graph);
-  const line = horizonSteadyAttested(graph, scenarioId) || (!accumulationWithdrawn && accumulationTestedAtGoalHorizon(graph, env)) ? null
-    : untestedHorizonLineForCells(graph, cells, scenarioId) ?? (accumulationWithdrawn && goal !== undefined
+  const verdict = goalHorizonVerdict(graph, env, scenarioId);
+  const line = verdict !== 'no_horizon' ? null
+    : untestedHorizonLineForCells(graph, cells) ?? (accumulationWithdrawn && goal !== undefined
       ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const hasRange = cells.some(cell => cell.kind === 'range');
+  const steadyLine = verdict === 'steady_attested' && hasChance ? goalHorizonSteadyWhyLine(graph) : null;
   let changed = false;
   let wroteHorizon = false;
+  let wroteSteady = false;
+  const horizonWithheld = verdict === 'withhold'
+    && warnings.some(w => recordOf(w)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+  const withoutQualifier = (warning: Rec): Rec => {
+    const { horizon_line: _line, horizon_untested: _untested, ...kept } = warning;
+    return kept;
+  };
   const next = warnings.flatMap(w => {
     const r = recordOf(w);
     // Removing or normalizing the global qualifier must not repair a range the original cells refused to admit.
@@ -339,10 +312,25 @@ function withCellHorizonWarning<E>(
       && warnings.some(prior => recordOf(prior)?.code === GOAL_HORIZON_NOT_TESTED
         && recordOf(prior)?.message !== r.horizon_line)) {
       changed = true;
-      return [{ ...r, code: GOAL_CHANCE_RANGE_HORIZON_CONFLICT, original_code: GOAL_CHANCE_RANGE,
+      const diagnostic = { ...r, code: GOAL_CHANCE_RANGE_HORIZON_CONFLICT, original_code: GOAL_CHANCE_RANGE,
         ...(r.message === undefined ? {} : { original_message: r.message }),
         message: 'Range not shown: its recorded horizon qualifiers conflict.',
-      }];
+      };
+      return [horizonWithheld ? withoutQualifier(diagnostic) : diagnostic];
+    }
+    // The typed horizon withhold bars the range independently. Retire only its old qualifier metadata, retaining
+    // every refusal/conflict code and range payload; other barred ranges and no-H normalization stay untouched.
+    if (horizonWithheld && (r?.code === GOAL_CHANCE_RANGE || r?.code === GOAL_CHANCE_RANGE_HORIZON_CONFLICT)
+      && (r.horizon_line !== undefined || r.horizon_untested !== undefined)) {
+      changed = true;
+      return [withoutQualifier(r)];
+    }
+    if (r?.code === GOAL_HORIZON_STEADY_ATTESTED) {
+      if (steadyLine === null || wroteSteady) { changed = true; return []; }
+      wroteSteady = true;
+      if (r.message === steadyLine) return [w];
+      changed = true;
+      return [{ ...r, message: steadyLine }];
     }
     if (r?.code === GOAL_HORIZON_NOT_TESTED) {
       if (line === null || wroteHorizon) { changed = true; return []; }
@@ -371,6 +359,12 @@ function withCellHorizonWarning<E>(
     const goalId = goalOf(graph)?.id;
     next.push({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: line,
       ...(typeof goalId === 'string' ? { node_ids: [goalId] } : {}),
+    });
+    changed = true;
+  }
+  if (steadyLine !== null && !wroteSteady) {
+    next.push({ code: GOAL_HORIZON_STEADY_ATTESTED, severity: 'info', message: steadyLine,
+      ...(typeof goal?.id === 'string' ? { node_ids: [goal.id] } : {}),
     });
     changed = true;
   }
@@ -406,7 +400,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
   const leftOut = leftOutLines(graph, label, ctx.chanceCells ?? []);
-  const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? [], ctx.scenarioId);
+  const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
   const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
@@ -450,7 +444,7 @@ export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): 
 export function withA7AfterGate(
   text: string,
   graph: unknown,
-  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan' | 'chanceCells' | 'scenarioId'>,
+  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan' | 'chanceCells'>,
   statusText: string | null,
 ): string {
   // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.
