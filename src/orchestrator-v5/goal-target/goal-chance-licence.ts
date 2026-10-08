@@ -60,6 +60,8 @@ export interface SentGoalThreshold {
 // Science B19 ruling (3), 7 Oct: the "(see its downside)" variant is RETIRED; the note always uses the short words, and the
 // goal-relative shortfall line (B19) follows it.
 export const SPREAD_NOTE_WITHOUT_DOWNSIDE = 'Its typical result falls short of your target: this chance comes from its wider spread, which also means it could fall further short.';
+/** The retired #2775 wording a Run saved before #2786 still carries; read as the short words, never said (Codex r4 on #2783). */
+const SPREAD_NOTE_RETIRED = 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 export interface GoalChanceLicence {
@@ -527,7 +529,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
     && notes !== undefined && Object.keys(notes).length > 0
     && Object.entries(notes).every(([id, note]) => optionIds.includes(id) && !withheld?.includes(id)
       && isRec(r.pct_by_option) && finite(r.pct_by_option[id])
-      && note === SPREAD_NOTE_WITHOUT_DOWNSIDE);
+      && (note === SPREAD_NOTE_WITHOUT_DOWNSIDE || note === SPREAD_NOTE_RETIRED));
   return {
     form,
     option_ids: optionIds,
@@ -538,7 +540,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
       ...(typeof sent.baseline === 'number' ? { baseline: sent.baseline } : {}),
       ...(typeof sent.status_quo_option_id === 'string' ? { status_quo_option_id: sent.status_quo_option_id } : {}),
     } satisfies SentGoalThreshold } : {}),
-    ...(validSpread ? { spread_note_by_option: notes as Record<string, string> } : {}),
+    ...(validSpread ? { spread_note_by_option: Object.fromEntries(Object.keys(notes!).map((id) => [id, SPREAD_NOTE_WITHOUT_DOWNSIDE])) } : {}),
     ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),

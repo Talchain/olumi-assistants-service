@@ -54,9 +54,9 @@ describe('the registry: ONE dispatch table, total', () => {
   it('every action has its handler (tsc enforces the Record; this row pins the names)', () => {
     expect(Object.keys(HANDLERS).sort()).toEqual([...ACTION_IDS].sort());
   });
-  it('slices 1 + 2a + 2b are exactly the twelve typed actions', () => {
-    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates']);
-    for (const held of ['set_target', 'outside_view', 'trade_offs', 'bias_check', 'anchoring']) {
+  it('slices 1 + 2a + 2b + 3 are exactly the thirteen typed actions', () => {
+    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates', 'bias_check']);
+    for (const held of ['set_target', 'outside_view', 'trade_offs', 'anchoring']) {
       expect((ACTION_IDS as readonly string[]).includes(held), held).toBe(false);
     }
   });
@@ -67,7 +67,7 @@ describe('the registry: ONE dispatch table, total', () => {
     }));
     expect(fixed).toEqual({ review: 'agent-next-review-decision', what_changes: 'agent-next-what-would-change', strengthen: 'agent-next-strengthen',
       pre_mortem: 'agent-next-pre-mortem', more_options: 'agent-next-widen',
-      frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id, bias_anchoring: 'act:bias_anchoring', check_estimates: 'act:check_estimates' });
+      frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id, bias_anchoring: 'act:bias_anchoring', check_estimates: 'act:check_estimates', bias_check: 'act:bias_check' });
     for (const [id, press] of Object.entries(fixed)) expect(actionOfPress(press, ACTION_REGISTRY[id as keyof typeof ACTION_REGISTRY].user_line)).toBe(id);
     // SR-5: WIDEN's risks chip id is shared with the pre-mortem worksheet's "Add this as a risk" (its own message), which
     // must stay an ordinary Agent turn: the id alone is never More risks.
@@ -567,5 +567,46 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
     expect(decidePress({ id: 'act:bias_anchoring', parameters: { offer_key: '0123456789abcdef' } }, empty)).toMatchObject({ kind: 'reply', reply: {
       text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [],
     } });
+  });
+});
+
+describe('P45 slice 3: Bias check is a standing typed model check', () => {
+  it('Bias check is enabled only in more on each readable captured state, never priority or standard', () => {
+    for (const read of [preRun(D1.graph), ran(D1.graph, WITHHELD), ran(D3.graph, { permitted: true, separation: 'separated' })]) {
+      const b = bar(read);
+      expect(b.more.find(o => o.action_id === 'bias_check')).toMatchObject({
+        label: 'Bias check', icon: 'ScanSearch', group: 'method', press_id: 'act:bias_check', enabled: true,
+        user_line: 'Where could a common reasoning pattern bite in this model?',
+        why_now: 'See where common reasoning patterns could bite in this model.',
+      });
+      expect(ids(b.priority)).not.toContain('bias_check');
+      expect(ids(b.standard)).not.toContain('bias_check');
+      expect(b.more.at(-1)?.action_id, 'the lowest tier is appended last').toBe('bias_check');
+    }
+    expect(ids(offers(bar({ scenarioId: SCENARIO, graph: null })))).not.toContain('bias_check');
+  });
+  it('act:bias_check with fired patterns is a typed reply with a ran outcome and no science receipt field', () => {
+    const facts = actionFactsOf(ran(estimateGraph(), WITHHELD));
+    const b = actionBarOf(facts);
+    expect(b.bias_risk?.items.length, 'precondition: the model has a fired pattern').toBeGreaterThan(0);
+    const d = decidePress({ id: 'act:bias_check' }, facts, b);
+    expect(d).toMatchObject({ kind: 'reply', press: { action: 'bias_check' }, reply: { outcome: 'ran' } });
+    if (d.kind !== 'reply') return;
+    expect(d.reply.text).toMatch(/^Checked: Narrow framing, Anchoring\./);
+    expect(d.reply.science).toBeUndefined();
+    expect(actionReceiptOf(d.press, facts.revision, d.reply.outcome!, undefined, d.reply.science))
+      .toMatchObject({ action_id: 'bias_check', outcome: 'ran' });
+    expect(d.reply.text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);
+  });
+  it('act:bias_check with nothing checkable (no goal, no Run) is a typed ran reply that says so, never "none fire"', () => {
+    const facts = actionFactsOf(preRun({ nodes: [], edges: [] }));
+    const b = actionBarOf(facts);
+    expect(b.bias_risk, 'precondition: no trigger fires').toBeUndefined();
+    expect(decidePress({ id: 'act:bias_check' }, facts, b)).toMatchObject({
+      kind: 'reply', press: { action: 'bias_check' }, reply: {
+        outcome: 'ran', exits: [],
+        text: 'Not checked yet: Narrow framing, because the model needs a goal first.\nNot checked yet: Anchoring, because it needs a current analysis first.',
+      },
+    });
   });
 });

@@ -100,7 +100,10 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     const b = await press(await runThenExplainPayload());
     expect(b._diagnostic_trace.fast_path).toBe('explain');
     for (const line of SCREEN) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
-    expect(b.assistant_text.indexOf(LEAD)).toBeLessThan(b.assistant_text.indexOf(SCREEN[0]!));
+    // B15 (#2783, DL): the lead-in opens the headline, directly followed by the first screen chance finding.
+    expect(b.assistant_text.startsWith(`${LEAD}\n${SCREEN[0]!}`), b.assistant_text).toBe(true);
+    expect(count(b.assistant_text, LEAD)).toBe(1);
+    expect(b.assistant_text.trimEnd().endsWith(':'), 'never ends on a colon').toBe(false);
   });
 
   it('a narrator that gives each figure in its own words gets nothing added (never two wordings)', async () => {
