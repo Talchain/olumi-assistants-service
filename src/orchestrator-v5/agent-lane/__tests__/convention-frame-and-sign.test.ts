@@ -15,10 +15,10 @@
 import { describe, it, expect } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema } from '../runtime/build-model.js';
-import { rescueConventionFrames } from '../convention-frame.js';
+import { basisStatesOpposite, rescueConventionFrames } from '../convention-frame.js';
 
 type Factor = { label: string; unit: string; level: number | null; max: number; known?: boolean; provenance?: string };
-type Link = { from: string; to: string; direction: 'positive' | 'negative'; amount: number | null; per?: number | null; prov?: string | null };
+type Link = { from: string; to: string; direction: 'positive' | 'negative'; amount: number | null; per?: number | null; prov?: string | null; basis?: string | null };
 
 const GOAL = { metric: 'Monthly recurring revenue', operator: '>=', value: 120000, unit: '£/month', horizon_months: 12, provenance: 'explicit' };
 
@@ -38,6 +38,8 @@ function candidate(factors: Factor[], links: Link[], options?: unknown[], constr
       from: l.from, to: l.to, direction: l.direction, provenance: 'ai_proposed',
       effect_amount: l.amount, effect_per_source_change: l.amount === null ? null : (l.per ?? 1),
       effect_provenance: l.amount === null ? null : (l.prov ?? 'ai_proposed'), definitional: null,
+      // An Olumi size carries a neutral one-line basis unless the row says otherwise (Science §(p)(1)).
+      basis: l.basis !== undefined ? l.basis : l.amount !== null && (l.prov ?? 'ai_proposed') !== 'explicit' ? 'from the brief\'s own figures' : null,
     })),
   } as unknown as CandidateModel;
 }
@@ -254,6 +256,32 @@ describe('NO HARM: a convention frame that would break a link representable toda
   });
 });
 
+describe('#2842 follow-up: a rescue needs its basis; a rescued factor says so on its record', () => {
+  it('Science condition 3: a size with NO basis is never rescued (the drafter\'s range stays, the size stays set aside)', () => {
+    const a = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, basis: null }]));
+    expect(frameOf(a, 'Monthly churn')).toBe(100);
+    expect(edgeOf(a, 'Monthly churn', 'Pro paying subscribers').provenance?.magnitude).not.toBe('olumi_estimate');
+  });
+
+  it('a rescued factor carries `frame_source: olumi_convention`; a byte-identical one carries nothing new', () => {
+    const r = admit(candidate([CHURN(3), SUBS(1300, 2000)], [CHURN_TO_SUBS]));
+    expect(nodeOf(r, 'Monthly churn').observed_state).toMatchObject({ frame_source: 'olumi_convention', cap: 13 });
+    expect(JSON.stringify(nodeOf(r, 'Pro paying subscribers'))).not.toContain('frame_source');
+    const n = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, amount: -10 }]));
+    expect(JSON.stringify(n.nodes)).not.toContain('frame_source');
+  });
+});
+
+describe('a drafter unit can be any string: the convention never reads a pathological one', () => {
+  it('a 20,000-space unit or label is excluded in well under a second (the estate currency reader is super-linear on it)', () => {
+    const ws = ' '.repeat(20000);
+    const t0 = performance.now();
+    const a = admit(candidate([{ label: 'Pro plan price', unit: `£${ws}/${ws}month`, level: 49, max: 200 }, CHURN(5, 15)], [PRICE_TO_CHURN]));
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(frameOf(a, 'Pro plan price')).toBe(200);
+  });
+});
+
 describe('#2842 review round 2: the rescue reads what admission reads', () => {
   it('#1: a stated RANGE on an option setting counts by its ends (50–500 customers → the rescue frame covers 500)', () => {
     const cust: Factor = { label: 'Existing customers', unit: 'customers', level: 100, max: 1000 };
@@ -334,11 +362,42 @@ describe('§(u)(b) an OLUMI-drafted size takes its sign from the drawn direction
     expect(edgeOf(agree, 'Monthly churn', 'Pro paying subscribers').provenance?.magnitude).toBe('user_stated');
   });
 
-  it('TRIPWIRE for Science\'s basis guard: the drafter link has NO basis text today; when one is added, the guard must be too', () => {
-    const schema = buildCandidateSchema() as { properties: { links: { items: { properties: Record<string, unknown> } } } };
-    const fields = Object.keys(schema.properties.links.items.properties);
-    expect(fields.filter((k) => /basis|reason|why|rationale|justif/i.test(k)),
-      'a basis field now exists: add §(u)(b)\'s guard (a basis stating the opposite direction is set aside, never resolved)').toEqual([]);
+  it('Science §(p)(1): the drafter LINK schema asks for a one-line `basis` (required once sent)', () => {
+    const schema = buildCandidateSchema() as { properties: { links: { items: { properties: Record<string, unknown>; required: string[] } } } };
+    expect(Object.keys(schema.properties.links.items.properties)).toContain('basis');
+  });
+
+  it('Science §(u)(b) guard: a basis STATING the opposite direction is not resolved — it stays set aside as today', () => {
+    const a = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'negative', amount: 3, basis: 'Higher churn adds subscribers each month' }]));
+    const e = edgeOf(a, 'Monthly churn', 'Pro paying subscribers');
+    expect(e.provenance?.magnitude).not.toBe('olumi_estimate');
+    expect(lossText(a)).not.toMatch(/effect_amount :: Olumi's drafted size/);
+    // CONTROL: a basis that agrees with the drawn direction is resolved as before.
+    const b = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'negative', amount: 3, basis: 'More churn removes paying subscribers' }]));
+    expect(edgeOf(b, 'Monthly churn', 'Pro paying subscribers').provenance?.natural_effect?.amount).toBe(-3);
+  });
+
+  it('the guard\'s corpus: unambiguous opposite statements fire; mixed, verb-less, negated or agreeing ones never do', () => {
+    const fires: [string, 'positive' | 'negative'][] = [
+      ['Higher churn adds subscribers each month', 'negative'], ['A price rise raises new sign-ups', 'negative'],
+      ['Each point of churn increased paying customers', 'negative'], ['Churn lifts the customer count', 'negative'],
+      ['More support load reduces retention', 'positive'], ['A bigger team lowers delivery capacity', 'positive'],
+      ['Extra hires cut throughput', 'positive'], ['Discounts erode margin', 'positive'],
+    ];
+    const silent: [string, 'positive' | 'negative'][] = [
+      ['Raising the price reduces new sign-ups', 'negative'], ['Cutting the price raises demand', 'negative'],
+      ['Churn and subscribers move together', 'negative'], ['A price rise does not add subscribers', 'negative'],
+      ['More churn removes paying subscribers', 'negative'], ['A price rise lifts churn', 'positive'], ['', 'negative'],
+    ];
+    for (const [b, d] of fires) expect(basisStatesOpposite(b, d), b).toBe(true);
+    for (const [b, d] of silent) expect(basisStatesOpposite(b, d), b).toBe(false);
+  });
+
+  it('Science §(p)(1) carrier: an Olumi estimate keeps its basis on the edge; a user\'s size and a placeholder never get one', () => {
+    const a = admit(candidate([PRICE(49), CHURN(5, 15)], [{ ...PRICE_TO_CHURN, amount: 0.05, basis: 'a higher price pushes more customers to cancel' }]));
+    expect((edgeOf(a, 'Pro plan price', 'Monthly churn').provenance as { basis?: string }).basis).toBe('a higher price pushes more customers to cancel');
+    const p = admit(candidate([PRICE(49), CHURN(5, 15)], [{ ...PRICE_TO_CHURN, amount: null }]));
+    expect((edgeOf(p, 'Pro plan price', 'Monthly churn').provenance as { basis?: string }).basis).toBeUndefined();
   });
 });
 

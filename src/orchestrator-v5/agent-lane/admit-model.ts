@@ -57,7 +57,7 @@ import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, 
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames } from './convention-frame.js';
+import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames, basisStatesOpposite, carriesBasis } from './convention-frame.js';
 import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
@@ -3277,6 +3277,8 @@ function admitOnce(
     && (l.direction === 'positive' || l.direction === 'negative')
     // #2842 review r2 #7 (Science §(v)(2)): a flow → stock size is never rescued, whichever end would move.
     && !(isFlowUnit(unitOfLabel(l.from)) && !isFlowUnit(unitOfLabel(l.to)))
+    // Science's condition 3 for a rescue: the size carries its §(p) basis, and the basis does not state the opposite sign.
+    && carriesBasis(l.basis, l.direction)
     ? [{ from: l.from, to: l.to, amount: l.effect_amount, per: l.effect_per_source_change }] : []));
   // Today's frame of a link end: a factor's drafted range, or an outcome's or risk's (the goal's is not known here, so a
   // link into it can be rescued only by narrowing its source).
@@ -3656,6 +3658,12 @@ function admitOnce(
       provenance: displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
+  }
+
+  // #2842 follow-up: a factor framed by Olumi's rescue convention says so on its own record, so a surface can disclose it.
+  for (const cf of conventionFrames) {
+    const node = nodes.find((n) => n.id === ids.get(cf.label)) as { observed_state?: Record<string, unknown> } | undefined;
+    if (node?.observed_state !== undefined) node.observed_state = { ...node.observed_state, frame_source: 'olumi_convention' };
   }
 
   // The scope choice, recorded with both readings: its `after` IS the assumption the build says, and
@@ -4232,7 +4240,9 @@ function admitOnce(
     // ⚠ Science's guard "a basis that states the opposite direction is set aside, not resolved" has no carrier yet: the
     // drafter link has no basis text (rowed as a tripwire in convention-frame-and-sign.test.ts).
     const userClaimed = user_stated || signRefusedLinks.has(l) || l.provenance_source === 'user_specified'
-      || (l.effect_provenance ?? l.provenance) === 'explicit';
+      || (l.effect_provenance ?? l.provenance) === 'explicit'
+      // Science §(u)(b): a basis STATING the opposite direction is not resolved; it stays set aside as today.
+      || basisStatesOpposite(l.basis, l.direction);
     const signed = olumiSignedSize(l, userClaimed);
     if (signed.resolved) {
       loss.push({

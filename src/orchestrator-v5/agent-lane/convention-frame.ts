@@ -67,8 +67,15 @@ export type ConventionClass = 'bounded_rate' | 'non_negative_level';
 const NON_NEGATIVE_MONEY = /\b(price|prices|cost|costs|fee|fees|spend|spending|salary|salaries|wage|wages|pay|payroll|budget|rent|revenue|sales|mrr|arr|subscription|charge|charges|tariff|expense|expenses|bill|invoice)\b/i;
 
 /** Which convention applies to this factor, or `undefined` (excluded: the drafter's range stays). */
+/**
+ * ⛔ A unit or label longer than any real one is never read (fail closed). The estate's currency reader
+ * (`readCurrencyUnitWithQualifiers`) is super-linear on long whitespace runs (measured: 1,000 → 0.46 s, 4,000 → 19 s).
+ */
+export const MAX_READ_LENGTH = 80;
+
 export function conventionClassOf(label: string, unit: string | null | undefined, level: number | null | undefined): ConventionClass | undefined {
   if (typeof unit !== 'string' || unit.trim() === '' || !finite(level) || !(level > 0)) return undefined;
+  if (unit.length > MAX_READ_LENGTH || label.length > 4 * MAX_READ_LENGTH) return undefined;
   if (SIGNED_OR_UNBOUNDED.test(label) || SIGNED_OR_UNBOUNDED.test(unit)) return undefined;
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percent') return level <= 100 && BOUNDED_RATE.test(label) ? 'bounded_rate' : undefined;
@@ -124,6 +131,7 @@ export const estimatedSpreadUpper = (level: number): number => level * 1.5;
  */
 export function briefWritesFigure(brief: string | undefined, value: number, cls?: ConventionClass, unit?: string | null): boolean {
   if (typeof brief !== 'string' || !finite(value)) return false;
+  if (typeof unit === 'string' && unit.length > MAX_READ_LENGTH) return false;
   const kind = cls === 'bounded_rate' ? 'percent'
     : cls === 'non_negative_level' && typeof unit === 'string' && (readCurrencyUnitWithQualifiers(unit).kind === 'currency' || isMoneyPerUnit(unit)) ? 'currency'
       : cls === 'non_negative_level' ? 'plain' : undefined;
@@ -228,3 +236,24 @@ export function rescueConventionFrames(
   }
   return { applied: [...applied], rescued };
 }
+
+/** Effect verbs, by the direction they state (a closed list: Science §(u)(b) "raises" vs an authored decrease). */
+const RAISES = /\b(raise[sd]?|raising|increase[sd]?|increasing|add[sd]?|adding|lift(?:s|ed|ing)?|boost(?:s|ed|ing)?|grow(?:s|n|ing)?|grew|push(?:es|ed|ing)? up|drive[sd]? up|driving up)\b/i;
+const LOWERS = /\b(lower(?:s|ed|ing)?|reduce[sd]?|reducing|cut(?:s|ting)?|remove[sd]?|removing|decrease[sd]?|decreasing|lose[sd]?|losing|lost|drop(?:s|ped|ping)?|shrink(?:s|ing)?|shrank|erode[sd]?|eroding|push(?:es|ed|ing)? down|drive[sd]? down|driving down)\b/i;
+const NEGATION = /\b(not|never|no|n't|without)\b|n't\b/i;
+
+/**
+ * ⭐ SCIENCE §(u)(b) GUARD: the drafter's own basis STATES the opposite direction to the link it drew ("adds subscribers"
+ * on a link drawn as negative). Only an unambiguous statement counts: effect verbs of ONE direction and no negation.
+ * Verbs of both directions ("raising the price reduces demand") or none say nothing about the sign. Pure.
+ */
+export function basisStatesOpposite(basis: string | null | undefined, direction: string): boolean {
+  if (typeof basis !== 'string' || basis.trim() === '' || NEGATION.test(basis)) return false;
+  const up = RAISES.test(basis); const down = LOWERS.test(basis);
+  if (up === down) return false;
+  return (direction === 'negative' && up) || (direction === 'positive' && down);
+}
+
+/** A basis Olumi can carry (Science §(u) condition 3 for a rescue): a non-empty line not stating the opposite direction. */
+export const carriesBasis = (basis: string | null | undefined, direction: string): boolean =>
+  typeof basis === 'string' && basis.trim() !== '' && !basisStatesOpposite(basis, direction);
