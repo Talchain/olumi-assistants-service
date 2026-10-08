@@ -35,7 +35,7 @@ import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import {
-  displayedPctAt, displayRoundingFor, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
+  displayedPctAt, displayRoundingFor, goalChanceDisplayClass, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
   type GoalChanceDisplayRounding, type GoalChanceDriver, type GoalChanceNoDriverReason, type GoalChancePrecision,
 } from './goal-chance-driver.js';
 
@@ -151,7 +151,6 @@ export function goalChanceLicenceOf(
   const recordOf = new Map<string, Rec>();
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
-  const exactExtreme = new Map<string, 'less_than_1' | 'more_than_99'>();
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
@@ -160,7 +159,6 @@ export function goalChanceLicenceOf(
     option_ids.push(id);
     const shareGate = share !== null && share.goal.id === goalId ? shareGateForOption(graph, id) : undefined;
     if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
-    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined) exactExtreme.set(id, shareGate.exact_extreme);
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) { withheld.push(id); continue; }
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
@@ -172,8 +170,7 @@ export function goalChanceLicenceOf(
       precisionOf.set(id, precision);
       rounding[id] = displayRoundingFor(precisionHalfWidthPoints(precision));
     }
-    pct[id] = exactExtreme.get(id) === 'less_than_1' ? 0 : exactExtreme.get(id) === 'more_than_99' ? 100
-      : displayedPctAt(p, rounding[id] ?? 'whole');
+    pct[id] = displayedPctAt(p, rounding[id] ?? 'whole');
   }
   if (option_ids.length < 2 || licensed.length === 0) return null;
 
@@ -207,7 +204,6 @@ export function goalChanceLicenceOf(
   const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
   if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
     for (const id of licensed) {
-      if (exactExtreme.has(id)) continue; // At the ruled extreme its drivers are moot.
       const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
       if ('driver' in claim) drivers[id] = claim.driver;
       else noDrivers[id] = claim.no_driver;
@@ -425,6 +421,17 @@ export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<str
     if (step === 'nearest_5' && typeof shown === 'number' && Number.isInteger(shown) && shown >= 0 && shown <= 100) out.set(id, shown / 100);
   }
   return out;
+}
+
+/** Both Agent doors refuse a raw point whose class contradicts its licensed display (including retained r3 Runs).
+ * A licensed nearest-5 replacement is checked as displayed, preserving the card's deliberate coarse rounding.
+ */
+export function goalChancePointForAgent(p: number, display: string | undefined, nearestFive?: number): number | undefined {
+  if (!Number.isFinite(p) || p < 0 || p > 1) return undefined;
+  const projected = nearestFive ?? p;
+  if (display === undefined) return projected; // legacy permission remains the caller's existing rule
+  const expectedClass = display === 'less than 1%' ? 'less_than_1' : display === 'more than 99%' ? 'more_than_99' : 'interior';
+  return goalChanceDisplayClass(projected) === expectedClass ? projected : undefined;
 }
 
 /** Screen copy (goalChanceCopy.ts): the licence's displayed percentage, including its non-certainty edge words. */

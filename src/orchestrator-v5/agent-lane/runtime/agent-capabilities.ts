@@ -204,7 +204,7 @@ import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
-import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -1661,12 +1661,14 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     const chancePermitted = legacyRun
       ? current && goalChance === undefined && permissions.leader_may_be_named === true
       : goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
+    const projectedChance = chancePermitted && typeof row?.probability_of_goal === 'number'
+      ? goalChancePointForAgent(row.probability_of_goal, goalChanceDisplay?.[id], shownChance.get(id)) : undefined;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
-      ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
-        ? { probability_of_goal: shownChance.get(id) ?? row.probability_of_goal } : {}),
+      ...(projectedChance !== undefined && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
+        ? { probability_of_goal: projectedChance } : {}),
       ...(decision !== undefined && !Object.hasOwn(goalFacts.goal_chance_range_display ?? {}, id) ? { goal_certainty: decision } : {}),
     }];
   }) : [];

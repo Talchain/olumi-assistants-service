@@ -1,6 +1,7 @@
 /** S2a: the stated quantity is uniform; derived share is never silently uniform.
  * Fractions throughout. Independent team time/pace and lead time; no sampling.
  */
+import { goalChanceDisplayClass } from './goal-chance-display.js';
 export interface Moments { readonly mean: number; readonly sd: number }
 export interface TeamShare {
   readonly quantity: 'months_to_finish' | 'share_per_month';
@@ -110,20 +111,14 @@ export function normalChance(parts: ShareParts, threshold: number): number {
   return sd === 0 ? (mean >= threshold ? 1 : 0) : normalTail((threshold - mean) / sd);
 }
 
-export type ShareGate = { readonly form: 'point'; readonly error_points: number; readonly exact_extreme?: 'less_than_1' | 'more_than_99' }
+export type ShareGate = { readonly form: 'point'; readonly error_points: number }
   | { readonly form: 'range'; readonly low: number; readonly high: number; readonly error_points: number };
 export const SHARE_GATE_MAX_ERROR_POINTS = 2;
 export function gate(parts: ShareParts, threshold: number): ShareGate {
   const normal = normalChance(parts, threshold), exact = exactChance(parts, threshold);
   const error = Math.abs(normal - exact) * 100;
-  const displayClass = (p: number): 'less_than_1' | 'interior' | 'more_than_99' =>
-    p < 0.01 ? 'less_than_1' : p > 0.99 ? 'more_than_99' : 'interior';
-  if (error <= SHARE_GATE_MAX_ERROR_POINTS) {
-    const exactClass = displayClass(exact);
-    if (displayClass(normal) !== exactClass && exactClass !== 'interior') {
-      return { form: 'point', error_points: error, exact_extreme: exactClass };
-    }
-    if (displayClass(normal) === exactClass) return { form: 'point', error_points: error };
+  if (error <= SHARE_GATE_MAX_ERROR_POINTS && goalChanceDisplayClass(normal) === goalChanceDisplayClass(exact)) {
+    return { form: 'point', error_points: error };
   }
   const t = parts.team;
   const at = (v: number): number => exactChance({ ...parts, team: { ...t, low: v, high: v } }, threshold);

@@ -9,18 +9,29 @@ type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** Brief-owned event/deadline scope; drafter flags never attest it. Bounded linear scans. */
-export const EVENT_WORDS = /\b(?:launch(?:ed|ing)?|deliver(?:ed|y|ing)?|ship(?:ped|ping)?|finish(?:ed|ing)?|complet(?:e|ed|ion|ing)|go(?:es)?[ \t]{1,4}live|releas(?:e|ed|ing))\b/i;
+export const EVENT_WORDS = /\b(?:launch(?:ed|ing|es)?|deliver(?:ed|y|ing|s)?|ship(?:ped|ping|s)?|finish(?:ed|ing|es)?|complet(?:e|ed|ion|ing)|go(?:es)?[ \t]{1,4}live|releas(?:e|ed|ing|es))\b/i;
 export const EVENT_DEADLINE = /\b(?:deadlines?|on[ \t-]{1,4}time|by[ \t]{1,4}(?:\d{1,4}(?:st|nd|rd|th)?\b|Q[1-4]\b|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|next|the|year|month|week)|within[ \t]{1,4}\d{1,3}[ \t]{1,4}(?:days?|weeks?|months?))\b/i;
 export const QUANTITY_TARGET = /[£$€][ \t]{0,4}\d|\b\d[\d,.]{0,20}[ \t]{0,4}(?:%|(?!(?:days?|weeks?|months?|years?|developers?|people|leads?|January|February|March|April|May|June|July|August|September|October|November|December)\b)[a-z][a-z-]{0,40}\b)/i;
 /** Date numbers are dates, not quantity targets; every run is bounded. */
 const CALENDAR_NUMBERS = /\b(?:\d{1,2}(?:st|nd|rd|th)?[ \t]{1,4})?(?:January|February|March|April|May|June|July|August|September|October|November|December)(?:[ \t]{1,4}\d{4})?\b/gi;
+/** Ignore only an explicitly contextual money limit, leaving other quantities available to reject. */
+const CONTEXTUAL_MONEY_LIMIT = /\b(?:on[ \t]{1,4}a[ \t]{1,4}budget[ \t]{1,4}of|within|budget[ \t]{1,4}is)[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?(?![\p{L}\p{N}])|\bwith[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?[ \t]{1,4}to[ \t]{1,4}spend\b/giu;
+const EVENT_VERB_ROOTS: Readonly<Record<string, string>> = {
+  launch: 'launch', launching: 'launch', launched: 'launch', launches: 'launch',
+  ship: 'ship', shipping: 'ship', shipped: 'ship', ships: 'ship',
+  release: 'release', releasing: 'release', released: 'release', releases: 'release',
+  deliver: 'deliver', delivering: 'deliver', delivered: 'deliver', delivers: 'deliver',
+  finish: 'finish', finishing: 'finish', finished: 'finish', finishes: 'finish',
+};
 export function briefAttestsEventByDate(brief: unknown, goal?: CandidateModel['goal']): boolean {
   if (typeof brief !== 'string' || brief.length > 20000) return false;
   if (goal && (QUANTITY_TARGET.test(goal.metric)
     || (goal.value !== null && goal.value !== undefined))) return false;
-  const words = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w && !['a', 'an', 'the'].includes(w));
+  const words = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u)
+    .filter(w => w && !['a', 'an', 'the'].includes(w)).map(w => EVENT_VERB_ROOTS[w] ?? w);
   return brief.split(/[.!?;\n]/).some(sentence => {
-    if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence) || QUANTITY_TARGET.test(sentence.replace(CALENDAR_NUMBERS, 'date'))) return false;
+    if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence)
+      || QUANTITY_TARGET.test(sentence.replace(CONTEXTUAL_MONEY_LIMIT, 'limit').replace(CALENDAR_NUMBERS, 'date'))) return false;
     if (!goal) return true;
     const held = new Set(words(sentence)), deliverable = words(goal.deliverable ?? ''), metric = words(goal.metric);
     return deliverable.length > 0 && metric.length > 0 && [...deliverable, ...metric].every(w => held.has(w));

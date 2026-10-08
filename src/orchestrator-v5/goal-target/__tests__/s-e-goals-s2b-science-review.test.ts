@@ -10,6 +10,8 @@ import { shareGoalChanceWords } from '../share-goal-chance-words.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { GOAL_FIGURES_SHARE_APPROXIMATION } from '../../../orchestrator/context/option-result-source.js';
+import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
+import { ProposalStore } from '../../agent-lane/proposal.js';
 
 type Rec = Record<string, any>;
 const UNIT = '% of the feature launch';
@@ -47,10 +49,30 @@ function graph(low = 6, high = 10): Rec {
   ] };
 }
 const result = (): Rec => ({ option_comparison: [
-  { option_id: 'carry', probability_of_goal: 0.0199 }, { option_id: 'hire', probability_of_goal: 0.390 },
+  { option_id: 'carry', option_label: 'Carry on', probability_of_goal: 0.0199 },
+  { option_id: 'hire', option_label: 'Hire two developers', probability_of_goal: 0.390 },
 ] });
 const warning = (out: Rec): Rec | undefined => out.inference_warnings?.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION);
 const saved = (g: Rec): Rec => ({ enrichment: withGoalChanceLicence(withShareByDateChanceGate(result(), g, 'goal'), g, 'goal') });
+/** Both production Agent doors, with a deterministic dispatch in place of external I/O. */
+async function agentDoor(g: Rec, block: Rec, door: 'Run' | 'saved-read'): Promise<Rec> {
+  const state = { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'near_tie' } };
+  const read = { graph: g, analysis_result: block, analysis_state: state, analysis_goal_certainty: [] };
+  const dispatch: InternalDispatch = async path => path.endsWith('/graph') ? { status: 200, json: read }
+    : path === '/orchestrate/v2/turn' ? { status: 200, json: { blocks: [{ type: 'analysis_result', ...block }], analysis_state: state } }
+      : { status: 500, json: {} };
+  const caps = createAgentCapabilities(dispatch, new ProposalStore());
+  const ctx = { scenario_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', authenticated_user_id: null, request_id: 'r4-p40' };
+  return door === 'Run' ? (await caps.runAnalysis(ctx, { reason: 'Run analysis.' }) as Rec).result
+    : (await caps.getCanonicalState(ctx) as Rec).analysis;
+}
+const agentRows = (view: Rec): Rec[] => view.saved_run_options ?? view.enrichment.option_comparison;
+/** Explicit r3 retained record: its exact-extreme override contradicted the raw normal point. */
+const retainedR3Point = (): Rec => ({ enrichment: { ...result(), inference_warnings: [{
+  code: GOAL_CHANCE_LICENSED, severity: 'info', message: 'Licensed.', form: 'each', option_ids: ['carry', 'hire'],
+  pct_by_option: { carry: 0, hire: 39 },
+  target: { comparator: 'at_least', value: 100, unit: UNIT, by_date: DEADLINE },
+}] } });
 
 afterEach(() => vi.useRealTimers());
 describe('SCIENCE review rows and controls', () => {
@@ -116,9 +138,11 @@ describe('SCIENCE review rows and controls', () => {
     expect(warning(out)?.message).not.toContain('today’s team is too uncertain');
   });
   it('S2-FAILING-INPUT-SCOPE control: bad hiring time does not withhold carry-on', () => {
-    const g = graph(); g.nodes[2].observed_state.extra_share_by_date.lead_high = 1;
-    const out = withShareByDateChanceGate(result(), g, 'goal');
-    expect(out.option_comparison.find((r: Rec) => r.option_id === 'carry').probability_of_goal).toBe(0.0199);
+    // A supported same-class carry-on control separates input scope from P40's independent class gate.
+    const g = graph(6.4, 10); g.nodes[2].observed_state.extra_share_by_date.lead_high = 1;
+    const before = result(); before.option_comparison[0].probability_of_goal = 0.0039;
+    const out = withShareByDateChanceGate(before, g, 'goal');
+    expect(out.option_comparison.find((r: Rec) => r.option_id === 'carry').probability_of_goal).toBe(0.0039);
     expect(out.option_comparison.find((r: Rec) => r.option_id === 'hire').probability_of_goal).toBeUndefined();
     expect(warning(out)?.option_ids).toEqual(['hire']);
     expect(goalChanceLicenceOf(out, g, 'goal')?.pct_by_option).toEqual({ carry: 0 });
@@ -126,18 +150,53 @@ describe('SCIENCE review rows and controls', () => {
   it('S2-FAILING-INPUT control: valid hiring range stays supported', () => {
     expect(goalChanceLicenceOf(result(), graph(), 'goal')?.pct_by_option.hire).toBe(39);
   });
-  it('S4-P40-CLASS: carry-on exact extreme is less than 1%, never about 2%', () => {
+  it('S4-P40-CLASS: carry-on U(6,10), D=6 withholds the class-mismatched point', () => {
     const g = graph(), before = result(), out = withShareByDateChanceGate(before, g, 'goal');
-    expect(JSON.stringify(out.option_comparison)).toBe(JSON.stringify(before.option_comparison));
+    expect(out.option_comparison.find((r: Rec) => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
     const licence = goalChanceLicenceOf(out, g, 'goal')!;
-    expect(licence.pct_by_option.carry).toBe(0);
-    expect(goalChanceScreenLinesForAgent({ enrichment: withGoalChanceLicence(out, g, 'goal') }, g, true)
-      .find(l => l.option_id === 'carry')?.figure).toBe('less than 1%');
-    expect(gate(CARRY, 1)).toMatchObject({ form: 'point', exact_extreme: 'less_than_1' });
+    expect(licence.pct_by_option).not.toHaveProperty('carry');
+    expect(licence.withheld_option_ids).toContain('carry');
+    const carryLine = goalChanceScreenLinesForAgent({ enrichment: withGoalChanceLicence(out, g, 'goal') }, g, true)
+      .find(l => l.option_id === 'carry');
+    expect(carryLine?.figure).toBe('between less than 1% and more than 99%');
+    expect(carryLine?.chance).toBe('‘Carry on’: less than 1% chance of launching by 7 April 2027 if it takes 10 months, and more than 99% if it takes 6 months, in this model.');
+    expect(warning(out)?.message).toBe("Not shown as a single figure. The approximation of your team's stated time or pace range does not support one figure here, so this chance is shown as a range.");
+    expect(exactChance(CARRY, 1)).toBe(0);
+    expect(normalChance(CARRY, 1)).toBeCloseTo(0.0199356, 6);
+    expect(gate(CARRY, 1)).toMatchObject({ form: 'range' });
+  });
+  it.each([6.2, 6.3])('S4-P40-CLASS rounded boundary: normal between 0.5 and 1 percent vs exact 0, team low=%s, withholds', low => {
+    const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low, high: 10 } };
+    const p = normalChance(parts, 1);
+    expect(p).toBeGreaterThanOrEqual(0.005);
+    expect(p).toBeLessThan(0.01);
+    expect(Math.round(p * 100)).toBe(1); // the card says "about 1%", not "less than 1%"
+    expect(exactChance(parts, 1)).toBe(0);
+    expect(gate(parts, 1).form).toBe('range');
+    const before = result(); before.option_comparison[0].probability_of_goal = p;
+    const out = withShareByDateChanceGate(before, graph(low, 10), 'goal');
+    expect(out.option_comparison.find((r: Rec) => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
+    expect(warning(out)?.message).toBe("Not shown as a single figure. The approximation of your team's stated time or pace range does not support one figure here, so this chance is not shown.");
+  });
+  it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS %s door: fresh carry-on point never reaches the Agent', async door => {
+    const g = graph(), view = await agentDoor(g, saved(g), door);
+    expect(agentRows(view).find(r => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
+    expect(JSON.stringify(view)).not.toContain('0.0199');
+    expect(view.goal_chance_display).not.toHaveProperty('carry');
+    expect(agentRows(view).find(r => r.option_id === 'hire')?.probability_of_goal).toBe(0.390);
+  });
+  it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS %s door: retained r3 class-mismatched raw 0.0199 is refused', async door => {
+    const block = retainedR3Point(), view = await agentDoor(graph(), block, door);
+    expect(block.enrichment.option_comparison[0].probability_of_goal).toBe(0.0199); // control on the actual ingress
+    expect(agentRows(view).find(r => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
+    expect(JSON.stringify(view)).not.toContain('0.0199');
+    expect(agentRows(view).find(r => r.option_id === 'hire')?.probability_of_goal).toBe(0.390);
   });
   it('S4-P40-CLASS control: interior producer chance remains 39%', () => {
     expect(goalChanceLicenceOf(result(), graph(), 'goal')?.pct_by_option.hire).toBe(39);
     expect(gate(HIRE, 1).form).toBe('point');
+    expect(goalChanceScreenLinesForAgent(saved(graph()), graph(), true).find(l => l.option_id === 'hire')?.chance)
+      .toBe("‘Hire two developers’: about 39% chance of launching by 7 April 2027, in this model, using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month).");
   });
   it('L1-PAST-DEADLINE-RERUN: a passed date withholds with recovery words', () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2027-04-08T12:00:00Z'));
