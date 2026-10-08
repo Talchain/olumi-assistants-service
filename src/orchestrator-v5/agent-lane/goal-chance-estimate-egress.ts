@@ -14,6 +14,8 @@ const plain = (s: string): string => foldQuotes(s).replace(/['"`*_]/g, '').repla
  */
 export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unknown }>(body: T, context: {
   analysisResult: unknown; graph: unknown; current: boolean;
+  /** Exact user-authored text from the turn/history, never a narration guess about whose words these are. */
+  userAuthoredTexts?: readonly string[];
 }): T {
   const licence = agentLicenceRecordOf(context.analysisResult);
   if (!context.current || typeof body.assistant_text !== 'string'
@@ -52,15 +54,37 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   };
   const text = body.assistant_text;
   const protectedSpans: { start: number; end: number }[] = [];
+  const userSpans: { start: number; end: number }[] = [];
   const edits: { start: number; end: number; replacement: string }[] = [];
   const said = new Set<string>();
   const folded = foldQuotes(text);
+  // An echoed user statement is still theirs. Keep those exact spans opaque even when an option name and percentage
+  // happen to coincide with this Run's licensed tuple; only assistant-authored narration can earn a replacement.
+  for (const authored of context.userAuthoredTexts ?? []) {
+    if (authored.trim() === '') continue;
+    // Storage carries full turns. A narrator may echo just one sentence; derive only exact source slices, without
+    // guessing authorship from phrases such as "you said". Decimal stops remain inside the sentence.
+    const ends = [...authored.matchAll(/[.!?]["'”’`*_)]*(?=\s|$)|\n/g)].map(m => m.index! + m[0].length);
+    if (ends[ends.length - 1] !== authored.length) ends.push(authored.length);
+    const pieces = [authored];
+    let cursor = 0;
+    for (const end of ends) { pieces.push(authored.slice(cursor, end).trim()); cursor = end; }
+    for (const piece of new Set(pieces)) {
+      if (piece === '') continue;
+      const needle = foldQuotes(piece);
+      for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
+        const span = { start: at, end: at + needle.length };
+        protectedSpans.push(span); userSpans.push(span);
+      }
+    }
+  }
   // Producer-bound sentences and conditional drivers are opaque, including their own percentages.
   for (const l of lines) {
     for (const sentence of [l.chance, l.depends].filter(s => s !== '')) {
       const needle = foldQuotes(sentence);
       for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
         protectedSpans.push({ start: at, end: at + needle.length });
+        if (userSpans.some(span => at < span.end && at + needle.length > span.start)) continue;
         if (sentence === l.chance) {
           if (said.has(l.option_id)) edits.push({ start: at, end: at + needle.length, replacement: '' });
           said.add(l.option_id);

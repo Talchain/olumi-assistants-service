@@ -14,7 +14,7 @@ import { dispatchSystemEvent } from '../dispatch.js';
 type Json = Record<string, any>;
 const capture = JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
 const SCENARIO = capture.capture.scenario_id as string;
-const PROGRESS = '2 more to go; with 1 left, Olumi can show a range.';
+const PROGRESS = '2 more to go.';
 const savedEnv = new Map<string, string | undefined>();
 let graph: Json;
 let writes: SessionTurnWrite[];

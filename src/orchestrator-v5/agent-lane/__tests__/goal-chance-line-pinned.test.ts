@@ -70,12 +70,22 @@ describe('goalChanceLineOwed', () => {
   it('WIRING: the route appends it with the owed disclosures, checked against the Agent\'s own text', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     // MC D1 (c): the Run's #416 ask is owed right after the goal-chance line, in the same list.
-    expect(src).toContain('...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),\n'
+    // Class (i): the amendment-A scoped owner supplies the final Run sentence; raw tool output is the fallback.
+    expect(src).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
+    expect(src).toContain('...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),\n'
       + '        // MC D1 (c): the Run\'s #416 ask, after its reason (never a bare "couldn\'t calculate it" with nothing to answer).\n'
       + '        ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),\n      ];');
     // Exact host-copy display normalisation preserves the narrator and the same owed lines.
     expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
     expect(src).toContain('withDisclosures(narrationText, owed)');
     expect(src).toContain('withDisclosures(narrationText, [...owed, ...decisionLines])');
+  });
+  it('R13 MUTANT: a raw-tool-only owed line loses the final scoped owner', () => {
+    const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const pin = '...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),';
+    expect(src.includes(pin)).toBe(true);
+    expect(src.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
+    // A later Run still clears an earlier withhold when no scoped final sentence exists.
+    expect(goalChanceLineOwed([runWithheld, runShown], PARAPHRASE)).toBeNull();
   });
 });

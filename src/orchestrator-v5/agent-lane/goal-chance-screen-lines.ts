@@ -28,6 +28,7 @@ import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
 import { goalChanceEstimateLinkCount } from './goal-chance-estimate-attribution.js';
+import { sentencesOf } from './reply/compose-reply.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
@@ -268,9 +269,20 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
           return part.replace(chanceOnly, l.chance);
         });
         added += 1;
+      } else if (l.olumi_estimate_link_count === undefined) {
+        // A previously accepted shorthand figure owes only its qualifier. Complete shortfall units remain opaque;
+        // neither their shared note words nor a neighbouring option can provide this sentence's insertion point.
+        let inserted = false;
+        const clean = removeSpread(body, l.spread_note);
+        const completed = outsideShortfallUnits(clean, lines, part => {
+          if (inserted) return part;
+          const [own] = ownWordsLeadTexts(part, l, sentencesOf);
+          if (own === undefined || !/[.!]["'”’`*_]*$/.test(own)) return part;
+          inserted = true;
+          return part.replace(own, `${own} ${l.spread_note}`);
+        });
+        if (inserted) { body = completed; added += 1; }
       }
-      // A shorthand figure without its note owes the complete chance/notes unit below.
-      // A row may also contain another option's opaque shortfall unit, so it cannot supply an insertion point.
     }
     if (alreadySaid(spreadBody(body), l)) continue;
     // Move any existing note behind its own chance, including when the Agent gave only the figure.

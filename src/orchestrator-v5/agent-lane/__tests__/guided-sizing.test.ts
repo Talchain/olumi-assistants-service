@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { guidedSizingReplyText } from '../guided-sizing.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../orchestrator/context/option-result-source.js';
@@ -38,9 +39,9 @@ const CODE = GOAL_FIGURES_PLACEHOLDER_PATH;
 const OPTION = 'raise_pro_price_to_59';
 const EVALUATED = [{ node_id: 'mrr', evaluated: true }];
 const LEVEL_ASK = "What's today's level of MRR?";
+const LEVEL_WITHHOLD = `This run doesn’t show how often each option reaches the goal’s target. ${LEVEL_ASK}`;
 const WORDS_2 = "Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.";
 const WORDS_3 = "Not shown yet: 3 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.";
-const WORDS_4 = "Not shown yet: 4 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.";
 const THREE = [
   { from: 'monthly_churn', to: 'paying_pro_subscribers' },
   { from: 'pro_plan_price', to: 'mrr_lost_to_price_sensitivity' },
@@ -92,19 +93,22 @@ describe('GUIDED PATH: multi-link withhold', () => {
       .toContain('from Pro plan price to Monthly churn');
   });
 
-  it('DRAW-2 three-placeholder variant: level-only ask FIRST, then exact guided words', () => {
+  it('DRAW-2 three-placeholder variant: another level cause keeps its ask without a sizing promise', () => {
     const { graph, run } = draw2();
     expect(warningOf(run).links).toEqual(THREE);
-    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(`${LEVEL_ASK} ${WORDS_3}`);
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(LEVEL_WITHHOLD);
+    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('a size for the links');
+    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('Size them to see the chance.');
   });
 
-  it("captured DRAW-2: both codes remain; level ask FIRST with only the warning's 2 acceptable links", () => {
+  it("captured DRAW-2: another level cause keeps its ask while the two sizing presses remain", () => {
     const value = sizing(captured.run, captured.graph);
     expect(warningOf(captured.run).acceptable_links).toEqual(THREE.slice(0, 2));
     expect(value?.total).toBe(2);
     expect(value?.links.map(l => ({ from: l.from, to: l.to }))).toEqual(THREE.slice(0, 2));
-    expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).toBe(`${LEVEL_ASK} ${WORDS_2}`);
+    expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).toBe(LEVEL_WITHHOLD);
     expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).not.toContain('a size for the links');
+    expect(goalChanceWithheldForAgent(captured.run, captured.graph)?.say).not.toContain('Size them to see the chance.');
     expect(actions(value, captured.graph)).toHaveLength(2);
   });
 
@@ -125,7 +129,7 @@ describe('GUIDED PATH: multi-link withhold', () => {
   it('DRAW-2: typed hook total 3, one link per edge identity in directness order', () => {
     const { graph, run } = draw2();
     const value = sizing(run, graph);
-    expect(value).toEqual({ v: 1, total: 3, scored_goal_id: 'mrr', links: expectedLinks(graph) });
+    expect(value).toEqual({ v: 1, total: 3, scored_goal_id: 'mrr', target_verdict: targetTestabilityOf(graph), links: expectedLinks(graph) });
   });
 
   it('DRAW-2: 3 exact press labels in the same directness order', () => {
@@ -196,7 +200,8 @@ describe('GUIDED PATH: multi-link withhold', () => {
     graph.edges.push({ from: 'expansion', to: 'mrr', strength: { mean: 0.5, std: 0.125 },
       provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder', mean_projected: true } });
     warningOf(run).acceptable_links.push({ from: 'expansion', to: 'mrr' });
-    expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).toBe(WORDS_4);
+    // The recorded N remains four, but the fourth pair is outside this option's actual cause set.
+    expect(goalChanceWithheldForAgent(onlyPlaceholder(run), graph)?.say).not.toContain('Size them to see the chance.');
     expect(sizing(run, graph)?.total).toBe(4);
     expect(sizing(run, graph)?.links[0]).toEqual(expect.objectContaining({ from: 'expansion', to: 'mrr', order: 0 }));
   });
@@ -365,7 +370,7 @@ describe('GUIDED PATH: progress from the stored graph after sizing', () => {
     const fresh = api.guidedSizingProgress?.(graph);
     expect(fresh).toBeDefined();
     expect(guidedSizingReplyText({ ...fresh!.draft, recovery_line: 'Existing recovery.' }, fresh))
-      .toEqual({ guided: `${WORDS_2} Existing recovery.`, progress: '2 more to go; with 1 left, Olumi can show a range.' });
+      .toEqual({ guided: `${WORDS_2} Existing recovery.`, progress: '2 more to go.' });
     expect(guidedSizingReplyText(undefined, fresh)).toEqual({ guided: null, progress: fresh!.progress_line });
     expect(guidedSizingReplyText(undefined)).toEqual({ guided: null, progress: null });
     expect(guidedSizingReplyText({ v: 1, total: 1, links: [] })).toEqual({ guided: null, progress: null });
@@ -374,14 +379,14 @@ describe('GUIDED PATH: progress from the stored graph after sizing', () => {
   it('AFTER ONE SIZING: 2 more to go', () => {
     const { graph } = draw2();
     storedSize(graph, THREE[0].from, THREE[0].to);
-    expect(progress(graph)).toBe('2 more to go; with 1 left, Olumi can show a range.');
+    expect(progress(graph)).toBe('2 more to go.');
   });
   it('fresh progress draft and hook share M and the same exact progress words after a size', () => {
     const { graph } = draw2();
     storedSize(graph, THREE[0].from, THREE[0].to);
     const fresh = api.guidedSizingProgress?.(graph);
     expect(fresh?.remaining).toBe(2);
-    expect(fresh?.progress_line).toBe('2 more to go; with 1 left, Olumi can show a range.');
+    expect(fresh?.progress_line).toBe('2 more to go.');
     expect(fresh?.draft.total).toBe(2);
     expect(fresh?.draft.links.map(l => ({ from: l.from, to: l.to }))).toEqual(THREE.slice(1));
     const presses = actions(fresh?.draft, graph);

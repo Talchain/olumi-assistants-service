@@ -198,10 +198,13 @@ describe.each(captures)('GUIDED HONESTY amended diagnostic: $name', capture => {
     expect(measurement.inspector.stored_guided.every((e: Json) => e.sizing === 'user' && e.natural_effect === undefined)).toBe(true);
   });
 
-  it('composition: existing level ask then exact guided words, no leftover case(c) clause; NOT honesty acceptance', () => {
+  it('composition: another cause keeps its level ask without a promise; exact placeholders keep guided words', () => {
     const said = goalChanceWithheldForAgent(runFor(capture), capture.graph)?.say;
-    const level = capture.name === 'draw-2' ? "What's today's level of MRR? " : '';
-    expect(said).toBe(`${level}${guidedSizingSentence(capture.guided.length)}`);
+    // Class (ii): a stored missing-level ask is another cause; sizing alone cannot promise the chance.
+    if (capture.name === 'draw-2') {
+      expect(said).toBe("This run doesn’t show how often each option reaches the goal’s target. What's today's level of MRR?");
+      expect(said).not.toContain('Size them to see the chance');
+    } else expect(said).toBe(guidedSizingSentence(capture.guided.length));
     expect(said).not.toContain('a size for the link');
   });
 });
@@ -380,7 +383,8 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
     expect(bindGuidedSizing(draft, guidedSizingActions(draft, graph), { graph_hash: '0123456789abcdef', run_key: 'same-run' }))
       .not.toHaveProperty('recovery_line');
     const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
-    expect(said).toContain(guidedSizingSentence(2));
+    // Class (ii): the user's refused conversion still blocks after the two placeholders are sized.
+    expect(said).not.toContain('Size them to see the chance');
     expect(said).toContain('I need a size for the link from Starter tier MRR to monthly recurring revenue.');
     expect(said).toContain('Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?');
   });

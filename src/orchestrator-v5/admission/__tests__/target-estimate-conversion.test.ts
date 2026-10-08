@@ -78,7 +78,9 @@ describe('Science §(i) amendment: estimates convert; placeholders and refused c
     expect(draft?.total).toBe(2);
     expect(draft?.links.map(l => l.id)).toEqual(['far', 'near', 'estimate']);
     expect(guidedSizingActions(draft, g).map(a => a.label).at(-1)).toBe(carve);
-    expect(guidedSizingProgressLine(g)).toBe('2 more to go; with 1 left, Olumi can show a range.');
+    // Class (ii): the refused band remains, and this graph has no G0 driver evidence.
+    expect(guidedSizingProgressLine(g)).toBe('2 more to go.');
+    expect(goalChanceWithheldForAgent(r, g)?.say).not.toContain('Size them to see the chance');
   });
   it('the selected Run’s evaluated identity operands cannot acquire extra conversion presses', () => {
     const g = graph();

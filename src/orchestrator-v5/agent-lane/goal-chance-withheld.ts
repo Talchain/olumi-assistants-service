@@ -26,7 +26,9 @@ import {
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 
 import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
-import { guidedSizingForRun, guidedSizingReplyText, type GuidedSizingDraft } from './guided-sizing.js';
+import { guidedSizingActions, guidedSizingForRun, guidedSizingOnlyPlaceholders, guidedSizingReplyText,
+  legacyGuidedSizingReplyText, withoutStaleGuidedSizingWords, type GuidedSizingDraft } from './guided-sizing.js';
+import { notTargetTestableSentence, untestableTargetTail, type TargetTestability } from '../admission/target-testability.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
@@ -126,6 +128,27 @@ export const OPTIONS_IDENTICAL_NOTE =
 const recordOf = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
 
+/** The bound list owns its questions; other target failures retain the existing target word producer. */
+export function targetVerdictWithoutGuidedLinks(graph: unknown, verdict: TargetTestability,
+  guided: GuidedSizingDraft | undefined): TargetTestability | null {
+  if (guided === undefined || verdict.kind !== 'not_testable') return verdict;
+  const pairs = new Set(guidedSizingActions(guided, graph).map(a => JSON.stringify([a.parameters.from, a.parameters.to])));
+  const nodes = recordOf(graph)?.nodes;
+  const label = (id: string): string => {
+    const node = (Array.isArray(nodes) ? nodes.map(recordOf) : []).find(n => n?.id === id);
+    return typeof node?.label === 'string' ? node.label : id;
+  };
+  const failures = verdict.failures.flatMap(f => {
+    if (f.case !== 'c' || f.links === undefined) return [f];
+    const links = f.links.filter(l => !pairs.has(JSON.stringify([l.from, l.to])));
+    // An unconfirmed identity is an independent cause, even if the offered list happens to name all its links.
+    if (links.length === 0) return f.code === 'identity_unconfirmed' ? [f] : [];
+    const first = links[0]!;
+    return [{ ...f, links, link: first, lever: label(first.from), link_to: label(first.to) }];
+  });
+  return failures.length === 0 ? null : { ...verdict, failures };
+}
+
 /**
  * `goal_chance` for a run's `analysis_result` block, or `undefined` when the run did not withhold it. The warning is read
  * where the run carries it (`enrichment.inference_warnings`) or where a kept, withheld run moved it (`inference_warnings`).
@@ -135,18 +158,49 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   ...scopedDraft: [] | [GuidedSizingDraft | undefined] | [GuidedSizingDraft | undefined, string | null]): GoalChanceWithheld | undefined {
   // An explicitly supplied empty draft also owns the scope; do not fall back to another read.
   const guided = scopedDraft.length > 0 ? scopedDraft[0] : guidedSizingForRun(result, graph);
-  const guidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : guidedSizingReplyText(guided).guided;
+  const suppliedGuidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : guidedSizingReplyText(guided).guided;
   const block = recordOf(result);
   if (block === undefined) return undefined;
   const opening = Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}).length > 0
     ? RANGE_OPENING : OPENING;
-  const warnings = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
+  const sourceWarnings = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : []))
     .map(recordOf)
     .filter((w): w is Record<string, unknown> => w !== undefined && typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code))
     // Science R3: an explicitly empty scoped say leaves this target reason on the panel, with no chat sentence.
     .filter(w => !(opening === RANGE_OPENING && w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && w.say === ''));
-  if (warnings.length === 0) return undefined;
+  if (sourceWarnings.length === 0) return undefined;
+  const levelAsk = (w: Record<string, unknown>): string | undefined => {
+    if (typeof w.level_only_say === 'string' && w.level_only_say.trim() !== '') return w.level_only_say.trim();
+    const words = typeof w.say === 'string' && w.say.trim() !== '' ? w.say : typeof w.message === 'string' ? w.message : '';
+    return words.match(/What's today's level of [^?]*\?/u)?.[0];
+  };
+  const onlySizingCodes = sourceWarnings.every(w => w.code === GOAL_FIGURES_PLACEHOLDER_PATH || w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  const hasLevelAsk = sourceWarnings.some(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && levelAsk(w) !== undefined);
+  // A warning-only legacy Run whose sole typed cause is placeholders retains amendment A's words. A mixed legacy
+  // Run cannot establish the complete cause set, so W5's complete target requirement stays in force.
+  const legacyPlaceholdersOnly = graph === undefined && guided !== undefined && guided.total >= 2
+    && guided.recovery_line === undefined && guided.links.every(l => l.nonconverting !== true)
+    && sourceWarnings.every(w => w.code === GOAL_FIGURES_PLACEHOLDER_PATH);
+  const promiseAllowed = onlySizingCodes && !hasLevelAsk && (guidedSizingOnlyPlaceholders(guided) || legacyPlaceholdersOnly);
+  const guidedText = promiseAllowed ? suppliedGuidedText ?? (legacyPlaceholdersOnly ? legacyGuidedSizingReplyText(guided) : null) : null;
+  const guidedActions = guidedSizingActions(guided, graph);
+  // Keep the existing refusal explanation from a band press, while the press itself owns its question.
+  const bandReason = guided === undefined ? '' : [...new Set(guidedActions
+    .filter(a => guided.links.some(l => l.nonconverting === true && a.parameters.from === l.from && a.parameters.to === l.to))
+    .map(a => a.label.slice(a.label.indexOf('?') + 1).trim()).filter(Boolean))].join(' ');
+  const warnings = sourceWarnings.map(w => {
+    if (w.code === GOAL_FIGURES_PLACEHOLDER_PATH && typeof w.message === 'string') {
+      return { ...w, message: withoutStaleGuidedSizingWords(w.message.replace(UI_OPENING, '').trim(), promiseAllowed ? guided : undefined) };
+    }
+    if (w.code !== GOAL_FIGURES_TARGET_NOT_TESTABLE || graph === undefined || guided?.target_verdict === undefined
+      || guided.links.length === 0 || guidedActions.length === 0) return w;
+    const filtered = targetVerdictWithoutGuidedLinks(graph, guided.target_verdict, guided);
+    const tail = filtered === null ? null : untestableTargetTail(graph, filtered);
+    const words = filtered === null ? null : notTargetTestableSentence(graph, filtered);
+    return { ...w, say: [tail ?? levelAsk(w), bandReason].filter(Boolean).join(' '),
+      message: [words, bandReason].filter(Boolean).join(' ') };
+  });
   // S-E GOALS (Codex buddy r1 on #2742): a chance goal's withhold speaks ALONE, ahead of every other cause, identical arms too.
   const chance = warnings.filter((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
   if (chance.length > 0) return goalChanceFromWarnings(chance, opening, guidedText);

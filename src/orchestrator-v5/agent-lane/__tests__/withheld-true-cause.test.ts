@@ -215,7 +215,16 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
     expect(route).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     expect(route).toContain('const askNow = identityAskLineFor(state.analysisResult, state.graph);');
     // Contrast: the probe sees the goal-chance line it follows.
-    expect(route).toContain('...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
+    expect(route).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
+    expect(route).toContain('...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),');
+  });
+  it('R13 MUTANT: replacing the scoped owed owner with raw tool results is caught', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const pin = '...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),';
+    expect(route.includes(pin)).toBe(true);
+    expect(route.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
+    expect(goalChanceLineOwed([{ ran: true, goal_chance: { withheld: true, say: 'The target cannot be tested yet.' } },
+      { ran: true }], 'Here is the run.')).toBeNull();
   });
 });
 
@@ -231,10 +240,11 @@ describe('(f) a placeholder path beside an untestable target: the chat discloses
     expect(placeholder.message).toMatch(/Set (it|them) to see how much (it|they) matters?\.$/);
   });
 
-  it('Science §(i) 4: captured case (c) has no missing level, so its 2-placeholder path speaks alone', () => {
+  it('W5: a legacy capture cannot prove the placeholders are its only cause; keep the complete target requirement', () => {
     const say = goalChanceWithheldForAgent(D1.analysis_result)!.say;
     expect(placeholder.links).toHaveLength(2);
-    expect(say).toBe("Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.");
+    expect(say).toContain(D1.analysis_result.enrichment.inference_warnings.find((w: Rec) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE').say);
+    expect(say).not.toContain('Size them to see the chance');
   });
 
   it('R2 RED: draw-2 has a missing level → its existing level-only ask FIRST, then the 2-link guided words', () => {
@@ -246,7 +256,8 @@ describe('(f) a placeholder path beside an untestable target: the chat discloses
     expect(target.say).toContain("What's today's level of MRR?");
     expect(target.say).toContain('from Pro plan price to Monthly churn');
     const say = goalChanceWithheldForAgent({ enrichment: { inference_warnings: warnings } }, draw2.graph)!.say;
-    expect(say).toBe("What's today's level of MRR? Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.");
+    expect(say).toContain("What's today's level of MRR?");
+    expect(say).not.toContain('Size them to see the chance');
     expect(say).not.toContain('a size for the links from');
   });
 
