@@ -199,8 +199,8 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     return words!;
   };
   const assertGuidedFace = (body: Json, guided: string): string => {
-    const shapeLog = info.mock.calls.map(([entry]) => entry as Json)
-      .filter(entry => entry.event === 'agent_lane.reply_shaped').at(-1);
+    const shapeLog = info.mock.calls.map((call: unknown[]) => call[0] as Json)
+      .filter((entry: Json) => entry.event === 'agent_lane.reply_shaped').at(-1);
     expect(body._answer_shape, JSON.stringify(shapeLog)).toBeDefined();
     const face = [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
     expect(body._answer_shape.headline).toBe(guided);
@@ -313,7 +313,7 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(first.assistant_text.split(GUIDED_WITHOUT_INVITE)).toHaveLength(2);
     expect(first._answer_shape.headline).toBe(reason.replace(THRESHOLD_REST_STANDS, ''));
     expect(first.assistant_text).toBe(deriveAnswerTextFromShape(first._answer_shape));
-    expect(wirePresses(first).map(action => action.id)).toEqual(ORDERED_PAIRS.map(pair => pressId(...pair)));
+    expect(wirePresses(first).map(action => action.id)).toEqual(ORDERED_PAIRS.map(pair => pressId(pair[0], pair[1])));
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
     expect(replay.assistant_text).toBe(first.assistant_text);

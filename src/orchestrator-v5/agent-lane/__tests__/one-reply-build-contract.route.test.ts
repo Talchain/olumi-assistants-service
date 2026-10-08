@@ -125,7 +125,7 @@ describe('ONE reply contract through the build route', () => {
 
   it('R1 Paul: one concise face, typed-card question in detail, RC4 census, plain units', async () => {
     const body = await buildTurn();
-    const shapeLog = info.mock.calls.map(([entry]) => entry as Rec).find(e => e.event === 'agent_lane.reply_shaped');
+    const shapeLog = info.mock.calls.map((call: unknown[]) => call[0] as Rec).find((e: Rec) => e.event === 'agent_lane.reply_shaped');
     const facts = actionFactsOf({ scenarioId: randomUUID(), graph: FX.read.graph, graphHash: FX.read.graph_hash,
       analysisState: FX.read.analysis_state, analysisResult: FX.read.analysis_result,
       analysisReady: (FX.read.current_read as Rec)?.analysis_ready });
@@ -177,7 +177,7 @@ describe('ONE reply contract through the build route', () => {
     const goal = saved.nodes.find(n => n.id === 'mrr')!;
     delete goal.nonlinear_identity;
     currentRead.graph = saved;
-    currentRead.graph_hash = computeAnalysisAffectingGraphHash(saved as never).slice(0, 16);
+    currentRead.graph_hash = computeAnalysisAffectingGraphHash(saved as never)!.slice(0, 16);
     currentRead.analysis_result.computed_against_hash = currentRead.graph_hash;
     (currentRead.current_read as Rec).computed_against_hash = currentRead.graph_hash;
     (currentRead.current_read as Rec).current_analysis_hash = currentRead.graph_hash;

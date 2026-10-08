@@ -871,10 +871,9 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const schema = !faceContract
     ? (goalChanceHeadline === undefined && hostHeadline === undefined ? AnswerShapeSchema
       : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) }))
-    : AnswerShapeSchema.extend({
-      ...(goalChanceHeadline === undefined && hostHeadline === undefined ? {} : { headline: z.string().trim().min(1) }),
-      bullets: z.array(z.string().trim().min(1)),
-    });
+    : goalChanceHeadline === undefined && hostHeadline === undefined
+      ? AnswerShapeSchema.extend({ bullets: z.array(z.string().trim().min(1)) })
+      : AnswerShapeSchema.extend({ headline: z.string().trim().min(1), bullets: z.array(z.string().trim().min(1)) });
   const parsed = schema.safeParse({ headline: headlineText, bullets: faceBullets.map((u) => u.text), detail });
   if (!parsed.success) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure };
   const shaped = deriveAnswerTextFromShape(parsed.data);
