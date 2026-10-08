@@ -207,7 +207,8 @@ export function goalChanceDriverDisplayForAgent(result: unknown, graph: unknown)
  * ⭐ THE HEADLINE'S "WHAT WOULD CHANGE IT" (#87 6 Oct ruling: chance + uncertainty + driver + what would change it; DL ruling
  * on #2840, 8 Oct; Science §(n).3). ONE line for the Run's face (COPY-SHAPE slot 2), naming only the licensed CHANCE driver
  * the screen's own "It rests most on …" sentence names, never the outcome-sensitivity leader and never a share of runs.
- * One clause when every speaking option rests on the same driver; otherwise one per option, in licence order.
+ * One unscoped clause ONLY when every option with a chance on screen (point or range) rests on the same driver; otherwise
+ * one per option that has a driver, in licence order, and an option with no driver gets nothing (DL #2840 review P1-2).
  * `null` when no option's chance driver speaks (a withheld chance is silent).
  */
 export function whatChangesFaceLine(result: unknown, graph: unknown): string | null {
@@ -215,6 +216,8 @@ export function whatChangesFaceLine(result: unknown, graph: unknown): string | n
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
   const speaks = goalChanceDriverDisplayForAgent(result, graph);
+  const ranges = goalChanceRangeDisplayForAgent(result, graph);
+  const shown = [...Object.keys(pointDisplayForAgent(result, ranges)), ...Object.keys(ranges ?? {})];
   const clauses: { option_id: string; key: string; clause: string }[] = [];
   for (const { option_id: optionId, driver: d } of goalChanceDriversForAgent(result, graph)) {
     if (!Object.hasOwn(speaks, optionId)) continue;
@@ -231,7 +234,9 @@ export function whatChangesFaceLine(result: unknown, graph: unknown): string | n
       : { option_id: optionId, key: `existence:${d.from}->${d.to}`, clause: `whether ‘${from}’ really affects ‘${to}’` });
   }
   if (clauses.length === 0) return null;
-  if (clauses.every((c) => c.key === clauses[0].key)) return `What would change it: ${clauses[0].clause}.`;
+  if (clauses.every((c) => c.key === clauses[0].key) && shown.every((o) => clauses.some((c) => c.option_id === o))) {
+    return `What would change it: ${clauses[0].clause}.`;
+  }
   const optionLabel = (optionId: string): string => labels.get(optionId) ?? optionId;
   if (clauses.some((c) => !labels.has(c.option_id))) return null; // never an id in the user's words
   return `What would change it: ${clauses.map((c) => `for ‘${optionLabel(c.option_id)}’, ${c.clause}`).join('; ')}.`;
