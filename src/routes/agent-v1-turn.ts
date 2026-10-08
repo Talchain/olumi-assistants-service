@@ -2308,11 +2308,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      const finalReplay = withShapeOnlyIfItDerives(gatedReplay);
-      // Accel P24 / SCI-10: the typed rows go on AFTER every replay guard and the shape check (a structured scrub must never
-      // reach them), and only when each row and figure is in the reply those guards left (Codex r1 P2).
-      const replayMethod = methodResultForEgress(replayMethodResult, String(finalReplay.assistant_text ?? ''));
-      return replayMethod !== null ? { ...finalReplay, _method_result: replayMethod } : finalReplay;
+      // Accel P24 / SCI-10: the typed rows go on AFTER every replay guard (a structured scrub must never reach them), and only
+      // when each row and figure is in the reply those guards left. withShapeOnlyIfItDerives below never changes
+      // assistant_text and keeps every other key (it can only drop `_answer_shape`), so this is the text that ships.
+      const replayMethod = methodResultForEgress(replayMethodResult, String(gatedReplay.assistant_text ?? ''));
+      if (replayMethod !== null) Object.assign(gatedReplay, { _method_result: replayMethod });
+      return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside

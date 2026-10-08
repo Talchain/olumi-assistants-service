@@ -83,6 +83,8 @@ const D3 = SERVED.cases.find((c) => c.id === 'A-WHAT-CHANGES-NONE-MEASURABLE-SIL
 const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"switch_to_gcp","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"monthly_cloud_savings","to_id":"monthly_spend","status":"quoted","reason":null,"current_mean":-0.3555555555555555,"threshold":-0.09324009324009322,"replicate_thresholds":[-0.09324009324009322,-0.09572649572649569,-0.08578088578088575,-0.09324009324009322],"replicate_range":0.009945609945609946,"to_option_id":"stay_on_aws"},{"from_id":"monthly_cloud_overspend_during_migration","to_id":"monthly_spend","status":"no_change","reason":null,"current_mean":0.17777777777777776,"threshold":null,"replicate_thresholds":[null,null,null,null],"replicate_range":null,"to_option_id":null}]};
 const rbD3 = (): MethodReadback => ({ graph: D3.body.draft_graph, analysisState: D3.body.analysis_state, analysisResult: D3.body.analysis_result,
   optionParticipation: D3.body.option_participation, analysisReady: buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) });
+/** The served D3 result with its goal figures removed: a Run whose hero shows no goal chance at all (ruling 4's open case). */
+const noGoalFigures = (r: Record<string, any>): Record<string, any> => JSON.parse(JSON.stringify(r, (k, v) => (['probability_of_goal', 'goal_probability', 'goal_fit'].includes(k) ? undefined : v)));
 const D3_RUN = { graph_hash_at_run: D3.body.analysis_result.computed_against_hash as string, computed_at: D3.body.analysis_state.run_state.computed_at as string };
 const measured = (links: FlipLinkRef[]): DecisionFlipDispatchResult => ({ status: 'measured', block: ISL_D3_BLOCK as never, links, run: D3_RUN });
 const whatChanges = () => whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbD3(), async (links) => measured(links.slice(0, 2)));
@@ -173,7 +175,7 @@ describe('"What would change this?": RC\'s measured lines only, and only beside 
   it('measured on the served D3 case: the quoted line, bound to its link and option; never the no_change line', async () => {
     const turn = (await whatChanges())!;
     expect(turn.outcome).toBe('measured');
-    const m = whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: D3.body.analysis_result })!;
+    const m = whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: noGoalFigures(D3.body.analysis_result) })!;
     expect(m).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'measured', run: D3_RUN });
     expect(m.rows.map((r) => r.row_id)).toEqual(['flip:monthly_cloud_savings->monthly_spend']);
     expect(m.rows[0]!.item_refs).toEqual([{ kind: 'link', from_id: 'monthly_cloud_savings', to_id: 'monthly_spend' }, { kind: 'option', id: 'stay_on_aws' }]);
@@ -193,7 +195,7 @@ describe('"What would change this?": RC\'s measured lines only, and only beside 
     lic.withheld_option_ids = [KEEP];
     delete lic.pct_by_option[KEEP];
     expect(changeRowsAgreeWithHero(withheld, options, STARTER)).toBe(false);
-    expect(changeRowsAgreeWithHero(D3.body.analysis_result, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(true);
+    expect(changeRowsAgreeWithHero(noGoalFigures(D3.body.analysis_result), ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(true);
     // A tie at the top and an option list without the top: none.
     const tied = structuredClone(BLOCK);
     tied.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').pct_by_option[RAISE] = 52;
@@ -207,6 +209,17 @@ describe('"What would change this?": RC\'s measured lines only, and only beside 
     expect(D3.body.draft_graph.nodes.some((n: Json) => n.id === 'phased_gcp_migration')).toBe(true); // control: it is in the graph
     // Why it matters: on T1b, one unscored option would read withheld and drop every row.
     expect(changeRowsAgreeWithHero(BLOCK, [RAISE, STARTER, KEEP, 'phased_gcp_migration'], STARTER)).toBe(false);
+  });
+
+  it('Codex review P1: goal figures with no licence record withhold every row (the hero\'s ordering is unknown); control: no goal figure at all → rows', async () => {
+    // As served, D3 carries probability_of_goal 0.2908 / 0 and goal_fit with no GOAL_CHANCE_LICENSED record → fail closed.
+    expect(changeRowsAgreeWithHero(D3.body.analysis_result, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
+    const legacy = noGoalFigures(D3.body.analysis_result);
+    legacy.enrichment.option_comparison.forEach((r: Json, i: number) => { r.probability_of_goal = i === 0 ? 0.4 : 0.8; });
+    expect(changeRowsAgreeWithHero(legacy, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
+    expect(changeRowsAgreeWithHero(noGoalFigures(D3.body.analysis_result), ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(true);
+    const turn = (await whatChanges())!;
+    expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: D3.body.analysis_result })).toMatchObject({ outcome: 'withheld', rows: [] });
   });
 
   it('a hero that disagrees withholds every row (the chat reply is untouched)', async () => {

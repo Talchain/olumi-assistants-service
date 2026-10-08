@@ -19,6 +19,8 @@ const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"sw
 const PRESS = NEXT_STEP_CHIPS.find((c) => c.id === 'agent-next-what-would-change')!;
 const TALK = { id: 'agent-talk-it-through', message: 'Let’s talk it through.' }; // TALK_IT_THROUGH_CHIP: an ordinary chip
 // The Run the served D3 read shows, by the identity the measurement carries (its fact's graph_hash_at_run + computed_at).
+/** The served D3 result with its goal figures removed: a Run whose hero shows no goal chance at all (ruling 4's open case). */
+const noGoalFigures = (r: Record<string, any>): Record<string, any> => JSON.parse(JSON.stringify(r, (k, v) => (['probability_of_goal', 'goal_probability', 'goal_fit'].includes(k) ? undefined : v)));
 const D3_RUN = { graph_hash_at_run: D3.body.analysis_result.computed_against_hash, computed_at: D3.body.analysis_state.run_state.computed_at };
 // Run B: the SAME model and leader, a newer Run (Codex P1 #2542: "unchanged leader/model variants").
 const RUN_B_AT = '2026-10-01T12:30:00.000Z';
@@ -153,6 +155,7 @@ describe('the real route: "What would change the result?" → measured tipping p
   });
 
   it('W1b (accel P24 / SCI-10): the measured answer carries its typed row beside the reply — the quoted line only, bound to its link', async () => {
+    served.result = noGoalFigures(D3.body.analysis_result); // a hero with no goal chance at all (ruling 4's open case)
     const turnId = randomUUID();
     const shownRun = { graph_hash_at_run: served.result.computed_against_hash, computed_at: served.state.run_state.computed_at };
     const body = await post(PRESS.id, PRESS.message, turnId) as unknown as Rec;
@@ -169,7 +172,14 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(modelCalls).toBe(0);
   });
 
+  it('W1c (accel P24 / SCI-10, ruling 4 fail-closed): as served, D3 carries goal figures with no licence record → the sidecar is withheld, no rows; the chat is unchanged', async () => {
+    const body = await post(PRESS.id, PRESS.message, randomUUID()) as unknown as Rec;
+    expect(body._method_result).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'withheld', rows: [] });
+    expect(body.assistant_text).toMatch(/would still be supported/);
+  });
+
   it('W5b (accel P24 / SCI-10): an answer that is not sent (the Run went stale at the final read) sends no rows either', async () => {
+    served.result = noGoalFigures(D3.body.analysis_result); // rows would be built: egress must drop them
     dispatch.during = () => { served.state = { ...D3.body.analysis_state, run_state: { ...D3.body.analysis_state.run_state, kind: 'complete_stale' } }; };
     const body = await post(PRESS.id, PRESS.message, randomUUID()) as unknown as Rec;
     expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
@@ -267,6 +277,7 @@ describe('the real route: "What would change the result?" → measured tipping p
   describe('ONE owner on replay (Codex P1 #2542: the replay always chose SCI-HERO)', () => {
     const MEASURED = "‘Switch to GCP’ would still be supported by the most runs even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
     it('R1: a retry of a measured turn, its Run still current, is the SAME measured answer and never measures again', async () => {
+      served.result = noGoalFigures(D3.body.analysis_result);
       const turn = randomUUID();
       const first = await post(PRESS.id, PRESS.message, turn);
       expect(first.assistant_text.endsWith(MEASURED), first.assistant_text).toBe(true);
@@ -274,6 +285,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       expect(again.assistant_text).toBe(first.assistant_text);
       expect((again as unknown as Rec)._method_result).toEqual((first as unknown as Rec)._method_result);
       expect((again as unknown as Rec)._method_result.run).toEqual(D3_RUN);
+      expect((again as unknown as Rec)._method_result.rows.length).toBe(1);
       expect(dispatch.calls).toHaveLength(1);
       expect(modelCalls).toBe(0);
     });

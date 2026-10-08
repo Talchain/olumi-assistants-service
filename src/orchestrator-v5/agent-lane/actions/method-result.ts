@@ -55,6 +55,26 @@ const idPart = (id: string): string => encodeURIComponent(id);
  * the single highest one is `runShareTopId`, or no option shows a goal chance at all. A range, a withheld figure, a mix
  * of shown and unshown options, a tie at the top or an unreadable result: false.
  */
+const GOAL_FIGURE_KEYS = new Set(['probability_of_goal', 'goal_probability', 'goal_fit', 'pct_by_option', 'probability_of_goal_by_option']);
+/** True when any goal-probability figure sits anywhere in the result (bounded walk); unreadable → true (fail closed). */
+function carriesGoalFigure(result: unknown): boolean {
+  try {
+    const seen = new Set<unknown>(); let budget = 20000;
+    const walk = (v: unknown, depth: number): boolean => {
+      if (v === null || typeof v !== 'object' || seen.has(v) || depth > 24 || --budget < 0) return budget < 0;
+      seen.add(v);
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        if (GOAL_FIGURE_KEYS.has(k) && x !== null && x !== undefined) return true;
+        if (walk(x, depth + 1)) return true;
+      }
+      return false;
+    };
+    return walk(result, 0);
+  } catch {
+    return true;
+  }
+}
+
 export function changeRowsAgreeWithHero(analysisResult: unknown, optionIds: readonly string[], runShareTopId: string): boolean {
   if (optionIds.length === 0 || !optionIds.includes(runShareTopId)) return false;
   let sides;
@@ -63,7 +83,9 @@ export function changeRowsAgreeWithHero(analysisResult: unknown, optionIds: read
   } catch {
     return false;
   }
-  if (sides.every(({ side }) => side.kind === 'not_recorded')) return true;
+  // "No goal chance shown" only when the result carries no goal-probability figure at all: a Run without a licence record
+  // can still show point chances (`probability_of_goal` etc.), and its ordering is unknown here (Codex review P1). Fail closed.
+  if (sides.every(({ side }) => side.kind === 'not_recorded')) return !carriesGoalFigure(analysisResult);
   if (!sides.every(({ side }) => side.kind === 'point')) return false;
   const pct = (s: (typeof sides)[number]) => (s.side.kind === 'point' ? s.side.pct : -1);
   const top = Math.max(...sides.map(pct));
