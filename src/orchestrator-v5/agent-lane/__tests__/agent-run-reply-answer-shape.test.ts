@@ -27,6 +27,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
   ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+  answerShapeFromDerivedText,
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
   type AnswerShape,
@@ -34,8 +35,10 @@ import {
 
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
-import { sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
+import { composeReplyShape, sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
 import { textAtRest } from '../decision-input-ask.js';
+import type { PendingAction } from '../../session/pending-action.js';
+import { AGENT_NO_LEADER_SENTENCES } from '../withheld-leader-fail-closed.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -93,19 +96,22 @@ const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting va
 /** The readback's graph: the corpus's served pricing graph, or a variant a row sets (reset before each row). */
 let readbackGraph: unknown = FX.state.draft_graph;
 /** The durable turn rows, keyed by turn id — the store fake from `agent-turn-withheld-leader-fail-closed.test.ts`. */
-type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null };
+type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; pending_actions?: readonly PendingAction[] };
 const rows = new Map<string, Row>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; pending_actions?: readonly PendingAction[] }) => {
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
-    const row: Row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null };
+    const row: Row = { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null,
+      ...(w.pending_actions !== undefined ? { pending_actions: structuredClone(w.pending_actions) } : {}) };
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
   readRecent: vi.fn(async () => []),
+  readMostRecentPendingActions: vi.fn(async (scenario: string) => [...rows.values()]
+    .filter(row => row.scenario_id === scenario && row.assistant_message !== null).at(-1)?.pending_actions ?? []),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
 };
@@ -175,15 +181,16 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(callModelOutputs).toHaveLength(1);
     const chip = first.json().suggested_actions.find((c: { id: string }) => c.id.startsWith('agent-explain-run:'));
     expect(chip).toBeDefined();
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    const payload = {
       scenario_id: scenario, agent_session_id: first.json()._agent.session_id, turn_id: nextTurnId(),
       message: chip.message, chip: { id: chip.id },
-    } });
+    };
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     expect(callModelOutputs, 'the control: the scripted interpretation was consumed').toEqual([]);
     const b = r.json() as Body;
     expect(b._diagnostic_trace.fast_path, 'the control: the follow-up only explains').toBe('explain');
-    return { b, turnId: [...rows.keys()].at(-1)! };
+    return { b, turnId: payload.turn_id, payload };
   };
   /** An ordinary composer message the Agent answers directly, with no tool call. */
   const askedTurn = async (text: string, scenario = SCENARIO, calls: Record<string, unknown>[][] = [], message = 'What does the analysis say?') => {
@@ -194,6 +201,88 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     return r.json() as Body;
   };
   const carriesResult = (b: Body) => (b.blocks ?? []).some((x) => x.type === 'analysis_result');
+  const retry = async (payload: Record<string, unknown>) => {
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body).toBe(200);
+    const b = response.json() as Body & { _agent: { replayed?: boolean } };
+    expect(b._agent.replayed, 'the same payload/turn_id returns the committed turn').toBe(true);
+    return b;
+  };
+  const recordReplay = (name: string, payload: Record<string, unknown>, live: Body, replay: Body & { _agent: { replayed?: boolean } }) => {
+    if (process.env.RP_WIRE_EVIDENCE) {
+      const wordsAndShape = (b: Body) => ({ assistant_text: b.assistant_text, _answer_shape: b._answer_shape });
+      writeFileSync(`${process.env.RP_WIRE_EVIDENCE}/${name}.json`, JSON.stringify({
+        payload, live: wordsAndShape(live), replay: { ...wordsAndShape(replay), replayed: replay._agent.replayed },
+      }, null, 2) + '\n');
+    }
+  };
+
+  it('RP Explain replay: live run-explanation chip is shaped; SAME payload/turn_id returns identical bytes and shape', async () => {
+    const { b: live, turnId, payload } = await typedRun(FOUR_BULLETS.text);
+    expect(live._answer_shape, 'positive control: the live Explain was composer-shaped').toBeDefined();
+    expect(deriveAnswerTextFromShape(live._answer_shape!)).toBe(live.assistant_text);
+    expect(rows.get(turnId)?.assistant_message).toBe(live.assistant_text);
+    vi.mocked(fetch).mockClear();
+
+    const replay = await retry(payload);
+    recordReplay('explain-shaped', payload, live, replay);
+    expect(runRequests, 'retry does not run analysis again').toBe(1);
+    expect(fetch, 'retry does not call the narrator again').not.toHaveBeenCalled();
+    expect(replay.assistant_text, 'stored Explain words are byte-identical').toBe(live.assistant_text);
+    expect(replay._answer_shape, 'replay restores exactly the live sidecar').toEqual(live._answer_shape);
+  });
+
+  it('RP whole control: live Explain ships a short unshaped answer whole; SAME payload replay has no shape', async () => {
+    const { b: live, turnId, payload } = await typedRun(ONE_PARAGRAPH);
+    expect(live._answer_shape, 'positive control: live shipped whole').toBeUndefined();
+    expect(rows.get(turnId)?.assistant_message).toBe(live.assistant_text);
+    vi.mocked(fetch).mockClear();
+
+    const replay = await retry(payload);
+    recordReplay('explain-whole-short', payload, live, replay);
+    expect(replay.assistant_text).toBe(live.assistant_text);
+    expect(replay._answer_shape, 'unshaped stored prose remains whole').toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // ⛔ PARKED #2827 (DL 58e392, 8 Oct): FAILS until the live shape is stored with the answer (nullable answer_shape +
+  // p_answer_shape; restore only if deriveAnswerTextFromShape(shape) === the stored words). Flip to it() when it lands.
+  it.fails('RP P1 whole control: live kept_whole text matching the derived format must not acquire a replay shape', async () => {
+    const reasons = AGENT_NO_LEADER_SENTENCES.slice(0, 4);
+    const detail = 'The team should retain the assumptions and their sources so that each claim can be reviewed against later evidence. '
+      + 'Record how each causal link was proposed, which observations support it, and where contributors still disagree about its meaning. '
+      + 'Review these expectations when new information arrives and keep the unresolved issues visible throughout the discussion.';
+    const text = `The model needs review.\n\n• Check this assumption.\n\n${[...reasons, detail].join('\n\n')}`;
+    const composed = composeReplyShape({ text, obligations: reasons.map(text => ({ role: 'withheld_reason', text })) });
+    expect(composed.outcome, 'positive control: these reasons cannot all fit on the face').toBe('kept_whole');
+    expect(composed.reason).toBe('face_over_cap');
+    expect(composed.text).toBe(text);
+    expect(answerShapeFromDerivedText(text), 'format alone accepts words that were never shaped').not.toBeNull();
+
+    const { b: live, turnId, payload } = await typedRun(text);
+    expect(live._answer_shape, 'the live route keeps every reason visible').toBeUndefined();
+    expect(rows.get(turnId)?.assistant_message).toBe(live.assistant_text);
+    expect(answerShapeFromDerivedText(live.assistant_text), 'the stored words still match the inverse').not.toBeNull();
+
+    const replay = await retry(payload);
+    recordReplay('explain-kept-whole', payload, live, replay);
+    expect(replay.assistant_text).toBe(live.assistant_text);
+    expect(replay._answer_shape, 'retry must not hide must-face reasons that shipped whole live').toBeUndefined();
+  });
+
+  it('RP changed words control: a stale Explain replaces the stored text and drops its shape', async () => {
+    const { b: live, payload } = await typedRun(FOUR_BULLETS.text);
+    expect(live._answer_shape).toBeDefined();
+    readbackState = { ...PERMITTED_STATE, run_state: {
+      ...(PERMITTED_STATE.run_state as Record<string, unknown>), computed_at: '2026-10-02T12:00:00.000Z',
+    } };
+
+    const replay = await retry(payload);
+    recordReplay('explain-stale', payload, live, replay);
+    expect((replay as Body & { narration: { status: string } }).narration.status).toBe('stale');
+    expect(replay.assistant_text).not.toBe(live.assistant_text);
+    expect(replay._answer_shape, 'no sidecar follows the stale Explain replacement').toBeUndefined();
+  });
 
   const runOnlyPayload = (turnId: string) => ({
     kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
@@ -218,6 +307,35 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
         links: [{ from: 'pro_subscriber_base', to: 'mrr' }, { from: 'mrr_per_pro_subscriber', to: 'mrr' }] },
     ] } };
   };
+
+  // ⛔ PARKED #2827 (DL 58e392, 8 Oct): FAILS until the live shape is stored with the answer (nullable answer_shape +
+  // p_answer_shape; restore only if deriveAnswerTextFromShape(shape) === the stored words). Flip to it() when it lands.
+  it.fails('RP P1 live schema: a shaped Explain chance lead-in with a single newline and atomic dependency replays the same shape', async () => {
+    readbackResult = { ...RESULT_BLOCK, enrichment: { ...(RESULT_BLOCK.enrichment as Record<string, unknown>), inference_warnings: [
+      { code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'The chance is shown as a range because a causal link is not sized.',
+        option_ids: ['keep_pro_at_49'], range_by_option: { keep_pro_at_49: {
+          from: 'pro_subscriber_base', to: 'mrr', kind: 'link_strength', among: 'all',
+          low_pct: 4, high_pct: 55, low_rounding: 'whole', high_rounding: 'whole',
+        } } },
+    ] } };
+    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    expect(screen, 'positive control: a real typed range and its dependency').toHaveLength(1);
+    expect(screen[0]!.depends).not.toBe('');
+    const lead = 'For your goal, on current information:';
+    const joined = `${screen[0]!.chance} ${screen[0]!.depends}`;
+    const narrated = ['The comparison remains conditional on the estimates used.', lead, joined,
+      'Use the visible dependencies to decide which uncertain causal link needs better evidence before drawing a conclusion from the model.'].join('\n');
+    const { b: live, turnId, payload } = await typedRun(narrated);
+    expect(live._answer_shape, 'the live composer accepts its typed multi-sentence finding').toBeDefined();
+    expect(live._answer_shape!.headline).toBe(`${lead}\n${joined}`);
+    expect(deriveAnswerTextFromShape(live._answer_shape!)).toBe(live.assistant_text);
+    expect(rows.get(turnId)?.assistant_message).toBe(live.assistant_text);
+
+    const replay = await retry(payload);
+    recordReplay('explain-chance-headline', payload, live, replay);
+    expect(replay.assistant_text).toBe(live.assistant_text);
+    expect(replay._answer_shape, 'inverse must accept the headline schema the live composer used').toEqual(live._answer_shape);
+  });
 
   it('B15 / 2b-0: uninterpreted Run leads with the first screen finding; ready and disclosure in More detail', async () => {
     hostRunFixture();
@@ -540,6 +658,68 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(await offersApprove(proposed), 'the control: the approve chip is offered').toBe(true);
     expect('_answer_shape' in proposed, 'the proposing turn is not shaped').toBe(false);
     expect(proposed.assistant_text).toBe(PROPOSAL_REPLY);
+  });
+
+  // ⛔ PARKED #2827 (DL 58e392, 8 Oct): FAILS until the live shape is stored with the answer (nullable answer_shape +
+  // p_answer_shape; restore only if deriveAnswerTextFromShape(shape) === the stored words). Flip to it() when it lands.
+  it.fails('RP proposal control: live approval-card disclosure ships whole; SAME payload replay has no shape, including after decline', async () => {
+    const payload = { kind: 'message', scenario_id: '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a20',
+      message: PROPOSING, turn_id: nextTurnId() };
+    const proposalWords = deriveAnswerTextFromShape({
+      headline: PROPOSAL_REPLY.split('\n\n')[0]!,
+      bullets: ['Add a link from Price-release alignment to Pro conversion rate (positive)'],
+      detail: PROPOSAL_REPLY.split('\n').slice(3).join('\n'),
+    });
+    expect(answerShapeFromDerivedText(proposalWords), 'the format could be inferred without the card guard').not.toBeNull();
+    callModelOutputs = [proposeLink('Price-release alignment', 'Pro conversion rate'), say(proposalWords)];
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body).toBe(200);
+    const live = response.json() as Offered;
+    expect(live._agent.tool_calls).toMatchObject([{ name: 'propose_model_change', ok: true }]);
+    expect(await offersApprove(live), 'positive control: a real proposal approval card').toBe(true);
+    expect(rows.get(payload.turn_id)?.pending_actions?.length, 'the store retains the live proposal carrier').toBeGreaterThan(0);
+    expect(live._answer_shape).toBeUndefined();
+    expect(live.assistant_text).toBe(proposalWords);
+    vi.mocked(fetch).mockClear();
+
+    const replay = await retry(payload);
+    recordReplay('proposal-active', payload, live, replay);
+    expect(await offersApprove(replay as Offered), 'replay retains the approval card').toBe(true);
+    expect(replay.assistant_text).toBe(live.assistant_text);
+    expect(replay._answer_shape, 'approval disclosure stays whole').toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+
+    const { declinedProposalOf } = await import('../proposal-object/record.js');
+    const decline = live.suggested_actions.find(action => declinedProposalOf(action.id) !== undefined);
+    expect(decline, 'positive control: the live card can be declined').toBeDefined();
+    const declined = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: payload.scenario_id, message: 'Not now.', turn_id: nextTurnId(), chip: { id: decline!.id },
+    } });
+    expect(declined.statusCode, declined.body).toBe(200);
+    expect(declined.json()._agent.tool_calls).toMatchObject([{ name: 'withdraw_proposal', ok: true }]);
+
+    const retiredReplay = await retry(payload);
+    recordReplay('proposal-declined', payload, live, retiredReplay);
+    expect(await offersApprove(retiredReplay as Offered), 'the declined card is no longer on offer').toBe(false);
+    expect(retiredReplay.assistant_text).toBe(live.assistant_text);
+    expect(retiredReplay._answer_shape, 'declining the card cannot change the original whole-shipping profile').toBeUndefined();
+  });
+
+  it('RP approval control: typed approval reply ships whole; SAME payload replay has no shape', async () => {
+    const { approvalChipIdFor } = await import('../approval-chips.js');
+    const payload = { kind: 'message', scenario_id: SCENARIO, message: 'Approve', turn_id: nextTurnId(),
+      chip: { id: approvalChipIdFor('prop_2b0001') } };
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body).toBe(200);
+    const live = response.json() as Body;
+    expect(live._diagnostic_trace.fast_path, 'positive control: typed approval route').toBe('approve');
+    expect(live._answer_shape).toBeUndefined();
+
+    const replay = await retry(payload);
+    recordReplay('approval', payload, live, replay);
+    expect(replay.assistant_text).toBe(live.assistant_text);
+    expect(replay._answer_shape).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('7b. a Run beside an EARLIER proposal’s approve chip → shaped: this reply states no change to consent to (R1), the chip and its card do', async () => {
