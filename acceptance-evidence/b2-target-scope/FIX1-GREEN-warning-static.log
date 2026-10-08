@@ -1,0 +1,12 @@
+Load gate exit: 0
+{"load":5.36865234375,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts tests/contract/tier3-leak-guard.static.guard.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+
+ Test Files  2 passed (2)
+      Tests  20 passed (20)
+   Start at  17:48:35
+   Duration  5.77s (transform 3.49s, setup 147ms, import 5.20s, tests 158ms, environment 0ms)
+

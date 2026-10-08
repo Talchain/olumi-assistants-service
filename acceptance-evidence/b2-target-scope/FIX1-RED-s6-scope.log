@@ -1,0 +1,73 @@
+Load gate exit: 0
+{"load":9.181640625,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts (10 tests | 1 failed) 182ms
+     × R4 producer without ranges: clean arms retain their chances despite fourth-shop failures 61ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts > S-E GOALS S6: each option owns its target-testability reason > R4 producer without ranges: clean arms retain their chances despite fourth-shop failures
+AssertionError: expected { option_comparison: [ …(4) ], …(8) } to be { option_comparison: [ …(4) ], …(8) } // Object.is equality
+
+- Expected
++ Received
+
+@@ -606,10 +606,38 @@
+          "fourth_shop_in_clifton",
+        ],
+        "severity": "warning",
+        "win_shares_withheld": true,
+      },
++     {
++       "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
++       "first_ask": {
++         "from": "fourth_shop_fit_out_spend",
++         "kind": "link",
++         "to": "monthly_profit",
++       },
++       "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £24,000 / month), because it needs a size for the link from Fourth-shop fit-out spend to monthly profit. Roughly how much monthly profit in GBP/month does a change in Fourth-shop fit-out spend bring?",
++       "node_ids": [
++         "monthly_profit",
++       ],
++       "option_ids": [
++         "fourth_shop_in_clifton",
++       ],
++       "per_option": {
++         "fourth_shop_in_clifton": {
++           "message": "Not shown. It can't yet be tested against your target (at least £24,000 / month), because it needs a size for the link from Fourth-shop fit-out spend to monthly profit. Roughly how much monthly profit in GBP/month does a change in Fourth-shop fit-out spend bring?",
++         },
++       },
++       "say": "I can't yet say how likely ‘Fourth shop in Clifton’ is to keep monthly profit at or above £24,000 / month: I need a size for the link from Fourth-shop fit-out spend to monthly profit. Roughly how much monthly profit in GBP/month does a change in Fourth-shop fit-out spend bring?",
++       "severity": "warning",
++       "withheld_claims": [
++         "goal_probability",
++         "joint_probability",
++         "outcome",
++         "downside",
++       ],
++     },
+    ],
+    "option_comparison": [
+      {
+        "id": "loyalty_app",
+        "label": "Loyalty app",
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts:140:22
+    138|     const verdict = notTestable(graph, evaluations);
+    139|     const produced = withholdGoalFiguresForUntestableTarget(noRanges, …
+    140|     expect(produced).toBe(noRanges);
+       |                      ^
+    141|     expect(produced.inference_warnings.filter((w: Rec) => w.code === T…
+    142|     expect(perOptionTargetReasonsForRun(graph, verdict, ['loyalty_app'…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 26 passed (27)
+   Start at  17:51:54
+   Duration  8.56s (transform 4.88s, setup 159ms, import 7.76s, tests 347ms, environment 0ms)
+

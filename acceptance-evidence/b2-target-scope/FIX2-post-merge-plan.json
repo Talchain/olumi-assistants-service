@@ -1,0 +1,22 @@
+[
+  [
+    "src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts",
+    "src/orchestrator-v5/goal-target/__tests__/s-e-goals-s6.test.ts"
+  ],
+  [
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-target-not-testable.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-horizon-untested.test.ts"
+  ],
+  [
+    "tests/unit/schemas/accumulation-carrier.test.ts",
+    "src/orchestrator-v5/admission/__tests__/accumulation-chance-credit.test.ts"
+  ],
+  [
+    "src/orchestrator-v5/agent-lane/__tests__/accumulation-identity-build.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/accumulation-product-reconciliation.test.ts"
+  ],
+  [
+    "tests/unit/agent-lane/accumulation-identity.test.ts",
+    "src/orchestrator-v5/agent-lane/__tests__/zero-spread-certainty.test.ts"
+  ]
+]

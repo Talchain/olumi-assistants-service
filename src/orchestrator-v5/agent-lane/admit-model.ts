@@ -1,6 +1,7 @@
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
 export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
 import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
+import { readProductIdentityCarrier as readCarrier } from '../admission/identity-evaluations.js';
 /**
  * Agent lane — whole-candidate admission.
  *
@@ -1850,13 +1851,6 @@ type GraphNodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly 
 function isAccumulationCarrier(n: GraphNodeLike): boolean {
   const c = n.nonlinear_identity as { operation?: unknown } | null | undefined;
   return c !== null && typeof c === 'object' && c.operation === 'accumulation';
-}
-
-function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
-  const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
-  if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
-  if (!Array.isArray(c.factor_ids) || c.factor_ids.length < 2 || !c.factor_ids.every((f) => typeof f === 'string' && f !== '')) return null;
-  return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
 }
 
 /**
