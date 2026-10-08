@@ -58,6 +58,15 @@ const contrarySame = (nothing: string): RegExp => new RegExp(String.raw`\b(${not
   + String.raw`|(?:didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\b`, 'iu');
 const CONTRARY_SAME = contrarySame('nothing');
 const CONTRARY_SAME_WITH_UNSAID = contrarySame('nothing(?: else)?');
+/** Qualify each claim separately: uncertainty about one claim cannot license a later contrary assertion. */
+function assertsContrarySame(text: string, ban: RegExp, labels: readonly (string | undefined)[]): boolean {
+  const own = maskedFor(text, ban, labels);
+  for (const match of own.matchAll(new RegExp(ban.source, 'giu'))) {
+    const prefix = own.slice(0, match.index);
+    if (!/\b(?:(?:cannot|can't)\s+confirm(?:\s+that)?|isn't\s+sure\s+whether)\s+$/iu.test(prefix)) return true;
+  }
+  return false;
+}
 /** WHOLE-TOKEN match after normalise(): label 'B' never matches inside another word (HARNESS #2478 P1). */
 function labelMatches(text: string, labels: readonly string[]): boolean {
   const normal = ` ${normalise(text)} `;
@@ -156,7 +165,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     // A named OR unsaid change is never "no change". Incomplete coverage also cannot license "nothing else changed".
     const changesUnsaid = inputs.changes_unsaid === true;
     check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 && !changesUnsaid
-      || !banned(reply, changesUnsaid ? CONTRARY_SAME_WITH_UNSAID : CONTRARY_SAME, labels));
+      || !assertsContrarySame(reply, changesUnsaid ? CONTRARY_SAME_WITH_UNSAID : CONTRARY_SAME, labels));
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'RC-WIDEN') {

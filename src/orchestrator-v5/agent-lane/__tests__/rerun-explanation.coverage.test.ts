@@ -6,7 +6,7 @@ import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-pa
 import { buildRunInputSnapshot } from '../../tools/handlers/run-input-snapshot.js';
 import { REPAIR_VOCABULARY_DENYLIST } from '../../../orchestrator/shared/repair-vocabulary-denylist.js';
 import { checkMethodTurn } from '../guidance/index.js';
-import { composeRerunExplanation, rerunExplanationPlan, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
+import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 const GRAPH = {
   nodes: [{ id: 'price', kind: 'factor', label: 'Pro plan price' },
@@ -101,6 +101,45 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
 
   it('a filtered malformed row never becomes a complete empty record', () => {
     expect(plan({ input_changes: [null] }).codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
+  });
+
+  for (const [name, delta] of cases) {
+    it.each([
+      'Olumi cannot confirm that nothing else changed.',
+      'Olumi can\'t confirm that nothing else changed.',
+      'Olumi isn\'t sure whether anything else changed.',
+    ])(`${name}: honest uncertainty survives composition and provisional-view checking: %s`, (uncertainty) => {
+      const p = plan(delta);
+      expect(p.inputs.changes_unsaid).toBe(true);
+      expect.soft(composeRerunExplanation(uncertainty, p)).toEqual({ text: `${p.codeLine}\n\n${uncertainty}`, dropped: [], failed: [] });
+      expect.soft(rerunViewFailures({ reasoning: uncertainty }, p)).toEqual([]);
+    });
+
+    it.each([
+      'Nothing else changed.',
+      'Olumi can confirm that nothing else changed.',
+      'Olumi is sure that nothing else changed.',
+      'Olumi cannot confirm the earlier comparison, but nothing else changed.',
+      'Olumi can\'t confirm the earlier comparison, but nothing else changed.',
+      'Olumi isn\'t sure about the earlier comparison, but nothing else changed.',
+    ])(`${name}: contrary claims still fail composition and provisional-view checking: %s`, (claim) => {
+      const p = plan(delta);
+      expect(composeRerunExplanation(claim, p)).toEqual({ text: p.codeLine, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
+      expect(rerunViewFailures({ reasoning: claim }, p)).toEqual(['RX-NO-CONTRARY-SAME']);
+    });
+  }
+
+  it('honest uncertainty does not exempt a later contrary claim in the same draft or view', () => {
+    const p = plan({ input_changes: [NAMED, UNKNOWN] });
+    const uncertainty = 'Olumi cannot confirm that nothing else changed.';
+    const claim = 'Nothing else changed.';
+    expect(composeRerunExplanation(`${uncertainty} ${claim}`, p)).toEqual({
+      text: `${p.codeLine}\n\n${uncertainty}`, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'],
+    });
+    expect(rerunViewFailures({ reasoning: `${uncertainty} ${claim}` }, p)).toEqual(['RX-NO-CONTRARY-SAME']);
+    const joinedClaim = `${uncertainty.slice(0, -1)}, but nothing else changed.`;
+    expect(composeRerunExplanation(joinedClaim, p)).toEqual({ text: p.codeLine, dropped: [joinedClaim], failed: ['RX-NO-CONTRARY-SAME'] });
+    expect(rerunViewFailures({ reasoning: joinedClaim }, p)).toEqual(['RX-NO-CONTRARY-SAME']);
   });
 
   it('CONTROL: full coverage beside a named change still permits Nothing else changed', () => {

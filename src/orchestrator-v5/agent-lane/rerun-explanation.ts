@@ -187,6 +187,27 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     const label = text(row.label_after) ?? text(row.label_before);
     const before = value(row.before); const after = value(row.after);
     if (label === undefined) { skipped += 1; continue; }
+    if ((row.entity_kind === 'option' || row.entity_kind === 'goal') && row.field === 'presence') {
+      const entered = row.before === null && rec(row.after)?.raw === true;
+      const left = rec(row.before)?.raw === true && row.after === null;
+      if (!entered && !left) { skipped += 1; continue; }
+      // These are calculation-input changes, not evidence of a user adding or deleting a model node.
+      out.push(row.entity_kind === 'option'
+        ? `The option ‘${label}’ is ${entered ? 'now' : 'no longer'} part of the analysis.`
+        : `‘${label}’ is ${entered ? 'now' : 'no longer'} the goal of the analysis.`);
+      continue;
+    }
+    if (row.entity_kind === 'option_setting' && row.field === 'value') {
+      // The row's labels name the factor; only option_id identifies whose setting changed.
+      const optionId = text(row.option_id);
+      const option = optionId === undefined ? undefined : text(labelOf(optionId));
+      if (option === undefined || before === undefined && after === undefined) { skipped += 1; continue; }
+      out.push(before !== undefined && after !== undefined
+        ? `The value of ‘${label}’ for the option ‘${option}’ changed: ${before} → ${after}.`
+        : after !== undefined ? `The value of ‘${label}’ for the option ‘${option}’ was recorded: ${after}.`
+          : `The recorded value of ‘${label}’ for the option ‘${option}’ was removed.`);
+      continue;
+    }
     if (row.entity_kind === 'goal') {
       if (row.field === 'value') {
         out.push(after !== undefined
