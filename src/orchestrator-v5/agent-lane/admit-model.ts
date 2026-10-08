@@ -1375,7 +1375,7 @@ const quotedList = (items: readonly string[]): string => {
  * still an addend (item c), and so is a cause that drives a factor (finding 3 of 1047641f).
  */
 function markProductIdentities(
-  declared: readonly CandidateIdentity[],
+  allDeclared: readonly CandidateIdentity[],
   resolve: (label: string) => string | undefined,
   nodes: readonly AdmittedNode[],
   edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
@@ -1387,6 +1387,9 @@ function markProductIdentities(
   const accepted: AcceptedProductIdentity[] = [];
   const analyses: ProductIdentityAnalysis[] = [];
   const unlevelled: string[] = [];
+  // ⭐ CEE #4: an `accumulation` is admitted by its own writer (`accumulation-identity.ts`, which needs the held deadline),
+  // never refused here as "not a relationship Olumi can check".
+  const declared = allDeclared.filter((d) => d?.operation !== 'accumulation');
   if (declared.length === 0) return { marks, loss, accepted, analyses, unlevelled };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const nodeOf = new Map(nodes.map((n) => [n.id, n]));
