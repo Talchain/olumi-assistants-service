@@ -38,11 +38,21 @@
  * The model's replies are SCRIPTED. That is what makes this an integration of
  * the MACHINERY, not evidence about model behaviour.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createApplyOperations, currentModelRevision } from '../../apply-operations.js';
+import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
+
+beforeEach(() => {
+  __setUseAppendV6ForTest(true);
+});
+
+afterEach(() => {
+  __setUseAppendV6ForTest(false);
+});
 
 /**
  * ⛔ THESE PROBE FILES USED HARDCODED `/tmp/<fixed-name>.json`, which CodeQL
@@ -67,14 +77,15 @@ const CAPTURED_GRAPH = JSON.parse(
 const SCENARIO = 'c0ffee00-0000-4000-8000-000000000001';
 
 /** Modelled on the transaction suite's double: append advances the graph AND records a readable row. */
-function makeStore(initial: unknown) {
+function makeStore(initial: unknown, numericRevisionAvailable = true) {
   let graphJson = JSON.stringify(initial);
+  let revision = numericRevisionAvailable ? 7 : undefined;
   const rows: Array<Record<string, unknown>> = [];
   return {
     rows,
     appends: [] as Array<Record<string, unknown>>,
     loadGraph: vi.fn(async () => JSON.parse(graphJson)),
-    loadGraphAndBriefText: async () => ({ graph: JSON.parse(graphJson), briefText: null }),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(graphJson), briefText: null, revision })),
     append: vi.fn(async (write: Record<string, unknown>) => {
       const id = `persisted-row-${rows.length + 1}`;
       rows.push({
@@ -83,7 +94,10 @@ function makeStore(initial: unknown) {
         turn_id: write.turn_id,
         request_hash: write.request_hash,
       });
-      if (write.graph !== undefined && write.graph !== null) graphJson = JSON.stringify(write.graph);
+      if (write.graph !== undefined && write.graph !== null) {
+        graphJson = JSON.stringify(write.graph);
+        if (revision !== undefined) revision += 1;
+      }
       return { id };
     }),
     readRecent: vi.fn(async () => rows.map((r) => ({ ...r }))),
@@ -112,7 +126,6 @@ describe('CLAUSE: one delayed-confirmation edit reaches the real writer', () => 
   });
 
   it('the real adapter commits a change to the captured graph and returns a receipt', async () => {
-    const { createApplyOperations, currentModelRevision } = await import('../../apply-operations.js');
     const store = makeStore(CAPTURED_GRAPH);
 
     const modelRevision = await currentModelRevision(SCENARIO, { store: store as never });
@@ -130,6 +143,7 @@ describe('CLAUSE: one delayed-confirmation edit reaches the real writer', () => 
       proposalId: 'prop-delayed-1',
       idempotencyKey: 'turn-confirm-1',
       modelRevision: modelRevision!,
+      beforeAppend: async () => undefined,
       operations: [
         {
           kind: 'set_option_effect',
@@ -172,14 +186,17 @@ describe('CLAUSE: one delayed-confirmation edit reaches the real writer', () => 
  * agrees ON A LATER TURN".
  */
 describe('CLAUSE: the offer survives the turn boundary and the answer commits', () => {
-  it('turn 1 offers · turn 2 confirms · the real writer returns a receipt', async () => {
-    const { createApplyOperations, currentModelRevision } = await import('../../apply-operations.js');
+  it.each([
+    { title: 'turn 1 offers · turn 2 confirms · the real writer returns a receipt', v6: true },
+    { title: 'flag OFF: fresh acceptance with no numeric revision applies without refusal or unknown outcome', v6: false },
+  ])('$title', async ({ v6 }) => {
+    __setUseAppendV6ForTest(v6);
     const { runReplacementTurn } = await import('../run-replacement-turn.js');
     const { ACCEPT_TOOL_NAME } = await import('../run-replacement-turn.js');
     const { EMPTY_CONVERSATION_MEMORY } = await import('../conversation-memory.js');
     const { EMPTY_PROPOSAL_STORE } = await import('../proposal-store.js');
 
-    const store = makeStore(CAPTURED_GRAPH);
+    const store = makeStore(CAPTURED_GRAPH, v6);
     const modelRevision = (await currentModelRevision(SCENARIO, { store: store as never }))!;
     const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'req-j', store: store as never });
 
@@ -224,6 +241,7 @@ describe('CLAUSE: the offer survives the turn boundary and the answer commits', 
     // ⭐ THE TURN BOUNDARY — everything reloads from storage, as the next turn would.
     const carried = JSON.parse(JSON.stringify({ memory: t1.memory, proposals: t1.proposals }));
 
+    const checkpoint = vi.fn(async () => undefined);
     const t2 = await runReplacementTurn(
       { ...base, turnId: 'turn-confirm', message: 'Yes, go ahead and update the model.',
         memory: carried.memory, proposals: carried.proposals } as never,
@@ -231,7 +249,7 @@ describe('CLAUSE: the offer survives the turn boundary and the answer commits', 
           reply([{ type: 'tool_use', id: 'tu2', name: ACCEPT_TOOL_NAME,
                    input: { proposal_id: open[0]!.id, user_agreement_quote: 'go ahead and update the model' } }], 'tool_use'),
           reply([{ type: 'text', text: 'Done.' }], 'end_turn'),
-        ]), checkpoint: async () => undefined, applyOperations: apply } as never,
+        ]), checkpoint, applyOperations: apply } as never,
     );
 
     writeFileSync(join(PROBE_DIR, 'journey-outcome.json'), JSON.stringify({
@@ -243,7 +261,14 @@ describe('CLAUSE: the offer survives the turn boundary and the answer commits', 
     expect(t2.applied, 'exactly one apply, carrying a receipt').toHaveLength(1);
     expect(t2.applied[0]!.receiptId, 'the receipt is the proof of commit').toBeTruthy();
     expect(t2.trace?.refusals ?? [], 'no refusal on the committing turn').toHaveLength(0);
+    expect(t2.mustReconcile, 'the save outcome is known').toHaveLength(0);
     expect(store.append.mock.calls.length, 'ONE write, not two').toBe(1);
+    expect(checkpoint).toHaveBeenCalledTimes(v6 ? 2 : 1);
+    if (!v6) {
+      expect(store.loadGraphAndBriefText, 'flag OFF adds no numeric revision read').not.toHaveBeenCalled();
+      expect(store.append.mock.calls[0]?.[0].expectedRevision).toBeUndefined();
+      expect(t2.proposals.proposals[0]).not.toHaveProperty('expected_graph_revision');
+    }
 
     // ── CLAUSE: RELOAD AGREEMENT — the graph a later turn loads carries it ──
     // Read back through the store the way the next turn would, not from any

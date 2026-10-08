@@ -18,6 +18,7 @@ import type { PendingAction } from '../../session/pending-action.js';
 import { applyOptionInterventionEdit, executeOptionInterventionBatch, executeOptionInterventionEdit } from '../option-intervention-edit.js';
 import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapPostimageIsScoped } from '../../agent-lane/unmodelled-mechanisms.js';
 import { runWithApprovedLevelAdoption } from '../../agent-lane/approved-adoption-context.js';
+import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -94,13 +95,24 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
   pendings?: readonly PendingAction[];
   /** The atomic version receipt this append reports, derived from the write. */
   receiptFor?: (write: SessionTurnWrite) => AtomicCommittedModelVersionReceipt | undefined;
+  /** A rival write after the initial snapshot, before this transaction appends. */
+  rivalRevisionAfterSnapshot?: number;
 } = {}) {
   let graphJson = JSON.stringify(initial);
   let concurrentGraphJson: string | undefined;
   let loads = 0;
+  let revision = 31;
   const attempts: SessionTurnWrite[] = [];
   const rows = new Map<string, { id: string; json: string }>();
   const fresh = (): SessionStore => createMockSessionStore({
+    loadGraphAndBriefText: async scenarioId => {
+      expect(scenarioId).toBe(SCENARIO_ID);
+      loads += 1;
+      if (loads === options.failLoadAt) throw new Error('canonical read unavailable');
+      const state = { graph: JSON.parse(graphJson), briefText: null, revision };
+      if (options.rivalRevisionAfterSnapshot !== undefined) revision = options.rivalRevisionAfterSnapshot;
+      return state;
+    },
     loadGraph: async scenarioId => {
       expect(scenarioId).toBe(SCENARIO_ID);
       loads += 1;
@@ -171,6 +183,7 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
     durableRows: () => [...rows.values()].map(row => JSON.parse(row.json) as SessionTurnWrite),
     durableGraph: () => JSON.parse(graphJson) as ReturnType<typeof canonicalGraph>,
     loadCount: () => loads,
+    currentRevision: () => revision,
     stageConcurrentGraphOnDuplicate: (graph: unknown) => { concurrentGraphJson = JSON.stringify(graph); },
   };
 }
@@ -185,16 +198,28 @@ function interventionNumber(raw: unknown): number | undefined {
 }
 
 beforeEach(() => {
+  __setUseAppendV6ForTest(true);
   vi.stubEnv('OLUMI_ENV', 'staging');
   vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', 'true');
   _resetConfigCache();
 });
 afterEach(() => {
+  __setUseAppendV6ForTest(false);
   vi.unstubAllEnvs();
   _resetConfigCache();
 });
 
 describe('option-intervention transaction — real commit, serialized store boundary', () => {
+  it('carries the original snapshot revision through a rival write with unchanged graph hashes', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before, { rivalRevisionAfterSnapshot: 32 });
+    const result = await executeOptionInterventionEdit(inputFor(before), persistence.fresh());
+    expect(result.kind).toBe('committed');
+    expect(persistence.currentRevision()).toBe(32);
+    expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.attempts[0]).toHaveProperty('expectedRevision', 31);
+  });
+
   it('commits the exact target, canonical options mirror and edit fact; cold reload retains every unrelated field', async () => {
     const before = canonicalGraph();
     const pristine = clone(before);
@@ -1198,10 +1223,12 @@ describe('approved option gaps use the existing atomic level door', () => {
 
   it('a node-only clear with a stale mirror readback is unverified', async () => {
     const before = withStoredGap(); const persistence = jsonStore(before); const facade = persistence.fresh();
-    const load = facade.loadGraph.bind(facade); let reads = 0;
+    const load = facade.loadGraph.bind(facade);
     facade.loadGraph = async scenario => {
-      const graph = await load(scenario) as ReturnType<typeof withStoredGap>; reads += 1;
-      if (reads > 1) graph.options!.find(o => o.id === 'option')!.unresolved_targets = [GAP];
+      const graph = await load(scenario) as ReturnType<typeof withStoredGap>;
+      // The initial authority is now the combined graph/revision read. Corrupt
+      // only a readback after a durable append, independent of read counts.
+      if (persistence.durableRows().length > 0) graph.options!.find(o => o.id === 'option')!.unresolved_targets = [GAP];
       return graph;
     };
     expect(await executeOptionInterventionBatch(request(before, clear), facade))

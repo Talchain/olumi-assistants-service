@@ -1,12 +1,13 @@
 /**
  * RED-first specification for Shared Data Phase 2(c).
  * Round 2 refusal rows run RED before the fix, then GREEN in this file only.
- * The shipping switch stays false. Exercise the dormant seam directly rather
- * than introducing a runtime configuration escape hatch.
+ * Slice ii-a exercises the public versioned append through the test seam,
+ * including replay and refusal at the Supabase RPC boundary. The shipped
+ * default stays off until commit B.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SupabaseSessionStore, USE_APPEND_V6 } from '../supabase-store.js';
+import { SupabaseSessionStore, USE_APPEND_V6, __setUseAppendV6ForTest, useAppendV6 } from '../supabase-store.js';
 import {
   GraphStaleWriteError,
   SessionReadError,
@@ -81,22 +82,26 @@ function write(overrides: Partial<SessionTurnWrite> = {}): SessionTurnWrite {
 }
 
 beforeEach(() => {
+  __setUseAppendV6ForTest(true);
   vi.clearAllMocks();
   selectCalls.length = 0;
   scenarioRow = { graph: GRAPH, brief_text: 'Synthetic brief', revision: 7 };
   rpc.mockResolvedValue({
-    data: { turn_row_id: 'turn-row', model_version_receipt: null },
+    data: { turn_row_id: 'turn-row', model_version_receipt: null, revision: 8 },
     error: null,
   });
 });
+afterEach(() => {
+  __setUseAppendV6ForTest(false);
+});
 
-describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
-  it('ships disabled, keeps the public append on v5, and sends no revision argument to v5', async () => {
+describe('scenario revision — public append_turn_atomic_v6 path', () => {
+  it('ships disabled and the enabled test seam sends the original revision to v6, never v5', async () => {
     expect(USE_APPEND_V6).toBe(false);
-    await expect(store().append(write())).resolves.toEqual({ id: 'turn-row' });
+    expect(useAppendV6()).toBe(true);
+    await expect(store().append(write())).resolves.toEqual({ id: 'turn-row', revision: 8 });
     expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v5');
-    expect(rpc.mock.calls[0]![1]).not.toHaveProperty('p_expected_revision');
+    expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v6');
     expect(rpc.mock.calls[0]![1]).toMatchObject({
       p_scenario_id: SCENARIO,
       p_turn_id: TURN,
@@ -104,6 +109,7 @@ describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
       p_expected_graph_identity_hash: null,
       p_cas_enforce: true,
       p_version_mutation_id: MUTATION,
+      p_expected_revision: 7,
     });
   });
 
@@ -159,15 +165,7 @@ describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
       details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }),
     };
 
-    // Route the disabled v5 dispatch through the real v6 seam in this mock.
-    // This exercises the downstream OLGC1/fence/generic handlers too, without
-    // changing the shipping flag or adding a runtime switch to production.
-    rpc.mockImplementation(async (rpcName: string, rpcArgs: Record<string, unknown>) => {
-      if (rpcName === 'append_turn_atomic_v5') {
-        return sessionStore['callAppendTurnAtomicV6'](turnWrite, rpcArgs);
-      }
-      return { data: null, error: rpcError };
-    });
+    rpc.mockResolvedValue({ data: null, error: rpcError });
 
     const error = await sessionStore['appendAtomicVersioned'](turnWrite, {
       p_scenario_id: SCENARIO, p_turn_id: TURN, p_request_hash: turnWrite.request_hash,
@@ -185,14 +183,60 @@ describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
     expect(emitFence).not.toHaveBeenCalled();
     expect(markGraphWriteFailed).not.toHaveBeenCalled();
     expect(rpc.mock.calls.map(([rpcName]) => rpcName)).toEqual([
-      'append_turn_atomic_v5', 'append_turn_atomic_v6',
+      'append_turn_atomic_v6',
     ]);
-    expect(rpc.mock.calls[1]![1]).toMatchObject({ p_expected_revision: 7 });
+    expect(rpc.mock.calls[0]![1]).toMatchObject({ p_expected_revision: 7 });
     if (code === 'OLGC1') {
       expect(emitCasConflict).toHaveBeenCalledExactlyOnceWith(turnWrite, 'enforce', 'OLGC1');
     } else {
       expect(emitCasConflict).not.toHaveBeenCalled();
     }
+  });
+
+  it('refuses a stale public versioned commit and threads the equal-revision commit result', async () => {
+    let current = 8;
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      expect(name).toBe('append_turn_atomic_v6');
+      if (args.p_expected_revision !== current) return {
+        data: null,
+        error: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: args.p_expected_revision, current }) },
+      };
+      current += 1;
+      return { data: { turn_row_id: 'committed-turn', model_version_receipt: null, revision: current }, error: null };
+    });
+    await expect(store().append(write({ expectedRevision: 7 }))).rejects.toMatchObject({
+      name: 'GraphStaleWriteError', conflict_category: 'revision_conflict',
+    });
+    expect(current).toBe(8);
+    await expect(store().append(write({ expectedRevision: 8 }))).resolves.toEqual({ id: 'committed-turn', revision: 9 });
+    expect(current).toBe(9);
+  });
+
+  it('returns the cached turn on a same-turn-id replay before comparing a moved revision', async () => {
+    let current = 7;
+    const committed = new Map<string, { turn_row_id: string; model_version_receipt: null; revision: number }>();
+    let comparisons = 0;
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      expect(name).toBe('append_turn_atomic_v6');
+      const cached = committed.get(String(args.p_turn_id));
+      if (cached) return { data: { ...cached, revision: current }, error: null };
+      comparisons += 1;
+      if (args.p_expected_revision !== current) return {
+        data: null,
+        error: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: args.p_expected_revision, current }) },
+      };
+      const data = { turn_row_id: 'cached-turn', model_version_receipt: null, revision: ++current };
+      committed.set(String(args.p_turn_id), data);
+      return { data, error: null };
+    });
+    const sessionStore = store();
+    await expect(sessionStore.append(write())).resolves.toEqual({ id: 'cached-turn', revision: 8 });
+    current = 11; // Another turn commits after the lost response.
+    await expect(sessionStore.append(write())).resolves.toEqual({ id: 'cached-turn', revision: 11 });
+    expect(comparisons).toBe(1);
+    expect(committed.size).toBe(1);
+    expect(rpc.mock.calls.map(([, args]) => args.p_turn_id)).toEqual([TURN, TURN]);
+    expect(rpc.mock.calls.map(([, args]) => args.p_expected_revision)).toEqual([7, 7]);
   });
 
   it('does not fall back when the new RPC is absent', async () => {
@@ -205,11 +249,11 @@ describe('scenario revision — dormant append_turn_atomic_v6 path', () => {
 });
 
 describe('scenario revision — turn-start scenario read', () => {
-  it('preserves legacy columns and result shape while the shipping switch is false', async () => {
+  it('reads and returns the scenario revision with the graph while the test seam is true', async () => {
     await expect(store().loadGraphAndBriefText(SCENARIO)).resolves.toEqual({
-      graph: GRAPH, briefText: 'Synthetic brief',
+      graph: GRAPH, briefText: 'Synthetic brief', revision: 7,
     });
-    expect(selectCalls).toEqual([{ table: 'scenarios', columns: 'graph, brief_text' }]);
+    expect(selectCalls).toEqual([{ table: 'scenarios', columns: 'graph, brief_text, revision' }]);
   });
 
   it('treats an absent scenario as revision zero on the dormant path', async () => {
@@ -226,4 +270,36 @@ describe('scenario revision — turn-start scenario read', () => {
       expect(rpc).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('scenario revision — flag-off staging parity', () => {
+  beforeEach(() => {
+    __setUseAppendV6ForTest(false);
+  });
+
+  it('uses v5 without an expected revision or added revision read, and calls the combined reader with false', async () => {
+    expect(USE_APPEND_V6).toBe(false);
+    expect(useAppendV6()).toBe(false);
+    scenarioRow = { graph: GRAPH, brief_text: 'Synthetic brief' };
+    const sessionStore = store();
+    const combinedReader = vi.spyOn(sessionStore, 'readGraphAndBriefText' as never);
+
+    await expect(sessionStore.loadGraphAndBriefText(SCENARIO)).resolves.toEqual({
+      graph: GRAPH, briefText: 'Synthetic brief',
+    });
+    expect(combinedReader).toHaveBeenCalledExactlyOnceWith(SCENARIO, false);
+    expect(selectCalls).toEqual([{ table: 'scenarios', columns: 'graph, brief_text' }]);
+
+    await expect(sessionStore.append(write({ expectedRevision: undefined }))).resolves.toEqual({ id: 'turn-row' });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc.mock.calls[0]![0]).toBe('append_turn_atomic_v5');
+    expect(rpc.mock.calls[0]![1]).not.toHaveProperty('p_expected_revision');
+    // The existing request-hash replay check remains; append adds no
+    // scenario read or revision column.
+    expect(selectCalls).toEqual([
+      { table: 'scenarios', columns: 'graph, brief_text' },
+      { table: 'v5_conversation_turns', columns: 'request_hash' },
+    ]);
+    expect(combinedReader).toHaveBeenCalledTimes(1);
+  });
 });

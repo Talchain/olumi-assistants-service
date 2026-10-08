@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
 const mocks = vi.hoisted(() => ({
   loadPersistedGraphStrict: vi.fn(),
+  loadPersistedScenarioStateStrict: vi.fn(),
   loadPriorFactsQuietly: vi.fn(),
   commitDirectAnswer: vi.fn(),
   applyFactorValueEdit: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../build-turn-context.js')>()),
   loadPersistedGraphStrict: mocks.loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict: mocks.loadPersistedScenarioStateStrict,
   loadPriorFactsQuietly: mocks.loadPriorFactsQuietly,
 }));
 
@@ -45,6 +47,7 @@ import { dispatchSystemEvent } from '../dispatch.js';
 import { validateEgress } from '../../../validators/b1.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
+import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
 import {
   ModelVersionMutationReceiptV1LocalSchema,
   OlumiResponseWithModelVersionReceiptLocalSchema,
@@ -163,11 +166,15 @@ function lastEgressIssues(): unknown[] {
   return (last.payload.issues as unknown[] | undefined) ?? [];
 }
 
+beforeEach(() => __setUseAppendV6ForTest(true));
+afterEach(() => __setUseAppendV6ForTest(false));
+
 describe('system-event atomic model-version receipt egress', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.emitted.length = 0;
     mocks.loadPersistedGraphStrict.mockResolvedValue(BASE_GRAPH);
+    mocks.loadPersistedScenarioStateStrict.mockResolvedValue({ graph: BASE_GRAPH, briefText: null, revision: 17 });
     mocks.loadPriorFactsQuietly.mockResolvedValue([]);
     mocks.applyFactorValueEdit.mockResolvedValue({
       kind: 'mutated',
@@ -221,6 +228,29 @@ describe('system-event atomic model-version receipt egress', () => {
     expect(result.commitPerformed).toBe(true);
     expect(wire.model_version_receipt).toEqual(RECEIPT);
     expect(mocks.commitDirectAnswer).toHaveBeenCalledOnce();
+    expect(mocks.commitDirectAnswer.mock.calls[0]?.[1]).toHaveProperty('expectedRevision', 17);
+  });
+
+  it('retains the original revision when a rival write occurs after the factor adapter receives its base', async () => {
+    let currentRevision = 17;
+    mocks.loadPersistedScenarioStateStrict.mockImplementation(async () => ({
+      graph: BASE_GRAPH, briefText: null, revision: currentRevision,
+    }));
+    const ordinaryResult = await mocks.applyFactorValueEdit();
+    mocks.applyFactorValueEdit.mockImplementation(async () => {
+      // A write can advance the revision without changing either graph hash.
+      currentRevision = 18;
+      return ordinaryResult;
+    });
+    mocks.applyFactorValueEdit.mockClear();
+    const payload = { kind: 'system_event', scenario_id: SCENARIO_ID, turn_id: TURN_ID,
+      stage: 'analyse', event: { kind: 'factor_value_edit', target_id: 'fac_demand', value: 0.7, field: 'value' },
+    } as unknown as SystemEventTurnPayload;
+    await dispatchSystemEvent({ payload, requestId: 'req-revision-rival' });
+    expect(currentRevision).toBe(18);
+    expect(mocks.loadPersistedScenarioStateStrict).toHaveBeenCalledOnce();
+    expect(mocks.applyFactorValueEdit).toHaveBeenCalledOnce();
+    expect(mocks.commitDirectAnswer.mock.calls[0]?.[1]).toHaveProperty('expectedRevision', 17);
   });
 
   // -------------------------------------------------------------------------

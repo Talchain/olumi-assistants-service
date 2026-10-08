@@ -224,6 +224,7 @@ import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
+import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -7367,7 +7368,8 @@ export function createAgentCapabilities(
               expected: { mean: direction === 'negative' ? -usersStrength! : usersStrength!, effect_direction: direction, reviewed_at: null },
               band: drawnBand, author: 'model_proposed' }],
           }));
-        } catch {
+        } catch (err) {
+          if (isRevisionConflict(err)) throw err;
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
             detail: 'The link was added, but recording its accepted Olumi estimate could not be confirmed. Check the saved model before continuing.' };
         }

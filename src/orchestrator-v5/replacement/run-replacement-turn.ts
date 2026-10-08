@@ -69,22 +69,27 @@ import {
   needsReconciliation,
   openProposals,
   operationsToApply,
+  pinApplyRevision,
   recordApplied,
   recordApplyAttempt,
   recordApplyFailed,
   recordUnresolved,
+  recordUnpinnedApplyUnresolved,
   type ProposalOperation,
   type ProposalStore,
 } from './proposal-store.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { composeTurn, type ComposeTurnResult } from './turn-composer.js';
 import type { ToolResponseBlock } from '../../adapters/llm/types.js';
+import { isRevisionConflict } from '../graph-revision-conflict.js';
+import { useAppendV6 } from '../session/supabase-store.js';
 
 /**
  * Core's authoritative write. Three outcomes, kept apart on purpose.
  *
- * A thrown error means UNKNOWN and is handled as such — the proposal stays in
- * flight and the next turn retries under the same key.
+ * An unknown thrown error leaves the proposal in flight for an idempotent
+ * retry. A revision refusal is a known non-write: the offer becomes stale
+ * and needs a fresh offer and agreement before another apply.
  *
  * ⛔⛔ THE ONE REQUIREMENT THIS LAYER CANNOT ENFORCE, AND DEPENDS ON ABSOLUTELY
  * ─────────────────────────────────────────────────────────────────────────
@@ -121,6 +126,11 @@ export interface ApplyOperations {
     readonly idempotencyKey: string;
     readonly operations: readonly ProposalOperation[];
     readonly modelRevision: string;
+    /** With v6 enabled, retained on reconciliation rather than refreshed. */
+    readonly expectedRevision?: number;
+    readonly reconcile?: true;
+    /** With v6 enabled, the adapter awaits this before the first append. */
+    readonly beforeAppend?: (revision: number) => Promise<void>;
   }): Promise<
     /**
      * ⭐ `receiptId` IS THE PROOF OF COMMIT — the turn row id — NOT the model
@@ -141,7 +151,7 @@ export interface ApplyOperations {
      * all landed.
      */
     | { readonly ok: true; readonly receiptId: string; readonly newModelRevision?: string }
-    | { readonly ok: false; readonly reason: string }
+    | { readonly ok: false; readonly reason: string; readonly outcomeUnknown?: true }
   >;
 }
 
@@ -357,6 +367,35 @@ export async function runReplacementTurn(
 
   const applied: { proposalId: string; receiptId: string }[] = [];
   let newModelRevision: string | undefined;
+  const revisionChecked = useAppendV6();
+
+  const checkpointApplyRevision = (proposalId: string) => async (revision: number): Promise<void> => {
+    proposals = pinApplyRevision(proposals, proposalId, revision);
+    await deps.checkpoint!({ memory, proposals });
+  };
+
+  const requireReconfirmation = async (proposalId: string): Promise<void> => {
+    proposals = recordApplyFailed(proposals, proposalId, {
+      reason: 'revision_conflict',
+      failed_at: input.now,
+    });
+    // A database revision can move without changing the analysis hash used
+    // by modelRevision. Invalidate this offer explicitly so that consent to
+    // the rejected write cannot authorise a retry against a refreshed base.
+    proposals = {
+      proposals: proposals.proposals.map((proposal) => proposal.id === proposalId
+        ? {
+            ...proposal,
+            status: 'stale' as const,
+            stale_reason: 'model_revision_moved' as const,
+            stale_from_status: proposal.status,
+          }
+        : proposal),
+    };
+    // The typed conflict aborts the normal turn save. Persist the cleared
+    // in-flight state before returning it to the HTTP mapper.
+    await deps.checkpoint!({ memory, proposals });
+  };
 
   // ── RESOLVING AN UNKNOWN SAVE ───────────────────────────────────────────
   //
@@ -410,6 +449,11 @@ export async function runReplacementTurn(
           idempotencyKey: p.idempotency_key,
           operations: p.operations,
           modelRevision: p.model_revision,
+          ...(revisionChecked ? {
+            expectedRevision: p.expected_graph_revision,
+            reconcile: true as const,
+            beforeAppend: checkpointApplyRevision(p.id),
+          } : {}),
         });
         if (outcome.ok) {
           proposals = recordApplied(proposals, p.id, {
@@ -427,13 +471,25 @@ export async function runReplacementTurn(
             proposal_id: p.id,
             receipt_id: outcome.receiptId,
           });
+        } else if (revisionChecked && outcome.outcomeUnknown) {
+          proposals = recordUnpinnedApplyUnresolved(proposals, p.id, input.now);
+          await deps.checkpoint({ memory, proposals });
         } else {
           proposals = recordApplyFailed(proposals, p.id, {
             reason: outcome.reason,
             failed_at: input.now,
           });
         }
-      } catch {
+      } catch (err) {
+        if (isRevisionConflict(err)) {
+          try {
+            await requireReconfirmation(p.id);
+          } finally {
+            // Keep the known refusal typed even when recording it fails.
+            // With v6 enabled, the earlier pin still fences reconciliation.
+            throw err;
+          }
+        }
         // Still unknown. Left in flight deliberately: the next turn retries
         // under the same key. Swallowed rather than thrown because a
         // reconciliation failure must not also destroy this turn.
@@ -711,8 +767,18 @@ export async function runReplacementTurn(
                 idempotencyKey,
                 operations: bound.operations,
                 modelRevision: bound.model_revision,
+                ...(revisionChecked ? { beforeAppend: checkpointApplyRevision(proposalId) } : {}),
               });
             } catch (err) {
+              if (isRevisionConflict(err)) {
+                try {
+                  await requireReconfirmation(proposalId);
+                } finally {
+                  // A checkpoint error must not become a generic tool result
+                  // from which the model can incorrectly announce a save.
+                  throw err;
+                }
+              }
               // UNKNOWN. It stays in flight; the next turn reconciles. The
               // model is told exactly this, so it cannot resolve it either way.
               trace.refused('write_outcome_unknown');

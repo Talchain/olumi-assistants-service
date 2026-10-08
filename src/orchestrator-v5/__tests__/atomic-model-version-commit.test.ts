@@ -9,6 +9,7 @@ import { decideModelVersionCreation } from "../model-management/version-creation
 import { GraphV3 } from "../../schemas/cee-v3.js";
 import * as telemetry from "../../utils/telemetry.js";
 import { createNoopSessionStore } from "../session/__tests__/fixtures.js";
+import { __setUseAppendV6ForTest } from "../session/supabase-store.js";
 import type {
   AtomicCommittedModelVersionReceipt,
   SessionStore,
@@ -82,7 +83,7 @@ function receiptFor(write: SessionTurnWrite): AtomicCommittedModelVersionReceipt
   };
 }
 
-function capturingStore(options: { receipt?: boolean; fail?: Error } = {}) {
+function capturingStore(options: { receipt?: boolean; fail?: Error; revision?: number } = {}) {
   const writes: SessionTurnWrite[] = [];
   const base = createNoopSessionStore();
   const store: SessionStore = {
@@ -92,6 +93,7 @@ function capturingStore(options: { receipt?: boolean; fail?: Error } = {}) {
       if (options.fail) throw options.fail;
       return {
         id: "row-1",
+        ...(options.revision !== undefined ? { revision: options.revision } : {}),
         ...(options.receipt === true && write.modelVersion !== undefined
           ? { modelVersionReceipt: receiptFor(write) }
           : {}),
@@ -101,13 +103,25 @@ function capturingStore(options: { receipt?: boolean; fail?: Error } = {}) {
   return { store, writes };
 }
 
-beforeEach(() => setFlag(true));
+beforeEach(() => {
+  __setUseAppendV6ForTest(true);
+  setFlag(true);
+});
 afterEach(() => {
+  __setUseAppendV6ForTest(false);
   vi.unstubAllEnvs();
   _resetConfigCache();
 });
 
 describe("atomic semantic model-version commit", () => {
+  it("threads the caller's revision into the writer and its returned revision back to the caller", async () => {
+    const { store, writes } = capturingStore({ receipt: true, revision: 8 });
+    const result = await commitDirectAnswer(composed(), { ...META, graph: GRAPH, expectedRevision: 7 }, store);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.expectedRevision).toBe(7);
+    expect(result.revision).toBe(8);
+  });
+
   it("folds the carrier into the one canonical append and exposes the strict public receipt", async () => {
     const { store, writes } = capturingStore({ receipt: true });
     const result = await commitDirectAnswer(

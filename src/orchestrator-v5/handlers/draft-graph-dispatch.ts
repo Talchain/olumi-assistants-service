@@ -83,6 +83,7 @@ import {
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
+import { useAppendV6 } from '../session/supabase-store.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
@@ -589,12 +590,12 @@ export async function dispatchDraftGraph(
   const { payload, requestId, request } = params;
   const startedAt = Date.now();
 
-  // Bind the write before the provider runs, using the same trusted-base
-  // policy as edit dispatch. A failed read is not evidence of an empty model.
-  const draftBase = config.features.graphCas.requiresExpectedHash
+  // Bind the write before the provider only when hash or revision CAS needs
+  // a base. With both off, preserve the draft path without a strict read.
+  const draftBase = config.features.graphCas.requiresExpectedHash || useAppendV6()
     ? await loadPersistedScenarioStateStrict(payload.scenario_id)
     : undefined;
-  const expectedGraphCasHashes = draftBase !== undefined
+  const expectedGraphCasHashes = draftBase !== undefined && config.features.graphCas.requiresExpectedHash
     ? computeExpectedGraphCasHashes(draftBase.graph)
     : undefined;
 
@@ -1166,7 +1167,7 @@ export async function dispatchDraftGraph(
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         // Only graph writes carry the base; null is known first-draft absence.
-        ...(draftGraphForCommit != null && draftBase !== undefined
+        ...(draftGraphForCommit != null && expectedGraphCasHashes !== undefined && draftBase !== undefined
           ? { ...expectedGraphCasHashes, baseGraphForInvariants: draftBase.graph }
           : {}),
         graph: draftGraphForCommit ?? undefined,
@@ -1190,6 +1191,7 @@ export async function dispatchDraftGraph(
         // V5 Conversation Context Reliability: persist the user's brief.
         userMessage: payload.message,
         contentGraph: draftResult.graphOutput,
+        expectedRevision: draftBase?.revision,
       },
     );
     const persistenceMs = Date.now() - commitStartedAt;

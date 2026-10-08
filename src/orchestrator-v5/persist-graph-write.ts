@@ -454,7 +454,9 @@ export async function appendCheckedGraphWrite(
 
     // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
     // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
-    const storedWrite = withoutAgentSubturnText(write);
+    // Reconciliation may replace the write, but it cannot replace the revision
+    // captured by its original server read. Bind it again at the append seam.
+    const storedWrite = withoutAgentSubturnText({ ...write, expectedRevision: params.write.expectedRevision });
     if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
     const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
     if (!('status' in outcome)) return outcome;

@@ -122,12 +122,14 @@ import { GraphStateIngressSchema, type GraphStateIngress } from './boundary/requ
 import { commitDirectAnswer } from './commit.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from './context/graph-cas-conflict.js';
+import { rethrowRevisionConflict } from './graph-revision-conflict.js';
 import { mergeAppliedGraphForPersistence } from './handlers/edit-graph-dispatch.js';
 import { buildEditGraphHandlerFact } from './handlers/edit-graph-fact-builder.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
 // Declared importer under `scripts/validate-state-write-invariant.sh` rule 3 —
 // see {@link ApplyOperationsDeps.store} for why this module holds it.
 import { getSessionStore } from './session/index.js';
+import { useAppendV6 } from './session/supabase-store.js';
 
 /**
  * One operation a proposal would perform, exactly as the conversation layer
@@ -206,11 +208,16 @@ export interface ApplyOperationsInput {
    * baseless and every first edit refused as `needs_fresh_base`.
    */
   readonly modelRevision: string;
+  /** With v6 enabled, the original numeric revision retained across reconciliation. */
+  readonly expectedRevision?: number;
+  readonly reconcile?: true;
+  /** With v6 enabled, persist the original numeric revision before append. */
+  readonly beforeAppend?: (revision: number) => Promise<void>;
 }
 
 export type ApplyOperationsOutcome =
   | { readonly ok: true; readonly receiptId: string; readonly newModelRevision?: string }
-  | { readonly ok: false; readonly reason: string };
+  | { readonly ok: false; readonly reason: string; readonly outcomeUnknown?: true };
 
 /** The injected port, derived from the canonical commit entrypoint so this
  *  module neither constructs a session store nor introduces a second one.
@@ -523,17 +530,68 @@ export function createApplyOperations(
     // Resolved here, not at construction: an injected double is used verbatim,
     // and a supplier that is never invoked never touches the accessor.
     const store: ApplyOperationsStore = deps.store ?? getSessionStore();
+    const revisionChecked = useAppendV6();
+
+    if (revisionChecked && input.reconcile) {
+      // A matching durable turn and its atomic applied fact prove the prior
+      // save without sending a graph. This also recovers a legacy attempt
+      // after its graph has subsequently changed.
+      const prior = (await store.readRecent(scenarioId)).filter(row => row.turn_id === input.idempotencyKey);
+      if (prior.length > 0) {
+        const row = prior[0]!;
+        if (prior.length !== 1 || row.scenario_id !== scenarioId
+          || row.request_hash !== requestDigestFor(input) || !row.id?.trim()) {
+          throw new ApplyOperationsUnverifiedError('reconciliation_turn_unverified');
+        }
+        const facts = await store.readFactsFor([row.id]);
+        if (facts.some(fact => fact.fact_type === 'edit_graph' && !fact.noop
+          && fact.result.status === 'applied' && fact.result.operations_count > 0)) {
+          return { ok: true, receiptId: row.id };
+        }
+        throw new ApplyOperationsUnverifiedError('reconciliation_applied_fact_unverified');
+      }
+      if (!Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision ?? -1) < 0) {
+        // No evidence of a receipt, and no original revision to fence a
+        // write. This is UNKNOWN, not an affirmative failure of the old save.
+        return { ok: false, outcomeUnknown: true,
+          reason: 'The prior save cannot be verified against its original revision; refresh the offer and reconfirm.' };
+      }
+    }
 
     // ── 1. THE BASE ────────────────────────────────────────────────────────
     // Read once. It is both the patch base and the invariant baseline, and it
     // is passed on verbatim — see `invariantBaselineFor`.
     let read: BaseRead;
+    let expectedRevision: number | undefined;
     try {
-      read = { ok: true, graph: await store.loadGraph(scenarioId) };
+      if (revisionChecked) {
+        const state = await store.loadGraphAndBriefText(scenarioId);
+        read = { ok: true, graph: state.graph };
+        expectedRevision = state.revision;
+      } else {
+        // Preserve the shipped v5 path: a fresh acceptance needs the graph,
+        // not a numeric revision or a second durability checkpoint.
+        read = { ok: true, graph: await store.loadGraph(scenarioId) };
+      }
     } catch {
       read = { ok: false, reason: 'I could not read the model, so I have not changed anything' };
     }
     if (!read.ok) return refuse(read.reason);
+    if (revisionChecked && (!Number.isSafeInteger(expectedRevision) || (expectedRevision ?? -1) < 0)) {
+      return refuse('I could not establish the model revision, so I have not changed anything');
+    }
+    if (revisionChecked && input.expectedRevision !== undefined) {
+      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+        return refuse('The original model revision is invalid, so I have not changed anything');
+      }
+      if (input.expectedRevision !== expectedRevision) {
+        // Refuse before append even when carrier policy would select v4.
+        // That unversioned branch cannot enforce numeric CAS itself.
+        rethrowRevisionConflict({ conflict_category: 'revision_conflict',
+          expected: input.expectedRevision, current: expectedRevision });
+      }
+      expectedRevision = input.expectedRevision;
+    }
 
     const before = read.graph;
     if (!isEditableGraph(before)) {
@@ -656,6 +714,12 @@ export function createApplyOperations(
     }
 
     // ── 6. COMMIT ──────────────────────────────────────────────────────────
+    if (revisionChecked) {
+      if (input.beforeAppend === undefined) {
+        return refuse('I cannot record the original model revision safely, so I have not saved it');
+      }
+      await input.beforeAppend(expectedRevision!);
+    }
     // Past this line NOTHING returns `ok: false`. The write has been
     // dispatched, and "it did not save" stops being a claim we can make.
     const response: OlumiResponse = {
@@ -684,6 +748,7 @@ export function createApplyOperations(
         ...invariantBaselineFor(read),
         ...computeExpectedGraphCasHashes(before),
         graph_hash: analysisGraphHash,
+        expectedRevision,
       },
       store,
     );

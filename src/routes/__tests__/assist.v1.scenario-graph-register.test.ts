@@ -18,7 +18,7 @@
 import { readFileSync } from "node:fs";
 
 import Fastify, { type FastifyInstance } from "fastify";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
 const OWNER = "0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b";
@@ -56,7 +56,9 @@ const getScenarioOwner = vi.fn();
 const scenarioExists = vi.fn();
 const readCommittedTurn = vi.fn();
 
-const store = { readMostRecentPendingActions: vi.fn(async () => []), append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
+const store = { readMostRecentPendingActions: vi.fn(async () => []), append, loadGraph,
+  loadGraphAndBriefText: async (scenarioId: string) => ({ graph: await loadGraph(scenarioId), briefText: null, revision: 7 }),
+  ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));
@@ -90,6 +92,7 @@ import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
 import { currentTurnFenceSlot, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
 import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
+import { __setUseAppendV6ForTest } from "../../orchestrator-v5/session/supabase-store.js";
 
 
 
@@ -150,6 +153,7 @@ function writtenGraph(): WireGraph {
 }
 
 beforeEach(() => {
+  __setUseAppendV6ForTest(true);
   vi.resetAllMocks();
   // The signed-in owner is the default caller; cases about a DIFFERENT user
   // override this explicitly — see the note on the mock.
@@ -163,6 +167,8 @@ beforeEach(() => {
   readCommittedTurn.mockResolvedValue(null);
 });
 
+afterEach(() => __setUseAppendV6ForTest(false));
+
 describe("register — optional initial brief", () => {
   const brief = "Saved example: Customer Data Platform Selection (vendor-selection; captured 2026-07-28). Original brief:\n\nWe need to replace our customer data platform before the current contract renews in March. The shortlist is Segment, RudderStack, or building on our existing Snowflake warehouse with Fivetran. Our constraint is a £120k annual budget and a two-person data team who can't absorb much operational overhead. We also have GDPR obligations that rule out any vendor without EU data residency.";
 
@@ -172,6 +178,7 @@ describe("register — optional initial brief", () => {
     expect(res.statusCode).toBe(200);
     expect(append).toHaveBeenCalledTimes(1);
     expect(append.mock.calls[0][0]).toMatchObject({ scenario_id: SCENARIO, briefText: brief });
+    expect(append.mock.calls[0][0].expectedRevision).toBe(7);
     expect(writtenGraph()).toEqual(projectGraphForPersistence(IMPORTED, {}));
     await app.close();
   });

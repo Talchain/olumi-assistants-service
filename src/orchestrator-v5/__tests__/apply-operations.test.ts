@@ -32,10 +32,15 @@
  *  3. The receipt is the TURN ROW id, not the model-version receipt — which is
  *     legitimately null for a guest.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import type { CommitMetadata, CommitResult } from '../commit.js';
+import { GraphStaleWriteError } from '../session/store.js';
+import { __setUseAppendV6ForTest } from '../session/supabase-store.js';
+import { EMPTY_CONVERSATION_MEMORY } from '../replacement/conversation-memory.js';
+import { EMPTY_PROPOSAL_STORE, needsReconciliation, openProposal } from '../replacement/proposal-store.js';
+import { ACCEPT_TOOL_NAME, runReplacementTurn } from '../replacement/run-replacement-turn.js';
 import {
   ApplyOperationsUnverifiedError,
   createApplyOperations,
@@ -200,7 +205,7 @@ function harness(options: { initial?: unknown; loadThrows?: boolean } = {}): Har
     } as unknown as CommitResult;
   });
   return {
-    store: { loadGraph, readRecent } as unknown as ApplyOperationsStore,
+    store: { loadGraph, readRecent, loadGraphAndBriefText: async () => ({ graph: await loadGraph(), briefText: null, revision: 7 }) } as unknown as ApplyOperationsStore,
     loadGraph,
     readRecent,
   };
@@ -218,6 +223,7 @@ function input(over: Partial<ApplyOperationsInput> = {}): ApplyOperationsInput {
     idempotencyKey: 'idempotency-turn-2-0',
     operations: proposalOperations(),
     modelRevision: modelRevisionOf(baseGraph())!,
+    beforeAppend: async () => undefined,
     ...over,
   };
 }
@@ -227,13 +233,24 @@ function port(h: Harness) {
 }
 
 beforeEach(() => {
+  __setUseAppendV6ForTest(true);
   commitDirectAnswer.mockReset();
   getSessionStore.mockReset();
+});
+
+afterEach(() => {
+  __setUseAppendV6ForTest(false);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('applyOperations — the accept path writes what was consented to', () => {
+  it('hands the commit the revision from the same canonical read as its mutation base', async () => {
+    const h = harness();
+    expect((await port(h)(input())).ok).toBe(true);
+    expect(lastCommitMetadata().expectedRevision).toBe(7);
+  });
+
   it.each(['whole', 'nested', 'leaf'])('generic approved operation cannot smuggle a range: %s', async (variant) => {
     const before = baseGraph();
     const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
@@ -417,6 +434,160 @@ describe('applyOperations — the accept path writes what was consented to', () 
     );
     expect(after.edges).toEqual(pristine.edges);
     expect(before, 'the base is not mutated in place').toEqual(pristine);
+  });
+});
+
+describe('replacement revision authority survives refusal-state checkpoint failure', () => {
+  type PinnedInput = ApplyOperationsInput & {
+    expectedRevision?: number;
+    reconcile?: true;
+    beforeAppend?: (revision: number) => Promise<void>;
+  };
+
+  it('checkpoints the numeric revision before the first append', async () => {
+    const h = harness();
+    const seen: string[] = [];
+    const originalCommit = commitDirectAnswer.getMockImplementation()!;
+    commitDirectAnswer.mockImplementation(async (...args: unknown[]) => {
+      seen.push(`append:${(args[1] as CommitMetadata).expectedRevision}`);
+      return originalCommit(...args);
+    });
+    const request: PinnedInput = { ...input(), beforeAppend: async (revision) => { seen.push(`pin:${revision}`); } };
+    expect((await port(h)(request)).ok).toBe(true);
+    expect(seen).toEqual(['pin:7', 'append:7']);
+  });
+
+  it('dispatches nothing when pinning the original revision fails', async () => {
+    const h = harness();
+    const failed = new Error('numeric revision checkpoint unavailable');
+    const request: PinnedInput = { ...input(), beforeAppend: async () => { throw failed; } };
+    await expect(port(h)(request)).rejects.toBe(failed);
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+  });
+
+  it('a refused apply whose clearing checkpoint fails cannot append at a fresh revision on the unrelated next turn', async () => {
+    const h = harness();
+    let graph = baseGraph();
+    let revision = 7;
+    let committed = false;
+    h.store.loadGraphAndBriefText = async () => ({ graph, briefText: null, revision });
+    h.loadGraph.mockImplementation(async () => graph);
+    h.readRecent.mockImplementation(async () => committed ? [{
+      id: TURN_ROW_ID, scenario_id: SCENARIO, turn_id: lastCommitMetadata().turn_id,
+      request_hash: lastCommitMetadata().request_hash,
+    }] : []);
+    const conflict = new GraphStaleWriteError('stale revision', {
+      conflict_category: 'revision_conflict',
+      cause: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) },
+    });
+    commitDirectAnswer.mockImplementation(async (response: unknown, metadata: CommitMetadata) => {
+      if (revision === 7) {
+        revision = 8; // A competing cosmetic save leaves the analysis hash unchanged.
+        throw conflict;
+      }
+      committed = true;
+      graph = metadata.graph as GraphV3T;
+      return { response, performed: true, persisted_row_id: TURN_ROW_ID,
+        modelVersionReceipt: null, graphPersisted: true } as unknown as CommitResult;
+    });
+    const proposals = openProposal(EMPTY_PROPOSAL_STORE, {
+      id: 'waiting', operations: proposalOperations(), model_revision: modelRevisionOf(graph)!,
+      proposed_at: '2026-10-08T12:00:00.000Z', proposed_in_turn: 'offer-turn',
+    });
+    let durable = clone({ memory: EMPTY_CONVERSATION_MEMORY, proposals });
+    const failed = new Error('refusal-state checkpoint unavailable');
+    const checkpoint = async (state: typeof durable) => {
+      if (state.proposals.proposals[0]?.status === 'stale') throw failed;
+      durable = clone(state);
+    };
+    const turnInput = {
+      message: 'yes go ahead', history: [], ...durable, modelRevision: modelRevisionOf(graph)!,
+      workspaceSummary: 'Campaign model', tools: [], turnId: 'agreement-turn',
+      now: '2026-10-08T12:01:00.000Z', idFor: (purpose: string, index: number) => `${purpose}-${index}`,
+    };
+    let calls = 0;
+    await expect(runReplacementTurn(turnInput, {
+      checkpoint, applyOperations: port(h),
+      chatWithTools: async () => ++calls === 1
+        ? { content: [{ type: 'tool_use', id: 'accept', name: ACCEPT_TOOL_NAME,
+            input: { proposal_id: 'waiting', user_agreement_quote: 'yes go ahead' } }], stop_reason: 'tool_use' }
+        : { content: [{ type: 'text', text: 'saved' }], stop_reason: 'end_turn' },
+    })).rejects.toBe(conflict);
+    // Refusal cleanup did not reach disk. Its earlier pin must still fence
+    // recovery, including a semantic no-op carrier which would use v4.
+    expect(needsReconciliation(durable.proposals)).toHaveLength(1);
+    expect((durable.proposals.proposals[0] as { expected_graph_revision?: number }).expected_graph_revision).toBe(7);
+    const checkpointAfterRecovery = async (state: typeof durable) => { durable = clone(state); };
+    await expect(runReplacementTurn({ ...turnInput, ...durable,
+      turnId: 'unrelated-turn', message: 'What evidence should we gather?',
+    }, { checkpoint: checkpointAfterRecovery, applyOperations: port(h),
+      chatWithTools: async () => ({ content: [{ type: 'text', text: 'Consider the evidence.' }], stop_reason: 'end_turn' }),
+    })).rejects.toMatchObject({ conflict_category: 'revision_conflict' });
+    expect(commitDirectAnswer).toHaveBeenCalledTimes(1);
+    expect(committed).toBe(false);
+    expect(needsReconciliation(durable.proposals)).toHaveLength(0);
+    expect((durable.proposals.proposals[0] as { expected_graph_revision?: number }).expected_graph_revision).toBe(7);
+  });
+
+  it.each(['semantic', 'no_op'] as const)('a moved numeric base is refused before append for a %s candidate', async (candidate) => {
+    let graph: unknown = baseGraph();
+    let operations = proposalOperations();
+    if (candidate === 'no_op') {
+      operations = proposalOperations([{ op: 'update_node', path: `/nodes/${QUALITY_ID}/label`,
+        value: 'Campaign Strategic Quality', old_value: null }]);
+      // Produce the persisted form through the actual adapter, then prove
+      // reapplying this same operation leaves that form exactly unchanged.
+      // This candidate has no semantic version carrier; numeric fencing must
+      // still apply rather than being conditional on a model-version plan.
+      const prepared = harness();
+      expect((await port(prepared)(input({ operations }))).ok).toBe(true);
+      graph = clone(lastCommitMetadata().graph);
+      expect((await port(prepared)(input({ operations, modelRevision: modelRevisionOf(graph)! }))).ok).toBe(true);
+      expect(lastCommitMetadata().graph).toEqual(graph);
+    }
+    const h = harness({ initial: graph });
+    commitDirectAnswer.mockClear();
+    h.readRecent.mockResolvedValue([]);
+    h.store.loadGraphAndBriefText = async () => ({ graph, briefText: null, revision: 8 });
+    const request: PinnedInput = { ...input({ operations, modelRevision: modelRevisionOf(graph)! }),
+      expectedRevision: 7, reconcile: true };
+    await expect(port(h)(request)).rejects.toMatchObject({ conflict_category: 'revision_conflict' });
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+  });
+
+  it('an already committed same-key/digest apply reconciles read-only after the graph and revision move', async () => {
+    const h = harness();
+    const request: PinnedInput = { ...input(), expectedRevision: 7, reconcile: true };
+    const graph = baseGraph();
+    graph.nodes.find(node => node.id === QUALITY_ID)!.observed_state!.value = 0.9;
+    h.store.loadGraphAndBriefText = async () => ({ graph, briefText: null, revision: 9 });
+    h.readRecent.mockResolvedValue([{ id: TURN_ROW_ID, scenario_id: SCENARIO,
+      turn_id: request.idempotencyKey, request_hash: requestDigestFor(request) }]);
+    h.store.readFactsFor = vi.fn(async () => [{ fact_type: 'edit_graph', fact_version: 1, noop: false,
+      result: { status: 'applied', operations_count: 2 } }] as never);
+    expect(await port(h)(request)).toEqual({ ok: true, receiptId: TURN_ROW_ID });
+    expect(h.store.readFactsFor).toHaveBeenCalledWith([TURN_ROW_ID]);
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+  });
+
+  it('legacy in-flight reconciliation with no pin stays unknown and requires reconfirmation without appending', async () => {
+    const h = harness();
+    h.readRecent.mockResolvedValue([]);
+    const request: PinnedInput = { ...input(), reconcile: true };
+    expect(await port(h)(request)).toMatchObject({ ok: false, outcomeUnknown: true });
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+  });
+
+  it('flag OFF: an unpinned legacy reconciliation applies through the staging graph-only path', async () => {
+    __setUseAppendV6ForTest(false);
+    const h = harness();
+    const combinedRead = vi.fn(async () => ({ graph: baseGraph(), briefText: null, revision: undefined }));
+    h.store.loadGraphAndBriefText = combinedRead as never;
+    const request: PinnedInput = { ...input(), reconcile: true, beforeAppend: undefined };
+    expect(await port(h)(request)).toMatchObject({ ok: true, receiptId: TURN_ROW_ID });
+    expect(commitDirectAnswer).toHaveBeenCalledTimes(1);
+    expect(lastCommitMetadata().expectedRevision).toBeUndefined();
+    expect(combinedRead).not.toHaveBeenCalled();
   });
 });
 

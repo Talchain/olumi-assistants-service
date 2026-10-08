@@ -15,9 +15,11 @@ import {
   GraphStaleWriteError,
   loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
 } from '../build-turn-context.js';
 import { commitDirectAnswer } from '../commit.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
+import { isRevisionConflict } from '../graph-revision-conflict.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
@@ -119,10 +121,11 @@ export async function commitOlumiOptionAdoptionInProcess(
   requestId: string,
 ): Promise<CommitOlumiOptionAdoptionResult> {
   let before: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>>;
   try {
-    [before, priorPendingActions] = await Promise.all([
-      loadPersistedGraphStrict(input.scenario_id),
+    [{ graph: before, revision: expectedRevision }, priorPendingActions] = await Promise.all([
+      loadPersistedScenarioStateStrict(input.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
     ]);
   } catch {
@@ -158,6 +161,7 @@ export async function commitOlumiOptionAdoptionInProcess(
       contentGraph: applied.graph,
       ...computeExpectedGraphCasHashes(before),
       coaching_state: null,
+      expectedRevision,
     });
     if (!committed.graphPersisted || !committed.thisAttemptWrote
       || committed.persistedAnalysisGraphHash !== applied.graph_hash) {
@@ -182,6 +186,7 @@ export async function commitOlumiOptionAdoptionInProcess(
         ? { model_version_receipt: committed.response.model_version_receipt } : {}),
     };
   } catch (err) {
+    if (isRevisionConflict(err)) throw err;
     if (err instanceof GraphStaleWriteError) return { status: 'stale' };
     // ⛔ B8 (CODEX CR 5934133792): a turn-fence verdict means the store wrote NOTHING. It is never "unconfirmed" (the
     // Agent would say "may have been saved"); it reaches the fence wrapper, which maps it to `stale` / `refused`.

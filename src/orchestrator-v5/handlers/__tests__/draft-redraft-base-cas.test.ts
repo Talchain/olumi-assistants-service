@@ -35,6 +35,8 @@ import { _resetConfigCache } from '../../../config/index.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import { GraphStaleWriteError, SessionReadError } from '../../session/store.js';
 import { createNoopSessionStore } from '../../session/__tests__/fixtures.js';
+import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
+import * as commitModule from '../../commit.js';
 import { computeExpectedGraphCasHashes } from '../../context/graph-cas-conflict.js';
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -78,6 +80,7 @@ function harness(initial: Graph | null, duringDraft: (h: Harness) => void = () =
     order: [] as string[],
     readFailure: null as Error | null,
     appendFailure: null as Error | null,
+    revision: 7,
   };
   const store: SessionStore = {
     ...createNoopSessionStore(),
@@ -89,7 +92,7 @@ function harness(initial: Graph | null, duringDraft: (h: Harness) => void = () =
     async loadGraphAndBriefText() {
       h.order.push('read');
       if (h.readFailure) throw h.readFailure;
-      return { graph: structuredClone(h.persisted), briefText: h.brief };
+      return { graph: structuredClone(h.persisted), briefText: h.brief, revision: h.revision };
     },
     async readExistingScenario() {
       return { userId: null, graph: structuredClone(h.persisted), briefText: h.brief, analysisInvalidatedAt: null };
@@ -133,6 +136,7 @@ function dispatch() {
 }
 
 beforeEach(() => {
+  __setUseAppendV6ForTest(true);
   vi.clearAllMocks();
   vi.stubEnv('OLUMI_ENV', 'staging');
   vi.stubEnv('CEE_REQUIRE_USER_JWT', 'false');
@@ -144,12 +148,56 @@ beforeEach(() => {
   setTestSink(() => undefined);
 });
 afterEach(() => {
+  __setUseAppendV6ForTest(false);
+  vi.restoreAllMocks();
   setTestSink(null);
   vi.unstubAllEnvs();
   _resetConfigCache();
 });
 
 describe('S1-A draft/redraft base through the real durable commit door', () => {
+  it('commits with hash CAS and v6 off without calling a strict read that would throw', async () => {
+    __setUseAppendV6ForTest(false);
+    vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'off');
+    vi.stubEnv('CEE_V5_GRAPH_CAS_RPC', 'off');
+    _resetConfigCache();
+    const h = harness(BASE);
+    h.readFailure = new SessionReadError('Storage read unavailable');
+    const commitSpy = vi.spyOn(commitModule, 'commitDirectAnswer');
+
+    expect((await dispatch()).commitPerformed).toBe(true);
+    expect(h.order).toEqual(['draft', 'append']);
+    expect(ports.draft).toHaveBeenCalledTimes(1);
+    expect(h.attempts).toHaveLength(1);
+    expect(h.committed).toHaveLength(1);
+    expect(h.persisted).toEqual(h.committed[0]!.graph);
+    expect(h.persisted).not.toEqual(BASE);
+    expect(h.attempts[0]!.expectedRevision).toBeUndefined();
+    expect(h.attempts[0]!.expectedGraphIdentityHash).toBeUndefined();
+    expect(h.attempts[0]!.expectedGraphAnalysisHash).toBeUndefined();
+    expect(commitSpy).toHaveBeenCalledTimes(1);
+    const metadata = commitSpy.mock.calls[0]![1];
+    expect(metadata.expectedRevision).toBeUndefined();
+    expect(metadata).not.toHaveProperty('baseGraphForInvariants');
+  });
+
+  it('captures the original server revision even when graph-hash CAS is off', async () => {
+    vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'off');
+    vi.stubEnv('CEE_V5_GRAPH_CAS_RPC', 'off');
+    _resetConfigCache();
+    const h = harness(BASE, state => { state.revision = 8; });
+    const commitSpy = vi.spyOn(commitModule, 'commitDirectAnswer');
+    expect((await dispatch()).commitPerformed).toBe(true);
+    expect(h.order).toEqual(['read', 'draft', 'append']);
+    expect(h.committed).toHaveLength(1);
+    expect(h.attempts[0]!.expectedRevision).toBe(7);
+    expect(h.revision).toBe(8);
+    expect(h.attempts[0]!.expectedGraphIdentityHash).toBeUndefined();
+    expect(h.attempts[0]!.expectedGraphAnalysisHash).toBeUndefined();
+    expect(commitSpy).toHaveBeenCalledTimes(1);
+    expect(commitSpy.mock.calls[0]![1]).not.toHaveProperty('baseGraphForInvariants');
+  });
+
   it('RED: a moved-base redraft is refused and the user model is byte-identical', async () => {
     const h = harness(BASE, state => { state.persisted = structuredClone(USER_MODEL); });
     const savedBytes = JSON.stringify(USER_MODEL);
@@ -193,6 +241,18 @@ describe('S1-A draft/redraft base through the real durable commit door', () => {
     await expect(dispatch()).rejects.toBeInstanceOf(SessionReadError);
     expect(ports.draft).not.toHaveBeenCalled();
     expect(h.attempts).toHaveLength(0);
+    expect(h.persisted).toEqual(BASE);
+  });
+
+  it('keeps the hash-CAS strict read and failure semantics with v6 off', async () => {
+    __setUseAppendV6ForTest(false);
+    const h = harness(BASE);
+    h.readFailure = new SessionReadError('Storage read unavailable');
+    await expect(dispatch()).rejects.toBeInstanceOf(SessionReadError);
+    expect(h.order).toEqual(['read']);
+    expect(ports.draft).not.toHaveBeenCalled();
+    expect(h.attempts).toHaveLength(0);
+    expect(h.committed).toHaveLength(0);
     expect(h.persisted).toEqual(BASE);
   });
 

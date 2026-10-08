@@ -2,15 +2,21 @@
  * A3 graph CAS — TRUSTED BASE acceptance test (hard acceptance item).
  *
  * The expected-base hashes on an edit commit must derive ONLY from the
- * server-side persisted graph (`loadPersistedGraphStrict`) — NEVER from the
+ * server-side persisted graph and revision (`loadPersistedScenarioStateStrict`) — NEVER from the
  * request-supplied `graphState`, and NEVER from the graph being written.
  * A CAS that validates the write against itself always "matches" and is
  * worthless; this test makes that regression loud.
  *
+ * Addendum 2: an incoming graph can use the persisted revision only when its
+ * identity equals the graph returned by that same server read. A stale client
+ * echo is refused before the provider or write seam. Addendum 3 preserves
+ * first-touch adoption from a genuinely empty read, with null expected hashes
+ * and the revision captured by that read.
+ *
  * Setup mirrors `edit-graph-dispatch-fact-emission.test.ts`: mocked
  * `handleEditGraph` (applied mutation), mocked `commitDirectAnswer`
- * (captures the metadata), and a mocked `loadPersistedGraphStrict` returning
- * a persisted server graph that DIFFERS from the incoming request graph.
+ * (captures the metadata), and a mocked `loadPersistedScenarioStateStrict` returning
+ * a persisted server graph and its revision from one read.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
@@ -33,23 +39,25 @@ vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapter: vi.fn().mockReturnValue({}),
 }));
 
-// Stub ONLY the strict persisted read; everything else in build-turn-context
+// Stub the strict persisted reads; everything else in build-turn-context
 // stays real (buildTurnContext failing against the unconfigured test store is
 // caught by the dispatch's freshness try/catch).
 const { persistedBaseRef } = vi.hoisted(() => ({
-  persistedBaseRef: { current: null as unknown },
+  persistedBaseRef: { current: null as unknown, revision: 7 },
 }));
 vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
   return {
     ...actual,
     loadPersistedGraphStrict: vi.fn(async () => persistedBaseRef.current),
+    loadPersistedScenarioStateStrict: vi.fn(async () => ({ graph: persistedBaseRef.current, briefText: null, revision: persistedBaseRef.revision })),
   };
 });
 
 // ── imports after mocks ─────────────────────────────────────────────
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
+import { loadPersistedScenarioStateStrict } from '../../build-turn-context.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
@@ -57,6 +65,8 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { _resetConfigCache } from '../../../config/index.js';
+import { GraphStaleWriteError } from '../../session/store.js';
+import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
 
 // ── fixtures ────────────────────────────────────────────────────────
 
@@ -182,10 +192,15 @@ function anHash(raw: unknown): string {
   return h;
 }
 
-async function runDispatch(): Promise<Parameters<typeof commitDirectAnswer>[1]> {
-  (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-    makeAppliedEditResult(),
-  );
+async function runDispatch(
+  duringEdit: () => void = () => {},
+  graphState = GraphStateIngressSchema.parse(PERSISTED_SERVER_GRAPH),
+  persistedEditBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>,
+): Promise<Parameters<typeof commitDirectAnswer>[1]> {
+  (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockImplementation(async () => {
+    duringEdit();
+    return makeAppliedEditResult();
+  });
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
     makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>,
   );
@@ -194,8 +209,9 @@ async function runDispatch(): Promise<Parameters<typeof commitDirectAnswer>[1]> 
     payload: makePayload(),
     requestId: 'req-cas-trusted-base',
     request: STUB_REQUEST,
-    graphState: INGRESS_GRAPH,
+    graphState,
     analysisState: null,
+    ...(persistedEditBase !== undefined ? { persistedEditBase } : {}),
   });
 
   const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
@@ -218,10 +234,12 @@ async function runDispatch(): Promise<Parameters<typeof commitDirectAnswer>[1]> 
 // own files (edit-graph-dispatch-graph-management-modes.test.ts and the
 // referee-gate suites), which is where a live regression would surface.
 beforeEach(() => {
+  __setUseAppendV6ForTest(true);
   vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'off');
   _resetConfigCache();
 });
 afterEach(() => {
+  __setUseAppendV6ForTest(false);
   vi.unstubAllEnvs();
   _resetConfigCache();
 });
@@ -230,6 +248,7 @@ describe('A3 graph CAS — trusted base rule on the edit path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     persistedBaseRef.current = PERSISTED_SERVER_GRAPH;
+    persistedBaseRef.revision = 7;
     vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'observe');
     _resetConfigCache();
   });
@@ -239,7 +258,7 @@ describe('A3 graph CAS — trusted base rule on the edit path', () => {
     _resetConfigCache();
   });
 
-  it('expected hashes == hash(persisted SERVER graph), NOT hash(incoming request graph) and NOT hash(the write itself)', async () => {
+  it('identical client graph commits against the graph and revision from the same server read', async () => {
     const metadata = await runDispatch();
 
     // Fixture sanity: the three graphs are pairwise identity-distinct.
@@ -248,15 +267,70 @@ describe('A3 graph CAS — trusted base rule on the edit path', () => {
     // The trusted base: the strict server read.
     expect(metadata.expectedGraphIdentityHash).toBe(idHash(PERSISTED_SERVER_GRAPH));
     expect(metadata.expectedGraphAnalysisHash).toBe(anHash(PERSISTED_SERVER_GRAPH));
-
-    // NEVER the request-supplied graph_state…
-    expect(metadata.expectedGraphIdentityHash).not.toBe(idHash(INGRESS_GRAPH));
+    expect(metadata.expectedRevision).toBe(7);
 
     // …and NEVER the graph being written (the merged post-edit persisted
     // graph on metadata.graph): CAS must not validate the write against
     // itself.
     expect(metadata.graph).toBeDefined();
     expect(metadata.expectedGraphIdentityHash).not.toBe(idHash(metadata.graph));
+  });
+
+  it.each([true, false])('client holds 10, server has 20 at revision 8 → revision_conflict and no write restores 10 (v6: %s)', async (v6) => {
+    __setUseAppendV6ForTest(v6);
+    const clientGraph = GraphStateIngressSchema.parse({
+      ...PERSISTED_SERVER_GRAPH,
+      nodes: PERSISTED_SERVER_GRAPH.nodes.map(node => node.id === 'fac_price'
+        ? { ...node, observed_state: { value: 10 } } : node),
+    });
+    const serverGraph = {
+      ...PERSISTED_SERVER_GRAPH,
+      nodes: PERSISTED_SERVER_GRAPH.nodes.map(node => node.id === 'fac_price'
+        ? { ...node, observed_state: { value: 20 } } : node),
+    };
+    persistedBaseRef.current = serverGraph;
+    persistedBaseRef.revision = 8;
+
+    await expect(runDispatch(() => {}, clientGraph)).rejects.toMatchObject({
+      name: 'GraphStaleWriteError', conflict_category: 'revision_conflict',
+    });
+    expect(handleEditGraph).not.toHaveBeenCalled();
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+    expect(persistedBaseRef.current).toEqual(serverGraph);
+  });
+
+  it('identity-only divergence is refused even when the analysis projection matches', async () => {
+    const clientGraph = GraphStateIngressSchema.parse({
+      ...PERSISTED_SERVER_GRAPH,
+      nodes: PERSISTED_SERVER_GRAPH.nodes.map(node => node.id === 'fac_price'
+        ? { ...node, label: 'Old price label' } : node),
+    });
+    expect(anHash(clientGraph)).toBe(anHash(PERSISTED_SERVER_GRAPH));
+    expect(idHash(clientGraph)).not.toBe(idHash(PERSISTED_SERVER_GRAPH));
+    await expect(runDispatch(() => {}, clientGraph)).rejects.toBeInstanceOf(GraphStaleWriteError);
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+  });
+
+  it('server reload carries its combined base and does not acquire a later revision', async () => {
+    const reloadBase = { graph: PERSISTED_SERVER_GRAPH, briefText: null, revision: 7 };
+    persistedBaseRef.current = POST_EDIT_GRAPH;
+    persistedBaseRef.revision = 8;
+    const metadata = await runDispatch(() => {}, GraphStateIngressSchema.parse(reloadBase.graph), reloadBase);
+    expect(metadata.expectedRevision).toBe(7);
+    expect(metadata.expectedGraphIdentityHash).toBe(idHash(reloadBase.graph));
+    expect(metadata.baseGraphForInvariants).toBe(reloadBase.graph);
+    expect(loadPersistedScenarioStateStrict).not.toHaveBeenCalled();
+  });
+
+  it('a competing write during the provider cannot refresh the mutation revision or merge base', async () => {
+    const metadata = await runDispatch(() => {
+      persistedBaseRef.current = POST_EDIT_GRAPH;
+      persistedBaseRef.revision = 8;
+    });
+    expect(metadata.expectedRevision).toBe(7);
+    expect(metadata.expectedGraphIdentityHash).toBe(idHash(PERSISTED_SERVER_GRAPH));
+    expect(metadata.baseGraphForInvariants).toBe(PERSISTED_SERVER_GRAPH);
+    expect(loadPersistedScenarioStateStrict).toHaveBeenCalledTimes(1);
   });
 
   it('mode off → the edit path threads no expected hashes (zero-cost flag-off)', async () => {
@@ -266,17 +340,20 @@ describe('A3 graph CAS — trusted base rule on the edit path', () => {
     const metadata = await runDispatch();
     expect(metadata.expectedGraphIdentityHash).toBeUndefined();
     expect(metadata.expectedGraphAnalysisHash).toBeUndefined();
+    expect(metadata.expectedRevision).toBe(7);
     // The write itself is unchanged: the merged graph still commits.
     expect(metadata.graph).toBeDefined();
   });
 
   it('genuinely-empty server graph (strict read returned null) → expected hashes null, never manufactured from the request graph', async () => {
     persistedBaseRef.current = null;
+    persistedBaseRef.revision = 3;
 
-    const metadata = await runDispatch();
+    const metadata = await runDispatch(() => {}, INGRESS_GRAPH);
     // Server base read happened; there was no graph → null (NOT the ingress
     // hash, NOT undefined).
     expect(metadata.expectedGraphIdentityHash).toBeNull();
     expect(metadata.expectedGraphAnalysisHash).toBeNull();
+    expect(metadata.expectedRevision).toBe(3);
   });
 });
