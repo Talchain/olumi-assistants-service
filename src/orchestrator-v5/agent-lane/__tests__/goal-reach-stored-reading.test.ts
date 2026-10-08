@@ -13,7 +13,7 @@ const graph = (edit: (g: Graph) => void = () => {}) => { const g = structuredClo
 const node = (g: Graph, id: string) => g.nodes.find(n => n.id === id)!;
 const offers = (g: Graph) => { const b = actionBarOf(actionFactsOf({ scenarioId: 'goal-reach', graph: g })); return [...b.priority, ...b.standard, ...b.more]; };
 const confirm = (g: Graph) => offers(g).filter(o => o.action_id === 'confirm_reading');
-const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?';
+const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’. Is that how you work it out?';
 const withCurrent = (current: number) => graph(g => {
   // Science's known answer is the earlier 300, not the final stored fixture's 8,000.
   node(g, 'pro_paying_subscribers').observed_state = { unit: 'subscribers', raw_value: 300, value: 0.15, source: 'cee_inference' };
@@ -113,7 +113,7 @@ describe('GOAL-REACH build 1 stored reading', () => {
   });
   it('stored order stays intact when the count precedes the rate', () => {
     const g = graph(g => { node(g, 'mrr').nonlinear_identity.factor_ids.reverse(); });
-    expect(proposeProductIdentity(g)).toMatchObject({ factor_ids: ['pro_paying_subscribers', 'pro_plan_price'], words: 'Olumi reads ‘MRR’ as ‘Pro paying subscribers’ × ‘Pro plan price’, less ‘MRR lost to price-driven churn’. Is that how you work it out?' });
+    expect(proposeProductIdentity(g)).toMatchObject({ factor_ids: ['pro_paying_subscribers', 'pro_plan_price'], words: 'Olumi reads ‘MRR’ as ‘Pro paying subscribers’ × ‘Pro plan price’. Is that how you work it out?' });
   });
   it('Science §(e) accepts the existing implicit per-count money-rate confirmation form', () => {
     const g = graph(g => { node(g, 'pro_plan_price').observed_state.unit = '£/month'; });
@@ -178,15 +178,21 @@ describe('GOAL-REACH build 1 stored reading', () => {
     expect(proposeProductIdentity(add(false))).toBeNull(); // control: an active second carrier is a second reading
   });
 
-  it('Science §(e) add. 2: Paul\'s STORED end state (user-added "Feature release slips" straight into MRR, not definitional) → no card; Run-1 shape → the card with the addend', () => {
+  it('Science §(e) add. 2: Paul\'s STORED end state (user-added "Feature release slips" straight into MRR, not definitional) → no card; Run-1 shape → the card', () => {
     const END = JSON.parse(readFileSync(new URL('./fixtures/goal-reach-paul-graph-632b92b9-end.json', import.meta.url), 'utf8')) as Graph;
     expect(proposeProductIdentity(END)).toBeNull();
     expect(proposeProductIdentity(PAUL)?.words).toBe(WORDS);
   });
-  it('Science §(e) add. 2 mutant guard: the words never ask "price × subscribers" alone while the model subtracts a definitional addend', () => {
-    expect(proposeProductIdentity(PAUL)!.words).toContain(', less ‘MRR lost to price-driven churn’');
-    const noAddend = graph(g => { g.edges = g.edges.filter(e => !(e.from === 'mrr_lost_to_price_driven_churn' && e.to === 'mrr')); });
-    expect(proposeProductIdentity(noAddend)!.words).not.toContain('less');
+  it('Science §(e) add. 3 + DL (b′): a LEVELLESS definitional addend executes as 0 → the card asks only what is computed (no less/plus clause)', () => {
+    expect(node(PAUL, 'mrr_lost_to_price_driven_churn').observed_state ?? null).toBeNull(); // Paul's risk really is levelless
+    const words = proposeProductIdentity(PAUL)!.words;
+    expect(words).toBe(WORDS);
+    expect(words).not.toMatch(/less|plus|adjusted|churn/);
+  });
+  it('DL (b′): a LEVELLED definitional addend → no card until build 2 words ISL\'s executed signed value; control: the same graph levelless → card', () => {
+    const levelled = graph(g => { node(g, 'mrr_lost_to_price_driven_churn').observed_state = { unit: '£/month', raw_value: 1000, value: 0.025, source: 'cee_inference' }; });
+    expect(proposeProductIdentity(levelled)).toBeNull();
+    expect(proposeProductIdentity(graph())?.words).toBe(WORDS);
   });
   it('Science §(e) add. 2: the same risk WITHOUT definitional provenance (or user-authored) vetoes', () => {
     expect(proposeProductIdentity(graph(g => { const e = g.edges.find(e => e.from === 'mrr_lost_to_price_driven_churn' && e.to === 'mrr')!; e.provenance = { source: 'cee_hypothesis' }; }))).toBeNull();

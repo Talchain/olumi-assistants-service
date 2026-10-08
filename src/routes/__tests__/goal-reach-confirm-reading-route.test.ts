@@ -50,7 +50,7 @@ import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b';
 const AT = '2026-10-08T08:00:00.000Z';
 const READY = { status: 'ready', may_run: true };
-const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?';
+const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’. Is that how you work it out?';
 const hashOf = (graph: unknown) => computeAnalysisAffectingGraphHash(graph as never)!;
 let app: FastifyInstance;
 let serial = 0;
