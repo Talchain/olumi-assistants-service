@@ -46,6 +46,8 @@ export interface DraftDiagnosis {
 }
 
 export const DRAFT_WIDENING_PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
+/** Options-pass only (DL, #87 6063002299): the shared directive asks why an option might do better; Science §(w)(2) never says better. */
+export const DRAFT_WIDENING_OPTIONS_PREAMBLE = 'Where the text asks why an option might do better, write instead how it would move the goal through a different mechanism; never use better, best, recommend, winner, or improve.';
 
 /** Diagnose only typed identities, attachments and directed paths on the final un-widened graph. */
 export function diagnoseDraft(graph: unknown): DraftDiagnosis {
@@ -61,7 +63,9 @@ export function diagnoseDraft(graph: unknown): DraftDiagnosis {
   const active = options.filter(n => !isBaseline(n)).sort((a, b) => (a.id as string).localeCompare(b.id as string));
   const activeIds = new Set(active.map(n => n.id as string));
   const levers = active.map(n => existingLevers(g, n.id as string, sq));
-  const same = levers.every((lever, i) => levers.slice(i + 1).every(other => sameLevers(lever, other)));
+  // Distinct only when proven: both levers known non-empty and neither reads as the other (an unknown move matches either way).
+  const provenDistinct = (a: ReturnType<typeof existingLevers>, b: ReturnType<typeof existingLevers>): boolean => a.size > 0 && b.size > 0 && !sameLevers(a, b) && !sameLevers(b, a);
+  const same = levers.every((lever, i) => levers.slice(i + 1).every(other => !provenDistinct(lever, other)));
   const risks = g.nodes.filter(n => n.kind === 'risk');
   if (risks.length < 2) return { risks: 'too_few', options: active.length <= 1 || same ? 'no_distinct_lever' : null };
 
@@ -204,7 +208,7 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
     const work = async (): Promise<WidenDraftResult | null> => {
       const [riskReply, optionReply] = await Promise.allSettled([
         riskPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${riskPass.directive}`, RISKS_SCHEMA),
-        optionPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${optionPass.directive}`, OPTIONS_SCHEMA),
+        optionPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${DRAFT_WIDENING_OPTIONS_PREAMBLE}\n${optionPass.directive}`, OPTIONS_SCHEMA),
       ]);
       if (finished) return null;
       const riskArgs = riskReply.status === 'fulfilled' ? riskReply.value : undefined;

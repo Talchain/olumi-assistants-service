@@ -22,6 +22,7 @@ type Rec = Record<string, any>;
 const BRIEF = 'We want to deliver 20 features in six months. I propose Hire a Tech Lead. Today we have 0 Developer hires, 0 Tech lead hires, and 0 Contractor hours. Developer hires can range up to 10 people; Tech lead hires up to 10 people; Contractor hours up to 100 hours. Background demand is 10 enquiries, up to 100 enquiries.';
 const SCENARIO = '99999999-9999-4999-8999-999999999999';
 const RATIONALE = 'RATIONALE MUST NEVER REACH ANY USER VISIBLE GRAPH FIELD';
+const OPTIONS_PREAMBLE = 'Where the text asks why an option might do better, write instead how it would move the goal through a different mechanism; never use better, best, recommend, winner, or improve.';
 const PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
 const WIDEN_TURN_SHA256 = '378292bd12aec3a4392ace8ede96e672a8170e0255472a2e8e2eb96ee30e4a67';
 const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
@@ -176,6 +177,19 @@ describe('P05b pure typed draft diagnosis', () => {
     const sameFactor = (value: number) => ({ ...graph, nodes: graph.nodes.map((n: Rec) => n.id === 'option_b' ? { ...n, interventions: { lever_a: { value } } } : n) });
     expect(widening.diagnoseDraft(sameFactor(2)).options).toBe('no_distinct_lever');
     expect(widening.diagnoseDraft(sameFactor(-1)).options).toBeNull();
+  });
+
+  it('dv-unproven-distinct: an unknown move or an empty lever never proves distinctness, in either option order', () => {
+    const graph = validationGraph();
+    const unknownOn = (unknownId: string, knownId: string) => ({ ...graph,
+      nodes: graph.nodes.map((n: Rec) => n.id === unknownId ? { ...n, interventions: undefined } : n.id === knownId ? { ...n, interventions: { lever_a: { value: 2 } } } : n),
+      edges: [...graph.edges, { from: unknownId, to: 'lever_a' }] });
+    expect(widening.diagnoseDraft(unknownOn('option_a', 'option_b')).options).toBe('no_distinct_lever');
+    expect(widening.diagnoseDraft(unknownOn('option_b', 'option_a')).options).toBe('no_distinct_lever');
+    const empty = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === 'option_b' ? { ...n, interventions: undefined } : n) };
+    expect(widening.diagnoseDraft(empty).options).toBe('no_distinct_lever');
+    // CONTRAST: a known opposite move on the same factor is still distinct.
+    expect(widening.diagnoseDraft({ ...graph, nodes: graph.nodes.map((n: Rec) => n.id === 'option_b' ? { ...n, interventions: { lever_a: { value: -1 } } } : n) }).options).toBeNull();
   });
 
   it('dv-B1-fixture: the captured B1 has one risk and two distinct active levers, so only the risks call runs', async () => {
@@ -680,6 +694,21 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
       expect(await widening.widenDraft({ ...input, callStructured: generator(optionField ? [] : [risk], { options: optionField ? [option] : [] }) })).toBeNull();
     });
 
+  it('aw-option-text-words: a kept option whose rationale says better persists no ranking word in any widened option text', async () => {
+    const input = fixture({ sameLever: true, counterCase: true });
+    const args = optionsArgs();
+    for (const o of args.options) (o as Rec).rationale = 'This could do better and is the best, recommended winner, improving results';
+    const out = await widening.widenDraft({ ...input, callStructured: generator([], args) });
+    expect(out).not.toBeNull();
+    const added = addedNodes(input.admitted, out!.admitted, 'option');
+    expect(added).toHaveLength(2);
+    const strings = (v: unknown): string[] => typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(strings)
+      : v !== null && typeof v === 'object' ? Object.values(v).flatMap(strings) : [];
+    const persisted = added.flatMap(strings);
+    expect(persisted.length).toBeGreaterThan(2);
+    for (const text of persisted) expect(text).not.toMatch(/\b(better|best|improv\w*|recommend\w*|winner)\b/i);
+  });
+
   it.each([undefined, '', '   '])('aw-basis: drop levels with missing or empty basis %s', async (basis) => {
     const input = fixture({ sameLever: true });
     const args = optionsArgs();
@@ -701,7 +730,8 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(requests).toHaveLength(2);
     for (const req of requests) expect(req.instructions.split('\n')[0]).toBe(PREAMBLE);
     expect(requests.find(isRisks)!.instructions).toBe(`${PREAMBLE}\n${(risksTurn as Rec).directive}`);
-    expect(requests.find(isOptions)!.instructions).toBe(`${PREAMBLE}\n${(optionsTurn as Rec).directive}`);
+    expect(widening.DRAFT_WIDENING_OPTIONS_PREAMBLE).toBe(OPTIONS_PREAMBLE);
+    expect(requests.find(isOptions)!.instructions).toBe(`${PREAMBLE}\n${OPTIONS_PREAMBLE}\n${(optionsTurn as Rec).directive}`);
     expect(createHash('sha256').update(readFileSync(new URL('../method-turn/widen-turn.ts', import.meta.url))).digest('hex')).toBe(WIDEN_TURN_SHA256);
     for (const req of requests) { expect(req.schema.type).toBe('object'); expect(req.max_output_tokens).toBeLessThanOrEqual(3000); }
   });
