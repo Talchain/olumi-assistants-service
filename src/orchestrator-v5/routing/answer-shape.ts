@@ -333,6 +333,22 @@ export function deriveAnswerTextFromShape(shape: AnswerShape): string {
 }
 
 /**
+ * ⭐ THE ONE INVERSE of `deriveAnswerTextFromShape`, for a replay that holds only the stored words (DL 58e392, 8 Oct:
+ * every Explain replay shipped whole while the live turn was shaped; the answer row stores text, not the shape). The
+ * composer's derived text is a fixed format — headline, a paragraph of `• ` lines, then detail — so the shape is read
+ * back only when (1) a bullet paragraph follows the headline (only the composer writes `• ` bullets), (2) the shape meets
+ * the schema, and (3) it derives the stored text BYTE FOR BYTE. Anything else → `null` (the replay ships whole, as before).
+ */
+export function answerShapeFromDerivedText(text: string): AnswerShape | null {
+  const paras = text.split('\n\n');
+  if (paras.length < 2) return null;
+  const lines = paras[1]!.split('\n');
+  if (lines.length > 3 || !lines.every((line) => /^• \S/.test(line))) return null;
+  const parsed = AnswerShapeSchema.safeParse({ headline: paras[0]!, bullets: lines.map((line) => line.slice(2)), detail: paras.slice(2).join('\n\n') });
+  return parsed.success && deriveAnswerTextFromShape(parsed.data) === text ? parsed.data : null;
+}
+
+/**
  * Split `text` at its FIRST internal sentence boundary. Derives from the same
  * three fragments as `INTERNAL_SENTENCE_BOUNDARY` (lookahead on the
  * next-sentence start so it is NOT consumed), so the split point is exactly

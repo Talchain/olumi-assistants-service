@@ -75,7 +75,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     expect(textWrites(afterComposer(mutant))).not.toEqual(['assistant_text: composedReply.text']);
   });
 
-  it('3. `_answer_shape` is attached at exactly the two composer sites across the route and agent-lane', () => {
+  it('3. `_answer_shape` is attached at exactly the two composer sites (+ the stored words read back) across the route and agent-lane', () => {
     const files = (dir: string): string[] => readdirSync(dir).flatMap((f) => {
       const p = join(dir, f);
       if (statSync(p).isDirectory()) return f === '__tests__' ? [] : files(p);
@@ -85,6 +85,8 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     const sources = [...files(lane).map((p) => readFileSync(p, 'utf8')), ROUTE];
     // An attach is `_answer_shape: <value>`; a drop is a destructuring alias (`_answer_shape: _stale`).
     const attaches = sources.flatMap((src) => [...src.matchAll(/\b_answer_shape\s*:\s*(?!_)([A-Za-z][\w.]{0,60})/g)].map((m) => m[1]));
-    expect(attaches).toEqual(['replayComposed.shape', 'composedReply.shape']);
+    // The third (DL 58e392, 8 Oct): a replay of the stored words UNCHANGED reads the composer's own shape back from them
+    // (`answerShapeFromDerivedText`, byte-for-byte re-derivation). It shapes nothing new; it restores what the composer made.
+    expect(attaches).toEqual(['replayComposed.shape', 'storedWordsShape', 'composedReply.shape']);
   });
 });
