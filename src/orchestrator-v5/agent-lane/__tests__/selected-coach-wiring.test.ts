@@ -56,13 +56,14 @@ const runFixture = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
 const runBlock = runFixture.turns.t2.analysis_result;
 
 type Sent = { model: string; instructions: string; reasoning?: { effort?: string }; max_output_tokens: number;
-  tools?: { name?: string }[]; tool_choice?: unknown; text?: { format?: { name?: string } } };
+  input?: unknown; tools?: { name?: string }[]; tool_choice?: unknown; text?: { format?: { name?: string } } };
 const sent: Sent[] = [];
 const registeredAtCall: boolean[] = [];
 let scripted: Record<string, unknown>[][] = [];
 let readMode: 'populated' | 'empty' | 'failed' = 'populated';
 let registered = false;
 let ran = false;
+let graphOverride: unknown;
 const BRIEF = 'Should we raise the Pro price or grow the Pro subscriber base to lift MRR?';
 const candidate = {
   goal: { metric: 'MRR', operator: '>=', value: 100, unit: 'k', horizon_months: 6, provenance: 'explicit' },
@@ -131,7 +132,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
       if (readMode === 'empty' && !registered) return { graph: null, graph_hash: null };
       if (readMode === 'empty' && !ran) return { graph: READY_GRAPH, graph_hash: runBlock.computed_against_hash,
         analysis_state: { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } } };
-      return { graph: readMode === 'empty' ? READY_GRAPH : fx.state.draft_graph,
+      return { graph: graphOverride ?? (readMode === 'empty' ? READY_GRAPH : fx.state.draft_graph),
         graph_hash: runBlock.computed_against_hash, analysis_ready: fx.state.analysis_ready,
         analysis_state: fx.state.analysis_state, analysis_result: runBlock };
     });
@@ -151,7 +152,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => { rows.clear(); sent.length = 0; registeredAtCall.length = 0; scripted = [];
-    readMode = 'populated'; registered = false; ran = false; });
+    readMode = 'populated'; registered = false; ran = false; graphOverride = undefined; });
 
   const sendTurn = async (message: string, output: Record<string, unknown>[][],
     chip?: { id: string; action_type: string }, scenario = SCENARIO) => {
@@ -171,6 +172,34 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(body.max_output_tokens).toBe(3400);
   };
   const conversationBodies = () => sent.filter((body) => body.text?.format?.name !== 'whole_candidate');
+
+  it('R2: the SENT model view says today at 4% does not meet under 4%, with unchanged coach pins', async () => {
+    const graph = JSON.parse(JSON.stringify(fx.state.draft_graph)) as { nodes: Array<Record<string, unknown>>; goal_constraints?: unknown[] };
+    graph.nodes = graph.nodes.map((node) => node.id === 'monthly_churn_rate' ? { ...node, scale_frame: 100,
+      observed_state: { value: 0.04, raw_value: 4, unit: '%', source: 'user_override' } } : node);
+    graph.goal_constraints = [{ constraint_id: 'agent-lane:monthly_churn_rate:<=', node_id: 'monthly_churn_rate',
+      operator: '<=', operator_as_stated: '<', value: 4, unit: '%', value_frame: 'level', provenance: 'explicit' }];
+    graphOverride = graph;
+    await sendTurn('Our current churn is 4%. Does that meet keeping monthly churn UNDER 4%?', [say('In this model, today’s 4% does not meet your under 4% limit.')]);
+    const body = conversationBodies()[0]!;
+    const textBlocks: string[] = [];
+    const collect = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(collect);
+      else if (value !== null && typeof value === 'object') {
+        for (const [key, item] of Object.entries(value)) {
+          if (key === 'text' && typeof item === 'string') textBlocks.push(item);
+          else collect(item);
+        }
+      }
+    };
+    collect(body.input);
+    const modelInput = textBlocks.join('\n');
+    expect(modelInput).toMatch(/"today_within_limit"\s*:\s*"at_threshold"/);
+    expect(modelInput).toContain('do no arithmetic');
+    // SHA and byte count are derived from the intercepted request, not estimated from source literals.
+    expect(sha256(body.instructions)).toBe(RENDERED_SHA);
+    expect(Buffer.byteLength(body.instructions)).toBe(RENDERED_BYTES);
+  });
 
   it('uses the exact selected template and host authority on an ordinary conversation', async () => {
     expect(sha256(SELECTED_COACH_V02_TEMPLATE)).toBe(TEMPLATE_SHA);

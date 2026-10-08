@@ -198,6 +198,9 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
+import { meetsLimit } from '../limit-operator-words.js';
+import { thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
+import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
@@ -1262,10 +1265,11 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * ⭐ (B) WHAT THE AGENT NEEDS TO EXPLAIN THE MODEL HONESTLY — the goal as the user stated it, the limits they
  * set, whose each link is, and the ONE readiness verdict (C33 5838970895; ChatGPT 5839692762 B).
  *
- * Every value is a stored carrier passed through, never re-derived: the goal target through the ONE trio
+ * Figures are stored carriers passed through: the goal target through the ONE trio
  * reader (`pickGoalThresholdTrio`, raw figure only — never the normalised `goal_threshold`, which is the
  * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
- * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
+ * provenance as stored. Today's limit fact uses the same predicate and proven frame as analysis.
+ * Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
 export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
@@ -1308,10 +1312,13 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     .map((c) => {
       // ⭐ A2: the limit as the user STATED it ("less than 4%"), from `operator_as_stated` beside the held `operator`
       // (`statedOperatorOf`: only its strict twin, never a contradicting stamp). `operator` stays the held one: it is
-      // the key `propose_limit_change` names the row by. The engine's "<=" differs only for a level pinned exactly at
-      // the threshold (`admit-constraint.ts` header: disclosed, not modelled).
+      // the key `propose_limit_change` names the row by. Strict ties are read by the shared predicate below.
       const stated = statedOperatorOf(c);
       const unit = str(c.unit) ? (c.unit.startsWith('%') ? c.unit : ` ${c.unit}`) : '';
+      const node = g.nodes.find((n) => n.id === c.node_id);
+      const today = node?.observed_state?.value;
+      const threshold = c.value_frame === 'level' && node !== undefined
+        ? thresholdOnNodeLevel(g.raw, c, node as Record<string, unknown>, c.value as number) : undefined;
       return {
         // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
         // own label only when that node is absent — so the card and the Agent say the same words for one limit.
@@ -1329,6 +1336,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
           words: LIMIT_OPERATOR_WORDS, figure: (v) => `${String(v)}${unit}`,
         }) } : {}),
         ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
+        ...(stated === undefined || !num(today) || threshold === undefined ? {} : {
+          today_within_limit: meetsLimit(today, stated, threshold),
+          today_within_limit_instruction: 'Quote this computed fact about today in this model; do no arithmetic. true means today meets the limit; false means it does not; at_threshold means today is at the strict threshold and does not meet the limit.',
+        }),
       };
     });
   /**
@@ -1906,7 +1917,11 @@ function riskUnreachableWhy(g: Pick<GraphRead, 'nodes'>, risk: string, links: re
 const FACTOR_PLACEHOLDER_STRENGTH = 'not known yet: Olumi uses a placeholder strength for the link, not an estimate';
 
 /** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
-const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
+const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most', below: 'below', above: 'above' } as const;
+type TargetDirection = keyof typeof DIRECTION_WORDS;
+const TARGET_OPERATOR = { at_least: '>=', at_most: '<=', below: '<', above: '>' } as const;
+const inclusiveTargetDirection = (type: TargetDirection): 'at_least' | 'at_most' =>
+  type === 'below' || type === 'at_most' ? 'at_most' : 'at_least';
 /**
  * A goal target's or a limit's figure as the user writes it ("£20,000 over 6 months", "£100,000 per month", "5%"): the
  * lane's one figure formatter (DL #72 5866282787: "20000 £ over 6 months" reached a consent subject). A figure it cannot
@@ -1921,13 +1936,14 @@ const targetFigure = (value: number, unit: string): string =>
  * figure, for both directions; for at least it also stamps the goal's own `goal_threshold_raw` (what the Agent's
  * `target` and the UI read). Both must hold exactly what was approved.
  */
-function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: 'at_least' | 'at_most'; raw_value: number }): boolean {
-  const operator = v.constraint_type === 'at_least' ? '>=' : '<=';
+function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: TargetDirection; raw_value: number }): boolean {
+  const type = inclusiveTargetDirection(v.constraint_type);
+  const operator = type === 'at_least' ? '>=' : '<=';
   const rows = (Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
     .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown } => c !== null && typeof c === 'object')
     .filter((c) => c.node_id === goalId && c.operator === operator);
-  if (rows.length !== 1 || rows[0]!.value !== v.raw_value) return false;
-  if (v.constraint_type === 'at_most') return true;
+  if (rows.length !== 1 || rows[0]!.value !== v.raw_value || statedOperatorOf(rows[0]!) !== TARGET_OPERATOR[v.constraint_type]) return false;
+  if (type === 'at_most') return true;
   const goal = (Array.isArray(raw.nodes) ? raw.nodes : []).find((n) => (n as { id?: unknown } | null)?.id === goalId) as { goal_threshold_raw?: unknown } | undefined;
   return goal?.goal_threshold_raw === v.raw_value;
 }
@@ -4174,8 +4190,9 @@ export function createAgentCapabilities(
        * direction is the alternative button, and the user's click is the authorship. No word list over the user's wording.
        */
       const said = comparatorTheUserWrote(ctx.user_turn_text);
-      const type: 'at_least' | 'at_most' = said ?? typed;
-      const directionIsADecision = said !== typed;
+      const type: TargetDirection = said ?? typed;
+      const inclusiveType = inclusiveTargetDirection(type);
+      const directionIsADecision = said === null || inclusiveType !== typed;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // Exactly ONE goal: the event is id-addressed, and choosing between two goals would be a guess.
@@ -4203,7 +4220,7 @@ export function createAgentCapabilities(
             + 'Tell the user plainly, and never offer a level target in its place.' };
       }
       // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
-      if (type === 'at_least' && !(value > 0)) {
+      if (inclusiveType === 'at_least' && !(value > 0)) {
         return { ok: false, mutated: false, refusal: 'target_not_positive',
           detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Tell the user that, in those words.` };
       }
@@ -4272,7 +4289,7 @@ export function createAgentCapabilities(
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       // ⭐ D3 step 1 (Science #87 6006079049 (1)): ONE target per goal — approving retires the goal's other own target row
       // (`add-constraint.ts`), so the card names what it replaces, in the row's own words and units.
-      const chosenOperator = type === 'at_most' ? '<=' : '>=';
+      const chosenOperator = inclusiveType === 'at_most' ? '<=' : '>=';
       const replaced = ((g.raw as { goal_constraints?: unknown }).goal_constraints as Array<Record<string, unknown>> | undefined ?? [])
         .filter((c) => c !== null && typeof c === 'object' && c.node_id === goal.id && (c.deadline_metadata === undefined || c.deadline_metadata === null)
           && (c.value_frame === undefined || c.value_frame === 'level')
@@ -4307,7 +4324,7 @@ export function createAgentCapabilities(
         ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
         // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
         // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
-        ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
+        ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: inclusiveType === 'at_least' ? 'at_most' : 'at_least' } } : {}),
         note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
@@ -5687,12 +5704,15 @@ export function createAgentCapabilities(
 
       if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
         const op = ops[0]!;
-        const v = op.value as { constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string };
+        const v = op.value as { constraint_type: TargetDirection; raw_value: number; unit: string };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
-        const res = await dispatch('/orchestrate/v2/turn', {
+        const write = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
-          event: { kind: 'goal_target_edit', goal_node_id: op.path, constraint_type: v.constraint_type, raw_value: v.raw_value, unit: v.unit, base_graph_hash: decision.proposal.base_graph_identity_hash },
+          event: { kind: 'goal_target_edit', goal_node_id: op.path, constraint_type: inclusiveTargetDirection(v.constraint_type), raw_value: v.raw_value, unit: v.unit, base_graph_hash: decision.proposal.base_graph_identity_hash },
         });
+        // The approved card's strict comparator rides only this exact in-process write, never a wire field.
+        const res = await runWithStatedGoalOperator({ scenario_id: ctx.scenario_id, goal_node_id: op.path,
+          turn_id: operationId, operator: TARGET_OPERATOR[v.constraint_type] }, write);
         // The writer's stale-base gate: the model moved between this approval's read and the write. Nothing written.
         if (res.status === 409) {
           return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,

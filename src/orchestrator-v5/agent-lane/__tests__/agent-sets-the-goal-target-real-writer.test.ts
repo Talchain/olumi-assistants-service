@@ -241,6 +241,53 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     for (const b of [t1, t2]) for (const p of b._provider_calls ?? []) expect(p.provider).toBe('openai');
   }, 180_000);
 
+  it.each([
+    ['Monthly churn', '%', 4, 'under', 'at_most', '<=', '<', 'at most'],
+    ['MRR', '£', 60000, 'above', 'at_least', '>=', '>', 'at least'],
+  ] as const)('R1b real writer: %s keeps the strict target in storage, while the wire stays inclusive',
+    async (label, unit, value, strictWord, wireType, heldOperator, statedOperator, inclusiveWords) => {
+      const seed = seedGraph();
+      seed.nodes = seed.nodes.map((node) => node.id === 'goal_mrr' ? { ...node, label } : node);
+      graphOf.set(SCENARIO, seed);
+      const propose = async (word: string, amount: number) => {
+        const figure = unit === '£' ? `£${amount}` : `${amount}%`;
+        script = [
+          () => fnCall('propose_goal_target', { constraint_type: wireType, value: amount, unit, rationale: 'The user stated this target.' }),
+          () => say('Please approve the target card.'),
+        ];
+        const reply = await turn({ message: `Keep ${label} ${word} ${figure}.` });
+        expect(reply._agent.tool_calls).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'propose_goal_target', ok: true })]));
+        const chip = approveChipOf(reply)[0];
+        expect(chip, JSON.stringify(reply)).toBeDefined();
+        const approved = await turn({ message: chip!.message, source: 'chip', chip: { id: chip!.id } });
+        expect(approved._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+        return approved;
+      };
+      const strict = await propose(strictWord, value);
+      expect(graphNow().goal_constraints?.filter((row) => row.node_id === 'goal_mrr')).toEqual([
+        expect.objectContaining({ operator: heldOperator, operator_as_stated: statedOperator, value, unit, value_frame: 'level' }),
+      ]);
+      expect(strict.assistant_text).toContain(`now has the target ${statedOperator === '<' ? 'below' : 'above'}`);
+      const firstEvent = systemEvents()[0]!;
+      expect(SystemEventTurnPayloadSchema.safeParse(firstEvent).success).toBe(true);
+      expect(firstEvent['event']).toEqual({ kind: 'goal_target_edit', goal_node_id: 'goal_mrr', constraint_type: wireType,
+        raw_value: value, unit, base_graph_hash: analysisHash(seed) });
+
+      // A later inclusive write must not inherit either the strict row or the previous write's process context.
+      await propose(inclusiveWords, value + 1);
+      const next = graphNow().goal_constraints?.filter((row) => row.node_id === 'goal_mrr');
+      expect(next).toEqual([expect.objectContaining({ operator: heldOperator, value: value + 1, unit })]);
+      expect(next![0]).not.toHaveProperty('operator_as_stated');
+      const events = systemEvents();
+      expect(events).toHaveLength(2);
+      for (const event of events) {
+        expect(SystemEventTurnPayloadSchema.safeParse(event).success).toBe(true);
+        expect((event['event'] as Record<string, unknown>)['constraint_type']).toBe(wireType);
+        expect(event).not.toHaveProperty('operator_as_stated');
+        expect(event['event']).not.toHaveProperty('operator_as_stated');
+      }
+    }, 180_000);
+
   it('RED: another writer moves the model between the approval and the write → the REAL stale-base gate refuses (409), the Agent says superseded, nothing of ours is written', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const approve = approveChipOf(await proposeTarget())[0]!;

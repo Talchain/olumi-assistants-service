@@ -999,31 +999,36 @@ export function holdsABandWord(words: unknown): boolean {
 }
 
 /**
- * The same rule for a goal's success target: WHICH WAY it binds \u2014 at least, or at most \u2014 is recorded as the user's
+ * The same rule for a goal's success target: its comparator, including strictness, is recorded as the user's
  * only when the user SAID it, in THIS turn's own typed words (`user_turn_text`). The goal-target writer stamps the
  * target as the user's (`threshold_source: 'user'`), so a direction the Agent picked and the user only approved would
  * read as the user's own.
  *
- * - The phrases, whole words only: "at least", "minimum", "no less than", "more than", "over", "above" \u2192 at least;
- *   "at most", "no more than", "under", "below", "less than", "maximum", "cap" \u2192 at most. "no less than" and
+ * - The phrases, whole words only: "at least", "minimum", "no less than" \u2192 at least; "more than", "over", "above"
+ *   \u2192 above; "at most", "no more than", "maximum", "cap" \u2192 at most; "under", "below", "less than" \u2192 below. "no less than" and
  *   "no more than" are read whole, never as a negated "less than" / "more than".
  * - ASKED ("Is at least \u00a360k realistic?") says nothing; DENIED anywhere in the turn ("not at least", "must not fall
  *   below") or BOTH directions in one turn \u2192 null. Every miss makes the Agent ask which the user means.
- * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" reads once as
- *   at least; "under" beside "over" reads as both, and the Agent asks.
+ * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" holds two
+ *   different comparators; "under" beside "over" reads as both, and the Agent asks.
  */
 const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
-const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap']);
+const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'maximum', 'cap']);
+const BELOW_WORDS: ReadonlySet<string> = new Set(['less than', 'under', 'below']);
+const ABOVE_WORDS: ReadonlySet<string> = new Set(['more than', 'over', 'above']);
+type StatedComparator = 'at_least' | 'at_most' | 'above' | 'below';
 
-/** At least / at most, as the user said it in `turnText`; null when not said, asked, denied, or said both ways. */
-export function comparatorTheUserWrote(turnText: string | null | undefined): 'at_least' | 'at_most' | null {
+/** The comparator as the user said it, including strictness; null when not said, asked, denied, or contradictory. */
+export function comparatorTheUserWrote(turnText: string | null | undefined): StatedComparator | null {
   if (typeof turnText !== 'string') return null;
-  const said = new Set<'at_least' | 'at_most'>();
+  const said = new Set<StatedComparator>();
   for (const m of turnText.matchAll(COMPARATOR_WORDS)) {
     const reading = readingAt(turnText, m.index);
     if (reading.said === 'asked') continue;
     if (reading.said === 'denied') return null;
-    said.add(AT_MOST_WORDS.has(m[1]!.toLowerCase().replace(/\s+/g, ' ')) ? 'at_most' : 'at_least');
+    const words = m[1]!.toLowerCase().replace(/\s+/g, ' ');
+    said.add(AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+      : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
   }
   return said.size === 1 ? [...said][0]! : null;
 }

@@ -34,7 +34,8 @@
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
-import { percentLimitFrameProvable, percentPeriodsDiffer, statedOperatorOf, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { percentLimitFrameProvable, percentPeriodsDiffer, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { meetsLimit, statedOperatorOf } from '../../agent-lane/limit-operator-words.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 
 type Rec = Record<string, unknown>;
@@ -316,9 +317,9 @@ export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstrain
 }
 
 /**
- * ⭐ A2 FOLLOW-UP (DL verdict on #2180): THE ONE CASE WHERE "LESS THAN" AND "AT MOST" DIFFER. An option that SETS the
- * limited quantity at EXACTLY a strict limit's threshold does not meet it: "keep churn under 4%" is not met by an option
- * that sets churn at 4%. The store holds that limit as `operator: "<="` + `operator_as_stated: "<"`, and PLoT/ISL get
+ * ⭐ A2 FOLLOW-UP (DL verdict on #2180): THE ONE CASE WHERE "LESS THAN" AND "AT MOST" DIFFER. An option whose limited
+ * quantity stays at EXACTLY a strict limit's threshold does not meet it: "keep churn under 4%" is not met by an option
+ * that sets churn at 4%, or leaves today's 4% alone. The store holds `operator: "<="` + `operator_as_stated: "<"`, and PLoT/ISL get
  * `<=` only (`run-analysis.ts` `withholdStatedOperator`), so the engine counts that option as meeting it. Over continuous
  * draws P(X < 4) = P(X <= 4) and the engine's score IS the stated limit's; the pinned level is the exception.
  *
@@ -329,7 +330,9 @@ export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstrain
  * SAME FRAME, from the two proofs this module already owns and nothing else — no unit is parsed here:
  *   · a `"%"` limit PLoT reads on the node's own level (`levelLimitReadsOnNodeLevel`): the level is the percentage ÷ 100;
  *   · a limit in the factor's own unit read on its own cap (`limitTargetCaps`): the level is the figure ÷ cap.
- * The option's level is the number PLoT received (the run's final wire options), compared with `valuesMatch`. A limit in
+ * The option's level is the number PLoT received (the run's final wire options), or the node's own current `value` when
+ * the option does not set it — the same value `carryLevelLimitBaselines` carries. `meetsLimit` owns the tie tolerance
+ * and strictness, shared with the Agent's model view. A limit in
  * any other shape proves no frame and is left alone: PLoT does not score it against the node's level either (it is
  * refused or unscored upstream). Level-framed rows only (a delta limit is on a change, not a level). A strict row is
  * read through `statedOperatorOf`, so a stamp that contradicts the held operator is never strict here. Pure.
@@ -350,10 +353,17 @@ export function strictLimitsPinnedAtThreshold(
     if (node === undefined || typeof c.value !== 'number' || !Number.isFinite(c.value)) continue;
     const threshold = thresholdOnNodeLevel(graph, c, node, c.value);
     if (threshold === undefined) continue;
+    const os = isRec(node.observed_state) ? node.observed_state : {};
+    const todayAtThreshold = typeof os.value === 'number' && meetsLimit(os.value, stated, threshold) === 'at_threshold';
     for (const o of options) {
       const id = typeof o.option_id === 'string' && o.option_id !== '' ? o.option_id : typeof o.id === 'string' && o.id !== '' ? o.id : undefined;
-      const level = isRec(o.interventions) ? o.interventions[c.node_id] : undefined;
-      if (id === undefined || typeof level !== 'number' || !valuesMatch(level, threshold)) continue;
+      const interventions = isRec(o.interventions) ? o.interventions : {};
+      const setsLimitedNode = Object.hasOwn(interventions, c.node_id);
+      const level = interventions[c.node_id];
+      const atThreshold = setsLimitedNode
+        ? typeof level === 'number' && meetsLimit(level, stated, threshold) === 'at_threshold'
+        : todayAtThreshold;
+      if (id === undefined || !atThreshold) continue;
       const ids = out.get(id) ?? new Set<string>();
       ids.add(c.constraint_id);
       out.set(id, ids);
@@ -363,7 +373,7 @@ export function strictLimitsPinnedAtThreshold(
 }
 
 /** A level limit's threshold on its node's own level, where this module proves PLoT reads it there; else `undefined`. */
-function thresholdOnNodeLevel(graph: unknown, c: Rec, node: Rec, value: number): number | undefined {
+export function thresholdOnNodeLevel(graph: unknown, c: Rec, node: Rec, value: number): number | undefined {
   const os = isRec(node.observed_state) ? node.observed_state : {};
   if (levelLimitReadsOnNodeLevel(value, typeof c.unit === 'string' ? c.unit : undefined, node, os)) return value / 100;
   const cap = limitTargetCaps(graph, [c]).get(node.id as string);

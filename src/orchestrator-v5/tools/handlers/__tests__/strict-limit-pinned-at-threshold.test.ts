@@ -8,10 +8,12 @@
  * meet limit L" (`deriveConstraintVerdict`) withholds that option's result for that limit, so the leader is not named on
  * it and the limit's per-limit row is not `scored`.
  *
- * The engine body is the VERBATIM C50 U2 capture (`gc_u2` "<= 10 %", certified `decision_grade: true`, P 0.9985 on both
+ * The original 10% rows use the VERBATIM C50 U2 capture (`gc_u2` "<= 10 %", certified `decision_grade: true`, P 0.9985 on both
  * options, `opt_raise` leads), run through the REAL `run_analysis` handler. The only thing that differs between the rows
  * is the stored row's `operator_as_stated` and the level an option sets on churn. Rows bind by `constraint_id` and
  * option id.
+ * Paul's 4% rows reuse that response shape to exercise CEE's real handler and guard. The outside control explicitly
+ * supplies a synthetic producer score of zero; it proves CEE preserves the producer's refusal, not a new engine run.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -21,7 +23,9 @@ import {
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from '../run-analysis.js';
-import { strictLimitsPinnedAtThreshold } from '../level-limit-baseline.js';
+import { carryLevelLimitBaselines, strictLimitsPinnedAtThreshold } from '../level-limit-baseline.js';
+import { createAgentCapabilities, type InternalDispatch } from '../../../agent-lane/runtime/agent-capabilities.js';
+import { ProposalStore } from '../../../agent-lane/proposal.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../registry.js';
@@ -41,7 +45,7 @@ const { operator_as_stated: _strict, ...atMostRow } = strictRow;
 
 type Pin = { readonly option: 'opt_raise' | 'opt_hold'; readonly level: number };
 
-function graphWith(row: Rec, pin: Pin | undefined): Rec {
+function graphWith(row: Rec, pin: Pin | undefined, today = 0.04): Rec {
   // The pin is the USER's figure (`user_specified`), so rule (d) — a leader setting the target at Olumi's estimate —
   // never fires here: the only question left is the threshold.
   const churnOn = (option: Pin['option']) =>
@@ -51,7 +55,7 @@ function graphWith(row: Rec, pin: Pin | undefined): Rec {
       { id: 'goal', kind: 'goal', label: 'MRR' },
       { id: 'fac_price', kind: 'factor', label: 'Pro plan price' },
       // The user's own current churn (4%), framed on 100: PLoT reads "10 %" on this node's level (0.10).
-      { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '%', source: 'brief_extraction' } },
+      { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: today, raw_value: today * 100, cap: 100, unit: '%', source: 'brief_extraction' } },
       { id: 'opt_hold', kind: 'option', label: 'Keep £49', interventions: { fac_price: { value: 0.49, source: 'user_specified' }, ...churnOn('opt_hold') } },
       { id: 'opt_raise', kind: 'option', label: '£59 with win-back', interventions: { fac_price: { value: 0.59, source: 'user_specified' }, ...churnOn('opt_raise') } },
     ],
@@ -86,13 +90,25 @@ interface Outcome {
   readonly summary: string;
   readonly wireLimit: Rec | undefined;
   readonly wireChurn: Record<string, unknown>;
+  readonly todayWithinLimit: unknown;
 }
 
 /** The PLoT request `run_analysis` sends for `rows` (one option may pin churn), and the verdict it persists. */
-async function plotLimit(rows: Rec[], pin?: Pin): Promise<Outcome> {
-  const graph = graphWith(rows[0]!, pin);
+async function plotLimit(rows: Rec[], pin?: Pin, today = 0.04, producerProbability?: number): Promise<Outcome> {
   const goal_constraints = rows.map((r) => JSON.parse(JSON.stringify(r)) as Rec);
+  const graph: Rec = { ...graphWith(rows[0]!, pin, today), goal_constraints };
   const before = JSON.stringify(goal_constraints);
+  // The reply and analysis read this exact graph and these same stored rows, before any wire projection.
+  const dispatch: InternalDispatch = async () => ({ status: 200, json: { graph, graph_hash: 'strict-limit-parity' } });
+  const modelView = await createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState({
+    scenario_id: SCENARIO_ID, authenticated_user_id: null, request_id: REQUEST_ID,
+  });
+  if (!Array.isArray(modelView.limits)) throw new Error('the Agent model view did not carry limits');
+  const replyLimits = modelView.limits.filter((limit): limit is Rec => typeof limit === 'object' && limit !== null && !Array.isArray(limit));
+  const limitedNode = (graph.nodes as Rec[]).find((node) => node.id === rows[0]?.node_id);
+  expect(limitedNode).toMatchObject({ id: 'fac_churn', label: 'Monthly churn' });
+  const replyLimit = replyLimits.find((limit) => limit.on === limitedNode?.label && limit.operator === rows[0]?.operator && limit.value === rows[0]?.value);
+  expect(replyLimit, `reply row for ${LIMIT_ID} on fac_churn`).toBeDefined();
   const wireLevels = (option: Pin['option']) => (pin?.option === option ? { fac_churn: pin.level } : {});
   const snapshot = {
     graph,
@@ -106,7 +122,19 @@ async function plotLimit(rows: Rec[], pin?: Pin): Promise<Outcome> {
   } as unknown as RunAnalysisScenarioSnapshot;
   const scenarioReader: ScenarioReader = vi.fn(() => Promise.resolve(snapshot));
   let sent: Rec | undefined;
-  const run = vi.fn((payload: Rec) => { sent = payload; return Promise.resolve(JSON.parse(U2) as V2RunResponseEnvelope); });
+  const run = vi.fn((payload: Rec) => {
+    sent = payload;
+    const response = JSON.parse(U2) as Rec;
+    if (producerProbability !== undefined) {
+      response.option_comparison = (response.option_comparison as Rec[]).map((o) => ({
+        ...o, constraint_probabilities: { [LIMIT_ID]: producerProbability }, probability_of_joint_goal: producerProbability,
+      }));
+      response.constraint_results = (response.constraint_results as Rec[]).map((c) => ({
+        ...c, probability: producerProbability, value: rows[0]?.value,
+      }));
+    }
+    return Promise.resolve(response as unknown as V2RunResponseEnvelope);
+  });
   const plotClient = { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
   const outcome = await createRunAnalysisHandler({ plotClient, scenarioReader })(invocation());
   expect(run).toHaveBeenCalledOnce();
@@ -125,11 +153,50 @@ async function plotLimit(rows: Rec[], pin?: Pin): Promise<Outcome> {
     summary: String(fact.result.summary ?? ''),
     wireLimit: ((sent?.goal_constraints as Rec[] | undefined) ?? []).find((c) => c.constraint_id === LIMIT_ID),
     wireChurn,
+    todayWithinLimit: replyLimit?.today_within_limit,
   };
 }
 
 const SCORED = [{ constraint_id: LIMIT_ID, state: 'scored' }];
 const WITHHELD_FOR_THE_PIN = [{ constraint_id: LIMIT_ID, state: 'unscored', reason: 'level_set_at_strict_threshold' }];
+
+describe('Paul\'s exact limit: keeping monthly churn UNDER 4%', () => {
+  const underFour = { ...strictRow, value: 4, label: 'keeping monthly churn UNDER 4%' };
+  const atMostFour = { ...atMostRow, value: 4, label: 'at most 4%' };
+
+  it('R3 RED: carry-on and a price option leave churn at today\'s 4%; neither can count as meeting under 4%', async () => {
+    const r = await plotLimit([underFour]);
+    expect(r.todayWithinLimit, 'R2: the reply uses the same graph as this R3 analysis').toBe('at_threshold');
+    expect(r.wireLimit).toMatchObject({ constraint_id: LIMIT_ID, operator: '<=', value: 4, unit: '%' });
+    expect(r.wireLimit).not.toHaveProperty('operator_as_stated');
+    expect(r.wireChurn).toEqual({ opt_hold: undefined, opt_raise: undefined });
+    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'unevaluated', mayName: false });
+    expect(r.perLimit).toEqual(WITHHELD_FOR_THE_PIN);
+    expect(r.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [LIMIT_ID] });
+    expect(r.summary).not.toMatch(/Raise to 59 was supported by/);
+  });
+
+  it('R4 CONTROL: at most 4% at today\'s 4% remains met and scored', async () => {
+    const r = await plotLimit([atMostFour]);
+    expect(r.todayWithinLimit).toBe(true);
+    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'evaluated_feasible', mayName: true });
+    expect(r.perLimit).toEqual(SCORED);
+  });
+
+  it('R5 inside CONTROL: under 4% at today\'s 3.9% remains scored', async () => {
+    const r = await plotLimit([underFour], undefined, 0.039);
+    expect(r.todayWithinLimit).toBe(true);
+    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'evaluated_feasible', mayName: true });
+    expect(r.perLimit).toEqual(SCORED);
+  });
+
+  it('R5 outside CONTROL: under 4% at today\'s 4.1% preserves the producer\'s zero score as not met', async () => {
+    const r = await plotLimit([underFour], undefined, 0.041, 0);
+    expect(r.todayWithinLimit).toBe(false);
+    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'evaluated_infeasible', mayName: false });
+    expect(r.perLimit).toEqual(SCORED);
+  });
+});
 
 describe('the DL row — the leading option pins churn at EXACTLY a strict limit ("under 10%")', () => {
   it('PREMISE: PLoT receives the pin at 0.10 on the leader and "<=" only (the wire is unchanged: nothing is modelled)', async () => {
@@ -194,6 +261,48 @@ describe('strictLimitsPinnedAtThreshold — the same frame, from the two proofs 
   it('a "%" limit on a node framed on 100: 0.10 is "10 %" → pinned; 0.099 is not', () => {
     expect(pinned({ nodes: [pctNode] }, [pctRow()], opts(0.1))).toEqual({ o1: ['c'] });
     expect(pinned({ nodes: [pctNode] }, [pctRow()], opts(0.099))).toEqual({});
+  });
+
+  it('R3 TODAY RED: the same current value carried as the baseline is at under 4%\'s strict threshold', () => {
+    const row = pctRow({ value: 4 });
+    const current = { ...pctNode, observed_state: { ...pctNode.observed_state, source: 'brief_extraction' } };
+    const graph = { nodes: [{ id: 'upstream', kind: 'factor' }, current], edges: [{ from: 'upstream', to: 'n' }] };
+    const wire = carryLevelLimitBaselines(graph, [row]);
+    expect(wire.nodes[1]).toMatchObject({ id: 'n', observed_state: { value: 0.04, raw_value: 4, baseline: 0.04 } });
+    expect(pinned(graph, [row], [{ option_id: 'carry_on', interventions: {} }])).toEqual({ carry_on: ['c'] });
+  });
+
+  it('R3 UNTOUCHED RED: every option without a churn set inherits today\'s strict threshold, preserving option ids', () => {
+    expect(pinned({ nodes: [pctNode] }, [pctRow({ value: 4 })], [
+      { option_id: 'carry_on', interventions: {} },
+      { option_id: 'price_only', interventions: { price: 0.59 } },
+      { option_id: 'below_limit', interventions: { n: 0.039 } },
+    ])).toEqual({ carry_on: ['c'], price_only: ['c'] });
+  });
+
+  it('R5: today at 3.9% or 4.1% is not a strict threshold; upstream scores keep their meaning', () => {
+    for (const today of [0.039, 0.041]) {
+      const node = { ...pctNode, observed_state: { ...pctNode.observed_state, value: today, raw_value: today * 100 } };
+      expect(pinned({ nodes: [node] }, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({});
+    }
+  });
+
+  it('TODAY tolerance: normalized round-trip noise remains at the strict threshold', () => {
+    const today = 0.04 + 5e-10;
+    const node = { ...pctNode, observed_state: { ...pctNode.observed_state, value: today, raw_value: today * 100 } };
+    expect(pinned({ nodes: [node] }, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({ untouched: ['c'] });
+  });
+
+  it('TODAY floor: an untouched option at more than 4%\'s threshold is withheld too', () => {
+    expect(pinned({ nodes: [pctNode] }, [pctRow({ value: 4, operator: '>=', operator_as_stated: '>' })], [
+      { option_id: 'untouched', interventions: {} },
+    ])).toEqual({ untouched: ['c'] });
+  });
+
+  it('TODAY frame CONTROL: a raw level on another cap cannot be compared as a percent; an explicit set supersedes today', () => {
+    const otherCap = { ...pctNode, observed_state: { value: 0.2, raw_value: 4, cap: 20, unit: '%' } };
+    expect(pinned({ nodes: [otherCap] }, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({});
+    expect(pinned({ nodes: [pctNode] }, [pctRow({ value: 4 })], [{ option_id: 'moved', interventions: { n: 0.039 } }])).toEqual({});
   });
 
   it('a strict FLOOR (">" beside ">=") pinned at its threshold is pinned too', () => {
