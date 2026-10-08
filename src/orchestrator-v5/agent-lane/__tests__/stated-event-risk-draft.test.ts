@@ -25,7 +25,7 @@ type ReviewDraftRow = {
 };
 const fix3Review = JSON.parse(readFileSync(new URL('../../../../acceptance-evidence/impact-pct/review-rows-fix3.json', import.meta.url), 'utf8')) as { draftRows: ReviewDraftRow[] };
 const PREFIX = "We're deciding between hiring contractors and training in-house. ";
-const STATED = 'Our key developer might leave, maybe 10–30% in the next 6 months.';
+const STATED = 'Our key developer might leave, chance is 10–30% in the next 6 months.';
 const BRIEF = PREFIX + STATED;
 const CONTROL = PREFIX + 'Our key developer might leave in the next 6 months.';
 const BLOCK = {
@@ -209,7 +209,7 @@ describe('event_risk.v1 slice 2c', () => {
     ['unnamed', 'Something might happen, maybe 10–30% in the next 6 months.'],
     ['partial-name', 'Our developer might leave, maybe 10–30% in the next 6 months.'],
     ['no-horizon', 'Our key developer might leave, maybe 10–30%.'],
-    ['two-sentences', `${STATED} Our key developer might leave, maybe 40% within a year.`],
+    ['two-sentences', 'Our key developer might leave, maybe 10–30% in the next 6 months. Our key developer might leave, maybe 40% within a year.'],
   ])('2c-REFUSAL-%s: nothing bound', (_id, brief) => {
     const input = graph();
     const result = holdStatedEventRisks(input.nodes, input.edges, brief);
@@ -240,10 +240,15 @@ describe('event_risk.v1 slice 2c', () => {
     expect(result.held).toEqual([]);
   });
 
-  it('2c-decimal-sentence: decimal probability survives sentence splitting', () => {
+  it('2c-decimal-sentence: hedge-only decimal figure holds no likelihood', () => {
     const input = graph();
+    // DL ruling 8 Oct: explicit likelihood words only
     const result = holdStatedEventRisks(input.nodes, input.edges, 'Our key developer leaves: maybe 12.5% within 6 months.');
-    expect(dev(result).event_risk).toEqual(readStatedEventRisk('maybe 12.5% within 6 months')!.event_risk);
+    expect(dev(result).event_risk).toBeUndefined();
+    expect(result.held).toEqual([]);
+    expect(result.refused).toEqual([]);
+    expect(result.nodes).toBe(input.nodes);
+    expect(result.edges).toBe(input.edges);
   });
 
   it('2c-bare-percent-refused: an uncued "<event>: N% within M months" holds no likelihood (impact-% lease: fail closed)', () => {
@@ -339,7 +344,7 @@ describe('event_risk.v1 slice 2c', () => {
 
   it.each([
     ['digits', (n: number) => `${'9'.repeat(n)} ${STATED}`],
-    ['spaces', (n: number) => `Our key developer ${' '.repeat(n)}might leave, maybe 10–30% in the next 6 months.`],
+    ['spaces', (n: number) => `Our key developer ${' '.repeat(n)}might leave, chance is 10–30% in the next 6 months.`],
     ['sentence-near-matches', (n: number) => `${'10- within. Key developer leaves! '.repeat(Math.ceil(n / 32)).slice(0, n)}. ${STATED}`],
   ])('2c-LINEAR TIME-%s: 5k to 40k, min of 7 calibrated batches, ratio < 22', (_id, make) => {
     const input = graph();

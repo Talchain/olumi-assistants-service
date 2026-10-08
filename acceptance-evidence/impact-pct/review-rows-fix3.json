@@ -374,26 +374,32 @@
     {
       "id": "review-44",
       "input": "I'd say 30% within a year.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 12",
+      "priorExpected": {
         "pLow": 0.3,
         "pHigh": 0.3,
         "months": 12.0
       },
-      "label": "LIKELIHOOD",
-      "group": "Must-fire likelihoods",
-      "reviewExpected": "0.3 / 12"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-45",
       "input": "Probably 20% within a year.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 12",
+      "priorExpected": {
         "pLow": 0.2,
         "pHigh": 0.2,
         "months": 12.0
       },
-      "label": "LIKELIHOOD",
-      "group": "Must-fire likelihoods",
-      "reviewExpected": "0.2 / 12"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-46",
@@ -410,7 +416,11 @@
     {
       "id": "review-47",
       "input": "Odds are about 20% within a year.",
-      "expected": null,
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12.0
+      },
       "label": "LIKELIHOOD",
       "group": "Must-fire likelihoods",
       "reviewExpected": "0.2 / 12",
@@ -419,7 +429,7 @@
         "pHigh": 0.2,
         "months": 12.0
       },
-      "refusalReason": "Accepted genuine likelihood refusal required by BRIEF-FIX3; unsupported phrase remains fail closed."
+      "refusalReason": "DL ruling 8 Oct: allowlisted odds with an are bridge"
     },
     {
       "id": "review-48",
@@ -558,14 +568,17 @@
     {
       "id": "review-59",
       "input": "Supplier failure is 15% probable within 6 months.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.15 / 6",
+      "priorExpected": {
         "pLow": 0.15,
         "pHigh": 0.15,
         "months": 6.0
       },
-      "label": "LIKELIHOOD",
-      "group": "Must-fire likelihoods",
-      "reviewExpected": "0.15 / 6"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-60",
@@ -606,62 +619,77 @@
     {
       "id": "review-63",
       "input": "The release might slip, maybe 30% within 6 months.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6",
+      "priorExpected": {
         "pLow": 0.3,
         "pHigh": 0.3,
         "months": 6.0
       },
-      "label": "LIKELIHOOD",
-      "group": "Must-fire likelihoods",
-      "reviewExpected": "0.3 / 6"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-64",
       "input": "I estimate 30% within 6 months.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6",
+      "priorExpected": {
         "pLow": 0.3,
         "pHigh": 0.3,
         "months": 6.0
       },
-      "label": "LIKELIHOOD",
-      "group": "Must-fire likelihoods",
-      "reviewExpected": "0.3 / 6"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-65",
       "input": "I guess about 30% within 6 months.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6",
+      "priorExpected": {
         "pLow": 0.3,
         "pHigh": 0.3,
         "months": 6.0
       },
-      "label": "LIKELIHOOD",
-      "group": "Must-fire likelihoods",
-      "reviewExpected": "0.3 / 6"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-66",
       "input": "Add a risk: our key developer might leave, maybe 10–30% in the next 6 months.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.1–0.3 / 6",
+      "priorExpected": {
         "pLow": 0.1,
         "pHigh": 0.3,
         "months": 6.0
       },
-      "label": "LIKELIHOOD",
-      "group": "PR-body must-fire set",
-      "reviewExpected": "0.1–0.3 / 6"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-67",
       "input": "I'd put it at about 15–25% within 3 months",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.15–0.25 / 3",
+      "priorExpected": {
         "pLow": 0.15,
         "pHigh": 0.25,
         "months": 3.0
       },
-      "label": "LIKELIHOOD",
-      "group": "PR-body must-fire set",
-      "reviewExpected": "0.15–0.25 / 3"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-68",
@@ -714,14 +742,17 @@
     {
       "id": "review-72",
       "input": "Supplier failure is 30% probable within 6 months.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.3 / 6",
+      "priorExpected": {
         "pLow": 0.3,
         "pHigh": 0.3,
         "months": 6.0
       },
-      "label": "LIKELIHOOD",
-      "group": "PR-body must-fire set",
-      "reviewExpected": "0.3 / 6"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "review-73",
@@ -738,14 +769,17 @@
     {
       "id": "review-74",
       "input": "It may happen 10–30% in the next 6 months.",
-      "expected": {
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.1–0.3 / 6",
+      "priorExpected": {
         "pLow": 0.1,
         "pHigh": 0.3,
         "months": 6.0
       },
-      "label": "LIKELIHOOD",
-      "group": "PR-body must-fire set",
-      "reviewExpected": "0.1–0.3 / 6"
+      "refusalReason": "DL ruling 8 Oct: explicit likelihood words only",
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     }
   ],
   "clauseBoundaryRows": [
@@ -818,8 +852,10 @@
     {
       "id": "no-window-09",
       "input": "Add a risk: supplier fails. Maybe 30%.",
-      "expected": true,
-      "label": "LIKELIHOOD"
+      "expected": false,
+      "label": "LIKELIHOOD",
+      "priorExpected": true,
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "no-window-10",
@@ -978,13 +1014,15 @@
       "riskLabels": [
         "Key developer leaves"
       ],
-      "expected": {
+      "expected": null,
+      "reviewCase": "Must-fire: comma fragment carries only the likelihood",
+      "priorExpected": {
         "riskLabel": "Key developer leaves",
         "pLow": 0.1,
         "pHigh": 0.3,
         "months": 6
       },
-      "reviewCase": "Must-fire: comma fragment carries only the likelihood"
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     },
     {
       "id": "must-fire-supplier-probable",
@@ -992,13 +1030,15 @@
       "riskLabels": [
         "Supplier failure"
       ],
-      "expected": {
+      "expected": null,
+      "reviewCase": "Must-fire: probable row",
+      "priorExpected": {
         "riskLabel": "Supplier failure",
         "pLow": 0.3,
         "pHigh": 0.3,
         "months": 6
       },
-      "reviewCase": "Must-fire: probable row"
+      "comment": "DL ruling 8 Oct: explicit likelihood words only"
     }
   ]
 }

@@ -20,7 +20,8 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
   // FIX-3 RED at 8436239f: every exact input in the review's eight reader tables.
   // The review prose says 75; the rendered tables contain 74. P2-2 adds two findings.
   // Review-only annotations such as "(r2 row)" are stored outside the input text.
-  // "Odds are about" and word-form "one in five" deliberately remain fail closed.
+  // DL ruling 8 Oct: explicit likelihood words only. "Odds are about" has a bridge;
+  // word-form "one in five" keeps its existing fail-closed grammar.
   it.each(fix3Review.readerRows)('fix3-review-$id: $input', (row) => {
     const result = readStatedEventRisk(row.input);
     if (row.expected === null) {
@@ -47,6 +48,21 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     expect(readStatedLikelihoodWithoutWindow(input.replace(' within 6 months', ''))).toBe(false);
   });
 
+  // DL ruling 8 Oct: explicit likelihood words only.
+  it.each([
+    ['range', 'key developer might leave, maybe 10–30% in the next 6 months'],
+    ['single', 'maybe about 20% within a year'],
+    ['between-percent', 'chance between 5 and 15 percent over the next 18 months'],
+    ['hyphen', 'maybe 10-30% within 12 months'],
+    ['to', 'maybe 10 to 30% within 2 years'],
+    ['both-percent', 'maybe 10% to 30% within 2 years'],
+    ['weeks', 'maybe 20% within 6 weeks'],
+    ['week-minimum', 'maybe 20% within 0.1 weeks'],
+    ['zero', 'maybe 0% within a year'],
+    ['hundred', 'maybe 100% in the next month'],
+    ['decimal', 'maybe 12.5% within 6 months'],
+  ])('2a-policy-refuse-%s', (_id, text) => expect(readStatedEventRisk(text)).toBeUndefined());
+
   it.each([
     ['with-probability', 'A competitor might cut its prices with probability 10% within 6 months'],
     ['with-chance', 'A competitor might cut its prices with a 10% chance within 6 months'],
@@ -57,17 +73,12 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
   });
 
   it.each([
-    ['range', 'key developer might leave, maybe 10–30% in the next 6 months', 0.1, 0.3, 6],
-    ['single', 'maybe about 20% within a year', 0.2, 0.2, 12],
-    ['between-percent', 'chance between 5 and 15 percent over the next 18 months', 0.05, 0.15, 18],
-    ['hyphen', 'maybe 10-30% within 12 months', 0.1, 0.3, 12],
-    ['to', 'maybe 10 to 30% within 2 years', 0.1, 0.3, 24],
-    ['both-percent', 'maybe 10% to 30% within 2 years', 0.1, 0.3, 24],
-    ['weeks', 'maybe 20% within 6 weeks', 0.2, 0.2, 1.4],
-    ['week-minimum', 'maybe 20% within 0.1 weeks', 0.2, 0.2, 0.1],
-    ['zero', 'maybe 0% within a year', 0, 0, 12],
-    ['hundred', 'maybe 100% in the next month', 1, 1, 1],
-    ['decimal', 'maybe 12.5% within 6 months', 0.125, 0.125, 6],
+    ['between-percent-explicit', 'between 5 and 15 percent chance over the next 18 months', 0.05, 0.15, 18],
+    ['weeks-explicit', '20% chance within 6 weeks', 0.2, 0.2, 1.4],
+    ['week-minimum-explicit', '20% chance within 0.1 weeks', 0.2, 0.2, 0.1],
+    ['zero-explicit', '0% chance within a year', 0, 0, 12],
+    ['hundred-explicit', '100% chance in the next month', 1, 1, 1],
+    ['decimal-explicit', '12.5% chance within 6 months', 0.125, 0.125, 6],
     ['one-in-five', 'a 1 in 5 chance within 6 months', 0.2, 0.2, 6],
     ['one-in-four-words', 'probability of one in 4 over the next year', 0.25, 0.25, 12],
     ['one-in-three-rounded', '1 in 3 odds within 6 months', 0.3333, 0.3333, 6],
@@ -196,13 +207,17 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
   });
 
   it.each([
-    ['probable', 'Supplier failure is 30% probable within 6 months.', 0.3, 6],
     ['abbreviation', 'There is a 30% chance the supplier fails (e.g. insolvency) within 6 months.', 0.3, 6],
     ['abbreviation-ie', 'There is a 30% chance of a key loss, i.e. a senior engineer leaving, within 6 months.', 0.3, 6],
   ])('r2-plain-likelihood-%s', (_id, text, p, months) => {
     const read = readStatedEventRisk(text)!;
     expect(read.event_risk.occurrence).toMatchObject({ p_low: p, p_high: p, basis: 'user' });
     expect(read.event_risk.horizon.months).toBe(months);
+  });
+
+  // DL ruling 8 Oct: explicit likelihood words only.
+  it('r2-policy-refuse-probable', () => {
+    expect(readStatedEventRisk('Supplier failure is 30% probable within 6 months.')).toBeUndefined();
   });
 
   it('fix1-uncued-first-alternative-is-ambiguous', () => {
@@ -213,32 +228,32 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
   it.each([
     ['probability-of-event', 'The probability of losing our biggest customer is 30% within 6 months.', 0.3, 0.3, 6],
     ['mixed-cost', 'The probability of losing our biggest customer is 30% within 6 months and the loss would cost us 10%.', 0.3, 0.3, 6],
-    ['percent-risk', "There's about a 30% risk the supplier fails within 6 months.", 0.3, 0.3, 6],
-    ['reckon-after-semicolon', 'The service could fail; I reckon 30% within 6 months', 0.3, 0.3, 6],
     ['percent-likely', '30% likely within 6 months', 0.3, 0.3, 6],
     ['odds-of', 'odds of 30% within a year', 0.3, 0.3, 12],
     ['percent-probability', 'a 30 percent probability within 6 months', 0.3, 0.3, 6],
-    ['maybe-range', 'maybe 10–30% in the next 6 months', 0.1, 0.3, 6],
-    ['put-it-at-range', "I'd put it at about 15–25% within 3 months", 0.15, 0.25, 3],
     ['chance', '10% chance it happens within 6 months', 0.1, 0.1, 6],
     ['one-in', '1 in 10 chance within a year', 0.1, 0.1, 12],
-    ['may-happen-card-words', 'It may happen 10–30% in the next 6 months.', 0.1, 0.3, 6],
-    ['might-happen-colon', 'It might happen: about 20% within a year.', 0.2, 0.2, 12],
   ])('fix1-must-still-read-%s', (_id, text, low, high, months) => {
     expect(readStatedEventRisk(text)?.event_risk).toEqual({ version: 1, occurrence: {
       p_low: low, p_high: high, basis: 'user', meaning: 'at_least_once_within_horizon',
     }, horizon: { months } });
   });
 
+  // DL ruling 8 Oct: explicit likelihood words only.
   it.each([
-    ['served-developer', 'Add a risk: our key developer might leave, maybe 10–30% in the next 6 months. If they leave it would cut platform improvement throughput.', 0.1, 0.3, 6],
-    ['served-competitor', 'Add a risk: a competitor might cut its prices, maybe 15 - 25% in the next 3 months. If that happens, monthly recurring revenue would drop.', 0.15, 0.25, 3],
+    ['percent-risk', "There's about a 30% risk the supplier fails within 6 months."],
+    ['reckon-after-semicolon', 'The service could fail; I reckon 30% within 6 months'],
+    ['maybe-range', 'maybe 10–30% in the next 6 months'],
+    ['put-it-at-range', "I'd put it at about 15–25% within 3 months"],
+    ['may-happen-card-words', 'It may happen 10–30% in the next 6 months.'],
+    ['might-happen-colon', 'It might happen: about 20% within a year.'],
+  ])('fix1-policy-refuse-%s', (_id, text) => expect(readStatedEventRisk(text)).toBeUndefined());
+
+  it.each([
     ['chance', '10% chance it happens within 6 months', 0.1, 0.1, 6],
     ['one-in', '1 in 10 chance within a year', 0.1, 0.1, 12],
     ['mixed', 'There is a 30% chance the release slips within 6 months and cuts MRR by 10%.', 0.3, 0.3, 6],
     ['mixed-impact-first', 'MRR would drop by 10% if the release slips; there is a 30% chance within 6 months.', 0.3, 0.3, 6],
-    ['bare-event', 'The release could happen, 10% in the next 6 months', 0.1, 0.1, 6],
-    ['put-it-at', "A supplier may fail. I'd put it at about 15–25% within 3 months", 0.15, 0.25, 3],
     ['verb-event-with-direct-chance', 'A competitor might cut its prices with a 10% chance within 6 months', 0.1, 0.1, 6],
     ['verb-event-with-direct-probability', 'A competitor might cut its prices with probability 10% within 6 months', 0.1, 0.1, 6],
     ['percent-risk-of', '10% risk of an outage within 6 months', 0.1, 0.1, 6],
@@ -247,6 +262,14 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
       p_low: low, p_high: high, basis: 'user', meaning: 'at_least_once_within_horizon',
     }, horizon: { months } });
   });
+
+  // DL ruling 8 Oct: explicit likelihood words only.
+  it.each([
+    ['served-developer', 'Add a risk: our key developer might leave, maybe 10–30% in the next 6 months. If they leave it would cut platform improvement throughput.'],
+    ['served-competitor', 'Add a risk: a competitor might cut its prices, maybe 15 - 25% in the next 3 months. If that happens, monthly recurring revenue would drop.'],
+    ['bare-event', 'The release could happen, 10% in the next 6 months'],
+    ['put-it-at', "A supplier may fail. I'd put it at about 15–25% within 3 months"],
+  ])('impact-pct-policy-refuse-%s', (_id, text) => expect(readStatedEventRisk(text)).toBeUndefined());
 
 
   it.each(corpus)('impact-pct-corpus-$id-$label', (row) => {
@@ -292,8 +315,9 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
   });
 
   it.each([
-    ['percent-only', 'maybe about 20%, add it', true],
-    ['range-only', 'a chance between 15 and 25 percent, add it', true],
+    // DL ruling 8 Oct: explicit likelihood words only.
+    ['percent-only', 'maybe about 20%, add it', false],
+    ['range-only', 'a chance between 15 and 25 percent, add it', false],
     ['one-in-only', '1 in 5 chance, add it', true],
     ['percent-with-window', 'about 20% within 6 months', false],
     ['one-in-with-window', 'probability of one in 4 over the next year', false],
@@ -306,7 +330,8 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     ['impact-cued-verb', 'Maybe revenue would shrink 10%.', false],
     ['impact-cued-lower', 'Perhaps MRR is 10% lower.', false],
     ['other-clause-cue', 'It could happen, perhaps. Revenue is 10%.', false],
-    ['put-it-at', "I'd put it at about 15–25%, add it", true],
+    // DL ruling 8 Oct: explicit likelihood words only.
+    ['put-it-at', "I'd put it at about 15–25%, add it", false],
     ['mixed-impact', 'There is a 30% chance it slips and cuts MRR by 10%.', true],
     ['percent-without-cue', 'Competitive response, 20%, add it.', false],
     ['verbal-likelihood', 'It is likely to happen within 6 months.', false],

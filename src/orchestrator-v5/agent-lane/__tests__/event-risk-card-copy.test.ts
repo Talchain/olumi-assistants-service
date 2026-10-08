@@ -31,18 +31,18 @@ const member = (text: string) => ({ risk_id: 'risk_dev', ...readStatedEventRisk(
 describe('event-risk approval card', () => {
   it('ER-1a-range: states the held likelihood once without changing the consent words', () => {
     const control = record();
-    const result = record(member('maybe 10–30% in the next 6 months'));
+    const result = record(member('a 10–30% chance in the next 6 months'));
     const line = 'It may happen: about 10–30% within 6 months, as you said.';
     expect(result.approve_action.detail).toBe(`${control.approve_action.detail}\n${line}`);
     expect(result.approve_action.label).toBe(control.approve_action.label);
     expect(result.approve_action.message).toBe(control.approve_action.message);
   });
   it('ER-1a-single: uses a single percentage and a month', () => {
-    expect(record(member('maybe 20% within a month')).approve_action.detail)
+    expect(record(member('a 20% chance within a month')).approve_action.detail)
       .toContain('It may happen: about 20% within a month, as you said.');
   });
   it('ER-1a-binding: the digest binds a changed likelihood on the same held revision', () => {
-    expect(record(member('maybe 10–30% within 6 months')).digest).not.toBe(record(member('maybe 20–40% within 6 months')).digest);
+    expect(record(member('a 10–30% chance within 6 months')).digest).not.toBe(record(member('a 20–40% chance within 6 months')).digest);
   });
   it('ER-1a-control: no member preserves the entire current record, including detail and digest', () => {
     expect(record()).toMatchSnapshot();

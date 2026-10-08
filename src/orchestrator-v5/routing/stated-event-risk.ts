@@ -29,23 +29,20 @@ const HORIZON_HEAD = String.raw`(?:within|in|over|during)${GAP}(?:(?:the${GAP})?
 const TAIL_WORD = String.raw`(?:$|[,;:.!?)]|${HORIZON_HEAD}|(?:of${GAP}(?:it|this|that|happening)|that|it|this|and|or|if|before|by|for|the${GAP}(?:next|coming))\b)`;
 // Every percent needs a supported right-hand attachment; an unknown noun is not a likelihood.
 const FIGURE_TAIL = new RegExp(String.raw`^${SPACE}(?:${TAIL_WORD}|(?:${MODIFIER}){0,3}${LIKELIHOOD_WORD}\b(?![-–—])${SPACE}(?:${TAIL_WORD}|(?:the|a|an|we|they|our|to|in|on|of|for)\b))`, 'i');
-const DIRECT_LIKELIHOOD_AFTER = new RegExp(String.raw`^${SPACE}(?:${MODIFIER}){0,3}${LIKELIHOOD_WORD}\b(?![-–—])`, 'i');
-const DIRECT_LIKELIHOOD_BEFORE = new RegExp(String.raw`\b(?:chances?|probability|likelihood|odds|risk)${GAP}(?:(?:of|that|is|at)${GAP}|=${SPACE}|${MODIFIER}){0,4}$`, 'i');
-// Not "risk": "the risk of churn is 7%" states a churn RATE, not a likelihood (base refused it; "N% risk" stays direct).
+// DL ruling 8 Oct: explicit likelihood words only; a hedge or an estimate never supplies the cue.
+const DIRECT_LIKELIHOOD_AFTER = new RegExp(String.raw`^${SPACE}(?:${MODIFIER}){0,3}(?:chances?|likely|probability|likelihood|odds|risk${GAP}(?:of|that))\b(?![-–—])`, 'i');
+const DIRECT_LIKELIHOOD_BEFORE = new RegExp(String.raw`\b(?:chances?|probability|likelihood|odds)(?:${GAP}(?:of|is|are|at)${GAP}|${SPACE}[=:]${SPACE})(?:${MODIFIER}){0,3}$`, 'i');
+const WITH_PROBABILITY_BEFORE = new RegExp(String.raw`\bwith${GAP}(?:a${GAP})?probability${GAP}(?:of${GAP})?(?:${MODIFIER}){0,3}$`, 'i');
+// Not "risk": "the risk of churn is 7%" states a churn RATE, not a likelihood ("N% risk of/that" stays direct).
 const EVENT_LIKELIHOOD_BEFORE = new RegExp(String.raw`\b(?:chances?|probability|likelihood|odds)${GAP}(of|that)${GAP}([^,;.!?\r\n]{1,60})$`, 'i');
-const EVENT_BRIDGE = new RegExp(String.raw`(?:\b(?:is|at)${GAP}|[=:]${SPACE})(?:${MODIFIER}){0,3}$`, 'i');
+// After an event, trailing "of N%" is an amount; "odds of N%" uses the direct noun bridge above.
+const EVENT_BRIDGE = new RegExp(String.raw`(?:\b(?:is|are|at)${GAP}|[=:]${SPACE})(?:${MODIFIER}){0,3}$`, 'i');
 // A "that" complement must describe a supported predicate before its numeric bridge.
 // Nominal "of an outage is N%" and label-style ": / = N%" remain supported.
 const EVENT_PREDICATE = /\b(?:may|might|could|will|would|can|should|must|does?|did|has|have|had|is|are|was|were|be|been|being|fails?|failed|failing|leaves?|left|leaving|slips?|slipped|slipping|loses?|lost|losing|happens?|happened|happening|occurs?|occurred|occurring|cuts?|falls?|fell|drops?|dropped|rises?|rose|increases?|increased|decreases?|decreased)\b/i;
 // A governing change verb denotes a delta, even with an adjacent likelihood noun.
 // "with" / conjunctions break that attachment: "cut its prices with probability N%" is a likelihood.
 const LIKELIHOOD_DELTA = new RegExp(String.raw`\b(?:raises?|raised|raising|increases?|increased|increasing|cuts?|reduces?|reduced|reducing|lowers?|lowered|lowering|doubles?|halves?)${GAP}(?:(?!(?:with|and|or|but)\b)[\p{L}\p{N}_'’\-]{1,30}${GAP}){0,3}(?:chances?|risk|odds|probability|likelihood)${GAP}(?:(?:of|that|is|at)${GAP}|=${SPACE}|${MODIFIER}){0,4}$`, 'iu');
-const HEDGE_BEFORE = new RegExp(String.raw`\b(?:maybe|perhaps|possibly|probably)${GAP}(?:${MODIFIER}){0,3}$`, 'i');
-const ESTIMATE_BEFORE = new RegExp(String.raw`\bi(?:(?:['’]d|${GAP}would)${GAP}(?:put${GAP}it${GAP}at|say)|${GAP}(?:reckon|estimate|guess))${GAP}(?:${MODIFIER}){0,3}$`, 'i');
-// "It may happen 10–30% in the next 6 months" (the card's own words) and "<event> might happen, N%".
-const BARE_EVENT = new RegExp(String.raw`\b(?:may|might|could)${GAP}happen${SPACE}[,:]?${SPACE}(?:(?:about|around|roughly)${GAP})?$`, 'i');
-// The happen form's figure must be followed directly by its window: "It may happen: 10% of our customers cancel" is a share.
-const WINDOW_NEXT = new RegExp(String.raw`^${SPACE}${HORIZON_HEAD}`, 'i');
 const ALTERNATIVE_BEFORE = new RegExp(String.raw`\bor${GAP}(?:${MODIFIER}){0,3}$`, 'i');
 const ALTERNATIVE_AFTER = new RegExp(String.raw`^${SPACE}or\b`, 'i');
 
@@ -94,11 +91,12 @@ export function splitStatedLikelihoodClauses(text: string): string[] {
   return likelihoodClauses(text).map((clause) => text.slice(clause.start, clause.end));
 }
 
-const SCAFFOLD_TOKEN = /[ \t,:]{1,24}|[a-z]{1,30}(?:['’]d)?/iy;
+const SCAFFOLD_TOKEN = /[ \t,:]{1,24}|[a-z]{1,30}(?:['’][ds])?/iy;
 const SCAFFOLD_WORDS = new Set(['and', 'then', 'there', 'is', 'a', 'an', 'about', 'around', 'roughly',
   'maybe', 'perhaps', 'possibly', 'probably', 'chance', 'chances', 'likely', 'probable', 'probability',
   'likelihood', 'odds', 'risk', 'that', 'of', 'it', 'this', 'happen', 'happens', 'may', 'might', 'could',
-  "i'd", 'i’d', 'i', 'would', 'put', 'at', 'say', 'reckon', 'estimate', 'guess']);
+  "i'd", 'i’d', "there's", 'there’s', "it's", 'it’s', "that's", 'that’s',
+  'i', 'would', 'put', 'at', 'say', 'reckon', 'estimate', 'guess']);
 
 /** Borrow preceding comma context only for a figure fragment with no event description. */
 function isStandaloneLikelihoodFragment(text: string, fragment: Span, match: RegExpMatchArray): boolean {
@@ -149,22 +147,22 @@ function statedProbabilityCandidates(userText: string): ProbabilityCandidate[] {
     }
     const before = userText.slice(Math.max(clause.start, index - 160), index);
     const after = userText.slice(index + match[0].length, Math.min(clause.end, index + match[0].length + 160));
-    const directWord = DIRECT_LIKELIHOOD_AFTER.test(after) || DIRECT_LIKELIHOOD_BEFORE.test(before);
-    // "of N%" is an event amount, not a numeric bridge. A bare noun in "that churn is N%" is a rate.
+    const directWord = DIRECT_LIKELIHOOD_AFTER.test(after) || DIRECT_LIKELIHOOD_BEFORE.test(before)
+      || WITH_PROBABILITY_BEFORE.test(before);
+    // A bare noun in "that churn is N%" is a rate.
     const event = EVENT_LIKELIHOOD_BEFORE.exec(before);
     const bridge = event === null ? null : EVENT_BRIDGE.exec(event[2]!);
     if (event?.[1]?.toLowerCase() === 'that' && bridge !== null
       && !EVENT_PREDICATE.test(event[2]!.slice(0, bridge.index))) continue;
     const eventWord = event !== null && bridge !== null;
-    const directLikelihood = directWord || eventWord || HEDGE_BEFORE.test(before) || ESTIMATE_BEFORE.test(before);
+    const directLikelihood = directWord || eventWord;
     // "probability of losing a customer is 30%" describes an event; "risk of losing 10%" describes its impact.
     const eventVerbIsLikelihood = directWord || eventWord;
     if (IMPACT_BY.test(before) || IMPACT_AFTER.test(after) || LIKELIHOOD_DELTA.test(before)
       || (!eventVerbIsLikelihood && IMPACT_VERB.test(before))) continue;
     if (!FIGURE_TAIL.test(after)) continue;
-    const bareEvent = BARE_EVENT.test(before) && WINDOW_NEXT.test(after);
-    if (!directLikelihood && !bareEvent && !ALTERNATIVE_BEFORE.test(before) && !ALTERNATIVE_AFTER.test(after)) continue;
-    candidates.push({ match, likelihood: directLikelihood || bareEvent, clause, binding });
+    if (!directLikelihood && !ALTERNATIVE_BEFORE.test(before) && !ALTERNATIVE_AFTER.test(after)) continue;
+    candidates.push({ match, likelihood: directLikelihood, clause, binding });
   }
   return candidates;
 }

@@ -36,7 +36,7 @@ vi.mock('../../handlers/chip-click-dispatch.js', async (original) => ({
     analysisReady: { status: 'needs_user_input' }, response: { response_version: 2, assistant_text: 'A level is needed.', suggested_actions: [], insights: [], blocks: [] } }),
 }));
 const PREFIX = "We're deciding between hiring contractors and training in-house. ";
-const STATED = 'Our key developer might leave, maybe 10–30% in the next 6 months.';
+const STATED = 'Our key developer might leave, a 10–30% chance in the next 6 months.';
 const NARRATION = 'The shared model is ready to explore.\n- Check the delivery assumptions.\n- Discuss the staffing choices.';
 let cause = false;
 let extraRisk = false;
@@ -141,7 +141,7 @@ describe('event-risk disclosure through the served build reply', () => {
   });
   it('ER-2-multi: each risk has its own disclosure in detail', async () => {
     extraRisk = true;
-    const second = 'Our supplier fails, maybe 20% within a month.';
+    const second = 'Our supplier fails, a 20% chance within a month.';
     const secondLine = heldEventRiskLine('Supplier fails', readStatedEventRisk(second)!.event_risk);
     const body = await turn(PREFIX + STATED + ' ' + second);
     for (const line of [held(), secondLine]) {

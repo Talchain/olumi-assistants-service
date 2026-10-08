@@ -3,23 +3,25 @@
   "id": "corpus-002",
   "message": "Add a risk: our biggest client might cancel their contract, maybe 15 - 25% in the next 3 months. If they cancel, on-time delivery of client projects would drop.",
   "label": "LIKELIHOOD",
-  "reason": "maybe range estimates client-event likelihood",
+  "reason": "DL ruling 8 Oct",
   "expectedOccurrence": {
    "p_low": 0.15,
    "p_high": 0.25
   },
-  "expectedHorizonMonths": 3
+  "expectedHorizonMonths": 3,
+  "expectedReaderEventRisk": null
  },
  {
   "id": "corpus-005",
   "message": "Add a risk: our largest client might cancel their contract, maybe 20 - 40% in the next 6 months. If they cancel, monthly revenue would drop.",
   "label": "LIKELIHOOD",
-  "reason": "maybe range estimates client-event likelihood",
+  "reason": "DL ruling 8 Oct",
   "expectedOccurrence": {
    "p_low": 0.2,
    "p_high": 0.4
   },
-  "expectedHorizonMonths": 6
+  "expectedHorizonMonths": 6,
+  "expectedReaderEventRisk": null
  },
  {
   "id": "corpus-014",
@@ -223,23 +225,25 @@
   "id": "corpus-078",
   "message": "There's a risk a competitor cuts its prices in response. I'd put it at about 15–25% within 3 months. Add it to the model.",
   "label": "LIKELIHOOD",
-  "reason": "put it at range estimates competitor-event likelihood",
+  "reason": "DL ruling 8 Oct",
   "expectedOccurrence": {
    "p_low": 0.15,
    "p_high": 0.25
   },
-  "expectedHorizonMonths": 3
+  "expectedHorizonMonths": 3,
+  "expectedReaderEventRisk": null
  },
  {
   "id": "corpus-079",
   "message": "There's a risk a key contractor walks off in response to the heavy workload. I'd put it at about 15–25% within 3 months. Add it.",
   "label": "LIKELIHOOD",
-  "reason": "put it at range estimates contractor-event likelihood",
+  "reason": "DL ruling 8 Oct",
   "expectedOccurrence": {
    "p_low": 0.15,
    "p_high": 0.25
   },
-  "expectedHorizonMonths": 3
+  "expectedHorizonMonths": 3,
+  "expectedReaderEventRisk": null
  },
  {
   "id": "corpus-085",

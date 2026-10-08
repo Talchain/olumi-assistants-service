@@ -183,8 +183,8 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
   const newRisk = () => graphNow().nodes.find((x) => x.kind === 'risk' && x.label === 'Competitive response');
-  const EVENT_MSG = 'Add a competitive response risk that lowers revenue, maybe 10–30% in the next 6 months.';
-  const NAMED_DRIVER_MSG = 'Add a competitive response risk that lowers revenue because our price goes up, maybe 10–30% in the next 6 months.';
+  const EVENT_MSG = 'Add a competitive response risk that lowers revenue, chance is 10–30% in the next 6 months.';
+  const NAMED_DRIVER_MSG = 'Add a competitive response risk that lowers revenue because our price goes up, chance is 10–30% in the next 6 months.';
   const EVENT = { version: 1, occurrence: { p_low: 0.1, p_high: 0.3, basis: 'user', meaning: 'at_least_once_within_horizon' }, horizon: { months: 6 } };
   const quote = '10–30% in the next 6 months';
   const offer = async (message: string, caused = false, driverLabel = 'Price') => {
@@ -267,16 +267,13 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
     },
     {
       kind: 'corpus-likelihood',
-      // Verbatim from corpus-served-169.json; the percentage describes the event, not the revenue effect.
+      // Verbatim from corpus-served-169.json.
+      // DL ruling 8 Oct: explicit likelihood words only
       message: 'Add a risk: a competitor might cut its prices, maybe 15 - 25% in the next 3 months. If that happens, monthly recurring revenue would drop.',
       label: 'Competitor cuts prices',
       target: 'Monthly recurring revenue',
-      expectedEvent: {
-        version: 1,
-        occurrence: { p_low: 0.15, p_high: 0.25, basis: 'user', meaning: 'at_least_once_within_horizon' },
-        horizon: { months: 3 },
-      },
-      likelihoodLine: 'It may happen: about 15–25% within 3 months, as you said.',
+      expectedEvent: undefined,
+      likelihoodLine: undefined,
     },
   ])('impact-pct-door-$kind: the user card and committed risk preserve the meaning of the percentage', async ({ message, label, target, expectedEvent, likelihoodLine }) => {
     const graph = seedGraph();
@@ -351,7 +348,7 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it('said-door-inferred-driver: the user likelihood wins over a driver the model inferred', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const message = "There's a risk of a competitive response. I'd put it at about 15–25% within 3 months. Add it.";
+    const message = "There's a risk of a competitive response. The chance is about 15–25% within 3 months. Add it.";
     const note = "I left out 'Price' as a driver: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.";
     const { result, approve } = await offer(message, true);
     expect(approve.detail!.split('\n').at(-1)).toBe('It may happen: about 15–25% within 3 months, as you said.');
@@ -371,7 +368,7 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it.each(['Price', 'fac_price'])('said-door-named-driver-%s: naming the driver preserves the ordinary risk and cause note', async (driverLabel) => {
     graphOf.set(SCENARIO, seedGraph());
-    const message = "There's a risk of a competitive response because our price goes up. I'd put it at about 15–25% within 3 months. Add it.";
+    const message = "There's a risk of a competitive response because our price goes up. The chance is about 15–25% within 3 months. Add it.";
     const note = HELD_RISK_CAUSE_NOTE;
     const { result, approve } = await offer(message, true, driverLabel);
     expect(result.note).toContain(note);
@@ -392,10 +389,10 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it.each([
     // Synthetic parser-shape controls state likelihood explicitly; bare percentages fail closed.
-    ['spaced-range', 'maybe 15 - 25% in the next 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
-    ['between', 'maybe between 15 and 25 percent within 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
-    ['year', 'maybe about 20% within a year', 0.2, 0.2, 12, 'about 20% within 12 months'],
-    ['n-percent', 'maybe 20 percent within 6 months', 0.2, 0.2, 6, 'about 20% within 6 months'],
+    ['spaced-range', 'a 15 - 25% chance in the next 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
+    ['between', 'between 15 and 25 percent chance within 3 months', 0.15, 0.25, 3, 'about 15–25% within 3 months'],
+    ['year', 'about 20% chance within a year', 0.2, 0.2, 12, 'about 20% within 12 months'],
+    ['n-percent', 'a 20 percent chance within 6 months', 0.2, 0.2, 6, 'about 20% within 6 months'],
     ['one-in-five', '1 in 5 chance within 6 months', 0.2, 0.2, 6, 'about 20% within 6 months'],
   ] as const)('said-door-paraphrase-%s: the chip and committed event state the user likelihood', async (_id, likelihood, low, high, months, words) => {
     graphOf.set(SCENARIO, seedGraph());
@@ -418,7 +415,7 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
 
   it('said-door-no-window: an ordinary risk asks for the missing time window', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const message = 'Competitive response could lower revenue, maybe about 20%, add it.';
+    const message = 'Competitive response could lower revenue, about 20% chance, add it.';
     const note = HELD_RISK_WINDOW_NOTE;
     const { result, approve } = await offer(message);
     expect((result.risk as Record<string, unknown>).likelihood).toBeUndefined();
@@ -441,8 +438,8 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
       links: [{ to_id: 'goal_x', effect_direction: 'negative' as const }] };
     const turnA = randomUUID();
     const turnB = randomUUID();
-    const blockA = readStatedEventRisk('maybe 10–30% within 6 months')!;
-    const blockB = readStatedEventRisk('maybe 20–40% within 6 months')!;
+    const blockA = readStatedEventRisk('a 10–30% chance within 6 months')!;
+    const blockB = readStatedEventRisk('a 20–40% chance within 6 months')!;
     expect(await holdAddRiskInProcess({ ...input, turn_id: turnA, user_event_risk: blockA }, '2a-hash-a')).toMatchObject({ status: 'held' });
     expect(await holdAddRiskInProcess({ ...input, turn_id: turnB, user_event_risk: blockB }, '2a-hash-b')).toMatchObject({ status: 'held' });
     expect(rows.get(`${SCENARIO}:${turnA}`)!.request_hash).not.toBe(rows.get(`${SCENARIO}:${turnB}`)!.request_hash);
