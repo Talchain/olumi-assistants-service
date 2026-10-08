@@ -128,7 +128,12 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percentage_points' || cls === 'basis_points') return null;
   if (cls === 'percent') {
-    return unit !== undefined && (isPercentWithPeriod(unit) || percentLevel) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+    if (unit === undefined || !(isPercentWithPeriod(unit) || percentLevel)) return null;
+    if (frame === 100 || frame === 1) return UNIT_INTERVAL;
+    // ⭐ #2842 review P1-2: a percentage level on another frame (Olumi's convention, 0–13 points for a 3% churn; or a
+    // drafter's 0–20) keeps its natural [0, 100] domain, said on that frame: [0, 100 ÷ frame]. Returning `null` here
+    // switched D4's out-of-domain check off for every such level.
+    return frame > 1 && frame < 100 ? { lo: 0, hi: 100 / frame } : null;
   }
   if (unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency') return { lo: 0, hi: Infinity };
   return frame === 1 ? UNIT_INTERVAL : null;

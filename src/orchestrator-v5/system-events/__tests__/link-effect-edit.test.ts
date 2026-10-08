@@ -58,6 +58,17 @@ function params(over: Partial<ApplyLinkEffectEditParams> = {}, graph: Rec = stor
 const edgeOf = (g: unknown) => (g as Rec).edges.find((e: Rec) => e.from === 'price' && e.to === 'subs') as Rec;
 
 describe('link effect writer — a stated effect sizes the link exactly, as the user\'s', () => {
+  it('#2848: Olumi\'s `basis` line goes with Olumi\'s size when the user states their own', () => {
+    const g = storedGraph();
+    const e0 = edgeOf(g);
+    e0.provenance = { ...e0.provenance, magnitude: 'olumi_estimate', basis: 'a higher price loses price-sensitive buyers' };
+    const r = applyLinkEffectEdit(params({}, g));
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    expect(edgeOf(r.mutatedGraph).provenance).not.toHaveProperty('basis');
+    expect(edgeOf(r.mutatedGraph).provenance.magnitude).toBe('user_stated');
+  });
+
   it('RED: writes β from the construction converter, magnitude user_stated, source user_specified, and the natural effect', () => {
     const r = applyLinkEffectEdit(params());
     expect(r.kind, JSON.stringify(r)).toBe('mutated');

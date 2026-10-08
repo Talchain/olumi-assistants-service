@@ -353,12 +353,15 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     }
   });
 
-  it('fix3-late-failure-fragments-scaling: 2k to 20k, ratio < 20 for both readers', () => {
+  it('fix3-late-failure-fragments-scaling: 8k to 80k, ratio < 20 for both readers', () => {
     // A long valid scaffold prefix reaches its non-scaffold event only at the end.
     // Repeated figures force the shared classifier to examine every comma fragment.
+    // 8k → 80k, not 2k → 20k: both readers are linear (~0.05 µs/char from 2k to 64k, 8 Oct), but a 2k run takes
+    // ~0.1 ms, so CI timer noise doubled the ratio (20.16 against <20 on #2841). At 8k the small run is ≥0.4 ms;
+    // the true ratio stays ~10, which leaves 2× headroom under the bar.
     const fragment = `Supplier fails, ${'maybe '.repeat(23)}30% within 6 months release slips. `;
     const make = (n: number) => fragment.repeat(Math.ceil(n / fragment.length)).slice(0, n);
-    const [small, large] = [make(2000), make(20000)];
+    const [small, large] = [make(8000), make(80000)];
     for (const text of [small, large]) {
       expect(readStatedEventRisk(text)).toBeUndefined();
       expect(readStatedLikelihoodWithoutWindow(text)).toBe(false);

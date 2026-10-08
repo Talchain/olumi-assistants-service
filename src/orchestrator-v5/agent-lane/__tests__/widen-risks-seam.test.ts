@@ -31,7 +31,7 @@ let n = 0;
 let SCENARIO = '';
 const nextScenario = () => { n += 1; SCENARIO = `5a0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d2c${String(n).padStart(2, '0')}`; };
 
-type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
+type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; response_emitted: boolean; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
 const rows = new Map<string, Row>();
 const order: string[] = [];
 let graphOf = new Map<string, unknown>();
@@ -52,7 +52,6 @@ const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown
   const raw = row ? (jsonbOrder(JSON.parse(JSON.stringify(row.pending_actions))) as unknown[]) : [];
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
-let tick = 0;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => {
@@ -60,23 +59,24 @@ const store = {
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
   }),
   readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; response_emitted?: boolean; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
-      tick += 1;
+      vi.setSystemTime(Date.now() + 1);
       rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash,
+        response_emitted: w.response_emitted ?? true,
         assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
         // Stored with the turn, as `append_turn_atomic` does, so a writer's own read-back of its fact is served.
         handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
-        created_at: new Date(Date.UTC(2026, 8, 26, 0, 0, tick)).toISOString() });
+        created_at: new Date().toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
     }
     return { id: rows.get(k)!.id };
   }),
-  readRecent: vi.fn(async (sid: string) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'))),
+  readRecent: vi.fn(async (sid: string, limit = 20) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim')).slice(0, limit)),
   readFactsFor: vi.fn(async () => []),
   // The production shape (`supabase-store.ts` readFactsWithTurnFor): each stored fact with the id of the turn row it rode on.
   readFactsWithTurnFor: vi.fn(async (ids: readonly string[]) => [...rows.values()].filter((r) => ids.includes(r.id))
@@ -134,6 +134,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     const { computeGraphIdentityHash } = await import('../../context/graph-identity.js');
+    const { registrationTurnId, registrationRequestHash } = await import('../../graph-registration/registration-identity.js');
     const a = Fastify({ logger: false });
     a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') { inner.push(req.body as Record<string, unknown>); onInner?.(req.body as Record<string, unknown>); } });
     a.addHook('onSend', async (req, _reply, payload) => { if (req.url === '/orchestrate/v2/turn') onInnerSent?.(req.body as Record<string, unknown>); return payload; });
@@ -144,8 +145,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     });
     a.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
       const sid = (req.params as { id: string }).id;
-      const g = (req.body as { graph: unknown }).graph;
-      graphOf.set(sid, jsonbOrder(JSON.parse(JSON.stringify(g))));
+      const body = req.body as { graph: unknown; brief_text?: string; operation_id?: string };
+      const g = jsonbOrder(JSON.parse(JSON.stringify(body.graph)));
+      // The production registration leaves a committed, non-public row as the first construction's stored marker.
+      await store.append({ scenario_id: sid, turn_id: registrationTurnId(sid, body.operation_id),
+        request_hash: registrationRequestHash(g, body.brief_text), response_emitted: false,
+        turn_class: 'direct_answer', handler_id: null, graph: g });
       return { registered: true, graph_hash: computeAnalysisAffectingGraphHash(g as never) };
     });
     a.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [], next_cursor: null }));
@@ -156,6 +161,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   }
   let app: FastifyInstance;
   beforeAll(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
       openAiCalls += 1;
@@ -171,10 +177,12 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     process.env.AGENT_LANE_PREVIEW = 'false';
     app = await buildApp();
   }, 600_000);
-  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; constructionCandidate = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; lastComposeInput = undefined; });
+  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.useRealTimers(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; lastComposeInput = undefined; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
+    // Issuance allows 2 seconds of clock skew; separate public turns so the preceding answer cannot be the issuer.
+    vi.setSystemTime(Date.now() + 3000);
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     return r.json() as Body;
@@ -193,7 +201,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const THIN_BUTTON = 'Suggest up to 3 more risks, including one against ‘Raise to £59’';
   const CONSTRUCTION_BRIEF = 'Raise Pro £49 → £59 to reach £20,000 Total MRR within 12 months. One risk is customer churn.';
   /** A real constructor candidate: one user-proposed option, a declared baseline, and unquantified risks. */
-  const thinConstruction = async (riskCount: number, prepare?: () => void) => {
+  const thinConstruction = async (riskCount: number, prepare?: () => void, brief = CONSTRUCTION_BRIEF) => {
     constructionCandidate = {
       goal: { kind: null, deliverable: null, metric: 'Total MRR', operator: '>=', target_stated: true, value: 20000,
         unit: 'GBP', horizon_months: 12, provenance: 'explicit', frame: 'level', baseline_known: false,
@@ -210,9 +218,9 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
         effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null }],
       identities: [], unknowns: [], decision_question: null,
     };
-    script = [() => fnCall('build_model_from_brief', { brief: CONSTRUCTION_BRIEF }), () => say('Here is the model to explore together.')];
+    script = [() => fnCall('build_model_from_brief', { brief }), () => say('Here is the model to explore together.')];
     prepare?.();
-    const t = await turn({ message: CONSTRUCTION_BRIEF });
+    const t = await turn({ message: brief });
     expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true, mutated: true }));
     expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(riskCount);
     expect(graphNow().nodes.find((node) => node.label === 'Raise to £59')).toMatchObject({ kind: 'option', provenance: 'from_brief' });
@@ -251,6 +259,30 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t.suggested_actions[runIndex === 0 ? 1 : 0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
     expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
     expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
+  };
+  const expectNoThinPress = (t: Body) =>
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  /** A real proposing tool called AFTER the builder, on the same public construction answer. */
+  const thinConfirmConstruction = async (name: string, args: Record<string, unknown>, brief = CONSTRUCTION_BRIEF, prepare?: () => void) => {
+    const t = await thinConstruction(1, () => {
+      script.splice(1, 1, () => fnCall(name, args), () => say('Here is the model to explore together.'));
+      prepare?.();
+    }, brief);
+    const proposal = t._agent.tool_calls.find(c => c.name === name);
+    expect(proposal, `construction confirm fixture: ${JSON.stringify(t)}`).toMatchObject({ ok: true, mutated: false });
+    expect(proposal!.proposal_id).toBeTypeOf('string');
+    expect(approveChipOf(t)?.id, JSON.stringify(t)).toBe(`agent-approve-proposal:${proposal!.proposal_id}`);
+    expectNoThinPress(t);
+    return t;
+  };
+  const heldAgentProposal = async (id: string) => {
+    const { agentProposalOf } = await import('../proposal-object/record.js');
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    return (await store.readMostRecentPendingActions(SCENARIO)).flatMap(raw => {
+      const pa = parsePendingAction(raw);
+      const proposal = pa === null ? undefined : agentProposalOf(pa);
+      return proposal?.proposal_id === id ? [proposal] : [];
+    })[0];
   };
 
   it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
@@ -302,7 +334,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     }
   }, 120_000);
 
-  it('r4a RED: Paul\'s B1 construction with a pending identity and one risk offers the exact thin press after Yes', async () => {
+  it('r5-identity / r4a: Paul\'s B1 construction with a pending identity and one risk offers the exact thin press after Yes', async () => {
     const construction = await thinIdentityConstruction(1);
     const identity = construction._agent.tool_calls.find((c) => c.name === 'propose_identity');
     expect(identity, JSON.stringify(construction)).toMatchObject({ ok: true, mutated: false });
@@ -397,6 +429,142 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(pending[0]!.action.scope).toBeUndefined();
     expect(t.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:'))).toBe(false);
     expectThinPress(t);
+  }, 120_000);
+
+  it('r5-deadline RED: the construction turn\'s set_goal_deadline card offers the thin press after Yes', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_deadline', { deadline_words: '12 months', rationale: 'The user stated this deadline.' });
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_deadline')!.proposal_id!;
+    expect((await heldAgentProposal(proposalId))?.operations).toEqual([
+      expect.objectContaining({ op: 'set_goal_deadline', path: 'total_mrr' }),
+    ]);
+    expect(approveChipOf(construction)?.message).toBe('Yes, that is my deadline.');
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+    expect(t._diagnostic_trace.fast_path).toBe('approve');
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-deadline declined: Not now on the construction deadline card resolves the held confirm and offers thin', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_deadline', { deadline_words: '12 months', rationale: 'The user stated this deadline.' });
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_deadline')!.proposal_id!;
+    const decline = construction.suggested_actions.find(c => c.id === `agent-decline-proposal:${proposalId}`)!;
+    const t = await pressCard(decline);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'withdraw_proposal', ok: true, mutated: false, proposal_id: proposalId }));
+    expect(t.suggested_actions.some(c => c.id.startsWith('agent-approve-proposal:')), JSON.stringify(t)).toBe(false);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-target RED: the construction turn\'s set_goal_target card offers the thin press after Yes', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_target', { constraint_type: 'at_least', value: 20000, unit: 'GBP', rationale: 'The user stated this target.' }, CONSTRUCTION_BRIEF, () => {
+      // The card owns this first target. Restating a target already stored on the node is a writer no-op without a row.
+      const goal = constructionCandidate!.goal as Record<string, unknown>;
+      goal.target_stated = false;
+      goal.value = null;
+    });
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_target')!.proposal_id!;
+    expect((await heldAgentProposal(proposalId))?.operations).toEqual([
+      expect.objectContaining({ op: 'set_goal_target', path: 'total_mrr' }),
+    ]);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-scope RED: a reachable typed goal-scope card issued by construction resolves through authorise_change and offers thin', async () => {
+    const { composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION } = await import('../../compose/analysis-state-v1.js');
+    const { canonicalStateFromFreshness } = await import('../../context/canonical-analysis-state.js');
+    // The real graph reader supplies canonical authority even before any Run. A missing mock authority removes scope cards.
+    extraRead.analysis_state = composeAnalysisStateV1({ canonical: canonicalStateFromFreshness(NO_ANALYSIS_CONTEXT_DERIVATION), rawRobustness: null });
+    const quote = 'Total MRR covers all plans together and is £10,000 today.';
+    const scope = { modelled: 'all plans together', alternative: 'the Pro plan only', extent: 'total', stated_in_brief: true, source: { quote } };
+    const construction = await thinConfirmConstruction('reconcile_goal_scope', {
+      goal_label: 'Total MRR', scope, current_level: { value: 10000, unit: 'GBP', quote },
+    }, `${CONSTRUCTION_BRIEF} ${quote}`);
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'reconcile_goal_scope')!.proposal_id!;
+    expect((await heldAgentProposal(proposalId))?.operations).toEqual([
+      expect.objectContaining({ op: 'update_node', path: 'total_mrr', value: expect.objectContaining({ goal_scope: scope }) }),
+    ]);
+    // The constructor's untyped goal-scope:<goal> question (r4f) is not this proposal-backed approval door.
+    expect(approveChipOf(construction)?.id).toBe(`agent-approve-proposal:${proposalId}`);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+    expect((await store.readMostRecentPendingActions(SCENARIO)).some(raw =>
+      (raw as { action?: { kind?: string } }).action?.kind === 'reconcile_goal_scope')).toBe(false);
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r5-later CONTRAST and issuing-turn mutant: Yes on a deadline card issued after construction offers no thin press', async () => {
+    await thinConstruction(1);
+    script = [() => fnCall('propose_goal_deadline', { deadline_words: '6 months', rationale: 'The user changed their deadline.' }),
+      () => say('Please confirm the new deadline.')];
+    const proposed = await turn({ message: 'Set my deadline to 6 months.' });
+    const proposal = proposed._agent.tool_calls.find(c => c.name === 'propose_goal_deadline');
+    expect(proposal, JSON.stringify(proposed)).toMatchObject({ ok: true, mutated: false });
+    const t = await pressCard(approveChipOf(proposed)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposal!.proposal_id }));
+    expect(graphNow().nodes.filter(node => node.kind === 'risk')).toHaveLength(1);
+    expectNoThinPress(t);
+  }, 120_000);
+
+  it.each(['registration', 'public user message'] as const)('r5 fail closed: a missing construction %s marker offers no thin press after identity Yes', async (marker) => {
+    const construction = await thinIdentityConstruction(1);
+    const row = marker === 'registration'
+      ? [...rows.values()].find(r => r.scenario_id === SCENARIO && r.request_hash.startsWith('graph_registration:'))
+      : latestRow();
+    expect(row).toBeDefined();
+    if (marker === 'registration') row!.request_hash = 'sha256:unverified_registration';
+    else row!.user_message = null;
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expectNoThinPress(t);
+  }, 120_000);
+
+  it('r5 import CONTRAST: a generic graph registration cannot attest build_model_from_brief before a first-chat confirm', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const { registrationTurnId } = await import('../../graph-registration/registration-identity.js');
+    const registration = [...rows.values()].find(r => r.scenario_id === SCENARIO && r.request_hash.startsWith('graph_registration:'));
+    expect(registration).toBeDefined();
+    // A UI import shares the committed registration shape, but has no construction operation identity.
+    registration!.turn_id = registrationTurnId(SCENARIO);
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expectNoThinPress(t);
+  }, 120_000);
+
+  it('r5 fail closed: an unreadable issuing/construction window offers no thin press after identity Not now', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const decline = construction.suggested_actions.find(c => c.id.startsWith('agent-decline-proposal:'))!;
+    const failedRead = vi.spyOn(store, 'readRecent').mockRejectedValue(new Error('construction history unavailable'));
+    try {
+      // Withdrawal resolves this held card without making the writer's separate confirmation read unavailable too.
+      const t = await pressCard(decline);
+      expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'withdraw_proposal', ok: true, mutated: false }));
+      expectNoThinPress(t);
+    } finally {
+      failedRead.mockRestore();
+    }
+  }, 120_000);
+
+  it('r5 fail closed: a full bounded window cannot attest the first construction answer', async () => {
+    const construction = await thinIdentityConstruction(1);
+    const readRecent = store.readRecent.getMockImplementation()!;
+    const fullRead = vi.spyOn(store, 'readRecent').mockImplementation(async (sid, limit = 20) => {
+      const recent = await readRecent(sid, limit);
+      if (sid !== SCENARIO) return recent;
+      // Keep the real construction and its live hold visible, while the raw cap cannot prove history exhaustion.
+      return [...recent, ...Array.from({ length: Math.max(0, limit - recent.length) }, (_, i): Row => ({
+        ...recent[0]!, id: `older-row-${i}`, turn_id: `older-internal-${i}`, request_hash: 'sha256:older-internal',
+        response_emitted: false, user_message: null, assistant_message: null, pending_actions: [],
+        created_at: new Date(Date.UTC(2026, 9, 7, 0, 0, i)).toISOString(),
+      }))];
+    });
+    try {
+      const t = await pressCard(approveChipOf(construction)!);
+      expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+      expectNoThinPress(t);
+    } finally {
+      fullRead.mockRestore();
+    }
   }, 120_000);
 
   it('P05b-8b CONTRAST: construction with three risks has no relabelled risks press', async () => {
