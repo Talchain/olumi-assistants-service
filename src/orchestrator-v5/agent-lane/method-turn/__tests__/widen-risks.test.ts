@@ -15,7 +15,7 @@ import * as riskTransaction from '../../../routing/add-risk-transaction.js';
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, modelGapOf, riskAddPressFor, riskGate, riskHeldReply, risksTurnForReadback, risksTurnFromSignals,
   settleRisksTurn, STATED_BUDGET, SUGGEST_RISKS_CHIP, widenAddCallOf, widenTargetOf, WIDEN_PRESS_ID, type RunRisksWidenTurn,
-  risksFallbackReply,
+  applyDisconfirm, risksFallbackReply,
 } from '../widen-turn.js';
 
 const fixture = (v: 'v1' | 'v2'): Record<string, unknown> =>
@@ -43,6 +43,110 @@ const TURN2 = [
     affects_id: 'meet_our_next_feature_launch_deadline', direction: 'negative', relies_on: 'keeping quality while hiring under time pressure', watch_for: 'rising defect counts before launch' },
 ];
 const appendix = (items: unknown): string => `<risk_suggestions>${JSON.stringify(items)}</risk_suggestions>`;
+
+describe('P05b RK-DISCONFIRM: challenge the brief’s option without bypassing the gate', () => {
+  const graph = () => {
+    const base = fixture('v1');
+    return { ...base, nodes: (base.nodes as Record<string, unknown>[]).map((n) =>
+      n.id === 'hire_a_tech_lead' ? { ...n, provenance: 'from_brief' } : n) };
+  };
+  const firstThree = [TURN2[0],
+    { ...TURN2[2], label: 'Onboarding friction' },
+    { ...TURN2[2], label: 'Supplier disruption', category: 'external' }];
+  const favoured = { id: 'hire_a_tech_lead', label: 'Hire a Tech Lead' };
+  const missingLine = 'None of these bears directly on ‘Hire a Tech Lead’; ask for risks to it if you want them.';
+
+  it('3a favoured directive: one exact disconfirm line with the option id and label', () => {
+    const turn = turnOn(graph());
+    expect(turn.favoured).toEqual(favoured);
+    const line = `At least one item must hit the option the brief proposes, ${JSON.stringify(favoured)}: a way it could fall short.`;
+    expect(turn.directive.split('\n').filter((l) => l === line)).toEqual([line]);
+  });
+  it('3b null favoured: no disconfirm directive or gate change', () => {
+    const turn = turnOn(fixture('v1'));
+    expect(turn.favoured).toBeNull();
+    expect(turn.directive).not.toContain('At least one item must hit the option the brief proposes,');
+    const base = riskGate(turn, TURN2);
+    expect(applyDisconfirm(turn, { ...base, candidates: TURN2 })).toEqual(base);
+  });
+  it('3c null favoured: every kept item is still labelled as Olumi\'s suggestion (DL ruling: the label is on each)', () => {
+    const turn = turnOn(fixture('v1'));
+    const settled = settleRisksTurn(turn, appendix(TURN2));
+    expect(settled.gate.kept.length).toBeGreaterThan(0);
+    const items = settled.reply.split('\n').filter((l) => l.startsWith('- ') && !l.startsWith('- Every option relies on'));
+    expect(items).toHaveLength(settled.gate.kept.length);
+    expect(items.every((l) => l.startsWith("- Olumi's suggestion: "))).toBe(true);
+  });
+  it('4a RK-COUNT-only fourth candidate hits favoured: swap out the last kept item', () => {
+    const turn = turnOn(graph());
+    const candidates = [...firstThree, TURN2[1]];
+    const base = riskGate(turn, candidates);
+    expect(base.dropped).toEqual([{ index: 3, failed: ['RK-COUNT'] }]);
+    const gate = applyDisconfirm(turn, { ...base, candidates });
+    expect(gate.kept.map((r) => [r.label, r.hits.id, r.hits.label])).toEqual([
+      ['Recruitment delay', 'hire_two_developers', 'Hire Two Developers'],
+      ['Onboarding friction', 'hire_two_developers', 'Hire Two Developers'],
+      ['Wrong bottleneck', favoured.id, favoured.label],
+    ]);
+    expect(gate.dropped).toEqual([{ index: 2, failed: ['RK-COUNT'] }]);
+    expect(gate.disconfirm_missing).not.toBe(true);
+    expect(gate).not.toHaveProperty('candidates');
+    expect(settleRisksTurn(turn, appendix(candidates)).gate).toEqual(gate);
+  });
+  it('4b no candidate hits favoured: missing flag and exact disclosure before nothing-added line', () => {
+    const settled = settleRisksTurn(turnOn(graph()), appendix(firstThree));
+    expect(settled.gate.disconfirm_missing).toBe(true);
+    const lines = settled.reply.split('\n');
+    expect(lines.filter((l) => l === missingLine)).toHaveLength(1);
+    expect(lines[lines.indexOf(missingLine) + 1])
+      .toBe('Possible risks, not established facts. Nothing is added until you choose one and approve the change.');
+  });
+  it('4c all candidates refused: the fallback stands alone (no "none of these" without a list)', () => {
+    const settled = settleRisksTurn(turnOn(graph()), appendix([]));
+    expect(settled.gate.disconfirm_missing).toBe(true);
+    expect(settled.reply).toBe(risksFallbackReply(turnOn(graph())));
+    expect(settled.reply).not.toContain(missingLine);
+  });
+  it('4d RK-WORDS is never bypassed by a count-only drop', () => {
+    const turn = turnOn(graph());
+    const candidates = [...firstThree, { ...TURN2[1], relies_on: 'likely to fix everything' }];
+    const base = riskGate(turn, firstThree);
+    const gate = applyDisconfirm(turn, { ...base, dropped: [{ index: 3, failed: ['RK-COUNT'] }], candidates });
+    expect(gate.kept).toEqual(base.kept);
+    expect(gate.disconfirm_missing).toBe(true);
+  });
+  it('4e RK-NO-DUP is never bypassed by a count-only drop', () => {
+    const turn = turnOn(graph());
+    const candidates = [...firstThree, { ...TURN2[1], label: TURN2[0]!.label }];
+    const base = riskGate(turn, firstThree);
+    const gate = applyDisconfirm(turn, { ...base, dropped: [{ index: 3, failed: ['RK-COUNT'] }], candidates });
+    expect(gate.kept).toEqual(base.kept);
+    expect(gate.disconfirm_missing).toBe(true);
+  });
+  it('4f RK-DOOR is rechecked before a count-only candidate can replace an item', () => {
+    const turn = turnOn(graph());
+    const candidates = [...firstThree, TURN2[1]];
+    const base = riskGate(turn, candidates);
+    const spy = vi.spyOn(riskTransaction, 'buildAddRiskTransaction').mockReturnValue({ matched: false } as never);
+    try {
+      const gate = applyDisconfirm(turn, { ...base, candidates });
+      expect(spy).toHaveBeenCalled();
+      expect(gate.kept).toEqual(base.kept);
+      expect(gate.disconfirm_missing).toBe(true);
+    } finally { spy.mockRestore(); }
+  });
+  it('5 labels: every kept line has the Olumi suggestion prefix inside its bullet; shared-precondition line is unchanged', () => {
+    const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
+      mechanism: 'relies_on', affects_id: 'feature_delivery_capacity', direction: 'positive',
+      relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
+    const settled = settleRisksTurn(turnOn(graph()), appendix([TURN2[0], TURN2[1], shared]));
+    expect(settled.gate.kept).toHaveLength(2);
+    expect(settled.reply.split('\n').slice(2, 4).every((l) => l.startsWith("- Olumi's suggestion: "))).toBe(true);
+    expect(settled.reply).toContain("- Olumi's suggestion: ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly.");
+    expect(settled.reply).toContain("- Every option relies on the current team staying intact. Risk: ‘Team attrition’ (outside events). This model can't yet hold a precondition that every option shares, so I haven't offered to add it.");
+    expect(settled.gate.disconfirm_missing).not.toBe(true);
+  });
+});
 
 describe('S-C press identity: ONE door, a target per press', () => {
   it('PI-1: the W6 pill (id + its exact message) and the canvas "+" Risk press open target risks', () => {
@@ -123,7 +227,7 @@ describe('S-C risks gate: grounded, attached, distinct — by identity', () => {
       through_direction: 'negative', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
     const settled = settleRisksTurn(turnOn(fixture('v1')), appendix([shared, TURN2[0]]));
     expect(settled.gate.kept.map((r) => [r.label, r.shared])).toEqual([['Recruitment delay', false], ['Team attrition', true]]);
-    expect(settled.reply.split('\n')[3]).toBe('- Every option relies on the current team staying intact. Risk: ‘Team attrition’ (outside events), through ‘Existing Engineering Team Size’; it affects every option alike. Watch for: a resignation before launch.');
+    expect(settled.reply.split('\n')[3]).toBe('- Olumi\'s suggestion: Every option relies on the current team staying intact. Risk: ‘Team attrition’ (outside events), through ‘Existing Engineering Team Size’; it affects every option alike. Watch for: a resignation before launch.');
   });
   it('RG-11: only a driver gets a parent factor; every hit option still really changes the identity-checked through factor', () => {
     const t = turnOn(fixture('v1'));
@@ -153,9 +257,9 @@ describe('S-C risks reply: the named method, what each hits, nothing added, ONE 
     expect(settled.reply.split('\n')).toEqual([
       'Three risks you haven’t mapped yet.',
       'I checked what each option relies on and how that could fail, across people, timing, cost, dependencies and outside events (assumption-based planning).',
-      '- ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.',
-      '- ‘Wrong bottleneck’: ‘Hire a Tech Lead’ relies on a Tech Lead removing the main delivery blocker. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.',
-      '- ‘Hire Two Developers’ relies on new developers joining without slowing the team. Risk: ‘Coordination drag’ (people), through ‘Developer Hires’. Watch for: senior time spent on onboarding.',
+      '- Olumi\'s suggestion: ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.',
+      '- Olumi\'s suggestion: ‘Wrong bottleneck’: ‘Hire a Tech Lead’ relies on a Tech Lead removing the main delivery blocker. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.',
+      '- Olumi\'s suggestion: ‘Hire Two Developers’ relies on new developers joining without slowing the team. Risk: ‘Coordination drag’ (people), through ‘Developer Hires’. Watch for: senior time spent on onboarding.',
       'Possible risks, not established facts. Nothing is added until you choose one and approve the change.',
       'What is the deadline for "meet our next feature-launch deadline"? A date or a time from now is fine, for example "6 months"; I\'ll propose it as your deadline.',
     ]);
@@ -388,7 +492,7 @@ describe('EVENT-RISK RC3 (a′): a precondition stays on the model with zero lin
       affects: [{ target_label: 'MRR', direction: 'negative' }], caused_by: [{ factor_label: 'Pro plan price', direction: 'positive' }], whole_request: true,
     } });
     expect(settleRisksTurn(turnOn(graph), appendix([priceRisk])).reply.split('\n')[2])
-      .toBe('- ‘Raise Pro price to £59’ relies on customers accepting the higher price. Risk: ‘Price-driven churn’ (cost), through ‘Pro plan price’. Watch for: cancellations after the price rise.');
+      .toBe('- Olumi\'s suggestion: ‘Raise Pro price to £59’ relies on customers accepting the higher price. Risk: ‘Price-driven churn’ (cost), through ‘Pro plan price’. Watch for: cancellations after the price rise.');
     const call = widenAddCallOf(r.press.id, r.press.message, { graph })!;
     expect(riskHeldReply(call)).toBe('I’ve prepared this change: add the risk ‘Price-driven churn’, driven by more ‘Pro plan price’; it would lower ‘MRR’. How strongly is not known yet. Nothing is added until you approve it.');
   });
@@ -465,7 +569,7 @@ describe('EVENT-RISK RC3 (a′): a precondition stays on the model with zero lin
       caused_by: [], affects: [], whole_request: true,
     } });
     expect(call?.args).not.toHaveProperty('relies_on');
-    expect(settled.reply.split('\n')[2]).toBe('- ‘Feature release slips’: ‘Raise Pro price to £59’ relies on the feature release. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.');
+    expect(settled.reply.split('\n')[2]).toBe('- Olumi\'s suggestion: ‘Feature release slips’: ‘Raise Pro price to £59’ relies on the feature release. This model can\'t yet apply that risk to that option alone, so the Run leaves it out, and that option\'s chance doesn\'t include it yet.');
     expect(settled.reply).not.toContain('through ‘Pro plan price’');
     expect(settled.reply).not.toContain('affects every option alike');
     expect(settled.reply).not.toContain('doesn\'t change the comparison');

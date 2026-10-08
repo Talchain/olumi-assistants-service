@@ -102,6 +102,8 @@ type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_tra
 
 /** Scripted OpenAI: each Agent model call takes the next reply; anything that is not OpenAI throws. */
 let script: ((body: Record<string, unknown>) => unknown)[] = [];
+/** The construction response goes through the real builder, without spending a scripted conversation reply. */
+let constructionCandidate: Record<string, unknown> | undefined;
 let openAiCalls = 0;
 const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(args) }] });
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
@@ -129,6 +131,13 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never),
         graph_identity_hash: g === null ? null : computeGraphIdentityHash(g as never), ...extraRead };
     });
+    a.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
+      const sid = (req.params as { id: string }).id;
+      const g = (req.body as { graph: unknown }).graph;
+      graphOf.set(sid, jsonbOrder(JSON.parse(JSON.stringify(g))));
+      return { registered: true, graph_hash: computeAnalysisAffectingGraphHash(g as never) };
+    });
+    a.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [], next_cursor: null }));
     await a.register(ceeOrchestratorRouteV2);
     await a.register(agentV1TurnRoute);
     await a.ready();
@@ -140,6 +149,10 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
       openAiCalls += 1;
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (constructionCandidate !== undefined
+        && (body['text'] as { format?: { type?: string } } | undefined)?.format?.type === 'json_schema') {
+        return new Response(JSON.stringify(say(JSON.stringify(constructionCandidate))), { status: 200 });
+      }
       const next = script.shift();
       return new Response(JSON.stringify(next !== undefined ? next(body) : say('Done.')), { status: 200 });
     }));
@@ -148,7 +161,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
+  beforeEach(() => { nextScenario(); script = []; constructionCandidate = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
@@ -166,6 +179,61 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
 
 
   const RISKS = { id: 'agent-next-suggest-risks', message: "Suggest risks I haven't considered." };
+  const THIN_BUTTON = 'Suggest up to 3 more risks, including one against ‘Raise to £59’';
+  const CONSTRUCTION_BRIEF = 'Raise Pro £49 → £59 to reach £20,000 Total MRR within 12 months. One risk is customer churn.';
+  /** A real constructor candidate: one user-proposed option, a declared baseline, and unquantified risks. */
+  const thinConstruction = async (riskCount: number) => {
+    constructionCandidate = {
+      goal: { kind: null, deliverable: null, metric: 'Total MRR', operator: '>=', target_stated: true, value: 20000,
+        unit: 'GBP', horizon_months: 12, provenance: 'explicit', frame: 'level', baseline_known: false,
+        baseline_value: null, baseline_provenance: 'inferred', scope: null },
+      constraints: [],
+      options: [
+        { label: 'Raise to £59', provenance: 'explicit', changes: ['Pro plan price'], interventions: [], is_status_quo: null, added_capacity: null },
+        { label: 'Keep £49', provenance: 'explicit', changes: [], interventions: [], is_status_quo: true, added_capacity: null },
+      ],
+      factors: [{ label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 100 }],
+      risks: ['Customer churn', 'Competitor discount', 'Slower acquisition'].slice(0, riskCount).map((label) => ({ label, provenance: 'inferred', unit: null, plausible_max: null })),
+      outcomes: [],
+      links: [{ from: 'Pro plan price', to: 'Total MRR', direction: 'positive', provenance: 'inferred',
+        effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null }],
+      identities: [], unknowns: [], decision_question: null,
+    };
+    script = [() => fnCall('build_model_from_brief', { brief: CONSTRUCTION_BRIEF }), () => say('Here is the model to explore together.')];
+    const t = await turn({ message: CONSTRUCTION_BRIEF });
+    expect(t._agent.tool_calls, JSON.stringify(t)).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true, mutated: true }));
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(riskCount);
+    expect(graphNow().nodes.find((node) => node.label === 'Raise to £59')).toMatchObject({ kind: 'option', provenance: 'from_brief' });
+    return t;
+  };
+
+  it('P05b-8a: construction with one risk puts the relabelled risks press first and leaves the base reply byte-identical', async () => {
+    const t = await thinConstruction(1);
+    expect(t.suggested_actions[0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
+    expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
+    expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
+    // Measured from the unmodified route in the RED run; the offer must leave these bytes unchanged.
+    expect(t.assistant_text).toBe([
+      'Here is the model to explore together.',
+      'The first analysis could not run yet: Factor "Pro plan price" is currently £49. What should option "Raise to £59" set it to?',
+      "This model doesn't yet say whether any option gets there within 12 months.",
+      'Questions this model does not answer yet: Does "Total MRR" get there within 12 months? The model holds the deadline; no result answers that yet. The analysis can\'t run yet. The values involved are Olumi\'s own suggestions, not yours — ask Olumi to work them through, or set them yourself.',
+    ].join('\n\n'));
+  }, 120_000);
+
+  it('P05b-8b CONTRAST: construction with three risks has no relabelled risks press', async () => {
+    const t = await thinConstruction(3);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
+
+  it('P05b-8c CONTRAST: a non-construction turn on the one-risk graph has no relabelled risks press', async () => {
+    await thinConstruction(1);
+    script = [() => say('We can explore this model together.')];
+    const t = await turn({ message: 'What do you think about the pricing options?' });
+    expect(t._agent.tool_calls.some((c) => c.name === 'build_model_from_brief' && c.mutated === true)).toBe(false);
+    expect(graphNow().nodes.filter((node) => node.kind === 'risk')).toHaveLength(1);
+    expect(t.suggested_actions.some((c) => c.id === RISKS.id && c.label === THIN_BUTTON), JSON.stringify(t)).toBe(false);
+  }, 120_000);
   const paulV1 = () => {
     const g = JSON.parse(readFileSync(new URL('../method-turn/__tests__/fixtures/s-c-widen/paul-6582edbc-v1.json', import.meta.url), 'utf8')) as Record<string, unknown>;
     delete g['_provenance'];
@@ -201,7 +269,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(addChips(t1).map((c) => c.label), JSON.stringify(t1.suggested_actions)).toEqual(['Add ‘Recruitment delay’', 'Add ‘Wrong bottleneck’', 'Add ‘Coordination drag’']);
     expect(t1.suggested_actions.map((c) => c.id).slice(3)).toEqual(['agent-widen-something-else']);
     expect(t1.assistant_text).toContain('(assumption-based planning)');
-    expect(t1.assistant_text).toContain("- ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
+    expect(t1.assistant_text).toContain("- Olumi's suggestion: ‘Recruitment delay’: ‘Hire Two Developers’ relies on filling both developer roles quickly. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
     expect((t1 as unknown as { model_gap?: { kind: string } }).model_gap?.kind, 'the typed gap rides the wire').toBe('deadline_missing');
     expect(t1.assistant_text).not.toContain('<risk_suggestions>');
     expect(t1.assistant_text.trim().split('\n').at(-1)).toBe(S1_ASK);
@@ -485,7 +553,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const add = adds[0]!;
     expect(add.message).toBe('Add the risk ‘Feature release slips’ to ‘Raise Pro price to £59’: that option relies on this not happening. The Run leaves it out until it can apply to that option alone.');
     expect(add.message).not.toContain('driven by');
-    expect(t1.assistant_text).toContain("- ‘Feature release slips’: ‘Raise Pro price to £59’ relies on the feature release enabling the planned price increase. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
+    expect(t1.assistant_text).toContain("- Olumi's suggestion: ‘Feature release slips’: ‘Raise Pro price to £59’ relies on the feature release enabling the planned price increase. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.");
     expect(t1.assistant_text).not.toContain('affects every option alike');
     expect(nodeLabels(), 'suggesting writes nothing').toEqual(before);
     const calls = openAiCalls;

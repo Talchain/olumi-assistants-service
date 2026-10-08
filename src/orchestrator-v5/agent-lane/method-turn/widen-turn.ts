@@ -690,6 +690,32 @@ export const SUGGEST_RISKS_CHIP = {
   label: 'Suggest risks',
   message: "Suggest risks I haven't considered.",
 } as const satisfies SuggestedAction;
+
+/** The brief's ONE proposed option, by provenance and identity; a baseline is never a leaning. */
+export function favouredOptionOf(graph: unknown): { id: string; label: string } | null {
+  const options = graphOf(graph).nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && n.provenance === 'from_brief');
+  const option = options.length === 1 ? options[0] : undefined;
+  return typeof option?.id === 'string' && labelOf(option) !== null ? { id: option.id, label: labelOf(option)! } : null;
+}
+
+/** The answer-offer envelope's label cap (migration `append_agent_answer_with_offers`: char_length(label) 1–80). */
+export const THIN_DRAFT_BUTTON_MAX = 80;
+
+/** Offer the existing risks door after a thin first draft; the reply contract owns placement of the face. */
+export function thinDraftOffer(graph: unknown, mutated: boolean): { face: string; button: string; press: SuggestedAction } | null {
+  const g = graphOf(graph);
+  const risks = g.nodes.filter((n) => n.kind === 'risk').length;
+  if (mutated !== true || !g.nodes.some((n) => n.kind === 'goal')
+    || !g.nodes.some((n) => n.kind === 'option' && n.is_baseline !== true) || risks > 1) return null;
+  const favoured = favouredOptionOf(graph);
+  const generic = 'Suggest up to 3 more risks, including one against one of your options';
+  const named = favoured !== null ? `Suggest up to 3 more risks, including one against ${quote(favoured.label)}` : generic;
+  // The answer row stores an offer only when its label is 1–80 characters (append_agent_answer_with_offers): a longer
+  // named button would be live-only and gone on reload, so it falls back to the generic words.
+  const button = named.length <= THIN_DRAFT_BUTTON_MAX ? named : generic;
+  return { face: risks === 1 ? 'Olumi found one risk in your brief.' : 'Olumi found no risks in your brief.',
+    button, press: { ...SUGGEST_RISKS_CHIP, label: button } };
+}
 /** The canvas "+" chooser's Risk press (DGAI `WhatElseChooser.tsx` → `askAi.ts` `ask:risks`). */
 export const CANVAS_RISKS_PRESS_ID = 'ask:risks';
 
@@ -804,6 +830,7 @@ export interface RunRisksWidenTurn {
   readonly graph: Graph;
   /** The user's own options and the factors each one CHANGES (moves against the status quo; repair edges excluded). */
   readonly options: readonly { readonly id: string; readonly label: string; readonly changes: readonly string[] }[];
+  readonly favoured: { readonly id: string; readonly label: string } | null;
   readonly gap: ModelGap | null;
 }
 
@@ -856,6 +883,7 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
   const factors = g.nodes.filter((n) => n.kind === 'factor' && labelOf(n) !== null).map(pick);
   const destinations = g.nodes.filter((n) => (n.kind === 'goal' || n.kind === 'outcome') && labelOf(n) !== null).map(pick);
   const risks = g.nodes.filter((n) => n.kind === 'risk' && labelOf(n) !== null).map((n) => labelOf(n)!);
+  const favoured = favouredOptionOf(graph);
   const directive = [
     'METHOD TURN: the user asked Olumi to suggest risks they have not considered. Do not write prose. Reply with ONLY '
       + `<${RISK_TAG}>JSON array</${RISK_TAG}>, nothing before or after it. The server writes every word the user sees.`,
@@ -879,11 +907,12 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
     `Goal and outcomes (affects_id): ${JSON.stringify(destinations)}.`,
     `The user's options and the factors each one changes: ${JSON.stringify(options.map((o) => ({ id: o.id, label: o.label,
       changes: o.changes.map((f) => ({ id: f, label: labelOf(g.nodes.find((n) => n.id === f)) ?? f })) })))}.`,
+    ...(favoured !== null ? [`At least one item must hit the option the brief proposes, ${JSON.stringify(favoured)}: a way it could fall short.`] : []),
     `All factors: ${JSON.stringify(factors)}.`,
     ...(risks.length > 0 ? [`Risks already in the model (never suggest these again): ${JSON.stringify(risks)}.`] : []),
     'Use only these ids. Never write a probability, percentage, figure, likely, chance, best, recommend, winner, leads or ahead.',
   ].join('\n');
-  return { kind: 'run_risks', target: 'risks', goal_label: goalLabel, directive, graph: g, options, gap: modelGapOf(graph, userWords) };
+  return { kind: 'run_risks', target: 'risks', goal_label: goalLabel, directive, graph: g, options, favoured, gap: modelGapOf(graph, userWords) };
 }
 
 const RISKS_UNAVAILABLE: Readonly<Record<'no_goal' | 'model_unread', string>> = {
@@ -1008,6 +1037,40 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
     sharedPreconditions.push({ label: squeezed.label, category: squeezed.category, relies_on: squeezed.relies_on });
   }
   return { kept: [...kept.filter((k) => !k.shared), ...kept.filter((k) => k.shared)], dropped, shared_preconditions: sharedPreconditions };
+}
+
+export interface DisconfirmGateResult extends RiskGateResult {
+  readonly disconfirm_missing?: true;
+}
+
+/** Re-run every per-item clause, then check the replacement against the items and disclosures that remain. */
+export function disconfirmCandidateOf(turn: RunRisksWidenTurn, candidate: unknown, remaining: RiskGateResult): RiskSuggestion | null {
+  const item = riskGate(turn, [candidate]).kept[0];
+  if (item === undefined || remaining.kept.some((k) => sameLabel(k.label, item.label) || k.category === item.category)
+    || remaining.shared_preconditions.some((p) => sameLabel(p.label, item.label) || p.category === item.category)) return null;
+  return item;
+}
+
+/** RK-DISCONFIRM follows the unchanged risk gate. Raw candidates are input only, never returned in diagnostics. */
+export function applyDisconfirm(turn: RunRisksWidenTurn, gate: RiskGateResult & { readonly candidates?: unknown }): DisconfirmGateResult {
+  const { candidates, ...base } = gate;
+  if (turn.favoured === null || base.kept.some((r) => r.hits.id === turn.favoured!.id)) return base;
+  const raw = Array.isArray(candidates) ? candidates : [];
+  const evicted = base.kept.at(-1);
+  if (evicted !== undefined) {
+    const remaining = { ...base, kept: base.kept.slice(0, -1) };
+    for (const dropped of base.dropped) {
+      if (dropped.failed.length !== 1 || dropped.failed[0] !== 'RK-COUNT') continue;
+      const item = disconfirmCandidateOf(turn, raw[dropped.index], remaining);
+      if (item === null || item.hits.id !== turn.favoured.id) continue;
+      const evictedIndex = raw.findIndex((c) => sameLabel(String(rec(c)?.label ?? ''), evicted.label));
+      if (evictedIndex < 0) continue;
+      const kept = [...remaining.kept, item];
+      return { ...base, kept: [...kept.filter((r) => !r.shared), ...kept.filter((r) => r.shared)],
+        dropped: [...base.dropped.filter((d) => d.index !== dropped.index), { index: evictedIndex, failed: ['RK-COUNT'] }] };
+    }
+  }
+  return { ...base, disconfirm_missing: true };
 }
 
 /** The Add press's message: the user's own words in the transcript, naming the risk, what it hits and its refs by label. */
@@ -1153,7 +1216,7 @@ export interface SettledRisksTurn {
   readonly reply: string;
   readonly offered: number;
   readonly actions: readonly SuggestedAction[];
-  readonly gate: RiskGateResult;
+  readonly gate: DisconfirmGateResult;
 }
 
 /**
@@ -1162,11 +1225,15 @@ export interface SettledRisksTurn {
  * then AT MOST ONE gap question. Chips: one Add per item, then 'Something else'. None passed → RC's fallback.
  */
 export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): SettledRisksTurn {
-  const gate = riskGate(turn, readRiskCandidates(draft));
+  const candidates = readRiskCandidates(draft);
+  const gate = applyDisconfirm(turn, { ...riskGate(turn, candidates), candidates });
+  const disconfirmLines = gate.disconfirm_missing === true && turn.favoured !== null
+    ? [`None of these bears directly on ${quote(turn.favoured.label)}; ask for risks to it if you want them.`] : [];
   // A shared precondition is SAID, never silence (DL 8 Oct): it can't be added yet, so it carries no Add press.
   const sharedLines = gate.shared_preconditions.map((p) => `- Every option relies on ${midSentence(p.relies_on)}. Risk: ${quote(p.label)} `
     + `(${CATEGORY_WORDS[p.category]}). This model can't yet hold a precondition that every option shares, so I haven't offered to add it.`);
   if (gate.kept.length === 0 && sharedLines.length === 0) {
+    // Nothing was offered, so there is no list to say "none of these" about: the fallback stands alone.
     return { reply: risksFallbackReply(turn), offered: 0, actions: [TALK_IT_THROUGH_CHIP], gate };
   }
   // Preconditions stay in the model but outside the Run; only drivers name a causal through factor.
@@ -1175,13 +1242,15 @@ export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): Settled
       + "This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet."
     : r.shared
     ? `- Every option relies on ${midSentence(r.relies_on)}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}; it affects every option alike. Watch for: ${r.watch_for}.`
-    : `- ${quote(r.hits.label)} relies on ${midSentence(r.relies_on)}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}. Watch for: ${r.watch_for}.`);
+    : `- ${quote(r.hits.label)} relies on ${midSentence(r.relies_on)}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}. Watch for: ${r.watch_for}.`)
+    .map((line) => line.replace(/^- /u, "- Olumi's suggestion: "));
   const count = gate.kept.length + sharedLines.length;
   const reply = [
     `${COUNT_WORDS[count]} you haven’t mapped yet.`,
     RISK_METHOD.line,
     ...lines,
     ...sharedLines,
+    ...disconfirmLines,
     gate.kept.length > 0 ? 'Possible risks, not established facts. Nothing is added until you choose one and approve the change.'
       : 'Possible risks, not established facts. Nothing has been added.',
     ...(turn.gap !== null ? [turn.gap.question] : []),
