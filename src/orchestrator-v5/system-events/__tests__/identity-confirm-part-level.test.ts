@@ -15,7 +15,9 @@ import {
 import { identityProposalOfferable } from '../../agent-lane/held-approval-offers.js';
 import { breakEvenFor, breakEvenLine } from '../../agent-lane/break-even.js';
 import { goalCoherenceAsk } from '../../agent-lane/goal-coherence.js';
-import type { StructuredProposal } from '../../agent-lane/proposal.js';
+import { createProposal, type StructuredProposal } from '../../agent-lane/proposal.js';
+import { proposalPendingAction } from '../../agent-lane/durable-proposal.js';
+import { proposalRecord } from '../../agent-lane/proposal-object/record.js';
 
 type Rec = Record<string, any>;
 const stored = JSON.parse(readFileSync(resolve(process.cwd(), 'src/orchestrator-v5/system-events/__tests__/fixtures/b1-828d87ac-stored-graph.json'), 'utf8')) as Rec;
@@ -103,6 +105,23 @@ describe('no Yes over a part with no level (stored 828d87ac)', () => {
       ? { ...n, observed_state: { unit: 'subscribers', value: 2.5, raw_value: 5000, source } } : n)) });
     expect(goalCoherenceAsk(count('cee_inference'), { nodeId: 'pro_monthly_price', previousRaw: 50 })).toBeNull();
     expect(goalCoherenceAsk(count('user_override'), { nodeId: 'pro_monthly_price', previousRaw: 50 })?.implied).toBe(245000);
+  });
+
+  // #2851 buddy r2 P1: the shared held-card projection (`proposalRecord`, behind the turn's held-card carry and the reload)
+  // drops an identity card that is no longer offerable.
+  it('a held identity card is not projected on 9f32a4b4 (Olumi\'s 250); CONTROL: the same card on the user\'s 300 is', () => {
+    const held = (g: Rec) => {
+      const card = proposeProductIdentity(g)!;
+      const proposal = createProposal({ scenario_id: 'sc', user_id: null, base_graph_identity_hash: computeAnalysisAffectingGraphHash(g as never) ?? '',
+        operations: [{ op: 'confirm_identity', path: card.outcome_id, value: { outcome_id: card.outcome_id, operation: 'product', factor_ids: [...card.factor_ids], words: card.words } }],
+        provenance: { authored_by: 'user_stated', basis: card.words }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: card.words } as never);
+      return proposalPendingAction(proposal, { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Yes', message: `Yes — ${card.words}` } as never,
+        { scenario_id: 'sc', emitted_at_iso: new Date().toISOString() });
+    };
+    expect(proposalRecord(held(inferred), inferred)).toBeUndefined();
+    const users = { ...inferred, nodes: inferred.nodes.map((n: Rec) => (n.id === 'pro_paying_subscribers'
+      ? { ...n, observed_state: { unit: 'subscribers', value: 0.15, raw_value: 300, source: 'user_override' } } : n)) };
+    expect(proposalRecord(held(users), users)).toBeDefined();
   });
 });
 
