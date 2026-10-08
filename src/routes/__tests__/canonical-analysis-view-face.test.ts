@@ -280,4 +280,60 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
     expect(cell(project(args([licence, { ...identity, message: 'Not shown. raw_node_id is unresolved.' }]))).why)
       .toBe("Not shown. Olumi can't give each option's figures for this goal from this run.");
   });
+
+  it('IDENTITY-SCOPED: Raise’s target words leave Keep’s own reason or licence line visible', () => {
+    const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', option_ids: ['raise'],
+      message: 'Not shown. Raise needs a testable target.' };
+    const bothWithheld = { ...licence, withheld_option_ids: ['raise', 'keep'], pct_by_option: {} };
+    const input = args([bothWithheld, target]);
+    const line = 'Not shown yet: needs month-by-month changes';
+    for (const carrier of [{ keep: { reason: 'zero_spread', side: 'falls_short', line } }, {}]) {
+      const view = projectWithReasonCarrier(input, carrier);
+      expect(cell(view, 'raise')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why: target.message });
+      expect(cell(view, 'keep')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN,
+        why: Object.hasOwn(carrier, 'keep') ? line : `‘Keep’: ${OPTION_CHANCE_WITHHELD}` });
+    }
+  });
+
+  it('IDENTITY-RUN-WIDE: no own option_ids keeps target words for both withheld options', () => {
+    const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: 'Not shown. The target cannot be tested yet.' };
+    const bothWithheld = { ...licence, withheld_option_ids: ['raise', 'keep'], pct_by_option: {} };
+    const view = project(args([bothWithheld, target]));
+    for (const id of ['raise', 'keep']) expect(cell(view, id)).toMatchObject({ kind: 'withheld', why: target.message });
+  });
+
+  it('IDENTITY-EMPTY-SCOPE: empty option_ids applies to neither option and leaves its next precedence visible', () => {
+    const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', option_ids: [],
+      message: 'Not shown. The target cannot be tested yet.' };
+    const bothWithheld = { ...licence, withheld_option_ids: ['raise', 'keep'], pct_by_option: {} };
+    const input = args([bothWithheld, target]);
+    const line = 'Not shown yet: needs month-by-month changes';
+    for (const carrier of [{ keep: { reason: 'zero_spread', side: 'falls_short', line } }, {}]) {
+      const view = projectWithReasonCarrier(input, carrier);
+      expect(cell(view, 'raise')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN,
+        why: `‘Raise’: ${OPTION_CHANCE_WITHHELD}` });
+      expect(cell(view, 'keep')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN,
+        why: Object.hasOwn(carrier, 'keep') ? line : `‘Keep’: ${OPTION_CHANCE_WITHHELD}` });
+    }
+  });
+
+  it.each(['raise', 'raise-extra', null, 42, {}, [42, null, { toString: () => 'raise' }], ['raise-extra']]
+    .map(option_ids => ({ option_ids })))(
+    'IDENTITY-INVALID-SCOPE: option_ids $option_ids cannot match Raise by coercion or substring', ({ option_ids }) => {
+      const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', option_ids,
+        message: 'Not shown. Raise needs a testable target.' };
+      expect(cell(project(args([licence, target])))).toMatchObject({ kind: 'withheld', why: `‘Raise’: ${OPTION_CHANCE_WITHHELD}` });
+    },
+  );
+
+  it('IDENTITY-SCOPE-BEFORE-READER: out-of-scope target and unsafe words cannot alter Keep’s placeholder words', () => {
+    const target = { code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', option_ids: ['raise'],
+      message: 'Not shown. raw_node_id is unresolved.' };
+    const placeholder = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', option_ids: ['keep'],
+      message: 'Not shown. A link is not sized.' };
+    const bothWithheld = { ...licence, withheld_option_ids: ['raise', 'keep'], pct_by_option: {} };
+    const view = project(args([bothWithheld, target, placeholder, placeholder]));
+    expect(cell(view, 'keep')).toMatchObject({ kind: 'withheld', why: placeholder.message });
+    expect(cell(view, 'raise').why).toBe("Not shown. Olumi can't give each option's figures for this goal from this run.");
+  });
 });

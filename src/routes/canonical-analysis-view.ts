@@ -26,7 +26,7 @@ const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
  * src/components/results/utils/goalIdentityWithheld.ts @ the same commit.
  * Copy selection only: it does not decide a cell's kind or licence.
  */
-function goalIdentityWithheldMessage(result: unknown): string | undefined {
+function goalIdentityWithheldMessage(result: unknown, option_id: string): string | undefined {
   const block = rec(result);
   const codes = ['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_USER_EFFECT_CLAMPED',
     'GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_PRODUCT_NOT_READ',
@@ -34,7 +34,10 @@ function goalIdentityWithheldMessage(result: unknown): string | undefined {
   const warnings = [rec(block?.enrichment)?.inference_warnings, block?.inference_warnings]
     .flatMap(value => Array.isArray(value) ? value : []).map(rec);
   const matched = warnings.filter((warning): warning is Rec => warning !== undefined
-    && typeof warning.code === 'string' && codes.includes(warning.code));
+    && typeof warning.code === 'string' && codes.includes(warning.code))
+    .filter(warning => !Object.hasOwn(warning, 'option_ids')
+      || (Array.isArray(warning.option_ids)
+        && warning.option_ids.some(id => typeof id === 'string' && id === option_id)));
   if (matched.length === 0) return undefined;
   const hasTargetRequirement = matched.some(warning => warning.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
   const reasons = hasTargetRequirement ? matched.filter(warning => warning.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') : matched;
@@ -115,7 +118,6 @@ export function projectCanonicalAnalysisCells(
   const result = current ? currentResult : null;
   const facts = goalChanceFactsForAgent(result, graph, current);
   const faces = goalChanceCellFacesForAgent(result, graph, current);
-  const identityMessage = goalIdentityWithheldMessage(result);
   const certainty = new Map((current ? readStoredGoalCertainty(goalCertainty) : undefined)
     ?.filter(decision => decision.earned === false).map(decision => [decision.option_id, decision.say]) ?? []);
   const licence = goalChanceLicenceForAgent(result);
@@ -136,6 +138,7 @@ export function projectCanonicalAnalysisCells(
     ...Object.keys(facts.goal_chance_range_display ?? {}),
   ])];
   return optionIds.map(option_id => {
+    const identityMessage = goalIdentityWithheldMessage(result, option_id);
     const range = Object.hasOwn(facts.goal_chance_range_display ?? {}, option_id)
       ? facts.goal_chance_range_display?.[option_id] : undefined;
     const display = Object.hasOwn(facts.goal_chance_display ?? {}, option_id)
