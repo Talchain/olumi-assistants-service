@@ -4,20 +4,31 @@
 -- Paul-gated: apply only after the isolated local rehearsal and step 3 approval.
 --
 -- WHAT / WHY
---   Add a monotonic scenario revision and a NEW append_turn_atomic_v6 wrapper.
---   v6 locks the scenario and detects replay before comparing the revision.
---   The existing v5 authority runs in the same transaction. A fresh successful
---   turn increments revision once; an accepted replay leaves it unchanged.
---   Existing v2-v5 writers do not read or increment this new column.
+--   Add a monotonic scenario revision, a BEFORE UPDATE trigger covering every
+--   scenarios writer, and a NEW append_turn_atomic_v6 wrapper. The six columns
+--   that advance revision are graph, brief, brief_text, framing, stage, and
+--   current_model_version_id. Excluded: title, is_pinned, is_archived, analysis*,
+--   analysis_invalidated_at, latest_analysis_summary, rolling_summary, events,
+--   event_seq, updated_at, last_turn_nonce, graph_identity_hash (moves with
+--   graph), source_scenario_id, user_id.
+--   this trigger fires on PRODUCTION writes on the shared DB; it is additive and never refuses
+--   Each qualifying UPDATE advances revision once; other UPDATEs pin it to OLD
+--   revision, including an attempt to set revision directly. A fresh turn that
+--   changes none of the six columns leaves revision unchanged. A turn may make
+--   multiple qualifying UPDATEs. v6 locks the scenario, detects replay before
+--   revision CAS, delegates to v5, and re-reads revision after v5 returns.
 --
 -- ADDITIVE-ONLY PROOF
 --   1. One new column: public.scenarios.revision BIGINT NOT NULL DEFAULT 0.
---   2. One new RPC name: public.append_turn_atomic_v6 (CREATE, never REPLACE).
+--   2. Two new functions (CREATE, never REPLACE): scenarios_bump_revision and
+--      append_turn_atomic_v6; one new plain BEFORE UPDATE row trigger.
 --   3. No existing RPC, trigger, grant, caller, or table definition is replaced.
 --   4. No DROP, data backfill, or existing-row UPDATE is executed by migration.
---      The UPDATE below runs only when the new RPC accepts a fresh turn.
---   5. EXECUTE is revoked from PUBLIC/anon/authenticated; granted to service_role
---      only, with SECURITY DEFINER and v5's pinned pg_catalog, public search_path.
+--      The trigger has only comparisons, NEW.revision assignment, and RETURN;
+--      it has no SELECT, lookup, RAISE, or exception path.
+--   5. v6 EXECUTE is revoked from PUBLIC/anon/authenticated; granted to
+--      service_role only, with SECURITY DEFINER and v5's pinned
+--      pg_catalog, public search_path.
 --
 -- SOURCE CONTRACT / BRIEF DISCREPANCIES
 --   20260920210000_v5_append_v5_replay_precedes_cas.sql returns JSONB containing
@@ -35,10 +46,33 @@
 --   input to have defaults, while p_expected_revision must remain required.
 --   A replay may supply its original stale revision: v5 validates its identity,
 --   revision CAS is skipped, and the current revision is returned without a bump.
+--   v5 currently requires a non-NULL graph and mutation id (SQLSTATE 22023), so
+--   a literal no-graph direct answer cannot succeed through this v6 wrapper.
 -- =============================================================================
 
 ALTER TABLE public.scenarios
   ADD COLUMN revision BIGINT NOT NULL DEFAULT 0;
+
+CREATE FUNCTION public.scenarios_bump_revision()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF NEW.graph IS DISTINCT FROM OLD.graph OR NEW.brief IS DISTINCT FROM OLD.brief OR NEW.brief_text IS DISTINCT FROM OLD.brief_text
+     OR NEW.framing IS DISTINCT FROM OLD.framing OR NEW.stage IS DISTINCT FROM OLD.stage
+     OR NEW.current_model_version_id IS DISTINCT FROM OLD.current_model_version_id THEN
+    NEW.revision := OLD.revision + 1;
+  ELSE
+    NEW.revision := OLD.revision;   -- pins revision: no writer can set it directly
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER scenarios_bump_revision
+BEFORE UPDATE ON public.scenarios
+FOR EACH ROW EXECUTE FUNCTION public.scenarios_bump_revision();
 
 CREATE FUNCTION public.append_turn_atomic_v6(
   p_scenario_id                  UUID,
@@ -150,14 +184,11 @@ BEGIN
 
   -- v5 returns only after a successful append or replay. Its refusals raise
   -- and roll back this transaction, including every delegated side effect.
-  IF v_turn_preexisting THEN
-    RETURN v_result || jsonb_build_object('revision', v_revision);
-  END IF;
-
-  UPDATE public.scenarios
-    SET revision = revision + 1
-    WHERE id = p_scenario_id
-    RETURNING revision INTO v_revision;
+  -- Both paths re-read after v5: the trigger owns revision across all writers,
+  -- and a fresh turn can advance it zero, one, or multiple times.
+  SELECT revision INTO v_revision
+    FROM public.scenarios
+    WHERE id = p_scenario_id;
 
   RETURN v_result || jsonb_build_object('revision', v_revision);
 END;

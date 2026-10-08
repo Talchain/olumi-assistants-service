@@ -1,3 +1,7 @@
+DROP TRIGGER scenarios_bump_revision ON public.scenarios;
+
+DROP FUNCTION public.scenarios_bump_revision();
+
 DROP FUNCTION public.append_turn_atomic_v6(
   UUID, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, INTEGER, JSONB,
   JSONB, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT, TEXT, BOOLEAN, BIGINT,
@@ -5,4 +9,4 @@ DROP FUNCTION public.append_turn_atomic_v6(
   BIGINT
 );
 
-ALTER TABLE public.scenarios DROP COLUMN IF EXISTS revision;
+ALTER TABLE public.scenarios DROP COLUMN revision;
