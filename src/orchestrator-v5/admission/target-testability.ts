@@ -114,18 +114,12 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
   // Codex r2 P1 (#2816): the factors' units must compose into the TARGET's currency and period (a target edited to
   // another currency keeps the confirmed identity; nothing downstream converts it).
   const goalLabel = typeof goal.label === 'string' ? goal.label : '';
-  // The user already confirmed this product, including an implicit per-count rate such as £/month × subscribers.
-  // `confirm` is unresolved only BEFORE that Yes (rejected above); after it, both the reader's proof and confirmed
-  // reading derive the level. A different currency, period or explicitly mismatched denominator still returns `no`.
   return unitsCompose(goal.goal_threshold_unit, goalLabel, levels[0], levels[1]).kind !== 'no';
 }
 
-/** Science §(i) (A): ONE estimate-conversion predicate for case (c) and its guided-list reader.
- * Read the writer's end units and magnitude converter, including its refused/unreadable frames. A stored natural
- * effect describes only the coefficient it was written for. This licenses no placeholder, user band or accepted size.
- */
-export function convertingOlumiEstimate(edge: unknown, graph: unknown): boolean {
-  if (!isRec(edge) || linkSizing(edge) !== 'olumi_estimate' || !isRec(graph) || !Array.isArray(graph.nodes)
+// A current natural effect converts this one causal link in the writer's end frames.
+function locallyConvertingNaturalEffect(edge: unknown, graph: unknown): boolean {
+  if (!isRec(edge) || !isRec(graph) || !Array.isArray(graph.nodes)
     || typeof edge.from !== 'string' || typeof edge.to !== 'string') return false;
   const natural = isRec(edge.provenance) && isRec(edge.provenance.natural_effect) ? edge.provenance.natural_effect : undefined;
   const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
@@ -140,6 +134,40 @@ export function convertingOlumiEstimate(edge: unknown, graph: unknown): boolean 
   // naturalEffectOf persists BOTH amount and per to six significant figures, while strength_mean keeps beta.
   // Each rounding has <=5e-6 relative error; their ratio differs by <=1e-5 of the larger coefficient.
   return beta !== null && Math.abs(mean) <= 1 && Math.abs(beta - mean) <= 1e-5 * Math.max(Math.abs(beta), Math.abs(mean));
+}
+
+/** Science §(i) (A): a local conversion licenses an Olumi estimate only on a converting route to the scored goal.
+ * Follow readable conversion frames or the existing exact identity operands. Each downstream link keeps its OWN
+ * case-(c) size check: removing this estimate's block never licenses a placeholder farther along the route.
+ */
+export function convertingOlumiEstimate(edge: unknown, graph: unknown, identityEvaluations?: readonly unknown[]): boolean {
+  if (!isRec(edge) || linkSizing(edge) !== 'olumi_estimate' || !locallyConvertingNaturalEffect(edge, graph)
+    || !isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return false;
+  const nodes = graph.nodes.filter(isRec);
+  const goal = nodes.find(n => n.kind === 'goal');
+  if (goal === undefined) return false;
+  const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit
+    : isRec(goal.observed_state) && typeof goal.observed_state.unit === 'string' ? goal.observed_state.unit : undefined;
+  if (edge.to === goal.id) return sizedInGoalUnit(edge, goalUnit, graph);
+  const edges = graph.edges.filter(isRec);
+  const exact = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const seen = new Set([edge.to]);
+  for (const from of seen) for (const next of edges) {
+    const to = byId.get(next.to);
+    if (next.from !== from || to === undefined || to.kind === 'option' || to.kind === 'decision') continue;
+    const identityOperand = exact.has(next);
+    const frames = typeof next.from === 'string' && typeof next.to === 'string'
+      ? linkEffectConversionFrames(graph, next.from, next.to) : null;
+    if (!identityOperand && (frames === null || convertLinkEffect(1, 1, frames.target, frames.source) === null)) continue;
+    if (next.to === goal.id) {
+      const ends = typeof next.from === 'string' && typeof next.to === 'string'
+        ? linkEffectEndUnits(graph, next.from, next.to) : null;
+      if (identityOperand || (goalUnit !== undefined && ends !== null
+        && statedInOneOf(goalUnit, [...ends.target.own, ends.target.adopted]))) return true;
+    } else seen.add(next.to);
+  }
+  return false;
 }
 
 /** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
@@ -318,7 +346,7 @@ export function targetTestabilityOf(
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
     const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
-      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph));
+      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf) && !convertingOlumiEstimate(e, graph, identityEvaluations));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     // ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's sizes on both sides of a level-less mediator size the path (M's

@@ -148,9 +148,19 @@ describe('R2 DL composition: draw-2 level ask before the ONE guided list', () =>
   });
 
   it('R2 RED: current target producer carries level_only_say from its existing parts, minus its link clause', () => {
-    const warning = targetNotTestableWarning(draw2.graph, targetTestabilityOf(draw2.graph), [], TARGET) as Warning;
+    // r9 class (ii) setup repair: the confirmed draw-2 graph already holds both operand levels.
+    // Remove one level only in this missing-level scenario; preserve both exact wording assertions.
+    const graph = structuredClone(draw2.graph) as { nodes: { id: string; observed_state?: unknown }[] };
+    graph.nodes.find(n => n.id === 'paying_pro_subscribers')!.observed_state = null;
+    const warning = targetNotTestableWarning(graph, targetTestabilityOf(graph), [], TARGET) as Warning;
     expect(warning.level_only_say).toBe(LEVEL_ONLY);
-    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [warnings[0], warning] } }, draw2.graph)?.say).toBe(COMPLETE);
+    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [warnings[0], warning] } }, graph)?.say).toBe(COMPLETE);
+  });
+
+  it('r9 CONTROL: the original confirmed draw-2 product derives its level and asks only for its unsized links', () => {
+    const warning = targetNotTestableWarning(draw2.graph, targetTestabilityOf(draw2.graph), [], TARGET) as Warning;
+    expect(warning.level_only_say).toBeUndefined();
+    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [warnings[0], warning] } }, draw2.graph)?.say).toBe(GUIDED_TWO);
   });
 
   it('R2 producer: target-derived scale keeps the existing unit-qualified level-only question verbatim', () => {

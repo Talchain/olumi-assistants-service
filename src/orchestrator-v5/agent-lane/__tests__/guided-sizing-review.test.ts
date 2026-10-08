@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress } from '../guided-sizing.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, type GuidedSizingDraft } from '../guided-sizing.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 
 type Json = Record<string, any>;
@@ -105,5 +105,26 @@ describe('GUIDED PATH round 7 reviewed identity and Run scope', () => {
     expect(guidedSizingActions(draft, graph, history).map(a => a.id)).toEqual(before.slice(1).map(a => a.id));
     history[0]!.assistant_message = 'Nothing is recorded: the link from “Same label” to “Same label” stays as it is.';
     expect(guidedSizingActions(draft, graph, history).map(a => a.id)).toEqual(before.slice(1).map(a => a.id));
+  });
+  it('r9 historical endpoints survive rename while label-only records close no newly labelled edge', () => {
+    const graph = { nodes: [
+      { id: 'a', label: 'Renamed A' }, { id: 'b', label: 'Renamed B' },
+      { id: 'c', label: 'Former A' }, { id: 'd', label: 'Former B' },
+    ], edges: [
+      { from: 'a', to: 'b', provenance: { magnitude: 'olumi_placeholder' } },
+      { from: 'c', to: 'd', provenance: { magnitude: 'olumi_placeholder' } },
+    ] };
+    const draft: GuidedSizingDraft = { v: 1, total: 2, links: [
+      { from: 'a', to: 'b', from_label: 'Renamed A', to_label: 'Renamed B', order: 0 },
+      { from: 'c', to: 'd', from_label: 'Former A', to_label: 'Former B', order: 1 },
+    ] };
+    const before = guidedSizingActions(draft, graph);
+    const formerQuestion = 'How strongly does ‘Former A’ affect ‘Former B’?';
+    const formerReceipt = 'Nothing is recorded: the link from “Former A” to “Former B” stays as it is.';
+    expect(guidedSizingActions(draft, graph, [formerQuestion, formerReceipt])).toEqual(before);
+    expect(guidedSizingActions(draft, graph, [{ assistant_message: formerQuestion }])).toEqual(before);
+    const digest = createHash('sha256').update(`chip:${JSON.stringify([before[0]!.id, null])}`).digest('hex').slice(0, 32);
+    expect(guidedSizingActions(draft, graph, [{ request_hash: `historical#chip:${digest}`, assistant_message: formerQuestion }])
+      .map(a => a.id)).toEqual([before[1]!.id]);
   });
 });

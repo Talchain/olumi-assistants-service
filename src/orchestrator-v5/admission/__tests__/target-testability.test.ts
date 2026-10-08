@@ -68,6 +68,7 @@ describe('the verdict (0 LLM)', () => {
         { from: 'warm_connections_pursued', to: 'angel_investor_meetings' },
         { from: 'angel_investor_outreach', to: 'angel_investor_meetings' },
         { from: 'fundraising_overhead', to: 'runway_exhaustion' },
+        { from: 'fundraising_overhead', to: 'investment_firm_outreach' },
       ] },
     ] });
   });
@@ -76,7 +77,7 @@ describe('the verdict (0 LLM)', () => {
     expect(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul))).toBe(
       // RE-PINNED, RT-10 B′ (Science's template edits, #87 5999608477): (c) names the canvas object, and the level
       // question is "What's today's level of {goal}?". The target words and every failing reason are unchanged.
-      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the links from Investment firm meetings to securing funding, from Angel investor meetings to securing funding and from Runway exhaustion to securing funding and 7 more. What's today's level of securing funding?");
+      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the links from Investment firm meetings to securing funding, from Angel investor meetings to securing funding and from Runway exhaustion to securing funding and 8 more. What's today's level of securing funding?");
   });
 
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {

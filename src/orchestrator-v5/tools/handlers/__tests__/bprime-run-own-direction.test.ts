@@ -36,7 +36,7 @@ const F = JSON.parse(readFileSync(new URL('./fixtures/bprime-rt10b.json', import
 const SCENARIO = '078e521e-907b-4444-96c9-b9a49472b766';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE
-// with a natural effect that converts into goal units." The two converting upstream estimates leave this list.
+// with a natural effect that converts into goal units." Their downstream conversion frames are unreadable, so these two still fail.
 
 
 /** What ISL answers for each direction CEE can send. */
@@ -141,7 +141,7 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(sentence).toMatch(/^Olumi can compare your options, but can't yet test them against your target \(at most 400 cancellations \/ month\), because it needs today's level of monthly cancellations/);
     const warning = (result.enrichment.inference_warnings as Json[]).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
     expect(warning.message).toBe(`Not shown. ${sentence}`);
-    expect(notTargetTestableSentence(F.graph_with_target, verdict)).toContain('and from Late-delivery cancellations to monthly cancellations and 1 more.');
+    expect(notTargetTestableSentence(F.graph_with_target, verdict)).toContain('and from Late-delivery cancellations to monthly cancellations and 3 more.');
     const tail = untestableTargetTail(F.graph_with_target, verdict)!;
     expect(warning.say).toBe(tail);
     expect(goalChanceWithheldForAgent(result)?.say).toBe(tail);
@@ -156,14 +156,15 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     if (verdict.kind !== 'not_testable') throw new Error('the long-list precondition is absent');
     expect(verdict.failures.find((failure) => failure.case === 'c')?.links?.length).toBeGreaterThanOrEqual(4);
     const warning = targetNotTestableWarning(graph, verdict, [], GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
-    expect(warning.message).toBe("Not shown. Olumi can compare your options, but can't yet test them against your target (at most 400 cancellations / month), because it needs today's level of monthly cancellations and a size for the links from Pauses taken instead of cancellations by returning customers to monthly cancellations and 3 more. What's today's level of monthly cancellations?");
+    expect(warning.message).toBe("Not shown. Olumi can compare your options, but can't yet test them against your target (at most 400 cancellations / month), because it needs today's level of monthly cancellations and a size for the links from Pauses taken instead of cancellations by returning customers to monthly cancellations and 5 more. What's today's level of monthly cancellations?");
     expect(warning.message.length).toBeLessThanOrEqual(400);
   });
 
   it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: %s keeps both upstream links in the target requirement', (kind) => {
     const graph = clone(F.graph_with_target);
-    const estimates = graph.edges.filter((edge: Json) => convertingOlumiEstimate(edge, graph));
+    const estimates = graph.edges.filter((edge: Json) => edge.provenance?.magnitude === 'olumi_estimate');
     expect(estimates).toHaveLength(2);
+    expect(estimates.every((edge: Json) => !convertingOlumiEstimate(edge, graph))).toBe(true);
     for (const edge of estimates) {
       if (kind === 'placeholder') edge.provenance.magnitude = 'olumi_placeholder';
       else delete edge.provenance.natural_effect;

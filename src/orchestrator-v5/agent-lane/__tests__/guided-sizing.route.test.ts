@@ -1,6 +1,6 @@
 /** Guided sizing through the real Agent reply and its existing link-effect approval door. */
 import { readFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -346,6 +346,43 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(doorCalls).toHaveLength(0);
   });
 
+  it('r9 chip RED: a stored arrow id on another same-labelled edge cannot redirect the encoded endpoint pair', async () => {
+    const [from, to] = PAIRS[0];
+    const source = graph.nodes.find((node: Json) => node.id === from);
+    const target = graph.nodes.find((node: Json) => node.id === to);
+    graph.nodes.push({ ...structuredClone(source), id: 'other_source' }, { ...structuredClone(target), id: 'other_target' });
+    graph.edges.push({ id: `${from}->${to}`, from: 'other_source', to: 'other_target', strength: { mean: 0.5, std: 0.125 },
+      provenance: { magnitude: 'olumi_placeholder' } });
+    const read = await run();
+    const press = wirePresses(read).find(action => action.id === pressId(from, to))!;
+    expect(press).toBeDefined();
+    scripts.push({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: randomUUID(), arguments: JSON.stringify({
+      from_label: source.label, to_label: target.label, amount: -2, amount_unit: 'subscribers',
+      per_source_change: 1, per_source_change_unit: 'percentage points', quote: press.message,
+    }) }] });
+    const opened = await turn(press.message, { source: 'chip', chip: { id: press.id } });
+    expect(linkDoorEntries).toHaveLength(1);
+    expect(linkDoorEntries[0].grounded_links).toEqual([{ from, to }]);
+    expect(linkDoorEntries[0].grounded_selection).toEqual({ element_ids: [], unresolved: 'none' });
+    expect(opened._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_link_effect', ok: false,
+      mutated: false, refusal: 'quote_not_verbatim' })]);
+    expect(doorCalls).toHaveLength(0);
+  });
+
+  it.each(['missing', 'ambiguous'])('r9 chip unresolved %s endpoint pair is refused before any ordinary model or door', async mismatch => {
+    const read = await run();
+    const press = wirePresses(read).find(action => action.id === pressId(...PAIRS[0]))!;
+    const edge = graph.edges.find((e: Json) => e.from === PAIRS[0][0] && e.to === PAIRS[0][1]);
+    if (mismatch === 'missing') graph.edges = graph.edges.filter((e: Json) => e !== edge);
+    else graph.edges.push({ ...structuredClone(edge), id: 'another-same-endpoint-edge' });
+    modelBodies.length = 0;
+    const opened = await turn(press.message, { source: 'chip', chip: { id: press.id } });
+    expect(modelBodies).toHaveLength(0);
+    expect(linkDoorEntries).toHaveLength(0);
+    expect(opened._agent.tool_calls).toEqual([]);
+    expect(opened.assistant_text).toContain('That sizing link could not be checked against the current model. Nothing was changed.');
+  });
+
   it('a press binds its edge ids into canonical selection; labels do not select a different link', async () => {
     const body = await run();
     const press = body.suggested_actions.find((c: Json) => c.id === pressId(...PAIRS[0]));
@@ -360,11 +397,11 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(doorCalls, 'a sizing press asks; only an approved figure writes').toHaveLength(0);
   });
 
-  it('a never-reask-closed link gets no press, including the old wording', async () => {
+  it('a legacy label-only question cannot close a current endpoint press', async () => {
     recent = [{ turn_id: 'prior-ask', request_hash: 'agent_turn:prior-ask',
       assistant_message: 'How much does ‘Monthly churn’ change ‘Paying Pro subscribers’?' }];
     const body = await run();
-    expect(body.suggested_actions.some((c: Json) => c.id === pressId(...PAIRS[0]))).toBe(false);
+    expect(body.suggested_actions.some((c: Json) => c.id === pressId(...PAIRS[0]))).toBe(true);
   });
 
   it.each([false, true])('N=0 conversion press survives final wire and respects its exact closed question (%s)', async closed => {
@@ -379,7 +416,10 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const opts = graph.nodes.filter((n: Json) => n.kind === 'option').map((n: Json) => n.id);
     result.enrichment.inference_warnings = [targetNotTestableWarning(graph, targetTestabilityOf(graph), opts, 'GOAL_FIGURES_TARGET_NOT_TESTABLE')];
     const words = "How much does ‘Pro plan price’ change ‘Monthly churn’, in percentage points? Olumi has it as a band, which can't be turned into your goal's units.";
-    if (closed) recent = [{ turn_id: 'closed-band', request_hash: 'agent_turn:closed-band', assistant_message: words }];
+    if (closed) {
+      const digest = createHash('sha256').update(`chip:${JSON.stringify([pressId(...PAIRS[2]), null])}`).digest('hex').slice(0, 32);
+      recent = [{ turn_id: 'closed-band', request_hash: `agent_turn:closed-band#chip:${digest}`, assistant_message: words }];
+    }
     const body = await run();
     expect(body.assistant_text).not.toContain('Not shown yet: 0');
     expect(body.guided_sizing.total).toBe(0);

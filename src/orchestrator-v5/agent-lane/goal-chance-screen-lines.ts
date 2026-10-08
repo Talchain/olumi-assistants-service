@@ -52,6 +52,21 @@ const CHANCE_LABEL = 'chance of meeting your goal, in this model';
 const ESTIMATE_POINT_END = '(see Check estimates).';
 const estimatePointSentence = (l: GoalChanceScreenLine): string => l.chance.slice(0, l.chance.indexOf(ESTIMATE_POINT_END) + ESTIMATE_POINT_END.length);
 
+/** Narrator points cannot coexist with an owed producer-bound estimate label, in either word order or shorthand. */
+function unlabelledGoalPoint(sentence: string, lines: readonly GoalChanceScreenLine[]): boolean {
+  const plain = (value: string): string => value.replace(/['"‘’“”*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const said = plain(sentence).replace(/^(?:[-•]|\d{1,3}[.)])\s+/, '');
+  // A percentage chance in either word order, including a standalone shorthand point.
+  const point = /^(?:(?:about|roughly|approximately|around|at least|at most|less than|more than)\s+)?\d+(?:\.\d+)?\s*%\s*[.!]?$/;
+  if (point.test(said) || (/\b(?:chance|probability)\b/.test(said) && /\d+(?:\.\d+)?\s*%/.test(said))) return true;
+  // An option's standalone point is a goal figure here; a percentage with another quantity remains narration.
+  return lines.some(l => {
+    const prefix = `${plain(l.label)}:`;
+    return said.startsWith(prefix)
+      && point.test(said.slice(prefix.length).trim());
+  });
+}
+
 /** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
 export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
   const facts = goalChanceFactsForAgent(result, graph, current);
@@ -218,14 +233,16 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
   let body = text;
   if (lines.some(l => l.olumi_estimate_link_count !== undefined)) {
     for (const l of lines) {
-      const sentence = l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l);
-      const folded = foldQuotes(body), needle = foldQuotes(sentence);
-      const positions: number[] = [];
-      for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) positions.push(at);
-      for (const at of positions.reverse()) {
-        const key = `\u0000GP_ESTIMATE_POINT_${authorised.length}\u0000`;
-        authorised.push(body.slice(at, at + sentence.length));
-        body = body.slice(0, at) + key + body.slice(at + sentence.length);
+      const chance = l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l);
+      for (const sentence of [chance, l.depends].filter(s => s !== '')) {
+        const folded = foldQuotes(body), needle = foldQuotes(sentence);
+        const positions: number[] = [];
+        for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) positions.push(at);
+        for (const at of positions.reverse()) {
+          const key = `\u0000GP_ESTIMATE_POINT_${authorised.length}\u0000`;
+          authorised.push(body.slice(at, at + sentence.length));
+          body = body.slice(0, at) + key + body.slice(at + sentence.length);
+        }
       }
     }
     body = narratorCountGuard(body, null).text;
@@ -234,10 +251,7 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
     body = body.split('\u0000').map(part =>
       part.startsWith('GP_ESTIMATE_POINT_') ? part : part.split('\n').map(row => {
         const sentences = sentencesOf(row);
-        const kept = sentences.filter(sentence => {
-          const plain = sentence.replace(/[*_`]/g, '');
-          return !/\d+(?:\.\d+)?\s*%\s+(?:chance|probability)\b/i.test(plain);
-        });
+        const kept = sentences.filter(sentence => !unlabelledGoalPoint(sentence, lines));
         return kept.length === sentences.length ? row : kept.join(' ');
       }).join('\n')).join('\u0000');
     for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000`).join(chance);

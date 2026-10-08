@@ -1,20 +1,25 @@
 import { createHash } from 'node:crypto';
 import { readOptionResultSources, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
-import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
-import { convertingOlumiEstimate, goalOrderedLinks, targetTestabilityOf } from '../admission/target-testability.js';
+import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { convertingOlumiEstimate, goalOrderedLinks, targetTestabilityOf, untestableTargetTail } from '../admission/target-testability.js';
 import { linkEffectEndUnits } from '../system-events/link-effect-edit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from './goal-certainty.js';
-import { withoutAskedQuestion } from './goal-chance-withheld.js';
 
 type Rec = Record<string, unknown>;
 const record = (v: unknown): Rec | undefined =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
+const hasOlumiSize = (edge: unknown): boolean => {
+  const sizing = linkSizing(edge);
+  return sizing === 'olumi_estimate' || sizing === 'olumi_accepted';
+};
 
 /** Display/selection data only. No graph postimage, coefficients or executable operations. */
 export interface GuidedSizingDraft {
   readonly v: 1;
   readonly total: number;
+  /** Existing user-size recovery, from this same scoped verdict; internal words only, never a hook field. */
+  readonly recovery_line?: string;
   readonly links: readonly {
     readonly id?: string;
     readonly from: string; readonly to: string;
@@ -29,7 +34,7 @@ export interface GuidedSizingDraft {
 export type GuidedSizingAction = SuggestedAction & {
   readonly parameters: { readonly from: string; readonly to: string; readonly edge_id?: string };
 };
-export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links'> {
+export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recovery_line'> {
   readonly graph_hash: string;
   readonly run_key: string;
   readonly links: readonly (GuidedSizingDraft['links'][number] & {
@@ -67,11 +72,20 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
     : graph;
   const verdict = targetTestabilityOf(targetGraph, identityEvaluations);
   const carveouts = verdict.kind !== 'not_testable' ? [] : verdict.failures.filter(f => f.case === 'c').flatMap(f => f.links ?? [])
-    .filter(l => edgeFor(l) !== undefined && !isPlaceholderLink(edgeFor(l)) && !convertingOlumiEstimate(edgeFor(l), graph));
+    .filter(l => hasOlumiSize(edgeFor(l)) && !convertingOlumiEstimate(edgeFor(l), graph, identityEvaluations));
   if (placeholders.length < 2 && carveouts.length === 0) return undefined;
+  // A user-stated size that still cannot convert retains the established recovery, rather than Olumi attribution.
+  const recovery = (() => {
+    if (verdict.kind !== 'not_testable') return null;
+    const failure = verdict.failures.find(f => f.case === 'c');
+    const userLinks = (failure?.links ?? []).filter(l => linkSizing(edgeFor(l)) === 'user');
+    const first = userLinks[0];
+    return failure === undefined || first === undefined ? null : untestableTargetTail(graph, { ...verdict,
+      failures: [{ ...failure, links: userLinks, link: first, lever: label(first.from), link_to: label(first.to) }] });
+  })();
   // Existing reverse shortest-hop relaxation from goals; the optional tie rule preserves THIS warning's order.
   const ordered = [...goalOrderedLinks(graph, placeholders, true), ...goalOrderedLinks(graph, carveouts, true)];
-  return { v: 1, total: placeholders.length,
+  return { v: 1, total: placeholders.length, ...(recovery !== null ? { recovery_line: recovery } : {}),
     links: ordered.map((l, order) => {
       const matches = (Array.isArray(edges) ? edges.map(record) : []).filter(e => e?.from === l.from && e.to === l.to);
       const id = matches.length === 1 && typeof matches[0]?.id === 'string' ? matches[0].id : undefined;
@@ -141,18 +155,11 @@ export type GuidedSizingHistory = string | { readonly request_hash?: string | nu
 export function guidedSizingActions(sizing: GuidedSizingDraft | undefined, graph: unknown, history: readonly GuidedSizingHistory[] = []): GuidedSizingAction[] {
   const edges = record(graph)?.edges;
   if (sizing === undefined || !Array.isArray(edges)) return [];
-  const recentReplies = history.flatMap(row => typeof row === 'string' ? [row]
-    : typeof row.assistant_message === 'string' ? [row.assistant_message] : []);
-  const nodes = record(graph)?.nodes;
-  const uniqueLabelId = (label: string): string | undefined => {
-    const matches = (Array.isArray(nodes) ? nodes.map(record) : []).filter(n => n?.label === label);
-    return matches.length === 1 && typeof matches[0]?.id === 'string' ? matches[0].id : undefined;
-  };
   return sizing.links.flatMap(l => {
     const matches = edges.map(record).filter(e => l.id !== undefined ? e?.id === l.id && e.from === l.from && e.to === l.to : e?.from === l.from && e.to === l.to);
     // The selected warning can predate a size: ask only for the SAME held, still-unsized edge.
     if (matches.length !== 1 || (l.nonconverting === true
-      ? isPlaceholderLink(matches[0]) || convertingOlumiEstimate(matches[0], graph)
+      ? !hasOlumiSize(matches[0]) || convertingOlumiEstimate(matches[0], graph)
       : !isPlaceholderLink(matches[0]))) return [];
     const ends = l.nonconverting === true ? linkEffectEndUnits(graph, l.from, l.to) : null;
     const unit = ends?.target.own[0] ?? ends?.target.adopted;
@@ -160,19 +167,13 @@ export function guidedSizingActions(sizing: GuidedSizingDraft | undefined, graph
     const label = l.nonconverting === true
       ? `How much does ‘${l.from_label}’ change ‘${l.to_label}’, in ${unit}?${NONCONVERTING_REASON}`
       : `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`;
-    const question = l.nonconverting === true ? label.slice(0, -NONCONVERTING_REASON.length) : label;
-    const legacy = `How much does ‘${l.from_label}’ change ‘${l.to_label}’?`;
     const pressId = `${PRESS_PREFIX}${encodeURIComponent(l.from)}:${encodeURIComponent(l.to)}`;
     // The existing chip discriminator records the directed pair in every completed press's request hash.
     // Resolve against the same unique held edge above; a matching display label cannot close another edge.
     const pressDigest = createHash('sha256').update(`chip:${JSON.stringify([pressId, null])}`).digest('hex').slice(0, 32);
     if (history.some(row => typeof row !== 'string' && row.request_hash?.endsWith(`#chip:${pressDigest}`))) return [];
-    // Pre-identity history is usable only when BOTH labels resolve to these exact stored endpoints.
-    // An ambiguous legacy question or FU-1 receipt closes no edge; its remaining controls stay available.
-    const legacyIsThisEdge = uniqueLabelId(l.from_label) === l.from && uniqueLabelId(l.to_label) === l.to;
-    if (legacyIsThisEdge && (withoutAskedQuestion(question, recentReplies) === '' || withoutAskedQuestion(legacy, recentReplies) === '')) return [];
-    const stays = `Nothing is recorded: the link from “${l.from_label}” to “${l.to_label}” stays as it is.`;
-    if (legacyIsThisEdge && recentReplies.some(reply => reply.includes(stays))) return [];
+    // Labels in a legacy question or receipt record no historical endpoint identity.
+    // Renames and label reuse cannot close an edge; only the recorded chip pair above can.
     return [{ id: pressId, label, message: label,
       parameters: { from: l.from, to: l.to, ...(l.id !== undefined ? { edge_id: l.id } : {}) } }];
   });
@@ -229,5 +230,6 @@ export function bindGuidedSizing(draft: GuidedSizingDraft | undefined, actions: 
       : a.parameters.from === l.from && a.parameters.to === l.to);
     return press === undefined ? [] : [{ ...l, press: { id: press.id, parameters: press.parameters } }];
   });
-  return { ...draft, ...identity, links, ...(progress !== undefined ? { remaining: progress.remaining, progress_line: progress.progress_line } : {}) };
+  return { v: draft.v, total: draft.total, ...identity, links,
+    ...(progress !== undefined ? { remaining: progress.remaining, progress_line: progress.progress_line } : {}) };
 }

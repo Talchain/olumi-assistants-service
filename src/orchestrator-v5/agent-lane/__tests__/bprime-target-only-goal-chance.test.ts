@@ -29,12 +29,12 @@ const F = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtur
 };
 
 // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
-// effect that converts into goal units." The two converting upstream estimates leave four failing links, not six.
+// effect that converts into goal units." These local sizes have no readable converting downstream route, so all six still fail.
 const PLURAL_TAIL = "I can't yet say how likely any option is to keep monthly cancellations at or below 400 cancellations / month: "
-  + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 1 more. '
+  + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 3 more. '
   + "What's today's level of monthly cancellations?";
 const SINGULAR_TAIL = "I can't yet say how likely any option is to keep monthly cancellation count at or below 400 cancellations / month: "
-  + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellation count, from Loyalty discount rate to monthly cancellation count and from Late-delivery cancellations to monthly cancellation count and 1 more. '
+  + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellation count, from Loyalty discount rate to monthly cancellation count and from Late-delivery cancellations to monthly cancellation count and 3 more. '
   + "What's today's level of monthly cancellation count?";
 
 const RAW = JSON.parse(readFileSync(new URL('../../admission/__tests__/fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json };
@@ -91,7 +91,7 @@ describe('B′ — the target tail and the target-only licence', () => {
     const g = heldStrict(F.graph_with_target);
     expect(targetTestabilityOf(g)).toMatchObject({ kind: 'not_testable' });
     expect(tailOf(g)).toBe("I can't yet say how likely any option is to keep monthly cancellations below 400 cancellations / month: "
-      + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 1 more. '
+      + 'I need today\'s level, and a size for the links from Pauses taken instead of cancellations to monthly cancellations, from Loyalty discount rate to monthly cancellations and from Late-delivery cancellations to monthly cancellations and 3 more. '
       + "Olumi also can't yet test a '< 400 cancellations / month' target. What's today's level of monthly cancellations?");
   });
 
@@ -103,7 +103,7 @@ describe('B′ — the target tail and the target-only licence', () => {
     const v = targetTestabilityOf(g);
     expect(v.kind === 'not_testable' && v.failures.find(f => f.case === 'c')?.links)
       .toContainEqual({ from: e.from, to: e.to });
-    expect(targetWarning(runOn(g)).say).toContain('and 2 more.');
+    expect(targetWarning(runOn(g)).say).toContain('and 3 more.');
   });
 
   it('(b) ALONE: the gap is named and nothing is asked', () => {

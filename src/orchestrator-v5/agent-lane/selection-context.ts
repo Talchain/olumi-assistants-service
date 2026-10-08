@@ -63,10 +63,12 @@ function linkEndsOf(ref: string): { from: string; to: string } | null {
 export function agentSelectionContext(
   selection: SelectedElementsIngress | null,
   state: unknown,
+  endpointPair?: { readonly from: string; readonly to: string },
 ): AgentSelectionContext | null {
-  if (selection === null) return null;
-  const nodeIds = [...new Set(selection.node_ids)];
-  const linkRefs = [...new Set(selection.edge_ids)];
+  if (selection === null && endpointPair === undefined) return null;
+  const nodeIds = [...new Set(selection?.node_ids ?? [])];
+  const linkRefs: (string | { readonly from: string; readonly to: string })[] = endpointPair === undefined
+    ? [...new Set(selection?.edge_ids ?? [])] : [endpointPair];
   if (nodeIds.length + linkRefs.length === 0) return null;
 
   const entities = isRec(state) && state.ok === true && Array.isArray(state.entities)
@@ -93,17 +95,22 @@ export function agentSelectionContext(
   const links = isRec(state) && Array.isArray(state.links) ? (state.links as unknown[]).filter(isRec) : null;
   for (const ref of linkRefs.slice(0, Math.max(0, SELECTION_MAX_ELEMENTS - selected.length))) {
     if (links === null) { unreadable += 1; continue; }
-    const idMatches = links.filter((l) => l.id === ref);
+    const idMatches = typeof ref === 'string' ? links.filter((l) => l.id === ref) : [];
     // An ambiguous stored id cannot fall through to endpoint parsing, even when it contains an arrow.
     if (idMatches.length > 1) { unreadable += 1; continue; }
     const identified = idMatches[0];
-    const ends = identified === undefined ? linkEndsOf(ref)
+    const ends = typeof ref !== 'string' ? ref : identified === undefined ? linkEndsOf(ref)
       : typeof identified.from === 'string' && identified.from.length > 0
         && typeof identified.to === 'string' && identified.to.length > 0
         ? { from: identified.from, to: identified.to } : null;
     if (ends === null) { unreadable += 1; continue; }
-    const link = identified ?? links.find((l) => l.from === ends.from && l.to === ends.to);
+    const endpointMatches = links.filter((l) => l.from === ends.from && l.to === ends.to);
+    // A chip records a directed pair, never a string that a different stored edge id can capture.
+    // Resolve it uniquely and verify both stored ends before supplying any grounded link.
+    if (typeof ref !== 'string' && endpointMatches.length > 1) { unreadable += 1; continue; }
+    const link = identified ?? endpointMatches[0];
     if (link === undefined) { missing += 1; continue; }
+    if (typeof ref !== 'string' && (link.from !== ref.from || link.to !== ref.to)) { unreadable += 1; continue; }
     const end = (id: string): Json => ({ id, ...(typeof byId.get(id)?.label === 'string' ? { label: byId.get(id)!.label } : {}) });
     selected.push({ kind: 'link', ...link, from: end(ends.from), to: end(ends.to) });
     selectedLinks.push(ends);

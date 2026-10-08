@@ -179,9 +179,14 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
   });
   it('chat: B chance ends with the note once; an unlabelled figure owes the full estimate-labelled point', () => {
     const g = graph();
+    // This downstream estimate-label test needs ordinary estimates; validated definitions owe no RC4 label.
+    for (const edge of g.edges.filter((e: Json) => e.provenance?.magnitude === 'olumi_estimate')) {
+      edge.provenance.definitional = false;
+    }
     const result = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, level);
     const lines = goalChanceScreenLinesForAgent(result, g, true);
     const b = lines.find(l => l.option_id === B)!;
+    expect(b.olumi_estimate_link_count).toBe(2);
     expect(b.chance.endsWith(SPREAD_NOTE_WITHOUT_DOWNSIDE)).toBe(true);
     expect(lines.filter(l => l.chance.includes(SPREAD_NOTE_WITHOUT_DOWNSIDE))).toHaveLength(1);
     const text = withScreenLinesOwed('', lines).text;
@@ -193,7 +198,8 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(withScreenLinesOwed(completed, [b]).added).toBe(0);
     const phrased = `${b.label}: ${b.figure}.`;
     const phrasedDone = withScreenLinesOwed(phrased, [b]).text;
-    expect(phrasedDone).toBe(`${phrased}\n\n${b.chance}${b.depends === '' ? '' : ` ${b.depends}`}`);
+    expect(phrasedDone).toBe(`${b.chance}${b.depends === '' ? '' : ` ${b.depends}`}`);
+    expect(phrasedDone).not.toContain(phrased);
     expect(withScreenLinesOwed(phrasedDone, [b]).added).toBe(0);
     const orphan = withScreenLinesOwed(`${SPREAD_NOTE_WITHOUT_DOWNSIDE}\n${chanceOnly}`, [b]).text;
     expect(orphan.split(SPREAD_NOTE_WITHOUT_DOWNSIDE)).toHaveLength(2);

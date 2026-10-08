@@ -13,11 +13,12 @@ import { targetNotTestableWarning, targetTestabilityOf } from '../../admission/t
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { applyEdgeStrengthEdit } from '../../system-events/edge-strength-edit.js';
 import { applyLinkEffectEdit } from '../../system-events/link-effect-edit.js';
+import { withholdGoalFiguresForUntestableTarget } from '../../tools/handlers/run-analysis.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
-import { placeholderGoalPaths } from '../goal-certainty.js';
-import { guidedSizingForRun, guidedSizingSentence } from '../guided-sizing.js';
+import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
+import { bindGuidedSizing, guidedSizingForRun, guidedSizingSentence } from '../guided-sizing.js';
 import { guidedSizingActions, guidedSizingProgressLine } from '../guided-sizing.js';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
 import * as estimateProducer from '../olumi-estimates-feeding-result.js';
@@ -298,12 +299,14 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
   const band = pair('starter_tier_mrr', 'monthly_recurring_revenue');
   const words = "How much does ‘Starter tier MRR’ change ‘monthly recurring revenue’, in £/month? Olumi has it as a band, which can't be turned into your goal's units.";
 
-  it('AUTHOR estimate twin of D1: band follows the remaining placeholder, keeps case(c), and names the existing end-unit reader’s unit', () => {
+  it.each([false, true])('AUTHOR estimate twin of D1 (accepted=%s): band follows the remaining placeholder, keeps case(c), and names the existing end-unit reader’s unit', accepted => {
     const graph = structuredClone(capture.graph);
     // The stored D1 edge is a placeholder. This explicit class twin exercises an Olumi ESTIMATE with the same band.
     const edge = graph.edges.find((e: Json & Pair) => key(e) === key(band));
     expect(linkSizing(edge)).toBe('placeholder');
     edge.provenance.magnitude = 'olumi_estimate';
+    if (accepted) edge.provenance.reviewed_by_user = { intent: 'confirm' };
+    expect(linkSizing(edge)).toBe(accepted ? 'olumi_accepted' : 'olumi_estimate');
     const draft = guidedSizingForRun(runFor(capture), graph)!;
     expect(draft.total).toBe(1);
     expect(draft.links.map(key)).toHaveLength(2);
@@ -314,19 +317,68 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
     expect(action?.message).toBe(words);
   });
 
-  it('only a non-converting link: no N=0 header or placeholder progress; the same press remains', async () => {
+  it('r9 inspector user band keeps existing recovery words without an Olumi-band press', async () => {
     // The real inspector turns both stored placeholders into user bands. The goal-end band still refuses conversion.
     const measured = await inspectorDoor(capture, capture.guided);
     const graph = measured.graph;
     const warning = targetNotTestableWarning(graph, targetTestabilityOf(graph), options(graph), 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
     expect(warning).not.toBeNull();
-    const run = { enrichment: { inference_warnings: [warning] } };
-    const draft = guidedSizingForRun(run, graph)!;
-    expect(draft).toBeDefined();
-    expect(draft.total).toBe(0);
-    expect(keys(draft.links)).toEqual([key(band)]);
-    expect(guidedSizingActions(draft, graph)[0]?.label).toBe(words);
-    expect(goalChanceWithheldForAgent(run, graph)?.say ?? '').not.toContain('Not shown yet: 0 links');
+    // The real Run withholder records the claim scope that makes its recovery words authoritative.
+    const run = { enrichment: withholdGoalFiguresForUntestableTarget({ inference_warnings: [],
+      option_comparison: options(graph).map(option_id => ({ option_id, probability_of_goal: 0.5 })) }, graph) };
+    expect(linkSizing(graph.edges.find((e: Json & Pair) => key(e) === key(band)))).toBe('user');
+    const draft = guidedSizingForRun(run, graph);
+    expect(draft).toBeUndefined();
+    expect(guidedSizingActions(draft, graph)).toEqual([]);
+    const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
+    expect(said).toContain(warning!.say);
+    expect(said).not.toContain('Olumi has it as a band');
+    expect(said).not.toContain('Not shown yet: 0 links');
     expect(guidedSizingProgressLine(graph)).toBeNull();
+  });
+
+  it.each(['user_specified', 'user_stated'])('r9 refused-conversion %s provenance cannot receive Olumi-band attribution', mark => {
+    const graph = structuredClone(capture.graph);
+    for (const link of capture.guided) {
+      const edge = graph.edges.find((e: Json & Pair) => key(e) === key(link));
+      edge.provenance = mark === 'user_specified' ? { source: 'user_specified' } : { source: 'cee_hypothesis', magnitude: 'user_stated' };
+      delete edge.defaulted;
+    }
+    const warning = targetNotTestableWarning(graph, targetTestabilityOf(graph), options(graph), 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+    expect(warning).not.toBeNull();
+    const run = { enrichment: withholdGoalFiguresForUntestableTarget({ inference_warnings: [],
+      option_comparison: options(graph).map(option_id => ({ option_id, probability_of_goal: 0.5 })) }, graph) };
+    expect(guidedSizingForRun(run, graph)).toBeUndefined();
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toContain(warning!.say);
+  });
+
+  it('r9 mixed two-placeholder list retains existing recovery for a user-sized refused conversion', () => {
+    const capture = captures[1];
+    const graph = structuredClone(capture.graph);
+    const edge = graph.edges.find((e: Json & Pair) => key(e) === key(band));
+    edge.provenance = { source: 'user_specified', magnitude: 'user_stated' };
+    delete edge.defaulted;
+    // Explicit author variant: the second placeholder has a held source level, so today's producer can offer it.
+    graph.nodes.find((n: Json) => n.id === 'starter_tier_support_cost').observed_state = { value: 0.1, raw_value: 100, unit: '£/month', cap: 1000 };
+    graph.edges.push({ from: 'starter_monthly_price', to: 'mrr_lost_to_starter_support_strain',
+      strength: { mean: 0.5, std: 0.125 }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
+    const placeholder = placeholderGoalWarning(graph, placeholderGoalPaths(graph, options(graph)), 'GOAL_FIGURES_PLACEHOLDER_PATH');
+    const enrichment = withholdGoalFiguresForUntestableTarget({ inference_warnings: [],
+      identity_evaluations: capture.evaluated,
+      option_comparison: options(graph).map(option_id => ({ option_id, probability_of_goal: 0.5 })) }, graph);
+    const run = { enrichment: { ...enrichment, inference_warnings: [
+      ...enrichment.inference_warnings, placeholder,
+    ] } };
+    const draft = guidedSizingForRun(run, graph)!;
+    expect(draft.total).toBe(2);
+    expect(draft.links).toHaveLength(2);
+    expect(guidedSizingActions(draft, graph).map(a => a.label).join(' ')).not.toContain('Olumi has it as a band');
+    expect(draft.recovery_line).toContain('I need a size for the link from Starter tier MRR to monthly recurring revenue.');
+    expect(bindGuidedSizing(draft, guidedSizingActions(draft, graph), { graph_hash: '0123456789abcdef', run_key: 'same-run' }))
+      .not.toHaveProperty('recovery_line');
+    const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
+    expect(said).toContain(guidedSizingSentence(2));
+    expect(said).toContain('I need a size for the link from Starter tier MRR to monthly recurring revenue.');
+    expect(said).toContain('Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?');
   });
 });

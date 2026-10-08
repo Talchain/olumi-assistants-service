@@ -1891,9 +1891,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const message = typeof body.message === 'string' ? body.message : '';
     /** RT-1: what the user had selected on the canvas (`selection-context.ts`); resolved below against the turn's state. */
     const guidedPress = parseGuidedSizingPress(body['chip']);
-    // Ingress edge_id has no authority: only the chip's encoded pair enters the canonical selection reader.
+    // Ingress edge_id has no authority: the chip's explicit pair enters the canonical selection reader separately.
     const selectedElements = guidedPress === null ? parseSelectedElements(body['selected_elements'])
-      : { node_ids: [], edge_ids: [`${guidedPress.from}->${guidedPress.to}`] };
+      : null;
     const sessionId = typeof body.agent_session_id === 'string' && body.agent_session_id.length > 0
       ? body.agent_session_id
       : `sess_${scenarioId}`;
@@ -2160,6 +2160,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
+      const replayScopedDraftForRun = guidedSizingForRun(state.analysisResult, state.graph);
       /**
        * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
        * rebuilt from the canonical readback, never from what the first attempt had in memory:
@@ -2193,7 +2194,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // unavailable reply). The SAME owner as the live turn, never a model call.
         const review = decisionReviewFor(scenarioId, { ...state,
           factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id)), recentReplies: await repliesToCheckAsks(
-          [goalChanceWithheldForAgent(state.analysisResult, state.graph)?.say], store, scenarioId, turnId) });
+          [goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun)?.say], store, scenarioId, turnId) });
         // S-B (Codex r1 P2-3 on #2751): an unbound review replays the live press's typed "can't yet" and its working exit.
         const pressed = review.bound ? null : decidePress({ id: DECISION_REVIEW_PRESS_ID }, actionFactsOf({ scenarioId, graph: state.graph,
           graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady, analysisResult: state.analysisResult,
@@ -2245,7 +2246,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
-          const say = goalChanceWithheldForAgent(state.analysisResult, state.graph)?.say;
+          const say = goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun)?.say;
           // The live Run turn's methods note (`disclosuresFor`, a Run on this turn) comes first in its owed lines.
           const indexNow = indexGoalWeightsMessages(state.analysisResult);
           const owedNow = [...indexNow, ...(typeof say === 'string' && say.trim() !== '' ? [say] : [])];
@@ -2349,7 +2350,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayCard = replayRecords[0];
       const replayActions = firstOfEachId([...stillValid, ...boundControl]);
       const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready'
-        ? guidedSizingForRun(state.analysisResult, state.graph) : undefined;
+        ? replayScopedDraftForRun : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
         await guidedSizingHistory(store, scenarioId, turnId));
       replayActions.push(...replayGuidedActions);
@@ -3453,10 +3454,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let hostFirstCall: Parameters<typeof runAgentTurn>[0]['hostFirstCall'];
       let linkSentenceTool: string | undefined;
       // RT-1: a failed state read leaves the selection unchecked (`could_not_check`), never silently dropped.
-      selectionContext = agentSelectionContext(selectedElements, undefined);
+      selectionContext = agentSelectionContext(selectedElements, undefined, guidedPress ?? undefined);
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
-        selectionContext = agentSelectionContext(selectedElements, st);
+        selectionContext = agentSelectionContext(selectedElements, st, guidedPress ?? undefined);
         // Select once from the initial host read; registration later in this turn cannot switch the model.
         budget = conversationBudgetFor(st.ok === true && (st as { empty?: unknown }).empty === true);
         const revision = (st as { graph_revision?: unknown }).graph_revision;
@@ -3538,65 +3539,77 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // sent, so it is an interpret-shaped call — the banked interpret budget (Sol, effort low; `model-budgets.ts`), not
       // the coach's conversation budget (Sol, effort high: 716 reasoning tokens, 25.5 s for ONE served call, R3 j7 @ecce374d).
       if (methodTurn?.kind === 'run' || risksRun !== undefined) budget = interpretBudget();
-      result = await runAgentTurn(
-        {
-          ctx: { ...toolCtx,
-            // A qualified confirmation retains the user's ORIGINAL figure quote after a restart; never Olumi's restatement.
-            ...(levelAnswerTool !== undefined && levelAsk?.action.figure_quote !== undefined
-              ? { user_text: userWordsOf([...histories.typedWords(sessionId), levelAsk.action.figure_quote], typedNow) } : {}),
-            ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
-            ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
-          history,
-          message,
-          instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
-            : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
-            : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}` : AGENT_INSTRUCTIONS,
-          maxOutputTokens: budget.max_output_tokens,
-          mode,
-          // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
-          withheldTools: methodTurn?.kind === 'run' || risksRun !== undefined ? toolsFor(mode).map((t) => t.name)
-            // Widen: ONE call, and its ONLY tool is the add-option door (forced below), so the turn ends in one card or none.
-            : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
-          ...(methodTurn?.kind === 'run' || widenRun !== undefined || risksRun !== undefined ? { maxHops: 1 } : {}),
-          // Before the widen and chip forcings below, which win if both were ever set.
-          ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
-          ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
-          ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
-          ...(canonicalContext !== undefined ? { canonicalContext } : {}),
-          ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
-          ...(selectionContext !== null && selectionContext !== undefined ? { selectionNote: selectionContext.note } : {}),
-          // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
-          composeReply: (tool, args, toolResult) => {
-            const firstResult = tool === 'build_model_from_brief'
-              ? firstAnalysisResultReply(args, toolResult, firstAnalysis?.outcome.ran === true) : null;
-            if (firstResult !== null) { firstAnalysisResultFirst = true; return firstResult; }
-            return composeProposalReply(tool, args, toolResult, message);
+      const chipPairChecked = guidedPress === null || (selectionContext?.grounded.unresolved === 'none'
+        && selectionContext.links?.length === 1 && selectionContext.links[0]!.from === guidedPress.from
+        && selectionContext.links[0]!.to === guidedPress.to);
+      if (!chipPairChecked) {
+        // An unresolved sizing chip is terminal: never let label resolution choose another link.
+        fastPath = 'method';
+        result = { assistant_text: 'That sizing link could not be checked against the current model. Nothing was changed.',
+          items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
+            provider_calls: 0, tool_calls: 0, hops: 0 } };
+      } else {
+        result = await runAgentTurn(
+          {
+            ctx: { ...toolCtx,
+              // A qualified confirmation retains the user's ORIGINAL figure quote after a restart; never Olumi's restatement.
+              ...(levelAnswerTool !== undefined && levelAsk?.action.figure_quote !== undefined
+                ? { user_text: userWordsOf([...histories.typedWords(sessionId), levelAsk.action.figure_quote], typedNow) } : {}),
+              ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
+              ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
+            history,
+            message,
+            instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
+              : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
+              : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}` : AGENT_INSTRUCTIONS,
+            maxOutputTokens: budget.max_output_tokens,
+            mode,
+            // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
+            withheldTools: methodTurn?.kind === 'run' || risksRun !== undefined ? toolsFor(mode).map((t) => t.name)
+              // Widen: ONE call, and its ONLY tool is the add-option door (forced below), so the turn ends in one card or none.
+              : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
+            ...(methodTurn?.kind === 'run' || widenRun !== undefined || risksRun !== undefined ? { maxHops: 1 } : {}),
+            // Before the widen and chip forcings below, which win if both were ever set.
+            ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
+            ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
+            ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
+            ...(canonicalContext !== undefined ? { canonicalContext } : {}),
+            ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
+            ...(selectionContext !== null && selectionContext !== undefined ? { selectionNote: selectionContext.note } : {}),
+            // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
+            composeReply: (tool, args, toolResult) => {
+              const firstResult = tool === 'build_model_from_brief'
+                ? firstAnalysisResultReply(args, toolResult, firstAnalysis?.outcome.ran === true) : null;
+              if (firstResult !== null) { firstAnalysisResultFirst = true; return firstResult; }
+              return composeProposalReply(tool, args, toolResult, message);
+            },
+            // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
+            ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
+              ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
           },
-          // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
-          ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
-            ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
-        },
-        // Widen: RC's structured checks run INSIDE the door, before it stores anything; a refusal stores nothing.
-        widenRun === undefined ? capabilities : {
-          ...capabilities,
-          proposeNewOption: async (gateCtx, gateArgs) => {
-            // ONE card or none: only the press's FIRST door call is gated and may reach the door (HARNESS P2 on #2512;
-            // the loop's ONE_CHANGE_PER_APPROVAL refuses a second proposal too, and this holds without it).
-            if (widenGateResult !== undefined) {
-              return { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
-                detail: 'Only one set of suggestions per press (WD-COUNT). Nothing was changed.' };
-            }
-            widenGateResult = widenGate(widenRun, gateArgs);
-            // ⛔ SERVER-OWNED ORIGIN (DL P1 on #2512): a Widen press carries no user-written figure, so every level it
-            // proposes is Olumi's ESTIMATE. The session's earlier words ("Price was £45") must never make it "yours".
-            return widenGateResult.ok
-              ? widenNotAdded(await capabilities.proposeNewOption({ ...gateCtx, user_text: '' }, widenPassingArgs(widenGateResult, gateArgs)), widenGateResult, gateArgs)
-              : { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
-                  detail: `These suggestions did not pass Olumi’s checks (${widenGateResult.failed.join(', ')}). Nothing was changed.` };
+          // Widen: RC's structured checks run INSIDE the door, before it stores anything; a refusal stores nothing.
+          widenRun === undefined ? capabilities : {
+            ...capabilities,
+            proposeNewOption: async (gateCtx, gateArgs) => {
+              // ONE card or none: only the press's FIRST door call is gated and may reach the door (HARNESS P2 on #2512;
+              // the loop's ONE_CHANGE_PER_APPROVAL refuses a second proposal too, and this holds without it).
+              if (widenGateResult !== undefined) {
+                return { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
+                  detail: 'Only one set of suggestions per press (WD-COUNT). Nothing was changed.' };
+              }
+              widenGateResult = widenGate(widenRun, gateArgs);
+              // ⛔ SERVER-OWNED ORIGIN (DL P1 on #2512): a Widen press carries no user-written figure, so every level it
+              // proposes is Olumi's ESTIMATE. The session's earlier words ("Price was £45") must never make it "yours".
+              return widenGateResult.ok
+                ? widenNotAdded(await capabilities.proposeNewOption({ ...gateCtx, user_text: '' }, widenPassingArgs(widenGateResult, gateArgs)), widenGateResult, gateArgs)
+                : { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
+                    detail: `These suggestions did not pass Olumi’s checks (${widenGateResult.failed.join(', ')}). Nothing was changed.` };
+            },
           },
-        },
-        callModelFor(budget),
-      );
+          callModelFor(budget),
+        );
+      }
     } catch (err) {
       log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');
       // Nothing was sent that could write: release the claim, so a retry of the
@@ -3721,22 +3734,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * time; the control beside it (next step, or Run) is added to the chips below.
      */
     const firstAnalysisSaid = firstAnalysis !== undefined ? firstAnalysisSentence(firstAnalysis.outcome) : null;
-    /** The withheld goal chance's reason as owed this turn (pure; the same value as its owed line below), typed for the composer. */
-    const goalChanceOwed = goalChanceLineOwed(result.tool_results, text);
-    const owed = stateFacts.current_state_unknown === true
-      ? [...valueChangeDisclosures(stateFacts)]
-      : [
-        ...disclosuresFor(result.tool_results, text),
-        ...valueChangeDisclosures(stateFacts),
-        ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
-        // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
-        ...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
-        // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
-        ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
-      ];
-    // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
-    // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
-    askEachOnce(owed, await repliesToCheckAsks(owed, store, scenarioId, undefined));
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
      * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
@@ -3817,6 +3814,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState, analysisResult } = composedRead;
+    const resultFirstRunCompleted = firstAnalysisResultFirst || (fastPath === 'run' && result.tool_results.some((r) => r.ran === true));
+    // One final scoped draft supplies the words, the offered presses and the hook on this bound Run.
+    const guidedDraftForRun = ((resultFirstRunCompleted && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null)
+      || (fastPath === 'explain' && narrationStatus === 'ready'))
+      ? guidedSizingForRun(analysisResult, readbackGraph) : undefined;
+    const finalGoalChance = (resultFirstRunCompleted || (fastPath === 'explain' && narrationStatus === 'ready'))
+      && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
+      ? goalChanceWithheldForAgent(analysisResult, readbackGraph, guidedDraftForRun) : undefined;
+    const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];
+    /** The withheld goal chance's reason as owed this turn (pure; the same value as its owed line below), typed for the composer. */
+    const goalChanceOwed = goalChanceLineOwed(goalChanceResults, text);
+    const owed = stateFacts.current_state_unknown === true
+      ? [...valueChangeDisclosures(stateFacts)]
+      : [
+        ...disclosuresFor(result.tool_results, text),
+        ...valueChangeDisclosures(stateFacts),
+        ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
+        // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
+        ...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),
+        // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
+        ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
+      ];
+    // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
+    // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
+    askEachOnce(owed, await repliesToCheckAsks(owed, store, scenarioId, undefined));
     // ONE set of leader-gate inputs from this turn's final read: the search controls offered below, the reply's words
     // about them and the final egress all read this same object, so they cannot disagree.
     const leaderGate = leaderGateInputsOf({ analysisState, analysisReady, graph: readbackGraph, scopeAuthorityUnavailable: composedRead.scopeAuthorityUnavailable });
@@ -3860,7 +3882,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (measuredRunKey !== null && !runExplanationMatches(measuredRunKey, scenarioId, composedRead)) {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
     }
-    const resultFirstRunCompleted = firstAnalysisResultFirst || (fastPath === 'run' && result.tool_results.some((r) => r.ran === true));
     if (resultFirstRunCompleted
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
       text = RUN_RESULT_UNVERIFIED_TEXT;
@@ -4066,9 +4087,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // The same selected Run as the words; the warning owns N. Re-check present sizing and never-reask before offering.
-    const guidedDraftForRun = ((resultFirstRunCompleted && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null)
-      || (fastPath === 'explain' && narrationStatus === 'ready'))
-      ? guidedSizingForRun(analysisResult, readbackGraph) : undefined;
     const sizingCommit = result.tool_results.find(r => r.guided_sizing_commit === true);
     const sizingProgress = sizingCommit !== undefined ? guidedSizingProgress(readbackGraph, analysisResult ?? sizingCommit.guided_sizing_run_result) : undefined;
     // Reconcile the commit receipt's words to the FINAL stored read, including a concurrent second sizing.

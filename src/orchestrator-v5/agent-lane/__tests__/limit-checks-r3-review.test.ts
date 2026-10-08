@@ -20,7 +20,7 @@ describe('L1 R3 independent-review regressions, with captured graph bytes', () =
   });
   it('P2-1 control: existing target-testability fixtures stay byte-identical', () => {
     // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
-    // effect that converts into goal units." The replay pins only the five named converting pairs removed by that rule.
+    // effect that converts into goal units." The replay pins only the three named goal-converting pairs removed by that rule.
     expect(verifyTargetBytes).not.toThrow();
   });
   it.each([
@@ -28,7 +28,6 @@ describe('L1 R3 independent-review regressions, with captured graph bytes', () =
     ['mrr', 'monthly_churn', 'pro_paying_subscribers'],
     ['mrr', 'pro_plan_monthly_price', 'monthly_churn'],
     ['n1', 'triage_automation_rate', 'median_first_response_time'],
-    ['n1', 'ai_triage_tool_monthly_cost', 'monthly_support_spend'],
   ])('amendment (A) CONTRAST: %s %s→%s still blocks as a placeholder or non-converting estimate', (key, from, to) => {
     const fixtures = JSON.parse(readFileSync(new URL('../../admission/__tests__/fixtures/target-testability-20260930.json', import.meta.url), 'utf8'));
     for (const kind of ['placeholder', 'non-converting estimate']) {

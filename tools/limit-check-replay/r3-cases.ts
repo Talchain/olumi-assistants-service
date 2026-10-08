@@ -87,11 +87,12 @@ export function verifyTargetBytes(): void {
   // Science 393023 LICENCE (a)/(b), 7 Oct: Paul and N1's goal_path_unsized → goal_path_placeholder; every other corpus field stays pinned.
   for (const key of ['paul', 'n1']) for (const verdict of expected[key]) verdict.failures.find((f: Rec) => f.code === 'goal_path_unsized').code = 'goal_path_placeholder';
   // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
-  // effect that converts into goal units." Re-pin ONLY these five captured converting sizes, leaving every other byte.
+  // effect that converts into goal units." Re-pin ONLY these three captured goal-converting sizes, leaving every other byte.
+  // Paul’s upstream local size cannot traverse its unreadable downstream frames; N1’s spend branch is off-goal.
+  // Both original case-(c) members stay pinned, alongside the separate placeholder licence change above.
   const convertingPairs: Record<string, string[]> = {
-    paul: ['fundraising_overhead→investment_firm_outreach'],
     mrr: ['monthly_churn→pro_paying_subscribers', 'pro_plan_monthly_price→monthly_churn'],
-    n1: ['triage_automation_rate→median_first_response_time', 'ai_triage_tool_monthly_cost→monthly_support_spend'],
+    n1: ['triage_automation_rate→median_first_response_time'],
   };
   for (const [key, pairs] of Object.entries(convertingPairs)) for (const verdict of expected[key]) {
     const failure = verdict.failures.find((f: Rec) => f.case === 'c');

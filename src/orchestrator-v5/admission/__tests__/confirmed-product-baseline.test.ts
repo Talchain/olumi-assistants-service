@@ -14,14 +14,17 @@ const graph = (priceUnit: string): Rec => ({
   edges: [{ from: 'price', to: 'mrr' }, { from: 'subscribers', to: 'mrr' }],
 });
 
-describe('confirmed-product baseline requires dimensional proof in the target unit', () => {
-  it('an ambiguous rate without the count denominator still needs the goal current level', () => {
+describe('P45 confirmed-product baseline preserves the confirmed rate reading in the target unit', () => {
+  it('a confirmed implicit per-count rate derives the goal current level without a second ask', () => {
     const g = graph('£/month');
     const verdict = targetTestabilityOf(g);
-    expect(verdict).toEqual({ kind: 'not_testable', goal_id: 'mrr',
+    expect(verdict).toEqual({ kind: 'unchecked', goal_id: 'mrr', unchecked: ['P5'] });
+    expect(targetNotTestableWarning(g, verdict, [], 'GOAL_FIGURES_TARGET_NOT_TESTABLE')).toBeNull();
+  });
+
+  it.each(['$/month', '£/year', '£/seat/month'])('a confirmed incompatible rate %s still needs the current level', unit => {
+    expect(targetTestabilityOf(graph(unit))).toEqual({ kind: 'not_testable', goal_id: 'mrr',
       failures: [{ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' }] });
-    expect(targetNotTestableWarning(g, verdict, [], 'GOAL_FIGURES_TARGET_NOT_TESTABLE')?.level_only_say)
-      .toBe("What's today's level of MRR?");
   });
 
   it('a rate per subscriber composes with subscriber count and does not ask for the derived level', () => {

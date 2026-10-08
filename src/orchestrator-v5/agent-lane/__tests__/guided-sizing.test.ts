@@ -1,6 +1,7 @@
 /** Science §(i) 4: one warning, one count, identity-bound presses, stored-graph progress. */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
@@ -12,9 +13,10 @@ type SizingAction = Omit<SuggestedAction, 'action_type'> & { action_type?: strin
 type Link = { id?: string; from: string; to: string; from_label: string; to_label: string; order: number };
 type Hook = Omit<Sizing, 'links'> & { graph_hash: string; run_key: string; remaining?: number; progress_line?: string; links: (Link & { press: { id: string; parameters: Record<string, unknown> } })[] };
 type Sizing = { v: 1; total: number; links: Link[] };
+type History = string | { request_hash?: string | null; assistant_message?: string | null };
 interface GuidedApi {
   guidedSizingForRun?: (result: unknown, graph: unknown) => Sizing | undefined;
-  guidedSizingActions?: (sizing: Sizing | undefined, graph: unknown, recentReplies?: readonly string[]) => SizingAction[];
+  guidedSizingActions?: (sizing: Sizing | undefined, graph: unknown, recentReplies?: readonly History[]) => SizingAction[];
   guidedSizingProgress?: (graph: unknown) => { draft: Sizing; remaining: number; progress_line: string } | undefined;
   guidedSizingProgressLine?: (graph: unknown) => string | null;
   bindGuidedSizing?: (sizing: Sizing | undefined, actions: SizingAction[], run: { graph_hash: string; run_key: string }, progress?: unknown) => Hook | undefined;
@@ -24,8 +26,10 @@ interface GuidedApi {
 const modulePath = '../guided-sizing.js';
 const api = await import(modulePath).catch(() => ({})) as GuidedApi;
 const sizing = (run: unknown, graph: unknown): Sizing | undefined => api.guidedSizingForRun?.(run, graph);
-const actions = (value: Sizing | undefined, graph: unknown, recentReplies: readonly string[] = []): SizingAction[] =>
+const actions = (value: Sizing | undefined, graph: unknown, recentReplies: readonly History[] = []): SizingAction[] =>
   api.guidedSizingActions?.(value, graph, recentReplies) ?? [];
+const recordedPress = (action: SizingAction, assistant_message = action.label): History => ({ assistant_message,
+  request_hash: `completed#chip:${createHash('sha256').update(`chip:${JSON.stringify([action.id, null])}`).digest('hex').slice(0, 32)}` });
 const progress = (graph: unknown): string | null | undefined => api.guidedSizingProgressLine?.(graph);
 
 const captured = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
@@ -221,26 +225,27 @@ describe('GUIDED PATH: multi-link withhold', () => {
     const before = actions(sizing(run, graph), graph);
     expect(before).toHaveLength(3);
     storedSize(graph, THREE[0].from, THREE[0].to);
-    const after = actions(sizing(run, graph), graph, [before[0]!.label]);
+    const after = actions(sizing(run, graph), graph, [recordedPress(before[0]!)]);
     expect(after.map(p => p.id)).toEqual([before[2]!.id]);
   });
 
-  it('never-reask recognises the legacy question for the same edge', () => {
+  it('legacy label-only question cannot establish historical endpoints even for currently unique labels', () => {
     const { graph, run } = draw2();
     const before = actions(sizing(run, graph), graph);
     expect(before).toHaveLength(3);
     const after = actions(sizing(run, graph), graph,
       ['How much does ‘Pro plan price’ change ‘MRR lost to price sensitivity’?']);
-    expect(after.map(p => p.id)).toEqual([before[1]!.id, before[2]!.id]);
+    expect(after).toEqual(before);
   });
 
-  it('FU-1 closed receipt suppresses its exact edge without pretending the edge was sized', () => {
+  it('FU-1 receipt suppresses only its recorded chip endpoints without pretending the edge was sized', () => {
     const { graph, run } = draw2();
     const before = actions(sizing(run, graph), graph);
     expect(before).toHaveLength(3);
     const receipt = 'Nothing is recorded: the link from “Pro plan price” to “MRR lost to price sensitivity” stays as it is.';
     expect(warningOf(run).links).toHaveLength(3);
-    expect(actions(sizing(run, graph), graph, [receipt]).map(p => p.id)).toEqual([before[1]!.id, before[2]!.id]);
+    expect(actions(sizing(run, graph), graph, [receipt])).toEqual(before);
+    expect(actions(sizing(run, graph), graph, [recordedPress(before[0]!, receipt)]).map(p => p.id)).toEqual([before[1]!.id, before[2]!.id]);
     expect(actions(sizing(run, graph), graph,
       ['Nothing is recorded: the link from “Another price” to “MRR lost to price sensitivity” stays as it is.']))
       .toEqual(before);
