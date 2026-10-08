@@ -538,12 +538,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'prepares ONE complete change and returns its id, which you keep for authorise_change: show the user the risk, what it '
       + 'threatens and what drives it, never the id, before asking them to approve. ' + RISK_LINKS_RULE + ' How strongly each '
       + 'link acts is not known yet: Olumi records a placeholder strength, not an estimate \u2014 say so. Use the labels exactly as the '
-      + 'CURRENT MODEL STATE gives them.',
+      + 'CURRENT MODEL STATE gives them. For a precondition or timing dependency ONLY, set relies_on_option to the option\'s '
+      + 'exact label when the user\'s words or brief say that option depends on the event happening or not (e.g. a price rise '
+      + 'launched with the next feature release). Then leave affects and caused_by empty: it is kept without links and left '
+      + 'out of the Run, with that option\'s omission disclosed for the user to approve.',
     parameters: obj({
       label: { type: 'string', description: 'The risk in the user\u2019s own words (e.g. "Competitive response").' },
+      relies_on_option: { type: 'string', description: 'Optional precondition lease: the exact label of the non-baseline option that depends on this event happening or not, as stated by the user or brief. Never an id. Leave affects and caused_by empty.' },
       affects: {
         type: 'array',
-        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one. Never a factor.',
+        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one for an ordinary risk; [] for relies_on_option. Never a factor.',
         items: obj({
           target_label: { type: 'string', description: 'The goal or an outcome, exactly as the CURRENT MODEL STATE labels it.' },
           direction: { type: 'string', enum: ['positive', 'negative'], description: 'negative when the risk lowers it (the usual case); from the user\u2019s words, never a guess.' },
@@ -903,6 +907,8 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
     label: string; rationale: string;
+    /** The host resolves and verifies this label; the model never supplies the node's relies_on stamp. */
+    relies_on_option?: string;
     affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
     caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
   }): Promise<ToolResult>;

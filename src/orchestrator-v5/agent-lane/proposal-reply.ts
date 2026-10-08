@@ -156,18 +156,27 @@ function newRiskReply(r: Rec): string | null {
   if (subject === undefined || risk === undefined || !nonEmpty(risk.label)) return null;
   const threatens = phrases(risk.threatens);
   const drivenBy = phrases(risk.driven_by ?? []);
-  const precondition = recordOf(risk.relies_on);
-  if (risk.relies_on !== undefined) {
-    if (precondition === undefined || !nonEmpty(precondition.option_id) || !nonEmpty(precondition.option_label)
-      || threatens === null || threatens.length !== 0 || drivenBy === null || drivenBy.length !== 0) return null;
-    return reply(subject, [reliesOnRiskLine(risk.label, precondition.option_label)], question(r.public_label));
-  }
-  if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
-  // event_risk.v1 slice 2a: the door's grounded occurrence, distinct from placeholder impact.
+  // Validate before either branch: a precondition may retain the same host-grounded user occurrence as an ordinary risk.
   const likelihood = recordOf(risk.likelihood);
   if (risk.likelihood !== undefined && (likelihood === undefined || likelihood.basis !== 'user'
     || typeof likelihood.p_low_pct !== 'number' || typeof likelihood.p_high_pct !== 'number'
     || typeof likelihood.horizon_months !== 'number' || !nonEmpty(likelihood.quote))) return null;
+  const likelihoodLines = likelihood === undefined ? []
+    : [`It may happen (about ${likelihood.p_low_pct}${likelihood.p_low_pct === likelihood.p_high_pct ? '' : `–${likelihood.p_high_pct}`}% within ${likelihood.horizon_months} months), as you said.`];
+  const precondition = recordOf(risk.relies_on);
+  if (risk.relies_on !== undefined) {
+    if (precondition === undefined || !nonEmpty(precondition.option_id) || !nonEmpty(precondition.option_label)
+      || threatens === null || threatens.length !== 0 || drivenBy === null || drivenBy.length !== 0
+      || (risk.links_dropped !== undefined && risk.links_dropped !== true)) return null;
+    return reply(subject, [
+      reliesOnRiskLine(risk.label, precondition.option_label),
+      ...(risk.links_dropped === true ? [`It is kept without links because it is a precondition of ${q(precondition.option_label)}.`] : []),
+      ...likelihoodLines,
+      ...(likelihood === undefined ? [] : ['The likelihood you stated is kept for when the model can apply the risk to that option.']),
+    ], question(r.public_label));
+  }
+  if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
+  // event_risk.v1 slice 2a: the door's grounded occurrence, distinct from placeholder impact.
   const causeNote = HELD_RISK_CAUSE_NOTE;
   const droppedDrivers = r.dropped_drivers === undefined ? []
     : Array.isArray(r.dropped_drivers) && r.dropped_drivers.every(nonEmpty) ? r.dropped_drivers as string[] : null;
@@ -175,7 +184,7 @@ function newRiskReply(r: Rec): string | null {
   const droppedNote = `I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.`;
   const windowNote = HELD_RISK_WINDOW_NOTE;
   return reply(subject, [
-    ...(likelihood !== undefined ? [`It may happen (about ${likelihood.p_low_pct}${likelihood.p_low_pct === likelihood.p_high_pct ? '' : `–${likelihood.p_high_pct}`}% within ${likelihood.horizon_months} months), as you said.`] : []),
+    ...likelihoodLines,
     ...(typeof r.note === 'string' && r.note.includes(causeNote) ? [causeNote] : []),
     ...(droppedDrivers.length > 0 && typeof r.note === 'string' && r.note.includes(droppedNote) ? [droppedNote] : []),
     ...(typeof r.note === 'string' && r.note.includes(windowNote) ? [windowNote] : []),
@@ -437,9 +446,13 @@ export function composeRecoveredProposalReply(tool: string, args: unknown, resul
   const likelihood = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;
   // RC3 (a′): a precondition press names its option by label ("Raise Pro price to £59"); the stamp carries that label.
   const precondition = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.relies_on) : undefined;
-  const carried = likelihood?.basis === 'user' && nonEmpty(likelihood.quote)
-    ? { args, event_risk_statement: likelihood.quote }
-    : precondition !== undefined && nonEmpty(precondition.option_label) ? { args, relies_on_option: precondition.option_label } : args;
+  const hasLikelihood = likelihood?.basis === 'user' && nonEmpty(likelihood.quote);
+  const hasPrecondition = precondition !== undefined && nonEmpty(precondition.option_label);
+  const carried = hasLikelihood || hasPrecondition ? {
+    args,
+    ...(hasLikelihood ? { event_risk_statement: likelihood!.quote } : {}),
+    ...(hasPrecondition ? { relies_on_option: precondition!.option_label } : {}),
+  } : args;
   if (userFiguresTheCallLeaves(carried, userMessage).length > 0) return null;
   return composeHeldResultReply(tool, result);
 }
