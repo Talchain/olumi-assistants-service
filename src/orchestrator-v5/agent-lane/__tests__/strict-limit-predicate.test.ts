@@ -35,24 +35,32 @@ describe('R6: one limit predicate, with the existing relative tie tolerance', ()
 });
 
 const LIMIT_ID = 'agent-lane:monthly_churn_rate:<=';
-async function modelLimit(level: number | undefined, operatorAsStated?: '<', frame = 'level', raw = level) {
-  const graph = {
-    nodes: [
-      { id: 'goal_mrr', kind: 'goal', label: 'MRR' },
-      { id: 'monthly_churn_rate', kind: 'factor', label: 'Monthly churn rate', scale_frame: 100,
-        ...(level === undefined ? {} : { observed_state: { value: level / 100, raw_value: raw, unit: '%', source: 'user_override' } }) },
-    ], edges: [],
-    goal_constraints: [{ constraint_id: LIMIT_ID, node_id: 'monthly_churn_rate', label: 'Monthly churn rate',
-      operator: '<=', ...(operatorAsStated === undefined ? {} : { operator_as_stated: operatorAsStated }),
-      value: 4, unit: '%', value_frame: frame, provenance: 'explicit' }],
-  };
+type Rec = Record<string, unknown>;
+async function modelLimits(graph: Rec): Promise<Rec[]> {
   const dispatch: InternalDispatch = async () => ({ status: 200, json: { graph, graph_hash: 'h-strict' } });
   const result = await createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState({
     scenario_id: '632b92b9-82df-4a46-933f-3a64e49004bd', authenticated_user_id: null, request_id: 'strict-test',
   });
-  expect(result.limits).toHaveLength(1);
   if (!Array.isArray(result.limits)) throw new Error('the model view did not carry limits');
-  return result.limits[0] as Record<string, unknown>;
+  return result.limits as Rec[];
+}
+
+async function modelLimit(level: number | undefined, operatorAsStated?: '<', frame = 'level', raw = level, observed: Rec = {}, unit = '%') {
+  const graph = {
+    nodes: [
+      { id: 'goal_mrr', kind: 'goal', label: 'MRR' },
+      { id: 'monthly_churn_rate', kind: 'factor', label: 'Monthly churn rate', scale_frame: 100,
+        ...(level === undefined ? {} : { observed_state: { value: level / 100, raw_value: raw, unit, source: 'user_override', ...observed } }) },
+    ], edges: [],
+    goal_constraints: [{ constraint_id: LIMIT_ID, node_id: 'monthly_churn_rate', label: 'Monthly churn rate',
+      operator: '<=', ...(operatorAsStated === undefined ? {} : { operator_as_stated: operatorAsStated }),
+      value: 4, unit, value_frame: frame, provenance: 'explicit' }],
+  };
+  const limits = await modelLimits(graph);
+  expect(limits).toHaveLength(1);
+  const limit = limits.find((row) => row.constraint_id === LIMIT_ID && row.node_id === 'monthly_churn_rate');
+  expect(limit, `identity-bound reply row ${LIMIT_ID}`).toBeDefined();
+  return limit!;
 }
 
 describe('R2/R4/R5: the reply reads a computed fact for the stored strict churn limit', () => {
@@ -75,5 +83,53 @@ describe('R2/R4/R5: the reply reads a computed fact for the stored strict churn 
     expect(await modelLimit(undefined, '<')).not.toHaveProperty('today_within_limit');
     expect(await modelLimit(4, '<', 'change_rel')).not.toHaveProperty('today_within_limit');
     expect(await modelLimit(4, '<', 'level', 40)).not.toHaveProperty('today_within_limit');
+  });
+  it.each([
+    [3.9, 0.04, 'at_threshold'],
+    [4, 0.039, true],
+  ] as const)('effective today uses preserved baseline: value %s%%, baseline %s', async (level, baseline, expected) => {
+    expect((await modelLimit(level, '<', 'level', level, { baseline })).today_within_limit).toBe(expected);
+  });
+  it('a stored limit used for positioning is not today\'s measurement or a does-not-meet instruction', async () => {
+    const limit = await modelLimit(4, '<', 'level', 4, { stated_role: 'constraint' });
+    expect(limit).not.toHaveProperty('today_within_limit');
+    expect(limit).not.toHaveProperty('today_within_limit_instruction');
+  });
+  it.each([
+    ['missing own-unit raw measurement', { raw_value: undefined }],
+    ['own-unit value/raw pair on different scales', { raw_value: 40 }],
+  ] as const)('%s supplies no today fact or instruction', async (_name, observed) => {
+    const limit = await modelLimit(4, '<', 'level', 4, observed, 'GBP');
+    expect(limit).not.toHaveProperty('today_within_limit');
+    expect(limit).not.toHaveProperty('today_within_limit_instruction');
+  });
+  it('an attested own-unit current value retains the strict-tie fact', async () => {
+    expect(await modelLimit(4, '<', 'level', 4, {}, 'GBP')).toMatchObject({ today_within_limit: 'at_threshold' });
+  });
+});
+
+describe('reply facts retain the stored node and constraint identities', () => {
+  it('same label/operator/value rows each receive their own current-level fact', async () => {
+    const graph = {
+      nodes: [
+        { id: 'goal_mrr', kind: 'goal', label: 'MRR' },
+        ...([['churn_tie', 0.04], ['churn_inside', 0.039]] as const).map(([id, value]) => ({
+          id, kind: 'factor', label: 'Monthly churn',
+          observed_state: { value, raw_value: Number(value) * 100, cap: 100, unit: '%', source: 'user_override' },
+        })),
+      ], edges: [],
+      goal_constraints: ['churn_inside', 'churn_tie'].map((node_id) => ({
+        constraint_id: `limit_${node_id}`, node_id, label: 'Monthly churn', operator: '<=', operator_as_stated: '<',
+        value: 4, unit: '%', value_frame: 'level', provenance: 'explicit',
+      })),
+    };
+    const limits = await modelLimits(graph);
+    expect(limits).toHaveLength(2);
+    for (const [node_id, fact] of [['churn_tie', 'at_threshold'], ['churn_inside', true]] as const) {
+      const limit = limits.find((row) => row.node_id === node_id && row.constraint_id === `limit_${node_id}`);
+      expect(limit, `identity-bound reply fact for limit_${node_id}`).toMatchObject({
+        node_id, constraint_id: `limit_${node_id}`, today_within_limit: fact,
+      });
+    }
   });
 });

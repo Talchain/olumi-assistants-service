@@ -1010,13 +1010,16 @@ export function holdsABandWord(words: unknown): boolean {
  * - The phrases, whole words only: "at least", "minimum", "no less than" \u2192 at least; "more than", "over", "above"
  *   \u2192 above; "at most", "no more than", "maximum", "cap" \u2192 at most; "under", "below", "less than" \u2192 below. "no less than" and
  *   "no more than" are read whole, never as a negated "less than" / "more than".
+ * - A strict phrase completed with "or equal to", or a figure followed by "or less / more" (and their direction
+ *   synonyms), is inclusive. Read the whole completion before its strict fragment; a suffix needs a stated figure.
  * - ASKED ("Is at least \u00a360k realistic?") says nothing; DENIED anywhere in the turn ("not at least", "must not fall
  *   below") or BOTH directions in one turn \u2192 null. Every miss makes the Agent ask which the user means.
  * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" holds two
  *   different comparators; "under" beside "over" reads as both, and the Agent asks.
  */
-const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
+const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|(?:less|fewer|lower|below|under|more|higher|above|over)(?:\s+than)?\s+or\s+equal\s+to|or\s+(?:less|fewer|lower|below|under|more|higher|above|over)|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
 const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'maximum', 'cap']);
+const INCLUSIVE_CEILING_WORDS: ReadonlySet<string> = new Set(['less', 'fewer', 'lower', 'below', 'under']);
 const BELOW_WORDS: ReadonlySet<string> = new Set(['less than', 'under', 'below']);
 const ABOVE_WORDS: ReadonlySet<string> = new Set(['more than', 'over', 'above']);
 type StatedComparator = 'at_least' | 'at_most' | 'above' | 'below';
@@ -1025,12 +1028,21 @@ type StatedComparator = 'at_least' | 'at_most' | 'above' | 'below';
 export function comparatorTheUserWrote(turnText: string | null | undefined): StatedComparator | null {
   if (typeof turnText !== 'string') return null;
   const said = new Set<StatedComparator>();
+  const figures = findStatedAmounts(turnText);
   for (const m of turnText.matchAll(COMPARATOR_WORDS)) {
-    const reading = readingAt(turnText, m.index);
+    const words = m[1]!.toLowerCase().replace(/\s+/g, ' ');
+    const suffix = words.startsWith('or ');
+    const figure = suffix ? figures.find((amount) => {
+      const end = amount.index + amount.matchedText.length;
+      return end <= m.index && /^\s*$/.test(turnText.slice(end, m.index));
+    }) : undefined;
+    if (suffix && figure === undefined) continue;
+    const reading = readingAt(turnText, figure?.index ?? m.index);
     if (reading.said === 'asked') continue;
     if (reading.said === 'denied') return null;
-    const words = m[1]!.toLowerCase().replace(/\s+/g, ' ');
-    said.add(AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
+    const completed = suffix ? words.slice(3) : words.endsWith(' or equal to') ? words.split(' ')[0]! : null;
+    said.add(completed !== null ? INCLUSIVE_CEILING_WORDS.has(completed) ? 'at_most' : 'at_least'
+      : AT_MOST_WORDS.has(words) ? 'at_most' : BELOW_WORDS.has(words) ? 'below'
       : ABOVE_WORDS.has(words) ? 'above' : 'at_least');
   }
   return said.size === 1 ? [...said][0]! : null;

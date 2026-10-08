@@ -471,6 +471,30 @@ describe('comparatorTheUserWrote — the direction is the user\'s own words, aff
   });
 
   it.each([
+    ['less than or equal to 4%', 'at_most'],
+    ['less or equal to 4%', 'at_most'],
+    ['under or equal to 4%', 'at_most'],
+    ['below or equal to 4%', 'at_most'],
+    ['more than or equal to 4%', 'at_least'],
+    ['more or equal to 4%', 'at_least'],
+    ['above or equal to 4%', 'at_least'],
+    ['over or equal to 4%', 'at_least'],
+    ...['less', 'fewer', 'lower', 'below', 'under'].map((word) => [`4% or ${word}`, 'at_most'] as const),
+    ...['more', 'higher', 'above', 'over'].map((word) => [`4% or ${word}`, 'at_least'] as const),
+    ['£4,000 or less', 'at_most'],
+    ['4k or more', 'at_least'],
+    ['under 4%', 'below'],
+    ['no less than 4%', 'at_least'],
+  ] as const)('R1 inclusive completion: %s → %s', (words, expected) => {
+    expect(comparatorTheUserWrote(`Keep churn ${words}.`), words).toBe(expected);
+  });
+
+  it('R1 inclusive suffix requires a stated figure', () => {
+    expect(comparatorTheUserWrote('Keep churn or less.')).toBeNull();
+    expect(comparatorTheUserWrote('Keep churn or above.')).toBeNull();
+  });
+
+  it.each([
     ['keep churn under 4%', 'at_most', 'below'],
     ['keep churn below 4%', 'at_most', 'below'],
     ['keep churn less than 4%', 'at_most', 'below'],

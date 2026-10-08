@@ -19,6 +19,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { SystemEventTurnPayloadSchema } from '@talchain/schemas/boundary';
+import { meetsLimit, statedOperatorOf } from '../limit-operator-words.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -287,6 +288,31 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
         expect(event['event']).not.toHaveProperty('operator_as_stated');
       }
     }, 180_000);
+
+  it('R1 real writer: less than or equal to 4% stores an inclusive target that meets the 4% tie', async () => {
+    const seed = seedGraph();
+    seed.nodes = seed.nodes.map((node) => node.id === 'goal_mrr' ? { ...node, label: 'Monthly churn' } : node);
+    graphOf.set(SCENARIO, seed);
+    script = [
+      () => fnCall('propose_goal_target', { constraint_type: 'at_most', value: 4, unit: '%', rationale: 'The user stated this inclusive target.' }),
+      () => say('Please approve the target card.'),
+    ];
+    const proposed = await turn({ message: 'Keep monthly churn less than or equal to 4%.' });
+    const chip = approveChipOf(proposed)[0];
+    expect(chip, JSON.stringify(proposed)).toBeDefined();
+    const approved = await turn({ message: chip!.message, source: 'chip', chip: { id: chip!.id } });
+    expect(approved._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const rows = graphNow().goal_constraints?.filter((row) => row.node_id === 'goal_mrr');
+    expect(rows).toEqual([expect.objectContaining({ node_id: 'goal_mrr', operator: '<=', value: 4, unit: '%' })]);
+    const row = rows![0]!;
+    expect(row, 'inclusive completion must not persist the strict fragment').not.toHaveProperty('operator_as_stated');
+    expect(meetsLimit(4, statedOperatorOf(row)!, row.value), 'the stored target includes the 4% tie').toBe(true);
+    expect(approved.assistant_text).toContain('now has the target at most 4%');
+    const events = systemEvents();
+    expect(events).toHaveLength(1);
+    expect(SystemEventTurnPayloadSchema.safeParse(events[0]).success).toBe(true);
+    expect(events[0]!['event']).toEqual(expect.objectContaining({ goal_node_id: 'goal_mrr', constraint_type: 'at_most', raw_value: 4, unit: '%' }));
+  }, 180_000);
 
   it('RED: another writer moves the model between the approval and the write → the REAL stale-base gate refuses (409), the Agent says superseded, nothing of ours is written', async () => {
     graphOf.set(SCENARIO, seedGraph());

@@ -37,6 +37,7 @@ import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.j
 import { percentLimitFrameProvable, percentPeriodsDiffer, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
 import { meetsLimit, statedOperatorOf } from '../../agent-lane/limit-operator-words.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
+import { canReachAnyGoal, type ReachabilityEdge } from '../../../graph/reachability.js';
 
 type Rec = Record<string, unknown>;
 
@@ -99,6 +100,16 @@ export function levelLimitReadsOnNodeCap(graph: unknown, c: Rec, node: Rec, os: 
   const cap = limitTargetCaps(graph, [c]).get(node.id as string);
   if (cap === undefined) return false;
   return typeof os.value === 'number' && typeof os.raw_value === 'number' && valuesMatch(os.value, os.raw_value / cap);
+}
+
+/** The proven current level analysis uses: preserve its baseline, else carry its value. A stored limit is no measurement. */
+export function effectiveLevelLimitCurrentLevel(graph: unknown, c: Rec, node: Rec): number | undefined {
+  const os = isRec(node.observed_state) ? node.observed_state : {};
+  if (os.stated_role === 'constraint' || c.value_frame !== 'level' || typeof c.value !== 'number' || !Number.isFinite(c.value)) return undefined;
+  const onLevel = levelLimitReadsOnNodeLevel(c.value, typeof c.unit === 'string' ? c.unit : undefined, node, os);
+  if (!onLevel && !levelLimitReadsOnNodeCap(graph, c, node, os)) return undefined;
+  const level = os.baseline !== undefined ? os.baseline : os.value;
+  return typeof level === 'number' && Number.isFinite(level) ? level : undefined;
 }
 
 /** The level's author is known: the user's own figure, or Olumi's in the form the run discloses. */
@@ -330,8 +341,10 @@ export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstrain
  * SAME FRAME, from the two proofs this module already owns and nothing else — no unit is parsed here:
  *   · a `"%"` limit PLoT reads on the node's own level (`levelLimitReadsOnNodeLevel`): the level is the percentage ÷ 100;
  *   · a limit in the factor's own unit read on its own cap (`limitTargetCaps`): the level is the figure ÷ cap.
- * The option's level is the number PLoT received (the run's final wire options), or the node's own current `value` when
- * the option does not set it — the same value `carryLevelLimitBaselines` carries. `meetsLimit` owns the tie tolerance
+ * The option's level is the number PLoT received (the run's final wire options), or the node's effective current level when
+ * no intervened node has a directed causal path to it — its preserved baseline, else the value `carryLevelLimitBaselines` carries. Moving an
+ * ancestor can move the limited quantity without setting it, so those options retain the producer's result.
+ * `meetsLimit` owns the tie tolerance
  * and strictness, shared with the Agent's model view. A limit in
  * any other shape proves no frame and is left alone: PLoT does not score it against the node's level either (it is
  * refused or unscored upstream). Level-framed rows only (a delta limit is on a change, not a level). A strict row is
@@ -345,6 +358,10 @@ export function strictLimitsPinnedAtThreshold(
   const out = new Map<string, Set<string>>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
   const nodes = graph.nodes.filter(isRec);
+  const edges = Array.isArray(graph.edges) ? graph.edges.flatMap((e): ReachabilityEdge[] =>
+    isRec(e) && typeof e.from === 'string' && typeof e.to === 'string'
+      ? [{ from: e.from, to: e.to, edge_type: e.edge_type === 'bidirected' ? 'bidirected' : 'directed' }]
+      : []) : [];
   for (const c of goalConstraints) {
     if (!isRec(c) || c.value_frame !== 'level' || typeof c.constraint_id !== 'string' || typeof c.node_id !== 'string') continue;
     const stated = statedOperatorOf(c);
@@ -353,8 +370,9 @@ export function strictLimitsPinnedAtThreshold(
     if (node === undefined || typeof c.value !== 'number' || !Number.isFinite(c.value)) continue;
     const threshold = thresholdOnNodeLevel(graph, c, node, c.value);
     if (threshold === undefined) continue;
-    const os = isRec(node.observed_state) ? node.observed_state : {};
-    const todayAtThreshold = typeof os.value === 'number' && meetsLimit(os.value, stated, threshold) === 'at_threshold';
+    const today = effectiveLevelLimitCurrentLevel(graph, c, node);
+    const todayAtThreshold = today !== undefined && meetsLimit(today, stated, threshold) === 'at_threshold';
+    const limitedNodeIds = new Set([c.node_id]);
     for (const o of options) {
       const id = typeof o.option_id === 'string' && o.option_id !== '' ? o.option_id : typeof o.id === 'string' && o.id !== '' ? o.id : undefined;
       const interventions = isRec(o.interventions) ? o.interventions : {};
@@ -362,7 +380,7 @@ export function strictLimitsPinnedAtThreshold(
       const level = interventions[c.node_id];
       const atThreshold = setsLimitedNode
         ? typeof level === 'number' && meetsLimit(level, stated, threshold) === 'at_threshold'
-        : todayAtThreshold;
+        : todayAtThreshold && !Object.keys(interventions).some((intervenedId) => canReachAnyGoal(intervenedId, edges, limitedNodeIds));
       if (id === undefined || !atThreshold) continue;
       const ids = out.get(id) ?? new Set<string>();
       ids.add(c.constraint_id);

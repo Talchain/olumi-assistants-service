@@ -202,7 +202,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { meetsLimit } from '../limit-operator-words.js';
-import { thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
+import { effectiveLevelLimitCurrentLevel, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
@@ -1320,10 +1320,12 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       const stated = statedOperatorOf(c);
       const unit = str(c.unit) ? (c.unit.startsWith('%') ? c.unit : ` ${c.unit}`) : '';
       const node = g.nodes.find((n) => n.id === c.node_id);
-      const today = node?.observed_state?.value;
+      const today = node === undefined ? undefined : effectiveLevelLimitCurrentLevel(g.raw, c, node as Record<string, unknown>);
       const threshold = c.value_frame === 'level' && node !== undefined
         ? thresholdOnNodeLevel(g.raw, c, node as Record<string, unknown>, c.value as number) : undefined;
       return {
+        ...(str(c.node_id) ? { node_id: c.node_id } : {}),
+        ...(str(c.constraint_id) ? { constraint_id: c.constraint_id } : {}),
         // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
         // own label only when that node is absent — so the card and the Agent say the same words for one limit.
         on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
