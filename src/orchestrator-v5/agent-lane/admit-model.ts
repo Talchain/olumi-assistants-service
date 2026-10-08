@@ -1375,7 +1375,7 @@ const quotedList = (items: readonly string[]): string => {
  * still an addend (item c), and so is a cause that drives a factor (finding 3 of 1047641f).
  */
 function markProductIdentities(
-  declared: readonly CandidateIdentity[],
+  allDeclared: readonly CandidateIdentity[],
   resolve: (label: string) => string | undefined,
   nodes: readonly AdmittedNode[],
   edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
@@ -1387,6 +1387,9 @@ function markProductIdentities(
   const accepted: AcceptedProductIdentity[] = [];
   const analyses: ProductIdentityAnalysis[] = [];
   const unlevelled: string[] = [];
+  // ⭐ CEE #4: an `accumulation` is admitted by its own writer (`accumulation-identity.ts`, which needs the held deadline),
+  // never refused here as "not a relationship Olumi can check".
+  const declared = allDeclared.filter((d) => d?.operation !== 'accumulation');
   if (declared.length === 0) return { marks, loss, accepted, analyses, unlevelled };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const nodeOf = new Map(nodes.map((n) => [n.id, n]));
@@ -1539,6 +1542,8 @@ function markProductIdentities(
     if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
     // The DECLARATION holds and bears on the goal: it is persisted as the node's carrier whatever the
     // options do today, so a Run re-judges it on the graph it analyses (an option added later included).
+    // No 5% current-level reconciliation here: accumulation carriers are attached later, so this reader cannot see S₀.
+    // The card/coherence readers compare price × S₀; price × the month-N operand is not today's goal level.
     accepted.push({ outcome_id: outcomeId, factor_ids: [...factorIds], stated_in_brief: d.provenance === 'explicit' });
 
     /**
@@ -1832,6 +1837,11 @@ export interface NonlinearIdentityLeaderWithhold {
 
 type GraphNodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown } & Record<string, unknown>;
 
+function isAccumulationCarrier(n: GraphNodeLike): boolean {
+  const c = n.nonlinear_identity as { operation?: unknown } | null | undefined;
+  return c !== null && typeof c === 'object' && c.operation === 'accumulation';
+}
+
 function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
   const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
   if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
@@ -1848,7 +1858,11 @@ export function nodesUnderANonlinearIdentity(graph: unknown): ReadonlySet<string
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return new Set();
   const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string');
-  const carried = nodes.filter((n) => readCarrier(n) !== null).map((n) => n.id as string);
+  // ⭐ CEE #3: an accumulation carrier's value is worked out by ISL too, never additively, so a limit on it is distrusted
+  // like a product's (the conservative direction: an over-withheld limit sentence, never a false one). C46's sign test
+  // (`readCarrier`) stays product-only: S_T rises with the stock and the inflow and falls with the churn rate, so its sign
+  // in each input is fixed, which is what the sign test exists to prove.
+  const carried = nodes.filter((n) => readCarrier(n) !== null || isAccumulationCarrier(n)).map((n) => n.id as string);
   if (carried.length === 0) return new Set();
   return new Set([...carried, ...nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string)]);
 }

@@ -21,7 +21,7 @@ import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
  *    mint), with or without the per-item denominator: the drafter's typed unit licenses nothing (AIQ 5891286280).
  */
-import { GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, sameUnit, unitsCompose } from './reconciling-product.js';
+import { accumulationStockFor, GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, sameUnit, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
@@ -252,7 +252,12 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     const cm = readMoneyTotal(current.unit, goalLabel); const gm = readMoneyTotal(goalUnit, goalLabel);
     if (cm === null || gm === null || cm.code !== gm.code || cm.period !== gm.period) return null;
     const operands = [a, b].map(n => {
-      const os = isRec(n.observed_state) ? n.observed_state : undefined;
+      // The product is month-N MRR; reconcile today's MRR with price × S₀, never price × S_N.
+      const stock = accumulationStockFor(n, byId);
+      // Without S₀ this reader cannot reconcile today's MRR; the projected operand is never its substitute.
+      if (isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation' && stock === null) return null;
+      const today = stock ?? n;
+      const os = isRec(today.observed_state) ? today.observed_state : undefined;
       return typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) && text(os.unit) !== undefined
         ? { id: String(n.id), label: text(n.label) ?? String(n.id), value: os.raw_value, unit: text(os.unit)! } : null;
     });
@@ -325,7 +330,13 @@ function todaysOperand(id: string, byId: Map<string, Rec2>, edges: readonly Rec2
 /** The ONE user-levelled cause `todaysOperand` reads an operand through (the node, the cause, its level), or null. */
 function todaysCause(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]): { n: Rec2; f: Rec2; level: { value: number; unit: string } } | null {
   const n = byId.get(id);
-  if (n === undefined || (n.kind !== 'outcome' && n.kind !== 'factor') || carriesIdentity(n)) return null;
+  if (n === undefined || (n.kind !== 'outcome' && n.kind !== 'factor')) return null;
+  const stock = accumulationStockFor(n, byId);
+  if (stock !== null) {
+    const level = usersLevel(stock);
+    return stock.kind === 'factor' && !carriesIdentity(stock) && level !== null ? { n, f: stock, level } : null;
+  }
+  if (carriesIdentity(n)) return null;
   const os = isRec(n.observed_state) ? n.observed_state : undefined;
   const causes = [...new Set(edges.filter((e) => e.to === id && typeof e.from === 'string').map((e) => e.from as string))]
     .filter((c) => { const k = byId.get(c)?.kind; return k !== 'option' && k !== 'decision'; });
