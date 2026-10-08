@@ -255,6 +255,17 @@ function oneQuestion(result: Json, expected: string): void {
 }
 
 describe('RT-6 natural sentences: held-out B5 corpus', () => {
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: the same waste→margin %s still blocks P5', kind => {
+    const row = NATURAL_SENTENCE_ROWS.find(r => r.id === 'S1')!;
+    const g = world(row).graph();
+    g.edges = g.edges.filter((e: Json) => (e.from === 'close_shops_and_centralise' && e.to === row.from)
+      || (e.from === row.from && e.to === row.to));
+    const e = edgeOf(g, row);
+    if (kind === 'placeholder') { e.provenance.magnitude = 'olumi_placeholder'; e.strength.defaulted = true; }
+    else delete e.provenance.natural_effect;
+    expect(targetTestabilityOf(g)).toMatchObject({ kind: 'not_testable',
+      failures: expect.arrayContaining([expect.objectContaining({ precondition: 'P5' })]) });
+  });
   for (const row of NATURAL_SENTENCE_ROWS) it(`${row.id}: ${row.quote}`, async () => {
     const w = world(row); const before = w.graph(); const result = await propose(w, row);
     if (row.limit !== undefined) {
@@ -293,11 +304,11 @@ describe('RT-6 natural sentences: held-out B5 corpus', () => {
     expect(olumiGuessedLink(link, nodeUnitOf(reload.nodes)), 'an approved card counts as user-sized for the licence').toBe(false);
     if (row.id === 'S1') {
       // Hold all other model content fixed and inspect this actual option → waste → margin path.
-      // Before consent, P5 withholds the Olumi estimate; the approved reading satisfies the same licence.
+      // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
+      // effect that converts into goal units." This unit-bearing waste→margin estimate already converts before consent.
       const path = (g: Json): Json => ({ ...g, edges: g.edges.filter((e: Json) =>
         (e.from === 'close_shops_and_centralise' && e.to === row.from) || (e.from === row.from && e.to === row.to)) });
-      expect(targetTestabilityOf(path(before))).toMatchObject({ kind: 'not_testable',
-        failures: expect.arrayContaining([expect.objectContaining({ precondition: 'P5' })]) });
+      expect(targetTestabilityOf(path(before))).toMatchObject({ kind: 'testable' });
       expect(targetTestabilityOf(path(reload))).toMatchObject({ kind: 'testable' });
     }
     const noReading = structuredClone(reload);

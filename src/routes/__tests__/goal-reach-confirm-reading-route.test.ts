@@ -22,6 +22,7 @@ import * as systemEvents from '../../orchestrator-v5/system-events/dispatch.js';
 import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
+import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
 
 const { port, source } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -53,7 +54,6 @@ import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b';
 const AT = '2026-10-08T08:00:00.000Z';
 const READY = { status: 'ready', may_run: true };
-const WORDS = 'Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?';
 const hashOf = (graph: unknown) => computeAnalysisAffectingGraphHash(graph as never)!;
 let app: FastifyInstance;
 let serial = 0;
@@ -171,20 +171,7 @@ async function press(id: string, message: string, parameters?: Record<string, un
   expect(response.statusCode, response.body).toBe(200); return response.json();
 }
 async function assertDoorThenNextRun(card: Record<string, any>, tools = ['propose_identity']): Promise<void> {
-  expect(card._agent?.tool_calls?.map((call: { name: string }) => call.name)).toEqual(tools);
-  const approve = card.suggested_actions.find((a: { id: string }) => a.id.startsWith('agent-approve-proposal:'));
-  expect(approve, 'press must expose the held identity card').toBeDefined();
-  expect(approve.detail).toBe(WORDS); expect(graphWrites).toBe(0);
-  const held = agentProposals.get(approve.id.slice('agent-approve-proposal:'.length));
-  expect(held?.operations).toEqual([expect.objectContaining({ op: 'confirm_identity', path: 'mrr', value: expect.objectContaining({
-    factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], words: WORDS,
-  }) })]);
-  const yes = await press(approve.id, approve.message);
-  expect(yes._agent?.tool_calls?.map((call: { name: string }) => call.name)).toEqual(['authorise_change']);
-  expect(graphWrites, `identity Yes response: ${JSON.stringify(yes)}`).toBe(1);
-  expect(source.graph.nodes.find((n: { id: string }) => n.id === 'mrr').nonlinear_identity).toEqual({
-    operation: 'product', factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: true,
-  });
+  await assertIdentityYes(card, press, id => agentProposals.get(id), () => graphWrites, () => source.graph, tools);
   const freshFacts = actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
     analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY });
   expect(offersOf(actionBarOf(freshFacts)).filter(o => o.action_id === 'confirm_reading')).toEqual([]);

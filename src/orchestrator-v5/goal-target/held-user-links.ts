@@ -198,6 +198,16 @@ export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefi
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
 }
 
+/** RC4's graph-bound definition reader, using the same endpoint ID as GoalPathLink. Ambiguous links stay estimates. */
+export function validatedDefinitionForGraph(graph: unknown): (linkId: string) => string | undefined {
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const ends = endsOfGraph(graph);
+  return linkId => {
+    const matches = edges.filter(e => typeof e.from === 'string' && typeof e.to === 'string' && `${e.from}->${e.to}` === linkId);
+    return matches.length === 1 ? validatedDefinition(matches[0], ends(matches[0])) : undefined;
+  };
+}
+
 /** A definitional link's spread on the Run input: the structural minimum (d5). */
 const DEFINITIONAL_STD = 0.01;
 

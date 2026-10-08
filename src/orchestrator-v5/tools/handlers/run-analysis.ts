@@ -2117,7 +2117,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // S-E GOALS: a chance goal's ONE withhold speaks alone (Codex buddy r1 on #2742): no later goal-figure withhold is added.
     if (!chanceGoalWithheld) {
       const before = response;
-      response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis);
+      response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis, snapshot.goal_node_id);
       if (response !== before) {
         log.info(
           {
@@ -2814,7 +2814,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
-    response = scopeTargetNotTestableWithRanges(response, graphForAnalysis);
+    response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
 
     const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
       snapshot.rawPersistedGraph,
@@ -3867,7 +3867,7 @@ export function withholdGoalFiguresForChanceGoal<E>(response: E, graph: unknown)
   });
 }
 
-export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
+export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown, goalId?: unknown): E {
   const { scored, shown } = goalFigureOptions(response);
   // A run that shows no goal figure and was withheld by nothing still names no leader and no share under `exploratory`
   // (the whole-run arm); a run an earlier withhold already emptied keeps that withhold's reason alone.
@@ -3875,7 +3875,7 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   if (ids.length === 0) return response;
   // THIS Run's identity evaluations, as (S) reads them: an inferred product the Run evaluated is exact (Science d5, #2644).
   const evaluations = (response as Record<string, unknown>).identity_evaluations;
-  const verdict = targetTestabilityOf(graph, Array.isArray(evaluations) ? evaluations : undefined);
+  const verdict = targetTestabilityOf(graph, Array.isArray(evaluations) ? evaluations : undefined, goalId);
   const warning = targetNotTestableWarning(graph, verdict, ids, GOAL_FIGURES_TARGET_NOT_TESTABLE);
   // ⭐ F1b [R1] (contract §2; L2(a) "option outcome distributions always show when computed"): when every failure is
   // about how the TARGET is stated (P2 off scale, P3 comparator, P4 unit), the goal has today's level and every path size

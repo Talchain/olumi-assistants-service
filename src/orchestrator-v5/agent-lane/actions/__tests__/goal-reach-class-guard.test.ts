@@ -313,4 +313,14 @@ describe('GOAL-REACH 3b — Paul\'s served post-Yes Run (P44 draw 2, 53e2ddbd)',
     const dollars = structuredClone(served.graph); goalOf(dollars).goal_threshold_unit = '$/month';
     expect(preconditionsOf(dollars)).toContain('P1');
   });
+  it.each(['different period', 'different rate denominator', 'non-count operand'])('r8 P1 CONTRAST: even a confirmed product cannot derive a level from a %s', change => {
+    const graph = structuredClone(served.graph);
+    const rate = graph.nodes.find((n: Rec) => n.id === 'pro_plan_price');
+    const count = graph.nodes.find((n: Rec) => n.id === 'paying_pro_subscribers');
+    if (change === 'different period') rate.observed_state.unit = '£/year';
+    if (change === 'different rate denominator') rate.observed_state.unit = '£/seat/month';
+    if (change === 'non-count operand') count.observed_state.unit = '%';
+    expect(preconditionsOf(graph)).toContain('P1');
+    expect(barOf(graph)).toHaveLength(1);
+  });
 });

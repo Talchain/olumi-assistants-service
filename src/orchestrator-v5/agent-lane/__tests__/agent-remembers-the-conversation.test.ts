@@ -58,9 +58,11 @@ describe('after a restart, the Agent still knows the conversation the user can s
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
   it('RED: the first turn in a fresh process carries the durable conversation, oldest first, before the new message', async () => {
+    const readsBefore = store.readRecent.mock.calls.length;
     sent.length = 0;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'What did I say the budget was?' } });
     expect(r.statusCode).toBe(200);
+    expect(store.readRecent.mock.calls.length, 'the seed is the only conversation-history read').toBe(readsBefore + 1);
     expect(JSON.stringify(sent[0]), 'the sub-turn row is not the conversation').not.toMatch(/the user pressed Run|100% of runs/);
     expect(texts(sent[0])).toEqual([
       'user: Should I hire a Tech lead or two developers? Our budget is fixed at £180k.',
@@ -94,10 +96,13 @@ describe('after a restart, the Agent still knows the conversation the user can s
   });
 
   it('a durable-read failure degrades to no history — the turn still answers', async () => {
-    store.readRecent.mockRejectedValueOnce(new Error('db down'));
+    const readsBefore = store.readRecent.mock.calls.length;
+    store.readRecent.mockRejectedValue(new Error('db down'));
     sent.length = 0;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '9b1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', message: 'Hello' } });
     expect(r.statusCode).toBe(200);
+    expect(r.json().assistant_text).toBe('You said the budget is fixed at £180k.');
+    expect(store.readRecent.mock.calls.length, 'failed seed is not retried by egress').toBe(readsBefore + 1);
     expect(texts(sent[0])).toEqual(['user: Hello']);
   });
 });
