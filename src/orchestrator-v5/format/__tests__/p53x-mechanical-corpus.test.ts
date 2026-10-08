@@ -32,3 +32,4 @@ describe('P53x mechanical corpus: sized links keep byte-identical band words', (
     expect(edgeStrengthWords(edge)).toBe('not sized yet');
   });
 });
+

@@ -117,6 +117,20 @@ const CONVERTER_MODULE = /edge-strength-bands|edge-strength-words|influence-band
  * namespace import) escapes the call scanner. Outside the helper and the module that DECLARES the converter, any value
  * reference that is not the callee of a direct call (or the object of a CANVAS_BAND_WORD[...] read) is refused.
  */
+/** Modules that DECLARE a converter (namespace access to them is computed access: refused outside the helper). */
+const DECLARING = ['edge-strength-bands', 'format-graph-for-context', 'explanation-fallback'];
+const declaringModule = (spec: string): boolean => DECLARING.some((m) => new RegExp(`(^|/)${m}(\\.js)?$`).test(spec));
+/** The primitive bands module's importers, frozen at P53x (8 Oct). A new importer needs a reviewed census update. */
+const BANDS_IMPORTERS = new Set([
+  'src/orchestrator-v5/agent-lane/approval-chips.ts', 'src/orchestrator-v5/agent-lane/guidance/select-strengthen-placeholder.ts',
+  'src/orchestrator-v5/agent-lane/proposal-object/amend.ts', 'src/orchestrator-v5/agent-lane/proposal-object/record.ts',
+  'src/orchestrator-v5/agent-lane/rerun-explanation.ts', 'src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts',
+  'src/orchestrator-v5/agent-lane/stated-link-band-context.ts', 'src/orchestrator-v5/agent-lane/turn-context/proposal-preview.ts',
+  'src/orchestrator-v5/coaching/run-input-changes.ts', 'src/orchestrator-v5/format/edge-strength-words.ts',
+  'src/orchestrator-v5/format/format-graph-for-context.ts', 'src/orchestrator-v5/system-events/edge-strength-edit.ts',
+  'src/orchestrator-v5/tools/handlers/adjust-edge-strength.ts', 'src/orchestrator-v5/tools/handlers/run-input-snapshot.ts',
+]);
+
 function converterIndirections(file: string, text: string): string[] {
   if (file === helper) return [];
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
@@ -127,14 +141,26 @@ function converterIndirections(file: string, text: string): string[] {
     if (ts.isImportDeclaration(statement)) {
       const bindings = statement.importClause?.namedBindings;
       if (bindings && ts.isNamedImports(bindings)) for (const b of bindings.elements) aliases.set(b.name.text, b.propertyName?.text ?? b.name.text);
-      if (bindings && ts.isNamespaceImport(bindings) && ts.isStringLiteral(statement.moduleSpecifier) && /edge-strength-bands/.test(statement.moduleSpecifier.text)) {
+      if (bindings && ts.isNamespaceImport(bindings) && ts.isStringLiteral(statement.moduleSpecifier) && declaringModule(statement.moduleSpecifier.text)) {
         found.push(`${file}::namespace-import::${statement.moduleSpecifier.text}`);
       }
+      if (ts.isStringLiteral(statement.moduleSpecifier) && /(^|\/)edge-strength-bands(\.js)?$/.test(statement.moduleSpecifier.text) && !BANDS_IMPORTERS.has(file)) {
+        found.push(`${file}::new-importer::${statement.moduleSpecifier.text}`);
+      }
+    }
+    if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier) && declaringModule(statement.moduleSpecifier.text)) {
+      const clause = statement.exportClause;
+      if (clause === undefined || ts.isNamespaceExport(clause)) found.push(`${file}::namespace-reexport::${statement.moduleSpecifier.text}`);
+      if (/(^|\/)edge-strength-bands(\.js)?$/.test(statement.moduleSpecifier.text) && !BANDS_IMPORTERS.has(file)) found.push(`${file}::new-importer::${statement.moduleSpecifier.text}`);
     }
     if (ts.isFunctionDeclaration(statement) && statement.name && isConverter(statement.name.text)) declared.add(statement.name.text);
     if (ts.isVariableStatement(statement)) for (const d of statement.declarationList.declarations) if (ts.isIdentifier(d.name) && isConverter(d.name.text)) declared.add(d.name.text);
   }
   function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments[0] !== undefined && ts.isStringLiteral(node.arguments[0]) && declaringModule(node.arguments[0].text)) {
+      found.push(`${file}::dynamic-import::${node.arguments[0].text}`);
+    }
     if (ts.isIdentifier(node)) {
       const name = aliases.get(node.text) ?? node.text;
       const parent = node.parent;
@@ -174,7 +200,7 @@ it('P53x AST: band-from-mean calls exist only in the sizing-aware helper or name
       if (!/\.tsx?$/.test(path) || /\.(test|spec)\.tsx?$/.test(path)) continue;
       const text = readFileSync(path, 'utf8');
       // Prefilter (speed only): a file that names no converter cannot call or alias one.
-      if (!/edgeBandFromMagnitude|strengthBand|CANVAS_BAND_WORD|relationshipPhrase|formatEdgeStrengthMagnitude|describeBand|edge-strength-bands/.test(text)) continue;
+      if (!/edgeBandFromMagnitude|strengthBand|CANVAS_BAND_WORD|relationshipPhrase|formatEdgeStrengthMagnitude|describeBand|edge-strength-bands|format-graph-for-context|explanation-fallback/.test(text)) continue;
       forbidden.push(...forbiddenCalls(path, text, used), ...converterIndirections(path, text));
     }
   }
@@ -196,10 +222,19 @@ it('P53x AST firing control detects forbidden, renamed and extra calls in an all
 });
 
 it('P53x AST firing control (Codex #2819 P2): aliases, re-exports, values and namespace imports are refused', () => {
-  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude, CANVAS_BAND_WORD } from './edge-strength-bands.js';\nconst toBand = edgeBandFromMagnitude; const words = CANVAS_BAND_WORD;\nexport function voice(edge) { return words[toBand(Math.abs(edge.strength.mean))]; }")).toHaveLength(2);
-  expect(converterIndirections('src/new-reader.ts', "export { edgeBandFromMagnitude as band } from './edge-strength-bands.js';")).toHaveLength(1);
-  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude } from './edge-strength-bands.js';\nexport const all = (ms: number[]) => ms.map(edgeBandFromMagnitude);")).toHaveLength(1);
+  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude, CANVAS_BAND_WORD } from './edge-strength-bands.js';\nconst toBand = edgeBandFromMagnitude; const words = CANVAS_BAND_WORD;\nexport function voice(edge) { return words[toBand(Math.abs(edge.strength.mean))]; }").filter((f) => f.includes('::indirect:'))).toHaveLength(2);
+  expect(converterIndirections('src/new-reader.ts', "export { edgeBandFromMagnitude as band } from './edge-strength-bands.js';").filter((f) => f.includes('::indirect:'))).toHaveLength(1);
+  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude } from './edge-strength-bands.js';\nexport const all = (ms: number[]) => ms.map(edgeBandFromMagnitude);").filter((f) => f.includes('::indirect:'))).toHaveLength(1);
   expect(converterIndirections('src/new-reader.ts', "import * as B from '../format/edge-strength-bands.js';\nexport const v = (m: number) => B.CANVAS_BAND_WORD[B.edgeBandFromMagnitude(m)];")).not.toHaveLength(0);
   // CONTROL: a direct call (checked by the call scanner) and a type query are not indirections.
-  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude } from './edge-strength-bands.js';\ntype B = ReturnType<typeof edgeBandFromMagnitude>;\nexport const v = (m: number) => edgeBandFromMagnitude(m);")).toEqual([]);
+  expect(converterIndirections('src/orchestrator-v5/coaching/run-input-changes.ts', "import { edgeBandFromMagnitude } from './edge-strength-bands.js';\ntype B = ReturnType<typeof edgeBandFromMagnitude>;\nexport const v = (m: number) => edgeBandFromMagnitude(m);")).toEqual([]);
+});
+
+it('P53x AST firing control (Codex #2819 r2 P2): namespace re-export + computed keys, export *, dynamic import, a new importer', () => {
+  expect(converterIndirections('src/new-barrel.ts', "export * as B from '../format/edge-strength-bands.js';")).not.toHaveLength(0);
+  expect(converterIndirections('src/new-barrel.ts', "export * from './format-graph-for-context.js';")).not.toHaveLength(0);
+  expect(converterIndirections('src/new-reader.ts', "export const v = async (m: number) => { const B = await import('../format/edge-strength-bands.js'); return B[('CANVAS_' + 'BAND_WORD') as 'CANVAS_BAND_WORD']; };")).not.toHaveLength(0);
+  expect(converterIndirections('src/new-reader.ts', "import { EDGE_BAND_CUTS } from '../format/edge-strength-bands.js';\nexport const c = EDGE_BAND_CUTS;")).not.toHaveLength(0);
+  // CONTROL: a frozen importer's named import of a non-converter is fine.
+  expect(converterIndirections('src/orchestrator-v5/coaching/run-input-changes.ts', "import { edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';\nexport const x = 1;")).toEqual([]);
 });

@@ -239,6 +239,9 @@ describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a 
     expect(proposal.public_label).not.toContain('as your own estimate');
     expect(result.note).toContain('nobody had sized this link; approving records review, never the user\u2019s authorship');
     expect(result.note).not.toMatch(/Olumi[’']s estimate/);
+    // P53x (Codex #2819 r2 P2): a placeholder has no band to "sit in".
+    expect(result.note).not.toContain('already sits in that band');
+    expect(result.note).toContain('Its numbers are kept exactly as they are');
   });
 
   it('CONTROL: independently sized prospect → revenue keeps Olumi’s estimate across card, whose, note and reply', async () => {

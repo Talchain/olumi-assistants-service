@@ -3669,7 +3669,7 @@ export function createAgentCapabilities(
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? (keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
+            : `Nothing has changed yet. ${linkSizing(edge) === 'placeholder' ? 'Its numbers are kept exactly as they are' : 'The link already sits in that band, so its strength is kept exactly as it is'} and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
               ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
               : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
