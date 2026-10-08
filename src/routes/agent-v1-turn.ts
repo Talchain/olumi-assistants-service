@@ -649,8 +649,8 @@ function widenedRunWordsOf(graph: unknown): { widenedRiskNote?: string; widenedR
 }
 
 /** The final scenario read owns the UI's cells; missing authority never licenses a substitute projection. */
-function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly CanonicalAnalysisCell[] {
-  const view = read.canonicalAnalysisView as { schema?: unknown; source?: unknown; options?: unknown } | null | undefined;
+function validCanonicalAnalysisView(value: unknown): value is { options: { cell: CanonicalAnalysisCell }[] } {
+  const view = value as { schema?: unknown; source?: unknown; options?: unknown } | null | undefined;
   const options = view?.options;
   const valid = view?.schema === 'canonical_analysis_view.v1' && view.source === 'stored_run_facts'
     && Array.isArray(options) && options.every(row => {
@@ -676,7 +676,12 @@ function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scena
           && typeof (reason as { code?: unknown }).code === 'string'
           && ((reason as { message?: unknown }).message === null || typeof (reason as { message?: unknown }).message === 'string'));
     });
-  if (valid) return (options as { cell: CanonicalAnalysisCell }[]).map(row => row.cell);
+  return valid;
+}
+
+function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly CanonicalAnalysisCell[] {
+  const view = read.canonicalAnalysisView;
+  if (validCanonicalAnalysisView(view)) return view.options.map(row => row.cell);
   log.warn({ event: 'agent_lane.canonical_analysis_view_unavailable', scenario_id: scenarioId },
     'agent-lane: final scenario read has no valid canonical analysis cells');
   return [];
@@ -4547,6 +4552,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The scenario-bound verdict from the FINAL readback governs; otherwise the
       // finaliser's own honest no-context verdict stays (present, never deleted).
       ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
+      // UI-only sidecar from this SAME composed read; never put it in history, Run deltas or model context.
+      ...(validCanonicalAnalysisView(composedRead.canonicalAnalysisView)
+        ? { canonical_analysis_view: composedRead.canonicalAnalysisView } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
     } as OlumiResponse & Record<string, unknown>;
     // What changed since the last run — the run turn's own block, or why it has none — only beside that same run.
@@ -4764,7 +4772,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       leaderFreeEnvelope = finalEgress.leaderFreeEnvelope === true;
       if (finalEgress.response !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
-        wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
+        wireBody = {
+          ...(finalEgress.proseEdited ? withoutShape : finalEgress.response),
+          // The producer licenses this view (including leader_licence); turn egress must match the scenario-graph read.
+          ...(validCanonicalAnalysisView(composedRead.canonicalAnalysisView)
+            ? { canonical_analysis_view: composedRead.canonicalAnalysisView } : {}),
+        } as OlumiResponse & Record<string, unknown>;
       }
     }
     /**
