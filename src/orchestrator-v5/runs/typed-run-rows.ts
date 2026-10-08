@@ -1,8 +1,10 @@
 import {
   RunAnalysisHandlerFactSchema,
+  type HandlerFact,
   type RunAnalysisHandlerFact,
 } from '@talchain/schemas/orchestrator';
 import type { LeaderLicence } from '../compose/leader-licence.js';
+import { isAnalysisRefusalFact } from '../context/analysis-refusal-continuity.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { goalChancePrecisionOf } from '../goal-target/goal-chance-driver.js';
 import { agentLicenceRecordOf, isLicensedDriver } from '../goal-target/goal-chance-licence.js';
@@ -66,7 +68,7 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
 
 export interface TypedRunRowsContext {
   readonly scenarioId: string;
-  /** Match the SQL boundary: live inserts quarantine absent identity; backfill skips it. */
+  /** Refusal markers without identity are not Runs; other absent identity quarantines live and skips backfill. */
   readonly mode?: 'trigger' | 'backfill';
   /** Only the identity of the graph this frozen Run evaluated, when attested by the caller. */
   readonly graphIdentityHash?: string | null;
@@ -100,10 +102,12 @@ export interface TypedRunRows {
 
 export type TypedRunRowsResult = { readonly ok: TypedRunRows }
   | { readonly quarantine: string }
+  | { readonly skipped_refusal: true }
   | { readonly skipped_legacy: true };
 
 /**
- * Maps ONE persisted fact. Malformed facts quarantine individually; backfill skips pre-run-identity facts.
+ * Maps ONE persisted fact. Refusal markers without a run_id derive nothing. Malformed facts quarantine
+ * individually; backfill skips other pre-run-identity facts.
  * Inputs are never rebuilt from the current graph. The canonical hash is the snapshot's sent_digest (the schema's
  * SHA-256 of the actual PLoT request, request ID excluded). graph_hash_at_run is an analysis-affecting currentness
  * hash, so it is deliberately NOT relabelled as graph_identity_hash.
@@ -124,6 +128,13 @@ export function toTypedRunRows(fact: unknown, ctx: TypedRunRowsContext): TypedRu
 function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult {
   const source = recordOf(fact);
   const sourceResult = recordOf(source?.result);
+  // Class refusal_not_a_run: a refusal attempt computed nothing. Match the shared predicate before
+  // current-schema validation: it does not require fact_version or Run fields.
+  if (source !== undefined && sourceResult !== undefined
+    && isAnalysisRefusalFact(source as unknown as HandlerFact)
+    && (!Object.hasOwn(sourceResult, 'run_id') || sourceResult.run_id === null)) {
+    return { skipped_refusal: true };
+  }
   let producerPermission: boolean | null = null;
   let schemaFact = fact;
   // Check the identity boundary before the current schema: legacy payloads may

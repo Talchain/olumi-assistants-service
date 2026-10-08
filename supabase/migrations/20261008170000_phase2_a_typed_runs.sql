@@ -8,7 +8,7 @@
 -- No append RPC is replaced: every writer of v5_handler_facts is covered.
 -- Discriminator: src/orchestrator-v5/session/supabase-store.ts:2972-2975 writes
 -- action_type = f.fact_type and payload = {fact_type, fact_version, result}.
--- Either run_analysis discriminator selects a fact; inconsistent carriers quarantine.
+-- Either run_analysis discriminator selects a fact; inconsistent Run carriers quarantine.
 -- noop is the fact column. The paths below are pinned by TYPED_RUN_PAYLOAD_PATHS
 -- in src/orchestrator-v5/runs/typed-run-rows.ts and its existing test file.
 -- Warning child paths apply equally to result.inference_warnings when present.
@@ -60,9 +60,13 @@
 -- Backfill is explicit, bounded, and is NOT invoked by this migration. It skips
 -- already derived/quarantined IDs and valid pre-run-identity facts whose run_id
 -- is absent/null.
--- Such live inserts quarantine as run_id_absent. Actionable backfill facts sort
--- before legacy facts, so the historical prefix cannot consume every batch.
--- skipped_legacy counts rows observed in this call, not a durable skip marker.
+-- Refusal markers with absent/null run_id are 'refusal_not_a_run': neither mode
+-- derives or quarantines them. Predicate mirrors isAnalysisRefusalFact exactly:
+-- payload.fact_type = run_analysis, noop = false, enrichment.analysis_status = refused.
+-- Other live inserts with absent/null run_id quarantine as run_id_absent.
+-- Actionable backfill facts sort before skipped facts, so the historical prefix
+-- cannot consume every batch. skipped_legacy and skipped_refusal count rows
+-- observed in this call, not durable skip markers.
 -- Historical revision is unknowable:
 -- both trigger and backfill record scenarios.revision at derivation time.
 -- Latest v4: 20260806120000_v5_turn_fence_first_write_exemption.sql:322-347
@@ -187,13 +191,20 @@ BEGIN
        AND p_fact.payload->>'fact_type' IS DISTINCT FROM 'run_analysis' THEN
       RETURN;
     END IF;
+    v_result := p_fact.payload->'result';
+    IF p_fact.payload->>'fact_type' = 'run_analysis' AND p_fact.noop IS FALSE
+       AND v_result #> '{enrichment,analysis_status}' = '"refused"'::jsonb
+       AND (v_result->'run_id' IS NULL OR v_result->'run_id' = 'null'::jsonb) THEN
+      -- refusal_not_a_run: the refused attempt computed nothing. This is the
+      -- exact isAnalysisRefusalFact predicate, independent of other Run fields.
+      RETURN;
+    END IF;
     IF p_fact.action_type IS DISTINCT FROM 'run_analysis'
        OR p_fact.payload->>'fact_type' IS DISTINCT FROM 'run_analysis'
        OR p_fact.payload->'fact_version' IS DISTINCT FROM '1'::jsonb
        OR p_fact.noop IS DISTINCT FROM FALSE THEN
       RAISE EXCEPTION 'invalid run_analysis discriminator, fact_version or noop';
     END IF;
-    v_result := p_fact.payload->'result';
     IF jsonb_typeof(v_result) IS DISTINCT FROM 'object' THEN
       RAISE EXCEPTION 'result_shape';
     END IF;
@@ -523,6 +534,7 @@ DECLARE
   v_derived INTEGER := 0;
   v_quarantined INTEGER := 0;
   v_skipped_legacy INTEGER := 0;
+  v_skipped_refusal INTEGER := 0;
 BEGIN
   IF p_limit IS NULL OR p_limit <= 0 THEN
     RAISE EXCEPTION 'backfill_analysis_runs: p_limit must be positive' USING ERRCODE = '22023';
@@ -532,11 +544,14 @@ BEGIN
     WHERE (f.action_type = 'run_analysis' OR f.payload->>'fact_type' = 'run_analysis')
       AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = f.id)
       AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = f.id)
-    ORDER BY CASE WHEN f.action_type = 'run_analysis'
+    ORDER BY CASE WHEN (f.payload->>'fact_type' = 'run_analysis' AND f.noop IS FALSE
+      AND f.payload #> '{result,enrichment,analysis_status}' = '"refused"'::jsonb
+      AND (f.payload #> '{result,run_id}' IS NULL OR f.payload #> '{result,run_id}' = 'null'::jsonb))
+      OR (f.action_type = 'run_analysis'
       AND f.payload->>'fact_type' = 'run_analysis'
       AND f.payload->'fact_version' = '1'::jsonb AND f.noop IS FALSE
       AND jsonb_typeof(f.payload->'result') = 'object'
-      AND (f.payload #> '{result,run_id}' IS NULL OR f.payload #> '{result,run_id}' = 'null'::jsonb)
+      AND (f.payload #> '{result,run_id}' IS NULL OR f.payload #> '{result,run_id}' = 'null'::jsonb))
       THEN 1 ELSE 0 END, f.created_at, f.id
     LIMIT p_limit
     FOR UPDATE OF f SKIP LOCKED
@@ -546,6 +561,10 @@ BEGIN
       v_derived := v_derived + 1;
     ELSIF EXISTS (SELECT 1 FROM public.analysis_run_quarantine WHERE fact_id = v_fact.id) THEN
       v_quarantined := v_quarantined + 1;
+    ELSIF v_fact.payload->>'fact_type' = 'run_analysis' AND v_fact.noop IS FALSE
+      AND v_fact.payload #> '{result,enrichment,analysis_status}' = '"refused"'::jsonb
+      AND (v_fact.payload #> '{result,run_id}' IS NULL OR v_fact.payload #> '{result,run_id}' = 'null'::jsonb) THEN
+      v_skipped_refusal := v_skipped_refusal + 1;
     ELSIF v_fact.action_type = 'run_analysis'
       AND v_fact.payload->>'fact_type' = 'run_analysis'
       AND v_fact.payload->'fact_version' = '1'::jsonb AND v_fact.noop IS FALSE
@@ -555,7 +574,7 @@ BEGIN
     END IF;
   END LOOP;
   RETURN jsonb_build_object('derived', v_derived, 'quarantined', v_quarantined,
-                           'skipped_legacy', v_skipped_legacy);
+                           'skipped_legacy', v_skipped_legacy, 'skipped_refusal', v_skipped_refusal);
 END;
 $$;
 

@@ -9,8 +9,8 @@
 -- Row (c) proves the malformed fact is accepted and retained by the real RPC;
 -- the harness deliberately does not COMMIT it outside this disposable scope.
 -- Every requested row prints PASS/FAIL; the final aggregate RAISE rejects FAIL.
--- There are 26 report rows plus the final transaction-cleanup check (27 total);
--- preflight is a separate prerequisite check. New j-p probes preserve the
+-- There are 27 report rows plus the final transaction-cleanup check (28 total);
+-- preflight is a separate prerequisite check. New j-q probes preserve the
 -- original a-h data deltas by rolling back their synthetic writes immediately.
 --
 -- REVISION ORDERING (b): v4 UPDATEs graph BEFORE INSERTing handler facts:
@@ -105,6 +105,7 @@ CREATE TEMP TABLE phase2_a_results (
 CREATE TEMP TABLE phase2_a_seed (scenario_id UUID NOT NULL, prefix TEXT NOT NULL) ON COMMIT DROP;
 CREATE TEMP TABLE phase2_a_baseline (
   derived BIGINT NOT NULL, quarantined BIGINT NOT NULL, skipped_legacy BIGINT NOT NULL,
+  skipped_refusal BIGINT NOT NULL,
   runs BIGINT NOT NULL, options BIGINT NOT NULL, quarantine BIGINT NOT NULL
 ) ON COMMIT DROP;
 
@@ -125,7 +126,15 @@ BEGIN
 END;
 $report$;
 
--- Exactly the backfill's valid pre-run-identity shell. Malformed carriers and
+-- Exactly isAnalysisRefusalFact plus absent/null identity: refusal_not_a_run.
+CREATE FUNCTION pg_temp.phase2_a_is_refusal(f public.v5_handler_facts)
+RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE AS $refusal$
+  SELECT COALESCE(f.payload->>'fact_type' = 'run_analysis' AND f.noop = FALSE
+    AND f.payload #> '{result,enrichment,analysis_status}' = '"refused"'::jsonb
+    AND (f.payload #> '{result,run_id}' IS NULL OR f.payload #> '{result,run_id}' = 'null'::jsonb), FALSE);
+$refusal$;
+
+-- Exactly the backfill's valid non-refusal pre-run-identity shell. Malformed carriers and
 -- non-object results remain actionable quarantine candidates, even without IDs.
 CREATE FUNCTION pg_temp.phase2_a_is_legacy(f public.v5_handler_facts)
 RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE AS $legacy$
@@ -133,27 +142,49 @@ RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE AS $legacy$
     AND f.payload->>'fact_type' = 'run_analysis'
     AND f.payload->'fact_version' = '1'::jsonb AND f.noop = FALSE
     AND jsonb_typeof(f.payload->'result') = 'object'
+    AND NOT pg_temp.phase2_a_is_refusal(f)
     AND (f.payload #> '{result,run_id}' IS NULL OR f.payload #> '{result,run_id}' = 'null'::jsonb), FALSE);
 $legacy$;
+
+-- Predict the two skip counters in the same bounded selection as backfill,
+-- including copies whose refusal and legacy timestamps are interleaved.
+CREATE FUNCTION pg_temp.phase2_a_skipped_counts(p_limit INTEGER)
+RETURNS JSONB LANGUAGE SQL AS $skipped_counts$
+  SELECT jsonb_build_object(
+    'skipped_legacy', count(*) FILTER (WHERE pg_temp.phase2_a_is_legacy(picked.fact)),
+    'skipped_refusal', count(*) FILTER (WHERE pg_temp.phase2_a_is_refusal(picked.fact)))
+  FROM (
+    SELECT f AS fact FROM public.v5_handler_facts f
+    WHERE (f.action_type = 'run_analysis' OR f.payload->>'fact_type' = 'run_analysis')
+      AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = f.id)
+      AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = f.id)
+    ORDER BY CASE WHEN pg_temp.phase2_a_is_legacy(f) OR pg_temp.phase2_a_is_refusal(f)
+      THEN 1 ELSE 0 END, f.created_at, f.id
+    LIMIT p_limit
+  ) picked;
+$skipped_counts$;
 
 -- Drain existing eligible facts before the synthetic cases so the global
 -- backfill in (g) has exactly three pending facts. This is a real derivation,
 -- not a synthetic quarantine or a claim that a data copy has no old facts.
--- Legacy rows remain in the fact table without run/quarantine markers. Count
+-- Legacy and refusal rows remain in the fact table without run/quarantine markers. Count
 -- that census once and exclude it from no-progress detection and loop exit.
 -- A quiescent isolated copy and successful quarantine storage are required;
 -- no-progress detection prevents a silently non-terminating backfill loop.
 DO $baseline_backfill$
 DECLARE v_result JSONB; v_pending BIGINT; v_remaining BIGINT;
-        v_derived BIGINT := 0; v_quarantined BIGINT := 0; v_skipped_legacy BIGINT;
+        v_derived BIGINT := 0; v_quarantined BIGINT := 0; v_skipped_legacy BIGINT; v_skipped_refusal BIGINT;
 BEGIN
   BEGIN
     SELECT count(*) INTO v_skipped_legacy FROM public.v5_handler_facts f
     WHERE pg_temp.phase2_a_is_legacy(f);
+    SELECT count(*) INTO v_skipped_refusal FROM public.v5_handler_facts f
+    WHERE pg_temp.phase2_a_is_refusal(f);
     LOOP
       SELECT count(*) INTO v_pending FROM public.v5_handler_facts f
       WHERE (f.action_type = 'run_analysis' OR f.payload->>'fact_type' = 'run_analysis')
         AND NOT pg_temp.phase2_a_is_legacy(f)
+        AND NOT pg_temp.phase2_a_is_refusal(f)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = f.id)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = f.id);
       EXIT WHEN v_pending = 0;
@@ -163,6 +194,7 @@ BEGIN
       SELECT count(*) INTO v_remaining FROM public.v5_handler_facts f
       WHERE (f.action_type = 'run_analysis' OR f.payload->>'fact_type' = 'run_analysis')
         AND NOT pg_temp.phase2_a_is_legacy(f)
+        AND NOT pg_temp.phase2_a_is_refusal(f)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = f.id)
         AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = f.id);
       IF v_remaining >= v_pending THEN
@@ -170,15 +202,15 @@ BEGIN
       END IF;
     END LOOP;
     INSERT INTO phase2_a_baseline
-    SELECT v_derived, v_quarantined, v_skipped_legacy, (SELECT count(*) FROM public.analysis_runs),
+    SELECT v_derived, v_quarantined, v_skipped_legacy, v_skipped_refusal, (SELECT count(*) FROM public.analysis_runs),
            (SELECT count(*) FROM public.analysis_run_options),
            (SELECT count(*) FROM public.analysis_run_quarantine);
     PERFORM pg_temp.phase2_a_report('baseline_backfill', TRUE,
-      format('existing facts: %s derived, %s quarantined, %s legacy skipped; all changes rolled back',
-             v_derived, v_quarantined, v_skipped_legacy));
+      format('existing facts: %s derived, %s quarantined, %s legacy skipped, %s refusal skipped; all changes rolled back',
+             v_derived, v_quarantined, v_skipped_legacy, v_skipped_refusal));
   EXCEPTION WHEN OTHERS THEN
     PERFORM pg_temp.phase2_a_report('baseline_backfill', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
-    INSERT INTO phase2_a_baseline VALUES (0, 0, 0, 0, 0, 0);
+    INSERT INTO phase2_a_baseline VALUES (0, 0, 0, 0, 0, 0, 0);
   END;
 END;
 $baseline_backfill$;
@@ -186,6 +218,7 @@ $baseline_backfill$;
 SELECT 'after existing-fact baseline backfill' AS phase,
        derived AS existing_facts_derived, quarantined AS existing_facts_quarantined,
        skipped_legacy AS existing_facts_skipped_legacy,
+       skipped_refusal AS existing_facts_skipped_refusal,
        runs AS analysis_runs_rows, options AS analysis_run_options_rows,
        quarantine AS analysis_run_quarantine_rows FROM phase2_a_baseline;
 
@@ -590,12 +623,12 @@ BEGIN
        OR EXISTS (SELECT 1 FROM public.analysis_runs WHERE scenario_id = v_scenario AND run_id LIKE v_prefix || 'backfill-%') THEN
       RAISE EXCEPTION 'three trigger-disabled real facts must exist without typed rows';
     END IF;
+    v_before := pg_temp.phase2_a_skipped_counts(1000);
     v_backfill := public.backfill_analysis_runs(1000);
+    v_result := pg_temp.phase2_a_skipped_counts(1000);
     v_repeat := public.backfill_analysis_runs(1000);
-    IF v_backfill IS DISTINCT FROM jsonb_build_object('derived', 3, 'quarantined', 0,
-            'skipped_legacy', (SELECT LEAST(997::bigint, skipped_legacy) FROM phase2_a_baseline))
-       OR v_repeat IS DISTINCT FROM jsonb_build_object('derived', 0, 'quarantined', 0,
-            'skipped_legacy', (SELECT LEAST(1000::bigint, skipped_legacy) FROM phase2_a_baseline))
+    IF v_backfill IS DISTINCT FROM (jsonb_build_object('derived', 3, 'quarantined', 0) || v_before)
+       OR v_repeat IS DISTINCT FROM (jsonb_build_object('derived', 0, 'quarantined', 0) || v_result)
        OR (SELECT count(*) FROM public.analysis_runs WHERE scenario_id = v_scenario AND run_id LIKE v_prefix || 'backfill-%') <> 3
        OR (SELECT count(*) FROM public.analysis_run_options WHERE run_id LIKE v_prefix || 'backfill-%') <> 9
        OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine q JOIN public.v5_handler_facts f ON f.id = q.fact_id
@@ -698,7 +731,7 @@ BEGIN
       RAISE SQLSTATE 'P2A01' USING MESSAGE = 'rollback successful synthetic probe';
     EXCEPTION WHEN SQLSTATE 'P2A01' THEN NULL;
     END;
-    PERFORM pg_temp.phase2_a_report('k_trigger_absent_quarantined', TRUE, 'live missing and JSON-null run_id both quarantine run_id_absent');
+    PERFORM pg_temp.phase2_a_report('k_trigger_absent_quarantined', TRUE, 'computed non-refusal facts with missing and JSON-null run_id quarantine run_id_absent');
   EXCEPTION WHEN OTHERS THEN
     PERFORM pg_temp.phase2_a_report('k_trigger_absent_quarantined', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
   END;
@@ -722,7 +755,7 @@ BEGIN
       ALTER TABLE public.v5_handler_facts ENABLE TRIGGER v5_handler_facts_derive_run;
       v_result := public.backfill_analysis_runs(2);
       v_repeat := public.backfill_analysis_runs(2);
-      IF v_result IS DISTINCT FROM '{"derived":0,"quarantined":0,"skipped_legacy":2}'::jsonb
+      IF v_result IS DISTINCT FROM '{"derived":0,"quarantined":0,"skipped_legacy":2,"skipped_refusal":0}'::jsonb
          OR v_repeat IS DISTINCT FROM v_result OR cardinality(v_fact_ids) <> 2
          OR (SELECT count(*) FROM public.v5_handler_facts WHERE id = ANY(v_fact_ids)) <> 2
          OR EXISTS (SELECT 1 FROM public.analysis_runs WHERE fact_id = ANY(v_fact_ids))
@@ -757,7 +790,7 @@ BEGIN
       END LOOP;
       ALTER TABLE public.v5_handler_facts ENABLE TRIGGER v5_handler_facts_derive_run;
       v_result := public.backfill_analysis_runs(2);
-      IF v_result IS DISTINCT FROM '{"derived":0,"quarantined":2,"skipped_legacy":0}'::jsonb
+      IF v_result IS DISTINCT FROM '{"derived":0,"quarantined":2,"skipped_legacy":0,"skipped_refusal":0}'::jsonb
          OR (SELECT count(*) FROM public.analysis_run_quarantine q JOIN public.v5_handler_facts f ON f.id = q.fact_id
               JOIN public.v5_conversation_turns t ON t.id = f.v5_conversation_turn_id
               WHERE t.scenario_id = v_scenario AND t.turn_id LIKE v_prefix || 'turn-backfill-invalid-%'
@@ -830,6 +863,76 @@ BEGIN
   END;
 END;
 $round3$;
+
+-- The refusal fixture mirrors buildAnalysisRefusalFact, including its deliberate
+-- lack of run_id and input_snapshot. Exercise the real v4 fact writer with the
+-- production derivation trigger installed, then the bounded backfill twice.
+DO $round4$
+DECLARE
+  v_scenario UUID;
+  v_prefix TEXT;
+  v_fact JSONB;
+  v_turn UUID;
+  v_fact_id UUID;
+  v_fact_ids UUID[] := ARRAY[]::UUID[];
+  v_case INTEGER;
+  v_early TIMESTAMPTZ;
+  v_result JSONB;
+  v_repeat JSONB;
+BEGIN
+  SELECT scenario_id, prefix INTO STRICT v_scenario, v_prefix FROM phase2_a_seed;
+  BEGIN
+    BEGIN
+      SELECT COALESCE(min(created_at), now()) - interval '1 second' INTO v_early FROM public.v5_handler_facts;
+      IF NOT isfinite(v_early) THEN RAISE EXCEPTION 'Refusal probe requires finite source fact timestamps'; END IF;
+      FOR v_case IN 1..2 LOOP
+        v_fact := jsonb_build_object('handler_id', 'run_analysis', 'action_type', 'run_analysis',
+          'noop', FALSE, 'payload', jsonb_build_object('fact_type', 'run_analysis', 'fact_version', 1,
+            'result', jsonb_build_object('scenario_id', v_scenario::text, 'leading_option_id', NULL,
+              'summary', 'Analysis attempt was refused before computation.',
+              'enrichment', jsonb_build_object('analysis_status', 'refused', 'refusal_reason_code', 'analysis_not_ready'),
+              'computed_at', '2026-10-08T12:00:00.000Z')));
+        IF v_case = 2 THEN v_fact := jsonb_set(v_fact, '{payload,result,run_id}', 'null'::jsonb); END IF;
+        v_turn := pg_temp.phase2_a_append_v4(v_scenario, v_prefix || 'turn-refusal-' || v_case,
+                                           jsonb_build_array(v_fact), NULL);
+        SELECT id INTO v_fact_id FROM public.v5_handler_facts WHERE v5_conversation_turn_id = v_turn;
+        IF v_fact_id IS NULL
+           OR NOT EXISTS (SELECT 1 FROM public.v5_handler_facts WHERE id = v_fact_id AND payload = v_fact->'payload')
+           OR EXISTS (SELECT 1 FROM public.analysis_runs WHERE fact_id = v_fact_id)
+           OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine WHERE fact_id = v_fact_id) THEN
+          RAISE EXCEPTION 'v4 refusal marker must retain its fact with 0 runs and 0 quarantine';
+        END IF;
+        UPDATE public.v5_handler_facts SET created_at = v_early WHERE id = v_fact_id;
+        v_fact_ids := array_append(v_fact_ids, v_fact_id);
+      END LOOP;
+      v_result := public.backfill_analysis_runs(2);
+      v_repeat := public.backfill_analysis_runs(2);
+      IF v_result IS DISTINCT FROM '{"derived":0,"quarantined":0,"skipped_legacy":0,"skipped_refusal":2}'::jsonb
+         OR v_repeat IS DISTINCT FROM v_result
+         OR (SELECT count(*) FROM public.v5_handler_facts WHERE id = ANY(v_fact_ids)) <> 2
+         OR EXISTS (SELECT 1 FROM public.analysis_runs WHERE fact_id = ANY(v_fact_ids))
+         OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine WHERE fact_id = ANY(v_fact_ids)) THEN
+        RAISE EXCEPTION 'Backfill must repeatedly classify refusal_not_a_run without markers; got %, %', v_result, v_repeat;
+      END IF;
+      -- A refused status carrying a real Run identity remains a withheld Run.
+      v_fact := pg_temp.phase2_a_fact(v_scenario, v_prefix || 'refusal-with-run', 'refused');
+      PERFORM pg_temp.phase2_a_append_v4(v_scenario, v_prefix || 'turn-refusal-with-run',
+                                       jsonb_build_array(v_fact), NULL);
+      IF NOT EXISTS (SELECT 1 FROM public.analysis_runs WHERE run_id = v_prefix || 'refusal-with-run' AND status = 'withheld')
+         OR (SELECT count(*) FROM public.analysis_run_options WHERE run_id = v_prefix || 'refusal-with-run'
+              AND chance IS NULL AND licence_status = 'withheld' AND withheld_reason = 'analysis_refused') <> 3 THEN
+        RAISE EXCEPTION 'Refusal with run_id must follow normal withheld Run derivation';
+      END IF;
+      RAISE SQLSTATE 'P2A01' USING MESSAGE = 'rollback successful synthetic probe';
+    EXCEPTION WHEN SQLSTATE 'P2A01' THEN NULL;
+    END;
+    PERFORM pg_temp.phase2_a_report('q_refusal_not_a_run', TRUE,
+      'real v4 returned; refusal facts retained; 0 runs, 0 quarantine; backfill/repeat skipped_refusal=2; refusal with run_id withheld (outer rehearsal later rolls back)');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.phase2_a_report('q_refusal_not_a_run', FALSE, format('[%s] %s', SQLSTATE, SQLERRM));
+  END;
+END;
+$round4$;
 
 -- Statement timeout starts when a statement enters the server, so SET LOCAL
 -- and the deliberately slow INSERT are separate commands. Test-only sleep is
@@ -922,7 +1025,7 @@ $authenticated_acl$;
 RESET ROLE;
 RELEASE SAVEPOINT phase2_a_authenticated_acl;
 
-SELECT 'after a-h and j-p writer/backfill/cancellation/role probes' AS phase,
+SELECT 'after a-h and j-q writer/backfill/cancellation/role probes' AS phase,
        (SELECT count(*) FROM public.scenarios) AS scenarios_rows,
        (SELECT count(*) FROM public.v5_conversation_turns) AS v5_conversation_turns_rows,
        (SELECT count(*) FROM public.v5_handler_facts) AS v5_handler_facts_rows,
@@ -1011,8 +1114,8 @@ SELECT 'after proposal rollback (synthetic facts still inside transaction)' AS p
 DO $aggregate$
 DECLARE v_failures TEXT;
 BEGIN
-  IF (SELECT count(*) FROM phase2_a_results) <> 26 THEN
-    RAISE EXCEPTION 'Phase 2(a) rehearsal must record all 26 checks before transaction cleanup';
+  IF (SELECT count(*) FROM phase2_a_results) <> 27 THEN
+    RAISE EXCEPTION 'Phase 2(a) rehearsal must record all 27 checks before transaction cleanup';
   END IF;
   SELECT string_agg(check_name || ': ' || COALESCE(detail, 'expected assertion did not hold'), '; ' ORDER BY check_name)
     INTO v_failures FROM phase2_a_results WHERE NOT passed;

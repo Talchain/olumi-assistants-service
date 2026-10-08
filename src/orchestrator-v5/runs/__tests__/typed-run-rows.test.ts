@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { buildAnalysisRefusalFact } from '../../context/analysis-refusal-continuity.js';
 import { TYPED_RUN_PAYLOAD_PATHS, toTypedRunRows } from '../typed-run-rows.js';
 
 type Json = Record<string, any>;
@@ -164,6 +165,66 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     expect(toTypedRunRows(fact, { scenarioId, mode: 'trigger' })).toEqual({ quarantine: 'run_id_absent' });
   });
 
+  it.each(['missing', 'null'] as const)('skips a built refusal marker with %s run identity in both modes without quarantine', shape => {
+    const fact: Json = clone(buildAnalysisRefusalFact({
+      scenarioId: succeeded.scenario_id,
+      reasonCode: 'analysis_not_ready',
+      computedAt: '2026-10-08T12:00:00.000Z',
+    }));
+    if (shape === 'null') fact.result.run_id = null;
+    const before = clone(fact);
+    for (const mode of ['trigger', 'backfill'] as const) {
+      expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode })).toEqual({ skipped_refusal: true });
+    }
+    expect(mapFact(fact)).toEqual({ skipped_refusal: true });
+    expect(fact).toEqual(before);
+  });
+
+  it('uses only the shared refusal predicate before current schema validation', () => {
+    const fact: Json = clone(buildAnalysisRefusalFact({
+      scenarioId: succeeded.scenario_id, reasonCode: 'analysis_blocked',
+    }));
+    delete fact.fact_version;
+    delete fact.result.summary;
+    delete fact.result.computed_at;
+    for (const mode of ['trigger', 'backfill'] as const) {
+      expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode })).toEqual({ skipped_refusal: true });
+    }
+  });
+
+  it.each([
+    ['another fact type', (fact: Json) => { fact.fact_type = 'create_scenario'; }],
+    ['noop', (fact: Json) => { fact.noop = true; }],
+    ['another status', (fact: Json) => { fact.result.enrichment.analysis_status = 'blocked'; }],
+  ] as const)('does not classify %s as a refusal marker', (_name, change) => {
+    const fact: Json = clone(buildAnalysisRefusalFact({
+      scenarioId: succeeded.scenario_id, reasonCode: 'analysis_not_ready',
+    }));
+    change(fact);
+    expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'trigger' })).toHaveProperty('quarantine');
+  });
+
+  it('quarantines a computed fact without run_id in trigger mode', () => {
+    const fact = factFromRead(succeeded);
+    delete fact.result.run_id;
+    expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'trigger' }))
+      .toEqual({ quarantine: 'run_id_absent' });
+  });
+
+  it('maps a refusal carrying a run_id through the normal withheld Run path', () => {
+    const fact = factFromRead(succeeded);
+    fact.result.enrichment.analysis_status = 'refused';
+    for (const mode of ['trigger', 'backfill'] as const) {
+      const mapped = toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode });
+      expect(mapped).toHaveProperty('ok');
+      if ('ok' in mapped) {
+        expect(mapped.ok.status).toBe('withheld');
+        expect(mapped.ok.run_id).toBe(fact.result.run_id);
+        expect(mapped.ok.options.every(option => option.chance === null && option.withheld_reason === 'analysis_refused')).toBe(true);
+      }
+    }
+  });
+
   it.each(['', ' \t\n', 0, false, [], {}])('quarantines present invalid run identity %j in both modes', runId => {
     const fact = factFromRead(succeeded);
     fact.result.run_id = runId;
@@ -223,6 +284,8 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     expect(migration).toContain("p_mode text DEFAULT 'trigger'");
     expect(migration).toContain("analysis_run_from_fact(v_fact, 'backfill')");
     expect(migration).toContain("'skipped_legacy'");
+    expect(migration).toContain("'skipped_refusal'");
+    expect(migration).toContain("'refusal_not_a_run'");
     const quarantineDefinition = migration.match(/CREATE TABLE public\.analysis_run_quarantine \(([\s\S]*?)\n\);/)?.[1];
     expect(quarantineDefinition).toBeDefined();
     expect(quarantineDefinition).not.toMatch(/\braw\b|\bJSONB\b/i);
