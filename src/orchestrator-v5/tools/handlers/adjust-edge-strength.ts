@@ -15,7 +15,7 @@
  * HandlerInvocation's trusted side band; natural-language callers retain the
  * legacy positive default and cannot self-authorise by inventing a parameter.
  *
- * Confirmation language uses `edgeBandFromMagnitude` (the one edge-strength table) so the user-visible
+ * Confirmation language uses `edgeStrengthWords` (the sizing-aware edge-strength table) so the user-visible
  * text says "moderate to strong" (not "0.4 to 0.7"). Sign reversal is
  * surfaced explicitly.
  */
@@ -33,7 +33,8 @@ export { ADJUST_EDGE_STRENGTH_STD_MAX, olumiSpreadForMean };
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, identityRunUseFromFacts } from '../../compose/definitional-links.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
+import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 import { REPLACE_KEEPS_DIRECTION_TEXT, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
@@ -332,6 +333,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         ...factEndpointLabels,
         strength: { ...targetEdge.strength },
         effect_direction: targetEdge.effect_direction,
+        // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side says nobody sized it, so no reader names
+        // the prior as a band ("Strong → Moderate"). Additive: \`before\` is a record on both receipt schemas.
+        ...(isPlaceholderLink(targetEdge) ? { sizing: 'placeholder' as const } : {}),
       };
       // Direction at numeric zero is authority-sensitive. It therefore rides
       // the invocation side band stamped by the strict system-event adapter,
@@ -468,7 +472,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // (`edgeStrengthReplacesUserFigureAuthority`). The canvas adapter and the Agent's proposal doors refuse first, in
       // these words (`user-figure-held.ts`). Read off the RAW edge, which keeps the passthrough `source_quote`.
       const heldFigure = reviewOnly ? null : heldNow;
-      const resultBandWord = CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(newMean))];
+      // These words describe the explicit proposed result, not the stored before-edge's prior.
+      const resultBandWord = edgeStrengthWords({ ...afterSnapshot, sizing: 'user' });
       if (heldFigure !== null && !replacesHeldFigure) {
         throw new D1HandlerError(
           'PRECONDITION_UNMET',
@@ -633,13 +638,14 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // claimed an adjustment, yielding "Adjusted the link between A and
       // B from moderate to moderate." on a turn that changed nothing.
       // ⭐ F1: an explicit replace says exactly what it replaced (d5 6006667946), never only the band move.
+      const savedEdge = (result.mutatedGraph as { edges?: Array<{ from?: unknown; to?: unknown }> }).edges
+        ?.find((e) => e.from === parsed.from && e.to === parsed.to);
       const assistantText = replacesHeldFigure && heldFigure !== null
         ? userFigureReplacedReceipt(heldFigure, resultBandWord)
         : noop
         ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean,
             // The SAVED sizing (a review may size a placeholder as Olumi's accepted estimate, `sizedByApproval`).
-            unsized: isPlaceholderLink((result.mutatedGraph as { edges?: Array<{ from?: unknown; to?: unknown }> }).edges
-              ?.find((e) => e.from === parsed.from && e.to === parsed.to)) })
+            edge: savedEdge })
         : formatEdgeAdjustment({
             fromLabel,
             toLabel,
@@ -647,7 +653,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             afterMean: newMean,
             beforeDirection: beforeSnapshot.effect_direction,
             afterDirection: afterSnapshot.effect_direction,
-            beforeUnsized: isPlaceholderLink(rawTargetEdge ?? targetEdge),
+            beforeEdge: rawTargetEdge ?? targetEdge,
+            afterEdge: savedEdge,
           });
       const truthfulSizeNote = unsizedGoalPathNote(graph, parsed.from, parsed.to);
 

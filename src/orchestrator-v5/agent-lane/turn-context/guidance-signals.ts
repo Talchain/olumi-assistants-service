@@ -183,6 +183,11 @@ function readableModel(graph: unknown): { readonly nodes: Rec[]; readonly edges:
   return { nodes, edges };
 }
 
+/** Empty path signals also describe unreadable models; census callers must preserve this distinction. */
+export function guidanceModelReadable(graph: unknown): boolean {
+  return readableModel(graph) !== null;
+}
+
 /** The link's stored value: what a change to the assumption changes. Provenance is `link_sizing`'s, not this. */
 const linkValueHash = (e: Rec): string =>
   computeResponseHash({ strength: e.strength, exists_probability: e.exists_probability, effect_direction: e.effect_direction });

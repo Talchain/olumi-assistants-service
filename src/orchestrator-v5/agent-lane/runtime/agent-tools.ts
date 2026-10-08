@@ -15,6 +15,7 @@ import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import type { ProposalEditsRequest } from '../proposal-object/amend.js';
 import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
+import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
 
 /**
  * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
@@ -538,12 +539,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'prepares ONE complete change and returns its id, which you keep for authorise_change: show the user the risk, what it '
       + 'threatens and what drives it, never the id, before asking them to approve. ' + RISK_LINKS_RULE + ' How strongly each '
       + 'link acts is not known yet: Olumi records a placeholder strength, not an estimate \u2014 say so. Use the labels exactly as the '
-      + 'CURRENT MODEL STATE gives them.',
+      + 'CURRENT MODEL STATE gives them. For a precondition or timing dependency ONLY, set relies_on_option to the option\'s '
+      + 'exact label when the user\'s words or brief say that option depends on the event happening or not (e.g. a price rise '
+      + 'launched with the next feature release). Then leave affects and caused_by empty: it is kept without links and left '
+      + 'out of the Run, with that option\'s omission disclosed for the user to approve.',
     parameters: obj({
       label: { type: 'string', description: 'The risk in the user\u2019s own words (e.g. "Competitive response").' },
+      relies_on_option: { type: 'string', description: 'Optional precondition lease: the exact label of the non-baseline option that depends on this event happening or not, as stated by the user or brief. Never an id. Leave affects and caused_by empty.' },
       affects: {
         type: 'array',
-        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one. Never a factor.',
+        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one for an ordinary risk; [] for relies_on_option. Never a factor.',
         items: obj({
           target_label: { type: 'string', description: 'The goal or an outcome, exactly as the CURRENT MODEL STATE labels it.' },
           direction: { type: 'string', enum: ['positive', 'negative'], description: 'negative when the risk lowers it (the usual case); from the user\u2019s words, never a guess.' },
@@ -584,6 +589,25 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       rationale: { type: 'string' },
       whole_request: WHOLE_REQUEST,
     }, ['factors', 'rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_new_limit',
+    description: 'Prepare ONE budget ceiling on an existing money quantity, or ONE percentage-level loss threshold, stated in THIS message. '
+      + 'Call in the same turn as “we only have £200,000”, “our budget is £200k” or “we cannot spend more than £200,000”. '
+      + 'Also call for “if it goes above 6%, we start to lose money”: above/over/more than/past/tops/exceeds with '
+      + `${LOSS_THRESHOLD_CONSEQUENCES.join('/')} names the bad region, so propose at most 6%, inclusively. `
+      + 'Use the percentage quantity named anywhere in THIS message, else the model’s only percentage-level quantity; if ambiguous, ask which. '
+      + 'Questions, third-party or past losses, percentage changes, and positive consequences never state this ceiling. '
+      + 'Use the quantity’s exact label and the user’s figure in its own units. No level or option cost is written. '
+      + 'An existing limit routes to propose_limit_change. No matching quantity means no card: say the returned line, with no invented chip. '
+      + 'Show the returned card exactly; a held-back reserve is offered as an alternative, never silently deducted. '
+      + 'Nothing changes until authorise_change after approval.',
+    parameters: obj({
+      quantity_label: { type: 'string', description: 'Exact existing quantity label, for example Total cost.' },
+      value: { type: 'number', description: 'The figure the user wrote, in the quantity’s own units.' },
+      rationale: { type: 'string' },
+    }, ['quantity_label', 'value', 'rationale']),
   },
   {
     type: 'function',
@@ -815,7 +839,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal', 'propose_new_limit'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -903,6 +927,8 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
     label: string; rationale: string;
+    /** The host resolves and verifies this label; the model never supplies the node's relies_on stamp. */
+    relies_on_option?: string;
     affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
     caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
   }): Promise<ToolResult>;
@@ -915,6 +941,7 @@ export interface AgentCapabilities {
     }[];
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
+  proposeNewLimit?(ctx: AgentToolContext, args: { quantity_label: string; value: number; rationale: string }): Promise<ToolResult>;
   proposeLimitChange?(ctx: AgentToolContext, args: {
     limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;
     /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
@@ -1040,6 +1067,10 @@ export async function dispatchTool(
       return caps.proposeNewFactor !== undefined
         ? caps.proposeNewFactor(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A factor cannot be added here. Nothing was changed.' };
+    case 'propose_new_limit':
+      return caps.proposeNewLimit !== undefined
+        ? caps.proposeNewLimit(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A limit cannot be added here. Nothing was changed.' };
     case 'propose_limit_change':
       return caps.proposeLimitChange !== undefined
         ? caps.proposeLimitChange(ctx, args as never)

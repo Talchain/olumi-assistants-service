@@ -39,7 +39,8 @@ import type {
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
 import { formatProbability } from '../../format/format-analysis-value.js';
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
+import { edgeStrengthWords } from '../../format/edge-strength-words.js';
+import type { LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import {
   formatSensitivityDirection,
   hasMaterialInfluence,
@@ -506,10 +507,8 @@ function nameableDrivers(
  * because edge-strength sentences compose it with a noun ("a {band}
  * link") rather than a verb-phrase.
  */
-export function formatEdgeStrengthMagnitude(value: number): string {
-  // The canvas's word for each band (DL D4 row: ONE word per band; `weak` is the enum, "slight" is what users read).
-  if (!Number.isFinite(value)) return CANVAS_BAND_WORD.weak;
-  return CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(value))];
+export function formatEdgeStrengthMagnitude(value: number, sizing?: LinkSizing): string {
+  return edgeStrengthWords({ strength: value, ...(sizing !== undefined ? { sizing } : {}) });
 }
 
 /**
@@ -1408,8 +1407,13 @@ export function composeExplainFromStructureFallback(
 
     const top = pathways[0];
     const topIsOutgoing = top.label_from === factor;
+    const topStrengthWords = edgeStrengthWords(top);
     sentences.push(`${factor} is connected to other elements in the model.`);
-    if (top.edge_type === 'bidirected') {
+    if (topStrengthWords === 'not sized yet') {
+      sentences.push(top.edge_type === 'bidirected'
+        ? `The bidirected connector between ${top.label_from} and ${top.label_to} is ${topStrengthWords}. It records non-causal co-movement, not influence in either direction.`
+        : `The directed link from ${top.label_from} to ${top.label_to} is ${topStrengthWords}.`);
+    } else if (top.edge_type === 'bidirected') {
       sentences.push(
         `Its most prominent adjacent connector is bidirected between ${top.label_from} and ${top.label_to}. It records non-causal co-movement, not influence in either direction.`,
       );
@@ -1420,30 +1424,35 @@ export function composeExplainFromStructureFallback(
       top.strength !== undefined
     ) {
       sentences.push(
-        `Its strongest direct influence runs from ${factor} to ${projection.goal_label} as a ${formatEdgeStrengthMagnitude(top.strength)} link.`,
+        `Its strongest direct influence runs from ${factor} to ${projection.goal_label} as a ${topStrengthWords} link.`,
       );
     } else if (topIsOutgoing && top.strength !== undefined) {
       sentences.push(
-        `Its strongest outgoing connector runs from ${factor} to ${top.label_to} as a ${formatEdgeStrengthMagnitude(top.strength)} link. This establishes only that direction, not a further route to the goal.`,
+        `Its strongest outgoing connector runs from ${factor} to ${top.label_to} as a ${topStrengthWords} link. This establishes only that direction, not a further route to the goal.`,
       );
     } else if (top.strength !== undefined) {
       sentences.push(
-        `Its strongest incoming connector runs from ${top.label_from} to ${factor} as a ${formatEdgeStrengthMagnitude(top.strength)} link. It does not show ${factor} influencing ${top.label_from}.`,
+        `Its strongest incoming connector runs from ${top.label_from} to ${factor} as a ${topStrengthWords} link. It does not show ${factor} influencing ${top.label_from}.`,
       );
     }
     if (pathways.length > 1) {
       const second = pathways[1];
-      if (second.edge_type === 'bidirected') {
+      const secondStrengthWords = edgeStrengthWords(second);
+      if (secondStrengthWords === 'not sized yet') {
+        sentences.push(second.edge_type === 'bidirected'
+          ? `The second bidirected connector between ${second.label_from} and ${second.label_to} is ${secondStrengthWords}. It records non-causal co-movement, not influence in either direction.`
+          : `The second directed link from ${second.label_from} to ${second.label_to} is ${secondStrengthWords}.`);
+      } else if (second.edge_type === 'bidirected') {
         sentences.push(
           `A second adjacent connector is bidirected between ${second.label_from} and ${second.label_to}, so it does not establish causal direction.`,
         );
       } else if (second.label_from === factor && second.strength !== undefined) {
         sentences.push(
-          `A second outgoing connector runs from ${factor} to ${second.label_to} as a ${formatEdgeStrengthMagnitude(second.strength)} link.`,
+          `A second outgoing connector runs from ${factor} to ${second.label_to} as a ${secondStrengthWords} link.`,
         );
       } else if (second.strength !== undefined) {
         sentences.push(
-          `A second incoming connector runs from ${second.label_from} to ${factor} as a ${formatEdgeStrengthMagnitude(second.strength)} link.`,
+          `A second incoming connector runs from ${second.label_from} to ${factor} as a ${secondStrengthWords} link.`,
         );
       }
     }
@@ -1464,14 +1473,16 @@ export function composeExplainFromStructureFallback(
       : 'This decision is shaped by several causal mechanisms.';
     sentences.push(goalIntro);
     const first = top[0];
-    sentences.push(
-      `${first.label_from} has the strongest visible direct influence on ${first.label_to} via a ${formatEdgeStrengthMagnitude(first.strength)} link, meaning changes here would have the most structural effect.`,
-    );
+    const firstStrengthWords = edgeStrengthWords(first);
+    sentences.push(firstStrengthWords === 'not sized yet'
+      ? `The directed link from ${first.label_from} to ${first.label_to} is ${firstStrengthWords}.`
+      : `${first.label_from} has the strongest visible direct influence on ${first.label_to} via a ${firstStrengthWords} link, meaning changes here would have the most structural effect.`);
     if (top.length > 1) {
       const second = top[1];
-      sentences.push(
-        `${second.label_from} also contributes meaningfully through a ${formatEdgeStrengthMagnitude(second.strength)} direct link to ${second.label_to}, so it is worth keeping in view as a secondary lever.`,
-      );
+      const secondStrengthWords = edgeStrengthWords(second);
+      sentences.push(secondStrengthWords === 'not sized yet'
+        ? `The second directed link from ${second.label_from} to ${second.label_to} is ${secondStrengthWords}.`
+        : `${second.label_from} also contributes meaningfully through a ${secondStrengthWords} direct link to ${second.label_to}, so it is worth keeping in view as a secondary lever.`);
     }
   } else if (projection.goal_label) {
     sentences.push(

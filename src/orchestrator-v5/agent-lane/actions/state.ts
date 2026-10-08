@@ -9,7 +9,7 @@
  */
 import { createHash } from 'node:crypto';
 import { eligibleGuidanceRows, type GuidanceState, type SelectedRow } from '../guidance/index.js';
-import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
+import { assembleGuidanceSignals, guidanceModelReadable } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf } from '../turn-context/selector-signals.js';
 import { guidanceLeaderLicensed } from '../turn-context/guidance-wire.js';
 import { leaderLicenceFromState } from '../../compose/leader-licence.js';
@@ -36,9 +36,46 @@ import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../sys
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { scopeIssueBlocks } from '../goal-scope.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
+import { olumiEstimatesFeedingResult, type OlumiEstimates } from '../olumi-estimates-feeding-result.js';
+import { InterventionV3 } from '../../../schemas/cee-v3.js';
+import { readOptionResultSources } from '../../../orchestrator/context/option-result-source.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : undefined);
+const settingProvenance = InterventionV3.pick({ value: true, source: true });
+type OptionSetting = NonNullable<Parameters<typeof olumiEstimatesFeedingResult>[0]['optionSettings']>[number];
+
+/** Distinct option settings from this read, restricted to the bound Run's options and goal-path factors. */
+function optionSettingsOf(read: ActionRead, goalPathFactors: readonly GoalPathFactor[]): OptionSetting[] {
+  const result = rec(read.analysisResult);
+  const enrichment = rec(result?.enrichment) ?? rec(rec(result?.data)?.enrichment) ?? {};
+  // Current-first, like the shared result reader: a legacy copy must not widen a current option set.
+  const analysedIds = readOptionResultSources(enrichment).map(rows => new Set(rows
+    .map(row => typeof row.option_id === 'string' ? row.option_id : row.id)
+    .filter((id): id is string => typeof id === 'string' && id !== ''))).find(ids => ids.size > 0);
+  const nodes = rec(read.graph)?.nodes;
+  if (!Array.isArray(nodes)) return [];
+  const factors = new Map(goalPathFactors.map(f => [f.factor_id, f]));
+  const settings: OptionSetting[] = [];
+  for (const raw of nodes) {
+    const option = rec(raw);
+    if (option?.kind !== 'option' || typeof option.id !== 'string' || (analysedIds !== undefined && !analysedIds.has(option.id))) continue;
+    // The baseline mirrors today's levels, which the factor's own provenance already counts.
+    if (option.is_baseline === true) continue;
+    const optionLabel = typeof option.label === 'string' && option.label !== '' ? option.label : option.id;
+    // Historical graphs carry the cells under data.interventions (analysis-ready-helper.ts reads both).
+    for (const [factorId, intervention] of Object.entries(rec(option.interventions) ?? rec(rec(option.data)?.interventions) ?? {})) {
+      const factor = factors.get(factorId);
+      if (factor === undefined) continue;
+      const setting = settingProvenance.safeParse(intervention);
+      if (!setting.success) continue;
+      // Approved Olumi levels retain cee_hypothesis; this read has no distinct acceptance marker.
+      settings.push({ id: `${option.id}:${factorId}`, label: `${factor.label} under ${optionLabel}`,
+        authorship: setting.data.source === 'cee_hypothesis' ? 'olumi_estimate' : 'user' });
+    }
+  }
+  return settings;
+}
 
 /** The persisted state the bar is a function of. The same fields at the turn's end and on the reload GET. */
 export interface ActionRead {
@@ -62,6 +99,7 @@ export interface ActionRevision { readonly graph_hash: string | null; readonly r
 export interface ActionFacts {
   readonly scenarioId: string;
   readonly canonicalStage: StageType | null;
+  readonly olumiEstimates: OlumiEstimates | null;
   readonly estimateCandidates: readonly (GoalPathFactor & { readonly figure: string })[];
   readonly estimateDriverIds: readonly string[];
   /** Goal-path factors whose value is Olumi's (estimate or accepted), BEFORE the display-scale filter: the bias check's "could Anchoring be checked" fact. */
@@ -163,7 +201,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', identityReading: null, goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
     optionFrame: { nonSqOptionLabels: [], statusQuoPresent: false, sameLever: false },
-    estimateCandidates: [], estimateDriverIds: [], olumiEstimateCount: 0, canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
+    estimateCandidates: [], estimateDriverIds: [], olumiEstimateCount: 0, olumiEstimates: null, canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
   const nodes = raw.nodes.map(rec);
   try {
@@ -195,6 +233,12 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       readable: true,
       identityReading,
       canonicalStage: canonicalStageOf(signals['run.kind'], read.graph),
+      olumiEstimates: runKey === null || !guidanceModelReadable(read.graph) ? null : olumiEstimatesFeedingResult({
+        goalPathFactors: signals['model.goal_path_factors'],
+        goalPathLinks: signals['model.goal_path_links'],
+        optionSettings: optionSettingsOf(read, signals['model.goal_path_factors']),
+        driverIds: [],
+      }),
       estimateCandidates: signals['model.goal_path_factors'].flatMap(f => {
         if (f.value_authorship !== 'olumi_estimate' && f.value_authorship !== 'olumi_accepted') return [];
         const node = nodes.find(n => n?.id === f.factor_id);

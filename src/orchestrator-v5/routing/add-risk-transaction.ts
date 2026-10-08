@@ -111,7 +111,8 @@ export function buildAddRiskTransaction(params: unknown, graph: AddOptionGraphVi
     for (let k = 2; graph.nodes.some((n) => n.id === riskId); k += 1) riskId = `${base}_${k}`;
   }
 
-  // RC3 (a′): only the host-bound widen press can supply this third argument. It is never a tool parameter.
+  // RC3 (a′): only the host-bound widen press or verified chat option-label lease can supply this third argument.
+  // The stamp itself is never a tool parameter or a model-authored member of the risk.
   if (reliesOn !== undefined) {
     const stamp = readReliesOnRisk(reliesOn);
     if (stamp === undefined || links.length !== 0

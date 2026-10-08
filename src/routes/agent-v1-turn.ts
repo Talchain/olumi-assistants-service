@@ -2,7 +2,7 @@ import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
 import { currentLevelAskForAnswerRow } from '../orchestrator-v5/agent-lane/current-level-ask-carry.js';
-import { parseAnswerOffers } from '../orchestrator-v5/agent-lane/answer-offers-envelope.js';
+import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/answer-offers-envelope.js';
 /**
  * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
  *
@@ -39,7 +39,7 @@ import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-s
 const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
+import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
@@ -76,7 +76,7 @@ import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-cur
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
@@ -93,7 +93,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, isDecisionInputAsk, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
@@ -124,6 +124,7 @@ import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigu
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
+import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
@@ -530,7 +531,7 @@ export function stillValidOffers(
   // The next steps stay while the result is still current and no approval is waiting (process-local, like the
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
-    ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id) || isWidenAddPressId(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
+    ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id) || isWidenAddPressId(a.id) || isMethodPress(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
   return [...approvals, ...declines, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
@@ -545,7 +546,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_new_limit for a budget ceiling the user stated in this message on an existing cost quantity (show its card exactly, including any offered reserve alternative; if no quantity matches, say the returned one line with no invented chip), propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 /**
  * How many recent answers the target ask reads to see whether it is already open (`decision-input-ask.ts`, PANEL 5944136475).
@@ -589,6 +590,29 @@ async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, e
     .slice(0, RECENT_REPLIES_READ)
     .map((t) => t.assistant_message)
     .filter((m): m is string => typeof m === 'string');
+}
+
+/**
+ * ⭐ A7 SAID LAST TURN → MORE DETAIL (DL 58e392 follow-up after RC6; Paul's test 8 Oct: "This model doesn't yet say whether any
+ * option gets there within 12 months." on the face of EVERY Run/Explain reply). When the graph owes A7 and the latest answer
+ * the user read already said it word for word, this reply types it `detail`: still said, under More detail, never removed.
+ * `null` when A7 is not owed, the latest answer did not say it, or the read fails (then it stays where it is).
+ */
+/** A7 typed `detail` (one role per unit: any other typing of the same line is replaced). Pure; unchanged when `a7` is null. */
+export function withA7AsDetail(obligations: readonly FaceObligation[], a7: string | null, text: string): FaceObligation[] {
+  if (a7 === null || !text.includes(a7)) return [...obligations];
+  return [...obligations.filter((o) => o.text !== a7), { role: 'detail', text: a7 }];
+}
+
+async function a7SaidLastTurn(graph: unknown, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string | null> {
+  const a7 = untestedHorizonLine(graph);
+  if (a7 === null) return null;
+  try {
+    const [latest] = await recentAgentReplies(store, scenarioId, exceptTurnId);
+    return typeof latest === 'string' && latest.includes(a7) ? a7 : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -780,10 +804,10 @@ export function isDurableAnswerOffer(action: SuggestedAction): boolean {
   return !('action_type' in action) && !('detail' in action)
     && typedApprovalOf({ chip: { id: action.id } }) === undefined
     && action.id !== RUN_OFFER_CHIP.id && !isRunExplanationChip(action.id)
-    && (METHOD_PRESS_IDS.has(action.id) || isWidenAddPressId(action.id))
+    && (METHOD_PRESS_IDS.has(action.id) || isWidenAddPressId(action.id) || isMethodPress(action.id))
     // ⛔ AIE 6048621134: the answer RPC refuses the WHOLE row on one offer outside the migration's envelope (a widen Add
     // id carries ':'), so the answer was never recorded. An offer the database would refuse stays live and is not stored.
-    && parseAnswerOffers([{ id: action.id, label: action.label, message: action.message }]) !== null;
+    && parseAnswerOffers([{ id: storedOfferId(action.id), label: action.label, message: action.message }]) !== null;
 }
 
 /**
@@ -1231,7 +1255,7 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1267,6 +1291,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let goalCertainty: StoredGoalCertainty | undefined;
   /** 52f8cd: the selected run's `analysis_option_participation`, same fact and gates as `analysisResult`. */
   let optionParticipation: StoredOptionParticipation | undefined;
+  /** Q6: the SAME selected fact's complete snapshot/participation projection, produced by the graph reader. */
+  let runOptionSet: RecordedRunOptionSet | undefined;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
@@ -1324,6 +1350,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
       // 52f8cd: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       optionParticipation = readStoredOptionParticipation(after.json.analysis_option_participation);
+      runOptionSet = after.json.analysis_run_option_set as RecordedRunOptionSet | undefined;
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
@@ -1452,7 +1479,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2299,8 +2326,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // live branch it does not mirror (leader gate, a proposal card's profile, a link ask, a held lapse…) would compose a
       // different shape. So the shape rides only when the composed replay IS the stored words the user first saw; any
       // other replay ships the rebuilt text whole, as before 2b-0 (the structural-challenge replay's rule).
+      // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
+      const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, store, scenarioId, turnId);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: replayObligations, graph: state.graph ?? null, profile: 'coaching' });
+        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText)), graph: state.graph ?? null, profile: 'coaching' });
       const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const replayCard = replayRecords[0];
@@ -2341,7 +2370,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
-      const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
+      const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
@@ -2354,6 +2383,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }).response, {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const gatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
+        runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
@@ -2578,6 +2611,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         holdAddFactor: async (input) => {
           writesDispatched += 1;
           return readCache.around(() => holdAddFactorInProcess(input, String(req.id)));
+        },
+        commitLimitAdd: async (input) => {
+          writesDispatched += 1;
+          const fenceRefused = () => ({ status: 'refused' as const, reason: 'turn_fence_refused' });
+          return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitAddInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
         },
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
@@ -2879,6 +2917,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow;
       const factsNow = savedRunContextFacts(scenarioId, {
         graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
+        option_participation: st.optionParticipation, run_option_set: st.runOptionSet,
         identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
       }, selectedPermissions);
       // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
@@ -3705,7 +3744,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested || premortemInitialRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
-    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet } = finalRead;
     let liveHolds: readonly PendingAction[] = [];
     let heldLapseLines: string[] = [];
     let heldRecords: ProposalRecord[] = [];
@@ -4426,9 +4465,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // shipped beside a range line. The SAME function and gate clean the view here, where it is built.
     const provisionalViewShown = provisionalView === null ? null : ((): typeof provisionalView => {
       const viewBody: { assistant_text?: unknown; _agent: { provisional_view: typeof provisionalView } } = { _agent: { provisional_view: provisionalView } };
-      return withoutDriverAbsenceClaimsAtEgress(viewBody, {
+      const driverEditedView = withoutDriverAbsenceClaimsAtEgress(viewBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      return withLeftOutOptionCorrectionAtEgress(driverEditedView, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view', ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
     })();
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
@@ -4493,9 +4536,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * never says no assumption is established or most worth investigating; only that clause goes, logged by code.
      */
     {
-      const edited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
+      const driverEdited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const edited = withLeftOutOptionCorrectionAtEgress(driverEdited, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_final', ...(turnId !== undefined ? { turnId } : {}),
       });
       if (edited !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = edited as OlumiResponse & { _answer_shape?: unknown };
@@ -4611,10 +4658,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
+      const a7Repeat = await a7SaidLastTurn(readbackGraph, store, scenarioId, turnId);
       const composedReply = composeReplyShape({
         text: reply,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
-        obligations,
+        obligations: withA7AsDetail(obligations, a7Repeat, reply),
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
@@ -4686,7 +4734,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
     const answerOffers = ((wireBody.suggested_actions ?? []) as readonly SuggestedAction[])
       // The migration's cap is 8 offers per row; a ninth would refuse the whole row, so it stays live only.
-      .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id, label, message }));
+      .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
@@ -4733,7 +4781,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
               return { ...write,
                 pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
-                suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message })) };
+                suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message })) };
             } },
           write: {
           scenario_id: scenarioId,

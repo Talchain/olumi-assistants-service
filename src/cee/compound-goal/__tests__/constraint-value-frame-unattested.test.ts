@@ -89,6 +89,12 @@ const REGISTERED_STAMPERS = [
   // instruction: CQE supplies the percentage amount, the baseline question
   // supplies the bound subject, and the handler checks the exact tuple.
   'orchestrator-v5/routing/baseline-answer-mutation.ts',
+  // S-E GOALS S4 (D-07): a ceiling the user states in this message ("we only
+  // have a budget for £200,000") on a money quantity the model already holds.
+  // It is an absolute amount on that quantity's own scale, so it stamps 'level'
+  // only, and only when the node's held quantity_frame is absent or 'level'
+  // (otherwise it refuses). It has no branch that can produce a delta.
+  'orchestrator-v5/agent-lane/stated-limit.ts',
 ] as const;
 
 /**

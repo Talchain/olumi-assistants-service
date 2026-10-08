@@ -47,6 +47,36 @@ describe('finding 1: the edit receipt never names a placeholder default as a ban
   });
 });
 
+// P48 dry walk (8 Oct, d8c01a8f pro_plan_price → mrr, 0.5/0.125 → 0.3): the DGAI receipt read BEFORE 0.5 as "Strong".
+// The receipt's before side now carries who sized it; every object the handler returns with this link's before is checked.
+const befores = (out: unknown): Record<string, unknown>[] => {
+  const found: Record<string, unknown>[] = [];
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (v === null || typeof v !== 'object') return;
+    const o = v as Record<string, unknown>;
+    const b = o.before as Record<string, unknown> | undefined;
+    if (b && typeof b === 'object' && b.from === 'f-budget' && b.to === 'g-revenue' && 'strength' in b) found.push(b);
+    Object.values(o).forEach(walk);
+  };
+  walk(out);
+  return found;
+};
+describe('P48: the edit receipt BEFORE side says a placeholder is unsized', () => {
+  it('door-default budget → revenue: every receipt before carries sizing "placeholder"', async () => {
+    const out = await createAdjustEdgeStrengthHandler()(invocation(withDoorDefault(), 'f-budget→g-revenue', 0.3));
+    const b = befores(out);
+    expect(b.length).toBeGreaterThan(0);
+    for (const x of b) expect(x.sizing).toBe('placeholder');
+  });
+  it('CONTROL: the sized fixture link (0.4/0.1) carries no sizing key on its receipt', async () => {
+    const out = await createAdjustEdgeStrengthHandler()(invocation(structuredClone(buildD1Fixture()), 'f-budget→g-revenue', 0.1));
+    const b = befores(out);
+    expect(b.length).toBeGreaterThan(0);
+    for (const x of b) expect('sizing' in x).toBe(false);
+  });
+});
+
 describe('finding 2: the Olumi-authored count never claims the user\'s own strength', () => {
   const banked = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/g1b-answer-door-banked.json', import.meta.url), 'utf8'));
   const graph = structuredClone(banked.graphs['acc__g1-2633s_draft-2__5fe19642'].graph ?? banked.graphs['acc__g1-2633s_draft-2__5fe19642']);

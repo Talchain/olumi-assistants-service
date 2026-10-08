@@ -22,6 +22,7 @@ import { resolveDskClaimProvenance, type DskClaimProvenance } from '../../compos
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { composeGoalTargetQuestion } from '../../goal-target/decide-goal-target-ask.js';
 import { parseStructuralChallengePress } from '../method-turn/structural-challenge-turn.js';
+import { sayOlumiEstimates } from '../olumi-estimates-feeding-result.js';
 
 export type ActionRoute = 'decision_review' | 'what_changes' | 'strengthen_s1' | 'method_turn' | 'widen_turn' | 'structural_challenge' | 'typed_reply' | 'propose_identity';
 export interface ActionHandler {
@@ -126,8 +127,10 @@ const BECAUSE: Record<keyof typeof DISABLED, string> = {
 };
 
 function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
-  // An estimate action not offered because no Run is bound still has its points: say what it needs, never "no triggers".
-  if ((action === 'bias_anchoring' || action === 'check_estimates') && !f.runBound && estimatePointsOf(f).length > 0) {
+  // Unknown census needs a current readable Run; it never claims a known zero.
+  if ((action === 'check_estimates' && (f.olumiEstimates === null || (!f.runBound
+    && f.olumiEstimates.count + f.olumiEstimates.accepted + f.olumiEstimates.placeholderLinks > 0)))
+    || (action === 'bias_anchoring' && !f.runBound && estimatePointsOf(f).length > 0)) {
     return { text: `${CANT_YET[action]}: ${BECAUSE.needs_current_analysis}`, reason: 'needs_current_analysis', exits: runExits(f) };
   }
   if (action === 'bias_anchoring') return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
@@ -146,13 +149,11 @@ function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFact
 
 /** Science 393023's exact bytes. Shown-first user figures await Science's wording and never enter these replies. */
 function estimateReply(action: 'bias_anchoring' | 'check_estimates', f: ActionFacts): ActionTypedReply {
-  const points = estimatePointsOf(f).filter(p => p.via !== 'shown_first');
   if (action === 'check_estimates') {
-    // TODO lane-edit-panel.md: replace this list with the S-D panel fields when EDIT-PANEL ships its builder.
-    return { text: ["Olumi's estimates that this result rests on:",
-      ...points.map(p => `- ‘${p.label}’: ${p.figure}. That's Olumi's estimate, not a measured figure.`),
-      "If you have your own figure for any of these, tell me and I'll propose it for you to approve."].join('\n'), exits: [], outcome: 'ran' };
+    return f.olumiEstimates === null ? cantYet(action, undefined, f, actionBarOf(f))
+      : { text: sayOlumiEstimates(f.olumiEstimates).join('\n'), exits: [], outcome: 'ran' };
   }
+  const points = estimatePointsOf(f).filter(p => p.via !== 'shown_first');
   if (points.length === 0) return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const stage = f.canonicalStage === null ? null : mapStageToDecisionStage(f.canonicalStage);
   const science = biasBadgeApplies('DSK-B-001', stage) ? resolveDskClaimProvenance('DSK-B-001') : null;
