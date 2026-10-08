@@ -16,7 +16,7 @@
  */
 import type { IdentityProposal } from './identity-proposal.js';
 import type { StructuredProposal } from './proposal.js';
-import type { PendingAction } from '../session/pending-action.js';
+import { isPendingActionExpired, type PendingAction } from '../session/pending-action.js';
 import { agentProposalOf, isHeldProposal } from './proposal-object/record.js';
 
 /** The proposal operation that carries a reading to confirm. `path` is the goal's id. */
@@ -127,8 +127,9 @@ export function identityAutoIssueAllowed(p: { readonly issue: boolean; readonly 
  * through the propose_identity capability, which asks this. True while any held change OTHER than an identity card waits
  * for its yes: path-only supersession would discard it before either is decided.
  */
-export function heldChangeBlocksIdentity(pending: readonly PendingAction[]): boolean {
-  return pending.some(p => isHeldProposal(p) && !(agentProposalOf(p)?.operations ?? []).some(o => o.op === CONFIRM_IDENTITY_OP));
+export function heldChangeBlocksIdentity(pending: readonly PendingAction[], nowMs: number = Date.now()): boolean {
+  // Codex r3 P2: only a LIVE hold waits; an expired carrier lapsed and blocks nothing (the existing lifecycle authority).
+  return pending.some(p => !isPendingActionExpired(p, nowMs) && isHeldProposal(p) && !(agentProposalOf(p)?.operations ?? []).some(o => o.op === CONFIRM_IDENTITY_OP));
 }
 
 type IdentityRefusalCode = 'reading_not_confirmed' | 'superseded' | 'not_admissible' | 'carrier_conflict' | 'already_carried' | string;

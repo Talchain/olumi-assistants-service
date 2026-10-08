@@ -209,6 +209,10 @@ describe('GOAL-REACH build 1 stored reading', () => {
     expect(heldChangeBlocksIdentity([held('confirm_identity')])).toBe(false);
     expect(heldChangeBlocksIdentity([held('confirm_identity'), held('set_factor_value')])).toBe(true);
     expect(heldChangeBlocksIdentity([])).toBe(false);
+    // Codex r3 P2: an EXPIRED held change lapsed and blocks nothing; the same hold live still blocks.
+    const stale = held('set_factor_value');
+    expect(heldChangeBlocksIdentity([stale], Date.parse(stale.expires_at_iso) + 1)).toBe(false);
+    expect(heldChangeBlocksIdentity([stale], Date.parse(stale.expires_at_iso) - 1)).toBe(true);
   });
 
   it.each(['percent', '%', 'per cent', 'percentage points', 'pp'])('DL #2802 P0: "£/month" × "%s" is a share, never a count → no reading, no offer', unit => {
