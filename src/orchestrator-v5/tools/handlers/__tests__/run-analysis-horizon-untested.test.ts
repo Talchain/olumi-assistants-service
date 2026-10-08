@@ -39,7 +39,6 @@ const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run
 const SCENARIO = 'c8108752-0000-4000-8000-0000000000a7';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const A7_12 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.";
-const A7_PLURAL_12 = "These chances use the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.";
 const A7_FREE_12 = "This model doesn't yet say whether any option gets there within 12 months.";
 const A7_SHORT = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
 const ONE_FIGURE = [{ kind: 'figure' as const, display: 'about 40%' }];
@@ -160,7 +159,9 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
   it('RED: a Run that SHOWS the goal chance still says the deadline is untested (the PL\'s distinction)', async () => {
     const result = await runOn(sizedRoute());
     expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).toBe(false);
-    expect(horizonWarnings(result).map((w) => w.message)).toEqual([A7_PLURAL_12]);
+    // r15 contract re-pin: "horizon form chosen by figure/range cell count". This served sized Run
+    // retains one shown chance; RED still requires the separate untested-deadline warning once.
+    expect(horizonWarnings(result).map((w) => w.message)).toEqual([A7_12]);
   });
 
   it('CONTROL: a duration limit scores the deadline → no horizon warning on a Run with no licensed chance, and no chat A7', async () => {

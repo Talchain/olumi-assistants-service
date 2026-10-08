@@ -288,12 +288,13 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(b.narration?.status).toBe('ready');
     expect(b.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
     expect(b.assistant_text).not.toContain(NARRATOR);
-    // The typed final withheld contract derives the same fixed words; authority and caveat exclusions stay exact.
+    // r15 contract re-pin: "cell-sourced marker". This final leader-scope refusal has no goal-chance
+    // cell, so its short fixed reason ships whole. Authority and caveat exclusions stay exact.
     const withheld = 'No single option can be put forward yet, and the reason is not recorded, so I will not guess at one; ask me to run the analysis and I can tell you then.';
-    expect(b._answer_shape).toEqual({ headline: 'Not shown yet; why is under More detail', bullets: [], detail: withheld });
-    expect(count(b._answer_shape!.detail, withheld)).toBe(1);
-    expect(b._answer_shape!.headline).not.toContain(withheld);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    expect(b._answer_shape).toBeUndefined();
+    expect(b.assistant_text).toBe(withheld);
+    expect(count(b.assistant_text, withheld)).toBe(1);
+    expect(b.assistant_text).not.toContain('Not shown yet; why is under More detail');
     expect(count(b.assistant_text, SENTENCE)).toBe(0);
     expect(count(b.assistant_text, NO_FLIP_SENTENCE)).toBe(0);
   });

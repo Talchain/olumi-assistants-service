@@ -984,8 +984,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       && units[u.idx - 1]!.kind === 'sentence' && /:["'”’)\]*]{0,4}$/.test(units[u.idx - 1]!.text))) {
       return { text, shape: null, outcome: 'kept_whole', reason: 'lead_in_split', measure };
     }
-  } else if (split?.lead !== '' && faceHostLines.length === 0 && controlQuestions.length === 0 && goalChanceHeadline === undefined
+  } else if ((input.faceContract !== 'draft' || detailUnits.length === 0)
+    && split?.lead !== '' && faceHostLines.length === 0 && controlQuestions.length === 0 && goalChanceHeadline === undefined
     && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) {
+    // A draft with units assigned to detail still owes its shape, even when no canonical chance cells exist.
     // A contract reply that is already the whole face (≤ budget, at most one question, nothing for the contract to place:
     // no chance, no horizon/W/E line, no card question to move) ships exactly as written, as on staging.
     return { text, shape: null, outcome: 'already_in_shape', measure };

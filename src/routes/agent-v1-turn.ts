@@ -618,6 +618,10 @@ function withCellHorizon(text: string, graph: unknown, cells: readonly Canonical
   const variants = [untestedHorizonLine(graph), untestedHorizonLine(graph, { besideChance: true }),
     untestedHorizonLine(graph, { besideChance: true, plural: true }), untestedHorizonLineForCells(graph, [])];
   for (const variant of new Set(variants)) if (variant !== null && variant !== line) text = text.replaceAll(variant, line ?? '');
+  // Narration and the host can each carry a different exact producer form. Once the cells unify them, keep ONE copy
+  // in its first place; only this typed horizon identity is deduplicated, never arbitrary repeated reasoning.
+  const first = line === null ? -1 : text.indexOf(line);
+  if (line !== null && first >= 0) text = text.slice(0, first + line.length) + text.slice(first + line.length).replaceAll(line, '');
   return text;
 }
 
@@ -1578,7 +1582,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { canonicalAnalysisView, graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, canonicalAnalysisView, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2489,7 +2493,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, optionParticipation: state.optionParticipation, identityEvaluated: state.identityEvaluated }).olumiEstimates;
       const replayControlQuestions = replayActions
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
-      const replayHorizon = replayObligations === undefined ? null : untestedHorizonLineForCells(state.graph, replayChanceCells);
+      const replayHorizon = replayObligations === undefined || !replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
+        ? null : untestedHorizonLineForCells(state.graph, replayChanceCells);
       const replayWhatChanges = replayObligations === undefined
         || (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'complete_current'
         ? null : whatChangesFaceLine(state.analysisResult, state.graph);
@@ -4850,13 +4855,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
       wireBody = { ...wireBody, assistant_text: resting.includes(freshScopeQuestion) ? resting : `${resting} ${freshScopeQuestion}`.trim() };
     }
-    // Every narrated reply, including ordinary follow-ups, crosses this boundary before shaping, history and storage.
-    wireBody = withEstimateGoalPointsAtEgress(wireBody, {
-      analysisResult, graph: readbackGraph ?? null,
-      current: selectedRunCurrent,
-      userAuthoredTexts: userTextsForEgress(
-        [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
-    });
     /**
      * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a
      * better length before with the three bullets as a construct"; `agent-lane/reply/compose-reply.ts`). HERE, after every
@@ -4894,7 +4892,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const firstRunRiskMarker = faceContract === 'draft' && screenLines.length > 0
         ? runWidenWords.widenedRiskMarker : undefined;
       if (firstRunRiskMarker !== undefined && !reply.includes(firstRunRiskMarker)) reply = withDisclosures(reply, [firstRunRiskMarker]);
-      const horizonLine = faceContract === 'run' ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;
+      // Every prose writer, including cell-owned horizons and the build's Run risk marker, crosses the ONE chokepoint
+      // before shaping, history and storage. The unchanged-body branch below retains this same gated carrier.
+      wireBody = withEstimateGoalPointsAtEgress({ ...wireBody, assistant_text: reply }, {
+        analysisResult, graph: readbackGraph ?? null,
+        current: selectedRunCurrent,
+        userAuthoredTexts: userTextsForEgress(
+          [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
+      });
+      reply = String(wireBody.assistant_text ?? '');
+      const horizonLine = faceContract === 'run' && chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
+        ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;
       const whatChanges = faceContract === 'run' && selectedRunCurrent && (fastPath !== 'explain' || explainsCurrentRun)
         ? whatChangesFaceLine(analysisResult, readbackGraph ?? null) : null;
       // The gate's typed cause precedence: a different claim reason does not name the co-held links.

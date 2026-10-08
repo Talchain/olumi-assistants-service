@@ -53,14 +53,13 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
-import { deriveAnalysisFreshness } from '../../context/freshness.js';
-import { selectCanonicalAnalysisState } from '../../context/canonical-analysis-state.js';
-import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding, readRawRobustnessFromResponseBody } from '../../compose/analysis-state-v1.js';
+import { boundRunLeaderClaim } from '../../model-management/version-result-binding.js';
+import { projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import type {
@@ -3100,21 +3099,19 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     };
 
     // The completed Run's final cells own every horizon form, after all withholds, licences and range scoping.
-    // Use the read's existing fact, freshness, state and public-block gates rather than interpreting warning order.
+    // Reuse the pinned bound-Run state reader and public-block gates; this producer never re-derives freshness.
     const horizonGraph = snapshot.rawPersistedGraph ?? snapshot.graph;
-    const horizonDerivation = deriveAnalysisFreshness([factCandidate], graphHashAtRun, undefined, { currentGraph: horizonGraph });
     const horizonResult = buildAnalysisResultBlock(factCandidate);
-    const horizonState = composeAnalysisStateV1({
-      canonical: selectCanonicalAnalysisState({ handlerFacts: [factCandidate], currentGraphHash: graphHashAtRun, currentGraph: horizonGraph }),
-      freshness: horizonDerivation,
-      runFactBinding: { scenarioId: args.scenario_id, selectedResult: factCandidate.result },
-      rawRobustness: readRawRobustnessFromResponseBody({ blocks: [horizonResult] }),
-    });
-    const currentHorizonResult = horizonState === undefined ? null
-      : projectAnalysisBlocksForRunBinding([horizonResult], horizonState, horizonDerivation.reason)[0] ?? null;
+    const horizonBound = graphHashAtRun === null ? null : boundRunLeaderClaim({
+      fact: factCandidate,
+      identity: { scenario_id: args.scenario_id, graph_hash_at_run: graphHashAtRun, computed_at: runComputedAt, run_id: runId },
+    }, { graph: horizonGraph, scenario_id: args.scenario_id });
+    const horizonState = horizonBound?.state ?? null;
+    const currentHorizonResult = horizonState === null ? null
+      : projectAnalysisBlocksForRunBinding([horizonResult], horizonState)[0] ?? null;
     const chanceCells = projectCanonicalAnalysisView({
-      graph: horizonGraph, runFact: factCandidate, derivation: horizonDerivation,
-      analysisState: horizonState, currentResult: currentHorizonResult,
+      graph: horizonGraph, runFact: factCandidate, analysisState: horizonState,
+      analysisReady: horizonBound?.readiness, currentResult: currentHorizonResult,
     }).options.map(option => option.cell);
     factCandidate.result.enrichment = withShortHorizonBesideChance(
       withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells), horizonGraph, chanceCells);
@@ -3947,9 +3944,7 @@ export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph:
   if (response === null || typeof response !== 'object' || Array.isArray(response)
     || thresholdReasonOf(response)?.reason !== 'missing_goal_baseline') return response;
   const env = response as Record<string, unknown>;
-  const warnings = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
-  if (warnings.some(w => w !== null && typeof w === 'object'
-    && (w as Record<string, unknown>).code === GOAL_FIGURES_MISSING_CURRENT_LEVEL)) return response;
+  if (goalFiguresWithheldWarnings(env).some(w => w.code === GOAL_FIGURES_MISSING_CURRENT_LEVEL)) return response;
   const goal = soleGoalOf(graph);
   const { scored } = goalFigureOptions(response);
   if (goal === undefined || scored.length === 0) return response;

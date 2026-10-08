@@ -158,11 +158,12 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
       leading_option_id: null,
       enrichment: {
         // The goal holds the brief's 12 months and no limit is a duration, so the Run also carries A7 as its typed
-        // warning (`decision-input-ask.ts` `untestedHorizonLine`), and the COLD READ returns it: the stored fact keeps it.
+        // warning, and the COLD READ returns it: the stored fact keeps it. Contract rule: "staging's chance-free horizon
+        // sentence when no cell shows a chance" — the product-not-read withhold leaves no figure/range cell here.
         inference_warnings: [
           { code: 'GOAL_FIGURES_PRODUCT_NOT_READ' },
           { code: 'GOAL_HORIZON_NOT_TESTED', severity: 'info',
-            message: 'This chance uses the model\'s numbers as they are today; the model doesn\'t project how they change over time yet, so it can\'t say whether you\'ll reach £85,000 within 12 months.' },
+            message: 'This model doesn\'t yet say whether any option gets there within 12 months.' },
         ],
       },
     });

@@ -37,6 +37,7 @@ import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
 import { HORIZON_MARKER, ROBUSTNESS_MARKER, WITHHOLD_FALLBACK_MARKER, sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
 import { textAtRest, untestedHorizonLine } from '../decision-input-ask.js';
+import type { CanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -93,6 +94,7 @@ const b3WireCases: { source: string; text: string; line: string; question: strin
 const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** The readback's graph: the corpus's served pricing graph, or a variant a row sets (reset before each row). */
 let readbackGraph: unknown = FX.state.draft_graph;
+let readbackCellRows: CanonicalAnalysisView['options'] | undefined;
 /** The durable turn rows, keyed by turn id — the store fake from `agent-turn-withheld-leader-fail-closed.test.ts`. */
 type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null };
 const rows = new Map<string, Row>();
@@ -163,15 +165,20 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
       };
     });
     // The final readback — the ONLY source of the response's `analysis_result` block.
-    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
-      graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: readbackReady,
-      ...(readbackCarriesResult ? { analysis_result: readbackResult } : {}),
-    }, SCENARIO));
+    app.post('/assist/v1/scenarios/:id/graph', async () => {
+      const read = withCanonicalAnalysisView({
+        graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: readbackReady,
+        ...(readbackCarriesResult ? { analysis_result: readbackResult } : {}),
+      }, SCENARIO);
+      return readbackCellRows === undefined ? read : {
+        ...read, canonical_analysis_view: { ...read.canonical_analysis_view, options: readbackCellRows },
+      };
+    });
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { vi.mocked(fetch).mockClear(); store.readRecent.mockReset().mockResolvedValue([]); runRequests = 0; rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; });
+  beforeEach(() => { vi.mocked(fetch).mockClear(); store.readRecent.mockReset().mockResolvedValue([]); runRequests = 0; rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; readbackCellRows = undefined; });
 
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
@@ -219,9 +226,10 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   };
   const RUN_DISCLOSURE = "How much each of ‘Pro subscriber base’ and ‘MRR per Pro subscriber’ counts towards ‘MRR’ is Olumi's assumption, not your stated priority. Set them to match what matters to you.";
   const A7 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
+  const A7_WITHOUT_CHANCE = "This model doesn't yet say whether any option gets there within 12 months.";
 
   it.each([
-    { label: 'previous answer said A7 verbatim → detail, never the headline/bullets', previousAnswer: `${RUN_RESULT_READY_TEXT}\n\n${A7}`, repeated: true },
+    { label: 'previous answer said chance-free A7 verbatim → detail, never the headline/bullets', previousAnswer: `${RUN_RESULT_READY_TEXT}\n\n${A7_WITHOUT_CHANCE}`, repeated: true },
     { label: 'CONTROL: previous answer without A7 → today’s headline placement unchanged', previousAnswer: RUN_RESULT_READY_TEXT, repeated: false },
   ])('A7 route: $label', async ({ previousAnswer, repeated }) => {
     const graph = structuredClone(FX.state.draft_graph) as { nodes: { kind: string; goal_horizon_months?: number }[] };
@@ -238,9 +246,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     // Store order is newest first, without claim rows, as in production. A newer tool row and an older Agent answer
     // both say A7: neither may override the immediately previous Agent answer in the no-A7 control.
     store.readRecent.mockImplementation(async () => [
-      { id: 'tool-row', turn_id: 'tool-turn', request_hash: 'sha256:tool', assistant_message: A7 },
+      { id: 'tool-row', turn_id: 'tool-turn', request_hash: 'sha256:tool', assistant_message: A7_WITHOUT_CHANCE },
       ...[...rows.values()].reverse().filter((row) => !row.turn_id.endsWith(':claim')),
-      { id: 'older-answer', turn_id: 'older-turn', request_hash: 'agent_turn:older', assistant_message: A7 },
+      { id: 'older-answer', turn_id: 'older-turn', request_hash: 'agent_turn:older', assistant_message: A7_WITHOUT_CHANCE },
     ]);
     callModelOutputs = [say(`${A7}\n\n${FOUR_BULLETS.text}`)];
     const chip = (run as Body & { suggested_actions: { id: string; message: string }[]; _agent: { session_id: string } }).suggested_actions
@@ -257,15 +265,18 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b._diagnostic_trace.fast_path).toBe('explain');
     expect(carriesResult(b)).toBe(true);
     expect(b._answer_shape, 'the live reply shapes, rather than falling back to whole prose').toBeDefined();
+    // r15 contract re-pin: "staging's chance-free horizon sentence when no cell shows a chance".
+    // The wording changes; the original fresh/repeated placement guard keeps its polarity.
     if (repeated) {
-      expect(b._answer_shape!.detail).toContain(A7);
-      expect(b._answer_shape!.headline).not.toContain(A7);
-      expect(b._answer_shape!.bullets.join('\n')).not.toContain(A7);
+      expect(b._answer_shape!.detail).toContain(A7_WITHOUT_CHANCE);
+      expect(faceOf(b._answer_shape!)).not.toContain(A7_WITHOUT_CHANCE);
     } else {
-      expect(b._answer_shape!.headline).toBe(A7);
-      expect(b._answer_shape!.detail).not.toContain(A7);
+      expect(b._answer_shape!.headline).toBe(A7_WITHOUT_CHANCE);
+      expect(b._answer_shape!.detail).not.toContain(A7_WITHOUT_CHANCE);
     }
-    expect(b.assistant_text.split(A7).length - 1, 'A7 is still said exactly once').toBe(1);
+    expect(faceOf(b._answer_shape!)).not.toContain(HORIZON_MARKER);
+    expect(b.assistant_text).not.toContain(A7);
+    expect(occurrences(b.assistant_text, A7_WITHOUT_CHANCE), 'A7 is still said exactly once').toBe(1);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
@@ -510,12 +521,19 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(unhyphen(faceOf(early!))).toContain(unhyphen(served.leak_phrases[0]!));
 
     readbackState = WITHHELD_STATE;
+    // r15 contract re-pin: "cell-sourced marker". The authoritative read records a withheld cell whose
+    // cause was not retained; a leader-claim closing alone cannot supply this goal-chance marker.
+    readbackCellRows = [{ option_id: 'keep_pro_at_49', main_driver: { kind: 'not_recorded' },
+      cell: { kind: 'withheld', face: 'Olumi can’t yet say its chance of meeting your goal, in this model.',
+        reasons: [{ code: 'reason_not_recorded', message: null }] } }];
     const { b, turnId } = await typedRun(served.text);
     expect(b._diagnostic_trace.leader_claim_enforced, 'the control: the gate edited this turn').toBe(true);
     expect(b.assistant_text, 'the control: the gate’s own sentence is in the reply').toContain(noLeaderSentence);
     expect(b._answer_shape, 'shaped after the gate').toBeDefined();
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
     expect(faceOf(b._answer_shape!), 'typed fallback withhold marker is must-face').toContain(WITHHOLD_FALLBACK_MARKER);
+    expect(b._answer_shape!.headline, 'withheld cells lead when no chance cell is shown').toBe(WITHHOLD_FALLBACK_MARKER);
+    expect(occurrences(b.assistant_text, WITHHOLD_FALLBACK_MARKER), 'one recorded cause gives one marker').toBe(1);
     expect(faceOf(b._answer_shape!), 'full withheld reason is behind progressive disclosure').not.toContain(noLeaderSentence);
     expect(occurrences(b._answer_shape!.detail, noLeaderSentence), 'exact gate reason once in detail').toBe(1);
     expect(b.assistant_text.split(noLeaderSentence)).toHaveLength(2);

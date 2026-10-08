@@ -29,8 +29,10 @@ const OBJECTIVE_QUESTION = 'What should this model help you explore?';
 const expectOwnAskOnce = (text: string, ask: string) => {
   for (const sentence of sentencesOf(ask)) expect(text.split(sentence).length - 1, `own sentence once: ${sentence}`).toBe(1);
 };
-const A7 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll get there within 2 months.";
-const A7_TARGET = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £1,000,000 within 2 months.";
+// r15 CONTRACT: "horizon form chosen by figure/range cell count; staging's chance-free horizon sentence when no cell
+// shows a chance". These host/Run fixtures show no chance cells, including when the target itself is stated.
+const A7 = "This model doesn't yet say whether any option gets there within 2 months.";
+const A7_TARGET = A7;
 const base = { restingText: 'The model is a sketch to challenge.', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
 const b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
 const captureB3 = (source: string, text: string, line: string, question: string) => {
@@ -247,13 +249,15 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 describe('≤160 words on screen (DL 5923219186 · AIQ 5923963470): over the bound, A7 folds back behind the toggle — never the ask', () => {
   const prose = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ');
   const a7w = A7.split(/\s+/).length; const askw = ASK.split(/\s+/).length;
-  it('the measured line sizes: A7 31 words, the ask 18', () => { expect([a7w, askw]).toEqual([31, 18]); });
+  it('the measured line sizes: chance-free A7 13 words, the ask 18', () => { expect([a7w, askw]).toEqual([13, 18]); });
   it('RED: at rest + toggle label + both lines = 161 → A7 stays behind the toggle; the ask is said', () => {
     const resting = prose(160 - 7 - a7w - askw + 1);
+    expect(resting.split(/\s+/).length + 7 + a7w + askw, 'the fixture still exceeds the exact 160-word bound by one').toBe(161);
     expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, restingText: resting, questionsToggle: true })).toEqual([ASK]);
   });
   it('CONTROL: exactly 160 → both lines', () => {
     const resting = prose(160 - 7 - a7w - askw);
+    expect(resting.split(/\s+/).length + 7 + a7w + askw, 'the fixture still meets the exact 160-word bound').toBe(160);
     expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, restingText: resting, questionsToggle: true })).toEqual([A7, ASK]);
   });
   it('CONTROL: over the bound with NO toggle (a Run turn: nowhere to fold it) → A7 is still said', () => {

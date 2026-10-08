@@ -96,7 +96,9 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     const owed = decisionInputLines(g, { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     const [left, a7, ask] = owed;
     expect(left).toBe('"Founder burnout" (with "Founder hours", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Funding secured".');
-    expect(a7).toMatch(/^This chance uses the model's numbers as they are today/);
+    // r15 contract re-pin: "staging's chance-free horizon sentence when no cell shows a chance".
+    // RED polarity stays: omitting restoration or inserting the left-out line in its place still fails below.
+    expect(a7).toBe("This model doesn't yet say whether any option gets there within 2 months.");
     const folded = `Your results are ready.\n\n${left}\n\n${ask}`;
     expect(withA7AfterGate(folded, g, { awaitingApproval: false, builtOrRan: true }, null)).toBe(`Your results are ready.\n\n${left}\n\n${a7}\n\n${ask}`);
   });
