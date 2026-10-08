@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
@@ -37,15 +37,18 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
  */
 
 import { createHash } from 'node:crypto';
+import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
 import { verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
+import { identityCanCarryExactLinks } from '../../admission/identity-evaluations.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
+import { widenDraft } from './widen-draft.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -60,6 +63,7 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
+import { admitAccumulationIdentities, withAccumulationCarriers } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -308,11 +312,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
      * marks whether its sign is provable. REQUIRED so "none" is an empty list, never an omission.
      */
     identities: { type: 'array', description:
-      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together. Empty when none.',
+      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline. Empty when none.',
       items: obj({
-        outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product.' },
-        operation: { type: 'string', enum: ['product'] },
-        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied.' },
+        outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product, or the stock at the deadline.' },
+        operation: { type: 'string', enum: ['product', 'accumulation'] },
+        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied; for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month.' },
         provenance,
       }, ['outcome', 'operation', 'factors', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
@@ -411,6 +415,10 @@ export const BUILD_INSTRUCTIONS = [
   'NEVER PICK THE SCOPE OF THE GOAL SILENTLY. When the goal metric could mean one part or the whole — the brief says "MRR" or "revenue" and the decision is about one plan, product, segment or region — set `goal.scope`: `modelled` is what your model actually measures (e.g. "the Pro plan only"), `alternative` is the other reading (e.g. "all plans together"), and `stated_in_brief` is true only when the brief itself says which. Keep `goal.metric` in the user’s own words: Olumi states the modelled scope as its own assumption and asks the user which they meant from `goal.scope`. When the goal metric has no part-or-whole reading, `goal.scope` is null.',
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
   'DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together — a plan’s revenue is its price times its paying subscribers; a cost is headcount times cost per head — add one entry to `identities`: `outcome` is that quantity’s EXACT label, `operation` "product", and `factors` the EXACT labels of every quantity multiplied. Still state each factor’s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds.',
+  // ⭐ CEE #4 (Science goals §(v)): a goal with a deadline over a stock that churns and grows is about that stock AT the
+  // deadline, which a model of today's levels cannot see. Admission (`accumulation-identity.ts`) refuses any shape below
+  // that does not hold, and says why.
+  'A STOCK AT THE DEADLINE IS WORKED OUT, NEVER GUESSED. Only when the goal states a deadline in months AND the goal depends on a stock that loses a share each month and gains an amount each month (paying subscribers with monthly churn and new sign-ups): add an outcome labelled with the stock and the deadline (e.g. "Pro subscribers at month 12"), link the stock today, its monthly churn and its monthly new additions each DIRECTLY to that outcome, and add one entry to `identities` with `operation` "accumulation", `outcome` that label, and `factors` EXACTLY [the stock today, the churn as a percentage per month (unit "%"), the amount added per month], in that order. Each of the three needs today\u2019s level. Whenever an accumulation is declared, the goal\u2019s PRODUCT in `identities` over [the price-like part, "<stock> at month N"] is REQUIRED; link both parts directly to the goal. Never use it for a churn stated per year, or without a stated deadline.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"); "change_abs" when they limit a CHANGE from today in the quantity\u2019s own unit ("churn no more than 2 points higher than now"); "change_rel" when they limit a PERCENTAGE change from today ("cost no more than 10% above today", "cut spend by at least 15%"): give `value` as that signed percentage (10, or -15) and `unit` "%". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
@@ -453,8 +461,8 @@ export const BUILD_INSTRUCTIONS = [
 ].join(' ');
 
 /** Only a brief attested by the deterministic reader may delegate its empty event forecast to admission. */
-export function buildInstructionsForBrief(brief: string): string {
-  return briefAttestsEventByDate(brief)
+export function buildInstructionsForBrief(brief: string, construction?: ConstructionAdmission): string {
+  return (construction?.event_by_date_prompted ?? briefAttestsEventByDate(brief))
     ? `${BUILD_INSTRUCTIONS} The deterministic reader attests an event by a date. The event-share parts replace ordinary causal goal links. When no stated facts belong in these collections, leave its factors, risks, outcomes, links and identities empty for this slice. Keep every stated limit, factor, risk, option setting and link; admission will disclose any link the deadline forecast cannot use.`
     : BUILD_INSTRUCTIONS;
 }
@@ -463,7 +471,7 @@ export type CallStructuredModel = (req: {
   model: string; instructions: string; input: string;
   max_output_tokens: number; schema: Record<string, unknown>;
   reasoning_effort?: 'low' | 'medium' | 'high';
-}) => Promise<{
+}, deadlineAt?: number) => Promise<{
   text: string; usage?: Record<string, unknown>;
   /**
    * The Responses API's own completion status (AIX-001), e.g. `incomplete` with reason `max_output_tokens` —
@@ -946,6 +954,48 @@ export function firstConstructInput(brief: string): string {
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
   return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+}
+
+/** A missing option-to-goal mechanism, read from what admission actually kept. */
+export interface OutcomePathIssue {
+  readonly option_id: string;
+  readonly option: string;
+  readonly factors: readonly string[];
+  readonly dead_end_ids: readonly string[];
+  readonly dead_ends: readonly string[];
+  readonly issue: string;
+}
+
+export interface ConstructionGaps {
+  readonly path_missing: readonly { readonly option_id: string; readonly option: string; readonly dead_end_ids: readonly string[]; readonly dead_ends: readonly string[] }[];
+}
+
+export function pathIssues(admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>): OutcomePathIssue[] {
+  const goals = admitted.nodes.filter((n) => n.kind === 'goal');
+  if (goals.length === 0) return []; // The existing no-goal refusal owns this case.
+  const refusedOptions = optionsWithoutGoalPath(admitted);
+  const nodeOf = new Map(admitted.nodes.map((n) => [n.id, n]));
+  const directed = admitted.edges.filter((e) => (e as { edge_type?: string }).edge_type !== 'bidirected');
+  const outgoing = new Map<string, string[]>();
+  for (const edge of directed) outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to]);
+  const quoted = (s: string): string => JSON.stringify(s);
+  const goal = goals.map((n) => quoted(n.label)).join(', ');
+  return admitted.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && refusedOptions.has(n.id)).map((option) => {
+    const factors = (outgoing.get(option.id) ?? []).map((id) => nodeOf.get(id)).filter((n) => n?.kind === 'factor').map((n) => n!.label);
+    const branch = reachableNodeIds(directed, [option.id]);
+    const terminals = [...branch].filter((id) => (outgoing.get(id) ?? []).length === 0);
+    // Admission normally breaks loops. A closed cycle still needs an honest name, not an empty dead-end list.
+    const dead_end_ids = terminals.length > 0 ? terminals : [...branch];
+    const dead_ends = dead_end_ids.map((id) => nodeOf.get(id)?.label ?? id);
+    // The structured gap preserves identities; the drafter's existing words stay label-only and deduplicated.
+    const deadEndLabels = [...new Set(dead_ends)];
+    const actsOn = factors.length > 0 ? factors.map(quoted).join(', ') : 'no connected factor';
+    return {
+      option_id: option.id, option: option.label, factors, dead_end_ids, dead_ends,
+      issue: `${quoted(option.label)} acts on ${actsOn}, whose links end at ${deadEndLabels.map(quoted).join(', ')}; nothing it changes reaches ${goal}. `
+        + `Link what it changes, through a mechanism you can state in one line, to ${goal}, or say in unknowns which mechanism is missing.`,
+    };
+  });
 }
 
 export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] {
@@ -1451,6 +1501,13 @@ export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unkn
     .filter((n) => n.analysis_participation === 'retained_excluded' && n.kind !== 'goal').map((n) => n.id));
   const nodes = (drafted.nodes as readonly Record<string, unknown>[]).filter((n) => !out.has(n.id));
   const graph = { nodes, edges: (drafted.edges as readonly Record<string, unknown>[]).filter((e) => !out.has(e.from) && !out.has(e.to)) };
+  // A held stock still sets the goal's level when an option changes only price, so an option-path walk cannot attest it.
+  const goalProducts = nodes.filter((n) => n.kind === 'goal' && n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object')
+    .map((n) => n.nonlinear_identity as Record<string, unknown>).filter((i) => i.operation === 'product');
+  if (goalProducts.some((i) => Array.isArray(i.factor_ids) && i.factor_ids.some((id) => {
+    const part = nodes.find((n) => n.id === id);
+    return part !== undefined && !identityCanCarryExactLinks(nodes, part.nonlinear_identity);
+  }))) return true;
   const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
   const evaluations = nodes.filter((n) => n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object').map((n) => {
     const i = n.nonlinear_identity as Record<string, unknown>;
@@ -1484,9 +1541,13 @@ export async function buildModelFromBrief(
   dispatch: InternalDispatch,
   callStructured: CallStructuredModel,
   observeConstruction?: (t: ConstructionTrace) => void,
+  deadlineAt?: number,
+  // The plain provider (never the recorder-wrapped drafter). Omitted → no widening: today's path, byte for byte.
+  wideningCallStructured?: CallStructuredModel,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
-  const buildInstructions = buildInstructionsForBrief(brief);
+  const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
+  const buildInstructions = buildInstructionsForBrief(brief, construction);
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
   // at output_tokens 6000 exactly and the refusal carried a SyntaxError). Same user words (`construction_failed`).
@@ -1512,10 +1573,10 @@ export async function buildModelFromBrief(
     }
     // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
     candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
-    if (candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
+    if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
       candidate = { ...candidate, goal: { ...candidate.goal, kind: null } };
     }
-    if (candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
+    if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
       && candidate.factors.length === 0 && candidate.risks.length === 0 && candidate.outcomes.length === 0 && candidate.links.length === 0) {
       return { ok: false, mutated: false, refusal: 'construction_needs_redraft',
         detail: 'That draft has no usable model for this brief. Ask me to draft it again with the factors and links that explain the outcome.' };
@@ -1576,8 +1637,39 @@ export async function buildModelFromBrief(
    * throughout, so a cut there would only take a risk the user can see (DL #75 5916217417, Paul 30 Sep: "new models have
    * fewer risks"; `construction-keeps-drafted-risks.test.ts`) and change no result.
    */
+  // Keep the existing repair route available to an ordinary draft before deciding that a failed event
+  // admission must refuse. These intermediate graphs are never registered without the final structural gate.
+  const eventFallbackRefusals = new WeakMap<AdmittedModel, string>();
+  const admitForBuild = (model: CandidateModel, levelCandidate = model): AdmittedModel => {
+    const args = [model, {}, brief, goalLevelTheUserWrote(levelCandidate, brief), writtenAgain,
+      (c: CandidateModel) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] as const;
+    const result = admitCandidateModel(...args, construction);
+    const refusal = eventByDateRefusalOf(result);
+    if (refusal === null) {
+      // An event construction over the size cap keeps the ordinary model when that reaches the goal: the same rule as a
+      // failed slice. The cap is met by Olumi's own option x capacity scaffolding, not the draft (census r3 B3-d2: 36 links).
+      if (draftedTeamPartOf(result) === null) return result;
+      const size = assessConstructionSize(result);
+      if (size.within || size.user_material_exceeds_limit) return result;
+      try {
+        const ordinary = admitOrdinaryCandidateModel(...args);
+        if (admittedReachesGoal(ordinary)) return ordinary;
+      } catch {
+        // No ordinary model: the size gate below decides, as before.
+      }
+      return result;
+    }
+    try {
+      const ordinary = admitOrdinaryCandidateModel(...args);
+      eventFallbackRefusals.set(ordinary, refusal);
+      return ordinary;
+    } catch {
+      eventFallbackRefusals.set(result, refusal);
+      return result;
+    }
+  };
   const trialGraph = (c: CandidateModel) => {
-    const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
+    const a = admitForBuild(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, c);
     return { nodes: a.nodes, edges: a.edges };
   };
   const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
@@ -1595,10 +1687,11 @@ export async function buildModelFromBrief(
   let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
+  let admissionCandidate = firstIdentity.model;
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
-  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
+  let admitted = admitForBuild(firstIdentity.model, candidate);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1674,12 +1767,18 @@ export async function buildModelFromBrief(
    */
   const loops = loopIssues(admitted);
   const loopsAsked = needsSizeRetry ? [] : loops;
+  // Like loops, a path issue never moves an oversized draft onto the repair route.
+  const pathsAsked = needsSizeRetry ? [] : pathIssues(admitted);
+  const reachedOptions = (a: Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>): number => {
+    const refused = optionsWithoutGoalPath(a);
+    return a.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && !refused.has(n.id)).length;
+  };
   // A4: a written money range no link carries (never on the size route, where the retry only sheds).
   const rangesAsked = needsSizeRetry ? [] : uncarriedRangeIssues(brief, admitted, candidate);
   // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
   // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
   const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1729,7 +1828,7 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
+        const retryAdmitted = admitForBuild(retryIdentity.model, retryCandidate);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1766,10 +1865,13 @@ export async function buildModelFromBrief(
           // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
           retryOpen <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
+            || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(admitted))
             || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
             // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
             || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
             || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
+          (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(admitted))) &&
           // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
           chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
@@ -1784,7 +1886,9 @@ export async function buildModelFromBrief(
             .filter((n) => !kept.has(nodeIdentity(n)))
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
           candidate = retryCandidate;
+          admissionCandidate = retryIdentity.model;
           admitted = retryAdmitted;
+          // #2854 sets admissionCandidate here
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
           gapResidual = retryIdentity.residual;
@@ -1813,7 +1917,13 @@ export async function buildModelFromBrief(
       trace = { retried: true, reasons, outcome: 'retry_failed' };
     }
   }
+  // Separate from projection losses: a missing path must not change existing disclosure counts or readers.
+  const constructionGaps: ConstructionGaps = {
+    path_missing: pathIssues(admitted).map(({ option_id, option, dead_end_ids, dead_ends }) => ({ option_id, option, dead_end_ids, dead_ends })),
+  };
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
+  // Read before the later steps replace `admitted`; judged on the graph that would be registered (below).
+  const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {
@@ -1870,268 +1980,301 @@ export async function buildModelFromBrief(
       ambiguous_names: notToldApart.map((a) => ({ option: a.option, owners: [...a.owners], because: a.because })),
     };
   }
-  // Said where the user always sees it: the carrier the model folded into their goal, with their own arithmetic.
-  if (foldedCarrier !== null) {
-    const f = foldedCarrier;
-    admitted = {
-      ...admitted,
-      loss: [...admitted.loss, {
-        field_path: `nodes[${slugId(f.carrier)}].folded_into_goal`, before: f.carrier, after: f.goal, reason: foldedCarrierLines(f).join(' '), severity: 'info',
-      } as AdmittedModel['loss'][number]],
-    };
-  }
-  // AIQ 5892219245 (3): a goal product whose units don't compose is not a reading at all; the draft's proposal is said.
-  // AIQ 5904406904: the gap residual's drop is SAID, never silent.
-  if (gapResidual !== null) {
-    const g = gapResidual;
-    admitted = {
-      ...admitted,
-      loss: [...admitted.loss, {
-        field_path: `nodes[${slugId(g.label)}].gap_residual`, before: { label: g.label, value: g.value }, after: null, reason: gapResidualLine(g), severity: 'warn',
-      } as AdmittedModel['loss'][number]],
-    };
-  }
-  if (droppedProducts.length > 0) {
-    admitted = {
-      ...admitted,
-      loss: [...admitted.loss, ...droppedProducts.map((d) => ({
-        field_path: `nodes[${slugId(d.goal)}].nonlinear_identity_rejected`,
-        before: { outcome: d.goal, operation: 'product', factors: [...d.factors] }, after: null, reason: droppedGoalProductLine(d), severity: 'warn',
-      }) as AdmittedModel['loss'][number])],
-    };
-  }
-  if (keptApart.length > 0 || linksSetAside.length > 0) {
-    admitted = {
-      ...admitted,
-      loss: [...admitted.loss, ...keptApart.map((k) => ({
-        field_path: `nodes[${slugId(k.to)}].label_kept_apart`, before: k.from, after: k.to, reason: keptApartLine(k), severity: 'info',
-      }) as AdmittedModel['loss'][number]), ...linksSetAside.map((a) => ({
-        field_path: `edges[${slugId(a.option)}->${slugId(a.to)}].link_set_aside`, before: { from: a.option, to: a.to }, after: null,
-        reason: setAsideLinkLine(a), severity: 'warn',
-      }) as AdmittedModel['loss'][number])],
-    };
-  }
-  if (mechanismsUnmodelled.length > 0 || costsOffRevenue.length > 0) {
-    admitted = {
-      ...admitted,
-      loss: [...admitted.loss, ...mechanismsUnmodelled.map((m) => ({
-        field_path: `nodes[${slugId(m.label)}].mechanism_not_modelled`, before: { label: m.label }, after: null,
-        reason: unmodelledMechanismChallenge(m), severity: 'warn',
-      }) as AdmittedModel['loss'][number]), ...(costsOffRevenue.length === 0 ? [] : [{
-        field_path: `edges[${slugId(costsOffRevenue[0]!.cost)}->${slugId(costsOffRevenue[0]!.goal)}].cost_not_revenue`,
-        before: { costs: costsOffRevenue.map((c) => c.cost), to: costsOffRevenue[0]!.goal }, after: null,
-        reason: costOffRevenueLine(costsOffRevenue), severity: 'info',
-      } as AdmittedModel['loss'][number]])],
-    };
-  }
-  let heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
-  // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
-  const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
-  if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
-    heldGoal = { ...heldGoal, nodes: [...heldEventRisks.nodes] };
-    const riskById = new Map(heldEventRisks.nodes.map((n) => [n.id, n]));
-    admitted = {
-      // Nodes travel on `heldGoal` (the graph's node source below); `admitted.nodes` keeps its own reading for scope.
-      ...admitted, edges: [...heldEventRisks.edges],
-      loss: [...admitted.loss, ...heldEventRisks.held.map(({ risk_id }) => {
-        const risk = riskById.get(risk_id)!;
-        return {
-          field_path: `nodes[${risk_id}].event_risk`, before: null, after: risk.event_risk!,
-          reason: heldEventRiskLine(String(risk.label), risk.event_risk!), severity: 'info',
-        } as AdmittedModel['loss'][number];
-      }), ...heldEventRisks.refused.map(({ risk_id }) => ({
-        field_path: `nodes[${risk_id}].event_risk`, before: null, after: null,
-        reason: refusedEventRiskLine(String(riskById.get(risk_id)!.label)), severity: 'info',
-      }) as AdmittedModel['loss'][number])],
-    };
-  }
-  if (heldGoal.held.horizon || heldGoal.held.direction) {
-    admitted = {
-      ...admitted,
-      loss: admitted.loss.filter((l) => !(heldGoal.held.horizon && /\.horizon_months$/.test(l.field_path))
-        && !(heldGoal.held.direction && /\.goal_operator$/.test(l.field_path))),
-    };
-  }
-  // ⭐ A HELD CEILING's stated current level (MG #72 5870097103): admission withheld every `<=` level before the brief
-  // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
-  // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
-  const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
-    (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
-  if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
-  // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of
-  // the user's held → Olumi's reading of the sense, typed on the goal (`goal-sense-reading.ts`) and said below.
-  const statedGoal = { ...heldGoal, nodes: [...withGoalSenseReading(ceilingLevel.nodes, candidate.goal)] };
-  const senseReading = (statedGoal.nodes.find((n) => n.kind === 'goal') as { goal_sense_reading?: GoalSenseReading; label?: unknown } | undefined);
-  if (senseReading?.goal_sense_reading !== undefined) {
-    admitted = {
-      ...admitted,
-      loss: [...admitted.loss, {
-        field_path: `nodes[${slugId(String(senseReading.label ?? ''))}].goal_sense_reading`, before: null, after: 'minimise',
-        reason: senseReading.goal_sense_reading.words, severity: 'info',
-      } as AdmittedModel['loss'][number]],
-    };
-  }
-  /**
-   * ⭐ T2 PART 2 (PJ-E-A2; Canonical #2231 `NodeV3.goal_deadline_as_stated`, G1 contract): an `unresolved` deadline's
-   * own words ("by Q3") are HELD on the goal — verbatim, never converted to a month count (that needs a year and a
-   * fiscal calendar: inventing). Construction is the field's only writer. Words over the field's 60 characters are not
-   * held (the schema would read them as absence); `attestHorizon`'s spans are far shorter today, so that is a guard.
-   */
-  const deadlineWords = statedGoal.horizon.status === 'unresolved' ? statedGoal.horizon.wording.trim() : '';
-  const deadlineHeld = deadlineWords !== '' && deadlineWords.length <= 60;
-  // ⭐ 0.67.0 `unit_reading` (PTL A; AIQ 5914471584): the goal's unit, said with its author — Olumi's reading unless the
-  // brief writes the goal's own target in it. A reading, never a figure (`goal-unit-reading.ts`).
-  // ONE authority for the goal node (P0 PARTNER CR on #2381): `user_stated` only where the node holds its target as the user's.
-  const unitReading = goalUnitReading(candidate.goal, brief, statedGoal.held.target);
-  const goalNodes = deadlineHeld || unitReading !== undefined
-    ? statedGoal.nodes.map((n) => (n.kind === 'goal'
-      ? { ...n, ...(deadlineHeld ? { goal_deadline_as_stated: deadlineWords } : {}),
-        ...(unitReading !== undefined && n.unit_reading?.source !== 'user_stated' ? { unit_reading: unitReading } : {}) }
-      : n))
-    : statedGoal.nodes;
-
-  const parked = (candidate as { unknowns?: unknown }).unknowns;
-  // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
-  // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
-  // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
-  const setAside = setAsideEstimatesOf(admitted.loss);
-  const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
-  // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
-  // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
-  // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
-  openQuestions.unshift(...admitted.loss.filter((l) => /\.magnitude_question$/.test(l.field_path)).map((l) => l.reason));
-  // ⭐ DL ruling #72 5863840239 (ii), condition 2: today's level of a quantity the user limits, when the model holds none
-  // of theirs, is ASKED — typed (`level_asks`) and said here: behind the scope, deadline, withheld-option and C46
-  // product questions (C46's required row keeps its reply slot), ahead of the magnitude and drafter's own — on journey C
-  // the second question the reply shows. Non-blocking: nothing in readiness reads it (`limited-level-ask.ts`).
-  // DL ruling 5865003207 §1: a limit on a quantity the options SET at Olumi's figures is asked too — one per quantity,
-  // naming Olumi's figures and, when it is Olumi's, today's level. Same seam, same slot rules.
-  const levelAsks = [
-    ...limitedLevelAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
-    ...optionSetLimitAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
-  ];
-  openQuestions.unshift(...levelAsks.map((a) => a.question));
-  // ⭐ R3-2 (AIQ #72 5867700610): a limited spend tally held as the SUM of its levers is said ONCE, as Olumi's reading,
-  // and §3's precondition failing (a lever reaches the goal only through a user-limited cost roll-up) ASKS Olumi's
-  // assumption instead of dropping the edge (AIQ 5867283878). Behind the C46 product questions, ahead of the level asks.
-  openQuestions.unshift(...(admitted.pure_limit_asks ?? []).map((a) => a.question), ...sumIdentityOpenQuestions(admitted));
-  // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
-  // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
-  // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
-  openQuestions.unshift(...productIdentityOpenQuestions(admitted));
-  // AIQ 5898415568 run 0 / R3 5898443502: Olumi's product refused for a part with no level asks for those figures, once.
-  openQuestions.unshift(...unlevelledProductQuestions(admitted));
-  // AIQ 5888943993 (1)(c): the carrier folded into the goal, and any Olumi addition left out, said where the user sees it.
-  if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
-  // ⭐ DL (dental): a link set aside between an option and its renamed namesake is asked where the user always sees it.
-  openQuestions.unshift(...linksSetAside.flatMap((a) => setAsideLinkQuestion(a) ?? []));
-  // d5's challenge where the user SEES it (DL: both seats; the server appends the first two to the reply).
-  openQuestions.unshift(...mechanismsUnmodelled.map(unmodelledMechanismChallenge));
-  // G1b honesty: a cost the BRIEF states, taken off the revenue, is said in the user's words, ahead of Olumi's own challenges.
-  openQuestions.unshift(...droppedStatedCostLines(costsOffRevenue, brief));
-  /**
-   * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
-   * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
-   * reply by the server every time. Placed after the deadline and ahead of the drafter's own questions, so the
-   * five-question cap cannot hide it. A group of USER options nothing tells apart is asked about here, once.
-   */
-  const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
-  openQuestions.unshift(
-    ...withheldOptions.map((w) => w.sentence),
-    ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
-  );
-  /**
-   * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
-   * admission records the loss in `not_represented`; attested, the goal holds it (G1) but the analysis compares levels,
-   * not a path over time, so the question stays, worded truthfully either way. Only the Agent's model reads
-   * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
-   * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
-   * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
-   */
-  const horizon = candidate.goal?.horizon_months;
-  // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
-  // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
-  // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
-  // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
-  // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
-  if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
-    openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
-  } else if (statedGoal.horizon.status === 'unresolved') {
-    const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
-    openQuestions.unshift(deadlineHeld
-      ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
-      : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
-  } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
-    // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
-    openQuestions.unshift(statedGoal.held.horizon
-      ? `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds the deadline; no result answers that yet.`
-      : `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
-  }
-  // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
-  // its `goal_scope` entry). First, because the ruling requires it clarified or named before
-  // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
-  // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
-  // the five-question cap.
-  // ⭐ (b) (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): the drafter's untyped scope question reads a goal that names
-  // no part (`metricReadsAsPlainTotal`) as the TOTAL. It is never a withhold (`scopeIssueBlocks`), and it is said once, as the
-  // disclosure, only where material and not already stated by the user (`untypedScopeComponents`). Nothing material →
-  // nothing asked, assumed or pended. Any other metric may name a part ("Starter MRR", "Non-Pro MRR"): it keeps C46's
-  // assumption and question (ask (a)), still non-blocking.
-  const scopeLoss = admitted.loss.find((l) => /\.goal_scope$/.test(l.field_path));
-  const scopeGoal = admitted.nodes.find((n) => n.kind === 'goal');
-  const plainTotal = metricReadsAsPlainTotal(candidate.goal.metric);
-  // Science d5 #87 6007341975 (2): the disclosure keys on MATERIALITY, never on the drafter's declaration — a drafter's
-  // "no part-or-whole reading" (goal.scope null) is Olumi making the reading silently. Only a scope the BRIEF states is not.
-  const readsAsTotal = plainTotal && (scopeLoss !== undefined || !candidate.goal.scope);
-  const scopeAsked = scopeLoss !== undefined && !plainTotal
-    ? { question: scopeLoss.reason, assumption: typeof scopeLoss.after === 'string' ? scopeLoss.after : undefined }
-    : null;
-  if (readsAsTotal && candidate.goal.scope) {
-    // The drafter's own restatement of the part-or-whole question (Codex buddy r1 P2: it carried the C46 "… for the Pro plan
-    // only. Which did you mean?" through `unknowns`): the goal now reads as the total, so it is not asked beside the reading.
-    // A restatement names the goal AND both readings AND asks which: an evidence question about the two populations ("can
-    // the Pro plan only estimate apply to all plans together?") names no goal and stays (Codex buddy r2 P2).
-    const [modelled, alternative, metric] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative, candidate.goal.metric]
-      .map((t) => t.trim().toLowerCase());
-    for (let i = openQuestions.length - 1; i >= 0; i--) {
-      const q = openQuestions[i]!.toLowerCase();
-      if (modelled !== '' && alternative !== '' && metric !== '' && q.includes(modelled) && q.includes(alternative) && q.includes(metric)
-        && /\b(or|whether|which)\b/.test(q)) openQuestions.splice(i, 1);
+  // Pure finalization includes event occurrence binding and frame fitting, where additions can affect old entities.
+  // The un-widened and every proposed widened admission run the same path before any dispatch.
+  const finalizeGraph = (admitted: AdmittedModel) => {
+    // Said where the user always sees it: the carrier the model folded into their goal, with their own arithmetic.
+    if (foldedCarrier !== null) {
+      const f = foldedCarrier;
+      admitted = {
+        ...admitted,
+        loss: [...admitted.loss, {
+          field_path: `nodes[${slugId(f.carrier)}].folded_into_goal`, before: f.carrier, after: f.goal, reason: foldedCarrierLines(f).join(' '), severity: 'info',
+        } as AdmittedModel['loss'][number]],
+      };
     }
-  }
-  const untypedScopeWords = scopeAsked !== null ? scopeAsked.question
-    : readsAsTotal && scopeGoal !== undefined
-      ? (() => {
-        const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);
-        return components.length > 0 ? untypedScopeDisclosure(candidate.goal.metric, components) : null;
-      })()
-      : null;
-  if (untypedScopeWords !== null) openQuestions.unshift(untypedScopeWords);
+    // AIQ 5892219245 (3): a goal product whose units don't compose is not a reading at all; the draft's proposal is said.
+    // AIQ 5904406904: the gap residual's drop is SAID, never silent.
+    if (gapResidual !== null) {
+      const g = gapResidual;
+      admitted = {
+        ...admitted,
+        loss: [...admitted.loss, {
+          field_path: `nodes[${slugId(g.label)}].gap_residual`, before: { label: g.label, value: g.value }, after: null, reason: gapResidualLine(g), severity: 'warn',
+        } as AdmittedModel['loss'][number]],
+      };
+    }
+    if (droppedProducts.length > 0) {
+      admitted = {
+        ...admitted,
+        loss: [...admitted.loss, ...droppedProducts.map((d) => ({
+          field_path: `nodes[${slugId(d.goal)}].nonlinear_identity_rejected`,
+          before: { outcome: d.goal, operation: 'product', factors: [...d.factors] }, after: null, reason: droppedGoalProductLine(d), severity: 'warn',
+        }) as AdmittedModel['loss'][number])],
+      };
+    }
+    if (keptApart.length > 0 || linksSetAside.length > 0) {
+      admitted = {
+        ...admitted,
+        loss: [...admitted.loss, ...keptApart.map((k) => ({
+          field_path: `nodes[${slugId(k.to)}].label_kept_apart`, before: k.from, after: k.to, reason: keptApartLine(k), severity: 'info',
+        }) as AdmittedModel['loss'][number]), ...linksSetAside.map((a) => ({
+          field_path: `edges[${slugId(a.option)}->${slugId(a.to)}].link_set_aside`, before: { from: a.option, to: a.to }, after: null,
+          reason: setAsideLinkLine(a), severity: 'warn',
+        }) as AdmittedModel['loss'][number])],
+      };
+    }
+    if (mechanismsUnmodelled.length > 0 || costsOffRevenue.length > 0) {
+      admitted = {
+        ...admitted,
+        loss: [...admitted.loss, ...mechanismsUnmodelled.map((m) => ({
+          field_path: `nodes[${slugId(m.label)}].mechanism_not_modelled`, before: { label: m.label }, after: null,
+          reason: unmodelledMechanismChallenge(m), severity: 'warn',
+        }) as AdmittedModel['loss'][number]), ...(costsOffRevenue.length === 0 ? [] : [{
+          field_path: `edges[${slugId(costsOffRevenue[0]!.cost)}->${slugId(costsOffRevenue[0]!.goal)}].cost_not_revenue`,
+          before: { costs: costsOffRevenue.map((c) => c.cost), to: costsOffRevenue[0]!.goal }, after: null,
+          reason: costOffRevenueLine(costsOffRevenue), severity: 'info',
+        } as AdmittedModel['loss'][number]])],
+      };
+    }
+    let heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+    // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
+    const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
+    if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
+      heldGoal = { ...heldGoal, nodes: [...heldEventRisks.nodes] };
+      const riskById = new Map(heldEventRisks.nodes.map((n) => [n.id, n]));
+      admitted = {
+        // Nodes travel on `heldGoal` (the graph's node source below); `admitted.nodes` keeps its own reading for scope.
+        ...admitted, edges: [...heldEventRisks.edges],
+        loss: [...admitted.loss, ...heldEventRisks.held.map(({ risk_id }) => {
+          const risk = riskById.get(risk_id)!;
+          return {
+            field_path: `nodes[${risk_id}].event_risk`, before: null, after: risk.event_risk!,
+            reason: heldEventRiskLine(String(risk.label), risk.event_risk!), severity: 'info',
+          } as AdmittedModel['loss'][number];
+        }), ...heldEventRisks.refused.map(({ risk_id }) => ({
+          field_path: `nodes[${risk_id}].event_risk`, before: null, after: null,
+          reason: refusedEventRiskLine(String(riskById.get(risk_id)!.label)), severity: 'info',
+        }) as AdmittedModel['loss'][number])],
+      };
+    }
+    if (heldGoal.held.horizon || heldGoal.held.direction) {
+      admitted = {
+        ...admitted,
+        loss: admitted.loss.filter((l) => !(heldGoal.held.horizon && /\.horizon_months$/.test(l.field_path))
+          && !(heldGoal.held.direction && /\.goal_operator$/.test(l.field_path))),
+      };
+    }
+    // ⭐ A HELD CEILING's stated current level (MG #72 5870097103): admission withheld every `<=` level before the brief
+    // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
+    // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
+    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss,
+      (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
+    if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
+    // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of
+    // the user's held → Olumi's reading of the sense, typed on the goal (`goal-sense-reading.ts`) and said below.
+    const statedGoal = { ...heldGoal, nodes: [...withGoalSenseReading(ceilingLevel.nodes, candidate.goal)] };
+    const senseReading = (statedGoal.nodes.find((n) => n.kind === 'goal') as { goal_sense_reading?: GoalSenseReading; label?: unknown } | undefined);
+    if (senseReading?.goal_sense_reading !== undefined) {
+      admitted = {
+        ...admitted,
+        loss: [...admitted.loss, {
+          field_path: `nodes[${slugId(String(senseReading.label ?? ''))}].goal_sense_reading`, before: null, after: 'minimise',
+          reason: senseReading.goal_sense_reading.words, severity: 'info',
+        } as AdmittedModel['loss'][number]],
+      };
+    }
+    /**
+     * ⭐ T2 PART 2 (PJ-E-A2; Canonical #2231 `NodeV3.goal_deadline_as_stated`, G1 contract): an `unresolved` deadline's
+     * own words ("by Q3") are HELD on the goal — verbatim, never converted to a month count (that needs a year and a
+     * fiscal calendar: inventing). Construction is the field's only writer. Words over the field's 60 characters are not
+     * held (the schema would read them as absence); `attestHorizon`'s spans are far shorter today, so that is a guard.
+     */
+    const deadlineWords = statedGoal.horizon.status === 'unresolved' ? statedGoal.horizon.wording.trim() : '';
+    const deadlineHeld = deadlineWords !== '' && deadlineWords.length <= 60;
+    // ⭐ 0.67.0 `unit_reading` (PTL A; AIQ 5914471584): the goal's unit, said with its author — Olumi's reading unless the
+    // brief writes the goal's own target in it. A reading, never a figure (`goal-unit-reading.ts`).
+    // ONE authority for the goal node (P0 PARTNER CR on #2381): `user_stated` only where the node holds its target as the user's.
+    const unitReading = goalUnitReading(candidate.goal, brief, statedGoal.held.target);
+    const goalNodes = deadlineHeld || unitReading !== undefined
+      ? statedGoal.nodes.map((n) => (n.kind === 'goal'
+        ? { ...n, ...(deadlineHeld ? { goal_deadline_as_stated: deadlineWords } : {}),
+          ...(unitReading !== undefined && n.unit_reading?.source !== 'user_stated' ? { unit_reading: unitReading } : {}) }
+        : n))
+      : statedGoal.nodes;
 
-  // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
-  // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
-  // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
-  // target, a spread would move, a new link would be cut, or the target is a bounded scale.
-  // ⭐ CLAMP AT PERSIST (DL 5924108406): a link no refit could fit is stored at ±1 with its full β marked (`refit-frames.ts`).
-  const graph = clampForPersist(refitFramesForStatedEffects({
-    // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
-    // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-    nodes: markOlumiOptions(goalNodes, candidate, brief),
-    edges: admitted.edges,
-    ...(admitted.goal_constraints.length > 0
-      ? { goal_constraints: admitted.goal_constraints }
-      : {}),
-  } as Record<string, any>).graph) as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
-  // ⭐ A4f (AIQ 5923220559): the user's size was asked about as "would be cut short" when it was sized, BEFORE the refit
-  // above. Where the refit made it fit, that question is no longer true, so it is not asked. Only the user's own sizes:
-  // Olumi's set-aside estimate quotes the same words but its link holds a placeholder, never the size.
-  const fitted = new Set(graph.edges
-    // A clamped link (its full β marked) is still cut in the analysis: its question stays (CODEX 5924186955).
-    .filter((e) => e.provenance?.magnitude === 'user_stated' && typeof e.strength?.mean === 'number' && Math.abs(e.strength.mean) <= 1
-      && !('clamped_from' in (e.provenance ?? {})))
-    .map((e) => `edges[${e.from}::${e.to}].magnitude_question`));
-  const noLongerCut = new Set(admitted.loss.filter((l) => fitted.has(l.field_path) && l.reason.includes(NOT_REPRESENTABLE)).map((l) => l.reason));
-  for (let i = openQuestions.length - 1; i >= 0; i--) if (noLongerCut.has(openQuestions[i]!)) openQuestions.splice(i, 1);
+    const parked = (candidate as { unknowns?: unknown }).unknowns;
+    // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
+    // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
+    // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
+    const setAside = setAsideEstimatesOf(admitted.loss);
+    const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
+    // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
+    // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
+    // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
+    openQuestions.unshift(...admitted.loss.filter((l) => /\.magnitude_question$/.test(l.field_path)).map((l) => l.reason));
+    // ⭐ DL ruling #72 5863840239 (ii), condition 2: today's level of a quantity the user limits, when the model holds none
+    // of theirs, is ASKED — typed (`level_asks`) and said here: behind the scope, deadline, withheld-option and C46
+    // product questions (C46's required row keeps its reply slot), ahead of the magnitude and drafter's own — on journey C
+    // the second question the reply shows. Non-blocking: nothing in readiness reads it (`limited-level-ask.ts`).
+    // DL ruling 5865003207 §1: a limit on a quantity the options SET at Olumi's figures is asked too — one per quantity,
+    // naming Olumi's figures and, when it is Olumi's, today's level. Same seam, same slot rules.
+    const levelAsks = [
+      ...limitedLevelAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
+      ...optionSetLimitAsks({ nodes: statedGoal.nodes, goal_constraints: admitted.goal_constraints }),
+    ];
+    openQuestions.unshift(...levelAsks.map((a) => a.question));
+    // ⭐ R3-2 (AIQ #72 5867700610): a limited spend tally held as the SUM of its levers is said ONCE, as Olumi's reading,
+    // and §3's precondition failing (a lever reaches the goal only through a user-limited cost roll-up) ASKS Olumi's
+    // assumption instead of dropping the edge (AIQ 5867283878). Behind the C46 product questions, ahead of the level asks.
+    openQuestions.unshift(...(admitted.pure_limit_asks ?? []).map((a) => a.question), ...sumIdentityOpenQuestions(admitted));
+    // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
+    // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
+    // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
+    openQuestions.unshift(...productIdentityOpenQuestions(admitted));
+    // AIQ 5898415568 run 0 / R3 5898443502: Olumi's product refused for a part with no level asks for those figures, once.
+    openQuestions.unshift(...unlevelledProductQuestions(admitted));
+    // AIQ 5888943993 (1)(c): the carrier folded into the goal, and any Olumi addition left out, said where the user sees it.
+    if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
+    // ⭐ DL (dental): a link set aside between an option and its renamed namesake is asked where the user always sees it.
+    openQuestions.unshift(...linksSetAside.flatMap((a) => setAsideLinkQuestion(a) ?? []));
+    // d5's challenge where the user SEES it (DL: both seats; the server appends the first two to the reply).
+    openQuestions.unshift(...mechanismsUnmodelled.map(unmodelledMechanismChallenge));
+    // G1b honesty: a cost the BRIEF states, taken off the revenue, is said in the user's words, ahead of Olumi's own challenges.
+    openQuestions.unshift(...droppedStatedCostLines(costsOffRevenue, brief));
+    /**
+     * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
+     * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
+     * reply by the server every time. Placed after the deadline and ahead of the drafter's own questions, so the
+     * five-question cap cannot hide it. A group of USER options nothing tells apart is asked about here, once.
+     */
+    const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
+    openQuestions.unshift(
+      ...withheldOptions.map((w) => w.sentence),
+      ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
+    );
+    /**
+     * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
+     * admission records the loss in `not_represented`; attested, the goal holds it (G1) but the analysis compares levels,
+     * not a path over time, so the question stays, worded truthfully either way. Only the Agent's model reads
+     * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
+     * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
+     * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
+     */
+    const horizon = candidate.goal?.horizon_months;
+    // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
+    // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
+    // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
+    // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
+    // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
+    if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
+      openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
+    } else if (statedGoal.horizon.status === 'unresolved') {
+      const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
+      openQuestions.unshift(deadlineHeld
+        ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
+        : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
+    } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
+      // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
+      openQuestions.unshift(statedGoal.held.horizon
+        ? `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds the deadline; no result answers that yet.`
+        : `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
+    }
+    // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
+    // its `goal_scope` entry). First, because the ruling requires it clarified or named before
+    // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
+    // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
+    // the five-question cap.
+    // ⭐ (b) (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): the drafter's untyped scope question reads a goal that names
+    // no part (`metricReadsAsPlainTotal`) as the TOTAL. It is never a withhold (`scopeIssueBlocks`), and it is said once, as the
+    // disclosure, only where material and not already stated by the user (`untypedScopeComponents`). Nothing material →
+    // nothing asked, assumed or pended. Any other metric may name a part ("Starter MRR", "Non-Pro MRR"): it keeps C46's
+    // assumption and question (ask (a)), still non-blocking.
+    const scopeLoss = admitted.loss.find((l) => /\.goal_scope$/.test(l.field_path));
+    const scopeGoal = admitted.nodes.find((n) => n.kind === 'goal');
+    const plainTotal = metricReadsAsPlainTotal(candidate.goal.metric);
+    // Science d5 #87 6007341975 (2): the disclosure keys on MATERIALITY, never on the drafter's declaration — a drafter's
+    // "no part-or-whole reading" (goal.scope null) is Olumi making the reading silently. Only a scope the BRIEF states is not.
+    const readsAsTotal = plainTotal && (scopeLoss !== undefined || !candidate.goal.scope);
+    const scopeAsked = scopeLoss !== undefined && !plainTotal
+      ? { question: scopeLoss.reason, assumption: typeof scopeLoss.after === 'string' ? scopeLoss.after : undefined }
+      : null;
+    if (readsAsTotal && candidate.goal.scope) {
+      // The drafter's own restatement of the part-or-whole question (Codex buddy r1 P2: it carried the C46 "… for the Pro plan
+      // only. Which did you mean?" through `unknowns`): the goal now reads as the total, so it is not asked beside the reading.
+      // A restatement names the goal AND both readings AND asks which: an evidence question about the two populations ("can
+      // the Pro plan only estimate apply to all plans together?") names no goal and stays (Codex buddy r2 P2).
+      const [modelled, alternative, metric] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative, candidate.goal.metric]
+        .map((t) => t.trim().toLowerCase());
+      for (let i = openQuestions.length - 1; i >= 0; i--) {
+        const q = openQuestions[i]!.toLowerCase();
+        if (modelled !== '' && alternative !== '' && metric !== '' && q.includes(modelled) && q.includes(alternative) && q.includes(metric)
+          && /\b(or|whether|which)\b/.test(q)) openQuestions.splice(i, 1);
+      }
+    }
+    const untypedScopeWords = scopeAsked !== null ? scopeAsked.question
+      : readsAsTotal && scopeGoal !== undefined
+        ? (() => {
+          const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);
+          return components.length > 0 ? untypedScopeDisclosure(candidate.goal.metric, components) : null;
+        })()
+        : null;
+    if (untypedScopeWords !== null) openQuestions.unshift(untypedScopeWords);
+
+    // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
+    // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
+    // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
+    // target, a spread would move, a new link would be cut, or the target is a bounded scale.
+    // ⭐ CLAMP AT PERSIST (DL 5924108406): a link no refit could fit is stored at ±1 with its full β marked (`refit-frames.ts`).
+    // ⭐ CEE #4 (Science goals §(v)): a stock worked out to the goal's deadline is carried only on the HELD deadline
+    // (`goal_horizon_months`, set above where the brief attests it), so it is admitted here, after the hold. Each refusal
+    // is said; a model with no accumulation declared is byte-identical.
+    const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, candidate.identities);
+    if (accumulation.loss.length > 0) {
+      admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
+    }
+    const prePersistGraph = refitFramesForStatedEffects({
+      // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
+      // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
+      nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
+      edges: admitted.edges,
+      ...(admitted.goal_constraints.length > 0
+        ? { goal_constraints: admitted.goal_constraints }
+        : {}),
+    } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+    const graph = clampForPersist(prePersistGraph);
+    // ⭐ A4f (AIQ 5923220559): the user's size was asked about as "would be cut short" when it was sized, BEFORE the refit
+    // above. Where the refit made it fit, that question is no longer true, so it is not asked. Only the user's own sizes:
+    // Olumi's set-aside estimate quotes the same words but its link holds a placeholder, never the size.
+    const fitted = new Set(graph.edges
+      // A clamped link (its full β marked) is still cut in the analysis: its question stays (CODEX 5924186955).
+      .filter((e) => e.provenance?.magnitude === 'user_stated' && typeof e.strength?.mean === 'number' && Math.abs(e.strength.mean) <= 1
+        && !('clamped_from' in (e.provenance ?? {})))
+      .map((e) => `edges[${e.from}::${e.to}].magnitude_question`));
+    const noLongerCut = new Set(admitted.loss.filter((l) => fitted.has(l.field_path) && l.reason.includes(NOT_REPRESENTABLE)).map((l) => l.reason));
+    for (let i = openQuestions.length - 1; i >= 0; i--) if (noLongerCut.has(openQuestions[i]!)) openQuestions.splice(i, 1);
+
+    return { admitted, prePersistGraph, graph, goalNodes, openQuestions, levelAsks, setAside,
+      withheldOptions, scopeAsked, untypedScopeWords };
+  };
+  const finals = new Map<AdmittedModel, ReturnType<typeof finalizeGraph>>();
+  const finalFor = (admission: AdmittedModel) => {
+    let final = finals.get(admission);
+    if (final === undefined) { final = finalizeGraph(admission); finals.set(admission, final); }
+    return final;
+  };
+  finalFor(admitted);
+  // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
+  const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
+    finalGraph: (admission) => finalFor(admission).prePersistGraph,
+    admissionArgs: [goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] });
+  if (widened !== null) {
+    admitted = widened.admitted;
+    size = assessConstructionSize(admitted);
+  }
+  const final = finalFor(admitted);
+  admitted = final.admitted;
+  const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
 
   // Never persist a graph the product cannot then read.
   const parsed = GraphV3.safeParse(graph);
@@ -2140,6 +2283,11 @@ export async function buildModelFromBrief(
       ok: false, mutated: false, refusal: 'admitted_graph_invalid',
       issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
     };
+  }
+  // A flagged draft whose event slice failed keeps its ordinary graph unless that graph, as registered, cannot reach
+  // the goal (B3 086e4624). Reachability only: base registers kept user loops (construction-acyclic-verified-arms P-M10).
+  if (eventFallbackRefusal !== undefined && draftedTeamPartOf(parsed.data) === null && !admittedReachesGoal(parsed.data as never)) {
+    return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
   }
 
   /**
@@ -2243,6 +2391,7 @@ export async function buildModelFromBrief(
   return {
     ok: true,
     mutated: true,
+    ...(widened !== null ? { widened: { ...widened.counts } } : {}),
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
     // The untyped question's ONE channel for a later answer (the existing reconcile path); it never gates (`scopeIssueBlocks`).
@@ -2267,6 +2416,7 @@ export async function buildModelFromBrief(
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
     projected_field_count: admitted.loss.length,
+    ...(constructionGaps.path_missing.length > 0 ? { construction_gaps: constructionGaps } : {}),
     ...(admitted.treated_as_context !== undefined ? { treated_as_context: admitted.treated_as_context } : {}),
     // Options that say what they DO, versus options that are inert. An inert
     // option can never be compared, whatever values arrive later.

@@ -83,8 +83,9 @@ export const GOAL_FIGURES_PRODUCT_NOT_READ = 'GOAL_FIGURES_PRODUCT_NOT_READ';
 
 /**
  * CEE's code for a run whose goal figures it withheld because the goal's target can't be tested yet (DECISION-
- * REPRESENTATION row 4, `targetTestabilityOf`; AIQ #2371 5914730220). Written by `run_analysis` for EVERY option, the
- * leader and shares too; `node_ids` names the goal. The message is the DR sentence, with its one question.
+ * REPRESENTATION row 4, `targetTestabilityOf`; AIQ #2371 5914730220). Gate A writes it for options with their own
+ * failures, including typed product/derived-baseline dependencies; goal-level failures remain every option's.
+ * Target withholding keeps the ordering. `node_ids` names the goal; `option_ids` and `per_option` carry its scope.
  */
 export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
 

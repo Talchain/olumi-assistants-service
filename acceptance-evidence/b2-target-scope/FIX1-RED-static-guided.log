@@ -1,0 +1,114 @@
+Load gate exit: 0
+{"load":7.55517578125,"threshold":25}
+node_modules/.bin/vitest run tests/contract/tier3-leak-guard.static.guard.test.ts src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+{"level":"info","time":1791478019675,"pid":44689,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+HONESTY_MEASUREMENT {"capture":"draw-2","graph_source":"/private/tmp/accel-p44/goalreach/draw-2/wire/read-after-reload-1791433703073.json","initial_case_c":[{"from":"monthly_churn","to":"paying_pro_subscribers"},{"from":"pro_plan_price","to":"mrr_lost_to_price_sensitivity"}],"original_placeholder_path":[{"from":"pro_plan_price","to":"mrr_lost_to_price_sensitivity"},{"from":"monthly_churn","to":"paying_pro_subscribers"}],"guided":[{"from":"monthly_churn","to":"paying_pro_subscribers"},{"from":"pro_plan_price","to":"mrr_lost_to_price_sensitivity"}],"case_c_minus_guided":[],"already_sized_outside":[],"natural":{"attempts":[{"from":"monthly_churn","to":"paying_pro_subscribers","result":"committed","quote":"Every 1 percentage points increase in Monthly churn reduces Paying Pro subscribers by 2 subscribers."},{"from":"pro_plan_price","to":"mrr_lost_to_price_sensitivity","result":"committed","quote":"Every 1 £/month increase in Pro plan price increases MRR lost to price sensitivity by 1 £/month."}],"case_c":[],"placeholder_path":[],"stored_guided":[{"from":"monthly_churn","to":"paying_pro_subscribers","sizing":"user","strength":{"std":0.05,"mean":-0.1},"magnitude":"user_stated","natural_effect":{"amount":-2,"amount_unit":"subscribers","per_source_change":1,"per_source_change_unit":"%","strength_mean":-0.1,"strength_mean_frame":"edge_strength"}},{"from":"pro_plan_price","to":"mrr_lost_to_price_sensitivity","sizing":"user","strength":{"std":0.01,"mean":0.02},"magnitude":"user_stated","natural_effect":{"amount":1,"amount_unit":"£/month","per_source_change":1,"per_source_change_unit":"£/month","strength_mean":0.02,"strength_mean_frame":"edge_strength"}}]},"inspector":{"attempts":[{"from":"monthly_churn","to":"paying_pro_subscribers","result":"mutated"},{"from":"pro_plan_price","to":"mrr_lost_to_price_sensitivity","result":"mutated"}],"case_c":[],"placeholder_path":[],"stored_guided":[{"from":"monthly_churn","to":"paying_pro_subscribers","sizing":"user","strength":{"mean":-0.3,"std":0.05773502691896258}},{"from":"pro_plan_price","to":"mrr_lost_to_price_sensitivity","sizing":"user","strength":{"mean":0.3,"std":0.05773502691896258}}]}}
+HONESTY_MEASUREMENT {"capture":"D1","graph_source":"/Users/paulslee/olumi-work/acceptance-pd/output/acceptance-successor-20261005/final/g1-b501/draft-1/wire/turn-002-1791253563628.json","initial_case_c":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue"},{"from":"starter_tier_support_cost","to":"mrr_lost_to_starter_support_strain"}],"original_placeholder_path":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue"},{"from":"starter_tier_support_cost","to":"mrr_lost_to_starter_support_strain"}],"guided":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue"},{"from":"starter_tier_support_cost","to":"mrr_lost_to_starter_support_strain"}],"case_c_minus_guided":[],"already_sized_outside":[],"natural":{"attempts":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue","result":"committed","quote":"Every £1 per month increase in Starter tier MRR adds £2 per month to monthly recurring revenue."},{"from":"starter_tier_support_cost","to":"mrr_lost_to_starter_support_strain","result":"committed","quote":"Every 1 £/month increase in Starter tier support cost increases MRR lost to starter support strain by 1 £/month."}],"case_c":[],"placeholder_path":[],"stored_guided":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue","sizing":"user","strength":{"std":0.39999999999999997,"mean":0.7999999999999999},"magnitude":"user_stated","natural_effect":{"amount":2,"amount_unit":"£/month","per_source_change":1,"per_source_change_unit":"£/month","strength_mean":0.7999999999999999,"strength_mean_frame":"edge_strength"}},{"from":"starter_tier_support_cost","to":"mrr_lost_to_starter_support_strain","sizing":"user","strength":{"std":0.5,"mean":1},"magnitude":"user_stated","natural_effect":{"amount":1,"amount_unit":"£/month","per_source_change":1,"per_source_change_unit":"£/month","strength_mean":1,"strength_mean_frame":"edge_strength"}}]},"inspector":{"attempts":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue","result":"mutated"},{"from":"starter_tier_support_cost","to":"mrr_lost_to_starter_support_strain","result":"mutated"}],"case_c":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue"}],"placeholder_path":[],"stored_guided":[{"from":"starter_tier_mrr","to":"monthly_recurring_revenue","sizing":"user","strength":{"mean":0.3,"std":0.05773502691896258}},{"from":"starter_tier_support_cost","to":"mrr_lost_to_starter_support_strain","sizing":"user","strength":{"mean":0.3,"std":0.05773502691896258}}]}}
+HONESTY_MEASUREMENT {"capture":"booking","graph_source":"/Users/paulslee/olumi-work/acceptance-pd/output/acceptance-20261006/item3-journey/wire/read-after-run1-1791316564263.json","initial_case_c":[{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments"},{"from":"online_booking_availability","to":"online_booking_rollout_disruption"}],"original_placeholder_path":[{"from":"online_booking_availability","to":"online_booking_rollout_disruption"},{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments"}],"guided":[{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments"},{"from":"online_booking_availability","to":"online_booking_rollout_disruption"}],"case_c_minus_guided":[],"already_sized_outside":[],"natural":{"attempts":[{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments","result":"refused","refusal":"unconvertible","detail":"Nothing was prepared: this effect cannot be recorded with this model yet (unconvertible). Tell the user plainly."},{"from":"online_booking_availability","to":"online_booking_rollout_disruption","result":"committed","quote":"Every 1 switch increase in Online booking availability reduces Online booking rollout disruption by 1 appointments/month."}],"case_c":[{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments"}],"placeholder_path":[],"stored_guided":[{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments","sizing":"olumi_estimate","strength":{"std":0.125,"mean":-1},"magnitude":"olumi_estimate"},{"from":"online_booking_availability","to":"online_booking_rollout_disruption","sizing":"user","strength":{"std":0.00025,"mean":0.0005},"magnitude":"user_stated","natural_effect":{"amount":1,"amount_unit":"appointments/month","per_source_change":1,"per_source_change_unit":"switch","strength_mean":0.0005,"strength_mean_frame":"edge_strength"}}]},"inspector":{"attempts":[{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments","result":"mutated"},{"from":"online_booking_availability","to":"online_booking_rollout_disruption","result":"mutated"}],"case_c":[],"placeholder_path":[],"stored_guided":[{"from":"online_booking_rollout_disruption","to":"monthly_booked_appointments","sizing":"user","strength":{"mean":-0.3,"std":0.05773502691896258}},{"from":"online_booking_availability","to":"online_booking_rollout_disruption","sizing":"user","strength":{"mean":0.3,"std":0.05773502691896258}}]}}
+{"level":"info","time":1791478019703,"pid":44689,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478019713,"pid":44689,"hostname":"Mac.net","msg":"PLoT client not configured (PLOT_BASE_URL not set)"}
+{"level":"info","time":1791478019720,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":9,"mutated_edge_count":12,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019723,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019724,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019727,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":9,"mutated_edge_count":12,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019729,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019729,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019770,"pid":44689,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_recurring_revenue","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478019793,"pid":44689,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_recurring_revenue","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478019806,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":14,"mutated_edge_count":22,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019807,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019807,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019813,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":14,"mutated_edge_count":22,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019815,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019815,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019843,"pid":44689,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_booked_appointments","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478019849,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":11,"mutated_edge_count":19,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019850,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019850,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019853,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":11,"mutated_edge_count":19,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019854,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019854,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019869,"pid":44689,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478019880,"pid":44689,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":3,"status":"ready","userQuestionCount":0,"goalNodeId":"mrr","readyOptionsCount":3,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791478019884,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":9,"mutated_edge_count":12,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019886,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019886,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019889,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":9,"mutated_edge_count":12,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019890,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019890,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019934,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":14,"mutated_edge_count":22,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019935,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019936,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+{"level":"info","time":1791478019943,"pid":44689,"hostname":"Mac.net","event":"v5.d1.persist_merge_back","request_id":"guided-honesty","scenario_id":"550e8400-e29b-41d4-a716-4466554400a7","base":"persisted","base_has_goal_node_id":false,"base_options_count":null,"mutated_node_count":14,"mutated_edge_count":22,"msg":"V5 D1 — mutated graph merged onto persisted graph shape for persistence"}
+{"level":"info","time":1791478019944,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"adjust_edge_strength","reason":"target_unresolved"}
+{"level":"info","time":1791478019945,"pid":44689,"hostname":"Mac.net","event":"v5.ui_directive.suppressed","fact_type":"discussed_entity","reason":"no_discussed_entity"}
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts (27 tests | 3 failed) 428ms
+     × r9 inspector user band keeps existing recovery words without an Olumi-band press 41ms
+     × r9 refused-conversion user_specified provenance cannot receive Olumi-band attribution 16ms
+     × r9 refused-conversion user_stated provenance cannot receive Olumi-band attribution 14ms
+ ❯ tests/contract/tier3-leak-guard.static.guard.test.ts (3 tests | 1 failed) 18ms
+     × ratified Tier-3 keys appear only in allow-listed, classified files 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/contract/tier3-leak-guard.static.guard.test.ts > Tier-3 leak guard — static producer scan (Brief 5 Part A) > ratified Tier-3 keys appear only in allow-listed, classified files
+AssertionError: tools/handlers/run-analysis.ts: references a ratified Tier-3 deny key (flip_thresholds, edge_e_values, inference_warnings, m1_coaching) but is not an allow-listed transport/structured/cage site. A user-facing string producer must not consume Tier-3 fields — consult isClaimUsable (claim-safety-cage.ts) and take the addition through claim-safety review (Brief 4 §9) before allow-listing it here with a classification.: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/contract/tier3-leak-guard.static.guard.test.ts:202:9
+    200|           `fields — consult isClaimUsable (claim-safety-cage.ts) and t…
+    201|           `review (Brief 4 §9) before allow-listing it here with a cla…
+    202|       ).toBe(true);
+       |         ^
+    203|     }
+    204|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts > GUIDED HONESTY round 4: D1 non-converting band uses the same guided list > r9 inspector user band keeps existing recovery words without an Olumi-band press
+AssertionError: expected 'I can\'t yet say how likely ‘Launch s…' to contain 'I can\'t yet say how likely any optio…'
+
+Expected: "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. You set this link as moderate. To test your £126,000 / month target I need it in £/month: roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+Received: "I can't yet say how likely ‘Launch starter tier’ is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. You set this link as moderate. To test your £126,000 / month target I need it in £/month: roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts:365:18
+    363|     expect(guidedSizingActions(draft, graph)).toEqual([]);
+    364|     const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
+    365|     expect(said).toContain(warning!.say);
+       |                  ^
+    366|     expect(said).not.toContain('Olumi has it as a band');
+    367|     expect(said).not.toContain("The chance isn't shown yet:");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts > GUIDED HONESTY round 4: D1 non-converting band uses the same guided list > r9 refused-conversion user_specified provenance cannot receive Olumi-band attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts > GUIDED HONESTY round 4: D1 non-converting band uses the same guided list > r9 refused-conversion user_stated provenance cannot receive Olumi-band attribution
+AssertionError: expected 'I can\'t yet say how likely ‘Launch s…' to contain 'I can\'t yet say how likely any optio…'
+
+Expected: "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+Received: "I can't yet say how likely ‘Launch starter tier’ is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier MRR to monthly recurring revenue. Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?"
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guided-sizing-honesty.test.ts:383:57
+    381|       option_comparison: options(graph).map(option_id => ({ option_id,…
+    382|     expect(guidedSizingForRun(run, graph)).toBeUndefined();
+    383|     expect(goalChanceWithheldForAgent(run, graph)?.say).toContain(warn…
+       |                                                         ^
+    384|   });
+    385|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 26 passed (30)
+   Start at  17:46:52
+   Duration  8.01s (transform 5.01s, setup 143ms, import 7.17s, tests 446ms, environment 0ms)
+

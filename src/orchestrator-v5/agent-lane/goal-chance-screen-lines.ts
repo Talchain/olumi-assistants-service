@@ -52,8 +52,12 @@ const CHANCE_LABEL = 'chance of meeting your goal, in this model';
 const ESTIMATE_POINT_END = '(see Check estimates).';
 const estimatePointSentence = (l: GoalChanceScreenLine): string => l.chance.slice(0, l.chance.indexOf(ESTIMATE_POINT_END) + ESTIMATE_POINT_END.length);
 
-/** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
-export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
+type ComposedChanceLine = Omit<GoalChanceScreenLine, 'label'> & { readonly label?: string };
+
+/** Pure extraction of the existing sentence composer; consumers keep their own label/narration gates. */
+function composeGoalChanceLines(result: unknown, graph: unknown, current: boolean): {
+  points: ComposedChanceLine[]; ranges: ComposedChanceLine[]; pointsOwed: boolean;
+} {
   const facts = goalChanceFactsForAgent(result, graph, current);
   const share = shareByDateGoalOf(graph);
   const chanceWords = facts.goal_chance_words !== undefined ? `${facts.goal_chance_words}, in this model`
@@ -67,23 +71,25 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
     .map((n) => [n.id as string, n.label as string]));
-  const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string, point = false): GoalChanceScreenLine[] => {
+  const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string, point = false): ComposedChanceLine[] => {
     const recorded = rec(facts.goal_chance_licence?.option_labels_by_option)?.[optionId];
     const label = typeof recorded === 'string' && recorded.trim() !== '' ? recorded : labels.get(optionId);
-    // An option the graph cannot name has no line (the screen drops it too); never an id.
-    if (label === undefined) return [];
+    // Narration still drops unnamed options below. A cell can carry the same
+    // chance words without a quoted label; no raw id or guessed label is added.
+    const prefix = label === undefined ? '' : `‘${label}’: `;
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
     const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
     const estimates = shareOptionEstimateWords(graph, optionId);
     const estimateRelationships = point && k > 0 ? `, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)` : '';
     return [{ option_id: optionId, label, figure,
-      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}${estimateRelationships}.`
+      chance: `${prefix}${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}${estimateRelationships}.`
         + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
       ...(estimateRelationships === '' ? {} : { olumi_estimate_link_count: k }),
       ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
       ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
   };
-  const points = (k > 0 || facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null) && facts.goal_chance_display !== undefined
+  const pointsOwed = k > 0 || facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null;
+  const points = facts.goal_chance_display !== undefined
     ? facts.goal_chance_licence!.option_ids.flatMap((id) => {
       const figure = facts.goal_chance_display![id];
       return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '',
@@ -92,7 +98,8 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   const ranges = Object.entries(facts.goal_chance_range_display ?? {}).flatMap(([id, d]) => {
     if (d.depends_on.kind === 'stated_time') {
       const label = labels.get(id), stated = d.stated_time;
-      if (label === undefined || stated === undefined) return [];
+      if (stated === undefined) return [];
+      const prefix = label === undefined ? '' : `‘${label}’: `;
       const words = stated.deliverable !== undefined && stated.by_date !== undefined
         ? shareGoalChanceWords(stated.deliverable, stated.by_date)
         : `chance of meeting your goal${stated.by_date === undefined ? '' : ` by ${sayDate(stated.by_date)}`}`;
@@ -102,8 +109,8 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
         && stated.slow_time !== undefined && stated.fast_time !== undefined;
       return [{ option_id: id, label, figure: d.range,
         chance: extremeEndpoints
-          ? `‘${label}’: less than 1% ${words} if it takes ${stated.slow_time}, and more than 99% if it takes ${stated.fast_time}, ${tail}.`
-          : `‘${label}’: ${d.range} ${words}, ${tail}, from the slow end of your ${stated.estimate} to the fast end.`,
+          ? `${prefix}less than 1% ${words} if it takes ${stated.slow_time}, and more than 99% if it takes ${stated.fast_time}, ${tail}.`
+          : `${prefix}${d.range} ${words}, ${tail}, from the slow end of your ${stated.estimate} to the fast end.`,
         depends: '' }];
     }
     const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';
@@ -112,7 +119,21 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
       : `whether ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’ at all, which Olumi assumed.`;
     return line(id, d.range, `${lead} ${link}`);
   });
-  return [...points, ...ranges];
+  return { points, ranges, pointsOwed };
+}
+
+/** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
+export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
+  const { points, ranges, pointsOwed } = composeGoalChanceLines(result, graph, current);
+  // Preserve the existing owed-point and named-option gates exactly.
+  return [...(pointsOwed ? points : []), ...ranges]
+    .filter((line): line is GoalChanceScreenLine => line.label !== undefined);
+}
+
+/** Every licensed cell's SAME sentence, including point forms not owed in narration. */
+export function goalChanceCellFacesForAgent(result: unknown, graph: unknown, current: boolean): ReadonlyMap<string, string> {
+  const { points, ranges } = composeGoalChanceLines(result, graph, current);
+  return new Map([...points, ...ranges].map(line => [line.option_id, line.chance]));
 }
 
 /**

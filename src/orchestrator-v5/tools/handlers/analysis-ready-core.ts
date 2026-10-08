@@ -46,6 +46,9 @@ import {
   type CanonicalReadinessRepairProposal,
 } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { draftedTeamPartOf, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
+import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
+import { limitSinkBranch } from '../../../graph/limit-sink-branch.js';
 import {
   computeScaffoldPlan,
   gateAnalysableOptions,
@@ -632,12 +635,37 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
   // this generic one would delete working guidance from three branches to fix
   // one, which is strictly worse than the defect. Both directions are pinned in
   // `tests/unit/analysis-refusal-carries-a-reason.test.ts`.
-  const admission = resolveRunAdmissionTerms(rawGraph);
+  let admissionGraph = rawGraph;
+  try {
+    const event = draftedTeamPartOf(rawGraph);
+    if (event !== null) {
+      // Readiness must assess the same event calculation the Run receives. Kept context has no active option setting;
+      // asking the semantic projector to fill it from a baseline would invent a second intervention beside capacity.
+      const graph = rawGraph as { nodes: readonly { id: string; kind: string; category?: unknown;
+        analysis_participation?: unknown; interventions?: Record<string, unknown> }[];
+        edges: readonly { from: string; to: string }[]; goal_constraints?: readonly { node_id: string }[] };
+      const nodes = graph.nodes;
+      const excludedContext = nodes.some(n => n.id.startsWith('event_context_') && n.analysis_participation === 'retained_excluded');
+      const limitIds = (graph.goal_constraints ?? []).map(c => c.node_id);
+      const protectedIds = new Set([...limitIds, ...limitSinkBranch(nodes, graph.edges, limitIds)]);
+      if (excludedContext && !nodes.some(n => n.analysis_participation === 'retained_excluded' && protectedIds.has(n.id))) {
+        const options = nodes.filter(n => n.kind === 'option');
+        const participation = guardAnalysisParticipation(rawGraph, { goalNodeId: event.goal.id,
+          submittedOptionIds: options.map(n => n.id), optionInterventionTargetIds: options.flatMap(n => Object.keys(n.interventions ?? {})) });
+        if (participation.refusals.length === 0) admissionGraph = participation.graph;
+      }
+    }
+  } catch {
+    // Recognition is optional. The existing total assessor owns malformed-input refusals.
+  }
+  const admission = resolveRunAdmissionTerms(admissionGraph);
+  const eventRefusal = eventByDateRefusalOf(rawGraph);
   return {
     ...admission,
-    blockedNextStep: admission.willProceed
+    ...(eventRefusal === null ? {} : { willProceed: false }),
+    blockedNextStep: eventRefusal ?? (admission.willProceed
       ? null
-      : admission.strict.nextStep ?? NO_COMPARISON_NEXT_STEP,
+      : admission.strict.nextStep ?? NO_COMPARISON_NEXT_STEP),
   };
 }
 

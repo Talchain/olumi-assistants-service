@@ -1,0 +1,42 @@
+Load gate exit: 0
+{"load":5.78515625,"threshold":25}
+node_modules/.bin/vitest run src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (17 tests | 3 failed) 104ms
+     × a warning-only marker {"node_id":"goal"} cannot establish a derived-baseline dependency 9ms
+     × a warning-only marker {"field":"nodes[goal].nonlinear_identity"} cannot establish a derived-baseline dependency 4ms
+     × a warning-only marker {} cannot establish a derived-baseline dependency 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a warning-only marker {"node_id":"goal"} cannot establish a derived-baseline dependency
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a warning-only marker {"field":"nodes[goal].nonlinear_identity"} cannot establish a derived-baseline dependency
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a warning-only marker {} cannot establish a derived-baseline dependency
+AssertionError: expected [] to deeply equal [ 'keep' ]
+
+- Expected
++ Received
+
+- [
+-   "keep",
+- ]
++ []
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:117:28
+    115|       body.inference_warnings.push({ code: 'GOAL_LEVEL_FROM_IDENTITY_I…
+    116|       const out = withholdGoalFiguresForUntestableTarget(body, g, 'goa…
+    117|       expect(chances(out)).toEqual(['keep']);
+       |                            ^
+    118|       expect(warning(out)?.option_ids).toEqual(['raise', 'starter']);
+    119|       expect(Object.keys(warning(out)?.per_option ?? {})).toEqual(['ra…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 14 passed (17)
+   Start at  17:48:14
+   Duration  4.02s (transform 2.79s, setup 112ms, import 3.69s, tests 104ms, environment 0ms)
+

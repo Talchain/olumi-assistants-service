@@ -1911,12 +1911,12 @@ describe('SupabaseSessionStore.readMostRecentCoachingState — Stage 2B-1b null-
 describe('readonly existing-scenario snapshot', () => {
   const row = () => ({ id: SCENARIO, user_id: USER, graph: { nodes: [], edges: [] }, brief_text: 'The brief', analysis_invalidated_at: null });
   it('returns one stored row and its restore marker in one query, with no RPC', async () => {
-    const value = { ...row(), analysis_invalidated_at: '2026-10-02T00:00:00.000Z' };
+    const value = { ...row(), analysis_invalidated_at: '2026-10-02T00:00:00.000Z', revision: 7 };
     const { client, selectCalls, rpcCalls } = makeClient({ selectResult: { data: value, error: null } });
     const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
-    expect(await store.readExistingScenario(SCENARIO)).toEqual({ userId: USER, graph: value.graph, briefText: value.brief_text, analysisInvalidatedAt: value.analysis_invalidated_at });
+    expect(await store.readExistingScenario(SCENARIO)).toEqual({ userId: USER, graph: value.graph, briefText: value.brief_text, analysisInvalidatedAt: value.analysis_invalidated_at, revision: 7 });
     expect(selectCalls).toHaveLength(1);
-    expect(selectCalls[0]).toMatchObject({ table: 'scenarios', cols: 'id, user_id, graph, brief_text, analysis_invalidated_at', filters: { ['eq:id']: SCENARIO } });
+    expect(selectCalls[0]).toMatchObject({ table: 'scenarios', cols: 'id, user_id, graph, brief_text, analysis_invalidated_at, revision', filters: { ['eq:id']: SCENARIO } });
     expect(rpcCalls).toHaveLength(0);
   });
   it('distinguishes an absent row from a guest row', async () => {

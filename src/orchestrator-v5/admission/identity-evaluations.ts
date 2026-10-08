@@ -3,8 +3,42 @@
  * (`target-testability.ts`), the licence's walk (`reachedGoalPaths`) and the Run's reading tail (`goal-reading-disclosure.ts`),
  * so none of them can disagree about which product the Run worked out.
  */
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+export const GOAL_LEVEL_FROM_IDENTITY_INPUTS = 'GOAL_LEVEL_FROM_IDENTITY_INPUTS';
+
+/** The existing product-carrier reader, shared with admission's structural sign checks. */
+export function readProductIdentityCarrier(n: Rec): {
+  readonly operation: 'product'; readonly factor_ids: readonly string[]; readonly stated_in_brief: boolean;
+} | null {
+  const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+  if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
+  if (!Array.isArray(c.factor_ids) || c.factor_ids.length < 2 || !c.factor_ids.every((f) => typeof f === 'string' && f !== '')) return null;
+  return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
+}
+
+/** This Run derived the selected goal's baseline from identity inputs, identified only by typed carriers. */
+export function goalBaselineFromIdentityInputs(
+  nodes: readonly Rec[], goalId: unknown, identityEvaluations?: readonly unknown[],
+): boolean {
+  return (identityEvaluations ?? []).some(e => isRec(e) && e.node_id === goalId && e.level_source === 'identity_inputs'
+    && evaluatedIdentityCarriers(nodes, [e]).has(goalId));
+}
+
+/** DL #2851: an accumulation carries goal figures only on all three of the user's levels, never Olumi's estimates. */
+export function identityCanCarryExactLinks(nodes: readonly Rec[], identity: unknown): boolean {
+  if (!isRec(identity) || identity.operation !== 'accumulation') return true;
+  if (!Array.isArray(identity.factor_ids) || identity.factor_ids.length !== 3) return false;
+  return identity.factor_ids.every((id) => {
+    const node = nodes.find((n) => n.id === id);
+    const state = node !== undefined && isRec(node.observed_state) ? node.observed_state : undefined;
+    const source = classifyValueSource(state?.source);
+    return source === 'user_stated' || source === 'user_ratified';
+  });
+}
 
 /**
  * The identity carriers THIS Run evaluated, as the graph declares them. An evaluation names its node, and ISL's also says
@@ -15,7 +49,7 @@ export function evaluatedIdentityCarriers(nodes: readonly Rec[], identityEvaluat
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   return new Set((identityEvaluations ?? []).filter(isRec).filter((e) => {
     const identity = byId.get(e.node_id)?.nonlinear_identity;
-    if (e.evaluated !== true || !isRec(identity)) return false;
+    if (e.evaluated !== true || !isRec(identity) || !identityCanCarryExactLinks(nodes, identity)) return false;
     const declared: unknown[] = Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
     const said = Array.isArray(e.factor_ids) ? e.factor_ids : undefined;
     return (e.operation === undefined || e.operation === identity.operation)
@@ -36,7 +70,8 @@ export function exactIdentityOperandLinks(
   return new Set(edges.filter(e => {
     const to = byId.get(e.to);
     const identity = isRec(to?.nonlinear_identity) ? to.nonlinear_identity : undefined;
-    return identity !== undefined && ((mode === 'stated_or_evaluated' && identity.stated_in_brief !== false) || evaluated.has(to?.id))
+    return identity !== undefined && identityCanCarryExactLinks(nodes, identity)
+      && ((mode === 'stated_or_evaluated' && identity.stated_in_brief !== false) || evaluated.has(to?.id))
       && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
   }));
 }

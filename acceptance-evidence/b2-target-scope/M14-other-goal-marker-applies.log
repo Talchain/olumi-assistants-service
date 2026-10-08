@@ -1,0 +1,35 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 1 failed | 13 skipped) 36ms
+     × another goal's derived warning and non-input failure cannot hold this baseline 33ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > another goal's derived warning and non-input failure cannot hold this baseline
+AssertionError: expected [] to deeply equal [ 'keep' ]
+
+- Expected
++ Received
+
+- [
+-   "keep",
+- ]
++ []
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:143:78
+    141|     const g = graph(true), body = envelope();
+    142|     body.inference_warnings.push({ code: 'GOAL_LEVEL_FROM_IDENTITY_INP…
+    143|     expect(chances(withholdGoalFiguresForUntestableTarget(body, g, 'go…
+       |                                                                              ^
+    144|     // The same derived marker only applies to feeds into the identity…
+    145|     const side = graph();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 skipped (14)
+   Start at  16:46:31
+   Duration  6.24s (transform 4.48s, setup 165ms, import 5.88s, tests 36ms, environment 0ms)
+
