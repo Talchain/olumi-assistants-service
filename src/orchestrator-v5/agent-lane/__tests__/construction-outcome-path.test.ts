@@ -6,7 +6,7 @@ import { modelFacingToolResult } from '../licensed-run-view.js';
 import * as validator from '../../../orchestrator/graph-structure-validator.js';
 import { admitCandidateModel, type AdmittedModel, type CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 
 const BASE_GAP_RESULT = {
   "ok": true,
@@ -34,39 +34,46 @@ const BASE_GAP_RESULT = {
 }; // Actual 2cf61b60 replay; no random pending-action fields in this fixture.
 const SCENARIO = '00000000-0000-4000-8000-000000000044';
 const BRIEF = 'Should we hire two senior engineers or four junior engineers? Keep annual salary spend under £400k. Hiring delay is a risk.';
-const link = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'inferred' });
-const factor = (label: string) => ({ label, role: 'controllable', baseline_known: false, baseline_value: 0, unit: 'points', plausible_max: 100, provenance: 'inferred' });
-function candidate(connected = false, extras = 0): CandidateModel {
+const link = (from: string, to: string): CandidateModel['links'][number] => ({ from, to, direction: 'positive', provenance: 'inferred' });
+const factor = (label: string): CandidateModel['factors'][number] => ({ label, role: 'controllable', baseline_known: false, baseline_value: 0, unit: 'points', plausible_max: 100, provenance: 'inferred' });
+// Fixtures can be edited between draft passes; production still receives CandidateModel.
+type DraftFixture = {
+  -readonly [K in keyof CandidateModel]: CandidateModel[K] extends readonly (infer Item)[] ? Item[] : CandidateModel[K];
+} & { unknowns: string[] };
+function candidate(connected = false, extras = 0): DraftFixture {
   const names = Array.from({ length: extras }, (_, i) => `Added context ${i}`);
   return {
-    goal: { metric: 'Platform completion', operator: '>=', value: null, unit: null, horizon_months: null, provenance: 'explicit' },
+    goal: { metric: 'Platform completion', operator: '>=', value: null, unit: '', horizon_months: null, provenance: 'explicit' },
     options: [
-      { label: 'Hire two senior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Senior engineers', value: 2, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] },
-      { label: 'Hire four junior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Junior engineers', value: 4, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] },
+      { label: 'Hire two senior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Senior engineers', value: 2, unit: 'points', provenance: 'ai_proposed' }] },
+      { label: 'Hire four junior engineers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Junior engineers', value: 4, unit: 'points', provenance: 'ai_proposed' }] },
     ],
-    factors: [factor('Senior engineers'), factor('Junior engineers'), { ...factor('Annual salary spend'), role: 'observable', unit: 'GBP', plausible_max: 1000000 }, ...names.map(n => ({ ...factor(n), role: 'observable' }))],
+    factors: [factor('Senior engineers'), factor('Junior engineers'), { ...factor('Annual salary spend'), role: 'observable', unit: 'GBP', plausible_max: 1000000 }, ...names.map((n): CandidateModel['factors'][number] => ({ ...factor(n), role: 'observable' }))],
     risks: [{ label: 'Hiring delay', provenance: 'explicit' }], outcomes: [], constraints: [], unknowns: [],
     links: [link('Senior engineers', 'Annual salary spend'), link('Junior engineers', 'Platform completion'), link('Hiring delay', 'Platform completion'),
       ...(connected ? [link('Senior engineers', 'Platform completion')] : []), ...names.map(n => link(n, 'Platform completion'))],
-  } as CandidateModel;
+  };
 }
 type Graph = Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>;
+const edge = (from: string, to: string): Graph['edges'][number] => ({ from, to, strength: { mean: 0, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+const validatorGraph = (graph: Graph): GraphV3T => GraphV3.parse(graph);
 function issues(g: Graph) {
   expect(construction, 'M3 path issue function exists').toHaveProperty('pathIssues');
-  return (construction as typeof construction & { pathIssues: (g: Graph) => { option: string; dead_ends: string[]; issue: string }[] }).pathIssues(g);
+  return construction.pathIssues(g);
 }
 async function replay(first: CandidateModel, retry = first) {
   const requests: { instructions: string; input: string }[] = [];
   let registered: Graph | undefined;
   let trace: construction.ConstructionTrace | undefined;
-  const call = (async (req: { instructions: string; input: string }) => {
+  const call: construction.CallStructuredModel = async req => {
     requests.push(req); return { text: JSON.stringify(requests.length === 1 ? first : retry) };
-  }) as construction.CallStructuredModel;
+  };
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) { registered = (body as { graph: Graph }).graph; return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, versions: [] } };
   };
   const out = await construction.buildModelFromBrief(SCENARIO, BRIEF, dispatch, call, t => { trace = t; });
+  if (process.env.M3_RETRY_REQUESTS) writeFileSync(process.env.M3_RETRY_REQUESTS, `${JSON.stringify(requests)}\n`, { flag: 'a' });
   return { requests, registered: registered!, trace, out };
 }
 
@@ -75,18 +82,18 @@ const b3: Graph = {
   goal_constraints: [],
   nodes: [
     { id: 'decision', kind: 'decision', label: 'Staffing' }, { id: 'platform_completion', kind: 'goal', label: 'Platform completion' },
-    ...[['current_team', 'Current team'], ['hire_2_senior_engineers', 'Hire two senior engineers'], ['hire_4_junior_engineers', 'Hire four junior engineers'], ['hire_1_senior_and_2_junior', 'Hire one senior and two junior engineers']].map(([id, label]) => ({ id, kind: 'option', label })),
-    ...[['senior_engineers_hired', 'Senior engineers hired'], ['junior_engineers_hired', 'Junior engineers hired'], ['annual_salary_spend', 'Annual salary spend']].map(([id, label]) => ({ id, kind: 'factor', label })),
+    ...[['current_team', 'Current team'], ['hire_2_senior_engineers', 'Hire two senior engineers'], ['hire_4_junior_engineers', 'Hire four junior engineers'], ['hire_1_senior_and_2_junior', 'Hire one senior and two junior engineers']].map(([id, label]): Graph['nodes'][number] => ({ id, kind: 'option', label })),
+    ...[['senior_engineers_hired', 'Senior engineers hired'], ['junior_engineers_hired', 'Junior engineers hired'], ['annual_salary_spend', 'Annual salary spend']].map(([id, label]): Graph['nodes'][number] => ({ id, kind: 'factor', label })),
     { id: 'hiring_lead_time_delay', kind: 'risk', label: 'Hiring lead time delay' },
   ],
   edges: [
-    ...['current_team', 'hire_2_senior_engineers', 'hire_4_junior_engineers', 'hire_1_senior_and_2_junior'].map(to => ({ from: 'decision', to })),
-    ...['current_team', 'hire_2_senior_engineers', 'hire_1_senior_and_2_junior'].map(from => ({ from, to: 'senior_engineers_hired' })),
-    ...['current_team', 'hire_4_junior_engineers', 'hire_1_senior_and_2_junior'].map(from => ({ from, to: 'junior_engineers_hired' })),
-    { from: 'senior_engineers_hired', to: 'annual_salary_spend' }, { from: 'junior_engineers_hired', to: 'annual_salary_spend' },
-    { from: 'hiring_lead_time_delay', to: 'platform_completion' },
+    ...['current_team', 'hire_2_senior_engineers', 'hire_4_junior_engineers', 'hire_1_senior_and_2_junior'].map(to => edge('decision', to)),
+    ...['current_team', 'hire_2_senior_engineers', 'hire_1_senior_and_2_junior'].map(from => edge(from, 'senior_engineers_hired')),
+    ...['current_team', 'hire_4_junior_engineers', 'hire_1_senior_and_2_junior'].map(from => edge(from, 'junior_engineers_hired')),
+    edge('senior_engineers_hired', 'annual_salary_spend'), edge('junior_engineers_hired', 'annual_salary_spend'),
+    edge('hiring_lead_time_delay', 'platform_completion'),
   ],
-} as Graph;
+};
 
 describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
   it('row 1: B3 names exactly its four dead-end options and Annual salary spend; connected CONTROL', () => {
@@ -97,6 +104,23 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
     expect(single.map(x => x.option)).toEqual(['Hire two senior engineers']);
     expect(single[0]!.issue).toContain('Senior engineers');
     expect(issues(admitCandidateModel(candidate(true)))).toEqual([]);
+  });
+
+  it('same-labelled options: the path gap carries the disconnected option id', () => {
+    const admitted = admitCandidateModel(candidate());
+    const graph = { ...admitted, nodes: admitted.nodes.map(n => n.kind === 'option' ? { ...n, label: 'Hire engineers' } : n) };
+    const missing = issues(graph);
+    expect(graph.nodes.filter(n => n.kind === 'option' && n.label === 'Hire engineers')).toHaveLength(2);
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toMatchObject({ option_id: 'hire_two_senior_engineers', option: 'Hire engineers', dead_end_ids: ['annual_salary_spend'], dead_ends: ['Annual salary spend'] });
+    expect(missing[0]!.option_id).not.toBe('hire_four_junior_engineers');
+    // Distinct terminals may share words: keep each id beside its label while drafter words stay deduplicated.
+    const split: Graph = { ...graph, nodes: [...graph.nodes, { id: 'other_salary_spend', kind: 'factor', label: 'Annual salary spend' }],
+      edges: [...graph.edges, edge('senior_engineers', 'other_salary_spend')] };
+    const splitGap = issues(split)[0]!;
+    expect(splitGap.dead_end_ids).toEqual(['annual_salary_spend', 'other_salary_spend']);
+    expect(splitGap.dead_ends).toEqual(['Annual salary spend', 'Annual salary spend']);
+    expect(splitGap.issue).toBe(missing[0]!.issue);
   });
 
   it('row 2: a limited terminal is harmless when the option reaches the goal another way; status quo excluded', () => {
@@ -123,7 +147,7 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
     expect(r.trace).toMatchObject({ outcome: 'kept_first' });
     expect(r.registered.nodes.some(n => n.label === 'Hiring delay')).toBe(true);
     expect(issues(r.registered).map(x => x.option)).toEqual(['Hire two senior engineers']);
-    expect(r.out.construction_gaps).toEqual({ path_missing: [{ option: 'Hire two senior engineers', dead_ends: ['Annual salary spend'] }] });
+    expect(r.out.construction_gaps).toEqual({ path_missing: [{ option_id: 'hire_two_senior_engineers', option: 'Hire two senior engineers', dead_end_ids: ['annual_salary_spend'], dead_ends: ['Annual salary spend'] }] });
   });
 
   it('row 3c: a path-only retry without strictly greater option reachability keeps the first', async () => {
@@ -167,10 +191,10 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
     const admitted = admitCandidateModel(model);
     expect(admitted.goal_constraints.map(c => c.node_id)).toContain('annual_salary_spend');
     expect(issues(admitted)).toEqual([]);
-    expect(validator.validateGraphStructure(admitted as GraphV3T).violations.filter(v => v.option_id === 'hire_two_senior_engineers' && v.code === 'NO_PATH_TO_GOAL')).toEqual([]);
+    expect(validator.validateGraphStructure(validatorGraph(admitted)).violations.filter(v => v.option_id === 'hire_two_senior_engineers' && v.code === 'NO_PATH_TO_GOAL')).toEqual([]);
     const without = { ...admitted, goal_constraints: [] };
     expect(issues(without).map(x => x.option)).toEqual(['Hire two senior engineers']);
-    expect(validator.validateGraphStructure(without as GraphV3T).violations.some(v => v.code === 'NO_PATH_TO_GOAL' && v.option_id === 'hire_two_senior_engineers')).toBe(true);
+    expect(validator.validateGraphStructure(validatorGraph(without)).violations.some(v => v.code === 'NO_PATH_TO_GOAL' && v.option_id === 'hire_two_senior_engineers')).toBe(true);
     expect([...validator.optionsWithoutGoalPath(without, new Set(['hire_two_senior_engineers']))]).toEqual([]);
   });
 
@@ -180,7 +204,7 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
     expect(r.out.ok).toBe(true);
     if (process.env.M3_RECORD_BASE) { writeFileSync(process.env.M3_RECORD_BASE, JSON.stringify(r.out, null, 2)); return; }
     const { construction_gaps, ...visible } = r.out;
-    expect(construction_gaps).toEqual({ path_missing: [{ option: 'Hire two senior engineers', dead_ends: ['Annual salary spend'] }] });
+    expect(construction_gaps).toEqual({ path_missing: [{ option_id: 'hire_two_senior_engineers', option: 'Hire two senior engineers', dead_end_ids: ['annual_salary_spend'], dead_ends: ['Annual salary spend'] }] });
     expect(JSON.stringify(visible)).toBe(JSON.stringify(BASE_GAP_RESULT));
   });
 
@@ -192,7 +216,7 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
     // The agent loop serialises this exact projection into its function_call_output.
     const payload = JSON.stringify(modelFacingToolResult('build_model_from_brief', result));
     const modelFacing = JSON.parse(payload) as typeof out;
-    expect(modelFacing.construction_gaps).toEqual({ path_missing: [{ option: 'Hire two senior engineers', dead_ends: ['Annual salary spend'] }] });
+    expect(modelFacing.construction_gaps).toEqual({ path_missing: [{ option_id: 'hire_two_senior_engineers', option: 'Hire two senior engineers', dead_end_ids: ['annual_salary_spend'], dead_ends: ['Annual salary spend'] }] });
     expect(payload).toContain('Hire two senior engineers');
     expect(payload).toContain('Annual salary spend');
     // Check figures in strings as well as numeric fields; none may be added in transport.
@@ -203,7 +227,7 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
 
   it('r2 progress uses exemptions: linking only an exempt option does not repair the asked option', async () => {
     const first = candidate();
-    first.factors.push({ ...factor('Delivery readiness'), role: 'observable' } as CandidateModel['factors'][number]);
+    first.factors.push({ ...factor('Delivery readiness'), role: 'observable' });
     first.constraints = [{ metric: 'Annual salary spend', operator: '<=', value: 400000, unit: 'GBP', provenance: 'explicit' }];
     first.links = [link('Senior engineers', 'Delivery readiness'), link('Junior engineers', 'Annual salary spend'), link('Hiring delay', 'Platform completion')];
     const prepared = construction.prepareProvisionalCandidate(first, BRIEF);
@@ -222,18 +246,18 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
     expect(asked[0]).not.toContain('Hire four junior engineers');
     expect(r.trace).toMatchObject({ outcome: 'kept_first' });
     expect(r.registered.edges.some(e => e.from === 'junior_engineers' && e.to === 'platform_completion')).toBe(false);
-    expect(r.out.construction_gaps).toEqual({ path_missing: [{ option: 'Hire two senior engineers', dead_ends: ['Delivery readiness'] }] });
+    expect(r.out.construction_gaps).toEqual({ path_missing: [{ option_id: 'hire_two_senior_engineers', option: 'Hire two senior engineers', dead_end_ids: ['delivery_readiness'], dead_ends: ['Delivery readiness'] }] });
   });
 
   it('row 4: shared directed reachability and validator refusal/control agree (cycles, bidirected, multiple roots)', () => {
     expect(validator).toHaveProperty('reachableNodeIds');
-    const reach = (validator as typeof validator & { reachableNodeIds: (e: { from: string; to: string; edge_type?: string }[], roots: string[], reverse?: boolean) => Set<string> }).reachableNodeIds;
+    const reach = validator.reachableNodeIds;
     const edges = [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }, { from: 'b', to: 'goal' }, { from: 'dead', to: 'goal', edge_type: 'bidirected' }];
     expect([...reach(edges, ['goal'], true)].sort()).toEqual(['a', 'b', 'goal']);
     expect([...reach(edges, ['a', 'other'])].sort()).toEqual(['a', 'b', 'goal', 'other']);
-    expect(validator.validateGraphStructure(b3 as GraphV3T).violations.some(v => v.code === 'NO_PATH_TO_GOAL')).toBe(true);
-    const connected = { ...b3, goal_constraints: [{ constraint_id: 'salary', node_id: 'annual_salary_spend', operator: '<=', value: 400000, unit: 'GBP', provenance: 'explicit' }], edges: [...b3.edges, { from: 'senior_engineers_hired', to: 'platform_completion' }, { from: 'junior_engineers_hired', to: 'platform_completion' }] };
-    expect(validator.validateGraphStructure(connected as GraphV3T).violations.filter(v => v.code === 'NO_PATH_TO_GOAL')).toEqual([]);
+    expect(validator.validateGraphStructure(validatorGraph(b3)).violations.some(v => v.code === 'NO_PATH_TO_GOAL')).toBe(true);
+    const connected: Graph = { ...b3, goal_constraints: [{ constraint_id: 'salary', node_id: 'annual_salary_spend', operator: '<=', value: 400000, unit: 'GBP', provenance: 'explicit' }], edges: [...b3.edges, edge('senior_engineers_hired', 'platform_completion'), edge('junior_engineers_hired', 'platform_completion')] };
+    expect(validator.validateGraphStructure(validatorGraph(connected)).violations.filter(v => v.code === 'NO_PATH_TO_GOAL')).toEqual([]);
   });
 });
 
@@ -254,7 +278,11 @@ it.skipIf(!process.env.M3_CENSUS_MANIFEST)('116-draft recorded census (0 LLM)', 
       return { status: 200, json: { graph: { nodes: [], edges: [] }, versions: [] } };
     };
     try {
-      const out = await construction.buildModelFromBrief(SCENARIO, brief, dispatch, (async req => { reqs.push(req); return { text: calls[Math.min(i++, calls.length - 1)].output_text, status: 'completed' }; }) as construction.CallStructuredModel, t => { trace = t; });
+      const call: construction.CallStructuredModel = async req => {
+        reqs.push(req);
+        return { text: calls[Math.min(i++, calls.length - 1)].output_text, status: 'completed' };
+      };
+      const out = await construction.buildModelFromBrief(SCENARIO, brief, dispatch, call, t => { trace = t; });
       // Deliberately independent oracle: contrast cannot depend on the implementation being added.
       const missing = (g?.nodes ?? []).filter(n => n.kind === 'option' && n.is_baseline !== true).filter(n => {
         const seen = new Set<string>(), pending = [n.id];
@@ -262,7 +290,7 @@ it.skipIf(!process.env.M3_CENSUS_MANIFEST)('116-draft recorded census (0 LLM)', 
           pending.push(...g!.edges.filter(e => e.from === id && (e as { edge_type?: string }).edge_type !== 'bidirected').map(e => e.to)); }
         return true;
       }).map(n => n.label);
-      const refused = g ? validator.validateGraphStructure(g as GraphV3T, { leaveOutInertRisks: true }).violations
+      const refused = g ? validator.validateGraphStructure(validatorGraph(g), { leaveOutInertRisks: true }).violations
         .filter(v => v.code === 'NO_PATH_TO_GOAL' && v.option_id !== undefined && !g!.nodes.some(n => n.id === v.option_id && n.is_baseline === true))
         .map(v => v.option_label) : [];
       rows.push({ f, ok: out.ok, graph_sha: g ? createHash('sha256').update(JSON.stringify(g)).digest('hex') : null,

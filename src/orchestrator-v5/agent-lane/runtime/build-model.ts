@@ -958,14 +958,16 @@ export function firstConstructInput(brief: string): string {
 
 /** A missing option-to-goal mechanism, read from what admission actually kept. */
 export interface OutcomePathIssue {
+  readonly option_id: string;
   readonly option: string;
   readonly factors: readonly string[];
+  readonly dead_end_ids: readonly string[];
   readonly dead_ends: readonly string[];
   readonly issue: string;
 }
 
 export interface ConstructionGaps {
-  readonly path_missing: readonly { readonly option: string; readonly dead_ends: readonly string[] }[];
+  readonly path_missing: readonly { readonly option_id: string; readonly option: string; readonly dead_end_ids: readonly string[]; readonly dead_ends: readonly string[] }[];
 }
 
 export function pathIssues(admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>): OutcomePathIssue[] {
@@ -976,17 +978,21 @@ export function pathIssues(admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'go
   const directed = admitted.edges.filter((e) => (e as { edge_type?: string }).edge_type !== 'bidirected');
   const outgoing = new Map<string, string[]>();
   for (const edge of directed) outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to]);
-  const goal = goals.map((n) => `"${n.label}"`).join(', ');
+  const quoted = (s: string): string => JSON.stringify(s);
+  const goal = goals.map((n) => quoted(n.label)).join(', ');
   return admitted.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && refusedOptions.has(n.id)).map((option) => {
     const factors = (outgoing.get(option.id) ?? []).map((id) => nodeOf.get(id)).filter((n) => n?.kind === 'factor').map((n) => n!.label);
     const branch = reachableNodeIds(directed, [option.id]);
     const terminals = [...branch].filter((id) => (outgoing.get(id) ?? []).length === 0);
     // Admission normally breaks loops. A closed cycle still needs an honest name, not an empty dead-end list.
-    const dead_ends = [...new Set((terminals.length > 0 ? terminals : [...branch]).map((id) => nodeOf.get(id)?.label ?? id))];
-    const actsOn = factors.length > 0 ? factors.map((f) => `"${f}"`).join(', ') : 'no connected factor';
+    const dead_end_ids = terminals.length > 0 ? terminals : [...branch];
+    const dead_ends = dead_end_ids.map((id) => nodeOf.get(id)?.label ?? id);
+    // The structured gap preserves identities; the drafter's existing words stay label-only and deduplicated.
+    const deadEndLabels = [...new Set(dead_ends)];
+    const actsOn = factors.length > 0 ? factors.map(quoted).join(', ') : 'no connected factor';
     return {
-      option: option.label, factors, dead_ends,
-      issue: `"${option.label}" acts on ${actsOn}, whose links end at ${dead_ends.map((d) => `"${d}"`).join(', ')}; nothing it changes reaches ${goal}. `
+      option_id: option.id, option: option.label, factors, dead_end_ids, dead_ends,
+      issue: `${quoted(option.label)} acts on ${actsOn}, whose links end at ${deadEndLabels.map(quoted).join(', ')}; nothing it changes reaches ${goal}. `
         + `Link what it changes, through a mechanism you can state in one line, to ${goal}, or say in unknowns which mechanism is missing.`,
     };
   });
@@ -1881,7 +1887,7 @@ export async function buildModelFromBrief(
   }
   // Separate from projection losses: a missing path must not change existing disclosure counts or readers.
   const constructionGaps: ConstructionGaps = {
-    path_missing: pathIssues(admitted).map(({ option, dead_ends }) => ({ option, dead_ends })),
+    path_missing: pathIssues(admitted).map(({ option_id, option, dead_end_ids, dead_ends }) => ({ option_id, option, dead_end_ids, dead_ends })),
   };
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
 
