@@ -38,7 +38,7 @@ const fixture = (file: string): CapturedRun => {
   }
   return captured;
 };
-const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
+const OPENING = 'This run doesn’t yet show each option’s chance of meeting your goal.';
 const PLACEHOLDER = 'GOAL_FIGURES_PLACEHOLDER_PATH';
 const TARGET = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
 // DL r14 changes the invitation only when placeholders are the complete cause set.

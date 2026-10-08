@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import * as admission from '../admit-model.js';
 import type { AdmittedModel, CandidateModel } from '../admit-model.js';
 import * as widening from '../runtime/widen-draft.js';
+import { composeReplyShape } from '../reply/compose-reply.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -980,5 +981,36 @@ describe('P05b build seam and words', () => {
     expect(widening.widenedRiskMarker([risk('added_risk_a', 'positive')])).toBe(widening.WIDENED_RISK_MARKER_MOVE);
     expect(widening.widenedRiskMarker([risk('added_risk_a', 'negative'), risk('added_risk_b', 'positive')])).toBe(widening.WIDENED_RISK_MARKER_MOVE);
     expect(`${widening.WIDENED_RISK_MARKER_DOWN} ${widening.WIDENED_RISK_MARKER_MOVE}`).not.toMatch(/you missed|\bimproved\b|\bcomplete\b|\bbetter\b|\bbest\b/i);
+  });
+
+  it('aw-draft-face: the widening producer’s complete two-sentence line stays together immediately after the headline', () => {
+    const headline = 'Olumi built your model.';
+    const widenedLine = widening.widenedLine({ options: 0, risks: 3 })!;
+    const widenedRiskNote = widening.widenedRiskNote({ options: 0, risks: 3 })!;
+    const composed = composeReplyShape({ faceContract: 'draft', text: headline,
+      widenedLine, widenedRiskNote, widenedRiskMarker: widening.WIDENED_RISK_MARKER_DOWN });
+    expect(composed.shape?.headline).toBe(headline);
+    expect(composed.shape?.bullets).toEqual([widenedLine]);
+    expect(composed.shape?.detail).toBe(widenedRiskNote);
+    expect(composed.text.split(widenedLine)).toHaveLength(2);
+    expect(composed.text).not.toContain(widening.WIDENED_RISK_MARKER_DOWN);
+  });
+
+  it('aw-run-face: the typed widening marker stays on the face while producer counts and full risk note stay once in detail', () => {
+    const chance = 'Hire a Tech Lead: about 34% chance.';
+    const widenedLine = widening.widenedLine({ options: 0, risks: 3 })!;
+    const widenedRiskNote = widening.widenedRiskNote({ options: 0, risks: 3 })!;
+    const composed = composeReplyShape({ faceContract: 'run', text: chance,
+      chanceCells: [{ kind: 'figure', display: 'about 34%' }], widenedLine, widenedRiskNote,
+      widenedRiskMarker: widening.widenedRiskMarker([{ affects: { direction: 'negative' } }])!,
+      obligations: [{ role: 'evidence', text: chance, lead: true, subjects: ['hire_a_tech_lead'] }],
+    });
+    expect(composed.shape?.headline).toBe(chance);
+    expect(composed.shape?.bullets).toEqual([widening.WIDENED_RISK_MARKER_DOWN]);
+    for (const words of [widenedLine, widenedRiskNote]) {
+      expect(composed.shape?.detail?.split(words)).toHaveLength(2);
+      expect([composed.shape!.headline, ...composed.shape!.bullets].join('\n')).not.toContain(words);
+    }
+    expect(composed.text.split(widening.WIDENED_RISK_MARKER_DOWN)).toHaveLength(2);
   });
 });

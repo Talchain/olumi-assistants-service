@@ -13,16 +13,32 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
  */
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
+import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
+import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
+import { readMoneyTotal } from './same-unit.js';
+import { sayFigure } from './say-figure.js';
+import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const OBJECTIVE_ASK_QUESTION = 'What should this model help you explore?';
+const TARGET_ASK_TAIL = "I'll propose it as your target.";
+
+/** The same exact host-owned words still count as said when the composer places the question apart from its context. */
+function ownAskAlreadySaid(wanted: string, recentReplies: readonly string[]): boolean {
+  const ending = wanted.endsWith(OBJECTIVE_ASK_QUESTION) ? OBJECTIVE_ASK_QUESTION
+    : wanted.endsWith(TARGET_ASK_TAIL) ? TARGET_ASK_TAIL : null;
+  const units = ending === null ? [wanted] : [wanted.slice(0, -ending.length).trimEnd(), ending].filter((s) => s !== '');
+  return recentReplies.some((reply) => units.every((unit) => reply.includes(unit)));
+}
 
 /** The goal node of a persisted graph, when there is exactly one. */
 function goalOf(graph: unknown): Rec | undefined {
@@ -60,12 +76,20 @@ export interface DecisionInputAskContext {
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
   readonly builtOrRan: boolean;
+  /** The selected current Run's UI cells own the horizon's chance wording. */
+  readonly chanceCells?: readonly CanonicalAnalysisCell[];
 }
 
 /** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
 function hasDurationLimit(graph: unknown): boolean {
   const ks = recordOf(graph)?.goal_constraints;
-  return Array.isArray(ks) && ks.some((k) => /week|month|day/i.test(String(recordOf(k)?.unit ?? '')));
+  return Array.isArray(ks) && ks.some((k) => {
+    const row = recordOf(k);
+    const unit = row?.unit;
+    const label = typeof row?.label === 'string' ? row.label : '';
+    // A money total measured per month/year is a target's rate, not a duration the analysis scores.
+    return readMoneyTotal(unit, label) === null && /week|month|day/i.test(String(unit ?? ''));
+  });
 }
 
 // ── DecisionGuideAI staging `69c05df1` `serverOpenQuestions.ts` (`splitServerOpenQuestions`), the consumer's predicate:
@@ -172,49 +196,163 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
   });
 }
 
-/** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
-const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
+/** The exact singular/plural prefixes identify the one horizon fact without interpreting narrator wording. */
+export const UNTESTED_HORIZON_PREFIXES = [
+  "This chance uses the model's numbers as they are today",
+  "These chances use the model's numbers as they are today",
+] as const;
+export const CHANCE_FREE_HORIZON_PREFIX = "This model doesn't yet say whether any option gets there";
+const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 
-/**
- * ⭐ A7, THE ONE RULE (DL 0df0e1 → Reasoning, 4 Oct; beat 2): the goal holds the brief's deadline (`goal_horizon_months`)
- * and no duration limit scores it, so the analysis says nothing about meeting it in time. The chat's host line
- * (`decisionInputLines`) and the Run's typed warning (`withUntestedHorizonWarning`) both say THIS sentence, so the two can
- * never disagree. `null` when there is no single goal, no held deadline, or a duration limit scores it.
- */
-export function untestedHorizonLine(graph: unknown): string | null {
+/** One horizon form for the reply and stored Run, from the same cells the UI reads. */
+export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): string | null {
+  const shown = cells.filter(cell => cell.kind === 'figure' || cell.kind === 'range').length;
+  if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1 });
   if (goalKindOf(graph) === 'share_by_date') return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const within = withinMonths(goal);
-  return within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
+  return within !== '' && !hasDurationLimit(graph) ? `${CHANCE_FREE_HORIZON_PREFIX}${within}.` : null;
+}
+
+/** The single goal's stated target in the user's unit, shared by the horizon and withheld-chance sentences. */
+export function statedTargetWords(graph: unknown): string | null {
+  const goal = goalOf(graph);
+  if (goal === undefined) return null;
+  const target = statedGoalTargetOf(recordOf(graph)!, goal);
+  if (target === null) return null;
+  const unit = target.unit ?? '';
+  const money = readMoneyTotal(unit, typeof goal.label === 'string' ? goal.label : '');
+  return sayFigure(target.value, money?.code ?? unit);
+}
+
+/**
+ * Format the established chance wording, including its held target/deadline and short present-number basis. This
+ * function supplies byte-stable identities for formatting and old-copy normalization; the cell rule above owns
+ * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
+ */
+export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean }): string | null {
+  if (goalKindOf(graph) === 'share_by_date') return null;
+  const goal = goalOf(graph);
+  if (goal === undefined) return null;
+  const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
+  const basis = `${prefix}; the model doesn't project how they change over time yet`;
+  const within = withinMonths(goal);
+  if (within !== '' && !hasDurationLimit(graph)) {
+    const target = statedTargetWords(graph);
+    const destination = target === null ? 'get there' : `reach ${target}`;
+    return `${basis}, so it can't say whether you'll ${destination}${within}.`;
+  }
+  return opts?.besideChance ? `${basis}.` : null;
 }
 
 /** The code the Run carries A7 under: an `info` inference warning whose `message` a consumer shows verbatim. */
 export const GOAL_HORIZON_NOT_TESTED = 'GOAL_HORIZON_NOT_TESTED';
+/** A retained diagnostic, never a range licence: its original horizon qualifiers conflicted. */
+export const GOAL_CHANCE_RANGE_HORIZON_CONFLICT = 'GOAL_CHANCE_RANGE_HORIZON_CONFLICT';
 
 /**
- * ⭐ A7 AS A TYPED FACT ON THE RUN (DL 0df0e1, beat 2). The PL's beat-2 wording separates "no option reaches the target"
- * from "the deadline is untested", and until now the second existed only as chat text, so no surface beside the chat
- * could say it without re-deriving A7. Appends ONE `info` warning to the envelope's `inference_warnings` (the carrier
- * every withheld-figure reader already keys on by code) when `untestedHorizonLine` holds: A7's sentence verbatim, and the
- * goal's id. A withdrawn accumulation always carries the same sentence, even with no deadline or a duration limit.
- * It withholds nothing and moves no figure. An envelope already carrying the code is returned as is. Pure.
+ * Write the horizon as one typed Run fact after the final current cells are projected. A point/range cell supplies
+ * the chance form; otherwise held months supply staging's chance-free form. No figure or licence is inferred here.
+ * A withdrawn accumulation retains that sentence even with no deadline or a duration limit.
  */
-export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown, accumulationWithdrawn = false): E {
-  // A withdrawn time calculation leaves the horizon untested even when a duration limit or no deadline remains.
+export function withUntestedHorizonWarning<E>(
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] | boolean = [], accumulationWithdrawn = false,
+): E {
+  // Retain staging's pre-cell third-argument form for callers that only carry the withdrawal fact.
+  return withCellHorizonWarning(envelope, graph, typeof cells === 'boolean' ? [] : cells,
+    typeof cells === 'boolean' ? cells : accumulationWithdrawn);
+}
+
+/**
+ * The same final-cell rule also writes the short basis where a visible point/range has no untested month count, and
+ * keeps any point licence's horizon_line in agreement. The presence/order of a licence or warning chooses no form.
+ */
+export function withShortHorizonBesideChance<E>(
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = [], accumulationWithdrawn = false,
+): E {
+  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn);
+}
+
+/** A horizon is tested only along the selected goal's Run-attested identity dependencies. */
+function accumulationTestedAtGoalHorizon(graph: unknown, envelope: Rec): boolean {
   const goal = goalOf(graph);
-  const line = untestedHorizonLine(graph) ?? (accumulationWithdrawn && goal !== undefined
-    ? `${A7_OPENER}${withinMonths(goal)}.` : null);
-  if (line === null || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
-  const env = envelope as Rec;
-  const existing: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
-  if (existing.some((w) => recordOf(w)?.code === GOAL_HORIZON_NOT_TESTED)) return envelope;
-  const goalId = goalOf(graph)?.id;
-  const warning = {
-    code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: line,
-    ...(typeof goalId === 'string' ? { node_ids: [goalId] } : {}),
+  const rawNodes = recordOf(graph)?.nodes;
+  if (goal === undefined || !finite(goal.goal_horizon_months) || !Array.isArray(rawNodes)) return false;
+  const nodes = rawNodes.map(recordOf).filter((node): node is Rec => node !== undefined);
+  const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
+  // This reader binds accumulation attestations to their declared month and positional inputs.
+  const evaluated = evaluatedIdentityCarriers(nodes, evaluations);
+  const byId = new Map(nodes.map(node => [node.id, node] as const));
+  const seen = new Set<unknown>();
+  const tested = (id: unknown): boolean => {
+    if (seen.has(id) || !evaluated.has(id)) return false;
+    seen.add(id);
+    const identity = recordOf(byId.get(id)?.nonlinear_identity);
+    if (identity?.operation === 'accumulation') return identity.horizon_months === goal.goal_horizon_months;
+    return Array.isArray(identity?.factor_ids) && identity.factor_ids.some(tested);
   };
-  return { ...env, inference_warnings: [...existing, warning] } as E;
+  return tested(goal.id);
+}
+
+/** Replace any intermediate wording with the final cell form; the warning and licence stay in agreement. */
+function withCellHorizonWarning<E>(
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[], accumulationWithdrawn: boolean,
+): E {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const env = envelope as Rec;
+  const warnings: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
+  const goal = goalOf(graph);
+  const line = !accumulationWithdrawn && accumulationTestedAtGoalHorizon(graph, env) ? null
+    : untestedHorizonLineForCells(graph, cells) ?? (accumulationWithdrawn && goal !== undefined
+      ? `${A7_OPENER}${withinMonths(goal)}.` : null);
+  const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');
+  const hasRange = cells.some(cell => cell.kind === 'range');
+  let changed = false;
+  let wroteHorizon = false;
+  const next = warnings.flatMap(w => {
+    const r = recordOf(w);
+    // Removing or normalizing the global qualifier must not repair a range the original cells refused to admit.
+    if (r?.code === GOAL_CHANCE_RANGE && !hasRange && typeof r.horizon_line === 'string'
+      && warnings.some(prior => recordOf(prior)?.code === GOAL_HORIZON_NOT_TESTED
+        && recordOf(prior)?.message !== r.horizon_line)) {
+      changed = true;
+      return [{ ...r, code: GOAL_CHANCE_RANGE_HORIZON_CONFLICT, original_code: GOAL_CHANCE_RANGE,
+        ...(r.message === undefined ? {} : { original_message: r.message }),
+        message: 'Range not shown: its recorded horizon qualifiers conflict.',
+      }];
+    }
+    if (r?.code === GOAL_HORIZON_NOT_TESTED) {
+      if (line === null || wroteHorizon) { changed = true; return []; }
+      wroteHorizon = true;
+      if (r.message === line) return [w];
+      changed = true;
+      return [{ ...r, message: line }];
+    }
+    // Only a range the original projection admitted may have its metadata aligned; an inconsistent/barred record
+    // stays under that reader's existing authority and is never repaired into display permission here.
+    if (r?.code === GOAL_CHANCE_LICENSED || (r?.code === GOAL_CHANCE_RANGE && hasRange)) {
+      if (line !== null && hasChance) {
+        if (r.horizon_untested === true && r.horizon_line === line) return [w];
+        changed = true;
+        return [{ ...r, horizon_untested: true, horizon_line: line }];
+      }
+      if (r.horizon_line !== undefined || r.horizon_untested !== undefined) {
+        changed = true;
+        const { horizon_line: _line, horizon_untested: _untested, ...licence } = r;
+        return [licence];
+      }
+    }
+    return [w];
+  });
+  if (line !== null && !wroteHorizon) {
+    const goalId = goalOf(graph)?.id;
+    next.push({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: line,
+      ...(typeof goalId === 'string' ? { node_ids: [goalId] } : {}),
+    });
+    changed = true;
+  }
+  return changed ? { ...env, inference_warnings: next } as E : envelope;
 }
 
 /** The one ask writer, before display scrubbing or turn eligibility. */
@@ -228,7 +366,7 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
   // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
   if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineOf(goal) === undefined ? chanceGoalDeadlineAsk(label) : null;
-  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
+  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`
     : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
 }
 
@@ -246,11 +384,11 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
   const leftOut = leftOutLines(graph, label);
-  const a7 = untestedHorizonLine(graph);
+  const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
   const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
-  const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
+  const ask = wanted !== null && ownAskAlreadySaid(wanted, ctx.recentReplies ?? []) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
@@ -263,16 +401,16 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
  * increase, a ceiling where it is minimised, and neutral words otherwise — never "the least your costs must reach".
  */
 function targetAsk(graph: unknown, goal: Rec, label: string, within: string): string {
-  if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? I'll propose it as your target.`;
-  if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? I'll propose it as your target.`;
-  return `What figure should "${label}" reach or stay under${within}? I'll propose it as your target.`;
+  if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? ${TARGET_ASK_TAIL}`;
+  if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? ${TARGET_ASK_TAIL}`;
+  return `What figure should "${label}" reach or stay under${within}? ${TARGET_ASK_TAIL}`;
 }
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */
 export function isDecisionInputAsk(line: string): boolean {
   if (line === 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?') return true;
   if (line.startsWith('How long would ') && line.endsWith(' take with the team you have now?')) return true;
-  return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith('What should this model help you explore?');
+  return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith(OBJECTIVE_ASK_QUESTION);
 }
 
 /** The one framing or target ask, or null. */
@@ -290,12 +428,13 @@ export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): 
 export function withA7AfterGate(
   text: string,
   graph: unknown,
-  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan'>,
+  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan' | 'chanceCells'>,
   statusText: string | null,
 ): string {
   // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.
   const owedLines = decisionInputLines(graph, { ...ctx, restingText: '', questionsToggle: false });
-  const a7 = owedLines.find((l) => l.startsWith(A7_OPENER));
+  const a7 = owedLines.find((l) => l.startsWith(CHANCE_FREE_HORIZON_PREFIX)
+    || UNTESTED_HORIZON_PREFIXES.some((prefix) => l.startsWith(prefix)));
   if (a7 === undefined || text.includes(a7)) return text;
   const rest = textAtRest(text);
   if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;

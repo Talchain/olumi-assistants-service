@@ -12,10 +12,15 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { decisionInputAsk } from '../decision-input-ask.js';
+import { sentencesOf } from '../reply/compose-reply.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE } from '../root-line.js';
+import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -24,7 +29,8 @@ const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leade
 const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0002';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
-const SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is it today?';
+const WITHHELD_FINDING = 'This run doesn’t yet show each option’s chance of meeting your goal.';
+const SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
 
 type Rec = Record<string, unknown>;
 const option = (id: string, label: string, interventions: Rec, is_baseline = false): Rec => ({
@@ -98,15 +104,51 @@ async function freshApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
     graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
-  app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: graphWith(riskValued, riskLabel), graph_hash: HASH, analysis_ready: READY,
-    analysis_state: readback === 'stale' ? staleState() : state(),
-    ...(readback === 'no_result' ? {} : { analysis_result: SERVED.block }) }));
+  app.post('/assist/v1/scenarios/:id/graph', async () => {
+    const graph = graphWith(riskValued, riskLabel);
+    const analysis_state = readback === 'stale' ? staleState() : state();
+    const analysis_result = readback === 'no_result' ? null : SERVED.block;
+    // Reconstruct only the successful fact wrapper for the captured Run; the read's public result owns cell gating.
+    const canonical_analysis_view = projectCanonicalAnalysisView({ graph,
+      runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+        scenario_id: SCENARIO, run_id: 'fixture-unvalued-root-run', summary: SERVED.block.summary,
+        leading_option_id: SERVED.block.leading_option_id, enrichment: SERVED.block.enrichment,
+        graph_hash_at_run: HASH, computed_at: analysis_state.run_state.computed_at,
+      } } as never,
+      analysisState: analysis_state as never, analysisReady: READY, currentResult: analysis_result as never });
+    return { graph, graph_hash: HASH, analysis_ready: READY, analysis_state, canonical_analysis_view,
+      ...(analysis_result === null ? {} : { analysis_result }) };
+  });
   await app.register(agentV1TurnRoute);
   await app.ready();
   return app;
 }
 
-type Body = { assistant_text: string; narration?: { status: string; run_key: string } };
+type Body = { assistant_text: string; _answer_shape?: AnswerShape; narration?: { status: string; run_key: string } };
+
+function expectWithheldContract(body: Body, rootLine?: string): void {
+  const shape = body._answer_shape;
+  expect(shape, body.assistant_text).toBeDefined();
+  expect(shape!.headline).toBe('Not shown yet; why is under More detail');
+  const rootOwnsAsk = rootLine?.includes('?') === true;
+  const targetAsk = rootOwnsAsk ? null : decisionInputAsk(graphWith(riskValued, riskLabel), {
+    restingText: [RUN_RESULT_READY_TEXT, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
+    questionsToggle: false, awaitingApproval: false, builtOrRan: true,
+  });
+  if (!rootOwnsAsk) expect(targetAsk).toBe('What figure should "Meet our next feature-launch deadline" reach or stay under? I\'ll propose it as your target.');
+  const targetSentences = targetAsk === null ? [] : sentencesOf(targetAsk);
+  expect(shape!.bullets).toEqual([rootOwnsAsk ? rootLine! : targetSentences[0]!]);
+  expect(shape!.detail).toBe([RUN_RESULT_READY_TEXT, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1), WITHHELD_FINDING].filter(Boolean).join('\n\n'));
+  expect(shape!.detail.split(WITHHELD_FINDING)).toHaveLength(2);
+  expect(body.assistant_text.split(WITHHELD_FINDING)).toHaveLength(2);
+  expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
+  expect(body.assistant_text.split(RUN_RESULT_READY_TEXT)).toHaveLength(2);
+  if (rootLine !== undefined) expect(body.assistant_text.split(rootLine)).toHaveLength(2);
+  for (const sentence of targetSentences) expect(body.assistant_text.split(sentence)).toHaveLength(2);
+  const face = [shape!.headline, ...shape!.bullets].join('\n');
+  expect(face).not.toContain(WITHHELD_FINDING);
+  expect(face.match(/\?/g) ?? []).toHaveLength(1);
+}
 
 describe('a native Run with an unvalued risk root says it is treated as zero, and asks for it (live route)', () => {
   let app: FastifyInstance;
@@ -123,9 +165,10 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   const runTurn = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
 
-  it('RED: the Run reply carries the disclosure AND the ask, after Olumi\'s fixed line', async () => {
+  it('RED: the Run face leads with the withheld finding and one disclosure/ask; Olumi\'s ready line is in detail', async () => {
     const body = (await runTurn(randomUUID())).json() as Body;
-    expect(body.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expect(goalChanceWithheldForAgent(SERVED.block, graphWith(riskValued, riskLabel))?.say).toBe(WITHHELD_FINDING);
+    expectWithheldContract(body, riskValued ? undefined : SENTENCE);
     expect(body.assistant_text).toContain(SENTENCE);
     expect(body.assistant_text.split(SENTENCE)).toHaveLength(2); // said once
   });
@@ -160,7 +203,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   it('CONTROL: the same risk with a figure → no treated-as-zero sentence', async () => {
     riskValued = true;
     const body = (await runTurn(randomUUID())).json() as Body;
-    expect(body.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expectWithheldContract(body);
     expect(body.assistant_text).not.toContain('treats it as zero');
   });
 
@@ -203,7 +246,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     riskLabel = label;
     const turnId = randomUUID();
     const first = (await runTurn(turnId)).json() as Body;
-    expect(first.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expectWithheldContract(first, TREATED_AS_ZERO_UNNAMED_ONE);
     expect(first.assistant_text.split(TREATED_AS_ZERO_UNNAMED_ONE)).toHaveLength(2);
     expect(first.assistant_text.split('treats it as zero')).toHaveLength(2);
     expect(first.assistant_text).not.toContain(tail);
@@ -221,7 +264,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   ])('CONTROL: %s → the labelled sentence, whole, once', async (_n, label) => {
     riskLabel = label;
     const shown = label.replace(/\s+/g, ' ');
-    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is "${shown}" today?`;
     const body = (await runTurn(randomUUID())).json() as Body;
     expect(body.assistant_text.split(sentence)).toHaveLength(2);
     expect(body.assistant_text).not.toContain(TREATED_AS_ZERO_UNNAMED_ONE);
@@ -236,7 +279,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     ['the option-name gate', 'Hire a Tech Lead backlog'],
     ['a line break that reached the check', 'Demand\nfalls'],
   ])('survivesReplyEditors: %s → not quoted', (_n, label) => {
-    const line = `No figure is set for "${label}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    const line = `No figure is set for "${label}" yet, so the analysis treats it as zero. How likely or how large is "${label}" today?`;
     expect(survivesReplyEditors(line, graphWith(false, label), READY)).toBe(false);
   });
   // Plural and 3+: the WHOLE line is quoted or none of it; the count is the typed roots'.
@@ -250,15 +293,15 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   };
   it.each([
     ['two ordinary labels', ['Demand shortfall', 'Supplier delay'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" yet, so the analysis treats them as zero. How likely or how large is each today?'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" today?'],
     ['three ordinary labels', ['Demand shortfall', 'Supplier delay', 'Churn spike'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each today?'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" and 1 more today?'],
     ['two, one unsafe (either position)', ['Demand shortfall', 'Hire a Tech Lead leads. Demand falls'],
       '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
     ['two, the first unsafe', ['Demand prop_abcdef12 falls', 'Supplier delay'],
       '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
     ['three, the undisplayed third unsafe (it never reaches the text)', ['Demand shortfall', 'Supplier delay', 'The analysis shows which option leads'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each today?'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" and 1 more today?'],
     ['three, a displayed one unsafe', ['Demand shortfall', 'The analysis shows which option leads', 'Supplier delay'],
       '3 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
   ])('treatedAsZeroReplyLine, %s → the exact line', (_n, labels, line) => {
@@ -274,7 +317,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   });
 
   it('the protected line is kept only where it stands whole; a neighbouring ranking sentence still goes', () => {
-    const line = 'No figure is set for "Competitor wins. Demand falls" yet, so the analysis treats it as zero. How likely or how large is it today?';
+    const line = 'No figure is set for "Competitor wins. Demand falls" yet, so the analysis treats it as zero. How likely or how large is "Competitor wins. Demand falls" today?';
     const text = `Hire a Tech Lead is the best option here.\n\n${line}`;
     const out = dropRankingSentences(text, undefined, [line]);
     expect(out.text).toBe(line);

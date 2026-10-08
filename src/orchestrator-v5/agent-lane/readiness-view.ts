@@ -169,11 +169,11 @@ export function treatedAsZeroLine(view: ReadinessView): string | null {
   // One line, whatever the label holds: a line break inside a quoted label would split the sentence in two.
   const roots = (view.treated_as_zero ?? []).map((label) => label.replace(/\s+/g, ' ').trim());
   if (roots.length === 1) {
-    return `No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    return `No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is "${roots[0]}" today?`;
   }
   if (roots.length > 1) {
     const labels = `"${roots[0]}" and "${roots[1]}"${roots.length > 2 ? ` and ${roots.length - 2} more` : ''}`;
-    return `No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each today?`;
+    return `No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each of ${labels} today?`;
   }
   return null;
 }

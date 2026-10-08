@@ -4,8 +4,8 @@
  * the one question that unlocks it — and the Agent is licensed to say the shares as model findings in the goal's own
  * direction, never as a chance of reaching the target.
  *
- * Served before (red team #87 5999041843, rt10b Run 2): "This run doesn't show how often each option reaches the goal's
- * target." then "What is the most that 'monthly cancellations' can be?" — for the target the user had just set.
+ * Served before (red team #87 5999041843, rt10b Run 2): a generic withheld opening, then
+ * "What is the most that 'monthly cancellations' can be?" — for the target the user had just set.
  *
  * Fixture: the red team's post-edit graph and the REAL PLoT body for its own payload (minimise, 2473ace). Science asked
  * for a plural and a singular goal label: both bound by their exact words.

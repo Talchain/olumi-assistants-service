@@ -15,6 +15,17 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { asSent } from './helpers/as-sent.js';
 import { readFileSync } from 'node:fs';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
+
+let lastComposeInput: ReplyComposeInput | undefined;
+vi.mock('../reply/compose-reply.js', async (original) => {
+  const actual = await original<typeof import('../reply/compose-reply.js')>();
+  return { ...actual, composeReplyShape: (input: ReplyComposeInput) => {
+    lastComposeInput = structuredClone(input);
+    return actual.composeReplyShape(input);
+  } };
+});
 
 let n = 0;
 let SCENARIO = '';
@@ -97,7 +108,7 @@ vi.mock('../../../adapters/llm/router.js', () => {
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({ getSystemPrompt: async () => 'test system prompt' }));
 
 type Chip = { id: string; label: string; message: string; detail?: string };
-type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
+type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
   _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string; conflict_fields?: string[]; rejected_levels?: Record<string, unknown>[] }[] } };
 
 /** Scripted OpenAI: each Agent model call takes the next reply; anything that is not OpenAI throws. */
@@ -174,7 +185,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.useRealTimers(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; wideningAnswer = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
+  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; wideningAnswer = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; lastComposeInput = undefined; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     // Issuance allows 2 seconds of clock skew; separate public turns so the preceding answer cannot be the issuer.
@@ -283,18 +294,17 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     })[0];
   };
 
-  it('P05b-8a: construction with one risk puts the relabelled risks press first and leaves the base reply byte-identical', async () => {
+  it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
     const t = await thinConstruction(1);
     expect(t.suggested_actions[0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
     expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
     expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
-    // Measured from the unmodified route in the RED run; the offer must leave these bytes unchanged.
-    expect(t.assistant_text).toBe([
-      'Here is the model to explore together.',
-      'The first analysis could not run yet: Factor "Pro plan price" is currently £49. What should option "Raise to £59" set it to?',
-      "This model doesn't yet say whether any option gets there within 12 months.",
-      'Questions this model does not answer yet: Does "Total MRR" get there within 12 months? The model holds the deadline; no result answers that yet. The analysis can\'t run yet. The values involved are Olumi\'s own suggestions, not yours — ask Olumi to work them through, or set them yourself.',
-    ].join('\n\n'));
+    // The live pre-composition base supplies the sentence identities; shaping may move them but loses/adds none.
+    expect(lastComposeInput?.faceContract).toBe('draft');
+    expect(lastComposeInput?.text).toBeDefined();
+    expect(sentenceMultiset(t.assistant_text)).toEqual(sentenceMultiset(lastComposeInput!.text));
+    expect(t._answer_shape).toBeDefined();
+    expect(t.assistant_text).toBe(deriveAnswerTextFromShape(t._answer_shape!));
   }, 120_000);
 
   it('R1 first-draft construction with a pending identity approval keeps exactly the offers without thin, including approve and decline', async () => {

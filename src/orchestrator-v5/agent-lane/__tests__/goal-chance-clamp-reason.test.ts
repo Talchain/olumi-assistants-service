@@ -11,7 +11,7 @@ import {
   runWithheldGoalFigures,
 } from '../../../orchestrator/context/option-result-source.js';
 
-const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
+const OPENING = 'This run doesn’t yet show each option’s chance of meeting your goal.';
 const CUT = {
   code: 'GOAL_FIGURES_USER_EFFECT_CLAMPED',
   severity: 'warning',
@@ -40,7 +40,7 @@ describe('the Agent reads PLoT #422\'s cut-link withhold', () => {
     expect(g?.node_ids).toEqual(['paying_subscribers', 'mrr']);
   });
 
-  it('CONTROL — the identity code alone is byte-identical to before', () => {
+  it('CONTROL — the identity code alone keeps its reason byte-identical after the new opening', () => {
     expect(goalChanceWithheldForAgent(block([IDENTITY]))?.say)
       .toBe(`${OPENING} Olumi reads 'MRR' as 'Pro plan price' × 'Paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.`);
   });

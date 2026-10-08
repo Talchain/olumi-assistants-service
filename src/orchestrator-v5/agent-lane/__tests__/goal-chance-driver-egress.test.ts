@@ -860,7 +860,8 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
     'Chances for every option are shown as ranges.',
     'The run does not show how often each option was supported.',
     // the producer's own opening (served verbatim on Wave B/B3): the producer owns its words
-    'This run doesn’t show how often each option reaches the goal’s target.',
+    'This run doesn’t yet show each option’s chance of reaching £20,000.',
+    'This run doesn’t yet show each option’s chance of meeting your goal.',
     // the gate's own no-target message (goal-chance-gate.ts)
     'The goal has no stated target, so no option has a chance of meeting one to show.',
   ])('MUST NOT FIRE (twin): %s', (text) => {

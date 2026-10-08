@@ -31,6 +31,7 @@ import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-as
 import { guidedSizingActions, guidedSizingForRun, guidedSizingOnlyPlaceholders, guidedSizingReplyText,
   guidedSizingWordDraft, legacyGuidedSizingReplyText, withoutStaleGuidedSizingWords, type GuidedSizingDraft } from './guided-sizing.js';
 import { notTargetTestableSentence, untestableTargetTail, type TargetTestability } from '../admission/target-testability.js';
+import { statedTargetWords } from './decision-input-ask.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
@@ -44,8 +45,11 @@ export interface GoalChanceWithheld {
   readonly option_ids?: readonly string[];
 }
 
-// AIQ 5887096626: the one register ("reaches the target in N% of model runs", 5885116642).
-const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
+// DL words ruling (8 Oct): chance vocabulary, with the same held-target words as the horizon line.
+function withheldOpeningForGraph(graph: unknown): string {
+  const target = statedTargetWords(graph);
+  return `This run doesn’t yet show each option’s chance of ${target === null ? 'meeting your goal' : `reaching ${target}`}.`;
+}
 export const RANGE_OPENING = 'This run shows some options’ chances only as a range.';
 /** S2a removes only the scoped points; the other options keep their licences. */
 export const SHARE_APPROXIMATION_NOTE =
@@ -171,7 +175,7 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   const scoredIds = [...new Set(readOptionResultSources(recordOf(block.enrichment) ?? block).flat().map(r => r.option_id ?? r.id)
     .filter((id): id is string => typeof id === 'string' && id !== ''))];
   const opening = Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}).length > 0
-    ? RANGE_OPENING : OPENING;
+    ? RANGE_OPENING : withheldOpeningForGraph(graph);
   const sourceWarnings = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : []))
     .map(recordOf)
@@ -378,12 +382,20 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
  * sentence verbatim, it is owed as its own line (`withDisclosures`). The latest run decides — an explicit Run, or the first
  * pass inside a build — and a later run that did not withhold owes nothing.
  */
-export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+export function goalChanceLineOwed(
+  toolResults: readonly unknown[], replyText: string,
+  opts: { readonly gateReasonOwed?: boolean; readonly identityAskOwed?: boolean; readonly graph?: unknown } = {},
+): string | null {
+  // ONE reply contract: the typed identity ask owns an unconfirmed reading, even when the narrator already echoed
+  // it. A gate that is saying the same goal-chance cause owns that disclosure instead. Suppress here, at the producer,
+  // before any owed line exists; the composer never filters a duplicate concept out of the finished reply.
+  if (identityAskLineOwed(toolResults, '') !== null || opts.identityAskOwed === true || opts.gateReasonOwed === true) return null;
   const say = goalChanceSayFromThisTurn(toolResults);
   if (say === null || sameWordsIn(replyText, say)) return null;
   // MC D1 (Codex buddy r2 P2): a composite line (the opening + a warning's own words) owes only what the reply does not
   // already carry — the Agent quoting the placeholder's "Set them …" must not get it a second time.
-  const opening = [OPENING, RANGE_OPENING].find(line => say.startsWith(line));
+  const builtOpening = withheldOpeningForGraph(opts.graph);
+  const opening = say.startsWith(builtOpening) ? builtOpening : say.startsWith(RANGE_OPENING) ? RANGE_OPENING : undefined;
   if (opening !== undefined && say.length > opening.length && sameWordsIn(replyText, say.slice(opening.length).trim())) {
     return sameWordsIn(replyText, opening) ? null : opening;
   }

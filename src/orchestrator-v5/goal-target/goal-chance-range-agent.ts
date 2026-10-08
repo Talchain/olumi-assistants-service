@@ -221,6 +221,45 @@ export function goalChanceDriverDisplayForAgent(result: unknown, graph: unknown)
   return out;
 }
 
+/**
+ * ⭐ THE HEADLINE'S "WHAT WOULD CHANGE IT" (#87 6 Oct ruling: chance + uncertainty + driver + what would change it; DL ruling
+ * on #2840, 8 Oct; Science §(n).3). ONE line for the Run's face (COPY-SHAPE slot 2), naming only the licensed CHANCE driver
+ * the screen's own "It rests most on …" sentence names, never the outcome-sensitivity leader and never a share of runs.
+ * One unscoped clause ONLY when every option with a chance on screen (point or range) rests on the same driver; otherwise
+ * one per option that has a driver, in licence order, and an option with no driver gets nothing (DL #2840 review P1-2).
+ * `null` when no option's chance driver speaks (a withheld chance is silent).
+ */
+export function whatChangesFaceLine(result: unknown, graph: unknown): string | null {
+  const nodes = rec(graph)?.nodes;
+  const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
+    .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
+  const speaks = goalChanceDriverDisplayForAgent(result, graph);
+  const ranges = goalChanceRangeDisplayForAgent(result, graph);
+  const shown = [...Object.keys(pointDisplayForAgent(result, ranges)), ...Object.keys(ranges ?? {})];
+  const clauses: { option_id: string; key: string; clause: string }[] = [];
+  for (const { option_id: optionId, driver: d } of goalChanceDriversForAgent(result, graph)) {
+    if (!Object.hasOwn(speaks, optionId)) continue;
+    if (d.kind === 'factor_value') {
+      const label = labels.get(d.factor_id as string);
+      if (label !== undefined) clauses.push({ option_id: optionId, key: `factor:${d.factor_id}`, clause: `the value of ‘${label}’` });
+      continue;
+    }
+    const from = labels.get(d.from as string);
+    const to = labels.get(d.to as string);
+    if (from === undefined || to === undefined) continue;
+    clauses.push(d.kind === 'link_strength'
+      ? { option_id: optionId, key: `strength:${d.from}->${d.to}`, clause: `how strongly ‘${from}’ affects ‘${to}’` }
+      : { option_id: optionId, key: `existence:${d.from}->${d.to}`, clause: `whether ‘${from}’ really affects ‘${to}’` });
+  }
+  if (clauses.length === 0) return null;
+  if (clauses.every((c) => c.key === clauses[0].key) && shown.every((o) => clauses.some((c) => c.option_id === o))) {
+    return `What would change it: ${clauses[0].clause}.`;
+  }
+  const optionLabel = (optionId: string): string => labels.get(optionId) ?? optionId;
+  if (clauses.some((c) => !labels.has(c.option_id))) return null; // never an id in the user's words
+  return `What would change it: ${clauses.map((c) => `for ‘${optionLabel(c.option_id)}’, ${c.clause}`).join('; ')}.`;
+}
+
 /** The two Agent doors read the same per-option entitlement, independently of permission to name a leader. */
 export function goalChanceFactsForAgent(result: unknown, graph: unknown, current: boolean): {
   goal_chance_licence?: ReturnType<typeof goalChanceLicenceForAgent>;
