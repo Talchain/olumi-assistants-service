@@ -32,6 +32,11 @@ export function evaluatedIdentityCarriers(nodes: readonly Rec[], identityEvaluat
     if (e.evaluated !== true || !isRec(identity) || !identityCanCarryExactLinks(nodes, identity)) return false;
     const declared: unknown[] = Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
     const said = Array.isArray(e.factor_ids) ? e.factor_ids : undefined;
+    // Accumulation's inputs are positional (stock, churn, inflow), and its result belongs to one horizon.
+    // A different month or reordered input tuple never attests this declaration; products/sums remain commutative.
+    if (identity.operation === 'accumulation' && (e.horizon_months !== identity.horizon_months
+      || typeof identity.horizon_months !== 'number'
+      || (said !== undefined && said.some((f, index) => f !== declared[index])))) return false;
     return (e.operation === undefined || e.operation === identity.operation)
       // The SAME operand set: no repeats, and each side holds every operand of the other (Codex buddy r1 F4: [price, price]).
       && (said === undefined || (new Set(said).size === said.length && said.length === declared.length

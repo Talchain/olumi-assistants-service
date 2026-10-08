@@ -14,6 +14,24 @@ const graph = (priceUnit: string): Rec => ({
   edges: [{ from: 'price', to: 'mrr' }, { from: 'subscribers', to: 'mrr' }],
 });
 
+/** The goal stays a binary product; ISL derives the stock at its horizon from three levelled inputs. */
+const accumulationGraph = (): Rec => {
+  const g = graph('£/subscriber/month');
+  g.nodes[0].goal_horizon_months = 12;
+  g.nodes[0].nonlinear_identity.factor_ids = ['price', 'subscribers_at_12'];
+  g.nodes[2] = { id: 'subscribers_at_12', kind: 'outcome', label: 'Subscribers at month 12', scale_frame: 5000,
+    nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'churn', 'inflow'],
+      horizon_months: 12, rate_scale: 0.01, stated_in_brief: false } };
+  g.nodes.push(
+    { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { raw_value: 250, value: 0.125, cap: 2000, unit: 'subscribers' } },
+    { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { raw_value: 3, value: 0.03, cap: 100, unit: '%' } },
+    { id: 'inflow', kind: 'factor', label: 'New subscribers each month', observed_state: { raw_value: 30, value: 0.15, cap: 200, unit: 'subscribers/month' } },
+  );
+  g.edges = [{ from: 'price', to: 'mrr' }, { from: 'subscribers_at_12', to: 'mrr' },
+    ...['stock_today', 'churn', 'inflow'].map(from => ({ from, to: 'subscribers_at_12' }))];
+  return g;
+};
+
 describe('P45 confirmed-product baseline preserves the confirmed rate reading in the target unit', () => {
   it('a confirmed implicit per-count rate derives the goal current level without a second ask', () => {
     const g = graph('£/month');
@@ -32,5 +50,31 @@ describe('P45 confirmed-product baseline preserves the confirmed rate reading in
     const verdict = targetTestabilityOf(g);
     expect(verdict).toEqual({ kind: 'unchecked', goal_id: 'mrr', unchecked: ['P5'] });
     expect(targetNotTestableWarning(g, verdict, [], 'GOAL_FIGURES_TARGET_NOT_TESTABLE')).toBeNull();
+  });
+
+  it('accumulation subscribers_at_12 with all three input levels meets P1 without a made-up derived level', () => {
+    const g = accumulationGraph();
+    const verdict = targetTestabilityOf(g);
+    expect(verdict).toEqual({ kind: 'unchecked', goal_id: 'mrr', unchecked: ['P5'] });
+    expect(g.nodes.find((n: Rec) => n.id === 'subscribers_at_12')).not.toHaveProperty('observed_state');
+    expect(targetNotTestableWarning(g, verdict, [], 'GOAL_FIGURES_TARGET_NOT_TESTABLE')).toBeNull();
+  });
+
+  it.each(['stock_today', 'churn', 'inflow'])('accumulation subscribers_at_12 missing the level of %s cannot supply the goal baseline', id => {
+    const g = accumulationGraph();
+    delete g.nodes.find((n: Rec) => n.id === id).observed_state.raw_value;
+    expect(targetTestabilityOf(g)).toEqual({ kind: 'not_testable', goal_id: 'mrr',
+      failures: [{ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' }] });
+    // CONTROL: this same carrier with that part levelled meets the precondition.
+    expect(targetTestabilityOf(accumulationGraph())).toEqual({ kind: 'unchecked', goal_id: 'mrr', unchecked: ['P5'] });
+  });
+
+  it('accumulation subscribers_at_12 at an old deadline cannot supply the current horizon baseline', () => {
+    const g = accumulationGraph();
+    g.nodes[0].goal_horizon_months = 18;
+    expect(targetTestabilityOf(g)).toEqual({ kind: 'not_testable', goal_id: 'mrr',
+      failures: [{ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' }] });
+    g.nodes.find((n: Rec) => n.id === 'subscribers_at_12').nonlinear_identity.horizon_months = 18;
+    expect(targetTestabilityOf(g)).toEqual({ kind: 'unchecked', goal_id: 'mrr', unchecked: ['P5'] });
   });
 });
