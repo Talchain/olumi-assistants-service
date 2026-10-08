@@ -98,6 +98,10 @@ export interface Proposal {
    *  no-op rather than a second write. */
   readonly idempotency_key?: string;
   readonly apply_started_at?: string;
+  /** Numeric scenario revision captured and checkpointed before the first
+   * append. Reconciliation must preserve it even when the analysis hash has
+   * not changed. Separate from model_revision, which is the analysis hash. */
+  readonly expected_graph_revision?: number;
   /** Set on recordApplied. Proof it persisted, from the mutation path. */
   readonly receipt_id?: string;
   readonly applied_at?: string;
@@ -267,6 +271,27 @@ export function beginApply(
     idempotency_key: opts.idempotency_key,
     apply_started_at: opts.apply_started_at,
   });
+}
+
+/** Pin the revision of the adapter's combined graph read before it appends. */
+export function pinApplyRevision(store: ProposalStore, id: string, revision: number): ProposalStore {
+  const p = find(store, id);
+  assertState(p.status === 'apply_in_flight', 'only an in-flight apply can pin its graph revision');
+  assertState(Number.isSafeInteger(revision) && revision >= 0, 'a valid numeric graph revision is required');
+  assertState(p.expected_graph_revision === undefined || p.expected_graph_revision === revision,
+    'an apply must never replace its original graph revision');
+  return replace(store, { ...p, expected_graph_revision: revision });
+}
+
+/** A legacy unknown save has no revision with which a new write can safely
+ * reconcile it. Retain the unknown outcome while allowing a fresh offer. */
+export function recordUnpinnedApplyUnresolved(store: ProposalStore, id: string, at: string): ProposalStore {
+  const p = find(store, id);
+  assertState(p.status === 'apply_in_flight', 'only an in-flight apply can become unresolved');
+  assertState(p.expected_graph_revision === undefined
+    || !Number.isSafeInteger(p.expected_graph_revision) || p.expected_graph_revision < 0,
+  'a pinned apply uses ordinary reconciliation');
+  return replace(store, { ...p, status: 'unresolved', unresolved_at: at });
 }
 
 /**
