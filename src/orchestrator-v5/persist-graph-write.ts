@@ -118,6 +118,31 @@ import {
 } from './persisted-graph-invariants.js';
 import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
 import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
+import { preconditionRiskLinkViolations } from '../orchestrator/graph-structure-validator.js';
+import type { GraphV3T } from '../schemas/cee-v3.js';
+
+/** A semantic representation refusal; its label-based reason is safe for the authorised writer's reply. */
+export class PreconditionRiskLinkWriteError extends Error {
+  readonly code = 'PRECONDITION_RISK_LINKED' as const;
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'PreconditionRiskLinkWriteError';
+  }
+}
+
+/** All whole-graph writers use the same rule as edit/apply, including a restore's return leg. Never repairs. */
+export function assertNoPreconditionRiskLinks(graph: unknown): void {
+  if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return;
+  const raw = graph as { nodes?: unknown; edges?: unknown };
+  if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return;
+  // The floor accepts unknown graph supersets. Select object members for this narrow structural check;
+  // schema/referential checks retain their existing authority and the saved graph is never modified.
+  const record = (value: unknown): boolean => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const violation = preconditionRiskLinkViolations({
+    nodes: raw.nodes.filter(record), edges: raw.edges.filter(record),
+  } as Pick<GraphV3T, 'nodes' | 'edges'>)[0];
+  if (violation !== undefined) throw new PreconditionRiskLinkWriteError(violation.detail);
+}
 
 export interface CheckedGraphAppendParams {
   /** The write, already projected and hashed by the caller. */
@@ -258,6 +283,9 @@ export function assertNoIntroducedGraphViolations(
   params: GraphInvariantAssertionParams,
 ): void {
   const { graph, identity, writesGraph, source } = params;
+
+  // RC3 is an absolute representation rule, independent of baseline absorption or GM mode.
+  if (writesGraph) assertNoPreconditionRiskLinks(graph);
 
   const persistedInvariants = checkPersistedGraphInvariants(graph, {
     baseGraph: params.baseGraphForInvariants,

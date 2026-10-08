@@ -139,7 +139,7 @@ import {
 } from "../orchestrator/route-v2-preflight.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { raiseRefHighWaterForRestore } from "../orchestrator-v5/graph/entity-refs.js";
-import { assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+import { assertNoIntroducedGraphViolations, assertNoPreconditionRiskLinks, PreconditionRiskLinkWriteError } from "../orchestrator-v5/persist-graph-write.js";
 import {
   PersistedGraphInvariantError,
   checkPersistedGraphInvariants,
@@ -1154,6 +1154,16 @@ export default async function route(app: FastifyInstance) {
       // WERE `scenarios.graph` a moment earlier and this floor permitted them
       // there — we are undoing a write the floor allowed, not introducing one it
       // refused.
+      // RC3's unsupported representation is refused on BOTH restore legs. The ordinary terminal
+      // invariant absorption below still permits its existing legacy return journey.
+      try {
+        assertNoPreconditionRiskLinks(graphForStore);
+      } catch (err) {
+        if (err instanceof PreconditionRiskLinkWriteError) {
+          return invalid(reply, requestId, err.code, err.message);
+        }
+        throw err;
+      }
       if (returnLeg) {
         // OBSERVE, DO NOT REFUSE. The admission decision was made by the
         // identity binding above; re-running the delta here with a self-baseline

@@ -781,6 +781,7 @@ export function modelGapOf(graph: unknown, userWords: string = ''): ModelGap | n
 export interface RiskSuggestion {
   readonly label: string;
   readonly category: RiskCategory;
+  readonly mechanism: 'drives' | 'relies_on';
   readonly hits: { readonly id: string; readonly label: string; readonly kind: 'option' | 'factor' };
   readonly through: { readonly id: string; readonly label: string; readonly direction: 'positive' | 'negative' };
   readonly affects: { readonly id: string; readonly label: string; readonly direction: 'positive' | 'negative' };
@@ -810,6 +811,7 @@ const nodeId = z.string().min(1).max(160);
 const riskCandidateSchema = z.object({
   label: z.string().trim().min(1).max(60),
   category: z.enum(RISK_METHOD.categories),
+  mechanism: z.enum(['drives', 'relies_on']).optional(),
   hits_id: nodeId,
   through_id: nodeId,
   through_direction: z.enum(['positive', 'negative']),
@@ -861,11 +863,16 @@ export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: 
       + 'affects every option alike, so offer it only if there is room. Ground each in the brief, the conversation or the model.',
     `Each item: {"label": a new risk name, 6 words or fewer, no figures; "category": one of ${RISK_METHOD.categories.join('|')}; `
       + '"hits_id": the id of the option it hits (or, for an assumption every option shares, the id of a factor NO option '
-      + 'changes); "through_id": the id of a factor which that option CHANGES (listed under it) and which the risk works through, '
-      + 'or the same factor id when hits_id is a factor; "through_direction": "positive" when more of that factor makes the risk '
-      + 'more severe, else "negative"; "affects_id": the id of the goal or an outcome the risk would hurt; "direction": '
+      + 'changes); "through_id": the id of a factor which that option CHANGES (listed under it), '
+      + 'or the same factor id when hits_id is a factor; "mechanism": "drives" when more or less of the through factor itself '
+      + 'makes the risk more likely or severe, "relies_on" when the option relies on something (a precondition or timing '
+      + 'dependency) that could fail. Timing and dependency items always use "relies_on"; "through_direction": "positive" '
+      + 'when more of that factor makes the risk more likely or severe, else "negative" (used only for "drives"); '
+      + '"affects_id": the id of the goal or an outcome the risk would hurt; "direction": '
       + '"negative" when the risk lowers it, "positive" when it raises it; "relies_on": what the option relies on, 12 words or '
       + 'fewer, starting with a verb or noun (e.g. "filling both roles quickly"); "watch_for": the early sign, 8 words or fewer}.',
+    'A "relies_on" risk must name one option: shared preconditions cannot be applied yet and will be refused. '
+      + 'It stays on the model with no links and is left out of the Run until the model can apply it to that option alone.',
     `The goal: ${JSON.stringify({ id: String(goal.id), label: goalLabel })}.`,
     `Goal and outcomes (affects_id): ${JSON.stringify(destinations)}.`,
     `The user's options and the factors each one changes: ${JSON.stringify(options.map((o) => ({ id: o.id, label: o.label,
@@ -902,8 +909,8 @@ export interface RiskGateResult {
  * RC-WIDEN's checks for target risks, BY IDENTITY, before anything is offered. Clauses: RK-SCHEMA · RK-NO-DUP (a new
  * name: no node and no earlier item has it) · RK-HITS (a user option, never the status quo, or a factor) · RK-THROUGH
  * (a factor that option really changes, uniquely named) · RK-AFFECTS (the goal or an outcome, uniquely named) ·
- * RK-DISTINCT (one per category) · RK-WORDS (no figure, no banned word, no question, quotable) · RK-DOOR (the door's own
- * builder accepts it, run purely) · RK-COUNT (at most three kept).
+ * RK-SHARED-PRECONDITION (a precondition names one option) · RK-DISTINCT (one per category) · RK-WORDS (no figure, no
+ * banned word, no question, quotable) · RK-DOOR (the door's own builder accepts it, run purely) · RK-COUNT (at most three kept).
  */
 export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGateResult {
   const g = turn.graph;
@@ -918,9 +925,16 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
   const raw = Array.isArray(candidates) ? candidates : [];
   for (const [index, item] of raw.entries()) {
     const failed: string[] = [];
-    const parsed = riskCandidateSchema.safeParse(item);
+    // RC3: only an explicit valid mechanism can name a driver. Keep every other schema check strict.
+    const candidate = rec(item);
+    const parsed = riskCandidateSchema.safeParse(candidate !== undefined
+      && candidate.mechanism !== 'drives' && candidate.mechanism !== 'relies_on'
+      ? { ...candidate, mechanism: undefined } : item);
     if (!parsed.success) { dropped.push({ index, failed: ['RK-SCHEMA'] }); continue; }
     const c = parsed.data;
+    // The validator overrides the model: timing/dependency and missing/invalid mechanisms are preconditions.
+    const mechanism: RiskSuggestion['mechanism'] = c.category === 'timing' || c.category === 'dependency'
+      || c.mechanism !== 'drives' ? 'relies_on' : 'drives';
     if (allLabels.some((l) => sameLabel(l, c.label)) || kept.some((k) => sameLabel(k.label, c.label))) failed.push('RK-NO-DUP');
     const hitNode = byId.get(c.hits_id);
     const option = turn.options.find((o) => o.id === c.hits_id);
@@ -928,6 +942,7 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
     const shared = option === undefined && hitNode?.kind === 'factor' && !turn.options.some((o) => o.changes.includes(c.hits_id));
     const hitsKind = option !== undefined ? 'option' : shared ? 'factor' : null;
     if (hitsKind === null) failed.push('RK-HITS');
+    if (shared && mechanism === 'relies_on') failed.push('RK-SHARED-PRECONDITION');
     const through = byId.get(c.through_id);
     const throughLabel = through?.kind === 'factor' ? uniqueLabel(through) : null;
     if (throughLabel === null || (hitsKind === 'option' && !option!.changes.includes(c.through_id))
@@ -942,16 +957,17 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
       || bannedAfterMasking(c.label, []) || bannedAfterMasking(c.relies_on, allLabels, true)
       || bannedAfterMasking(c.watch_for, allLabels, true)) failed.push('RK-WORDS');
     if (failed.length === 0) {
-      const built = buildAddRiskTransaction({ risk: { label: c.label }, links: [
+      const built = buildAddRiskTransaction({ risk: { label: c.label }, links: mechanism === 'drives' ? [
         { from_id: c.through_id, effect_direction: c.through_direction },
         { to_id: c.affects_id, effect_direction: c.direction },
-      ] }, { nodes: g.nodes as never, edges: g.edges as never });
+      ] : [] }, { nodes: g.nodes as never, edges: g.edges as never },
+      mechanism === 'relies_on' ? { option_id: c.hits_id } : undefined);
       if (!built.matched) failed.push('RK-DOOR');
     }
     if (failed.length === 0 && kept.length >= RISK_MAX_ITEMS) failed.push('RK-COUNT');
     if (failed.length > 0) { dropped.push({ index, failed }); continue; }
     const s: Omit<RiskSuggestion, 'press'> = {
-      label: c.label.trim(), category: c.category,
+      label: c.label.trim(), category: c.category, mechanism,
       hits: { id: c.hits_id, label: hitsKind === 'option' ? option!.label : throughLabel!, kind: hitsKind! },
       through: { id: c.through_id, label: throughLabel!, direction: c.through_direction },
       affects: { id: c.affects_id, label: affectsLabel!, direction: c.direction },
@@ -964,44 +980,54 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
 }
 
 /** The Add press's message: the user's own words in the transcript, naming the risk, what it hits and its refs by label. */
-function riskAddMessage(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects'>): string {
+function riskAddMessage(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects' | 'mechanism'>): string {
   const target = s.hits.kind === 'option' ? `to ${quote(s.hits.label)}` : 'for every option';
+  if (s.mechanism === 'relies_on') {
+    return `Add the risk ${quote(s.label)} to ${quote(s.hits.label)}: that option relies on this not happening. `
+      + 'The Run leaves it out until it can apply to that option alone.';
+  }
   return `Add the risk ${quote(s.label)} ${target}: driven by ${s.through.direction === 'positive' ? 'more' : 'less'} ${quote(s.through.label)}, `
     + `it would ${s.affects.direction === 'negative' ? 'lower' : 'raise'} ${quote(s.affects.label)}.`;
 }
 /**
- * The press id binds the message AND the node identities it was minted on (Codex r1 P1 on #2744): a label that later
+ * The press id binds the mechanism, message AND the node identities it was minted on (Codex r1 P1 on #2744): a label that later
  * names another node (a rename plus a new node with the old name) recomputes to a different id and is refused.
  */
-const addPressId = (message: string, ids: readonly [string, string, string]): string =>
-  `${WIDEN_ADD_PREFIX}${createHash('sha256').update(JSON.stringify([message, ...ids]), 'utf8').digest('hex').slice(0, 16)}`;
+const addPressId = (message: string, ids: readonly [string, string, string], mechanism: RiskSuggestion['mechanism']): string =>
+  `${WIDEN_ADD_PREFIX}${createHash('sha256').update(JSON.stringify([message, ...ids, mechanism]), 'utf8').digest('hex').slice(0, 16)}`;
 
-export function riskAddPressFor(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects'>): SuggestedAction {
+export function riskAddPressFor(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects' | 'mechanism'>): SuggestedAction {
   const message = riskAddMessage(s);
-  return { id: addPressId(message, [s.hits.id, s.through.id, s.affects.id]), label: `Add ${quote(s.label)}`, message };
+  return { id: addPressId(message, [s.hits.id, s.through.id, s.affects.id], s.mechanism), label: `Add ${quote(s.label)}`, message };
 }
 
 export function isWidenAddPressId(id: unknown): boolean {
   return typeof id === 'string' && /^agent-widen-add:[0-9a-f]{16}$/u.test(id);
 }
 
-export type WidenAddCall = { readonly tool: 'propose_new_risk'; readonly args: {
-  label: string; rationale: string;
-  /** The press IS the whole request (server-owned): the door's own typed reply composes it (`composeProposalReply`). */
-  whole_request: true;
-  affects: { target_label: string; direction: 'positive' | 'negative' }[];
-  caused_by: { factor_label: string; direction: 'positive' | 'negative' }[];
-} };
+export type WidenAddCall = {
+  readonly tool: 'propose_new_risk';
+  /** Server-only marker, re-minted from graph identities. Never copied into the model's tool args. */
+  readonly relies_on?: { readonly option_id: string; readonly option_label: string };
+  readonly args: {
+    label: string; rationale: string;
+    /** The press IS the whole request (server-owned): the door's own typed reply composes it (`composeProposalReply`). */
+    whole_request: true;
+    affects: { target_label: string; direction: 'positive' | 'negative' }[];
+    caused_by: { factor_label: string; direction: 'positive' | 'negative' }[];
+  };
+};
 
 const ADD_PREFIX_WORDS = 'Add the risk ‘';
 const DIRECTIONS = ['positive', 'negative'] as const;
+const RISK_MECHANISMS = ['drives', 'relies_on'] as const;
 
 /**
  * The door call an Add press asks for, re-checked against the model AS IT IS NOW, or null (the route then refuses it
  * deterministically: an Add press never falls through to ordinary generation, Codex r1 P1).
  *
  * NO PARSING of the user-visible words (Codex r2 P1: a label's own ’ broke a capture): the press is RECONSTRUCTED. Every
- * (option or "every option", factor, goal/outcome, direction pair) the Suggest turn could offer on THIS readback — the
+ * (option or "every option", factor, goal/outcome, mechanism, directions) the Suggest turn could offer on THIS readback — the
  * same scope, `risksTurnForReadback` (Codex r2 P2) — is minted again with `riskAddPressFor`; the press stands only when
  * one of them is byte-identical in message AND id (the id binds the node ids, Codex r1 P1). Then the attachment is
  * re-checked: the option still changes the factor, or (shared) no option in scope does.
@@ -1026,23 +1052,32 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
       // The attachment, re-checked now: the option still changes the factor; a shared factor is changed by no option in scope.
       if (option !== null ? !option.changes.includes(fid) : turn.options.some((o) => o.changes.includes(fid))) continue;
       for (const a of destinations) {
-        for (const td of DIRECTIONS) {
-          for (const ad of DIRECTIONS) {
-            const minted = {
-              label,
-              hits: option !== null ? { id: option.id, label: option.label, kind: 'option' as const } : { id: fid, label: labelOf(f)!, kind: 'factor' as const },
-              through: { id: fid, label: labelOf(f)!, direction: td },
-              affects: { id: String(a.id), label: labelOf(a)!, direction: ad },
-            };
-            // Words first (cheap), then the id over the node ids.
-            if (riskAddMessage(minted) !== m || riskAddPressFor(minted).id !== chipId) continue;
-            return { tool: 'propose_new_risk', args: {
-              label,
-              affects: [{ target_label: labelOf(a)!, direction: ad }],
-              caused_by: [{ factor_label: labelOf(f)!, direction: td }],
-              rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
-              whole_request: true,
-            } };
+        for (const mechanism of RISK_MECHANISMS) {
+          // There is no option identity to stamp on a shared precondition: the gate refuses it too.
+          if (mechanism === 'relies_on' && option === null) continue;
+          // A precondition has no driver direction: mint it once, using a canonical unused value.
+          for (const td of mechanism === 'drives' ? DIRECTIONS : ['positive'] as const) {
+            for (const ad of DIRECTIONS) {
+              const minted = {
+                label, mechanism,
+                hits: option !== null ? { id: option.id, label: option.label, kind: 'option' as const } : { id: fid, label: labelOf(f)!, kind: 'factor' as const },
+                through: { id: fid, label: labelOf(f)!, direction: td },
+                affects: { id: String(a.id), label: labelOf(a)!, direction: ad },
+              };
+              // Words first (cheap), then the id over the node ids and mechanism.
+              if (riskAddMessage(minted) !== m || riskAddPressFor(minted).id !== chipId) continue;
+              return {
+                tool: 'propose_new_risk',
+                ...(mechanism === 'relies_on' ? { relies_on: { option_id: option!.id, option_label: option!.label } } : {}),
+                args: {
+                  label,
+                  affects: mechanism === 'drives' ? [{ target_label: labelOf(a)!, direction: ad }] : [],
+                  caused_by: mechanism === 'drives' ? [{ factor_label: labelOf(f)!, direction: td }] : [],
+                  rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
+                  whole_request: true,
+                },
+              };
+            }
           }
         }
       }
@@ -1057,6 +1092,16 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
  */
 export function riskHeldReply(call: WidenAddCall): string {
   const a = call.args;
+  if (call.relies_on !== undefined) {
+    return `I’ve prepared this change: add the risk ${quote(a.label)} to ${quote(call.relies_on.option_label)}. `
+      + "The Run leaves it out because this model can't yet apply that risk to that option alone, so that option's chance doesn't include it yet. "
+      + 'Nothing is added until you approve it.';
+  }
+  if (a.caused_by.length === 0) {
+    return `I’ve prepared this change: add the risk ${quote(a.label)}; if it happens, it would `
+      + `${a.affects[0]!.direction === 'negative' ? 'lower' : 'raise'} ${quote(a.affects[0]!.target_label)}. `
+      + 'How strongly is not known yet. Nothing is added until you approve it.';
+  }
   return `I’ve prepared this change: add the risk ${quote(a.label)}, driven by ${a.caused_by[0]!.direction === 'positive' ? 'more' : 'less'} `
     + `${quote(a.caused_by[0]!.factor_label)}; it would ${a.affects[0]!.direction === 'negative' ? 'lower' : 'raise'} ${quote(a.affects[0]!.target_label)}. `
     + 'How strongly is not known yet. Nothing is added until you approve it.';
@@ -1090,8 +1135,11 @@ export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): Settled
   if (gate.kept.length === 0) {
     return { reply: risksFallbackReply(turn), offered: 0, actions: [TALK_IT_THROUGH_CHIP], gate };
   }
-  // Science's item shape: who relies on what · the risk, its class and the factor it works through · the signpost.
-  const lines = gate.kept.map((r) => r.shared
+  // Preconditions stay in the model but outside the Run; only drivers name a causal through factor.
+  const lines = gate.kept.map((r) => r.mechanism === 'relies_on'
+    ? `- ${quote(r.label)}: ${quote(r.hits.label)} relies on ${r.relies_on}. `
+      + "This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet."
+    : r.shared
     ? `- Every option relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}; it affects every option alike. Watch for: ${r.watch_for}.`
     : `- ${quote(r.hits.label)} relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}. Watch for: ${r.watch_for}.`);
   const reply = [

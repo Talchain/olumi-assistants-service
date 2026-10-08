@@ -42,6 +42,8 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import type { PatchOperation } from '../../orchestrator/types.js';
+import { reliesOnRefereeOperations } from '../routing/relies-on-risk.js';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import {
@@ -881,11 +883,14 @@ export function assessHeldBatchAgainstGraph(input: {
   readonly requestId: string;
 }): HeldBatchAssessment {
   try {
+    // The server stamp must remain executable when an unrelated edit re-pins this held batch.
+    const operations = reliesOnRefereeOperations(input.operations as readonly PatchOperation[], input.currentGraph);
+    if (operations === undefined) return { valid: false, governing: 'rejected' };
     const { verdicts } = refereeBatch({
       // mode/requestId are type-required by EditGmEvaluationInput but unused
       // by refereeBatch (no telemetry, no routing on this pure path).
       mode: 'shadow',
-      operations: input.operations,
+      operations,
       ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
       currentGraph: input.currentGraph,
       currentGraphHash: input.currentGraphHash,

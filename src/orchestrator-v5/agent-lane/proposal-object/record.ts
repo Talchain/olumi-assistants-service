@@ -31,6 +31,7 @@ import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromMagnitude, strengthBandFromEdgeBan
 import type { InfluenceBand } from '../../format/influence-bands.js';
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../routing/stated-event-risk.js';
 import { eventRiskCardLine } from '../stated-event-risk-draft.js';
+import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
 import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -234,6 +235,8 @@ function missingOf(pa: PendingAction, ops: readonly HeldOp[]): MissingDatum[] {
     if (o.op !== 'add_node' || !isRec(o.value)) continue;
     const { id, label, kind } = o.value as { id?: unknown; label?: unknown; kind?: unknown };
     if (typeof id !== 'string' || typeof label !== 'string' || (kind !== 'risk' && kind !== 'factor')) continue;
+    // A held precondition has no Run level to resolve: the card discloses its option-bound omission below.
+    if (kind === 'risk' && readReliesOnRisk((o.value as Rec).relies_on) !== undefined) continue;
     const observed = (o.value as Rec)['observed_state'];
     if (isRec(observed) && typeof observed['value'] === 'number') continue;
     if (recorded.has(id)) continue;
@@ -259,6 +262,10 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
   const eventRisk = readUserEventRiskMember(patch[GM_HELD_USER_EVENT_RISK_KEY]);
   if (eventRisk !== undefined) {
     const line = eventRiskCardLine(eventRisk.event_risk);
+    detail = detail !== undefined ? `${detail}\n${line}` : line;
+  }
+  // This reader rebuilds card detail on reload; the dispatch-only detail would otherwise disappear.
+  for (const line of heldReliesOnRiskLines(ops as PatchOperation[], graph)) {
     detail = detail !== undefined ? `${detail}\n${line}` : line;
   }
   return { id: `${APPROVE_PREFIX}${pa.chip_id}`, label, message, ...(detail !== undefined ? { detail } : {}) };
