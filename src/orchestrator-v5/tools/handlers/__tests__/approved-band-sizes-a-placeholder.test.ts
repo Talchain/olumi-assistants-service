@@ -175,3 +175,23 @@ describe('L4: Olumi’s OLDER default (no sizing mark, `defaulted`) is sized by 
     expect(run(false)).toBe(false);
   });
 });
+
+describe('P03 served blocker (8 Oct): a link whose mean the Run projected (`mean_projected`) is sized by approval too', () => {
+  const PROJECTED = { source: 'cee_hypothesis', mean_projected: true } as const;
+  const confirm = (sized: boolean) => {
+    const before = graphWith(PROJECTED);
+    const after = structuredClone(before) as GraphV3T;
+    const p = target(after).provenance as Record<string, unknown>;
+    delete p.mean_projected;
+    if (sized) p.magnitude = 'olumi_estimate';
+    p.reviewed_by_user = { intent: 'confirm', at: new Date().toISOString() };
+    return isProvenanceOnlyEdgeConfirmation({ before, after, from: FROM, to: TO });
+  };
+  it('RED: approving it records Olumi’s estimate, accepted, and drops the projection marker', async () => {
+    const after = await approve(graphWith(PROJECTED), 0.85, 'very strong');
+    expect(target(after).provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
+    expect(target(after).provenance).not.toHaveProperty('mean_projected');
+  });
+  it('RED: the canvas allowlist admits exactly that transition (marker dropped WITH the sizing)', () => expect(confirm(true)).toBe(true));
+  it('⛔ REFUSES the marker dropped WITHOUT the sizing (a confirm may not touch it otherwise)', () => expect(confirm(false)).toBe(false));
+});

@@ -633,3 +633,14 @@ describe('set_factor_value — Wave 2 receipt: staleness narrative + redaction',
     }
   });
 });
+
+// R3: shared D1 guard also covers both set_factor_value paths; the carrier is never a value-write field.
+it('P1-C set_factor_value preserves server-owned share_by_date bytes', async () => {
+  const graph = buildD1Fixture(), edge = graph.edges[0]!;
+  const carrier = { role: 'team', team_id: edge.from, goal_id: edge.to, deliverable: 'the feature launch', unresolved_option_ids: ['option-hire'] };
+  edge.provenance = { source: 'cee_hypothesis', ...(edge.provenance ?? {}), share_by_date: carrier };
+  const before = JSON.stringify(carrier);
+  const outcome = await createSetFactorValueHandler()(buildInvocation(graph, makeProposal({ entityId: 'f-churn', value: { value: 5, unit: '%', cap: 100 }, operator: 'set' })));
+  const written = (outcome.mutated_graph as GraphV3T).edges.find(e => e.from === edge.from && e.to === edge.to)!;
+  expect(JSON.stringify(written.provenance?.share_by_date)).toBe(before);
+});

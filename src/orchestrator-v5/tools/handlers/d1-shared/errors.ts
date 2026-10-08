@@ -13,6 +13,10 @@ export type D1ErrorCode =
   | 'PRECONDITION_UNMET'
   | 'GRAPH_INVARIANT_VIOLATED';
 
+/** Canonical authored copy, shared by the typed boundary and its composer. */
+export const SHARE_BY_DATE_OWNERSHIP_GUIDANCE =
+  "That link holds the deadline forecast's definition, so I can't remove or replace it here. Change the deadline or the team's time on its change card. Nothing was written.";
+
 export class D1HandlerError extends Error {
   readonly code: D1ErrorCode;
   readonly details?: Readonly<Record<string, unknown>>;

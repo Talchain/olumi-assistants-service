@@ -60,6 +60,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
+  propose_team_time: { label: 'Yes', message: 'Yes' },
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
@@ -93,6 +94,9 @@ export const ONE_CHANGE_PER_APPROVAL_DETAIL =
   + 'have answered. Never ask them to approve both.';
 
 /** Whether a tool leaves a proposal awaiting the user's yes — the approve chip's own list. */
+/** P44 S1: `authorise_change` refused on a narrating call (`agent-loop.ts`); the held change stays offered. */
+export const NOT_ON_NARRATION = 'not_on_narration';
+
 export const isProposingTool = (name: string): boolean => APPROVE[name] !== undefined;
 
 /**
@@ -128,7 +132,7 @@ export const AMEND_CHIP: SuggestedAction = {
  * authorisation's identity is unknown: never a guess about which proposal it consumed.
  */
 export function proposalsAwaitingApproval(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
 ): ReadonlyMap<string, string> {
   /**
    * A turn that authorised something consumes THOSE proposals only: one that approved A and proposed
@@ -141,7 +145,8 @@ export function proposalsAwaitingApproval(
    * (Codex #1806 5807933515: propose B on H0, then approve A → H1, offered a chip that could not
    * commit). So only a proposal made AFTER the turn's last model change is still offerable.
    */
-  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
+  // An approval refused on a narrating call (`NOT_ON_NARRATION`, P44 S1) never reached the store: it consumes nothing.
+  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change' && c.refusal !== NOT_ON_NARRATION);
   if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return new Map();
   const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
   // A change the Agent withdrew this turn is neither offered nor carried (`WITHDRAW_PROPOSAL`).
@@ -161,7 +166,7 @@ export interface ApprovalLabelSource {
 }
 
 export function approvalChipsFor(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
   labelSourceFor?: (proposalId: string) => ApprovalLabelSource | undefined,
 ): SuggestedAction[] {
   const offered = proposalsAwaitingApproval(toolCalls);
@@ -254,12 +259,12 @@ export function approvalChipsFor(
   }
   // ⭐ S-E GOALS: the deadline card asks "Is your deadline 7 April 2027 (6 months from today)?" — the STORED card's words ride
   // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
-  if (tool === 'propose_goal_deadline') {
+  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time') {
     const source = labelSourceFor?.(proposalId);
     const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
       && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
-      DEADLINE_CHANGE_CHIP];
+      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' } : DEADLINE_CHANGE_CHIP];
   }
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
