@@ -15,6 +15,7 @@ import * as riskTransaction from '../../../routing/add-risk-transaction.js';
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, modelGapOf, riskAddPressFor, riskGate, riskHeldReply, risksTurnForReadback, risksTurnFromSignals,
   settleRisksTurn, STATED_BUDGET, SUGGEST_RISKS_CHIP, widenAddCallOf, widenTargetOf, WIDEN_PRESS_ID, type RunRisksWidenTurn,
+  risksFallbackReply,
 } from '../widen-turn.js';
 
 const fixture = (v: 'v1' | 'v2'): Record<string, unknown> =>
@@ -457,6 +458,35 @@ describe('EVENT-RISK RC3 (a′): a precondition stays on the model with zero lin
     expect(settled.reply).not.toContain('through ‘Pro plan price’');
     expect(settled.reply).not.toContain('affects every option alike');
     expect(settled.reply).not.toContain('doesn\'t change the comparison');
+  });
+
+  it('hotfix-rk-schema: a precondition item WITHOUT through_direction (as the #2803 directive asks) is kept, not RK-SCHEMA (served ced778c4: 2/2 turns dropped every item)', () => {
+    const { through_direction: _td, ...noDirection } = { ...priceRisk, label: 'Feature release slips', category: 'timing',
+      mechanism: 'relies_on', through_direction: 'negative', relies_on: 'the feature release', watch_for: 'release date moves' };
+    const settled = settleRisksTurn(turnOn(graph), appendix([noDirection]));
+    expect(settled.gate.dropped).toEqual([]);
+    expect(settled.gate.kept.map((r) => [r.label, r.mechanism])).toEqual([['Feature release slips', 'relies_on']]);
+    expect(widenAddCallOf(settled.gate.kept[0]!.press.id, settled.gate.kept[0]!.press.message, { graph })?.args.caused_by).toEqual([]);
+  });
+
+  it('hotfix-drives-needs-direction: a "drives" item without a direction is a precondition, never an invented driver', () => {
+    const { through_direction: _td, ...noDirection } = { ...priceRisk, label: 'Payment provider fails', category: 'cost',
+      mechanism: 'drives', through_direction: 'positive', relies_on: 'the payment provider', watch_for: 'failed card payments' };
+    const r = riskGate(turnOn(graph), [noDirection]).kept[0]!;
+    expect(r.mechanism).toBe('relies_on');
+    expect(r.press.message).not.toContain('driven by');
+  });
+
+  it('hotfix-shared-precondition-said: a refused shared precondition is SAID in the reply, never silence (DL 8 Oct)', () => {
+    const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
+      mechanism: 'relies_on', affects_id: 'feature_delivery_capacity', direction: 'positive',
+      relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
+    const settled = settleRisksTurn(turnOn(fixture('v1')), appendix([shared]));
+    expect(settled.offered).toBe(0);
+    expect(settled.gate.shared_preconditions).toEqual([{ label: 'Team attrition', category: 'external', relies_on: 'the current team staying intact' }]);
+    expect(settled.reply).toContain("- Every option relies on the current team staying intact. Risk: ‘Team attrition’ (outside events). This model can't yet hold a precondition that every option shares, so I haven't offered to add it.");
+    expect(settled.reply).not.toBe(risksFallbackReply(turnOn(fixture('v1'))));
+    expect(settled.actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
   });
 
   it('rc3-shared-precondition: a shared relies_on item is refused because it has no option identity to stamp', () => {
