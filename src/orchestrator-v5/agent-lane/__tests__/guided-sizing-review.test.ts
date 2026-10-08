@@ -33,7 +33,7 @@ describe('GUIDED PATH round 7 reviewed identity and Run scope', () => {
     storedSize(graph);
     const legacyRun = { enrichment: { analysis_status: 'computed' } };
     expect(guidedSizingProgress(graph, legacyRun)?.remaining).toBe(2);
-    expect(guidedSizingProgress(graph, legacyRun)?.progress_line).toBe('2 more to go; with 1 left, Olumi can show a range.');
+    expect(guidedSizingProgress(graph, legacyRun)?.progress_line).toBe('2 more to go.');
   });
   it('r8 contrast: an explicitly empty recorded Run scope never falls back to stored options', () => {
     const { graph } = draw3();
@@ -52,7 +52,7 @@ describe('GUIDED PATH round 7 reviewed identity and Run scope', () => {
     expect(guidedSizingForRun(run, graph)?.total).toBe(3);
     storedSize(graph);
     expect(guidedSizingProgress(graph, run)?.remaining).toBe(2);
-    expect(guidedSizingProgress(graph, run)?.progress_line).toBe('2 more to go; with 1 left, Olumi can show a range.');
+    expect(guidedSizingProgress(graph, run)?.progress_line).toBe('2 more to go.');
     expect(guidedSizingProgress(graph, run)?.draft.links.some(l => l.from.startsWith('extra'))).toBe(false);
   });
   it('P1 M cannot add a non-converting estimate from an excluded option to its guided list', () => {

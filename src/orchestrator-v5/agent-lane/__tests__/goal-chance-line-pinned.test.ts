@@ -95,9 +95,18 @@ describe('goalChanceLineOwed', () => {
     expect(src).toContain('owed.push(...goalLines);');
     expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
     expect(src).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
+    expect(src).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
     // Exact host-copy display normalisation preserves the narrator and the same owed lines.
     expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
     expect(src).toContain('withDisclosures(narrationText, owed)');
     expect(src).toContain('withDisclosures(narrationText, [...owed, ...decisionLines])');
+  });
+  it('R13 MUTANT: a raw-tool-only owed line loses the final scoped owner', () => {
+    const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const pin = '...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),';
+    expect(src.includes(pin)).toBe(true);
+    expect(src.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
+    // A later Run still clears an earlier withhold when no scoped final sentence exists.
+    expect(goalChanceLineOwed([runWithheld, runShown], PARAPHRASE)).toBeNull();
   });
 });

@@ -304,6 +304,15 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     spreadOnly.chance = other.chance.slice(0, -other.shortfall_note.length).trimEnd();
     return { b, other, spreadOnly };
   };
+  it('r13 P2(d): a spread-only shorthand figure with no estimate label appears once, with its note inline', () => {
+    const { spreadOnly } = sharedSpreadLines();
+    expect(spreadOnly.olumi_estimate_link_count).toBeUndefined();
+    const own = `${spreadOnly.label}: ${spreadOnly.figure}.`;
+    const completed = withScreenLinesOwed(own, [spreadOnly]);
+    expect(completed).toEqual({ text: `${own} ${spreadOnly.spread_note}`, added: 1 });
+    expect(completed.text.split(spreadOnly.figure)).toHaveLength(2);
+    expect(withScreenLinesOwed(completed.text, [spreadOnly])).toEqual({ text: completed.text, added: 0 });
+  });
   it.each([
     ['canonical', 'same row'], ['canonical', 'new row'], ['agent', 'same row'], ['agent', 'new row'],
     ['missing', 'same row'], ['missing', 'new row'],
@@ -315,8 +324,9 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
       : `${spreadOnly.label} still needs evidence.`;
     const text = `${b.chance}${separator}${ownRow}`;
     const completed = withScreenLinesOwed(text, [b, spreadOnly]);
-    const ownDone = mode === 'canonical' ? spreadOnly.chance : `${ownRow}\n\n${spreadOnly.chance}`;
+    const ownDone = mode === 'canonical' ? spreadOnly.chance : mode === 'agent' ? `${ownRow} ${spreadOnly.spread_note}` : `${ownRow}\n\n${spreadOnly.chance}`;
     expect(completed).toEqual({ text: `${b.chance}${separator}${ownDone}`, added: 1 });
+    if (mode === 'agent') expect(completed.text.split(spreadOnly.figure)).toHaveLength(3); // One figure for each option.
     expect(completed.text.split(b.spread_note!)).toHaveLength(3);
     expect(withScreenLinesOwed(completed.text, [b, spreadOnly])).toEqual({ text: completed.text, added: 0 });
   });

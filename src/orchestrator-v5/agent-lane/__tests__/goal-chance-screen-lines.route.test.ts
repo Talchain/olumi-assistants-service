@@ -46,6 +46,8 @@ vi.mock('../reply/compose-reply.js', async original => {
     return composition;
   } };
 });
+let recentRows: Json[] = [];
+let hashTurn: (message: string) => string;
 
 const rows = new Map<string, Json>();
 const store = {
@@ -58,7 +60,7 @@ const store = {
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
-  readRecent: vi.fn(async () => []),
+  readRecent: vi.fn(async () => recentRows),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
 };
@@ -85,7 +87,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
-    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const { agentV1TurnRoute, agentTurnRequestHash } = await import('../../../routes/agent-v1-turn.js');
+    hashTurn = message => agentTurnRequestHash(SCENARIO, null, message);
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
       response_version: 2, assistant_text: forwardedText, suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
@@ -99,15 +102,17 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
+  beforeEach(() => { rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
-  const turn = async (outputs: Record<string, unknown>[][], message: string, extra: Json = {}): Promise<Body> => {
+  // A string third argument is the Agent session id (GP rows); an object is extra payload (A rows).
+  const turn = async (outputs: Record<string, unknown>[][], message: string, extra: Json | string = {}): Promise<Body> => {
     seq += 1;
     callModelOutputs = outputs;
+    const more: Json = typeof extra === 'string' ? { agent_session_id: extra } : extra;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message, turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, ...extra,
+      kind: 'message', scenario_id: SCENARIO, message, turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, ...more,
     } });
     expect(r.statusCode, r.body).toBe(200);
     const b = r.json() as Body;
@@ -390,6 +395,54 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     } });
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json().assistant_text).toBe(`${line.chance} ${unrelated}`);
+  });
+
+  it('r13: a user-authored competitor sentence survives live egress, storage and same-id replay', async () => {
+    const line = estimateScreenLine();
+    const risk = 'Raise to £59: there is a 67% chance a competitor launches first.';
+    const message = `Keep this risk in our reasoning. ${risk} We can revisit it next quarter.`;
+    const narration = `You said: “${risk}”\n${line.chance}`;
+    const b = await turn([say(narration)], message);
+    expect(b.assistant_text).toContain(risk);
+    const saved = [...rows.values()].find(r => r.assistant_message === b.assistant_text)!;
+    expect(saved.assistant_message).toContain(risk);
+    const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message, turn_id: saved.turn_id,
+    } });
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json().assistant_text).toContain(risk);
+  });
+
+  it.each(['live', 'replay'] as const)('r13 cold %s: an earlier durable user sentence survives an assistant echo after restart', async mode => {
+    const line = estimateScreenLine();
+    const risk = 'Raise to £59: there is a 67% chance a competitor launches first.';
+    const earlierMessage = `Keep this risk in our reasoning. ${risk} We can revisit it next quarter.`;
+    const earlier = { id: 'r13-user-risk', turn_id: 'a13d0000-0000-4000-8000-000000000001', request_hash: hashTurn(earlierMessage),
+      user_message: earlierMessage, assistant_message: 'Recorded your risk.', llm_calls_used: 1,
+      created_at: '2026-10-08T10:00:00.000Z' };
+    const message = 'Review the risk we recorded earlier.';
+    const narration = `You said: “${risk}”\n${line.chance}`;
+    // A unique session starts with no in-process typedWords. Only actual durable user_message rows own the risk.
+    const sessionId = `r13-cold-${mode}`;
+    recentRows = [earlier];
+    if (mode === 'live') {
+      const b = await turn([say(narration)], message, sessionId);
+      expect(b.assistant_text).toContain(risk);
+      expect([...rows.values()].find(r => r.assistant_message === b.assistant_text)!.assistant_message).toContain(risk);
+    } else {
+      const turnId = 'a13d0000-0000-4000-8000-000000000002';
+      const prior = { id: 'r13-prior-followup', turn_id: turnId, request_hash: hashTurn(message),
+        user_message: message, assistant_message: narration, llm_calls_used: 1, created_at: '2026-10-08T10:01:00.000Z' };
+      rows.set(turnId, prior); recentRows = [prior, earlier];
+      const providerCalls = vi.mocked(fetch).mock.calls.length;
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message, turn_id: turnId, agent_session_id: sessionId,
+      } });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()._agent.replayed).toBe(true);
+      expect(vi.mocked(fetch).mock.calls.length, 'a cold replay makes no provider call').toBe(providerCalls);
+      expect(response.json().assistant_text).toContain(risk);
+    }
   });
 
   it('fixture control: the served readback carries a range record and withholds the leader on a current Run', () => {

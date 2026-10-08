@@ -103,8 +103,9 @@ import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-senten
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
-import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
+import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -559,7 +560,14 @@ const MUTATION_INSTRUCTION =
  */
 const RECENT_REPLIES_READ = 20;
 
-type RecentRowsReader = { readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null }[]> };
+type RecentRowsReader = { readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null; readonly user_message?: string | null }[]> };
+
+/** Protect visible user sentences after a restart, without treating stored messages as authority for graph writes. */
+async function userTextsForEgress(store: RecentRowsReader, scenarioId: string, typed: readonly string[]): Promise<string[]> {
+  if (typeof store.readRecent !== 'function') return [...typed];
+  const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
+  return [...typed, ...rows.filter(isAgentAnswerRow).flatMap(row => typeof row.user_message === 'string' ? [row.user_message] : [])];
+}
 
 /**
  * D1's at-rest lines with the target ask said ONCE (PANEL 5944136475): only when the lines would ask, the Agent's own recent
@@ -921,12 +929,17 @@ export function knownNotRunnable(analysisReady: unknown): boolean {
  * readback's `analysis_ready`). A sentence contradicting the button is worse than none, and an unchecked verdict
  * says nothing rather than implying "nothing is blocking".
  */
-export function postWriteReadinessLine(graph: unknown, analysisReady: unknown): string | null {
+export function postWriteReadinessLine(graph: unknown, analysisReady: unknown, guided?: GuidedSizingDraft): string | null {
   const view = readinessViewOf(graph);
   if (!view.checked) return null;
   if (view.may_run === true && !admitsRunOffer(analysisReady)) return null;
   if (view.may_run === false && !knownNotRunnable(analysisReady)) return null;
-  return readinessSentence(view);
+  if (guided === undefined) return readinessSentence(view);
+  // The bound presses already ask about these pairs; keep every other target cause in its existing words.
+  const filtered = targetVerdictWithoutGuidedLinks(graph, guided.target_verdict ?? targetTestabilityOf(graph), guided);
+  const targetWords = filtered === null ? null : notTargetTestableSentence(graph, filtered);
+  const { target_not_testable: _sizingAsk, ...withoutTarget } = view;
+  return readinessSentence({ ...withoutTarget, ...(targetWords === null ? {} : { target_not_testable: targetWords }) });
 }
 
 /**
@@ -1970,6 +1983,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const forwardedBody = withEstimateGoalPointsAtEgress(forwarded.json, {
         analysisResult: forwardedState?.analysisResult, graph: forwardedState?.graph,
         current: (forwardedState?.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+        userAuthoredTexts: await userTextsForEgress(getSessionStore(), scenarioId,
+          [...histories.typedWords(sessionId), ...(typedByUser(body) ? [message] : [])]),
       });
       /**
        * ⛔ THE AGENT MUST KNOW WHAT THE USER CHANGED ON THE BOARD. Measured on served
@@ -2454,6 +2469,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
         analysisResult: state.analysisResult, graph: state.graph ?? null,
         current: (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
+        userAuthoredTexts: await userTextsForEgress(store, scenarioId,
+          [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])]),
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
@@ -4134,7 +4151,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The same selected Run as the words; the warning owns N. Re-check present sizing and never-reask before offering.
     // Reconcile the commit receipt's words to the FINAL stored read, including a concurrent second sizing.
     if (sizingCommit !== undefined) {
-      text = text.replace(/\s*\d+ more to go; with 1 left, Olumi can show a range\./gu, '').trim();
+      text = text.replace(/\s*\d+ more to go(?:; with 1 left, Olumi can show a range)?\./gu, '').trim();
       if (guidedReplyText.progress !== null) text = `${text} ${guidedReplyText.progress}`;
     }
     const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
@@ -4304,7 +4321,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
     // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
     const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
-    const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady,
+      guidedActions.length > 0 ? guidedDraft : undefined) : null;
     const askLine = wroteThisTurn ? postWriteAskLine(readbackGraph, analysisReady) : null;
     // "Run it again" already says a run is permitted; the readiness sentence would repeat it. And on the build turn whose
     // automatic first pass already RAN, "The analysis can run now" sits beside that result with no Run chip (the route
@@ -4707,6 +4725,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     wireBody = withEstimateGoalPointsAtEgress(wireBody, {
       analysisResult, graph: readbackGraph ?? null,
       current: selectedRunCurrent,
+      userAuthoredTexts: await userTextsForEgress(store, scenarioId,
+        [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])]),
     });
     /**
      * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a

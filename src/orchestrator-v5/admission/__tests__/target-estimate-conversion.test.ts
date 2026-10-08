@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as target from '../target-testability.js';
-import { guidedSizingActions, guidedSizingForRun, guidedSizingProgressLine, guidedSizingSentence } from '../../agent-lane/guided-sizing.js';
+import { guidedSizingActions, guidedSizingForRun, guidedSizingProgressLine } from '../../agent-lane/guided-sizing.js';
 import { goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
 import { naturalEffectOf } from '../../../cee/magnitude/link-effect.js';
 
@@ -60,9 +60,9 @@ describe('Science §(i) amendment: estimates convert; placeholders and refused c
     const draft = guidedSizingForRun(run(), g);
     expect(draft?.total).toBe(0);
     expect(guidedSizingActions(draft, g).map(a => a.label)).toEqual([carve]);
-    expect(goalChanceWithheldForAgent(run(), g)?.say).not.toContain('Not shown yet: 0');
+    expect(goalChanceWithheldForAgent(run(), g)?.say).not.toContain("The chance isn't shown yet:");
     const old = { enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', acceptable_links: [],
-      message: `Not shown. ${guidedSizingSentence(2)}` }] } };
+      message: "Not shown. Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance." }] } };
     expect(goalChanceWithheldForAgent(old, g)?.say).not.toContain('Not shown yet:');
     expect(guidedSizingProgressLine(g)).toBeNull();
   });
@@ -78,7 +78,9 @@ describe('Science §(i) amendment: estimates convert; placeholders and refused c
     expect(draft?.total).toBe(2);
     expect(draft?.links.map(l => l.id)).toEqual(['far', 'near', 'estimate']);
     expect(guidedSizingActions(draft, g).map(a => a.label).at(-1)).toBe(carve);
-    expect(guidedSizingProgressLine(g)).toBe('2 more to go; with 1 left, Olumi can show a range.');
+    // Class (ii): the refused band remains, and this graph has no G0 driver evidence.
+    expect(guidedSizingProgressLine(g)).toBe('2 more to go.');
+    expect(goalChanceWithheldForAgent(r, g)?.say).not.toContain('Give a rough strength');
   });
   it('the selected Run’s evaluated identity operands cannot acquire extra conversion presses', () => {
     const g = graph();

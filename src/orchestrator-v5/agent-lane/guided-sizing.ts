@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readOptionResultSources, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
-import { convertingOlumiEstimate, goalOrderedLinks, scoredGoalIdOf, targetTestabilityOf, untestableTargetTail } from '../admission/target-testability.js';
+import { convertingOlumiEstimate, goalOrderedLinks, scoredGoalIdOf, targetTestabilityOf, untestableTargetTail, type TargetTestability } from '../admission/target-testability.js';
+import { GOAL_CHANCE_RANGE, goalChanceRangeOf } from '../goal-target/goal-chance-range.js';
 import { linkEffectEndUnits } from '../system-events/link-effect-edit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from './goal-certainty.js';
@@ -22,6 +23,8 @@ export interface GuidedSizingDraft {
   readonly recovery_line?: string;
   /** Internal scored identity for conversion readers; omitted from the transport hook. */
   readonly scored_goal_id?: string;
+  /** Same scoped target verdict as this draft; internal only, never transported in the hook. */
+  readonly target_verdict?: TargetTestability;
   readonly links: readonly {
     readonly id?: string;
     readonly from: string; readonly to: string;
@@ -36,7 +39,7 @@ export interface GuidedSizingDraft {
 export type GuidedSizingAction = SuggestedAction & {
   readonly parameters: { readonly from: string; readonly to: string; readonly edge_id?: string };
 };
-export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recovery_line' | 'scored_goal_id'> {
+export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recovery_line' | 'scored_goal_id' | 'target_verdict'> {
   readonly graph_hash: string;
   readonly run_key: string;
   readonly links: readonly (GuidedSizingDraft['links'][number] & {
@@ -46,23 +49,61 @@ export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recover
   readonly progress_line?: string;
 }
 
-/** Science §(i) 4: the ONE multi-link sentence; never an estimate or a graph-derived count. */
-export const guidedSizingSentence = (total: number): string =>
-  `Not shown yet: ${total} links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.`;
+/** DL r14: ONE word producer, naming the same ordered placeholder pairs as the offers. */
+export function guidedSizingSentence(draft: Pick<GuidedSizingDraft, 'total' | 'links'>, invite = true): string {
+  const names = draft.links.filter(l => l.nonconverting !== true).slice(0, 3)
+    .map(l => `how strongly ‘${l.from_label}’ affects ‘${l.to_label}’`);
+  const named = names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+  return `The chance isn't shown yet: the model doesn't yet say ${named}${draft.total > 3 ? ` and ${draft.total - 3} more` : ''}, so any figure would be a guess.${invite
+    ? ` Give a rough strength for ${draft.total === 1 ? 'it' : 'each'} to see the chance.` : ''}`;
+}
+
+/** Adapt retained GP prose without rewriting the factor labels inside it. */
+export function withoutGuidedSizingJargon(words: string, labels: readonly string[] = []): string {
+  const kept = ['‘[^’]*’', ...labels.filter(Boolean).sort((a, b) => b.length - a.length)
+    .map(label => label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))];
+  return words.split(new RegExp(`(${kept.join('|')})`, 'u')).map((part, i) => i % 2 === 1 ? part : part
+    .replace(/\b(the|This|this|for \d+) (link|links)\b/gu, (_match, prefix: string, noun: string) => `${prefix} effect${noun === 'links' ? 's' : ''}`)
+    .replace(/\bstand-ins\b/gu, 'rough strengths')).join('');
+}
+
+/** The warning reader alone establishes a legacy Run's sole-placeholder cause set before calling this helper. */
+export function legacyGuidedSizingReplyText(draft: GuidedSizingDraft | undefined): string | null {
+  return draft !== undefined && draft.total >= 1 ? guidedSizingSentence(draft) : null;
+}
+
+/** The consumer supplies a draft only when its complete cause set permits these words; other reasons are retained. */
+export function withoutStaleGuidedSizingWords(words: string, draft: GuidedSizingDraft | undefined): string {
+  if (draft !== undefined && draft.total >= 1) return words;
+  // Read old persisted copy only to remove it; it is never produced again.
+  return words.replace(/^(?:Not shown yet: \d+ links[^.]*\. Size them to see the chance\.|The chance isn't shown yet: [\s\S]*?, so any figure would be a guess\.(?: Give a rough strength for (?:it|each) to see the chance\.)?)\s*/u, '').trim();
+}
+
+/** The promise requires exactly this draft's placeholders to be the target's only remaining blockers. */
+export function guidedSizingOnlyPlaceholders(draft: GuidedSizingDraft | undefined): boolean {
+  const verdict = draft?.target_verdict;
+  if (draft === undefined || draft.total < 1 || draft.links.some(l => l.nonconverting === true)
+    || verdict?.kind !== 'not_testable' || verdict.failures.length === 0
+    || verdict.failures.some(f => (f.precondition !== 'P5' && f.precondition !== 'P6') || f.code !== 'goal_path_placeholder')) return false;
+  const key = (l: { from: string; to: string }): string => JSON.stringify([l.from, l.to]);
+  const offered = new Set(draft.links.map(key));
+  const failed = new Set(verdict.failures.flatMap(f => f.links ?? []).map(key));
+  return offered.size === draft.total && failed.size === offered.size && [...failed].every(k => offered.has(k));
+}
 
 /** The exact GP words for this reply, from its one scoped draft and fresh progress read. */
 export function guidedSizingReplyText(draft: GuidedSizingDraft | undefined,
-  progress?: { readonly progress_line: string }): { progress: string | null; guided: string | null } {
+  progress?: { readonly progress_line: string }, invite = guidedSizingOnlyPlaceholders(draft)): { progress: string | null; guided: string | null } {
   return {
     progress: progress?.progress_line ?? null,
-    guided: draft !== undefined && draft.total >= 2
-      ? [guidedSizingSentence(draft.total), draft.recovery_line].filter(Boolean).join(' ') : null,
+    guided: draft !== undefined && draft.total >= 1 && draft.links.some(l => l.nonconverting !== true)
+      ? [guidedSizingSentence(draft, invite), draft.recovery_line].filter(Boolean).join(' ') : null,
   };
 }
 
 /** N comes solely from ONE typed placeholder warning. The SAME case-(c) verdict supplies conversion carve-outs. */
 export function guidedSizingFromWarning(warning: unknown, graph: unknown, identityEvaluations?: readonly unknown[],
-  optionIds?: readonly string[], scoredGoalId?: unknown): GuidedSizingDraft | undefined {
+  optionIds?: readonly string[], scoredGoalId?: unknown, wordsOnly = false): GuidedSizingDraft | undefined {
   const w = record(warning);
   if (w?.code !== GOAL_FIGURES_PLACEHOLDER_PATH && w?.code !== GOAL_FIGURES_TARGET_NOT_TESTABLE) return undefined;
   const links = (w.code === GOAL_FIGURES_PLACEHOLDER_PATH && Array.isArray(w.acceptable_links) ? w.acceptable_links : []).map(record);
@@ -70,7 +111,18 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
     && typeof l.from === 'string' && l.from !== '' && typeof l.to === 'string' && l.to !== '')) return undefined;
   const nodes = record(graph)?.nodes;
   const byId = new Map((Array.isArray(nodes) ? nodes.map(record).filter((n): n is Rec => n !== undefined) : []).map(n => [n.id, n]));
-  const label = (id: string): string => typeof byId.get(id)?.label === 'string' ? byId.get(id)!.label as string : id;
+  // Legacy warnings retain factor labels in their recorded pair explanation, even without a graph.
+  const recordedLabels = new Map<string, string>();
+  const isNamedHeader = typeof w.message === 'string' && w.message.includes("The chance isn't shown yet:");
+  const recordedPairs = !isNamedHeader && Array.isArray(w.links) ? w.links.map(record) : links;
+  const namedPairs = typeof w.message === 'string' ? [...w.message.matchAll(/(?:from|how strongly) ‘([^’]+)’ (?:to|affects) ‘([^’]+)’/gu)] : [];
+  namedPairs.forEach((pair, i) => {
+    const ends = recordedPairs[i];
+    if (typeof ends?.from === 'string' && typeof ends.to === 'string') {
+      recordedLabels.set(ends.from, pair[1]!); recordedLabels.set(ends.to, pair[2]!);
+    }
+  });
+  const label = (id: string): string => typeof byId.get(id)?.label === 'string' ? byId.get(id)!.label as string : recordedLabels.get(id) ?? id;
   const edges = record(graph)?.edges;
   const edgeFor = (l: { from: string; to: string }): Rec | undefined =>
     (Array.isArray(edges) ? edges.map(record) : []).find(e => e?.from === l.from && e.to === l.to);
@@ -85,7 +137,7 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
   const verdict = targetTestabilityOf(targetGraph, identityEvaluations, scoredGoalId);
   const carveouts = verdict.kind !== 'not_testable' ? [] : verdict.failures.filter(f => f.case === 'c').flatMap(f => f.links ?? [])
     .filter(l => hasOlumiSize(edgeFor(l)) && !convertingOlumiEstimate(edgeFor(l), graph, verdict.goal_id, identityEvaluations));
-  if (placeholders.length < 2 && carveouts.length === 0) return undefined;
+  if (placeholders.length < (wordsOnly ? 1 : 2) && carveouts.length === 0) return undefined;
   // A user-stated size that still cannot convert retains the established recovery, rather than Olumi attribution.
   const recovery = (() => {
     if (verdict.kind !== 'not_testable') return null;
@@ -98,8 +150,9 @@ export function guidedSizingFromWarning(warning: unknown, graph: unknown, identi
   // Existing reverse shortest-hop relaxation from goals; the optional tie rule preserves THIS warning's order.
   const ordered = [...goalOrderedLinks(graph, placeholders, true), ...goalOrderedLinks(graph, carveouts, true)];
   const goalId = verdict.kind === 'no_goal' ? undefined : verdict.goal_id;
-  return { v: 1, total: placeholders.length, ...(goalId !== undefined ? { scored_goal_id: goalId } : {}),
-    ...(recovery !== null ? { recovery_line: recovery } : {}),
+  return { v: 1, total: placeholders.length, target_verdict: verdict, ...(goalId !== undefined ? { scored_goal_id: goalId } : {}),
+    ...(recovery !== null ? { recovery_line: withoutGuidedSizingJargon(recovery,
+      [...byId.values()].flatMap(n => typeof n.label === 'string' ? [n.label] : [])) } : {}),
     links: ordered.map((l, order) => {
       const matches = (Array.isArray(edges) ? edges.map(record) : []).filter(e => e?.from === l.from && e.to === l.to);
       const id = matches.length === 1 && typeof matches[0]?.id === 'string' ? matches[0].id : undefined;
@@ -131,7 +184,7 @@ function scoredGoalIdForRun(result: unknown, graph: unknown): string | undefined
     ?? r?.goal_node_id ?? enrichment?.goal_node_id);
 }
 
-export function guidedSizingForRun(result: unknown, graph: unknown): GuidedSizingDraft | undefined {
+export function guidedSizingForRun(result: unknown, graph: unknown, wordsOnly = false): GuidedSizingDraft | undefined {
   const r = record(result);
   const warnings = record(r?.enrichment)?.inference_warnings ?? r?.inference_warnings;
   if (!Array.isArray(warnings)) return undefined;
@@ -141,7 +194,7 @@ export function guidedSizingForRun(result: unknown, graph: unknown): GuidedSizin
   const warning = warnings.find(w => record(w)?.code === GOAL_FIGURES_PLACEHOLDER_PATH)
     ?? warnings.find(w => record(w)?.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
   return guidedSizingFromWarning(warning, graph, Array.isArray(evaluations) ? evaluations : undefined,
-    scoredOptionIdsForRun(result, warning), scoredGoalIdForRun(result, graph));
+    scoredOptionIdsForRun(result, warning), scoredGoalIdForRun(result, graph), wordsOnly);
 }
 
 const PRESS_PREFIX = 'agent-size-link:';
@@ -179,6 +232,12 @@ export type GuidedSizingHistory = string | { readonly request_hash?: string | nu
 export function guidedSizingActions(sizing: GuidedSizingDraft | undefined, graph: unknown, history: readonly GuidedSizingHistory[] = []): GuidedSizingAction[] {
   const edges = record(graph)?.edges;
   if (sizing === undefined || !Array.isArray(edges)) return [];
+  // When the offered pairs exhaust an unconfirmed identity's links, the original target requirement must own
+  // the reply. Its existing words survive; a sizing list cannot stand in for confirming that identity.
+  const offeredPairs = new Set(sizing.links.map(l => JSON.stringify([l.from, l.to])));
+  if (sizing.target_verdict?.kind === 'not_testable' && sizing.target_verdict.failures.some(f =>
+    f.code === 'identity_unconfirmed' && f.links !== undefined && f.links.length > 0
+    && f.links.every(l => offeredPairs.has(JSON.stringify([l.from, l.to]))))) return [];
   return sizing.links.flatMap(l => {
     const matches = edges.map(record).filter(e => l.id !== undefined ? e?.id === l.id && e.from === l.from && e.to === l.to : e?.from === l.from && e.to === l.to);
     // The selected warning can predate a size: ask only for the SAME held, still-unsized edge.
@@ -240,8 +299,21 @@ export function guidedSizingProgress(graph: unknown, run?: unknown): { draft: Gu
   // Same predicate AND same deduplicating warning producer as a Run's N; no stale-warning subtraction.
   const freshWarning = placeholderGoalWarning(graph, paths, GOAL_FIGURES_PLACEHOLDER_PATH);
   const draft = guidedSizingFromWarning(freshWarning, graph, evals, r !== undefined ? options : undefined, goalId);
+  // The producer's range carrier attests that PLoT did not already withhold this option. Re-run G0 against the
+  // authoritative post-commit graph and retained driver evidence; a stale carrier alone cannot promise a range.
+  const rangeWarnings = Array.isArray(enrichment?.inference_warnings) ? enrichment.inference_warnings.map(record) : [];
+  const rangeOptions = new Set(rangeWarnings.filter(w => w?.code === GOAL_CHANCE_RANGE)
+    .flatMap(w => Object.keys(record(w?.range_by_option) ?? {})));
+  const driversByOption = new Map<string, unknown>();
+  for (const row of readOptionResultSources(enrichment ?? r ?? {}).flat()) {
+    const id = typeof row.option_id === 'string' ? row.option_id : row.id;
+    if (typeof id === 'string' && !driversByOption.has(id)) driversByOption.set(id, row.probability_of_goal_drivers);
+  }
+  const rangeEnvelope = { ...(enrichment ?? r ?? {}), ...(evals !== undefined ? { identity_evaluations: evals } : {}) };
+  const showsRange = guidedSizingOnlyPlaceholders(draft) && options.some(id => rangeOptions.has(id) && goalChanceRangeOf(rangeEnvelope, scoredGraph, id,
+    { driversByOption, goalPaths: paths, plotWithheld: false, goalId }) !== null);
   return draft === undefined || draft.total < 2 ? undefined : { draft, remaining: draft.total,
-    progress_line: `${draft.total} more to go; with 1 left, Olumi can show a range.` };
+    progress_line: `${draft.total} more to go${showsRange ? '; with 1 left, Olumi can show a range' : ''}.` };
 }
 
 export function guidedSizingProgressLine(graph: unknown, run?: unknown): string | null {

@@ -362,6 +362,7 @@ async function readConversationTurns(
         assistant_message: typeof r.assistant_message === "string"
           ? withEstimateGoalPointsAtEgress({ assistant_text: r.assistant_message }, {
             analysisResult: authority.analysisResult, graph: authority.graph, current,
+            userAuthoredTexts: answers.flatMap(answer => typeof answer.user_message === 'string' ? [answer.user_message] : []),
           }).assistant_text : null,
       }))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)

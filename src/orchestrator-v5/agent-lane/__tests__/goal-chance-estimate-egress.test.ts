@@ -98,6 +98,22 @@ describe('r11 option, scored goal and displayed value identity', () => {
   const apply = (text: string, analysisResult: unknown = run(), model: unknown = multiGraph) =>
     withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult, graph: model, current: true }).assistant_text;
 
+  it('r13 P2(c): the user owns an echoed competitor-risk sentence even beside the same licensed option and percentage', () => {
+    const userSentence = 'Keep at £49: there is a 30% chance a competitor launches first.';
+    const text = `You said: “${userSentence}”  That stays in your model.\n${line.chance}`;
+    const context = { analysisResult: run(), graph: multiGraph, current: true, userAuthoredTexts: [userSentence] };
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, context).assistant_text).toBe(text);
+    // Turn storage carries whole paragraphs; echoing one of those sentences must retain its original authorship.
+    const paragraph = `Keep the current offer. ${userSentence} We should revisit it next quarter.`;
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+      ...context, userAuthoredTexts: [paragraph],
+    }).assistant_text).toBe(text);
+    // The ownership carrier is material: the same assistant-authored percentage remains subject to the gate.
+    expect(apply(userSentence)).not.toContain(userSentence);
+    const originalReviewRisk = 'You told me there is a 30% chance a competitor launches first, and that stays in the model.';
+    expect(apply(originalReviewRisk)).toBe(originalReviewRisk);
+  });
+
   it('uses the scored second goal from analysis_result, never graph order or selection', () => {
     expect(apply('Monthly recurring revenue reaches its target in 67% of model runs.')).toBe(line.chance);
     const other = 'Supplier reliability reaches its target in 67% of model runs.';

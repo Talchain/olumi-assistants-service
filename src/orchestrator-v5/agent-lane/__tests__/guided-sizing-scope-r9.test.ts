@@ -33,24 +33,24 @@ function fixture(count: number, includeExcluded = false): { graph: Json; run: Js
 }
 
 describe('GUIDED PATH r9 one scoped draft for words and controls', () => {
-  it('r9 scope RED: one scored placeholder plus an excluded non-converting link retains the single-link words and no hook', () => {
+  it('r9 scope RED: one scored placeholder plus an excluded non-converting influence gets singular words and no hook', () => {
     const { graph, run } = fixture(1);
     const draft = guidedSizingForRun(run, graph);
     expect(draft).toBeUndefined();
-    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(SINGLE.replace(/^Not shown\.\s*/u, ''));
-    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('1 links');
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(guidedSizingSentence(guidedSizingForRun(run, graph, true)!));
+    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('links');
     const actions = guidedSizingActions(draft, graph);
     expect(actions).toEqual([]);
     expect(bindGuidedSizing(draft, actions, { graph_hash: '0123456789abcdef', run_key: 'selected' })).toBeUndefined();
   });
 
-  it('r9 N=1 contrast: a scored conversion carve-out retains its press and hook but never the multi-link header', () => {
+  it('r9 N=1 contrast: a scored conversion carve-out retains its press and hook with no promise', () => {
     const { graph, run } = fixture(1, true);
     const draft = guidedSizingForRun(run, graph);
     expect(draft?.total).toBe(1);
     expect(draft?.links).toHaveLength(2);
-    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(SINGLE.replace(/^Not shown\.\s*/u, ''));
-    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('1 links');
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(guidedSizingSentence(draft!, false));
+    expect(goalChanceWithheldForAgent(run, graph)?.say).not.toContain('Give a rough strength');
     const actions = guidedSizingActions(draft, graph);
     expect(actions).toHaveLength(2);
     expect(bindGuidedSizing(draft, actions, { graph_hash: '0123456789abcdef', run_key: 'selected' })?.links).toHaveLength(2);
@@ -59,7 +59,7 @@ describe('GUIDED PATH r9 one scoped draft for words and controls', () => {
   it('r9 N=2 contrast: scored placeholders alone feed the words, presses and hook', () => {
     const { graph, run } = fixture(2);
     const draft = guidedSizingForRun(run, graph);
-    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(guidedSizingSentence(2));
+    expect(goalChanceWithheldForAgent(run, graph)?.say).toBe(guidedSizingSentence(draft!));
     expect(draft?.links.map(l => [l.from, l.to])).toEqual([['x', 'goal'], ['y', 'goal']]);
     const actions = guidedSizingActions(draft, graph);
     const hook = bindGuidedSizing(draft, actions, { graph_hash: '0123456789abcdef', run_key: 'selected' });
