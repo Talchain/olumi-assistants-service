@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- evidence harness, not product code: it reads its own CL_* run gates from the environment, like tools/ harnesses. */
 /**
  * EVENT branch census: P44's recorded-response construction harness, zero provider calls.
  * Source corpus matches #2842: valid 6 Oct lab 80 + two-risk arms 18 + mechanism arms 18.

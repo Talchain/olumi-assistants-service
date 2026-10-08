@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- evidence harness, not product code: it reads its own CL_* run gates from the environment, like tools/ harnesses. */
 /**
  * EVENT branch two-live-draw pilot adapted from P44's 8 Oct re-pinned construction harness.
  * Authorisation: BRIEF-build.md, correction (a); exactly two draws, <=4 provider calls. Fake dispatch, no store writes.
