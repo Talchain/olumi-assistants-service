@@ -5,16 +5,25 @@
  * that Run (`waveB-screen-chance-lines-20261007.json`, source unseen-b3-2). Harness copied from the S2e route test.
  */
 import { readFileSync } from 'node:fs';
+import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
 import { SPREAD_NOTE_WITHOUT_DOWNSIDE } from '../../goal-target/goal-chance-licence.js';
-import type { AnswerShape } from '../../routing/answer-shape.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { untestedHorizonLine } from '../decision-input-ask.js';
+import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
+import { HORIZON_MARKER, WITHHOLD_FALLBACK_MARKER, type ReplyComposeInput, type ReplyComposition } from '../reply/compose-reply.js';
+import { runExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { goalKindOf } from '../../goal-target/goal-kind.js';
+import { teamShareMoments, extraShareMoments } from '../../goal-target/event-by-date-share.js';
 
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** B5 T1b on 3fce64f: three point lines on the `each` licence, leader withheld (near tie); the gate deleted the chat's copy. */
 const READ_T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
+/** The live HEAD-B1 pilot, copied locally with its graph, Run and original displayed face/detail. */
+const READ_B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as Json;
 // Exact B2 was not captured in this tree; the constructed fixture records its source and alterations.
 const RANGE_WINS_B2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-range-wins.json', import.meta.url), 'utf8')) as Json;
 let READ: Json = READ_B3;
@@ -32,6 +41,20 @@ const SIZE_QUESTION = 'How sure are you of that size?';
 const SCREEN_T1B_SAID_ONCE = SCREEN_T1B.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
 let analysisResult: Json = READ.analysis_result;
 let forwardedText = 'ok';
+let composeInput: ReplyComposeInput | undefined;
+let composition: ReplyComposition | undefined;
+let lastTurnPayload: Json;
+let runCompleted = false;
+let canonicalReadOverride: ((view: ReturnType<typeof projectCanonicalAnalysisView>) => unknown) | undefined;
+let warn: ReturnType<typeof vi.spyOn>;
+vi.mock('../reply/compose-reply.js', async original => {
+  const actual = await original<typeof import('../reply/compose-reply.js')>();
+  return { ...actual, composeReplyShape: (input: ReplyComposeInput) => {
+    composeInput = input;
+    composition = actual.composeReplyShape(input);
+    return composition;
+  } };
+});
 let recentRows: Json[] = [];
 let hashTurn: (message: string) => string;
 
@@ -74,31 +97,44 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute, agentTurnRequestHash } = await import('../../../routes/agent-v1-turn.js');
+    const { log } = await import('../../../utils/telemetry.js');
+    warn = vi.spyOn(log, 'warn');
     hashTurn = message => agentTurnRequestHash(SCENARIO, null, message);
     app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async () => ({
+    app.post('/orchestrate/v2/turn', async () => { runCompleted = true; return ({
       response_version: 2, assistant_text: forwardedText, suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [analysisResult], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
-    }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: READ.graph, graph_hash: READ.graph_hash, analysis_result: analysisResult, analysis_state: READ.analysis_state,
-      analysis_ready: READ.analysis_ready,
-    }));
+    }); });
+    app.post('/assist/v1/scenarios/:id/graph', async () => {
+      // The harness authors the successful fact wrapper around this captured Run; production never invents one.
+      const canonical_analysis_view = projectCanonicalAnalysisView({ graph: READ.graph,
+        runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+          scenario_id: SCENARIO, run_id: 'fixture-screen-run', summary: analysisResult.summary,
+          leading_option_id: analysisResult.leading_option_id, enrichment: analysisResult.enrichment,
+          graph_hash_at_run: READ.graph_hash, computed_at: READ.analysis_state.run_state.computed_at,
+        } } as never,
+        analysisState: READ.analysis_state as never, analysisReady: READ.analysis_ready,
+        currentResult: analysisResult as never });
+      return { graph: READ.graph, graph_hash: READ.graph_hash, analysis_result: analysisResult, analysis_state: READ.analysis_state,
+        analysis_ready: READ.analysis_ready, canonical_analysis_view: canonicalReadOverride === undefined
+          ? canonical_analysis_view : canonicalReadOverride(canonical_analysis_view) };
+    });
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
-  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
+  afterAll(async () => { warn.mockRestore(); await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
-  const turn = async (outputs: Record<string, unknown>[][], message: string, sessionId?: string): Promise<Body> => {
+  // A string third argument is the Agent session id (GP rows); an object is extra payload (A rows).
+  const turn = async (outputs: Record<string, unknown>[][], message: string, extra: Json | string = {}): Promise<Body> => {
     seq += 1;
     callModelOutputs = outputs;
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message, turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`,
-      ...(sessionId === undefined ? {} : { agent_session_id: sessionId }),
-    } });
+    const more: Json = typeof extra === 'string' ? { agent_session_id: extra } : extra;
+    lastTurnPayload = { kind: 'message', scenario_id: SCENARIO, message,
+      turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, ...more };
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: lastTurnPayload });
     expect(r.statusCode, r.body).toBe(200);
     const b = r.json() as Body;
     expect(b._agent.replayed).not.toBe(true);
@@ -107,6 +143,35 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   const run = (reply: string) => [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }], say(reply)];
   const count = (text: string, s: string): number => text.split(s).length - 1;
+  const faceUnits = (body: Body): string[] => [body._answer_shape!.headline, ...body._answer_shape!.bullets];
+  const withholdMarkers = (body: Body): string[] => faceUnits(body).filter(unit => /^Not shown(?::| yet;)/.test(unit));
+  const expectStoredAndReplayed = async (body: Body): Promise<void> => {
+    const payload = structuredClone(lastTurnPayload);
+    expect(body._answer_shape, 'PL live: displayed contract carries its face/detail shape').toBeDefined();
+    const durable = rows.get(payload.turn_id);
+    expect(durable?.assistant_message, 'PL live: durable answer text equals displayed text').toBe(body.assistant_text);
+    expect(body.assistant_text, 'PL live: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(body._answer_shape!));
+    const providerCalls = vi.mocked(fetch).mock.calls.length;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body).toBe(200);
+    const replay = response.json() as Body;
+    expect(replay._agent.replayed).toBe(true);
+    expect(vi.mocked(fetch).mock.calls.length, 'PL replay makes no provider call').toBe(providerCalls);
+    expect(replay.assistant_text, 'PL replay: durable answer text equals displayed text').toBe(durable?.assistant_message);
+    expect(replay.assistant_text, 'PL replay: exact live words').toBe(body.assistant_text);
+    expect(replay._answer_shape, 'PL replay: exact live face/detail shape').toEqual(body._answer_shape);
+    expect(replay.assistant_text, 'PL replay: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(replay._answer_shape!));
+  };
+  const expectHorizonMarker = (body: Body, chance: string, fullSentence: string): void => {
+    const shape = body._answer_shape!;
+    const units = [shape.headline, ...shape.bullets];
+    expect(units[units.indexOf(chance) + 1], 'must-face horizon marker immediately follows its chance').toBe(HORIZON_MARKER);
+    expect(count(units.join('\n'), HORIZON_MARKER), 'one horizon marker on face').toBe(1);
+    expect(count(units.join('\n'), fullSentence), 'full horizon sentence is off face').toBe(0);
+    expect(count(shape.detail, fullSentence), 'full horizon sentence is verbatim in detail once').toBe(1);
+    expect(count(body.assistant_text, fullSentence), 'one full horizon sentence in whole reply').toBe(1);
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape));
+  };
   const estimateScreenLine = () => {
     READ = structuredClone(READ_T1B);
     READ.graph.nodes.find((n: Json) => n.id === 'raise_prices_10').label = 'Raise to £59';
@@ -120,6 +185,17 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       option_labels_by_option: { raise_prices_10: 'Raise to £59' },
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
+  };
+  const expectMandatoryFindings = (body: Body) => {
+    expect(body._answer_shape, 'R2 T1b coaching reply carries one shape').toBeDefined();
+    const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
+    const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
+    expect(units, 'exact mandatory finding identities, then short horizon marker; no optional framing/W/E').toEqual([...SCREEN_T1B_SAID_ONCE, HORIZON_MARKER]);
+    expectHorizonMarker(body, SCREEN_T1B_SAID_ONCE.at(-1)!, horizon);
+    expect(composition?.measure?.face_words, 'T1b is re-measured below its old 137-word face').toBeLessThan(120);
+    expect(units.join('\n')).not.toContain('What would change it:');
+    expect(units.join('\n')).not.toContain("Olumi's estimates:");
+    expect(composition?.measure?.face_over_word_budget).toBe(true);
   };
   const shortfallScreenLine = () => {
     READ = structuredClone(READ_T1B);
@@ -142,6 +218,319 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(lines[0]!.shortfall_note).toBeDefined();
     return lines[0]!;
   };
+
+  const oneChance = (goalFields: Json = {}, driver = false) => {
+    READ = structuredClone(READ_T1B);
+    const goal = READ.graph.nodes.find((n: Json) => n.kind === 'goal');
+    Object.assign(goal, { label: 'MRR', goal_threshold_raw: 20000, goal_threshold_cap: 25000,
+      goal_threshold_unit: '£/month', goal_horizon_months: 12 }, goalFields);
+    READ.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
+    analysisResult = structuredClone(READ.analysis_result);
+    analysisResult.enrichment.inference_warnings = [{
+      code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance is licensed.', form: 'each',
+      option_ids: ['raise_prices_10'], pct_by_option: { raise_prices_10: 67 },
+      target: { comparator: 'at_least', value: 20000, unit: '£/month' },
+      ...(driver ? { driver_by_option: { raise_prices_10: { kind: 'factor_value', factor_id: 'price_rise', quantity_id: 'price_rise',
+        side: 'low', cut_value: 0.05, cut_unit: '%', pct_if_side: 40, authored_by: 'user' } } } : {}),
+    }];
+    return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
+  };
+
+  it.each([
+    ['missing', () => undefined],
+    ['null', () => null],
+    ['invalid options', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: {} })],
+    ['invalid cell', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: [{ option_id: 'bad', cell: { kind: 'figure' } }] })],
+    ['invalid range', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: [{ option_id: 'bad', cell: { kind: 'range', display: 'between 1% and 2%', detail: {} } }] })],
+  ] as const)('r11d %s canonical_analysis_view: no marker, chance-free horizon, one warning on live and replay', async (_name, override) => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    canonicalReadOverride = override;
+    const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
+    expect(composeInput?.chanceCells).toEqual([]);
+    expect(withholdMarkers(b)).toEqual([]);
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    const warnings = () => warn.mock.calls.filter((call: unknown[]) => (call[0] as { event?: unknown } | undefined)?.event === 'agent_lane.canonical_analysis_view_unavailable');
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]![0]).toMatchObject({ scenario_id: SCENARIO });
+    await expectStoredAndReplayed(b);
+    expect(warnings()).toHaveLength(2); // Once for each reply, never for the turn's intermediate reads.
+  });
+
+  it('r11d READ wins: FINAL read cells override a disagreeing local projection on live and replay', async () => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    canonicalReadOverride = view => {
+      expect(view.options.length).toBeGreaterThan(0);
+      expect(view.options.every(row => row.cell.kind === 'withheld'), 'local projection would add a marker').toBe(true);
+      // Earlier reads remain withheld; only the read after Run carries the none cells used by the UI.
+      return runCompleted ? { ...view, options: view.options.map(row => ({ ...row, cell: { kind: 'none' as const } })) } : view;
+    };
+    const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
+    expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
+    expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'READ owns the cells').toBe(true);
+    expect(withholdMarkers(b), 'locally recomputed withholds cannot supply a marker').toEqual([]);
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    await expectStoredAndReplayed(b);
+    expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'replay READ owns the cells too').toBe(true);
+  });
+
+  it('r11d valid withheld cells with no recorded reason retain the fallback marker', async () => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    canonicalReadOverride = view => ({ ...view, options: view.options.map(row => ({ ...row,
+      cell: { ...row.cell, kind: 'withheld' as const, reasons: [{ code: 'reason_not_recorded', message: null }] } })) });
+    const b = await turn(run('Your results are ready.'), 'Run it');
+    expect(withholdMarkers(b)).toEqual([WITHHOLD_FALLBACK_MARKER]);
+    expect(warn.mock.calls.filter((call: unknown[]) => (call[0] as { event?: unknown } | undefined)?.event === 'agent_lane.canonical_analysis_view_unavailable')).toEqual([]);
+    await expectStoredAndReplayed(b);
+  });
+
+  it('r11b B1 pilot: withheld canonical cells give one face marker and the chance-free horizon once', async () => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    // Exercise the Run's real producer, including when an earlier identity withhold already removed its figures.
+    const { withholdGoalFiguresForMissingCurrentLevel } = await import('../../tools/handlers/run-analysis.js');
+    analysisResult.enrichment = withholdGoalFiguresForMissingCurrentLevel(analysisResult.enrichment, READ.graph);
+    expect(analysisResult.enrichment.inference_warnings.some((warning: Json) => warning.code === 'GOAL_FIGURES_MISSING_CURRENT_LEVEL')).toBe(true);
+    expect(goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)).toEqual([]);
+    const b = await turn(run(READ_B1.before_text), 'Run it');
+    expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
+    expect(composeInput?.chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
+    expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    const horizon = "This model doesn't yet say whether any option gets there within 12 months.";
+    expect(count(b.assistant_text, horizon), 'the exact staging chance-free horizon survives once').toBe(1);
+    expect(withholdMarkers(b), 'one marker is supplied by the Run cells despite three detail withhold sentences').toHaveLength(1);
+    expect(withholdMarkers(b)[0], 'distinct identity and current-level causes cannot be replaced by one partial cause').toBe(WITHHOLD_FALLBACK_MARKER);
+    for (const sentence of [
+      "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
+      'This run doesn’t yet show each option’s chance of reaching £20,000.',
+      "Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.",
+    ]) expect(b._answer_shape!.detail, 'the three original withhold sentences retain their producers this round').toContain(sentence);
+    const words = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+    process.stdout.write(`R11B_B1 ${JSON.stringify({
+      before: READ_B1.before_shape, after: b._answer_shape,
+      words: { before_face: words([READ_B1.before_shape.headline, ...READ_B1.before_shape.bullets].join(' ')),
+        before_detail: words(READ_B1.before_shape.detail), after_face: words(faceUnits(b).join(' ')),
+        after_detail: words(b._answer_shape!.detail) },
+    })}\n`);
+    await expectStoredAndReplayed(b);
+  });
+
+  it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'] as const)(
+    'r11c identity-only withheld Run: %s retains the named face marker through storage and replay', async code => {
+      READ = structuredClone(READ_B1);
+      analysisResult = structuredClone(READ.analysis_result);
+      const identity = analysisResult.enrichment.inference_warnings.find((warning: Json) =>
+        warning.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED');
+      expect(identity).toBeDefined();
+      analysisResult.enrichment.inference_warnings = [{ ...identity, code }];
+      const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
+      expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
+      expect(composeInput?.chanceCells?.every(cell => cell.kind === 'withheld'
+        && cell.reasons.length === 1 && cell.reasons[0]!.code === code)).toBe(true);
+      expect(withholdMarkers(b)).toEqual(["Not shown: how MRR is worked out isn't confirmed"]);
+      expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
+      await expectStoredAndReplayed(b);
+    });
+
+  it('r11b B3 range fixture: the ranged option counts as a chance and supplies no withhold marker', async () => {
+    // Reuse the served B3 range; narrow its Run roster to that option so the other B3 withholds do not add a marker.
+    analysisResult.enrichment.option_comparison = analysisResult.enrichment.option_comparison
+      .filter((option: Json) => option.option_id === 'fourth_shop_in_clifton');
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expect(composeInput?.chanceCells?.map(cell => cell.kind)).toEqual(['range']);
+    expect(b.assistant_text).toContain(SCREEN[0]!);
+    expect(b.assistant_text).toContain("This chance uses the model's numbers as they are today");
+    expect(b.assistant_text).not.toContain('These chances use');
+    expect(withholdMarkers(b)).toEqual([]);
+    expect(faceUnits(b)).toContain(HORIZON_MARKER);
+    await expectStoredAndReplayed(b);
+  });
+
+  it.each([1, 2] as const)('r11b mixed %s shown: figure cells choose horizon grammar beside exactly one withheld marker', async shown => {
+    oneChance();
+    const licence = analysisResult.enrichment.inference_warnings[0];
+    if (shown === 2) {
+      licence.option_ids.push('launch_49_starter_tier');
+      licence.pct_by_option.launch_49_starter_tier = 20;
+    }
+    analysisResult.enrichment.inference_warnings.push({
+      code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', severity: 'warning',
+      message: "Not shown. MRR's current level is missing.", option_ids: ['keep_pricing_as_it_is'],
+      detail: { reason: 'missing_goal_baseline' },
+    });
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'figure')).toHaveLength(shown);
+    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'withheld')).toHaveLength(1);
+    const prefix = shown === 1 ? 'This chance uses' : 'These chances use';
+    const otherPrefix = shown === 1 ? 'These chances use' : 'This chance uses';
+    expect(b.assistant_text).toContain(prefix);
+    expect(b.assistant_text).not.toContain(otherPrefix);
+    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+    expect(withholdMarkers(b)).toEqual(["Not shown: MRR's current level is missing"]);
+    expect(faceUnits(b)).toContain(HORIZON_MARKER);
+    await expectStoredAndReplayed(b);
+  });
+
+  it('SCOPE: ordinary converse keeps its lead and three bullets visible without draft or Run contract', async () => {
+    oneChance();
+    const text = 'The main risks are clear.\n- Churn could rise.\n- Adoption could lag.\n- Support costs could grow.';
+    const b = await turn([say(text)], 'What are the main risks?');
+    expect(b._agent.tool_calls).toEqual([]);
+    expect(composeInput?.faceContract).toBeUndefined();
+    expect(b.assistant_text.startsWith(text)).toBe(true);
+    expect(b._answer_shape).toBeUndefined();
+  });
+
+  it('B1 Paul Run: marker beside chance, exact full horizon in detail once, with one next step', async () => {
+    const line = oneChance();
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
+    const next = 'What evidence should we check next?';
+    const b = await turn(run(`Your comparison is ready. ${next}`), 'Run it');
+    expect(composeInput?.faceContract).toBe('run');
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    expectHorizonMarker(b, line.chance, horizon);
+    expect(units.at(-1)).toBe(next);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+    await expectStoredAndReplayed(b);
+  });
+
+  it.each(['by Q3', 'no deadline'] as const)('B3 %s: horizon marker beside chance, short full sentence once in detail', async deadline => {
+    const line = oneChance({ goal_horizon_months: undefined, ...(deadline === 'by Q3' ? { goal_deadline_as_stated: 'by Q3' } : {}) });
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expectHorizonMarker(b, line.chance, horizon);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+  });
+
+  it('no target + months: marker beside chance, exact no-target horizon in detail once', async () => {
+    const line = oneChance({ goal_threshold_raw: undefined, goal_threshold: undefined, goal_threshold_cap: undefined });
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll get there within 12 months.";
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expectHorizonMarker(b, line.chance, horizon);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+  });
+
+  it('hiring Run: horizon carries its own target words rather than pricing assumptions', async () => {
+    const line = oneChance({ label: 'Hire engineers', goal_threshold_raw: 6, goal_threshold_unit: 'engineers', goal_horizon_months: 9 });
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach 6 engineers within 9 months.";
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expectHorizonMarker(b, line.chance, horizon);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+  });
+
+  it('share_by_date Run: event-by-date chances model time and carry no horizon clause anywhere', async () => {
+    oneChance();
+    const deadline = '2027-04-07', unit = '% of launch';
+    const team = teamShareMoments(6, 6, 10), extra = extraShareMoments(0.1, 6, 3, 5);
+    // The existing Science S2a graph: a held share sum with its real time/lead-time moments and fixed date.
+    READ.graph = { nodes: [
+      { id: 'launch_share', kind: 'goal', label: 'Launch share', goal_horizon: { deadline }, goal_horizon_months: 12,
+        goal_threshold_frame: 'level', goal_threshold: 1, goal_threshold_raw: 100, goal_threshold_cap: 100,
+        goal_threshold_unit: unit, goal_direction: '>=' },
+      { id: 'team_share', kind: 'factor', category: 'observable', label: 'Team launch share', observed_state: {
+        value: team.mean, std: team.sd, unit, cap: 100, source: 'user_override',
+        stated_time: { quantity: 'months_to_finish', low: 6, high: 10, unit: 'months', deadline, reference_date: '2026-10-07' } } },
+      { id: 'two_devs', kind: 'factor', category: 'controllable', label: 'Two developers', observed_state: {
+        value: 0, source: 'cee_inference', extra_share_by_date: { monthly_share: 10, lead_low: 3, lead_high: 5,
+          unit: `${unit} per month`, deadline, reference_date: '2026-10-07' } } },
+      { id: 'launch_decision', kind: 'decision', label: 'How to launch on time' },
+      { id: 'status_quo', kind: 'option', label: 'Carry on', is_baseline: true, interventions: { two_devs: { value: 0 } } },
+      { id: 'hire', kind: 'option', label: 'Two developers', interventions: { two_devs: { value: 1 } } },
+    ], edges: [
+      { from: 'team_share', to: 'launch_share', exists_probability: 0.8, strength: { mean: 1, std: 0.1 }, effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', definitional: true, natural_effect: {
+          amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
+          strength_mean: 1, strength_mean_frame: 'edge_strength' } } },
+      { from: 'two_devs', to: 'launch_share', exists_probability: 1, strength: { mean: extra.mean, std: extra.sd }, effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: {
+          amount: 20, amount_unit: unit, per_source_change: 1, per_source_change_unit: 'switch',
+          strength_mean: extra.mean, strength_mean_frame: 'edge_strength' } } },
+      ...['status_quo', 'hire'].flatMap(id => [
+        { from: 'launch_decision', to: id, strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: id, to: 'two_devs', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      ]),
+    ] };
+    analysisResult.enrichment.inference_warnings = [{ code: 'GOAL_CHANCE_LICENSED', form: 'each', severity: 'info',
+      message: 'Each option’s chance is licensed.', option_ids: ['status_quo', 'hire'], pct_by_option: { status_quo: 2, hire: 39 },
+      target: { comparator: 'at_least', value: 100, unit, by_date: deadline } }];
+    expect(goalKindOf(READ.graph)).toBe('share_by_date');
+    const lines = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
+    expect(lines).toHaveLength(2);
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expect(composeInput?.faceContract).toBe('run');
+    expect(composeInput?.horizonLine).toBeUndefined();
+    expect(b.assistant_text).not.toContain("uses the model's numbers as they are today");
+    expect(b.assistant_text).not.toContain("use the model's numbers as they are today");
+    expect(b.assistant_text).not.toContain("doesn't project");
+    const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join('\n');
+    for (const line of lines) expect(face).toContain(line.chance);
+  });
+
+  it('two chances: plural horizon once across the whole reply even when the narrator echoes its singular fact', async () => {
+    oneChance();
+    const licence = analysisResult.enrichment.inference_warnings[0];
+    licence.option_ids.push('keep_pricing_as_it_is');
+    licence.pct_by_option.keep_pricing_as_it_is = 20;
+    const singular = untestedHorizonLine(READ.graph)!;
+    const plural = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
+    const b = await turn(run(`Review the recorded assumptions.\n\n${singular}`), 'Run it');
+    const lines = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
+    expectHorizonMarker(b, lines.at(-1)!.chance, plural);
+    expect(count(b.assistant_text, plural)).toBe(1);
+    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+  });
+
+  it('W current licensed Run: same selected result and graph; face order chance, horizon marker, W, E', async () => {
+    const line = oneChance({ goal_horizon_months: undefined }, true);
+    const expected = whatChangesFaceLine(analysisResult, READ.graph);
+    expect(expected).not.toBeNull();
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    const screen = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
+    expect(screen, 'W uses the same selected result and producer finding').toEqual([line]);
+    const findingUnits = screen.map(finding => [finding.chance, finding.depends].filter(Boolean).join(' '));
+    expect(units.slice(0, findingUnits.length), 'every exact chance plus its typed dependency precedes the marker').toEqual(findingUnits);
+    const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: screen.length > 1 })!;
+    expect(composeInput?.whatChanges).toBe(expected);
+    expectHorizonMarker(b, findingUnits.at(-1)!, horizon);
+    expect(units[units.indexOf(HORIZON_MARKER) + 1]).toBe(expected);
+    const e = units.findIndex(unit => unit.startsWith("Olumi's estimates:"));
+    if (e >= 0) expect(e).toBeGreaterThan(units.indexOf(expected!));
+  });
+
+  it('W stale selected Run: no W despite a licensed result', async () => {
+    oneChance({ goal_horizon_months: undefined }, true);
+    expect(whatChangesFaceLine(analysisResult, READ.graph)).not.toBeNull();
+    READ.analysis_state.run_state.kind = 'complete_stale';
+    const b = await turn([], 'Run it', { chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    expect(composeInput?.faceContract).toBe('run');
+    expect(composeInput?.whatChanges).toBeUndefined();
+    expect(b.assistant_text).not.toContain('What would change it:');
+  });
+
+  it('W stale Explain binding: a newer current licensed Run cannot supply W for the old control', async () => {
+    oneChance({ goal_horizon_months: undefined }, true);
+    const chip = runExplanationChip(SCENARIO, { graphHash: READ.graph_hash, analysisState: READ.analysis_state, analysisResult })!;
+    expect(chip).not.toBeNull();
+    expect(whatChangesFaceLine(analysisResult, READ.graph)).not.toBeNull();
+    READ.analysis_state.run_state.computed_at = '2026-10-08T11:00:00.000Z';
+    seq += 1;
+    callModelOutputs = [];
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: RUN_EXPLANATION_MESSAGE,
+      turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, chip: { id: chip.id },
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    const b = response.json() as Body & { narration?: { status: string } };
+    expect(b.narration?.status).toBe('stale');
+    expect(composeInput?.faceContract).toBe('run');
+    expect(composeInput?.whatChanges).toBeUndefined();
+    expect(b.assistant_text).not.toContain('What would change it:');
+  });
 
   it('GP review P1: zero added lines still applies cleaned narration and removes a fabricated link count', async () => {
     shortfallScreenLine();
@@ -299,10 +688,13 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
+    expectMandatoryFindings(b);
+    await expectStoredAndReplayed(b);
     // B15 (#2783, DL): the lead-in opens the headline and is directly followed by the first screen chance finding; it
     // still introduces the list and never ends the reply on a colon.
     const lead = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
-    expect(b.assistant_text.startsWith(`${lead}\n${SCREEN_T1B[0]!}`), b.assistant_text).toBe(true);
+    expect(b._answer_shape!.headline).toBe(SCREEN_T1B[0]!);
+    expect(b._answer_shape!.detail).toContain(lead);
     expect(count(b.assistant_text, lead)).toBe(1);
     expect(b.assistant_text.trimEnd().endsWith(':'), 'never ends on a colon').toBe(false);
   });
@@ -312,7 +704,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run(`For reaching at least £126,000 monthly recurring revenue, on current information:\n\n${SCREEN_T1B.join(' ')}`), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expect(b.assistant_text.startsWith(`For reaching at least £126,000 monthly recurring revenue, on current information:\n${SCREEN_T1B[0]!}`), 'the first chance+depends unit keeps its question and still leads').toBe(true);
+    expectMandatoryFindings(b);
+    expect(b._answer_shape!.headline, 'the first chance+depends unit keeps its question and still leads').toBe(SCREEN_T1B[0]!);
   });
 
   it('B19 r3: a completed reply preserves Agent chance phrasing and keeps the appended canonical unit on the face', async () => {

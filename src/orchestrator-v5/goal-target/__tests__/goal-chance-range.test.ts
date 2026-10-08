@@ -313,7 +313,7 @@ describe('real loader and run-analysis handler', () => {
       horizon_line: record(e, GOAL_HORIZON_NOT_TESTED)?.message,
       range_by_option: { '59_price': { ...expected, from: 'pro_plan_price', to: 'monthly_churn_rate' } } });
     expect(record(e, GOAL_HORIZON_NOT_TESTED)).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED,
-      message: "This model doesn't yet say whether any option gets there within 12 months.", node_ids: ['mrr'] });
+      message: "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.", node_ids: ['mrr'] });
     expect(e.option_comparison.find((r: Json) => r.option_id === '59_price')).toMatchObject({ option_id: '59_price' });
     for (const key of ['probability_of_goal', 'probability_of_goal_precision', 'probability_of_goal_drivers', 'win_probability']) {
       expect(e.option_comparison.find((r: Json) => r.option_id === '59_price')).not.toHaveProperty(key);

@@ -12,6 +12,7 @@
  * Run tool's own output for the SAME stubbed Run. Fixture: the served W3 cold read (`520aab46`, CEE `f074916`), whose
  * goal MRR carries the price x subscribers product and whose churn limit has a ratified constraint id.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
@@ -93,7 +94,7 @@ vi.mock('../../build-turn-context.js', async original => ({
 const fresh = (): Json => JSON.parse(JSON.stringify(SERVED)) as Json;
 /** The Run turn's own `analysis_ready`: the same admission the read carries (the turn and the read agree). */
 const readyOf = (r: Json): Json => ({ status: 'ready', analysis_admission: r.analysis_admission });
-const graphBody = (): Json => ({ ...read, analysis_ready: readyOf(read), current_read: read.current_read ?? {} });
+const graphBody = (): Json => withCanonicalAnalysisView({ ...read, analysis_ready: readyOf(read), current_read: read.current_read ?? {} }, SCENARIO);
 const turnBody = (): Json => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
   graph_hash: read.graph_hash, blocks: [read.analysis_result], analysis_state: read.analysis_state, analysis_ready: readyOf(read) });
 

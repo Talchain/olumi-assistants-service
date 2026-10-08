@@ -7,6 +7,8 @@ import { goalChanceWithheldForAgent, RANGE_OPENING } from '../goal-chance-withhe
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingReplyText, guidedSizingSentence,
   legacyGuidedSizingReplyText } from '../guided-sizing.js';
+import { composeReplyShape, withholdDisclosureForCells } from '../reply/compose-reply.js';
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 
 type Json = Record<string, any>;
 const CAPTURE = (JSON.parse(readFileSync(new URL('../method-turn/__tests__/fixtures/w9b/C.json', import.meta.url), 'utf8')) as Json).j;
@@ -21,6 +23,30 @@ const said = (run: Json, graph: Json): string => withScreenLinesOwed(goalChanceW
   goalChanceScreenLinesForAgent(run, graph, true)).text;
 
 describe('RANGE WINS at the guided sentence producer', () => {
+  it('the scenario-read range cell also keeps the typed reply free of a withheld chance marker', () => {
+    const { graph, run } = structuredClone(B2);
+    const read = withCanonicalAnalysisView({ graph,
+      analysis_state: { run_state: { kind: 'complete_current' } },
+      analysis_result: { ...run, type: 'analysis_result' },
+    }, 'range-wins-canonical-read');
+    const cells = read.canonical_analysis_view.options.map(option => option.cell);
+    expect(cells.map(cell => cell.kind)).toEqual(['range']);
+    expect(withholdDisclosureForCells(graph, cells)).toBeNull();
+    const lines = goalChanceScreenLinesForAgent(run, graph, true);
+    const composed = composeReplyShape({ faceContract: 'run', text: said(run, graph), graph, chanceCells: cells,
+      obligations: lines.flatMap(line => [
+        { role: 'evidence' as const, text: line.chance, lead: true as const, subjects: [line.option_id] },
+        { role: 'evidence' as const, text: line.depends, subjects: [line.option_id], companionOf: line.option_id },
+      ]),
+    });
+    expect(composed.shape).not.toBeNull();
+    const face = [composed.shape!.headline, ...composed.shape!.bullets].join('\n');
+    expect(face).toContain(RANGE_LINE);
+    expect(face).toContain(RANGE_DEPENDS);
+    expect(composed.text).not.toMatch(/Not shown|The chance isn't shown yet/);
+    expect(guidedSizingReplyText(guidedSizingForRun(run, graph)).guided).toBeNull();
+  });
+
   it('row 1 B2 constructed: the ranged starter keeps its range and produces no guided sentence', () => {
     const { graph, run } = structuredClone(B2);
     expect(goalChanceFactsForAgent(run, graph, true).goal_chance_range_display?.starter.range).toBe('between about 5% and 37%');

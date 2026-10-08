@@ -11,6 +11,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
 import { pruneSupersededToolOutputs } from '../history-store.js';
+import { statedTargetWords, untestedHorizonLine } from '../decision-input-ask.js';
 
 type Json = Record<string, any>;
 const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400d1', authenticated_user_id: null, request_id: 'r' };
@@ -40,7 +41,7 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
     const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
     expect(r.goal_chance, JSON.stringify(Object.keys(r))).toEqual(expect.objectContaining({ withheld: true, node_ids: ['mrr'] }));
     // The reply's opening, then PLoT's reason verbatim (its UI-slot "Not shown." is not a sentence in a reply).
-    expect(r.goal_chance.say).toBe("This run doesn’t show how often each option reaches the goal’s target. 'MRR' depends on Pro plan price × Pro paying "
+    expect(r.goal_chance.say).toBe("This run doesn’t yet show each option’s chance of meeting your goal. 'MRR' depends on Pro plan price × Pro paying "
       + "subscribers, but this run couldn't calculate it that way, so the figures for each option would be wrong.");
     expect(r.goal_chance.note).toMatch(/Never state, estimate, rank or compare a chance/);
     expect(r.goal_chance.note).toMatch(/estimated value for the goal itself/); // AIQ 5886183999: the means are the same class
@@ -55,7 +56,7 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
   it('the TYPED code decides, never the words: other warnings → nothing; the code with no words → still withheld (fail closed)', () => {
     expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: [{ code: 'IDENTITY_NOT_EVALUATED', message: PLOT_WORDS }] } })).toBeUndefined();
     const bare = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [{ code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED }] } });
-    expect(bare).toEqual(expect.objectContaining({ withheld: true, say: 'This run doesn’t show how often each option reaches the goal’s target.', node_ids: [] }));
+    expect(bare).toEqual(expect.objectContaining({ withheld: true, say: 'This run doesn’t yet show each option’s chance of meeting your goal.', node_ids: [] }));
     // A chance beside the code is still withheld: the code is the run's decision.
     expect(goalChanceWithheldForAgent({ enrichment: { option_comparison: SHOWN_ROWS, inference_warnings: [WITHHELD_WARNING] } })?.withheld).toBe(true);
   });
@@ -83,4 +84,29 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
     }
   });
 
+});
+
+
+describe('DL chance words share the exact held target with the horizon line', () => {
+  const targetGraph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Monthly recurring revenue',
+    goal_threshold_raw: 20000, goal_threshold_unit: '£/month', goal_horizon_months: 12 }], edges: [] };
+  const bare = { enrichment: { inference_warnings: [{ code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED }] } };
+
+  it('target held: the chance sentence names £20,000 in the same words as the unchanged horizon sentence', () => {
+    expect(statedTargetWords(targetGraph)).toBe('£20,000');
+    expect(goalChanceWithheldForAgent(bare, targetGraph)?.say)
+      .toBe('This run doesn’t yet show each option’s chance of reaching £20,000.');
+    expect(untestedHorizonLine(targetGraph)).toBe("This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.");
+  });
+
+  it.each([
+    ['no target', GRAPH],
+    ['no graph', undefined],
+    ['no goal', { nodes: [], edges: [] }],
+    ['more than one goal', { ...targetGraph, nodes: [...targetGraph.nodes, { id: 'other', kind: 'goal', label: 'Other goal' }] }],
+  ])('%s: no single stated target uses the exact no-target opening', (_name, graph) => {
+    expect(statedTargetWords(graph)).toBeNull();
+    expect(goalChanceWithheldForAgent(bare, graph)?.say)
+      .toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
+  });
 });

@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { goalChanceLineOwed, goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
 
 type Json = Record<string, any>;
@@ -23,7 +24,7 @@ const PARAPHRASE = 'The run could not use the formula for Total cost, so it adds
 
 describe('goalChanceLineOwed', () => {
   it('RED (served shape): a paraphrase of the reason → the typed sentence is owed, verbatim', () => {
-    expect(SAY).toMatch(/^This run doesn’t show how often each option reaches the goal’s target\. 'Total cost' depends on Staff cost \+ Cloud cost/);
+    expect(SAY).toMatch(/^This run doesn’t yet show each option’s chance of meeting your goal\. 'Total cost' depends on Staff cost \+ Cloud cost/);
     expect(goalChanceLineOwed([runWithheld], PARAPHRASE)).toBe(SAY);
   });
 
@@ -34,6 +35,26 @@ describe('goalChanceLineOwed', () => {
   it('the first pass inside a build owes it too', () => {
     const build: Json = { ok: true, mutated: true, first_analysis: { ran: true, goal_chance: runWithheld.goal_chance } };
     expect(goalChanceLineOwed([build], PARAPHRASE)).toBe(SAY);
+  });
+
+  it('ONE reply: a typed identity ask owns the unconfirmed reading, including when the narrator already echoed it', () => {
+    const ask = 'Olumi reads Total cost as Staff cost + Cloud cost. Is that how you work it out?';
+    const run = { ...runWithheld, identity_ask_say: ask };
+    expect(goalChanceLineOwed([run], 'The run is ready.')).toBeNull();
+    expect(goalChanceLineOwed([run], `The run is ready. ${ask}`)).toBeNull();
+    // A later Run without an identity ask clears its ownership; the reason is then owed in its own right.
+    expect(goalChanceLineOwed([run, runWithheld], 'The run is ready.')).toBe(SAY);
+  });
+
+  it('ONE reply: the gate owns its typed goal-chance reason, so the owed producer adds nothing beside it', () => {
+    expect(goalChanceLineOwed([runWithheld], PARAPHRASE, { gateReasonOwed: true })).toBeNull();
+    expect(goalChanceLineOwed([runWithheld], PARAPHRASE, { gateReasonOwed: false })).toBe(SAY);
+  });
+
+  it('ONE reply: a surviving typed identity card owns a build first pass without identity_ask_say', () => {
+    const build: Json = { ok: true, mutated: true, first_analysis: { ran: true, goal_chance: runWithheld.goal_chance } };
+    expect(goalChanceLineOwed([build], PARAPHRASE, { gateReasonOwed: false, identityAskOwed: true })).toBeNull();
+    expect(goalChanceLineOwed([build], PARAPHRASE, { gateReasonOwed: false, identityAskOwed: false })).toBe(SAY);
   });
 
   it('the LATEST run decides: a later run that did not withhold owes nothing; a later withheld run owes its own', () => {
@@ -52,7 +73,12 @@ describe('goalChanceLineOwed', () => {
       { warning_message: string; replies: { agent_text: string; served_reply: string }[] };
     const said = goalChanceWithheldForAgent(block(FX.warning_message))!;
     const run: Json = { ok: true, ran: true, goal_chance: said };
-    for (const r of FX.replies) {
+    // Keep the historical capture intact; project only its former opening into today's no-graph producer words.
+    // Quotes, emphasis, all warning words and the duplicate appended line remain as captured.
+    const opening = goalChanceWithheldForAgent(block(''))!.say;
+    const todayWords = (text: string): string => text.replace(/This run[^.\n]*\./gu, opening);
+    for (const captured of FX.replies) {
+      const r = { agent_text: todayWords(captured.agent_text), served_reply: todayWords(captured.served_reply) };
       expect(r.agent_text.includes(said.say), 'precondition: not a byte match (the served defect)').toBe(false);
       expect(r.served_reply.endsWith(said.say), 'precondition: served appended it').toBe(true);
       expect(goalChanceLineOwed([run], r.agent_text), r.agent_text.slice(0, 60)).toBeNull();
@@ -69,12 +95,15 @@ describe('goalChanceLineOwed', () => {
 
   it('WIRING: the route appends it with the owed disclosures, checked against the Agent\'s own text', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    // MC D1 (c): the Run's #416 ask is owed right after the goal-chance line, in the same list.
-    // Class (i): the amendment-A scoped owner supplies the final Run sentence; raw tool output is the fallback.
+    // ONE reply: the producer runs after the gate, so actual typed gate ownership decides whether a second line is owed.
+    expect(src).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
+    expect(src).toContain('wireBody.assistant_text.includes(gateGoalChance.why)');
+    expect(src).toContain('owed.push(...goalLines);');
+    expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
+    expect(src).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     expect(src).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
-    expect(src).toContain('...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),\n'
-      + '        // MC D1 (c): the Run\'s #416 ask, after its reason (never a bare "couldn\'t calculate it" with nothing to answer).\n'
-      + '        ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),\n      ];');
+    expect(src).toContain('identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, \'\') !== null, graph: readbackGraph });');
+    expect(src).toContain('}], RUN_RESULT_READY_TEXT, { graph: state.graph });');
     // Exact host-copy display normalisation preserves the narrator and the same owed lines.
     expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
     expect(src).toContain('withDisclosures(narrationText, owed)');
@@ -82,10 +111,55 @@ describe('goalChanceLineOwed', () => {
   });
   it('R13 MUTANT: a raw-tool-only owed line loses the final scoped owner', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    const pin = '...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),';
+    const pin = "goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,";
     expect(src.includes(pin)).toBe(true);
     expect(src.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
     // A later Run still clears an earlier withhold when no scoped final sentence exists.
     expect(goalChanceLineOwed([runWithheld, runShown], PARAPHRASE)).toBeNull();
+  });
+});
+
+
+describe('DL exact constructed chance-opening reader keeps owed-once behaviour', () => {
+  const targetGraph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Monthly recurring revenue',
+    goal_threshold_raw: 20000, goal_threshold_unit: '£/month' }], edges: [] };
+  const reason = SUM_WORDS.replace(/^Not shown\.\s*/, '');
+
+  it.each([
+    ['target held', targetGraph, 'This run doesn’t yet show each option’s chance of reaching £20,000.'],
+    ['no target', undefined, 'This run doesn’t yet show each option’s chance of meeting your goal.'],
+  ])('%s: a reason already said owes only its opening, and the completed reply owes nothing', (_name, graph, opening) => {
+    const chance = goalChanceWithheldForAgent(block(SUM_WORDS), graph)!;
+    expect(chance.say).toBe(`${opening} ${reason}`);
+    const run = { ran: true, goal_chance: chance };
+    expect(goalChanceLineOwed([run], reason, { graph })).toBe(opening);
+    expect(goalChanceLineOwed([run], `${reason} ${opening}`, { graph })).toBeNull();
+    expect(goalChanceLineOwed([run], chance.say, { graph })).toBeNull();
+  });
+
+  it('a target clause longer than 80 characters says the constructed opening once, including a build first pass', () => {
+    const unit = 'qualified customer accounts with independently validated recurring demand across every international operating region';
+    const graph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Validated accounts',
+      goal_threshold_raw: 20000, goal_threshold_unit: unit }], edges: [] };
+    const targetClause = `reaching 20,000 ${unit}`;
+    expect(targetClause.length).toBeGreaterThan(80);
+    const opening = `This run doesn’t yet show each option’s chance of ${targetClause}.`;
+    const chance = goalChanceWithheldForAgent(block(SUM_WORDS), graph)!;
+    expect(chance.say).toBe(`${opening} ${reason}`);
+    const run = { ran: true, goal_chance: chance };
+    expect(goalChanceLineOwed([run], reason, { graph })).toBe(opening);
+    expect(goalChanceLineOwed([run], `${opening} Other observations. ${reason}`, { graph })).toBeNull();
+    expect(goalChanceLineOwed([{ first_analysis: run }], reason, { graph })).toBe(opening);
+    expect(goalChanceLineOwed([run, runShown], reason, { graph })).toBeNull();
+  });
+
+  it('a 20,000-character unbound target owes its full sentence and finishes within 50 ms', () => {
+    const say = `This run doesn’t yet show each option’s chance of reaching ${'x'.repeat(20000)}. ${reason}`;
+    const run = { ran: true, goal_chance: { withheld: true, say } };
+    const started = performance.now();
+    const owed = goalChanceLineOwed([run], reason);
+    const elapsed = performance.now() - started;
+    expect(owed).toBe(say);
+    expect(elapsed).toBeLessThan(50);
   });
 });

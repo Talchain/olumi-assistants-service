@@ -13,6 +13,7 @@
  *   · the prior-facts read returns those persisted facts.
  * The explicit Run goes through the product's own `/orchestrate/v2/turn`, counted separately.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -21,6 +22,8 @@ import { readFileSync } from 'node:fs';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
 import { RUN_RESULT_READY_TEXT, RUN_EXPLANATION_PREFIX } from '../run-explanation.js';
+import { readMoneyTotal } from '../same-unit.js';
+import { sayFigure } from '../say-figure.js';
 
 const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
@@ -132,10 +135,11 @@ async function buildApp(): Promise<FastifyInstance> {
   const a = Fastify({ logger: false });
   a.post('/assist/v1/scenarios/:id/graph', async (req) => {
     const s = st((req.params as { id: string }).id);
-    if (!s.registered) return { graph: { nodes: [], edges: [] }, graph_hash: 'empty' };
+    const scenarioId = (req.params as { id: string }).id;
+    if (!s.registered) return withCanonicalAnalysisView({ graph: { nodes: [], edges: [] }, graph_hash: 'empty' }, scenarioId);
     const H = hashOf(s);
     const ran = s.facts.some((f) => (f.result as { graph_hash_at_run?: unknown }).graph_hash_at_run === H) || s.injectRunHashes.includes(H);
-    return {
+    return withCanonicalAnalysisView({
       graph: { ...s.graph, edges: [...s.graph.edges, ...s.extraEdges] },
       graph_hash: H,
       analysis_state: ran
@@ -143,7 +147,7 @@ async function buildApp(): Promise<FastifyInstance> {
         : { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } },
       ...(ran && knobs.runStateKind === 'complete_current' && !knobs.withholdResult ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: H, ...(knobs.analysisResultExtra ?? {}) } } : {}),
       ...(knobs.analysisReady !== undefined ? { analysis_ready: knobs.analysisReady } : {}),
-    };
+    }, scenarioId);
   });
   a.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
     const sid = (req.params as { id: string }).id;
@@ -774,7 +778,7 @@ describe('F3: the first reply names the goal it could not check', () => {
     return g as unknown as typeof READY_GRAPH;
   })();
   const REASON = { enrichment: { decision_brief: { warning_codes: ['GOAL_THRESHOLD_NOT_CONVERTIBLE'] } } };
-  const LINE = 'Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.';
+  const LINE = 'Your MRR target of \u00a320,000 a month is not checked yet: the model has no current MRR figure to measure it against.';
   beforeAll(async () => {
     installFetch();
     installRunStub();
@@ -790,6 +794,10 @@ describe('F3: the first reply names the goal it could not check', () => {
   });
 
   it('RED (served 013636Z): the build turn whose first pass could not score the goal names it and why', async () => {
+    const goal = GOAL_GRAPH.nodes.find((node) => node.kind === 'goal') as unknown as Record<string, unknown>;
+    const moneyUnit = readMoneyTotal(goal.goal_threshold_unit, '');
+    expect(moneyUnit, 'the unchecked-target producer reads a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(20000, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£20,000 a month');
     knobs.analysisResultExtra = REASON;
     const b = await buildTurn(app);
     expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: true });
@@ -799,10 +807,14 @@ describe('F3: the first reply names the goal it could not check', () => {
   it('CONTRAST (served 013214Z): when the arithmetic already states the target, the goal line is not added too', async () => {
     const { readFileSync } = await import('node:fs');
     knobs.graph = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as typeof READY_GRAPH;
+    const goal = knobs.graph.nodes.find((node) => node.kind === 'goal') as unknown as Record<string, unknown>;
+    const moneyUnit = readMoneyTotal(goal.goal_threshold_unit, '');
+    expect(moneyUnit, 'the arithmetic producer reads a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(20000, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£20,000 a month');
     knobs.leaderClaim = { permitted: false, withheld_reason: 'nonlinear_identity_sign_unproven' };
     knobs.analysisResultExtra = REASON;
     const b = await buildTurn(app);
-    expect(b.assistant_text).toContain('\u00a320,000/month needs 339');
+    expect(b.assistant_text).toContain('\u00a320,000 a month needs 339');
     expect(b.assistant_text).not.toContain('is not checked yet');
   });
 

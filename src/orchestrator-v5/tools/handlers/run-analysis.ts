@@ -53,10 +53,12 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
-import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
+import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import type {
   RunAnalysisArgs,
@@ -2142,6 +2144,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (!chanceGoalWithheld) {
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis, snapshot.goal_node_id);
+      // Record the additional typed cause only AFTER the target gate has applied its original P1/P5 outcome rules.
+      response = withholdGoalFiguresForMissingCurrentLevel(response, graphForAnalysis);
       if (response !== before) {
         log.info(
           {
@@ -2194,10 +2198,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.
     response = withoutDirectionUnattestedOnHeldFloor(response, heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id));
 
-    // ⭐ A7 AS A TYPED FACT (DL 0df0e1, beat 2): a held deadline no duration limit scores is untested, and the Run says so
-    // on the carrier a consumer reads, in A7's own sentence (`decision-input-ask.ts`, the one rule the chat line uses too).
     response = withShareByDateChanceGate(response, snapshot.rawPersistedGraph ?? snapshot.graph, snapshot.goal_node_id);
-    response = withUntestedHorizonWarning(response, graphForAnalysis, accumulationDrift.warnings.length > 0);
     for (const warning of accumulationDrift.warnings) response = appendInferenceWarning(response, warning);
     if (accumulationDrift.warnings.length > 0) {
       // The withdrawn identity was not evaluated: use #416's existing Run-wide withholding route before claim readers.
@@ -3128,6 +3129,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       },
     };
 
+    // The completed Run's final cells own every horizon form, after all withholds, licences and range scoping.
+    // Use the response's public-block builder; its projection owns the claim gate, not the cell reader.
+    // This is the Run just produced here: no historical binding or freshness selection is needed.
+    const horizonGraph = snapshot.rawPersistedGraph ?? snapshot.graph;
+    const horizonResult = buildAnalysisResultBlock(factCandidate);
+    const chanceCells = projectCanonicalAnalysisCells(horizonResult, horizonGraph, factCandidate.result.goal_certainty)
+      .map(option => option.cell);
+    factCandidate.result.enrichment = withShortHorizonBesideChance(
+      withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells, accumulationDrift.warnings.length > 0),
+      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0);
+
     // --- 7. Zod-validate the fact ----------------------------------------
     //
     // ONE parse, not two. Until 0.25.0 the claim-safety verdict had to be
@@ -3972,6 +3984,24 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
     ...(Object.keys(perOption).length > 0 ? { per_option: perOption } : {}),
   };
   return withholdOptionGoalFigures(response, new Set(ids), recorded, { keepOutcome, keepOrdering: true });
+}
+
+/** The engine's current-level refusal is a typed per-option withhold even when an earlier gate removed the figures. */
+export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph: unknown): E {
+  if (response === null || typeof response !== 'object' || Array.isArray(response)
+    || thresholdReasonOf(response)?.reason !== 'missing_goal_baseline') return response;
+  const env = response as Record<string, unknown>;
+  if (goalFiguresWithheldWarnings(env).some(w => w.code === GOAL_FIGURES_MISSING_CURRENT_LEVEL)) return response;
+  const goal = soleGoalOf(graph);
+  const { scored } = goalFigureOptions(response);
+  if (goal === undefined || scored.length === 0) return response;
+  const label = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'The goal';
+  return withholdOptionGoalFigures(response, new Set(scored), {
+    code: GOAL_FIGURES_MISSING_CURRENT_LEVEL, severity: 'warning',
+    message: `Not shown. ${label}'s current level is missing.`,
+    node_ids: [String(goal.id)], option_ids: scored,
+    detail: { reason: 'missing_goal_baseline' },
+  }, { keepOutcome: true, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */
