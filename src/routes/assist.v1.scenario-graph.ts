@@ -217,7 +217,7 @@ import {
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
-import { proposalRecord, proposalFieldsWire } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
+import { proposalRecord, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalIssuingRow } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -342,12 +342,12 @@ export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/con
  * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly (ProposalIssuingRow & { readonly created_at: string })[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
   scenarioId: string,
   requestId: string,
   authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
     analysisState: unknown; analysisResult: unknown; analysisReady: unknown; modelExists: boolean },
-): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[] } | null> {
+): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[]; proposalRows: readonly ProposalIssuingRow[] } | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
     const answers = rows.filter(isAgentAnswerRow)
@@ -376,7 +376,7 @@ async function readConversationTurns(
         }
       } catch { /* Offers unavailable: retain the existing response. */ }
     }
-    return { turns, heldOffers };
+    return { turns, heldOffers, proposalRows: rows };
   } catch (err) {
     log.warn(
       {
@@ -757,9 +757,13 @@ export default async function route(app: FastifyInstance) {
        * from the latest row's holds read above, pinned to THIS graph's hash. Opt-in with the conversation, so the
        * Agent's own internal reads stay byte-identical.
        */
+      const heldProposalRecords = conversationRequested && graphPresent
+        ? latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }) : [];
+      const proposalRows = conversationRead?.proposalRows ?? [];
+      const issuedTurnIds = await issuedTurnIdsForProposalRecords(proposalIssuances(heldProposalRecords, latestPending), proposalRows, CONVERSATION_ROWS_READ,
+        typeof store.readCommittedTurn === 'function' ? turnId => store.readCommittedTurn!(scenarioId, turnId) : undefined);
       const proposalFields = conversationRequested && graphPresent
-        ? proposalFieldsWire(latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }),
-          computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
+        ? proposalFieldsWire(heldProposalRecords, computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined, issuedTurnIds)
         : undefined;
 
       /**
@@ -887,6 +891,9 @@ export default async function route(app: FastifyInstance) {
         // 52f8cd: the Olumi options the selected Run left out of the comparison, and why — same fact, same gates.
         ...(analysis.analysis_option_participation !== undefined
           ? { analysis_option_participation: analysis.analysis_option_participation }
+          : {}),
+        ...(analysis.analysis_run_option_set !== undefined
+          ? { analysis_run_option_set: analysis.analysis_run_option_set }
           : {}),
         // C46 × R3-4: the carriers the selected fact's engine evaluated — same fact, same gates; absent when it records none.
         ...(analysis.analysis_identity_evaluated_node_ids !== undefined

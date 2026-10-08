@@ -4,7 +4,7 @@ import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
 import { currentLevelAskForAnswerRow } from '../orchestrator-v5/agent-lane/current-level-ask-carry.js';
-import { parseAnswerOffers } from '../orchestrator-v5/agent-lane/answer-offers-envelope.js';
+import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/answer-offers-envelope.js';
 /**
  * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
  *
@@ -41,14 +41,14 @@ import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-s
 const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
+import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, withResearchControlTruth, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
-import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
+import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -67,7 +67,7 @@ import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
-import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -78,11 +78,12 @@ import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-cur
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
-import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
+import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt, PLAIN_APPROVAL_SUPERSEDED } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
+import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
@@ -94,7 +95,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, isDecisionInputAsk, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
@@ -108,7 +109,7 @@ import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLines
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { identityCardToIssue, identityCardToReoffer } from '../orchestrator-v5/agent-lane/identity-card.js';
+import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
@@ -121,10 +122,11 @@ import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/ag
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
-import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
+import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf, noLeaderBecauseSentences } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
+import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
@@ -137,7 +139,7 @@ import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
-import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
+import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
   settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
@@ -164,7 +166,7 @@ import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
-import { breakEvenFor, breakEvenLine, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { breakEvenFor, breakEvenLine, goalNotCheckedLine, thresholdReasonLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
@@ -531,7 +533,7 @@ export function stillValidOffers(
   // The next steps stay while the result is still current and no approval is waiting (process-local, like the
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
-    ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id) || isWidenAddPressId(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
+    ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id) || isWidenAddPressId(a.id) || isMethodPress(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
   return [...approvals, ...declines, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
@@ -546,7 +548,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_new_limit for a budget ceiling the user stated in this message on an existing cost quantity (show its card exactly, including any offered reserve alternative; if no quantity matches, say the returned one line with no invented chip), propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 /**
  * How many recent answers the target ask reads to see whether it is already open (`decision-input-ask.ts`, PANEL 5944136475).
@@ -590,6 +592,29 @@ async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, e
     .slice(0, RECENT_REPLIES_READ)
     .map((t) => t.assistant_message)
     .filter((m): m is string => typeof m === 'string');
+}
+
+/**
+ * ⭐ A7 SAID LAST TURN → MORE DETAIL (DL 58e392 follow-up after RC6; Paul's test 8 Oct: "This model doesn't yet say whether any
+ * option gets there within 12 months." on the face of EVERY Run/Explain reply). When the graph owes A7 and the latest answer
+ * the user read already said it word for word, this reply types it `detail`: still said, under More detail, never removed.
+ * `null` when A7 is not owed, the latest answer did not say it, or the read fails (then it stays where it is).
+ */
+/** A7 typed `detail` (one role per unit: any other typing of the same line is replaced). Pure; unchanged when `a7` is null. */
+export function withA7AsDetail(obligations: readonly FaceObligation[], a7: string | null, text: string): FaceObligation[] {
+  if (a7 === null || !text.includes(a7)) return [...obligations];
+  return [...obligations.filter((o) => o.text !== a7), { role: 'detail', text: a7 }];
+}
+
+async function a7SaidLastTurn(graph: unknown, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string | null> {
+  const a7 = untestedHorizonLine(graph);
+  if (a7 === null) return null;
+  try {
+    const [latest] = await recentAgentReplies(store, scenarioId, exceptTurnId);
+    return typeof latest === 'string' && latest.includes(a7) ? a7 : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -781,10 +806,10 @@ export function isDurableAnswerOffer(action: SuggestedAction): boolean {
   return !('action_type' in action) && !('detail' in action)
     && typedApprovalOf({ chip: { id: action.id } }) === undefined
     && action.id !== RUN_OFFER_CHIP.id && !isRunExplanationChip(action.id)
-    && (METHOD_PRESS_IDS.has(action.id) || isWidenAddPressId(action.id))
+    && (METHOD_PRESS_IDS.has(action.id) || isWidenAddPressId(action.id) || isMethodPress(action.id))
     // ⛔ AIE 6048621134: the answer RPC refuses the WHOLE row on one offer outside the migration's envelope (a widen Add
     // id carries ':'), so the answer was never recorded. An offer the database would refuse stays live and is not stored.
-    && parseAnswerOffers([{ id: action.id, label: action.label, message: action.message }]) !== null;
+    && parseAnswerOffers([{ id: storedOfferId(action.id), label: action.label, message: action.message }]) !== null;
 }
 
 /**
@@ -1021,7 +1046,7 @@ export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went
 /** Request 1 ran, but the readback cannot confirm a current result: Olumi's own line, live and on replay (#2470). */
 export const RUN_RESULT_UNVERIFIED_TEXT = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
 
-export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
+export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }, modelChangedThisTurn = false): string {
   if (ran.ran === true) {
     return 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
   }
@@ -1033,7 +1058,42 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
     ? ran.refusal
     : typeof ran.status === 'string' && ran.status !== '' && ran.status !== 'unknown' ? ran.status : '';
   const why = code !== '' ? ` (${code.replace(/_/g, ' ')})` : '';
-  return `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+  return modelChangedThisTurn
+    ? `The analysis didn’t run this time${why}. Your model was updated this turn — ask me what changed and what the analysis still needs.`
+    : `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+}
+
+/**
+ * A withheld call consumed no proposal and moved nothing: it is not an authorisation, and counting one (it has no proposal
+ * id) would strand the proposal it named without its chip. ONE filter for the chip and for the fallback words that describe
+ * it (Codex r1 on #2820: unfiltered, the fallback said "could not settle" beside the chip it offered).
+ */
+function callsThatCanConsumeProposals<C extends { readonly refusal?: string }>(calls: readonly C[]): C[] {
+  return calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
+}
+
+/** The turn fields the hop-limit and cut-short answers read (`AgentTurnResult`'s own shape). */
+type FallbackTurn = {
+  readonly tool_calls: readonly { readonly name: string; readonly ok?: boolean; readonly mutated?: boolean; readonly proposal_id?: string; readonly refusal?: string }[];
+  readonly tool_results: readonly unknown[];
+  readonly mutated: boolean;
+};
+
+/**
+ * ⛔ A FALLBACK NEVER CONTRADICTS THE CARD IT SHIPS WITH (DL 58e392, 8 Oct; EDIT-UX served be7a896f, turn 3a5a1258): the
+ * hop limit answered "I could not settle that within this turn, and nothing in your model was changed" while the SAME turn
+ * offered a held change ("Yes, use those." then saved it). When the turn offers exactly the one card `approvalChipsFor`
+ * shows (same predicate, `proposalsAwaitingApproval`), the answer is that held change's own typed reply, else the one
+ * held-change sentence. A model change is still said.
+ */
+function heldCardText(result: FallbackTurn): string | null {
+  const offered = proposalsAwaitingApproval(callsThatCanConsumeProposals(result.tool_calls).map((c) => ({ name: c.name, ok: c.ok === true, mutated: c.mutated === true,
+    ...(c.proposal_id !== undefined ? { proposal_id: c.proposal_id } : {}), ...(c.refusal !== undefined ? { refusal: c.refusal } : {}) })));
+  if (offered.size !== 1) return null;
+  const [proposalId, tool] = [...offered.entries()][0]!;
+  const held = result.tool_results.find((r) => r !== null && typeof r === 'object' && (r as { proposal_id?: unknown }).proposal_id === proposalId);
+  if (held === undefined) return null;
+  return composeHeldResultReply(tool, held) ?? heldChangeSentence((held as { public_label?: unknown }).public_label);
 }
 
 /**
@@ -1041,16 +1101,17 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
  * turn's own outcome, never from the partial text (which is not shown and not kept, so nothing can "continue").
  * After a run: the run's own sentence. A turn that changed the model says so. Otherwise: shorter questions.
  */
-export function unfinishedAnswerText(result: {
-  readonly tool_calls: readonly { readonly name: string }[];
-  readonly tool_results: readonly unknown[];
-  readonly mutated: boolean;
-}): string {
+export function unfinishedAnswerText(result: FallbackTurn): string {
   for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
     if (result.tool_calls[i]!.name === 'run_analysis') {
-      return interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>);
+      // Codex r1 on #2820: a turn that saved something before its run never says "Nothing in the model was changed".
+      const ran = interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>, result.mutated);
+      const heldAfterRun = heldCardText(result);
+      return heldAfterRun === null ? ran : `${ran}\n\n${heldAfterRun}`;
     }
   }
+  const held = heldCardText(result);
+  if (held !== null) return result.mutated ? `Your model was updated. ${held}` : held;
   return result.mutated
     ? 'Your model was updated, but my reply ran too long and was cut short, so I have not shown it. Ask me what changed.'
     : 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.';
@@ -1062,11 +1123,9 @@ export function unfinishedAnswerText(result: {
  * asking again replays the same refusals, and the typed reason was thrown away. Composed from the LAST refusal's typed
  * fields only (a refusal's `detail`, `reason` and notes address the Agent, never the user); a changed model says so.
  */
-export function hopLimitText(result: {
-  readonly tool_calls: readonly { readonly name: string }[];
-  readonly tool_results: readonly unknown[];
-  readonly mutated: boolean;
-}): string {
+export function hopLimitText(result: FallbackTurn): string {
+  const held = heldCardText(result);
+  if (held !== null) return result.mutated ? `Your model was updated. ${held}` : held;
   if (result.mutated) return 'Your model was updated, but I could not finish the rest within this turn. Ask me what changed.';
   const last = [...result.tool_results].reverse().find((r): r is Record<string, unknown> =>
     r !== null && typeof r === 'object' && (r as Record<string, unknown>).ok === false);
@@ -1198,7 +1257,7 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1234,6 +1293,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let goalCertainty: StoredGoalCertainty | undefined;
   /** 52f8cd: the selected run's `analysis_option_participation`, same fact and gates as `analysisResult`. */
   let optionParticipation: StoredOptionParticipation | undefined;
+  /** Q6: the SAME selected fact's complete snapshot/participation projection, produced by the graph reader. */
+  let runOptionSet: RecordedRunOptionSet | undefined;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
@@ -1291,6 +1352,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
       // 52f8cd: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       optionParticipation = readStoredOptionParticipation(after.json.analysis_option_participation);
+      runOptionSet = after.json.analysis_run_option_set as RecordedRunOptionSet | undefined;
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
@@ -1419,7 +1481,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2039,6 +2101,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
       ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
+    /** Live turns and replays resolve issuance exactly as reload does, from one bounded recent window. */
+    const proposalIssuers = async (records: readonly ProposalRecord[], pending: readonly PendingAction[]): Promise<ReadonlyMap<string, string>> => {
+      if (records.length === 0) return new Map();
+      try {
+        const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
+        return await issuedTurnIdsForProposalRecords(proposalIssuances(records, pending), rows, CONVERSATION_ROWS_READ, typeof store.readCommittedTurn === 'function'
+          ? id => store.readCommittedTurn!(scenarioId, id) : undefined);
+      }
+      catch (err) {
+        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: proposal issuing window unreadable');
+        return new Map();
+      }
+    };
     /** A replay returns the bound presentation on today's state, with no model call. */
     /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
     const liveHeldRefs = async (sid: string): Promise<string[]> => {
@@ -2059,9 +2134,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const currentPending = typeof store.readMostRecentPendingActions === 'function'
         ? await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }) : [];
       const currentScope = currentPending.filter(p => p.action.kind === 'reconcile_goal_scope');
+      const priorRecords = (prior.pending_actions ?? []).flatMap(p => {
+        // Rendering keeps the exact original card even when its old lifetime elapsed; current live membership and
+        // the current graph pin below still decide whether this target may be offered at all.
+        const emittedAt = Date.parse(p.emitted_at_iso);
+        const r = proposalRecord(p, read.graph, Number.isFinite(emittedAt) ? emittedAt : Date.now());
+        return r && r.base_graph_hash === read.graphHash ? [r] : [];
+      });
       const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
-        .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso));
-      const replayFields = proposalFieldsWire(replayRecords, read.graphHash);
+        .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso))
+        // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record.
+        .map(r => priorRecords.find(old => old.proposal_id === r.proposal_id) ?? r);
+      const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
+      const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
       /**
        * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
@@ -2159,6 +2244,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // turn's own stage: before the root line and the basis, which the live turn adds after it (Codex r1 on #2664 P2).
           askEachOnce(owedNow, await repliesToCheckAsks(owedNow, store, scenarioId, turnId));
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
+          const reasonNow = thresholdReasonLine(state.graph, state.analysisResult);
+          if (reasonNow !== null) owedNow.push(reasonNow);
           const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
           if (rootNow !== null) owedNow.push(rootNow);
           if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
@@ -2241,8 +2328,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // live branch it does not mirror (leader gate, a proposal card's profile, a link ask, a held lapse…) would compose a
       // different shape. So the shape rides only when the composed replay IS the stored words the user first saw; any
       // other replay ships the rebuilt text whole, as before 2b-0 (the structural-challenge replay's rule).
+      // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
+      const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, store, scenarioId, turnId);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: replayObligations, graph: state.graph ?? null, profile: 'coaching' });
+        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText)), graph: state.graph ?? null, profile: 'coaching' });
       const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const replayCard = replayRecords[0];
@@ -2283,7 +2372,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
-      const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
+      const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
@@ -2296,6 +2385,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }).response, {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const gatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
+        runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
@@ -2520,6 +2613,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         holdAddFactor: async (input) => {
           writesDispatched += 1;
           return readCache.around(() => holdAddFactorInProcess(input, String(req.id)));
+        },
+        commitLimitAdd: async (input) => {
+          writesDispatched += 1;
+          const fenceRefused = () => ({ status: 'refused' as const, reason: 'turn_fence_refused' });
+          return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitAddInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
         },
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
@@ -2766,8 +2864,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const editsApplied = applied.ok === true && applied.mutated === true ? readUserEdits(applied.user_edits) : undefined;
         editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
         const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
+        const refusedBinding = editsForThisCard?.fields.length === 0
+          && (applied.refusal === 'edits_superseded' || applied.refusal === 'superseded' || applied.refusal === 'unknown_proposal');
         const followUp = [editedLinks ? '' : guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
-          editsRefusedThisTurn ? editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
+          editsRefusedThisTurn ? refusedBinding ? PLAIN_APPROVAL_SUPERSEDED
+            : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
         const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
@@ -2821,6 +2922,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow;
       const factsNow = savedRunContextFacts(scenarioId, {
         graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
+        option_participation: st.optionParticipation, run_option_set: st.runOptionSet,
         identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
       }, selectedPermissions, liveLinkEffectClarifications(effectAsks, scenarioId, st.graph));
       // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
@@ -3031,6 +3133,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         } else if (decided.decision.kind === 'reply') {
           actionReply = decided.decision.reply;
           actionReplyChips = actionExitChips(actionReply.exits);
+        } else if (decided.decision.handler.route === 'propose_identity') {
+          // GOAL-REACH: the bar opens the existing held card; its Yes keeps the sole identity_confirm writer.
+          const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
+          if (issued.ok === true && typeof issued.proposal_id === 'string') {
+            fastPath = 'method';
+            const text = identityIssuedText(issued);
+            result = {
+              assistant_text: text, items: [],
+              tool_calls: [{ name: 'propose_identity', ok: true, mutated: false, proposal_id: issued.proposal_id }],
+              tool_results: [issued], mutated: false, hops: 0, stopped_reason: 'answered',
+              timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
+                provider_calls: 0, tool_calls: 1, hops: 0 },
+            };
+          } else {
+            actionReply = { text: typeof issued.detail === 'string' && issued.detail.trim() !== '' ? issued.detail : 'This reading cannot be confirmed now. Nothing changed.',
+              reason: 'nothing_in_scope', exits: [] };
+          }
         }
         if (actionReply !== null) {
           fastPath = 'method';
@@ -3218,7 +3337,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
       const call = widenAddCallOf(pressedChipId, message, rb);
-      const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode);
+      const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args),
+        call.relies_on === undefined ? toolCtx : { ...toolCtx, widen_relies_on: { option_id: call.relies_on.option_id } }, capabilities, mode);
       const held = issued?.ok === true && typeof issued.proposal_id === 'string';
       // A held card is NEVER worded as a refusal: the door's own reply, else what is held (served sc-plus-1 defect).
       const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? riskHeldReply(call!) : RISK_ADD_REFUSED_REPLY;
@@ -3634,10 +3754,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested || premortemInitialRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
-    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet } = finalRead;
     let liveHolds: readonly PendingAction[] = [];
     let heldLapseLines: string[] = [];
     let heldRecords: ProposalRecord[] = [];
+    /** What the persistence floor reconciled into the answer row: the held actions `heldRecords` was rebuilt from. */
+    let reconciledPending: readonly PendingAction[] = [];
     /** Every held proposal this turn read (at its start and at its end): the floor never re-adds one it settled itself. */
     const heldSeenThisTurn = new Set<string>(heldAtStart.map((h) => h.chip_id));
     let liveScopeIssues: readonly PendingAction[] = [];
@@ -3751,7 +3873,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
       readingWaiting: readbackGraph != null && proposeProductIdentity(readbackGraph) !== null && identityConfirmBaseIsWritable(readbackGraph),
     });
-    if (identityCardToIssue(result.tool_calls, result.tool_results) || reoffer) {
+    if (identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
       const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
       result = {
         ...result,
@@ -3809,9 +3931,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
       return chip !== undefined ? [chip, AMEND_CHIP] : [];
     })();
-    // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
-    // counting one (it has no proposal id) would strand the proposal it named without its chip.
-    const approvalCalls = result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
+    const approvalCalls = callsThatCanConsumeProposals(result.tool_calls);
     // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
     const approvals = approvalChipsFor(
       approvalCalls,
@@ -3981,8 +4101,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // AIQ: words pending
     const effectLapseSentence = (action: LinkEffectClarificationAction): string => `I've set aside your earlier statement about how ‘${action.from_label}’ affects ‘${action.to_label}’; say it again whenever you want it in the model.`;
     // S-D: preserve a stored carrier's revision. Each proposal has its own pending item.
+    const existingApprovalCarrier = offeredProposal !== undefined
+      ? liveHolds.find(h => heldProposalId(h) === offeredProposal.proposal_id) : undefined;
     let approvalCarrier = offeredApprove !== undefined && offeredProposal !== undefined
-      ? liveHolds.find(h => heldProposalId(h) === offeredProposal.proposal_id)
+      ? existingApprovalCarrier
         ?? refreshedHold(proposalPendingAction(offeredProposal, offeredApprove, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso }), Date.now()) : undefined;
     const offeredCarrier = approvalCarrier;
     if (offeredCarrier !== undefined && !liveHolds.some(h => h.chip_id === offeredCarrier.chip_id)) {
@@ -4124,7 +4246,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // arithmetic below already states the target. Pure reads of this turn's readback; the same inputs AX1 uses.
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
-    const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
+    // GOAL-REACH 3b: the arithmetic dedupe is for the legacy copy only; a carried reason (Science §(g)) is always said.
+    const goalLine = fa?.ran === true && fastPath !== 'run'
+      && (!targetStatedByArithmetic || thresholdReasonLine(readbackGraph, analysisResult) !== null) ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
     // ⭐ S5t-W (e7 #87 6011176086): an approval's text is the capability's OWN receipt (server-authored, already through
     // `withoutAgentDirections` above), never model prose, so the completion-claim stripper — which exists for the model's
     // words — never runs over it. It dropped "Recorded your figure … as you confirmed: "…" Olumi rescaled ‘…’ so your
@@ -4200,6 +4324,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const rootLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
+    // GOAL-REACH 3b (DL CHANGES_REQUIRED #2816): an explicit Run says why the goal chance was refused (§(g)), on the same
+    // binding as the root line; its replay says the same in the same place.
+    const reasonLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
+      && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
+      ? thresholdReasonLine(readbackGraph, analysisResult) : null;
+    if (reasonLine !== null && !narrationText.includes(reasonLine)) owed.push(reasonLine);
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
@@ -4402,9 +4532,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // shipped beside a range line. The SAME function and gate clean the view here, where it is built.
     const provisionalViewShown = provisionalView === null ? null : ((): typeof provisionalView => {
       const viewBody: { assistant_text?: unknown; _agent: { provisional_view: typeof provisionalView } } = { _agent: { provisional_view: provisionalView } };
-      return withoutDriverAbsenceClaimsAtEgress(viewBody, {
+      const driverEditedView = withoutDriverAbsenceClaimsAtEgress(viewBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      return withLeftOutOptionCorrectionAtEgress(driverEditedView, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view', ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
     })();
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
@@ -4469,9 +4603,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * never says no assumption is established or most worth investigating; only that clause goes, logged by code.
      */
     {
-      const edited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
+      const driverEdited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const edited = withLeftOutOptionCorrectionAtEgress(driverEdited, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_final', ...(turnId !== undefined ? { turnId } : {}),
       });
       if (edited !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = edited as OlumiResponse & { _answer_shape?: unknown };
@@ -4601,6 +4739,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
         ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
           .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
+        // RC6: the gate's own "No single option … because <why>." when the reply already carries it (the gate then adds no
+        // closing, so `leaderGateClosing` is null): typed by identity, so the bare reason is said once inside it.
+        ...(coHold === undefined ? [] : noLeaderBecauseSentences(coHold)).filter((l) => reply.includes(l))
+          .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
         ...AGENT_NO_LEADER_SENTENCES.filter((text) => reply.includes(text))
           .map((text) => ({ role: 'withheld_reason' as const, text })),
         // #2746: the fixed words that say an offered web search has no control under this reply stay on the face, never
@@ -4652,10 +4794,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
+      const a7Repeat = await a7SaidLastTurn(readbackGraph, store, scenarioId, turnId);
       const composedReply = composeReplyShape({
         text: reply,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
-        obligations,
+        obligations: withA7AsDetail(obligations, a7Repeat, reply),
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
@@ -4683,7 +4826,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const sentText = String(wireBody.assistant_text ?? text);
     // Persist the producer's exact delivered question or its qualified clarification, after every egress gate.
     const levelAskAnswered = levelAnswerTool !== undefined || result.tool_calls.some(call => call.name === CURRENT_LEVEL_TOOL);
-    const deliveredLevelAsk = mode === 'full' && fastPath !== 'method' ? currentLevelAskOnAnswer({
+    // GOAL-REACH 3b (COPY-SHAPE patch): the bar's set_current_level press is a typed reply ('method'), and its words ARE
+    // the current-level ask, so it is persisted like the producer's own (otherwise the answer could not force the card).
+    // Never while a held change waits for its yes (Codex r1 P1-3 on #2816): that change is answered first.
+    const levelPress = actionPress?.action === 'set_current_level' && liveHolds.length === 0;
+    const deliveredLevelAsk = mode === 'full' && (fastPath !== 'method' || levelPress) ? currentLevelAskOnAnswer({
       graph: readbackGraph, analysisResult, sentText, scenarioId, userId, emittedAtIso,
       prior: levelAsk, answered: levelAskAnswered, message,
       awaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
@@ -4723,7 +4870,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
     const answerOffers = ((wireBody.suggested_actions ?? []) as readonly SuggestedAction[])
       // The migration's cap is 8 offers per row; a ninth would refuse the whole row, so it stays live only.
-      .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id, label, message }));
+      .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
@@ -4749,6 +4896,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...effectObservedLineages, ...consumedEffectLineages]),
             offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
             onReconciled: (write, overCap, overCapClarifications) => {
+              reconciledPending = write.pending_actions ?? [];
               heldRecords = (write.pending_actions ?? []).flatMap(p => {
                 const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
               });
@@ -4772,7 +4920,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
               return { ...write,
                 pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
-                suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message })) };
+                suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message })) };
             } },
           write: {
           scenario_id: scenarioId,
@@ -4864,8 +5012,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Local carrier, AFTER finalisation and licence egress. If egress changed the prose, the worksheet is withheld.
     const premortemDiagnostics = premortemWorksheetDiagnosticsFor({
       scenarioId, turnId, turn: methodTurn?.kind === 'run' ? methodTurn : null,
-      passed: premortemPassed && premortemReply === wireBody.assistant_text,
-      reply: String(wireBody.assistant_text ?? ''), candidates: premortemCandidates,
+      // Egress may add whole paragraphs around the method reply, never edit it (P02, jw-j1): rows parse that reply.
+      passed: premortemPassed && premortemReply !== undefined && methodReplySurvives(premortemReply, String(wireBody.assistant_text ?? '')),
+      reply: premortemReply ?? '', candidates: premortemCandidates,
       initial: premortemInitialRead, final: composedRead,
     });
     const premortemWorksheet = premortemDiagnostics.worksheet;
@@ -4875,6 +5024,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
       'PREMORTEM_WORKSHEET_WITHHELD');
     }
+    const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),
@@ -4898,7 +5048,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * (`OlumiResponseSchema` is `.strict()`; the UI parser moves an undeclared root key into `__additive__`), bound to
        * this response's `graph_hash`. Absent when nothing is held.
        */
-      ...((): Record<string, unknown> => { const w = proposalFieldsWire(heldRecords, graphHash); return w !== undefined ? { _proposal_fields: w } : {}; })(),
+      ...((): Record<string, unknown> => { const w = proposalFieldsWire(heldRecords, graphHash, issuedTurnIds); return w !== undefined ? { _proposal_fields: w } : {}; })(),
       /**
        * ⭐ RT-1: which selected elements this answer was given, route-v2's `_grounded_selection` shape (DGAI
        * `GroundedOnNotice` reads it). A sidecar like `_not_modelled`; absent when nothing was selected or the turn never

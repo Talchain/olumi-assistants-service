@@ -57,8 +57,8 @@ describe('the registry: ONE dispatch table, total', () => {
   it('every action has its handler (tsc enforces the Record; this row pins the names)', () => {
     expect(Object.keys(HANDLERS).sort()).toEqual([...ACTION_IDS].sort());
   });
-  it('slices 1 + 2a + 2b + 3 are exactly the thirteen typed actions', () => {
-    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates', 'bias_check']);
+  it('slices 1 + 2a + 2b + 3 + GOAL-REACH are exactly the fifteen typed actions (GOAL-REACH 3b adds set_current_level)', () => {
+    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates', 'bias_check', 'confirm_reading', 'set_current_level']);
     for (const held of ['set_target', 'outside_view', 'trade_offs', 'anchoring']) {
       expect((ACTION_IDS as readonly string[]).includes(held), held).toBe(false);
     }
@@ -70,7 +70,7 @@ describe('the registry: ONE dispatch table, total', () => {
     }));
     expect(fixed).toEqual({ review: 'agent-next-review-decision', what_changes: 'agent-next-what-would-change', strengthen: 'agent-next-strengthen',
       pre_mortem: 'agent-next-pre-mortem', more_options: 'agent-next-widen',
-      frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id, bias_anchoring: 'act:bias_anchoring', check_estimates: 'act:check_estimates', bias_check: 'act:bias_check' });
+      frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id, bias_anchoring: 'act:bias_anchoring', check_estimates: 'act:check_estimates', bias_check: 'act:bias_check', confirm_reading: 'act:confirm_reading', set_current_level: 'act:set_current_level' });
     for (const [id, press] of Object.entries(fixed)) expect(actionOfPress(press, ACTION_REGISTRY[id as keyof typeof ACTION_REGISTRY].user_line)).toBe(id);
     // SR-5: WIDEN's risks chip id is shared with the pre-mortem worksheet's "Add this as a risk" (its own message), which
     // must stay an ordinary Agent turn: the id alone is never More risks.
@@ -533,17 +533,19 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
     ].join('\n');
     expect(anchoring).toMatchObject({ kind: 'reply', reply: { text: expected, outcome: 'ran', exits: [] } });
     expect(estimates).toMatchObject({ kind: 'reply', reply: { outcome: 'ran', exits: [], text: [
-      "Olumi's estimates that this result rests on:",
-      "- ‘Far’: 25%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Near’: 15%. That's Olumi's estimate, not a measured figure.",
-      "- ‘Extra’: 10%. That's Olumi's estimate, not a measured figure.",
-      "If you have your own figure for any of these, tell me and I'll propose it for you to approve.",
+      'Olumi supplied 3 of the figures behind this result: 3 values.',
+      'For example:',
+      'Near (value)',
+      'Extra (value)',
+      'Far (value)',
+      "1 you accepted from Olumi's suggestions.",
     ].join('\n') } });
     for (const d of [anchoring, estimates]) {
       if (d.kind !== 'reply') throw new Error('expected typed reply');
       expect(d.reply.text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
-      expect(d.reply.text.split('\n').filter(l => l.startsWith('- '))).toHaveLength(3);
     }
+    if (anchoring.kind !== 'reply') throw new Error('expected typed reply');
+    expect(anchoring.reply.text.split('\n').filter(l => l.startsWith('- '))).toHaveLength(3);
   });
   it.each(['frame', 'analyse', 'decide', 'review', null] as const)('canonical stage %s gates exactly one anchoring receipt badge, absent for check_estimates', stage => {
     const facts = { ...actionFactsOf(read()), canonicalStage: stage };

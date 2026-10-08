@@ -1,4 +1,5 @@
 import type { ApprovedTeamTime } from '../goal-target/team-share-write.js';
+import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
@@ -3478,6 +3479,8 @@ export type HoldAddRiskInput = {
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
   readonly risk: { readonly id?: string; readonly label: string };
+  /** RC3: server-owned option identity from the widen press or verified chat label lease, never a model-authored stamp. */
+  readonly relies_on?: { readonly option_id: string };
   /** event_risk.v1 slice 2a: CEE-held user words, outside producer operations. */
   readonly user_event_risk?: { readonly event_risk: EventRiskV1T; readonly quote: string };
   /** Each link names ONE end: `from_id` (a factor driving the risk) or `to_id` (the goal or an outcome it threatens). */
@@ -3533,6 +3536,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
 
   const outcome = dispatchAddRiskTransaction({
     params: { risk: input.risk, links: input.links },
+    ...(input.relies_on !== undefined ? { reliesOn: input.relies_on } : {}),
     ...(input.user_event_risk !== undefined ? { userEventRisk: input.user_event_risk } : {}),
     currentGraph: persistedGraph,
     currentGraphHash: currentHash,
@@ -3554,6 +3558,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash,
+    ...(input.relies_on !== undefined ? { relies_on: input.relies_on } : {}),
     ...(input.user_event_risk !== undefined ? { user_event_risk: input.user_event_risk } : {}) })).digest('hex').slice(0, 32)}`;
   try {
     await commitDirectAnswer(response, {
@@ -3728,6 +3733,8 @@ export type CommitLimitEditInput = {
   readonly raw_value: number;
   /** A2 follow-up: the comparator the user STATED on this edit (typed), when they stated one (`LimitEditRequest`). */
   readonly stated_operator?: LimitEditRequest['stated_operator'];
+  /** S-E S4: the user's approved re-statement, kept through the existing limit writer. */
+  readonly source_quote?: LimitEditRequest['source_quote'];
 };
 export type CommitLimitEditResult =
   | {
@@ -3739,7 +3746,7 @@ export type CommitLimitEditResult =
        */
       readonly model_version_receipt: unknown;
       /** The row exactly as the committed model holds it. */
-      readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string };
+      readonly row: { readonly constraint_id: string; readonly value: number; readonly unit?: string; readonly value_frame?: string; readonly provenance?: string; readonly source_quote?: string };
     }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string }
@@ -3750,7 +3757,8 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
   const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'agent_limit_edit', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
-    ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) }))
+    ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}),
+    ...(input.source_quote !== undefined ? { source_quote: input.source_quote } : {}) }))
     .digest('hex').slice(0, 32)}`;
   const r = await dispatchAddConstraintEdit(
     {
@@ -3764,7 +3772,64 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
       apply: (persistedGraph, priorFacts) => applyLimitEdit({
         payload: turn,
         request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
-          ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) },
+          ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}),
+          ...(input.source_quote !== undefined ? { source_quote: input.source_quote } : {}) },
+        requestId,
+        persistedGraph,
+        priorFacts,
+      }),
+      reportRefusalReason: true,
+      fenceRefusalReachesCaller: true,
+    },
+    requestId,
+    Date.now(),
+  );
+  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.commitSkippedReason === 'refused_no_write') return { status: 'refused', reason: r.refusal?.reason ?? 'refused' };
+  const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
+  if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
+  const held = (Array.isArray((r.graph as { goal_constraints?: unknown } | null)?.goal_constraints)
+    ? (r.graph as { goal_constraints: Record<string, unknown>[] }).goal_constraints : [])
+    .filter((c) => c['node_id'] === input.node_id && c['operator'] === input.operator);
+  const row = held.length === 1 ? held[0]! : undefined;
+  if (row === undefined || typeof row['constraint_id'] !== 'string' || typeof row['value'] !== 'number') return { status: 'unconfirmed' };
+  if (input.source_quote !== undefined && row['source_quote'] !== input.source_quote) return { status: 'unconfirmed' };
+  return {
+    status: 'committed',
+    graph_hash: graphHash,
+    model_version_receipt: (r.response as { model_version_receipt?: unknown }).model_version_receipt,
+    row: {
+      constraint_id: row['constraint_id'],
+      value: row['value'],
+      ...(typeof row['unit'] === 'string' ? { unit: row['unit'] } : {}),
+      ...(typeof row['value_frame'] === 'string' ? { value_frame: row['value_frame'] } : {}),
+      ...(typeof row['provenance'] === 'string' ? { provenance: row['provenance'] } : {}),
+      ...(typeof row['source_quote'] === 'string' ? { source_quote: row['source_quote'] } : {}),
+    },
+  };
+}
+
+/** S-E S4: the same fenced CAS commit and persisted-row read-back as limit edits. */
+export type CommitLimitAddInput = Omit<CommitLimitEditInput, 'operator' | 'stated_operator'> & Omit<LimitAddRequest, 'node_id' | 'raw_value' | 'base_graph_hash'>;
+export async function commitLimitAddInProcess(input: CommitLimitAddInput, requestId: string): Promise<CommitLimitEditResult> {
+  const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_limit_add', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+    unit: input.unit, source_quote: input.source_quote, ...(input.value_frame !== undefined ? { value_frame: input.value_frame } : {}) }))
+    .digest('hex').slice(0, 32)}`;
+  const r = await dispatchAddConstraintEdit(
+    {
+      turn,
+      requestHash,
+      eventKind: 'limit_add',
+      logFields: { node_id: input.node_id, operator: input.operator },
+      committedLogFields: { node_id: input.node_id, operator: input.operator },
+      committedMessage: 'V5 limit_add committed — the new limit row appended through add_constraint, hash recomputed',
+      dispatchPath: 'agent_lane.limit_add',
+      apply: (persistedGraph, priorFacts) => applyLimitAdd({
+        payload: turn,
+        request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+          unit: input.unit, source_quote: input.source_quote, ...(input.value_frame !== undefined ? { value_frame: input.value_frame } : {}) },
         requestId,
         persistedGraph,
         priorFacts,

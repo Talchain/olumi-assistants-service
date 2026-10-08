@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
+import { composeRecoveredProposalReply } from '../proposal-reply.js';
 import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
@@ -65,6 +66,17 @@ export interface ModelCallResponse {
  * ⛔ AN UNFINISHED ANSWER IS NOT AN ANSWER (AIX-001): the envelope, or any message in it, says `incomplete` — the
  * visible text may stop before its closing caveat. Absent status is read as finished, as the API did before it had one.
  */
+/**
+ * ⭐ ONE WORDING FOR "A CHANGE IS WAITING FOR YOUR APPROVAL" when no typed reply exists: narration recovery here, and the
+ * route's hop-limit / cut-short answers (DL 58e392, 8 Oct; EDIT-UX be7a896f turn 3a5a1258: "I could not settle that within
+ * this turn, and nothing in your model was changed" shipped over a held card the user then saved).
+ */
+export function heldChangeSentence(label: unknown): string {
+  return typeof label === 'string' && label.trim() !== ''
+    ? `I have prepared this change: ${label.trim()}. Nothing is changed until you approve it.`
+    : 'I have prepared a change for you to review. Nothing is changed until you approve it.';
+}
+
 export function answerIsIncomplete(resp: ModelCallResponse): boolean {
   if (resp.status === 'incomplete') return true;
   return (resp.output ?? []).some((o) => o['type'] === 'message' && o['status'] === 'incomplete');
@@ -480,11 +492,12 @@ export async function runAgentTurn(
   const recoverNarration = (err: unknown, hopsTaken: number): AgentTurnResult => {
     const held = lastHeldCall!; // `narrateNext` is true only after a hop whose every call held a proposal.
     const composed = input.composeReply?.(held.name, held.args, held.result);
-    const label = held.result.public_label;
-    const text = typeof composed === 'string' && composed.trim() !== '' ? composed
-      : typeof label === 'string' && label.trim() !== ''
-        ? `I have prepared this change: ${label}. Nothing is changed until you approve it.`
-        : 'I have prepared a change for you to review. Nothing is changed until you approve it.';
+    // ⛔ P44 (a) / Codex #2781 r5: failed conversational gates must not hide the held result's disclosures.
+    // Preserve the user-figure honesty gate; an absent runtime message is treated as ''.
+    const recoveredReply = typeof composed === 'string' && composed.trim() !== '' ? composed
+      : composeRecoveredProposalReply(held.name, held.args, held.result, input.message ?? '');
+    const text = typeof recoveredReply === 'string' && recoveredReply.trim() !== '' ? recoveredReply
+      : heldChangeSentence(held.result.public_label);
     items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
     log.warn({ hop: hopsTaken, err: String(err) }, 'agent-lane: narration failed — answering from the held proposal');
     return {

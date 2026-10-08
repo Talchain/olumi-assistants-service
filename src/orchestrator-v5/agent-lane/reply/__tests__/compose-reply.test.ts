@@ -25,7 +25,7 @@ import {
   type ReplyComposition, type FaceObligation,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
-import { textAtRest } from '../../decision-input-ask.js';
+import { openQuestionsSegment, textAtRest } from '../../decision-input-ask.js';
 
 const face = (c: ReplyComposition): string[] => (c.shape === null ? [] : [c.shape.headline, ...c.shape.bullets]);
 /** Every sentence of `original` is in `shipped`, verbatim (bullet markers aside). */
@@ -34,6 +34,18 @@ const everySentenceKept = (original: string, shipped: string): void => {
     const body = line.replace(/^[ \t]{0,6}(?:[-•*]|\d{1,2}[.)])[ \t]{1,4}/, '');
     for (const s of sentencesOf(body)) expect(shipped, `kept: ${s.slice(0, 70)}`).toContain(s);
   }
+};
+/** RC6 changes the invariant only by the exact, occurrence-counted sentences the composer reports dropping. */
+const everySentenceExceptReportedKept = (original: string, c: ReplyComposition): void => {
+  const expected = sentenceMultiset(original);
+  for (const dropped of c.measure?.said_once_dropped ?? []) {
+    const sentences = sentenceMultiset(dropped);
+    expect(sentences, 'each reported drop is one whole sentence').toHaveLength(1);
+    const at = expected.indexOf(sentences[0]!);
+    expect(at, `reported drop existed in the input: ${dropped}`).toBeGreaterThanOrEqual(0);
+    expected.splice(at, 1);
+  }
+  expect(sentenceMultiset(c.text), 'input multiset minus exactly the reported dropped occurrences').toEqual(expected);
 };
 
 // ── Paul's session, verbatim fragments ─────────────────────────────────────────────────────────────
@@ -49,6 +61,9 @@ const T1 = [
   '',
   'Questions this model does not answer yet: The current likelihood of meeting the next feature-launch deadline is not stated, so no goal baseline has been assumed. (2 of 7 shown.)',
 ].join('\n');
+const T1_REPEATED_ASK = 'What is it, in % likelihood of on-time launch?';
+const T1_LAST_ASK_AT = T1.lastIndexOf(T1_REPEATED_ASK);
+const T1_SAID_ONCE = T1.slice(0, T1_LAST_ASK_AT).trimEnd() + T1.slice(T1_LAST_ASK_AT + T1_REPEATED_ASK.length);
 /** #3 09:06:12 (40.1 s): the recruitment-delay proposal. */
 const T3 = 'This is a time-to-value risk… The link’s strength is a placeholder, not an estimate. This adds the risk, but does not quantify either timing threshold. Shall I add it?';
 /** #5 09:14:06 (53.0 s): the freelance fallback proposal. */
@@ -69,7 +84,7 @@ describe('Paul’s replies: a headline, at most three bullets, the rest under Mo
     everySentenceKept(text, c.text);
   });
 
-  it('#1: shaped; ONE question on the face (the last), the other two in detail (D-12); the questions segment stays last, intact, for the panel’s toggle', () => {
+  it('#1: shaped; ONE question on the face (the last), the earlier repeated ask said once in detail (D-12 + RC6); the questions segment stays last, intact, for the panel’s toggle', () => {
     const c = composeReplyShape({ text: T1 });
     expect(c.outcome).toBe('shaped');
     expect(c.shape!.bullets.length).toBeLessThanOrEqual(REPLY_FACE_MAX_BULLETS);
@@ -78,11 +93,12 @@ describe('Paul’s replies: a headline, at most three bullets, the rest under Mo
     expect(onFace).toEqual(['How much does "Feature Delivery Capacity" change "meet our next feature-launch deadline"?']);
     expect(c.shape!.bullets.at(-1)).toBe(onFace[0]);
     expect(c.measure!.questions_in, 'the control: the reply asked three times').toBe(3);
-    expect(c.shape!.detail.split('What is it, in % likelihood of on-time launch?'), 'both earlier asks are in detail').toHaveLength(3);
+    expect(c.shape!.detail.split('What is it, in % likelihood of on-time launch?'), 'the earlier repeated ask is in detail once').toHaveLength(2);
+    expect(c.measure!.said_once_dropped).toEqual(['What is it, in % likelihood of on-time launch?']);
     expect(c.shape!.detail.endsWith('Questions this model does not answer yet: The current likelihood of meeting the next feature-launch deadline is not stated, so no goal baseline has been assumed. (2 of 7 shown.)')).toBe(true);
     // The panel's own predicate still finds the segment, now inside detail.
     expect(textAtRest(c.shape!.detail)).not.toContain('(2 of 7 shown.)');
-    everySentenceKept(T1, c.text);
+    everySentenceExceptReportedKept(T1, c);
   });
 });
 
@@ -106,8 +122,16 @@ describe('controls: a reply already in shape ships exactly as written', () => {
     expect(c.text).toBe(text);
   });
 
-  it('keepWhole leader_free_envelope → byte-identical, no sidecar (identity of the turn, never the words)', () => {
-    expect(composeReplyShape({ text: T1, keepWhole: 'leader_free_envelope' })).toMatchObject({ outcome: 'kept_whole', reason: 'leader_free_envelope', shape: null, text: T1 });
+  it('keepWhole leader_free_envelope → byte-identical, no sidecar, no RC6 drop (identity of the turn, never the words)', () => {
+    const c = composeReplyShape({ text: T1, keepWhole: 'leader_free_envelope' });
+    expect(c).toMatchObject({ outcome: 'kept_whole', reason: 'leader_free_envelope', shape: null, text: T1 });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+  });
+
+  it('CONTROL: keepWhole leader_free_envelope with no duplicate → byte-identical, no sidecar', () => {
+    const c = composeReplyShape({ text: T1_SAID_ONCE, keepWhole: 'leader_free_envelope' });
+    expect(c).toMatchObject({ outcome: 'kept_whole', reason: 'leader_free_envelope', shape: null, text: T1_SAID_ONCE });
+    expect(c.measure!.said_once_dropped).toEqual([]);
   });
 
 });
@@ -119,8 +143,15 @@ describe('TYPED RESPONSE PROFILES (DL, AIE line review 6037446159 item 5): chose
     expect(c.shape!.bullets.length).toBeLessThanOrEqual(3);
     expect(c.measure!.face_words).toBeLessThanOrEqual(75);
   });
-  it.each(['method_step', 'proposal'] as const)('%s: the SAME long reply ships whole, byte-identical, no sidecar (one structured prompt / card + disclosure)', (profile) => {
-    expect(composeReplyShape({ text: T1, profile })).toMatchObject({ outcome: 'kept_whole', reason: profile, shape: null, text: T1 });
+  it.each(['method_step', 'proposal'] as const)('%s: the SAME long reply ships whole, byte-identical, no sidecar, no RC6 drop (worksheet verbatim / consent card disclosure)', (profile) => {
+    const c = composeReplyShape({ text: T1, profile });
+    expect(c).toMatchObject({ outcome: 'kept_whole', reason: profile, shape: null, text: T1 });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+  });
+  it.each(['method_step', 'proposal'] as const)('CONTROL %s: no duplicate → byte-identical, no sidecar', (profile) => {
+    const c = composeReplyShape({ text: T1_SAID_ONCE, profile });
+    expect(c).toMatchObject({ outcome: 'kept_whole', reason: profile, shape: null, text: T1_SAID_ONCE });
+    expect(c.measure!.said_once_dropped).toEqual([]);
   });
   it('CONTROL: no profile behaves exactly as coaching', () => {
     expect(composeReplyShape({ text: T1 }).text).toBe(composeReplyShape({ text: T1, profile: 'coaching' }).text);
@@ -221,16 +252,21 @@ describe('obligations on a coaching reply (DL R1 + AIE): the headline, the ONE a
   const TAIL = 'This model doesn’t yet say whether any option gets there within nine months, because the deadline is not encoded in the goal.';
   const TAIL2 = 'Sizing the price link first would show how much the chances move when that one assumption changes.';
   const evidence = [EQ, EL, EK].map((t) => ({ role: 'evidence' as const, text: t }));
+  const EL_SAID_ONCE = EL.replace(' How sure are you of that size?', '');
   it('⛔ a lead-in stays with what it introduces: three chance lines after "…, on current information:" fill the face, so → whole', () => {
     const text = `No single option can be put forward: the comparison is a near tie.\n\n${LEAD}\n\n${EQ} ${EL} ${EK}\n\n${TAIL} ${TAIL2}`;
-    expect(composeReplyShape({ text, obligations: evidence })).toMatchObject({ outcome: 'kept_whole', reason: 'lead_in_split', text });
+    const c = composeReplyShape({ text, obligations: evidence });
+    expect(c).toMatchObject({ outcome: 'kept_whole', reason: 'lead_in_split', text: text.replace(EL, EL_SAID_ONCE) });
+    expect(c.measure!.said_once_dropped).toEqual(['How sure are you of that size?']);
+    everySentenceExceptReportedKept(text, c);
   });
   it('CONTROL: the same lines with no lead-in are shaped, in the reply’s order (a line ending on its own question is evidence, never moved to close the face)', () => {
     const text = `No single option can be put forward: the comparison is a near tie.\n\n${EQ} ${EL} ${EK}\n\n${TAIL} ${TAIL2}`;
     const c = composeReplyShape({ text, obligations: evidence });
     expect(c.outcome).toBe('shaped');
-    expect(c.shape!.bullets).toEqual([EQ, EL, EK]);
-    everySentenceKept(text, c.text);
+    expect(c.shape!.bullets).toEqual([EQ, EL_SAID_ONCE, EK]);
+    expect(c.measure!.said_once_dropped).toEqual(['How sure are you of that size?']);
+    everySentenceExceptReportedKept(text, c);
   });
 
   // S-A host parts (DL: "host lines as typed parts inserted by identity"); served words from run-outcome-follow-ups / s5t.
@@ -328,6 +364,440 @@ describe('the model wrote a list: its lead-in becomes the headline, its first po
   });
 });
 
+describe('RC6 said once', () => {
+  const longContext = 'The model compares four options on twelve months of revenue. Each figure rests on the values in your model today. Several of those values are Olumi estimates rather than yours. Changing any estimate changes what this model implies. The analysis does not rank the options for you.';
+  const faceOf = (c: ReturnType<typeof composeReplyShape>): string => [c.shape?.headline ?? c.text, ...(c.shape?.bullets ?? [])].join('\n');
+  it('prefer the typed copy (Codex r1 P1-2): an earlier untyped copy goes; the typed multi-sentence unit stays whole on the face', () => {
+    const typed = 'Revenue is £100. Churn is 5%.';
+    const text = ['Revenue is £100.', longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual(['Revenue is £100.']);
+    expect(faceOf(c)).toContain(typed);
+  });
+  it('prefer the typed copy (Codex r1 P1-2): a typed atomic statement + question keeps its question; the earlier loose copy goes', () => {
+    const typed = 'The price link is not sized yet. How sure are you of that size?';
+    const text = ['How sure are you of that size?', longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual(['How sure are you of that size?']);
+    expect(faceOf(c)).toContain(typed);
+  });
+  it('Codex r2 P1: a colon frame never contains a typed finding away ("The following claim is false: …")', () => {
+    const finding = 'The link is sized.';
+    const text = [finding, longContext, 'The following claim is false: the link is sized.'].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: finding }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(faceOf(c)).toContain(finding);
+  });
+  it('Codex r2 P1: an untyped container never carries part of a typed unit away; the typed unit stays whole on the face', () => {
+    const typed = 'Revenue is £100. Churn is 5%.';
+    const text = ['The baseline needs confirmation because revenue is £100.', longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(faceOf(c)).toContain(typed);
+  });
+  it('Codex r2 P1: an earlier typed HOST copy of a question never takes it from the typed ask (strongest role stays)', () => {
+    const q = 'Which figure should we check first?';
+    const askUnit = `The baseline is unconfirmed. ${q}`;
+    const text = [`Ready. ${q}`, longContext, askUnit].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'host', text: `Ready. ${q}` }, { role: 'ask', text: askUnit }] });
+    expect(faceOf(c).trimEnd().endsWith(q), faceOf(c)).toBe(true);
+    expect(c.text.split(q)).toHaveLength(2);
+  });
+  it('Codex r3 P1: a typed host container never takes one sentence out of a typed multi-sentence evidence unit', () => {
+    const typed = 'Revenue is £100. Churn is 5%.';
+    const host = 'The baseline needs confirmation because revenue is £100.';
+    const text = [host, longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'host', text: host }, { role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(faceOf(c)).toContain(typed);
+  });
+  it('idempotent (Codex r1 P1-3): composing twice keeps the same face, the typed closing ask last both times', () => {
+    const closing = 'HOW sure are you?';
+    const text = [longContext, 'How sure are you?', 'Which assumption matters most?', closing].join('\n\n');
+    const obligations = [{ role: 'ask' as const, text: closing }];
+    const once = composeReplyShape({ text, obligations });
+    const twice = composeReplyShape({ text: once.text, obligations });
+    expect(twice.text).toBe(once.text);
+    expect(faceOf(twice)).toBe(faceOf(once));
+    expect(faceOf(once).trimEnd().endsWith(closing)).toBe(true);
+  });
+  it.each([
+    ['negation', 'The link is sized.', 'It is not true that the link is sized.'],
+    ['reported belief', 'Churn rises.', 'Nobody expects that churn rises.'],
+    ['condition', 'The goal is met.', 'If the price holds, the goal is met.'],
+  ])('a sentence inside another FRAME (%s) means something else: both are kept', (_why, short, framed) => {
+    const filler = 'The model compares four options on twelve months of revenue. Each figure rests on the values in your model today. Several of those values are Olumi estimates rather than yours. Changing any estimate changes what this model implies.';
+    const c = composeReplyShape({ text: `${short} ${filler} ${framed}` });
+    expect(c.measure?.said_once_dropped ?? []).toEqual([]);
+    expect(c.text).toContain(short);
+    expect(c.text).toContain(framed);
+  });
+  it('quote fold (Science #2787 P1-A): a typed obligation in curly quotes binds the reply’s straight-quoted words, so it faces', () => {
+    const typed = 'No single option can be put forward yet, because ‘MRR’ is read as ‘Pro plan price’ × ‘Pro paying subscribers’, which is not confirmed.';
+    const written = typed.replace(/[‘’]/g, "'");
+    const filler = ['The model compares four options on twelve months of revenue.', 'Each figure rests on the values in your model today.',
+      'Several of those values are Olumi’s estimates rather than yours.', 'Changing any estimate changes what this model implies.',
+      'The analysis does not rank the options for you.', 'It shows what the current model implies under its assumptions.'];
+    const text = [...filler, written].join(' ');
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: typed }] });
+    expect(c.shape, c.reason).not.toBeNull();
+    expect([c.shape!.headline, ...c.shape!.bullets].join('\n'), 'the withheld reason faces, in the reply’s own glyphs').toContain(written);
+    expect(c.shape!.detail).not.toContain(written);
+  });
+  const served = JSON.parse(readFileSync(new URL('./fixtures/paul-test-20261008-explain.json', import.meta.url), 'utf8')) as {
+    explain_00_24_38: string;
+    explain_00_30_46: string;
+    withhold_sentence: string;
+    no_leader_with_reason: string;
+  };
+  const count = (text: string, sentence: string): number => text.split(sentence).length - 1;
+  const chanceIntro = 'This run doesn’t show how often each option reaches the goal’s target.';
+  const context = 'Current estimates need evidence before anyone relies on this comparison for planning across teams. Recruitment takes time, and new starters may need the existing team to stop and help them. Capacity is only one part of the path from hiring to timely delivery of a release. The evidence should show how the new people affect work already planned for this quarter.';
+
+  it.each([
+    ['explain_00_24_38', served.explain_00_24_38],
+    ['explain_00_30_46', served.explain_00_30_46],
+  ])('P1 %s with the ROUTE’s typing (Codex r4: the gate types coHold.why WITHOUT its period): the standalone copy still goes', (_id, text) => {
+    const why = served.withhold_sentence.replace(/\.$/, '');
+    const c = composeReplyShape({ text, obligations: [
+      { role: 'withheld_reason', text: served.no_leader_with_reason },
+      { role: 'withheld_reason', text: why },
+    ] });
+    expect(count(c.text, served.withhold_sentence)).toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([served.withhold_sentence]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it.each([['plain', 'Option A', 'Option B'], ['markdown', '## Option A', '## Option B'], ['bold', '**Option A**', '**Option B**']])(
+    'the same finding under two %s headings is two findings (Codex r6): both stay', (_form, a, b) => {
+      const text = [a, '- Revenue may dip in month one.', b, '- Revenue may dip in month one.', '- Cash runs short in month three.', context].join('\n');
+      const c = composeReplyShape({ text });
+      expect(c.measure!.said_once_dropped).toEqual([]);
+      expect(count(c.text, 'Revenue may dip in month one.')).toBe(2);
+    });
+  it.each([
+    ['explain_00_24_38', served.explain_00_24_38],
+    ['explain_00_30_46', served.explain_00_30_46],
+  ])('P1 %s with the route’s IDENTITY typing of the gate’s closing (noLeaderBecauseSentences; Codex r6/r8): the standalone copy goes', async (_id, text) => {
+    const { noLeaderBecauseSentences } = await import('../../withheld-leader-fail-closed.js');
+    const why = served.withhold_sentence.replace(/\.$/, '');
+    const [closing] = noLeaderBecauseSentences({ why });
+    expect(closing, 'the gate’s own words are the served bullet').toBe(served.no_leader_with_reason);
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: why }, { role: 'withheld_reason', text: closing! }] });
+    expect(count(c.text, served.withhold_sentence)).toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([served.withhold_sentence]);
+    // control: with the closing untyped, nothing is contained away (an untyped frame never absorbs a typed finding)
+    const untyped = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: why }] });
+    expect(untyped.measure?.said_once_dropped ?? []).toEqual([]);
+  });
+  it('Codex r8 P1: a hypothetical frame never absorbs a typed fact', () => {
+    const fact = 'The sources of this comparison’s factor starting values are unavailable.';
+    const text = [fact, context, 'If that were true, we would need to pause because the sources of this comparison’s factor starting values are unavailable.'].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: fact }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(c.text).toContain(fact);
+  });
+
+  it.each([['markdown with a period', '## Option A.', '## Option B.'], ['bold with a period', '**Option A.**', '**Option B.**'], ['sentence above a list', 'Option A.', 'Option B.']])(
+    'repeated %s headings stay (Codex r7): a finding is never re-parented', (_form, a, b) => {
+      const text = [a, '- Revenue may dip in month one.', b, '- Churn may rise above 4%.', a, '- Cash runs short in month three.', context].join('\n');
+      const c = composeReplyShape({ text });
+      expect(c.measure!.said_once_dropped).toEqual([]);
+      const cash = c.text.indexOf('Cash runs short');
+      expect(c.text.lastIndexOf(a, cash)).toBeGreaterThan(c.text.lastIndexOf(b, cash));
+    });
+  it.each([['straight', "isn't"], ['curly', 'isn’t']])('a %s contraction negates too (Codex r7): both stay', (_form, isnt) => {
+    const reason = 'The price link is not sized.';
+    const text = [reason, context, `The result ${isnt} withheld because the price link is not sized.`].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: reason }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(c.text).toContain(reason);
+  });
+  it('a negated "because" denies the reason: both stay', () => {
+    const reason = 'The price link is not sized.';
+    const text = [reason, context, 'The result is not withheld because the price link is not sized.'].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: reason }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(c.text).toContain(reason);
+  });
+  it.each([['colon', 'Option A:', 'Option B:'], ['plain', 'Option A', 'Option B'], ['markdown', '## Option A', '## Option B'], ['bold', '**Option A**', '**Option B**']])(
+    'repeated %s headings stay (Codex r4/r5): a finding is never re-parented under another option', (_form, a, b) => {
+      const text = [a, '- Revenue may dip in month one.', b, '- Churn may rise above 4%.', a, '- Cash runs short in month three.', context].join('\n');
+      const c = composeReplyShape({ text });
+      expect(c.measure!.said_once_dropped).toEqual([]);
+      expect(count(c.text, a)).toBe(2);
+      const cash = c.text.indexOf('Cash runs short');
+      expect(c.text.lastIndexOf(a, cash)).toBeGreaterThan(c.text.lastIndexOf(b, cash));
+    });
+
+  it.each([
+    ['explain_00_24_38', served.explain_00_24_38, 'What is ‘Monthly churn rate’ today?'],
+    ['explain_00_30_46', served.explain_00_30_46, 'How much does ‘Pro plan price’ change ‘Monthly churn rate’?'],
+  ])('P1 %s: the contained withhold sentence is said only inside the face bullet; removing the standalone copy by hand is today’s byte-identical control', (_id, text, ask) => {
+    const obligations: FaceObligation[] = [
+      { role: 'withheld_reason', text: served.no_leader_with_reason },
+      { role: 'withheld_reason', text: served.withhold_sentence },
+      { role: 'ask', text: ask },
+    ];
+    const c = composeReplyShape({ text, obligations });
+    expect(c.outcome).toBe('shaped');
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.shape!.bullets).toContain(served.no_leader_with_reason);
+    expect(c.shape!.bullets.at(-1)).toBe(ask);
+    expect(count(c.text, served.withhold_sentence)).toBe(1);
+    expect(c.shape!.detail).not.toContain(served.withhold_sentence);
+    expect(c.measure!.said_once_dropped).toEqual([served.withhold_sentence]);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceExceptReportedKept(text, c);
+
+    // The served fixture is read-only. Remove only its standalone detail copy in this local control.
+    const controlText = text.replace(`${chanceIntro} ${served.withhold_sentence}`, chanceIntro);
+    expect(count(controlText, served.withhold_sentence)).toBe(1);
+    const control = composeReplyShape({ text: controlText, obligations });
+    expect(control.outcome).toBe('shaped');
+    expect(control.text, 'the no-drop control is byte-identical to today’s already-shaped served words').toBe(controlText);
+    expect(control.measure!.said_once_dropped).toEqual([]);
+    expect(c.text).toBe(control.text);
+    everySentenceExceptReportedKept(controlText, control);
+  });
+
+  it('R2: two atomic chance+depends findings ask the same question once, on the FIRST finding; the second obligation still binds and the headline is unchanged', () => {
+    const question = 'How sure are you of that size?';
+    const lead = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
+    const first = `‘Raise prices 10%’: about 47% chance of meeting your goal, in this model. It rests most on how strongly ‘Price rise’ affects ‘monthly recurring revenue’, at the size you set. ${question}`;
+    const secondWithoutQuestion = '‘Launch £49 starter tier’: about 34% chance of meeting your goal, in this model. It rests most on how strongly ‘Starter tier monthly price’ affects ‘New starter subscribers’, at the size you set.';
+    const second = `${secondWithoutQuestion} ${question}`;
+    const withheld = 'No single option can be put forward: the comparison is a near tie.';
+    const text = [withheld, lead, first, second, context].join('\n\n');
+    const obligations: FaceObligation[] = [
+      { role: 'evidence', text: first, lead: true },
+      { role: 'evidence', text: second, lead: true },
+      { role: 'withheld_reason', text: withheld },
+    ];
+    const c = composeReplyShape({ text, obligations });
+    expect(c.outcome).toBe('shaped');
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.shape!.headline).toBe(`${lead}\n${first}`);
+    expect(c.shape!.bullets).toContain(secondWithoutQuestion);
+    expect(c.shape!.bullets).toContain(withheld);
+    expect(c.shape!.detail).not.toContain(secondWithoutQuestion);
+    expect(count(c.text, question)).toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([question]);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceExceptReportedKept(text, c);
+
+    const again = composeReplyShape({ text: c.text, obligations });
+    expect(again.reason).not.toBe('obligation_unlocated');
+    expect(again.measure!.said_once_dropped).toEqual([]);
+    everySentenceExceptReportedKept(c.text, again);
+  });
+
+  it.each([
+    ['bold', '**'],
+    ['backtick', '`'],
+    ['underscore', '_'],
+  ])('R2 %s with twelve-space sentence gaps: normalised equal questions on one line preserve the first formatted atomic headline and re-bind the second finding', (_format, mark) => {
+    const gap = ' '.repeat(12);
+    const firstQuestion = `${mark}How sure are you of that size?${mark}`;
+    const secondQuestion = `${mark}HOW sure are you of that size?${mark}`;
+    const first = [
+      'First option: about 20% chance of meeting your goal, in this model.',
+      'It rests on the size you set for recruitment.',
+      firstQuestion,
+    ].join(gap);
+    const secondWithoutQuestion = [
+      'Second option: about 30% chance of meeting your goal, in this model.',
+      'It rests on the size you set for onboarding.',
+    ].join(gap);
+    const second = `${secondWithoutQuestion}${gap}${secondQuestion}`;
+    const text = `${first}${gap}${second}\n\n${context}`;
+    const c = composeReplyShape({ text, obligations: [
+      { role: 'evidence', text: first, lead: true },
+      { role: 'evidence', text: second, lead: true },
+    ] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.shape!.headline).toBe(first);
+    expect(c.shape!.bullets).toContain(secondWithoutQuestion);
+    expect(c.shape!.detail).not.toContain(secondWithoutQuestion);
+    expect(count(c.text, firstQuestion), 'the first question keeps its original casing and emphasis').toBe(1);
+    expect(c.text).not.toContain(secondQuestion);
+    expect(c.measure!.said_once_dropped).toEqual([secondQuestion]);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  const largest = 'This comparison is withheld because the outcome depends on revenue falling after churn.';
+  const middle = 'The outcome depends on revenue falling after churn.';
+  const smallest = 'Revenue falling after churn.';
+  const equalSmallest = '“REVENUE” **falling**  \t after _churn_!';
+  it.each([
+    ['container first', [largest, middle, smallest, equalSmallest]],
+    ['container last', [middle, smallest, equalSmallest, largest]],
+  ])('never-both + normalisation chain, %s: untyped prose loses only the equal copy; nothing is contained away', (_order, lines) => {
+    const text = (lines as string[]).join('\n');
+    const c = composeReplyShape({ text });
+    // Untyped (Agent) prose loses only EXACT copies: the equal copy goes; containment never applies to it (Codex r2).
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset([largest, middle, smallest].join(' ')));
+    expect(c.measure!.said_once_dropped).toEqual([equalSmallest]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('a dropped typed sentence re-binds its strongest role, lead marker and directed-link subjects to the containing unit by identity', () => {
+    const contained = 'The link from ‘Support cost’ to ‘MRR lost to support strain’ has no size yet.';
+    const containing = 'No single option can be put forward, because the link from ‘Support cost’ to ‘MRR lost to support strain’ has no size yet.';
+    const restatement = 'Support cost affects MRR lost to support strain, whose strength is not sized in the model yet.';
+    const graph = { nodes: [
+      { id: 'support', label: 'Support cost' }, { id: 'loss', label: 'MRR lost to support strain' },
+    ] };
+    const text = [restatement, context, containing, contained].join('\n\n');
+    const c = composeReplyShape({ text, graph, obligations: [
+      { role: 'evidence', text: contained, lead: true },
+      { role: 'withheld_reason', text: contained, subjects: ['support→loss'] },
+      // The leader gate's own closing (typed by the route): containment applies only between typed sentences.
+      { role: 'withheld_reason', text: containing },
+    ] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.shape!.headline).toBe(containing);
+    expect(c.measure!.obligations_on_face).toBe(1);
+    expect(face(c)).not.toContain(restatement);
+    expect(c.shape!.detail).toContain(restatement);
+    expect(c.measure!.restatements_to_detail).toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([contained]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('the one unique typed closing ask stays on the face even when its whole normalised text is inside an earlier larger question', () => {
+    const earlier = 'Before we rerun, which input should we check first?';
+    const ask = 'Which input should we check first?';
+    const text = [context, earlier, ask].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'ask', text: ask }] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.bullets.at(-1)).toBe(ask);
+    expect(c.text).toContain(earlier);
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('an equal normalised earlier question goes; the TYPED closing ask survives in its own wording (prefer the typed copy)', () => {
+    const first = 'How sure are you of “Revenue” *rising*?';
+    const closing = '“HOW sure are you of Revenue  \t rising”?';
+    const text = [context, first, closing].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'ask', text: closing }] });
+    expect(['shaped', 'already_in_shape']).toContain(c.outcome);
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.text.trimEnd().endsWith(closing)).toBe(true);
+    expect(c.text).not.toContain(first);
+    expect(c.measure!.said_once_dropped).toEqual([first]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+
+  it('Open Questions is untouched, including a copy of the face finding and repeated questions inside the protected segment', () => {
+    const finding = 'Revenue may fall after churn.';
+    const question = 'How sure are you of that size?';
+    const segment = `Questions this model does not answer yet:\n- ${finding}\n- ${question}\n- ${question}`;
+    const text = [finding, context, segment].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: finding, lead: true }] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.headline).toBe(finding);
+    expect(openQuestionsSegment(c.text)?.segment).toBe(segment);
+    expect(c.shape!.detail.endsWith(segment)).toBe(true);
+    expect(count(c.text, finding)).toBe(2);
+    expect(count(c.text, question)).toBe(2);
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('a protected later Open Questions copy cannot steal the dropped face sentence’s obligation identity', () => {
+    const containing = 'No option can be put forward yet, because the cost is uncertain.';
+    const contained = 'The cost is uncertain.';
+    const segment = `Questions this model does not answer yet:\n- ${contained}`;
+    const text = [containing, context, contained, segment].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: contained, lead: true }, { role: 'withheld_reason', text: containing }] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.shape!.headline).toBe(containing);
+    expect(c.measure!.obligations_on_face).toBe(1);
+    expect(openQuestionsSegment(c.text)?.segment).toBe(segment);
+    expect(count(c.text.toLowerCase(), contained.toLowerCase()), 'only the containing finding and protected segment carry the shorter copy').toBe(2);
+    expect(c.measure!.said_once_dropped).toEqual([contained]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('Open Questions keeps its protected identity; an untyped "Saved:" frame never absorbs the lead (containment is typed-only)', () => {
+    const lead = 'Revenue may fall.';
+    const question = 'How sure are you?';
+    const segment = `Questions this model does not answer yet: We need evidence. ${question}`;
+    const after = `Saved: ${lead} ${context}`;
+    const text = [lead, segment, after].join('\n\n');
+    expect(openQuestionsSegment(text)?.segment, 'the input has a recognised protected segment').toBe(segment);
+    const c = composeReplyShape({ text });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(openQuestionsSegment(c.text)?.segment).toBe(segment);
+    expect(count(c.text, question)).toBe(1);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+
+  it('a protected later copy of the typed closing ask never causes the unique outside ask to drop or lose its face identity', () => {
+    const earlier = 'Before we rerun, which input should we check first?';
+    const ask = 'Which input should we check first?';
+    const segment = `Questions this model does not answer yet:\n- ${ask}`;
+    const text = [context, earlier, ask, segment].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'ask', text: ask }] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.shape!.bullets.at(-1)).toBe(ask);
+    expect(c.text).toContain(earlier);
+    expect(openQuestionsSegment(c.text)?.segment).toBe(segment);
+    expect(count(c.text, ask)).toBe(2);
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('Codex r9 P1: two options sharing a qualification keep it each; only the shared QUESTION is asked once', () => {
+    const qual = 'It rests most on the size you set: if that effect is weaker than that, the chance falls.';
+    const q = 'How sure are you of that size?';
+    const a = `‘Raise prices 10%’: about 47% chance of meeting your goal, in this model. ${qual} ${q}`;
+    const b = `‘Launch starter tier’: about 34% chance of meeting your goal, in this model. ${qual} ${q}`;
+    const text = [a, b, context].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: a, lead: true }, { role: 'evidence', text: b, lead: true }] });
+    expect(count(c.text, qual), 'each option keeps its own qualification').toBe(2);
+    expect(count(c.text, q), 'the shared question is asked once').toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([q]);
+  });
+
+  it('an exactly repeated multi-sentence atomic finding retains the first complete span and lead identity when both later sentences drop', () => {
+    const firstSentence = 'The chance is low.';
+    const secondSentence = 'The premise is estimated.';
+    const atomic = `${firstSentence} ${secondSentence}`;
+    const text = [atomic, context, atomic].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: atomic, lead: true }] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.reason).not.toBe('obligation_unlocated');
+    expect(c.shape!.headline).toBe(atomic);
+    expect(c.measure!.obligations_on_face).toBe(1);
+    expect(count(c.text, firstSentence)).toBe(1);
+    expect(count(c.text, secondSentence)).toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([firstSentence, secondSentence]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('negative: two different sentences sharing a long prefix both ship whole', () => {
+    const prefix = 'The outcome depends on how quickly newly recruited people add useful capacity to the existing delivery team, ';
+    const before = `${prefix}before the next feature deadline.`;
+    const after = `${prefix}after the next feature deadline.`;
+    const text = [context, before, after].join('\n\n');
+    const c = composeReplyShape({ text });
+    expect(c.text).toContain(before);
+    expect(c.text).toContain(after);
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    everySentenceExceptReportedKept(text, c);
+  });
+});
+
 // ── the served corpus: properties over text from outside this author's head ─────────────────────────
 function corpus(): { source: string; text: string }[] {
   const out: { source: string; text: string }[] = [];
@@ -361,7 +831,7 @@ describe('the served corpus', () => {
     expect(all.some((r) => r.source.startsWith('aiq:'))).toBe(true);
   });
 
-  it('every reply: never throws; shaped ⇒ ≤3 bullets, the identity tie, every sentence kept; otherwise byte-identical', () => {
+  it('every reply: never throws; shaped ⇒ ≤3 bullets and the identity tie; every sentence except recorded RC6 drops kept; no-drop passthrough is byte-identical', () => {
     const outcomes: Record<string, number> = {};
     for (const r of all) {
       const c = composeReplyShape({ text: r.text });
@@ -369,22 +839,24 @@ describe('the served corpus', () => {
       if (c.outcome === 'shaped') {
         expect(c.shape!.bullets.length, r.source).toBeLessThanOrEqual(REPLY_FACE_MAX_BULLETS);
         expect(c.text, r.source).toBe(deriveAnswerTextFromShape(c.shape!));
-        everySentenceKept(r.text, c.text);
-      } else {
+      } else if ((c.measure?.said_once_dropped.length ?? 0) === 0) {
         expect(c.text, r.source).toBe(r.text);
       }
+      everySentenceExceptReportedKept(r.text, c);
     }
     // The class is exercised: most long served replies are reshaped, and none fails its own invariant.
     expect(outcomes.shaped ?? 0).toBeGreaterThanOrEqual(Math.floor(all.length / 2));
     expect(all.filter((r) => composeReplyShape({ text: r.text }).reason === 'invariant_failed').map((r) => r.source)).toEqual([]);
   });
 
-  it('a composed reply composed again still keeps every sentence and at most three face bullets (stable contract)', () => {
+  it('a composed reply composed again keeps every sentence except its reported RC6 drops and at most three face bullets (stable contract)', () => {
     for (const r of all) {
       const once = composeReplyShape({ text: r.text });
       const twice = composeReplyShape({ text: once.text });
       if (twice.shape !== null) expect(twice.shape.bullets.length, r.source).toBeLessThanOrEqual(REPLY_FACE_MAX_BULLETS);
-      everySentenceKept(r.text, twice.text);
+      everySentenceExceptReportedKept(r.text, once);
+      everySentenceExceptReportedKept(once.text, twice);
+      expect(twice.measure?.said_once_dropped ?? [], r.source).toEqual([]);
     }
   });
 });

@@ -44,6 +44,7 @@ import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { boundedLinkEffectText } from '../agent-lane/link-effect-figures.js';
+import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -590,7 +591,10 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (sizing.problem !== undefined && !fitsByRefit) return refuse(sizing.problem);
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
-  const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
+  // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side names who sized it, so no reader turns a
+  // placeholder's prior into a band ("Strong → Moderate" on a link nobody sized). Additive: \`before\` is a record.
+  const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance },
+    ...(isPlaceholderLink(edge) ? { sizing: 'placeholder' as const } : {}) };
   // Olumi's why, its old size, its clamp marker and its "holds by definition" claim describe OLUMI's figure, never the
   // user's (Review Desk; Codex buddy r1): `reasoning` would be read as the stated reason for a user-set link, a stale
   // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition. MC P0: a user size

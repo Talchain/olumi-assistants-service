@@ -80,8 +80,8 @@
  */
 
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
-import { inertRiskBranch } from '../graph/inert-risk.js';
-import type { GraphV3T } from "../schemas/cee-v3.js";
+import { inertRiskBranch, preconditionRiskIds } from '../graph/inert-risk.js';
+import { NodeV3, type GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
 
@@ -99,7 +99,8 @@ export type StructuralViolationCode =
   | 'NO_DECISION'
   | 'FEWER_THAN_TWO_OPTIONS'
   | 'OPTION_NO_FACTOR_EDGES'
-  | 'OPTION_NOT_LINKED_TO_DECISION';
+  | 'OPTION_NOT_LINKED_TO_DECISION'
+  | 'PRECONDITION_RISK_LINKED';
 
 export interface StructuralViolation {
   code: StructuralViolationCode;
@@ -275,6 +276,10 @@ export const VIOLATION_COPY: Record<
     preview: 'This change would leave an option that is not connected from the decision. Link the decision to it.',
     current: 'An option is not connected from the decision. Link the decision to it.',
   },
+  PRECONDITION_RISK_LINKED: {
+    preview: "A risk tied to one option is left out of the Run; this model can't link it yet.",
+    current: "A risk tied to one option is left out of the Run; this model can't link it yet.",
+  },
 };
 
 function projectVoice(voice: 'preview' | 'current'): Record<StructuralViolationCode, string> {
@@ -376,15 +381,17 @@ export function validateGraphStructure(
   graph: GraphV3T,
   // ⭐ K3 (`graph/inert-risk.ts`): READINESS ONLY (`analysis-ready-helper.ts`) leaves an inert risk out of the Run rather
   // than refusing it. The chat-edit gate (`edit-graph.ts`) does not pass it: an edit that dead-ends a risk is still refused,
-  // exactly as before (DL condition 2 on lease #85 5945974225).
+  // exactly as before (DL condition 2 on lease #85 5945974225). RC3 a′'s server-stamped precondition is exempt on BOTH
+  // gates: zero edges is its authorised representation, not a dead-ending edit.
   opts: { readonly leaveOutInertRisks?: boolean } = {},
 ): StructuralValidationResult {
   const violations: StructuralViolation[] = [];
   const leftOut = opts.leaveOutInertRisks === true
-    ? inertRiskBranch(graph.nodes, graph.edges.filter(isDirected), limitIdsOf(graph))
-    : new Set<string>();
+    ? inertRiskBranch(graph.nodes, graph.edges, limitIdsOf(graph))
+    : preconditionRiskIds(graph.nodes, graph.edges, limitIdsOf(graph));
 
   checkRequiredNodeKinds(graph, violations);
+  violations.push(...preconditionRiskLinkViolations(graph));
   // No size check. Absolute graph size is `graphCaps`' question, not this
   // validator's — see the file header for the measurement that settled it.
   checkOrphanNodes(graph, violations, leftOut);
@@ -402,6 +409,38 @@ export function validateGraphStructure(
 // ============================================================================
 // Individual Checks
 // ============================================================================
+
+/**
+ * RC3 a′: the stamp is an option precondition, not a causal effect shared by
+ * every option. Its authorised representation has no incident link. This is
+ * the single rule owner: default structural validation, the patch applier,
+ * direct mutation validation and the persistence floor all read this check.
+ * Writers select this violation independently of unrelated drafting gaps.
+ * The server stamp owns the precondition identity even if a generic writer
+ * retypes its carrier: changing kind cannot authorise its causal linkage.
+ */
+export function preconditionRiskLinkViolations(
+  graph: Pick<GraphV3T, 'nodes' | 'edges'>,
+): StructuralViolation[] {
+  const linked = new Set(graph.edges.flatMap((edge) => [edge.from, edge.to]));
+  return graph.nodes.flatMap((risk): StructuralViolation[] => {
+    if (risk.relies_on === undefined || !linked.has(risk.id)) return [];
+    // The persistence floor also reads raw object supersets. Use the schema's
+    // existing stamp parser: malformed metadata is not an authored stamp.
+    const parsed = NodeV3.shape.relies_on.safeParse(risk.relies_on);
+    const stamp = parsed.success ? parsed.data : undefined;
+    if (stamp === undefined) return [];
+    const option = graph.nodes.find((node) => node.id === stamp.option_id && node.kind === 'option');
+    const riskLabel = typeof risk.label === 'string' ? risk.label : 'This risk';
+    const optionLabel = typeof option?.label === 'string' ? option.label : 'its option';
+    return [{
+      code: 'PRECONDITION_RISK_LINKED',
+      detail: `‘${riskLabel}’ is tied to ‘${optionLabel}’ and left out of the Run; this model can't link it yet.`,
+      option_id: stamp.option_id,
+      ...(option?.label === undefined ? {} : { option_label: option.label }),
+    }];
+  });
+}
 
 function checkRequiredNodeKinds(graph: GraphV3T, violations: StructuralViolation[]): void {
   const hasGoal = graph.nodes.some((n) => n.kind === 'goal');

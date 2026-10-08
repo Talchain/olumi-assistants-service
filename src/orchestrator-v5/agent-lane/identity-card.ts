@@ -16,6 +16,8 @@
  */
 import type { IdentityProposal } from './identity-proposal.js';
 import type { StructuredProposal } from './proposal.js';
+import { isPendingActionExpired, type PendingAction } from '../session/pending-action.js';
+import { agentProposalOf, isHeldProposal } from './proposal-object/record.js';
 
 /** The proposal operation that carries a reading to confirm. `path` is the goal's id. */
 export const CONFIRM_IDENTITY_OP = 'confirm_identity' as const;
@@ -38,8 +40,20 @@ const IDENTITY_APPROVE_PREFIX = 'Yes — ';
 export const identityApproveMessage = (words: string): string => `${IDENTITY_APPROVE_PREFIX}${words}`;
 /** The card words an identity approval carries, or `undefined` for any other words. */
 export function readingOfIdentityApproval(message: unknown): string | undefined {
-  return typeof message === 'string' && message.startsWith(`${IDENTITY_APPROVE_PREFIX}Is “`)
-    ? message.slice(IDENTITY_APPROVE_PREFIX.length) : undefined;
+  if (typeof message !== 'string' || !message.startsWith(IDENTITY_APPROVE_PREFIX)) return undefined;
+  const words = message.slice(IDENTITY_APPROVE_PREFIX.length);
+  return words.startsWith('Is “') || (words.startsWith('Olumi reads ‘') && words.endsWith('’. Is that how you work it out?'))
+    ? words : undefined;
+}
+
+/** The held line when an issued card carries neither words nor a public label (COPY-SHAPE: never "undefined"). */
+export const IDENTITY_ISSUED_FALLBACK = 'I’ve prepared that confirmation for you to approve. Nothing changes until you approve it.';
+/** The reply text for a bar-issued identity card: its words, else its public label, else the fixed held line. */
+export function identityIssuedText(issued: unknown): string {
+  const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+  const r = typeof issued === 'object' && issued !== null ? (issued as { card?: unknown; public_label?: unknown }) : {};
+  const words = typeof r.card === 'object' && r.card !== null ? (r.card as { words?: unknown }).words : undefined;
+  return nonEmpty(words) ? words : nonEmpty(r.public_label) ? r.public_label : IDENTITY_ISSUED_FALLBACK;
 }
 
 /** What the Agent is told when a Run's stored model holds a reading to confirm. */
@@ -94,6 +108,28 @@ export function identityCardToReoffer(p: {
 }): boolean {
   if (p.fastPath !== undefined || p.mutated || p.proposalOffered || !p.readingWaiting) return false;
   return !p.toolCalls.some((c) => c.name === 'propose_identity' || c.name === 'authorise_change');
+}
+
+/**
+ * ⛔ AN AUTOMATIC IDENTITY CARD NEVER DISPLACES ANOTHER HELD CHANGE (GOAL-REACH Codex r1 P1): the route's supersession
+ * compares operation paths, so an identity card issued on its own (a Run's hint or the re-offer) could discard a held,
+ * unrelated goal edit the user has not answered yet. One approval carries one change: while another held proposal is live,
+ * nothing is issued automatically; the card returns on the next turn once that change is settled. A press of the bar's
+ * `confirm_reading` is the user's own request and is not gated here.
+ */
+export function identityAutoIssueAllowed(p: { readonly issue: boolean; readonly reoffer: boolean; readonly heldWaiting: boolean }): boolean {
+  return (p.issue || p.reoffer) && !p.heldWaiting;
+}
+
+/**
+ * ⛔ THE ONE HELD-CHANGE PREDICATE AT IDENTITY ISSUANCE (DL #2802 P1; the third finding in this class): every door that
+ * issues the identity card — the Agent's tool call, a Run's hint, the re-offer and the bar's confirm_reading press — goes
+ * through the propose_identity capability, which asks this. True while any held change OTHER than an identity card waits
+ * for its yes: path-only supersession would discard it before either is decided.
+ */
+export function heldChangeBlocksIdentity(pending: readonly PendingAction[], nowMs: number = Date.now()): boolean {
+  // Codex r3 P2: only a LIVE hold waits; an expired carrier lapsed and blocks nothing (the existing lifecycle authority).
+  return pending.some(p => !isPendingActionExpired(p, nowMs) && isHeldProposal(p) && !(agentProposalOf(p)?.operations ?? []).some(o => o.op === CONFIRM_IDENTITY_OP));
 }
 
 type IdentityRefusalCode = 'reading_not_confirmed' | 'superseded' | 'not_admissible' | 'carrier_conflict' | 'already_carried' | string;

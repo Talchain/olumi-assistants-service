@@ -23,15 +23,16 @@ import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
  */
 import { GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, sameUnit, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
+import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
 export interface IdentityProposal {
   readonly outcome_id: string;
   readonly operation: 'product';
-  /** The rate's id, then the count's. */
+  /** The existing cards put the rate first; a stored reading keeps its declared order. */
   readonly factor_ids: readonly [string, string];
-  /** The card's words: the reading, then the arithmetic on the user's stored figures. */
+  /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
 }
 
@@ -82,8 +83,177 @@ function unconfirmedProduct(node: Rec): readonly string[] | null {
   return i.factor_ids.every((f) => typeof f === 'string') ? (i.factor_ids as string[]) : null;
 }
 
+/** A definitional addend of the goal's reading, in the card's words ("less ‘MRR lost to churn’"); `figured` when it has a level. */
+function termOf(n: Rec, e: Rec): { words: string; label: string; figured: boolean } {
+  const mean = isRec(e.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
+  const negative = e.effect_direction === 'negative' || (mean !== undefined && mean < 0);
+  const label = text(n.label) ?? String(n.id);
+  const raw = isRec(n.observed_state) ? n.observed_state.raw_value : undefined;
+  return { words: `${negative ? 'less' : 'plus'} ‘${label}’`, label, figured: typeof raw === 'number' && Number.isFinite(raw) };
+}
+
+/**
+ * ⭐ ONE PRODUCER (Science goals §(i), 8 Oct, served 7f9fe459): the stored product reading's definitional "less"/"plus"
+ * terms, exactly as the card says them. The stored identity carries the product only; the term is a separate definitional
+ * edge into the goal, so the level its inputs give (49 × 250 = £12,250) is BEFORE the term. The card, the confirmation
+ * receipt, the break-even line and the Run's level warning all read this, so they never disagree.
+ */
+export function readingTermsOf(graph: unknown): { words: string; label: string; figured: boolean }[] {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const goals = nodes.filter(n => n.kind === 'goal');
+  const goal = goals.length === 1 ? goals[0]! : undefined;
+  const i = goal?.nonlinear_identity;
+  if (goal === undefined || !isRec(i) || i.operation !== 'product' || !Array.isArray(i.factor_ids)) return [];
+  const ids = i.factor_ids.filter((f): f is string => typeof f === 'string');
+  const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
+  return edges.flatMap((e) => {
+    if (e.to !== goal.id || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') return [];
+    if (!isRec(e.provenance) || e.provenance.definitional !== true) return [];
+    const n = byId.get(e.from);
+    if (n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded') return [];
+    return [termOf(n, e)];
+  });
+}
+
+/** Science §(i) (2): ", before ‘C’, which has no figure yet" after a level its inputs give; '' when every term has a figure. */
+export function levelBeforeTermsTail(graph: unknown): string {
+  const open = readingTermsOf(graph).filter(t => !t.figured).map(t => `‘${t.label}’`);
+  if (open.length === 0) return '';
+  return open.length === 1 ? `, before ${open[0]}, which has no figure yet`
+    : `, before ${open.slice(0, -1).join(', ')} and ${open[open.length - 1]}, which have no figures yet`;
+}
+
+/** Science §(i) (3): the receipt names the reading's terms exactly as the card did (", less ‘C’"); '' when there are none. */
+export function readingTermsWords(graph: unknown): string {
+  return readingTermsOf(graph).map(t => `, ${t.words}`).join('');
+}
+
+/** The confirmation receipt, read back from the stored graph: Science §(i) (3) names its terms as the card did. */
+export function identityReceiptWords(goalLabel: string, rate: string, count: string, graph: unknown): string {
+  return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}"${readingTermsWords(graph)}. Any earlier result is now out of date; `
+    + 'run the analysis again to see it calculated that way.';
+}
+
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
-  return proposeOnGoal(graph) ?? proposeOnCarrier(graph);
+  return proposeOnGoal(graph) ?? proposeOnCarrier(graph) ?? proposeOnStoredReading(graph);
+}
+
+/**
+ * GOAL-REACH build 1: the stored lock carries its own confirmation reading. Unlike the
+ * legacy cards, this checks the definition without requiring a stated current goal level.
+ * Science §(e) Q1.2 binds the goal's own parents, so a path through another node alone
+ * cannot qualify. Callers check writability and dry-run the existing confirmation door.
+ */
+/**
+ * Science §(e) addendum 6 (8 Oct, P48 552acb7d): an operand with NO stored unit may take its count unit from its own
+ * label, only when the full reader reads ONE count (no period, no per-denominator) and the label carries no money, rate
+ * or share word ("Pro paying subscribers" → a count; "Pro subscriber revenue" → nothing). A stored unit always wins (the
+ * caller reads it first). Never credited as the user's: the card's words name no unit.
+ */
+// Codex r1 P1 (#2826): words are singularised before the check, so inflections and plurals are caught ("Revenues",
+// "Royalties", "Percentages"); a label joining two things, or an average, is not ONE count.
+const NOT_A_COUNT_WORDS = new Set(['revenue', 'income', 'sale', 'price', 'cost', 'fee', 'spend', 'spending', 'budget', 'mrr', 'arr', 'arpu',
+  'margin', 'profit', 'value', 'rate', 'ratio', 'share', 'percent', 'percentage', 'churn', 'conversion', 'royalty', 'earning', 'payment',
+  'pound', 'dollar', 'euro', 'cash', 'money', 'amount', 'average', 'mean', 'median', 'per', 'of', 'from', 'and', 'or', 'with', 'by',
+  // Codex r2 (#2826): compound operators join two quantities ("Customers plus subscribers"). Not 'total': "Total paying
+  // subscribers" is ONE count (DL pre-read).
+  'plus', 'minus', 'times', 'vs', 'versus', 'excluding', 'excl', 'both', 'either', 'between']);
+const singularWord = (w: string): string => w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.endsWith('ses') ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+function labelCountUnit(n: Rec): string | undefined {
+  if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
+  // The drafter names a count AT A TIME ("Paying subscribers at month 12", "12-month paying subscribers", "Month-12 Pro
+  // paying subscribers", truncated "… at month…": 34 of 55 stored outcome operands, staging all-time, 8 Oct). A time POINT
+  // is not a rate: it is stripped, and the count that remains is the unit. A flow ("per month") still fails below.
+  const raw = text(n.label);
+  const label = raw === undefined ? undefined : raw.replace(/…/g, ' ')
+    .replace(/\b(?:at|in|by|after|within)\s+(?:(?:month|year|week|quarter)s?\s*\d*|\d+\s*(?:month|year|week|quarter)s?)\b/gi, ' ')
+    .replace(/\b(?:month|year|week|quarter)[-\s]?\d+\b|\b\d+[-\s]?(?:month|year|week|quarter)s?\b/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if (label === undefined || label === '' || /[%£$€¥\d()]/.test(label)) return undefined;
+  const words = label.toLowerCase().split(/[^a-z]+/).filter((w) => w !== '');
+  if (words.length === 0 || words.length > 4 || words.some((w) => NOT_A_COUNT_WORDS.has(w) || NOT_A_COUNT_WORDS.has(singularWord(w)))) return undefined;
+  const parts = readUnitParts(label);
+  return parts?.kind === 'count' && parts.per === null && parts.period === null && (parts.noun?.length ?? 0) > 0 ? label : undefined;
+}
+
+function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const goals = nodes.filter(n => n.kind === 'goal');
+  if (goals.length !== 1) return null;
+  const goal = goals[0]!;
+  const goalId = text(goal.id);
+  const goalLabel = text(goal.label);
+  const ids = unconfirmedProduct(goal);
+  // Condition 1: exactly one valid stored reading over two distinct existing factors.
+  if (goalId === undefined || goalLabel === undefined || ids === null || ids.length !== 2 || ids[0] === ids[1]
+    || goal.analysis_participation === 'retained_excluded' || identityConflictsWithScope(goal)) return null;
+  // DL (8 Oct): ISL adds a LISTED addend's signed value, which the edge-sign words below cannot state; no card until build 2.
+  const listed = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity.addends : undefined;
+  if (listed !== undefined && !(Array.isArray(listed) && listed.length === 0)) return null;
+  const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
+  const parts = ids.map(id => byId.get(id));
+  // Science §(e) addendum 6: an operand of the DECLARED product the drafter typed as an OUTCOME reads as a factor.
+  if (parts.some(n => n === undefined || (n.kind !== 'factor' && n.kind !== 'outcome') || n.analysis_participation === 'retained_excluded')) return null;
+  // Condition 2: the reading's factors are both direct parents (and therefore on the goal path).
+  if (!ids.every(id => edges.some(e => e.edge_type !== 'bidirected' && e.from === id && e.to === goalId))) return null;
+  const reachesGoal = (from: string): boolean => {
+    const seen = new Set([from]); const queue = [from];
+    for (let i = 0; i < queue.length; i += 1) {
+      for (const e of edges) {
+        if (e.edge_type === 'bidirected' || e.from !== queue[i] || typeof e.to !== 'string') continue;
+        if (e.to === goalId) return true;
+        const next = byId.get(e.to);
+        if (next === undefined || next.analysis_participation === 'retained_excluded' || seen.has(e.to)) continue;
+        seen.add(e.to); queue.push(e.to);
+      }
+    }
+    return false;
+  };
+  // Codex r2 P2: a carrier kept out of the calculation (retained_excluded) is not a competing reading the Run sees.
+  if (nodes.some(n => n !== goal && n.analysis_participation !== 'retained_excluded' && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'product'
+    && typeof n.id === 'string' && reachesGoal(n.id))) return null;
+  // Science §(e) addendum 2: every OTHER direct parent of the goal is part of what the Run computes. A drafter-made
+  // definitional addend (edge provenance.definitional, node not the user's) joins the reading's words; anything else — a
+  // user-authored or non-definitional risk or factor straight into the goal — means the goal is not this product: null.
+  const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
+  const addends: string[] = [];
+  for (const e of edges) {
+    if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') continue;
+    const n = byId.get(e.from);
+    if (n === undefined || n.kind === 'option' || n.kind === 'decision' || n.analysis_participation === 'retained_excluded') continue;
+    const prov = isRec(e.provenance) ? e.provenance : undefined;
+    const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
+    if (prov?.definitional !== true || userAuthored) return null;
+    addends.push(termOf(n, e).words);
+  }
+  const [a, b] = parts as [Rec, Rec];
+  const level = (n: Rec) => ({ unit: (isRec(n.observed_state) ? text(n.observed_state.unit) : undefined) ?? labelCountUnit(n), label: String(n.id) });
+  const goalUnit = text(goal.goal_threshold_unit);
+  // Condition 3: use the existing unit reader, including Science's £/month × count confirmation form.
+  if (readMoneyTotal(goalUnit, goalLabel) === null || unitsCompose(goalUnit, goalLabel, level(a), level(b)).kind === 'no') return null;
+  const current = usersLevel(goal);
+  const currentState = isRec(goal.observed_state) ? goal.observed_state : undefined;
+  // Science §(e) Q1.3 also covers a stated zero or unreadable current level; usersLevel's
+  // legacy null for those must not turn a contradictory statement into an absent one.
+  if (current === null && currentState !== undefined && classifyValueSource(currentState.source) === 'user_stated') return null;
+  // Condition 4: a stated CURRENT level must reconcile at the factors' current raw values within the existing 5%.
+  if (current !== null) {
+    // Codex r1 P2: currency AND period read in the goal's own context ("Monthly recurring revenue" + GBP = £/month).
+    const cm = readMoneyTotal(current.unit, goalLabel); const gm = readMoneyTotal(goalUnit, goalLabel);
+    if (cm === null || gm === null || cm.code !== gm.code || cm.period !== gm.period) return null;
+    const operands = [a, b].map(n => {
+      const os = isRec(n.observed_state) ? n.observed_state : undefined;
+      return typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) && text(os.unit) !== undefined
+        ? { id: String(n.id), label: text(n.label) ?? String(n.id), value: os.raw_value, unit: text(os.unit)! } : null;
+    });
+    if (operands[0] === null || operands[1] === null || !Number.isFinite(operands[0]!.value * operands[1]!.value)
+      || reading(goal, goalLabel, current, operands[0]!, operands[1]!) === null) return null;
+  }
+  const words = `Olumi reads ‘${goalLabel}’ as ‘${text(a.label) ?? ids[0]}’ × ‘${text(b.label) ?? ids[1]}’${addends.map(x => `, ${x}`).join('')}. Is that how you work it out?`;
+  if (words.length > CARD_WORDS_MAX) return null;
+  return { outcome_id: goalId, operation: 'product', factor_ids: [ids[0]!, ids[1]!], words };
 }
 
 type Rec2 = Rec;

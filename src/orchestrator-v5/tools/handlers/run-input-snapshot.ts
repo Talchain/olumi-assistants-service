@@ -29,6 +29,7 @@ import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
 import { factorAuthorshipDigest, linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
 import { STATED_LEVEL_STD } from './stated-level-spread.js';
+import { effectiveLinkExistenceProbability } from '../../goal-target/held-user-links.js';
 
 type Rec = Record<string, unknown>;
 
@@ -254,14 +255,14 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     const strength = isRec(e.strength) ? e.strength : {};
     const mean = finite(strength.mean);
     if (from === undefined || to === undefined || mean === undefined) return [];
-    const p = finite(e.exists_probability);
+    const p = effectiveLinkExistenceProbability(e);
     const persisted = input.persistedEdges === undefined ? undefined : persistedByPair.get(`${from}\u0000${to}`) ?? undefined;
     return [{
       from,
       to,
       mean,
       ...(finite(strength.std) !== undefined ? { std: finite(strength.std) } : {}),
-      ...(p !== undefined && p >= 0 && p <= 1 ? { exists_probability: p } : {}),
+      ...(p !== undefined ? { exists_probability: p } : {}),
       band: strengthBandFromEdgeBand(edgeBandFromMagnitude(Math.abs(mean))),
       ...(persisted !== undefined ? { sizing: linkSizing(persisted) } : {}),
       // 0.72.0 (DL ruling #2482 r3): the link's authorship as the request carried it, so the diff can tell pairwise

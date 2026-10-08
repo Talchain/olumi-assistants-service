@@ -268,6 +268,27 @@ describe('X4 real commit door → cold graph-read door', () => {
     expect(rpcCalls.filter(c => c.args.p_turn_id === 'aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4').map(c => c.name)).toEqual(['append_agent_answer_if_latest']);
     coldStore(); expect((await read()).conversation_turns.at(-1)).toMatchObject({ turn_id: 'aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4', suggested_actions: [EXPECTED[0]] });
   });
+  it('RED row 7d (P48 probe5, 8 Oct): the pre-mortem plan pick survives a reload — stored as the migration\'s id, restored as the live one', async () => {
+    await positive(); conditionalAppend();
+    const pick = { id: 'agent-premortem-plan:48ab24ab77fb', label: '‘Raise Pro price to £59’', message: 'Run a pre-mortem on ‘Raise Pro price to £59’.' };
+    expect(isDurableAnswerOffer(pick)).toBe(true); finalOffers.value = [pick];
+    const live = await ask('aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5'); expect(live.suggested_actions).toEqual([pick]);
+    const row = table.find(r => r.turn_id === 'aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5');
+    expect(row?.suggested_actions).toEqual([{ ...pick, id: 'agent-premortem-plan-48ab24ab77fb' }]);
+    expect((row?.suggested_actions as { id: string }[]).every(a => SQL_OFFER_ID.test(a.id))).toBe(true);
+    coldStore(); expect((await read()).conversation_turns.at(-1)).toMatchObject({ turn_id: 'aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5', suggested_actions: [pick] });
+    // Control: a stored id that only looks like a pick (not 12 hex) is not rewritten into a press.
+    expect(answerOffersForReload({ turn_id: 'x', run_key: null, suggested_actions: [{ ...pick, id: 'agent-premortem-plan-zz' }] }, scenario,
+      { graphHash: HASH, analysisState: CURRENT, analysisReady: READY, analysisResult: RESULT, outstandingProposalIds: new Set(), modelExists: true })).toEqual([]);
+  });
+  it('row 7e: the same plan pick on the plain answer writer (no conditional append) is stored as the migration\'s id', async () => {
+    await positive();
+    const pick = { id: 'agent-premortem-plan:48ab24ab77fb', label: '‘Raise Pro price to £59’', message: 'Run a pre-mortem on ‘Raise Pro price to £59’.' };
+    finalOffers.value = [pick];
+    expect((await ask('aaaaaaa6-aaaa-4aaa-8aaa-aaaaaaaaaaa6')).suggested_actions).toEqual([pick]);
+    expect(table.find(r => r.turn_id === 'aaaaaaa6-aaaa-4aaa-8aaa-aaaaaaaaaaa6')?.suggested_actions).toEqual([{ ...pick, id: 'agent-premortem-plan-48ab24ab77fb' }]);
+    coldStore(); expect((await read()).conversation_turns.at(-1)).toMatchObject({ turn_id: 'aaaaaaa6-aaaa-4aaa-8aaa-aaaaaaaaaaa6', suggested_actions: [pick] });
+  });
   it('row 7c (retry-safe): the same widen-Add answer sent again under its turn id replays the one recorded answer; no second row', async () => {
     await positive();
     const add = { id: 'agent-widen-add:0123456789abcdef', label: 'Add', message: 'Add the risk ‘Existing customers downgrade’ to ‘Launch Starter Tier’.' };

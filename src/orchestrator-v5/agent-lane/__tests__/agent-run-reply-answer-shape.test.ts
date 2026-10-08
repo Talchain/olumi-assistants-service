@@ -35,7 +35,7 @@ import {
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
 import { sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
-import { textAtRest } from '../decision-input-ask.js';
+import { textAtRest, untestedHorizonLine } from '../decision-input-ask.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -105,7 +105,7 @@ const store = {
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
-  readRecent: vi.fn(async () => []),
+  readRecent: vi.fn(async (_sid: string, _limit?: number): Promise<Row[]> => []),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
 };
@@ -159,7 +159,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { vi.mocked(fetch).mockClear(); runRequests = 0; rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; });
+  beforeEach(() => { vi.mocked(fetch).mockClear(); store.readRecent.mockReset().mockResolvedValue([]); runRequests = 0; rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; });
 
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
@@ -206,6 +206,58 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     return { b: response.json() as Body & { narration?: { status: string; run_key: string }; _agent: { replayed?: boolean } }, turnId };
   };
   const RUN_DISCLOSURE = "How much each of ‘Pro subscriber base’ and ‘MRR per Pro subscriber’ counts towards ‘MRR’ is Olumi's assumption, not your stated priority. Set them to match what matters to you.";
+  const A7 = "This model doesn't yet say whether any option gets there within 12 months.";
+
+  it.each([
+    { label: 'previous answer said A7 verbatim → detail, never the headline/bullets', previousAnswer: `${RUN_RESULT_READY_TEXT}\n\n${A7}`, repeated: true },
+    { label: 'CONTROL: previous answer without A7 → today’s headline placement unchanged', previousAnswer: RUN_RESULT_READY_TEXT, repeated: false },
+  ])('A7 route: $label', async ({ previousAnswer, repeated }) => {
+    const graph = structuredClone(FX.state.draft_graph) as { nodes: { kind: string; goal_horizon_months?: number }[] };
+    const goal = graph.nodes.find((n) => n.kind === 'goal')!;
+    goal.goal_horizon_months = 12;
+    readbackGraph = graph;
+    expect(untestedHorizonLine(readbackGraph), 'the current goal owes exactly this A7').toBe(A7);
+
+    const { b: run, turnId: previousTurnId } = await runOnly();
+    // Seed the durable previous answer the user read; the control represents an earlier answer that did not say A7.
+    const previous = { ...rows.get(previousTurnId)!, assistant_message: previousAnswer };
+    expect(previous.request_hash).toMatch(/^agent_turn:/);
+    rows.set(previousTurnId, previous);
+    // Store order is newest first, without claim rows, as in production. A newer tool row and an older Agent answer
+    // both say A7: neither may override the immediately previous Agent answer in the no-A7 control.
+    store.readRecent.mockImplementation(async () => [
+      { id: 'tool-row', turn_id: 'tool-turn', request_hash: 'sha256:tool', assistant_message: A7 },
+      ...[...rows.values()].reverse().filter((row) => !row.turn_id.endsWith(':claim')),
+      { id: 'older-answer', turn_id: 'older-turn', request_hash: 'agent_turn:older', assistant_message: A7 },
+    ]);
+    callModelOutputs = [say(`${A7}\n\n${FOUR_BULLETS.text}`)];
+    const chip = (run as Body & { suggested_actions: { id: string; message: string }[]; _agent: { session_id: string } }).suggested_actions
+      .find((c) => c.id.startsWith('agent-explain-run:'))!;
+    expect(chip, 'the current Run offers its real Explain control').toBeDefined();
+    const turnId = nextTurnId();
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      scenario_id: SCENARIO, agent_session_id: (run as Body & { _agent: { session_id: string } })._agent.session_id,
+      turn_id: turnId, message: chip.message, chip: { id: chip.id },
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    const b = response.json() as Body;
+    expect(callModelOutputs, 'the scripted Explain was consumed').toEqual([]);
+    expect(b._diagnostic_trace.fast_path).toBe('explain');
+    expect(carriesResult(b)).toBe(true);
+    expect(b._answer_shape, 'the live reply shapes, rather than falling back to whole prose').toBeDefined();
+    if (repeated) {
+      expect(b._answer_shape!.detail).toContain(A7);
+      expect(b._answer_shape!.headline).not.toContain(A7);
+      expect(b._answer_shape!.bullets.join('\n')).not.toContain(A7);
+    } else {
+      expect(b._answer_shape!.headline).toBe(A7);
+      expect(b._answer_shape!.detail).not.toContain(A7);
+    }
+    expect(b.assistant_text.split(A7).length - 1, 'A7 is still said exactly once').toBe(1);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
+  });
+
   const hostRunFixture = () => {
     // Two licensed screen findings, no interpreter output; the Run's typed methods-note carrier owes a disclosure.
     readbackResult = { ...RESULT_BLOCK, enrichment: { ...(RESULT_BLOCK.enrichment as Record<string, unknown>), inference_warnings: [
@@ -336,6 +388,20 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     }
     // control: without the note sentence in the reply, only the sentence is lead
     expect(ownWordsLeadTexts([ownA, ownC].join('\n'), raise, split)).toEqual([ownA]);
+  });
+
+  it('RC6 quote fold (Science #2787 P1-A, non-B19 form): the screen’s chance units in STRAIGHT quotes after a share still lead; no canonical copy is added', async () => {
+    hostRunFixture();
+    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    const share = 'In this model, 71% of runs supported ‘Raise Pro to £59 at release’.';
+    const straight = screen.map((l) => [l.chance, l.depends].filter(Boolean).join(' ').replace(/[‘’]/g, "'"));
+    const narrated = [share, ...straight].join('\n\n');
+    for (const l of screen) expect(narrated, 'control: no curly-quoted chance').not.toContain(l.chance);
+    const { b } = await typedRun(narrated);
+    expect(b._answer_shape, b.assistant_text).toBeDefined();
+    expect(b._answer_shape!.headline.startsWith(screen[0]!.chance.replace(/[‘’]/g, "'")), b._answer_shape!.headline).toBe(true);
+    expect(b._answer_shape!.headline).not.toContain(share);
+    for (const l of screen) expect(b.assistant_text, 'no canonical copy beside the Agent’s').not.toContain(l.chance);
   });
 
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {

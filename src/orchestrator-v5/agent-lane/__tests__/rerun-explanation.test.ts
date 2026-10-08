@@ -8,8 +8,22 @@
  * rows placeholder → olumi_accepted, coverage complete). The run_delta is shaped by @talchain/schemas 0.70.0
  * (`RunDeltaInputChangeObjectSchema`, `win_probabilities_unavailable`).
  */
-import { describe, expect, it } from 'vitest';
-import { checkMethodTurn } from '../guidance/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
+vi.mock('typescript', async (importOriginal) => {
+  const actual = await importOriginal<{ default: typeof ts }>();
+  return { default: { ...actual.default, createProgram: vi.fn(actual.default.createProgram) } };
+});
+import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { diffRunInputSnapshots } from '../../coaching/run-input-changes.js';
+import { findEditInternalsHit, findForbiddenPhraseHit, findSuccessClaimHit, HELD_SCIENCE_VOCABULARY_PATTERN } from '../../compose/forbidden-user-facing-phrases.js';
+import { findProcessNarrationHit } from '../../compose/process-narration.js';
+import { sanitiseNarrateOutput } from '../../sanitise.js';
+import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
+import { REPAIR_VOCABULARY_DENYLIST } from '../../../orchestrator/shared/repair-vocabulary-denylist.js';
+import { checkMethodTurn, internalValueTerms } from '../guidance/index.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 const LABELS: Record<string, string> = {
@@ -24,6 +38,10 @@ const LABELS: Record<string, string> = {
   ai_reporting_module_availability: 'AI reporting module availability',
   integration_step_bug_resolution: 'Integration-step bug resolution',
   qualified_leads: 'Qualified leads per month',
+  risk: 'Feature release slips',
+  mrr: 'MRR',
+  price: 'Pro plan price',
+  o: 'Raise price',
 };
 const labelOf = (id: string) => LABELS[id];
 const OPTIONS = ['AI Reporting Module Sprint', 'Integration Bug Fix Sprint', 'Split Sprint Capacity', 'Continue Current Plan'];
@@ -48,6 +66,331 @@ const plan = (delta: unknown, licensed = false) => rerunExplanationPlan(delta, l
 
 const LINE = `${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.unwithheld}`;
 const PAIRED = { ...UNWITHHELD, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] };
+
+const snapshot = (over: Partial<RunInputSnapshot> = {}): RunInputSnapshot => ({
+  snapshot_version: 1, sent_digest: 'a'.repeat(64), residual_digest: 'b'.repeat(64),
+  goal: null, options: [], options_not_sent: [], factors: [], constraints: [], links: [], ...over,
+});
+const PRESENCE_ROWS = diffRunInputSnapshots(snapshot(), snapshot({ links: [
+  { from: 'risk', to: 'mrr', mean: -0.5 }, { from: 'price', to: 'risk', mean: -0.5 },
+] }));
+const ENTERED = [
+  'The link from ‘Feature release slips’ to ‘MRR’ is now part of the analysis.',
+  'The link from ‘Pro plan price’ to ‘Feature release slips’ is now part of the analysis.',
+];
+
+const ROW_HELPERS = ['changeRow', 'pushPair'] as const;
+const referenceVariant = (helper: typeof ROW_HELPERS[number], shorthand: boolean) => (source: string): string => {
+  const ends = helper === 'changeRow' ? 'null, { raw: true }' : '[null, { raw: true }]';
+  const declaration = shorthand ? `const emitters = { ${helper} };` : `const emit = ${helper};`;
+  return (helper === 'changeRow'
+    ? source.replace('const byId', `${declaration}\n\nconst byId`)
+    : source.replace('  // ── option settings', `  ${declaration}\n  // ── option settings`))
+    .replace('  // ── option settings',
+      `  ${shorthand ? `emitters.${helper}` : 'emit'}({ entity_kind: 'link', entity_id: 'new', field: 'presence', link: { from: 'risk', to: 'mrr' } }, ${ends});\n  // ── option settings`);
+};
+const PRODUCER_VARIANTS = {
+  'alias:changeRow': referenceVariant('changeRow', false),
+  'alias:pushPair': referenceVariant('pushPair', false),
+  'shorthand:changeRow': referenceVariant('changeRow', true),
+  'shorthand:pushPair': referenceVariant('pushPair', true),
+  'export:changeRow': (source: string) => `${source}\nexport { changeRow };\n`,
+};
+type ProducerVariant = keyof typeof PRODUCER_VARIANTS;
+const producerPath = fileURLToPath(new URL('../../coaching/run-input-changes.ts', import.meta.url));
+const producerVariantPath = (variant?: ProducerVariant) => variant === undefined ? producerPath
+  : producerPath.replace(/\.ts$/u, `.probe-${variant.replace(':', '-')}.ts`);
+let producerCache: { program: ts.Program; checker: ts.TypeChecker } | undefined;
+
+/** One lazy program for this file; virtual sibling modules preserve each mutation's own helper symbols. */
+function producerCompiler(): NonNullable<typeof producerCache> {
+  if (producerCache !== undefined) return producerCache;
+  const baseline = readFileSync(producerPath, 'utf8');
+  const virtualSources = new Map(Object.entries(PRODUCER_VARIANTS)
+    .map(([variant, mutate]) => [producerVariantPath(variant as ProducerVariant), mutate(baseline)]));
+  const options = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true };
+  const host = ts.createCompilerHost(options);
+  const readFile = host.readFile;
+  const fileExists = host.fileExists;
+  host.readFile = (file) => virtualSources.get(file) ?? readFile(file);
+  host.fileExists = (file) => virtualSources.has(file) || fileExists(file);
+  const program = ts.createProgram([producerPath, ...virtualSources.keys()], options, host);
+  producerCache = { program, checker: program.getTypeChecker() };
+  return producerCache;
+}
+
+/** Resolve literal kinds/fields at the producer's constructors; helper references must be direct calls, never aliases. */
+function emittedPairs(variant?: ProducerVariant): string[] {
+  const { program, checker } = producerCompiler();
+  const source = program.getSourceFile(producerVariantPath(variant));
+  if (source === undefined) throw new Error(`Missing producer source: ${variant ?? 'baseline'}`);
+  const producer = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'diffRunInputs');
+  if (producer === undefined || !ts.isFunctionDeclaration(producer) || producer.body === undefined) throw new Error('Missing diffRunInputs');
+  const changeRow = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'changeRow');
+  const pushPair = producer.body.statements.filter(ts.isVariableStatement).flatMap((node) => node.declarationList.declarations)
+    .find((node) => ts.isIdentifier(node.name) && node.name.text === 'pushPair');
+  if (changeRow === undefined || !ts.isFunctionDeclaration(changeRow) || changeRow.name === undefined || pushPair === undefined) {
+    throw new Error('Missing row helpers');
+  }
+  const helpers = new Map([
+    [checker.getSymbolAtLocation(changeRow.name)!, 'changeRow'],
+    [checker.getSymbolAtLocation(pushPair.name)!, 'pushPair'],
+  ]);
+  const checkHelperReferences = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      const parent = node.parent;
+      const symbol = ts.isShorthandPropertyAssignment(parent)
+        ? checker.getShorthandAssignmentValueSymbol(parent) : checker.getSymbolAtLocation(node);
+      const resolved = symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+      if (helpers.has(resolved!)) {
+        expect(ts.isVariableDeclaration(parent) && parent.name === node
+          || ts.isFunctionDeclaration(parent) && parent.name === node
+          || ts.isCallExpression(parent) && parent.expression === node, 'row helpers must be called directly').toBe(true);
+      }
+    }
+    ts.forEachChild(node, checkHelperReferences);
+  };
+  checkHelperReferences(source);
+  const pairs = new Set<string>();
+  let writes = 0;
+  const strings = (type: ts.Type): string[] => {
+    if (type.isUnion()) return type.types.flatMap(strings);
+    if (type.isStringLiteral()) return [type.value];
+    throw new Error(`Unresolved producer row type: ${checker.typeToString(type)}`);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === 'rows') {
+      const parent = node.parent;
+      expect(ts.isVariableDeclaration(parent) && parent.name === node
+        || ts.isPropertyAccessExpression(parent) && parent.expression === node && parent.name.text === 'push'
+        || ts.isShorthandPropertyAssignment(parent), 'row writes must not bypass the constructor guard').toBe(true);
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText(source) === 'rows') {
+      expect(node.getText(source), 'rows must enter through the checked constructors').toBe('rows.push(r)');
+      writes += 1;
+      const declaration = checker.getSymbolAtLocation(node.arguments[0]!)?.valueDeclaration;
+      expect(declaration?.parent.parent.getText(source)).toMatch(/^push\s*=/u);
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      if (node.expression.text === 'push') expect(node.arguments[0] && ts.isCallExpression(node.arguments[0])
+        && node.arguments[0].expression.getText(source) === 'changeRow').toBe(true);
+      const name = helpers.get(checker.getSymbolAtLocation(node.expression)!);
+      if (name !== undefined) {
+        const argument = node.arguments[0]!;
+        const declaration = ts.isIdentifier(argument) ? checker.getSymbolAtLocation(argument)?.valueDeclaration : undefined;
+        if (declaration !== undefined && ts.isParameter(declaration)) {
+          expect(name).toBe('changeRow');
+          expect(node.getText(source)).toBe('changeRow(base, pair[0], pair[1])');
+          expect(declaration.parent.parent.getText(source)).toMatch(/^pushPair\s*=/u);
+        } else {
+          const type = checker.getTypeAtLocation(argument);
+          const values = (key: string) => {
+            const property = type.getProperty(key);
+            if (property === undefined) throw new Error(`Missing ${key}: ${node.getText(source)}`);
+            return strings(checker.getTypeOfSymbolAtLocation(property, argument));
+          };
+          for (const kind of values('entity_kind')) for (const field of values('field')) pairs.add(`${kind}:${field}`);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(producer.body);
+  expect(writes).toBe(1);
+  expect(pairs.size).toBeGreaterThan(0);
+  return [...pairs].sort();
+}
+
+describe('Q4: every recorded row is spoken or accounted for', () => {
+  it.each(ROW_HELPERS)('exhaustiveness: an alias of %s cannot bypass row discovery', (helper) => {
+    expect(() => emittedPairs(`alias:${helper}`)).toThrow('row helpers must be called directly');
+  }, 20_000);
+
+  it.each(ROW_HELPERS)('exhaustiveness: a shorthand reference to %s cannot bypass row discovery', (helper) => {
+    expect(() => emittedPairs(`shorthand:${helper}`)).toThrow('row helpers must be called directly');
+  }, 20_000);
+
+  it('exhaustiveness: an exported helper reference is rejected', () => {
+    expect(() => emittedPairs('export:changeRow')).toThrow('row helpers must be called directly');
+  }, 20_000);
+
+  it('Paul\'s risk → MRR and price → risk presence rows name both links now part of the analysis', () => {
+    const p = plan({ ...PAIRED, input_changes: PRESENCE_ROWS })!;
+    expect(p.changes).toEqual([ENTERED[1], ENTERED[0]]);
+    expect(p.codeLine).not.toContain(RERUN_NO_CHANGE_LINES.unknown);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it('a link leaving the calculation inputs says no longer part of the analysis, with both endpoint labels', () => {
+    const rows = diffRunInputSnapshots(snapshot({ links: [{ from: 'risk', to: 'mrr', mean: -0.5 }] }), snapshot());
+    const p = plan({ ...PAIRED, input_changes: rows })!;
+    expect(p.changes).toEqual(['The link from ‘Feature release slips’ to ‘MRR’ is no longer part of the analysis.']);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it.each([
+    ['entered', false, 'The option ‘Raise price’ is now part of the analysis.'],
+    ['left', true, 'The option ‘Raise price’ is no longer part of the analysis.'],
+  ] as const)('an option that %s the calculation inputs names its direction', (_name, leaving, sentence) => {
+    const withOption = snapshot({ options: [{ option_id: 'o', label: 'Raise price', settings: [] }] });
+    const rows = diffRunInputSnapshots(leaving ? withOption : snapshot(), leaving ? snapshot() : withOption);
+    expect(rows).toMatchObject([{ entity_kind: 'option', field: 'presence',
+      before: leaving ? { raw: true } : null, after: leaving ? null : { raw: true } }]);
+    const p = plan({ ...PAIRED, input_changes: rows })!;
+    expect(p.changes).toEqual([sentence]);
+    expect(composeRerunExplanation('', p).text).toBe(`${sentence} ${RERUN_FALLBACK_LINES.C1}`);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it.each(['added', 'removed', 'replaced'] as const)('a goal that was %s names each recorded goal and its direction', (change) => {
+    // Both nodes remain calculation inputs: presence records the goal's role, not deletion of a node.
+    const base = snapshot({ factors: [{ factor_id: 'mrr', label: 'MRR' },
+      { factor_id: 'quarterly_revenue', label: 'Quarterly revenue' }] });
+    const oldGoal = { ...base, goal: { node_id: 'mrr', label: 'MRR' } };
+    const newGoal = { ...base, goal: { node_id: 'quarterly_revenue', label: 'Quarterly revenue' } };
+    const rows = diffRunInputSnapshots(change === 'added' ? base : oldGoal,
+      change === 'removed' ? base : change === 'added' ? oldGoal : newGoal);
+    const sentences = change === 'added' ? ['‘MRR’ is now the goal of the analysis.']
+      : change === 'removed' ? ['‘MRR’ is no longer the goal of the analysis.']
+        : ['‘MRR’ is no longer the goal of the analysis.', '‘Quarterly revenue’ is now the goal of the analysis.'];
+    expect(rows).toMatchObject(change === 'replaced'
+      ? [{ entity_kind: 'goal', field: 'presence', label_before: 'MRR', before: { raw: true }, after: null },
+        { entity_kind: 'goal', field: 'presence', label_after: 'Quarterly revenue', before: null, after: { raw: true } }]
+      : [{ entity_kind: 'goal', field: 'presence', before: change === 'added' ? null : { raw: true },
+        after: change === 'added' ? { raw: true } : null }]);
+    const p = plan({ ...PAIRED, input_changes: rows })!;
+    expect(p.changes).toEqual(sentences);
+    expect(composeRerunExplanation('', p).text).toBe(`${sentences.join(' ')} ${RERUN_FALLBACK_LINES.C1}`);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it.each([
+    ['changed', 49, 59, 'The value of ‘Pro plan price’ for the option ‘Raise price’ changed: 49 GBP → 59 GBP.'],
+    ['added', undefined, 59, 'The value of ‘Pro plan price’ for the option ‘Raise price’ was recorded: 59 GBP.'],
+    ['removed', 49, undefined, 'The recorded value of ‘Pro plan price’ for the option ‘Raise price’ was removed.'],
+  ] as const)('an option setting that was %s names its own option, distinct from today’s factor value', (_name, before, after, sentence) => {
+    const withSetting = (raw: number | undefined) => snapshot({
+      options: [{ option_id: 'o', label: 'Raise price', settings: raw === undefined ? []
+        : [{ factor_id: 'price', label: 'Pro plan price', raw, unit: 'GBP', encoded: raw }] }],
+      factors: raw === undefined ? [] : [{ factor_id: 'price', label: 'Pro plan price', raw, unit: 'GBP', encoded: raw }],
+    });
+    const rows = diffRunInputSnapshots(withSetting(before), withSetting(after));
+    const setting = rows.find((r) => r.entity_kind === 'option_setting')!;
+    const factor = rows.find((r) => r.entity_kind === 'factor_value')!;
+    expect(setting).toMatchObject({ option_id: 'o', entity_id: 'price', field: 'value' });
+    const p = plan({ ...PAIRED, input_changes: rows })!;
+    expect(p.changes[0]).toBe(sentence);
+    expect(p.changes[0]).not.toBe(plan({ ...PAIRED, input_changes: [factor] })!.changes[0]);
+    expect(composeRerunExplanation('', p).text).toBe(p.codeLine);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+    const unknownOption = { ...setting, option_id: 'gone' };
+    expect(plan({ ...PAIRED, input_changes: [unknownOption] })!.codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
+    expect(plan({ ...PAIRED, input_changes: [AI, unknownOption] })!.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
+  });
+
+  it.each([
+    'The option ‘Raise price’ is now part of the analysis.',
+    'The option ‘Raise price’ is no longer part of the analysis.',
+    '‘MRR’ is now the goal of the analysis.',
+    '‘MRR’ is no longer the goal of the analysis.',
+    '‘Quarterly revenue’ is now the goal of the analysis.',
+    'The value of ‘Pro plan price’ for the option ‘Raise price’ changed: 49 GBP → 59 GBP.',
+    'The value of ‘Pro plan price’ for the option ‘Raise price’ was recorded: 59 GBP.',
+    'The recorded value of ‘Pro plan price’ for the option ‘Raise price’ was removed.',
+  ])('every new per-kind sentence passes the repository copy guards: %s', (sentence) => {
+    expect(findForbiddenPhraseHit(sentence)).toBeNull();
+    expect(findEditInternalsHit(sentence)).toBeNull();
+    expect(findSuccessClaimHit(sentence)).toBeNull();
+    expect(findProcessNarrationHit(sentence)).toBeNull();
+    expect(sentence).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
+    expect(internalValueTerms(sentence)).toEqual([]);
+    expect(sanitiseNarrateOutput(sentence)).toEqual({ output: sentence, contamination_detected: false });
+    expect(sanitiseUserFacingText(sentence, null)).toMatchObject({ text: sentence, matches: [] });
+    for (const ban of REPAIR_VOCABULARY_DENYLIST) expect(sentence).not.toMatch(ban);
+  });
+
+  it.each(['from', 'to'] as const)('an unknown %s end stays skipped, alone and beside a named presence row', (end) => {
+    const known = PRESENCE_ROWS.find((r) => r.link?.from === 'risk')!;
+    const unknown = { ...known, link: { ...known.link!, [end]: 'gone' } };
+    expect(plan({ ...PAIRED, input_changes: [unknown] })!.codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
+    const p = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [known, unknown] })!;
+    expect(p.changes).toEqual([ENTERED[0]]);
+    expect(p.codeLine).toBe(`${ENTERED[0]} ${RERUN_FALLBACK_LINES.other}`);
+    expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.C0);
+    expect(p.inputs.attribution_case).toBe('C2_unpaired');
+  });
+
+  it('exhaustiveness: every producer pair has a sentence or a skipped-row disclosure, never a silent omission', () => {
+    const prior = snapshot({
+      goal: { node_id: 'mrr', label: 'MRR', target_raw: 55000, unit: 'GBP', operator: '>=', direction: 'maximise' },
+      factors: [{ factor_id: 'mrr', label: 'MRR', raw: 40000, unit: 'GBP', encoded: 0.4 },
+        { factor_id: 'price', label: 'Pro plan price', raw: 49, unit: 'GBP', encoded: 49 }],
+      options: [{ option_id: 'o', label: 'Raise price', settings: [{ factor_id: 'price', label: 'Pro plan price', raw: 49, unit: 'GBP', encoded: 49 }] }],
+      constraints: [{ constraint_id: 'c', node_id: 'price', label: 'Price limit', raw: 50, unit: 'GBP', operator: '<=' }],
+      links: [{ from: 'risk', to: 'mrr', mean: 0.4, band: 'moderate', sizing: 'placeholder',
+        natural_effect: { amount: 2, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'days' } }],
+    });
+    const current = snapshot({
+      goal: { ...prior.goal!, target_raw: 60000, unit: 'USD', operator: '>', direction: 'minimise' },
+      factors: prior.factors.map((f) => ({ ...f, raw: 59, encoded: 59 })),
+      options: [{ ...prior.options[0]!, settings: [{ ...prior.options[0]!.settings[0]!, raw: 59, encoded: 59 }] },
+        { option_id: 'new', label: 'New option', settings: [] }],
+      constraints: [{ ...prior.constraints[0]!, raw: 60, operator: '>=' }],
+      links: [{ ...prior.links[0]!, mean: 0.8, band: 'strong', sizing: 'olumi_accepted',
+        natural_effect: { ...prior.links[0]!.natural_effect!, amount: 3 } }, { from: 'price', to: 'risk', mean: -0.5 }],
+    });
+    const rows = [...diffRunInputSnapshots(prior, current), ...diffRunInputSnapshots(prior, { ...prior, goal: null })];
+    const probes = new Map(rows.map((row) => [`${row.entity_kind}:${row.field}`, row]));
+    expect([...probes.keys()].sort(), 'a new producer pair needs a behavioural row').toEqual(emittedPairs());
+    const sentences: Record<string, string | undefined> = {
+      'option_setting:value': 'The value of ‘Pro plan price’ for the option ‘Raise price’ changed: 49 GBP → 59 GBP.',
+      'option:presence': 'The option ‘New option’ is now part of the analysis.',
+      'factor_value:value': 'You changed Pro plan price: 49 GBP → 59 GBP.',
+      'goal:value': "Today's level of ‘MRR’ was recorded: 59 GBP.",
+      'goal:target': 'You changed the target for ‘MRR’: 55000 GBP → 60000 USD.',
+      'goal:unit': '‘MRR’ is now measured in USD.',
+      'goal:operator': 'You changed MRR: >= → >.',
+      'goal:direction': 'You changed MRR: maximise → minimise.',
+      'goal:presence': '‘MRR’ is no longer the goal of the analysis.',
+      'constraint:target': 'You changed Price limit: 50 GBP → 60 GBP.',
+      'constraint:operator': 'You changed Price limit: <= → >=.',
+      'link:presence': ENTERED[1],
+      'link:sizing': "You accepted Olumi's estimate for how much Feature release slips changes MRR.",
+      'link:strength': undefined,
+      'link:effect': undefined,
+    };
+    expect(Object.keys(sentences).sort(), 'every pair needs exact words or an exact skipped-row disclosure').toEqual([...probes.keys()].sort());
+    for (const [pair, row] of probes) {
+      const sentence = sentences[pair];
+      const alone = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [row] })!;
+      expect(alone.changes, pair).toEqual(sentence === undefined ? [] : [sentence]);
+      expect(alone.codeLine, pair).toBe(sentence === undefined ? RERUN_NO_CHANGE_LINES.unknown : `${sentence} ${RERUN_FALLBACK_LINES.C0}`);
+      const beside = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, row] })!;
+      expect(beside.changes, pair).toEqual(sentence === undefined ? [SAID_AI] : [SAID_AI, sentence]);
+      expect(beside.codeLine, pair).toBe(sentence === undefined
+        ? `${SAID_AI} ${RERUN_FALLBACK_LINES.other}` : `${SAID_AI} ${sentence} ${RERUN_FALLBACK_LINES.C0}`);
+      if (sentence === undefined) {
+        expect(beside.inputs.attribution_case, pair).toBe('C2_unpaired');
+      }
+      const unnamed = { ...row, label_before: undefined, label_after: undefined,
+        ...(row.link !== undefined ? { link: { from: 'gone', to: row.link.to } } : {}) };
+      const unsaid = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, unnamed] })!;
+      expect(unsaid.changes, pair).toEqual([SAID_AI]);
+      expect(unsaid.codeLine, pair).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
+      expect(unsaid.inputs.attribution_case, pair).toBe('C2_unpaired');
+    }
+  }, 20_000);
+
+  it('exhaustiveness: all mutation probes and repeat reads reuse one TypeScript program per file', () => {
+    emittedPairs();
+    for (const variant of Object.keys(PRODUCER_VARIANTS) as ProducerVariant[]) {
+      expect(() => emittedPairs(variant)).toThrow('row helpers must be called directly');
+    }
+    emittedPairs();
+    expect(ts.createProgram).toHaveBeenCalledTimes(1);
+  }, 20_000);
+});
 
 describe('the plan: Olumi\'s code line from the typed rows, the check inputs', () => {
   it('RED (the investor moment): two Accepts → RC\'s two sentences with the graph\'s labels + the UNWITHHELD line; prior_withheld is typed', () => {
@@ -81,8 +424,8 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     expect(plan({ ...UNWITHHELD, input_changes: [accept('gone_a', 'gone_b')] })!.codeLine).not.toContain(RERUN_NO_CHANGE_LINES.nothing);
   });
 
-  it('a change no template can name (a link presence row) beside a named Accept: never "Nothing else changed", checked as unpaired (Codex pre-review P2)', () => {
-    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'qualified_leads', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
+  it('an unknown-end link presence row beside a named Accept: never "Nothing else changed", checked as unpaired (Codex pre-review P2)', () => {
+    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'gone', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
     const p = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, presence] })!;
     expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
     expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.C0);
@@ -265,7 +608,7 @@ describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown d
   });
 
   it('CONTROL: a RECORDED row no template can name, under PARTIAL coverage, is an observed difference → "Other things also differed"', () => {
-    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'qualified_leads', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
+    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'gone', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
     expect(plan({ ...PAIRED, input_coverage: 'partial', input_changes: [AI, presence] })!.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
   });
 

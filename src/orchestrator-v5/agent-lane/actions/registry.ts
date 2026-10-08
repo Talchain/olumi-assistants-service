@@ -22,7 +22,7 @@
 
 import { SUGGEST_RISKS_CHIP, widenTargetOf } from '../method-turn/widen-turn.js';
 
-export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates', 'bias_check'] as const;
+export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates', 'bias_check', 'confirm_reading', 'set_current_level'] as const;
 export type ActionId = (typeof ACTION_IDS)[number];
 
 /** The four standard actions, in their FIXED bar positions (D.3: users learn their places). */
@@ -66,6 +66,20 @@ export interface ActionEntry {
 }
 
 export const ACTION_REGISTRY: Readonly<Record<ActionId, ActionEntry>> = {
+  // GOAL-REACH 3b: the Run refused the goal chance for want of the goal's current level; the user's answer forces the
+  // existing current-level card (the ask is persisted from the same words, `goalLevelAskOf`).
+  set_current_level: {
+    label: 'Current level', icon: 'Target', group: 'gap',
+    press: { kind: 'fixed', id: 'act:set_current_level' },
+    user_line: 'Tell Olumi where the goal stands today.',
+    authorities: { eligibility: 'Canonical', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: true,
+  },
+  confirm_reading: {
+    label: 'Confirm reading', icon: 'BadgeCheck', group: 'gap',
+    press: { kind: 'fixed', id: 'act:confirm_reading' },
+    user_line: 'Check how Olumi works out the goal.',
+    authorities: { eligibility: 'Canonical', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: false,
+  },
   review: {
     label: 'Review', icon: 'ListChecks', group: 'review',
     press: { kind: 'fixed', id: 'agent-next-review-decision' },

@@ -1,3 +1,4 @@
+import type { NewLimitValue } from './stated-limit.js';
 /**
  * ⭐ ONE CLICK TO APPROVE THE PROPOSAL THE USER IS LOOKING AT.
  *
@@ -62,6 +63,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
   propose_team_time: { label: 'Yes', message: 'Yes' },
+  propose_new_limit: { label: 'Yes', message: 'Yes, record that limit.' },
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
@@ -234,7 +236,8 @@ export function approvalChipsFor(
   if (tool === 'propose_identity') {
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
-      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+      : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') ? "Yes, that's how" : approve.label,
+        message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {
@@ -260,6 +263,22 @@ export function approvalChipsFor(
   }
   // ⭐ S-E GOALS: the deadline card asks "Is your deadline 7 April 2027 (6 months from today)?" — the STORED card's words ride
   // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
+  if (tool === 'propose_new_limit' || tool === 'propose_limit_change') {
+    if (stored?.operations.length === 1 && stored.operations[0]?.op === 'set_limit') {
+      const edit = APPROVE.propose_limit_change!;
+      const value = stored.operations[0].value as { reserve?: NewLimitValue['reserve'] };
+      return [{ id: approvalChipIdFor(proposalId), label: edit.label, message: edit.message, detail: stored.public_label }, AMEND_CHIP,
+        ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
+          message: value.reserve.message, detail: value.reserve.detail }])];
+    }
+    if (tool !== 'propose_new_limit' || stored?.operations.length !== 1 || stored.operations[0]?.op !== 'add_limit'
+      || held?.ok !== true || held.proposal_id !== stored.proposal_id || held.public_label !== stored.public_label) return [];
+    const value = stored.operations[0].value as NewLimitValue;
+    return [{ id: approvalChipIdFor(proposalId), label: 'Yes', message: approve.message, detail: stored.public_label },
+      { id: 'agent-limit-change', label: 'Change', message: 'Change that limit; I will give you the figure.' },
+      ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
+        message: value.reserve.message, detail: value.reserve.detail }])];
+  }
   if (tool === 'propose_goal_deadline' || tool === 'propose_team_time') {
     const source = labelSourceFor?.(proposalId);
     const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
@@ -286,18 +305,24 @@ export function linkStrengthCardFor(proposalId: string, proposal: StructuredProp
   return typeof proposal.public_label === 'string' && proposal.public_label.trim() !== '' ? proposal.public_label : undefined;
 }
 
-type Direction = 'at_least' | 'at_most';
-const DIRECTION_CHOICE_LABEL: Readonly<Record<Direction, string>> = { at_least: 'Yes, at least', at_most: 'Yes, at most' };
-const DIRECTION_CHOICE_LABEL_INSTEAD: Readonly<Record<Direction, string>> = { at_least: 'At least instead', at_most: 'At most instead' };
+type Direction = 'at_least' | 'at_most' | 'below' | 'above';
+const DIRECTION_CHOICE_LABEL: Readonly<Record<Direction, string>> = {
+  at_least: 'Yes, at least', at_most: 'Yes, at most', below: 'Yes, below', above: 'Yes, above',
+};
+const DIRECTION_CHOICE_LABEL_INSTEAD: Readonly<Record<Direction, string>> = {
+  at_least: 'At least instead', at_most: 'At most instead', below: 'Below instead', above: 'Above instead',
+};
 const DIRECTION_CHOICE_MESSAGE: Readonly<Record<Direction, string>> = {
   at_least: 'No, the goal should be at least that figure.',
   at_most: 'No, the goal should be at most that figure.',
+  below: 'No, the goal should be below that figure.',
+  above: 'No, the goal should be above that figure.',
 };
 /** The proposer's own typed choice for a goal target the Agent read the direction of (`proposeGoalTarget`). */
 function directionChoiceFor(tool: string, source: ApprovalLabelSource | undefined): { chosen: Direction; alternative: Direction } | undefined {
   if (tool !== 'propose_goal_target') return undefined;
   const c = (source?.result as { direction_choice?: { chosen?: unknown; alternative?: unknown } } | undefined)?.direction_choice;
-  const ok = (d: unknown): d is Direction => d === 'at_least' || d === 'at_most';
+  const ok = (d: unknown): d is Direction => d === 'at_least' || d === 'at_most' || d === 'below' || d === 'above';
   return c !== undefined && ok(c.chosen) && ok(c.alternative) && c.chosen !== c.alternative ? { chosen: c.chosen, alternative: c.alternative } : undefined;
 }
 
@@ -675,7 +700,8 @@ export const approvalChipIdFor = (proposalId: string): string => `${APPROVE_PREF
 export function typedApprovalOf(body: unknown): string | undefined {
   const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
   if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
-  const proposalId = id.slice(APPROVE_PREFIX.length);
+  const named = id.slice(APPROVE_PREFIX.length);
+  const proposalId = named.endsWith(':reserve') ? named.slice(0, -':reserve'.length) : named;
   // `gmh_…` is a held add-option or add-risk on the product's own seam (C52, SLICE C2): the same typed, zero-call approval.
   return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
 }

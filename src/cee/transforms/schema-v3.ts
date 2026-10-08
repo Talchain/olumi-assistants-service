@@ -70,6 +70,7 @@ import {
 } from "./stated-option-figure-adoption.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
+import { isPlaceholderLink } from '../magnitude/link-sizing.js';
 
 // ============================================================================
 // V3 Types
@@ -436,11 +437,14 @@ export function transformNodeToV3(
     //    stamping it shifts that goal's sample base from 0.0 to B. The shift
     //    is UNIFORM ACROSS OPTIONS — it moves every option's samples by the
     //    same constant — so comparative verdicts (which option leads, by how
-    //    much) are unchanged. Goal PROBABILITY is unaffected for a different
-    //    reason: a root goal is refused outright at :3182 (`root_goal`,
-    //    "takes its base from observed_state.value, so its samples are not in
-    //    the non-root change-from-origin frame"), so no probability is
-    //    rendered either way. What DOES change is the absolute level of a root
+    //    much) are unchanged. Goal PROBABILITY: ISL no longer refuses every root
+    //    goal. It refuses one (`GOAL_THRESHOLD_NOT_CONVERTIBLE`, reason
+    //    `root_goal`) only with no measured level (`root_value_source`) or a
+    //    non-zero intercept (`root_intercept`); a root goal with a level and a
+    //    zero intercept is scored on the identity path (Science research, ISL
+    //    82842bb8). So stamping B can let a goal probability render that was
+    //    refused before; that effect is not analysed here (GOAL-REACH 3b,
+    //    flagged to Science). What DOES change is the absolute level of a root
     //    goal's reported samples and `GOAL_NODE_ROOT_STATIC.base_value` —
     //    arguably more correct (0.0 was a placeholder for "no observed
     //    value"), but a change, and named here so it is not mistaken for a
@@ -2537,6 +2541,9 @@ function generateValidationWarnings(
 
   // P1-CEE-3: Check for negligible and low strength edges
   for (const edge of graph.edges) {
+    // Science 393023 LICENCE ruling 3 (P53x, Codex #2819 P2): a placeholder's mean is a default, not a size: never
+    // word it as 'low' or 'negligible' strength.
+    if (isPlaceholderLink(edge)) continue;
     const absMean = Math.abs(edge.strength.mean);
 
     if (absMean < EDGE_STRENGTH_LOW_THRESHOLD) {

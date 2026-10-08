@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
-import type { LinkEffectClarificationPending } from '../link-effect-clarification.js';
+import { liveLinkEffectClarifications, type LinkEffectClarificationPending } from '../link-effect-clarification.js';
 import { limitChecksForAgent } from '../limit-checks.js';
 import { savedRunContextFacts } from '../saved-run-context-facts.js';
 
@@ -78,6 +78,36 @@ describe('RC2 post-Run asks retain stated effects with their open clarification'
     const before = JSON.stringify(limitChecksForAgent(g, verdicts));
     expect(JSON.stringify(limitChecksForAgent(g, verdicts, undefined, []))).toBe(before);
     expect(JSON.stringify(limitChecksForAgent(g, verdicts, undefined, [pending('unknown', 'churn')]))).toBe(before);
+  });
+
+  it('sent-only Run clauses retain one live carried question and never revive a superseded level ask', () => {
+    const base = graph(true);
+    // A percent level on frame 100 is sized in percentage points, matching Q6's B6 link-guess fixture.
+    const g = { ...base,
+      nodes: [...base.nodes.map(node => node.id === 'churn' ? { ...node, scale_frame: 100 } : node), {
+        id: 'test', kind: 'option', label: 'Try lower price',
+        interventions: { price: { value: 0.5, source: 'user_specified' } },
+      }],
+      edges: base.edges.map(edge => edge.from === 'price' ? { ...edge,
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: {
+          amount: 0.1, amount_unit: 'percentage points', per_source_change: 1,
+          per_source_change_unit: 'GBP', strength_mean: 0.1,
+        } },
+      } : edge),
+    };
+    const carried = liveLinkEffectClarifications([pending()], SID, g, Date.parse('2026-10-08T00:27:00.000Z'));
+    expect(carried).toHaveLength(1);
+    const [churn] = limitChecksForAgent(g, verdicts, undefined, new Set(['test']), carried)!;
+    expect(churn!.withheld_for).toEqual(['Raise prices']);
+    expect(churn!.say).toContain('Raise prices');
+    expect(churn!.say).toContain('which Olumi estimated.');
+    expect(churn!.say).not.toContain('Try lower price');
+    expect(churn!.ask).toBe(CARRIED_ASK);
+
+    const [allLeftOut] = limitChecksForAgent(g, verdicts, undefined, new Set(['raise', 'test']), carried)!;
+    expect(allLeftOut!.say).toBe('');
+    expect(allLeftOut).not.toHaveProperty('withheld_for');
+    expect(allLeftOut).not.toHaveProperty('ask');
   });
 
   it('RED: saved Run facts receive the same clarification carrier', () => {
