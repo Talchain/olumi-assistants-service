@@ -1,5 +1,5 @@
 {
-  "source_head": "f8ed674dec63758a2945acaffebe67e26a5f0a4a",
+  "source_head": "69ff73cf180efb4099c10446197661a33f9777da",
   "fixture_derivation": "Stored public Run + read graph; restore Keep p=0 from lane witness (public transport stripped it), add Starter p=0.97 as control; retain every stored warning.",
   "licence": {
     "code": "GOAL_CHANCE_LICENSED",
@@ -1142,7 +1142,8 @@
               "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?"
             }
           ],
-          "face": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?"
+          "face": "Chance not shown yet",
+          "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?"
         },
         "main_driver": {
           "kind": "not_recorded"
@@ -1178,7 +1179,8 @@
               "message": null
             }
           ],
-          "face": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?"
+          "face": "Chance not shown yet",
+          "why": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Price-rise customer churn to monthly recurring revenue and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Price-rise customer churn bring?"
         },
         "main_driver": {
           "kind": "not_recorded"

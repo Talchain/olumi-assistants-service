@@ -1,0 +1,28 @@
+[
+  {
+    "mutation": "old-return",
+    "source": "src/orchestrator-v5/goal-target/goal-chance-licence.ts",
+    "selection": "no licensed point means no scoring-threshold",
+    "before": "if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0)) return null;",
+    "after": "if (option_ids.length < 2 || licensed.length === 0) return null;",
+    "original_sha256": "4d89b261863472a2161d2d576db2acb0790389a3db1b814510247ace99e8614c",
+    "restored_sha256": "4d89b261863472a2161d2d576db2acb0790389a3db1b814510247ace99e8614c",
+    "source_restored": true,
+    "baseline_green": true,
+    "mutant_red": true,
+    "restored_green": true
+  },
+  {
+    "mutation": "no-point-gate",
+    "source": "src/orchestrator-v5/goal-target/goal-chance-range-agent.ts",
+    "selection": "reviewer row",
+    "before": "reasons : hasLicensedPoint && licence?.withheld_option_ids?.includes(optionId)",
+    "after": "reasons : licence?.withheld_option_ids?.includes(optionId)",
+    "original_sha256": "3a79d0279a5761eac4462bbaeb3fbdcfdd27eacfbd1f533a768b2311da125484",
+    "restored_sha256": "3a79d0279a5761eac4462bbaeb3fbdcfdd27eacfbd1f533a768b2311da125484",
+    "source_restored": true,
+    "baseline_green": true,
+    "mutant_red": true,
+    "restored_green": true
+  }
+]

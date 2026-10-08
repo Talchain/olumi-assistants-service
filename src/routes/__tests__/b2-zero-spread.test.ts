@@ -82,6 +82,19 @@ const licenceRecord = (enrichment: Rec): Rec | undefined => enrichment.inference
   .find((warning: Rec) => warning.code === GOAL_CHANCE_LICENSED);
 const keepCell = (view: Rec): Rec => view.options.find((row: Rec) => row.option_id === KEEP).cell;
 const otherwise = (view: Rec): Rec => ({ ...view, options: view.options.filter((row: Rec) => row.option_id !== KEEP) });
+const expectNoGenericCellCopy = (view: Rec): void => {
+  for (const { cell } of view.options) {
+    for (const field of ['face', 'why']) {
+      expect((cell[field] ?? '').toLowerCase()).not.toContain('not shown yet in this model');
+    }
+  }
+};
+const expectKeepZeroSpread = (view: Rec): void => {
+  expectNoGenericCellCopy(view);
+  expect(keepCell(view)).toEqual({ kind: 'withheld',
+    reasons: [{ code: 'zero_spread', message: LINE }], face: 'Chance not shown yet', why: LINE });
+  expect(keepCell(view).why).toBe('Not shown yet: needs month-by-month changes');
+};
 
 describe('B2 d2: zero spread when no option has a licensed point', () => {
   it('pins the lane witness bytes and the original generic-empty-cell defect', () => {
@@ -91,7 +104,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
       .toBe('b2a372adca05d3eb0baa91c9eb6b76a7cfa04cd7ce42328d8de8e80bfb5c47e4');
     expect(WIRE.build).toBe('f8ed674');
     expect(READ.scenario_id).toBe('5e0fbc03-8af8-488e-b02f-82c25499e59e');
-    expect(STAGING_CONTROL.source_head).toBe('f8ed674dec63758a2945acaffebe67e26a5f0a4a');
+    expect(STAGING_CONTROL.source_head).toBe('69ff73cf180efb4099c10446197661a33f9777da');
     expect(READ.graph.nodes.find((node: Rec) => node.id === GOAL).goal_horizon_months).toBe(9);
     expect(READ.graph.nodes.some((node: Rec) => node.nonlinear_identity?.operation === 'accumulation')).toBe(false);
     expect(sourceBlock.enrichment.option_comparison.find((row: Rec) => row.option_id === KEEP))
@@ -99,7 +112,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(keepCell(READ.canonical_analysis_view)).toEqual({ kind: 'none' });
   });
 
-  it('all-withheld Run: preserves Keep’s reason and face without any licensed point claim', () => {
+  it('all-withheld Run: preserves Keep’s reason and why without any licensed point claim', () => {
     const envelope = producerEnvelope();
     const licence = goalChanceLicenceOf(envelope, READ.graph, GOAL);
     expect(licence).not.toBeNull();
@@ -122,10 +135,11 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(nearestFiveGoalChancesForAgent(publicResult).size).toBe(0);
     expect(output.agent_facts).not.toHaveProperty('goal_chance_licence');
     expect(goalChanceWithheldReasonsForAgent(publicResult, KEEP)).toEqual([{ code: 'zero_spread', message: LINE }]);
-    expect(keepCell(output.canonical_view)).toEqual({ kind: 'withheld',
-      reasons: [{ code: 'zero_spread', message: LINE }], face: LINE });
-    expect(keepCell(output.canonical_view).face.toLowerCase()).not.toContain('not shown yet in this model');
-    expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(READ.canonical_analysis_view)));
+    expectKeepZeroSpread(output.canonical_view);
+    // The old wire predates #2878's fixed withheld face and separate why.
+    // Starter's stored range dominates its point in the independent staging control.
+    expect(JSON.stringify(otherwise(output.canonical_view)))
+      .toBe(JSON.stringify(otherwise(STAGING_CONTROL.canonical_view)));
     expect(JSON.stringify(output)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
     const forAgent = analysisResultForAgent({ ...sourceBlock, enrichment: output.public_enrichment }, READ.graph) as Rec;
     expect(JSON.stringify(forAgent)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
@@ -140,8 +154,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(goalChanceWithheldReasonsForAgent(result, STARTER)).toEqual([]);
     expect(output.canonical_view.options.find((row: Rec) => row.option_id === STARTER).cell).toEqual({ kind: 'none' });
     expect(goalChanceWithheldReasonsForAgent(result, KEEP)).toEqual([{ code: 'zero_spread', message: LINE }]);
-    expect(keepCell(output.canonical_view)).toEqual({ kind: 'withheld',
-      reasons: [{ code: 'zero_spread', message: LINE }], face: LINE });
+    expectKeepZeroSpread(output.canonical_view);
   });
 
   it('licensed-point control: a withheld option without a warning still has reason_not_recorded', () => {
@@ -159,9 +172,10 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
       .toEqual([{ code: 'reason_not_recorded', message: null }]);
     expect(keepCell(output.canonical_view)).toMatchObject({ kind: 'withheld',
       reasons: [{ code: 'reason_not_recorded', message: null }] });
+    expectNoGenericCellCopy(output.canonical_view);
   });
 
-  it('Starter-point control: producer and transport stay byte-identical to staging; only Keep’s canonical reason and face gain the stored line', () => {
+  it('Starter-point control: byte-identical to staging except Keep’s canonical cell gains its zero-spread reason and why', () => {
     const envelope = producerEnvelope(true);
     expect(JSON.stringify(goalChanceLicenceOf(envelope, READ.graph, GOAL)))
       .toBe(JSON.stringify(STAGING_CONTROL.licence));
@@ -173,8 +187,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(licenceRecord(output.enrichment)!.withheld_reason_by_option).toEqual({ [KEEP]: keepReason });
     expect(JSON.stringify(otherwise(output.canonical_view)))
       .toBe(JSON.stringify(otherwise(STAGING_CONTROL.canonical_view)));
-    expect(keepCell(output.canonical_view)).toEqual({ kind: 'withheld',
-      reasons: [{ code: 'zero_spread', message: LINE }], face: LINE });
+    expectKeepZeroSpread(output.canonical_view);
   });
 
   it('no zero-spread option and none licensed: keeps the null/no-new-record control unchanged', () => {
@@ -187,6 +200,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     const output = produced(envelope);
     expect(licenceRecord(output.enrichment)).toBeUndefined();
     expect(keepCell(output.canonical_view)).toEqual({ kind: 'none' });
+    expectNoGenericCellCopy(output.canonical_view);
   });
 
   it('no licensed point means no scoring-threshold or estimated-link claim, even with one threshold candidate', () => {
@@ -230,19 +244,23 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
 
   it('selector row: changing the no-carrier + horizon selector changes only Keep’s line', () => {
     const before = produced();
+    expectNoGenericCellCopy(before.canonical_view);
     // Existing no-horizon wording, used only as a temporary selector control.
     // Science 93 keeps the production selector on the §(o′) wording above.
     const alternate = 'Falls short of £126,000 a month if today’s figures hold.';
     const selector = vi.spyOn(horizonLine, 'zeroSpreadNoCarrierHorizonLine').mockReturnValue(alternate);
     try {
       const after = produced();
+      expectNoGenericCellCopy(after.canonical_view);
       const expected = structuredClone(before);
       for (const key of ['enrichment', 'public_enrichment']) {
         licenceRecord(expected[key])!.withheld_reason_by_option[KEEP].line = alternate;
       }
       keepCell(expected.canonical_view).reasons[0].message = alternate;
-      keepCell(expected.canonical_view).face = alternate;
+      keepCell(expected.canonical_view).why = alternate;
       expect(after).toEqual(expected);
+      expect(keepCell(after.canonical_view).face).toBe('Chance not shown yet');
+      expect(keepCell(after.canonical_view).why).toBe(alternate);
       expect(selector).toHaveBeenCalledOnce();
     } finally {
       selector.mockRestore();
