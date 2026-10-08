@@ -32,7 +32,7 @@ const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run
 };
 const SCENARIO = 'c8108752-0000-4000-8000-0000000000a7';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-const A7_12 = 'This model doesn\'t yet say whether any option gets there within 12 months.';
+const A7_12 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.";
 
 async function runOn(graph: Json, body: Json = M1.plot_body): Promise<Json> {
   const store = {

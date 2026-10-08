@@ -2036,12 +2036,9 @@ export async function buildModelFromBrief(
     ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
   );
   /**
-   * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
-   * admission records the loss in `not_represented`; attested, the goal holds it (G1) but the analysis compares levels,
-   * not a path over time, so the question stays, worded truthfully either way. Only the Agent's model reads
-   * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
-   * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
-   * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
+   * A missing or unresolved deadline remains an open question ahead of the five-question cap. A held month count
+   * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
+   * to the draft/Run reply and the Run's typed warning.
    */
   const horizon = candidate.goal?.horizon_months;
   // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
@@ -2056,11 +2053,8 @@ export async function buildModelFromBrief(
     openQuestions.unshift(deadlineHeld
       ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
       : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
-  } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
-    // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
-    openQuestions.unshift(statedGoal.held.horizon
-      ? `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds the deadline; no result answers that yet.`
-      : `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
+  } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0 && !statedGoal.held.horizon) {
+    openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
   }
   // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
   // its `goal_scope` entry). First, because the ruling requires it clarified or named before

@@ -100,19 +100,13 @@ async function canonicalEntities(raw: unknown): Promise<Record<string, unknown>[
 }
 
 const goalOf = (g: Graph) => g.nodes.find((n) => n.kind === 'goal')!;
-/**
- * The deadline question staging #1939 asks first for Paul's "within 12 months" (exact sentence, by the goal's metric).
- * G1: this brief writes "12 months", so the goal now HOLDS the deadline and the question says so (`holdStatedGoalAttributes`).
- */
-const deadlineQuestion = (metric: string) =>
-  `Does "${metric}" get there within 12 months? The model holds the deadline; no result answers that yet.`;
 const allQuestions = (out: Record<string, unknown>) => (out.open_questions as string[] | undefined) ?? [];
-/** Every open question except the deadline one (#1939), which this brief's 12-month horizon always adds. */
+/** A held deadline is explained by the horizon line, so it owes no duplicate open question. */
 const questions = (out: Record<string, unknown>) => {
   const all = allQuestions(out);
   const deadline = all.filter((q) => /^Does ".*" get there within 12 months\? The model holds the deadline; no result answers that yet\.$/.test(q));
-  expect(deadline, JSON.stringify(all)).toHaveLength(1);
-  return all.filter((q) => !deadline.includes(q));
+  expect(deadline, JSON.stringify(all)).toHaveLength(0);
+  return all;
 };
 const notRepresented = (out: Record<string, unknown>) => (out.not_represented as string[] | undefined) ?? [];
 const scopeLoss = (m: ReturnType<typeof admitCandidateModel>) => m.loss.filter((l) => /\.goal_scope$/.test(l.field_path));
@@ -172,11 +166,11 @@ describe('an unstated scope is named in the goal and asked, never silently picke
 
   it('(b) (was RED ask-once): a plain total adds no question beside the drafter’s own; a part-named metric is asked ONCE, first', async () => {
     const { out } = await build(pricing('MRR', AMBIGUOUS, ['How price-sensitive are current Pro subscribers?']));
-    expect(allQuestions(out)).toEqual([deadlineQuestion('MRR'), 'How price-sensitive are current Pro subscribers?']);
-    // Ask (a): "Non-Pro MRR" while the model measures the Pro plan leads, the deadline question second, then the drafter's.
+    expect(allQuestions(out)).toEqual(['How price-sensitive are current Pro subscribers?']);
+    // Ask (a): "Non-Pro MRR" while the model measures the Pro plan leads, then the drafter's.
     const part = await build(pricing('Non-Pro MRR', AMBIGUOUS, ['How price-sensitive are current Pro subscribers?']));
     const partQuestion = SCOPE_QUESTION.replace('"MRR"', '"Non-Pro MRR"');
-    expect(allQuestions(part.out)).toEqual([partQuestion, deadlineQuestion('Non-Pro MRR'), 'How price-sensitive are current Pro subscribers?']);
+    expect(allQuestions(part.out)).toEqual([partQuestion, 'How price-sensitive are current Pro subscribers?']);
     expect(notRepresented(part.out)[0]).toBe(SCOPE_ASSUMPTION.replace('"MRR"', '"Non-Pro MRR"'));
   });
 

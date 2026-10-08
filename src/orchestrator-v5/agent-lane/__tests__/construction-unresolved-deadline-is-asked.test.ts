@@ -127,11 +127,11 @@ describe('T2: journey E\'s "by Q3" reaches the user in their own words', () => {
 });
 
 describe('CONTRAST: every other deadline shape reads exactly as before', () => {
-  it('a written "within 6 months" the drafter typed as 6 is HELD, and its question is unchanged', async () => {
+  it('a written "within 6 months" the drafter typed as 6 is HELD, and owes no duplicate open question', async () => {
     const { goal, questions } = await build(BRIEF_6_MONTHS, candidate(6));
     expect(goal.goal_horizon_months).toBe(6);
     expect(Object.hasOwn(goal, 'goal_deadline_as_stated'), 'a month count holds it; no stated words').toBe(false);
-    expect(questions[0]).toBe('Does "ship the new platform" get there within 6 months? The model holds the deadline; no result answers that yet.');
+    expect(questions).not.toContain('Does "ship the new platform" get there within 6 months? The model holds the deadline; no result answers that yet.');
     expect(questions.some((q) => q.startsWith('Which date does'))).toBe(false);
   });
 

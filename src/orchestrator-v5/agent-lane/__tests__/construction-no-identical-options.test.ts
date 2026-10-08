@@ -251,9 +251,6 @@ const shownQuestions = (out: Record<string, unknown>) => questions(out).slice(0,
 /** The step, word for word. Never the user's words: "as drafted" is Olumi's draft. */
 const STEP_1 = 'I left out "Test £59 with AI release" as a separate option: as drafted it sets nothing the model can hold that "£59 with AI release" does not — a test, pilot or staged rollout needs its own level on a factor the model holds. It stays open as a next step.';
 const STEP_2 = 'I left out "Test £59 With AI Release" as a separate option: as drafted it sets nothing the model can hold that "Raise Pro Price to £59" does not — a test, pilot or staged rollout needs its own level on a factor the model holds. It stays open as a next step.';
-// G1: the brief writes "12 months", so the goal holds the deadline and the question says so.
-const HORIZON = 'Does "MRR" get there within 12 months? The model holds the deadline; no result answers that yet.';
-
 /**
  * The starting point's fill, as it ran on the wire: every option level left open is filled from the SAME
  * source — the level a sibling option already sets on that factor, else one common proposed level.
@@ -321,11 +318,12 @@ describe.each([
     expect(out.options_withheld).toEqual([{ option: label, like, reason: 'option_indistinct' }]);
   });
 
-  it('RED: the step is said where the user always sees it — shown, after the deadline question, word for word', async () => {
+  it('RED: the step is said where the user always sees it — first, word for word, with no duplicate held-deadline question', async () => {
     const { out } = await build(draft());
-    expect(questions(out).slice(0, 2)).toEqual([HORIZON, step]);
+    expect(questions(out)[0]).toBe(step);
+    expect(questions(out).join(' ')).not.toContain('The model holds the deadline; no result answers that yet.');
     expect(shownQuestions(out)).toContain(step);
-    expect(statusLine(out)).toContain(`Questions this model does not answer yet: ${HORIZON} ${step}`);
+    expect(statusLine(out)).toContain(`Questions this model does not answer yet: ${step}`);
   });
 
   it('RED: the options that remain are distinct — the status quo holds, the user\'s option sets a level', async () => {
@@ -401,7 +399,7 @@ describe('controls — what the rule must never touch', () => {
     expect(out).not.toHaveProperty('options_withheld');
     const asked = questions(out).filter((q) => q.startsWith('What makes '));
     expect(asked).toEqual(['What makes "£59 with AI release" different from "Test £59 with AI release"? As drafted, nothing the model holds tells them apart, so the analysis cannot compare them yet.']);
-    expect(questions(out)[1]).toBe(asked[0]);
+    expect(questions(out)[0]).toBe(asked[0]);
   });
 
   it('CONTROL: a user-stated option is never withheld, even when it holds no level at all', async () => {

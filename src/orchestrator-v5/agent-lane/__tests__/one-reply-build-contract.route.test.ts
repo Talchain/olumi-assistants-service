@@ -9,6 +9,7 @@ import { sentenceMultiset } from '../reply/compose-reply.js';
 import { actionFactsOf } from '../actions/state.js';
 import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 
 type Rec = Record<string, unknown>;
 type Graph = { nodes: Rec[]; edges: Rec[] };
@@ -153,6 +154,9 @@ describe('ONE reply contract through the build route', () => {
     for (const sentence of new Set(sentences)) expect(sentences.filter(s => s === sentence), sentence).toHaveLength(1);
     expect(body.assistant_text).not.toContain('£/subscriber/month');
     expect(body.assistant_text).not.toContain('£/month');
+    expect(count(body.assistant_text, 'The model holds the deadline; no result answers that yet.')).toBe(0);
+    expect(count(body.assistant_text, 'within 12 months')).toBeLessThanOrEqual(1);
+    expect(count(body.assistant_text, "doesn't project")).toBeLessThanOrEqual(1);
     writeFileSync('/private/tmp/accel-cs-contract-r1-final.json', JSON.stringify({ log: shapeLog, face: shown,
       words: words(shown), census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
   });
@@ -190,6 +194,9 @@ describe('ONE reply contract through the build route', () => {
     expect(body._answer_shape!.headline).toContain('current level');
     const shown = face(body._answer_shape!);
     expect(words(shown)).toBeLessThanOrEqual(80);
+    expect(shown).not.toContain('What would change it:');
+    expect(whatChangesFaceLine(currentRead.analysis_result, saved)).toBeNull();
+    expect((lastComposeInput as { whatChanges?: string }).whatChanges).toBeUndefined();
     expect(count(shown, '?')).toBeLessThanOrEqual(1);
     const currentLevelControl = body.action_bar?.priority.filter(a => a.action_id === 'set_current_level' && a.enabled === true) ?? [];
     expect(count(shown, '?') + currentLevelControl.length, 'one resolving ask or current-level control').toBe(1);

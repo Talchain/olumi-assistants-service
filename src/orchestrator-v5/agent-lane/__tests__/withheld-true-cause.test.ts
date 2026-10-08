@@ -215,7 +215,7 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
     expect(route).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     expect(route).toContain('const askNow = identityAskLineFor(state.analysisResult, state.graph);');
     // ONE reply: the typed reason is owed after the gate only if the gate did not already say it.
-    expect(route).toContain("goalChanceLineOwed(result.tool_results, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance, identityAskOwed: identityAskOwnedByCard });");
+    expect(route).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
     expect(route).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
   });
 });

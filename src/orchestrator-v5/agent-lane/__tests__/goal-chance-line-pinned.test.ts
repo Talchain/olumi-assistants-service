@@ -90,7 +90,7 @@ describe('goalChanceLineOwed', () => {
   it('WIRING: the route appends it with the owed disclosures, checked against the Agent\'s own text', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     // ONE reply: the producer runs after the gate, so actual typed gate ownership decides whether a second line is owed.
-    expect(src).toContain("goalChanceLineOwed(result.tool_results, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance, identityAskOwed: identityAskOwnedByCard });");
+    expect(src).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
     expect(src).toContain('wireBody.assistant_text.includes(gateGoalChance.why)');
     expect(src).toContain('owed.push(...goalLines);');
     expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');

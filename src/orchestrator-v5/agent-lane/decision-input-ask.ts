@@ -19,10 +19,22 @@ import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
+import { readMoneyTotal } from './same-unit.js';
+import { sayFigure } from './say-figure.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const OBJECTIVE_ASK_QUESTION = 'What should this model help you explore?';
+const TARGET_ASK_TAIL = "I'll propose it as your target.";
+
+/** The same exact host-owned words still count as said when the composer places the question apart from its context. */
+function ownAskAlreadySaid(wanted: string, recentReplies: readonly string[]): boolean {
+  const ending = wanted.endsWith(OBJECTIVE_ASK_QUESTION) ? OBJECTIVE_ASK_QUESTION
+    : wanted.endsWith(TARGET_ASK_TAIL) ? TARGET_ASK_TAIL : null;
+  const units = ending === null ? [wanted] : [wanted.slice(0, -ending.length).trimEnd(), ending].filter((s) => s !== '');
+  return recentReplies.some((reply) => units.every((unit) => reply.includes(unit)));
+}
 
 /** The goal node of a persisted graph, when there is exactly one. */
 function goalOf(graph: unknown): Rec | undefined {
@@ -60,12 +72,20 @@ export interface DecisionInputAskContext {
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
   readonly builtOrRan: boolean;
+  /** The selected Run places more than one goal chance on its face; its one shared horizon fact is plural. */
+  readonly horizonPlural?: boolean;
 }
 
 /** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
 function hasDurationLimit(graph: unknown): boolean {
   const ks = recordOf(graph)?.goal_constraints;
-  return Array.isArray(ks) && ks.some((k) => /week|month|day/i.test(String(recordOf(k)?.unit ?? '')));
+  return Array.isArray(ks) && ks.some((k) => {
+    const row = recordOf(k);
+    const unit = row?.unit;
+    const label = typeof row?.label === 'string' ? row.label : '';
+    // A money total measured per month/year is a target's rate, not a duration the analysis scores.
+    return readMoneyTotal(unit, label) === null && /week|month|day/i.test(String(unit ?? ''));
+  });
 }
 
 // ── DecisionGuideAI staging `69c05df1` `serverOpenQuestions.ts` (`splitServerOpenQuestions`), the consumer's predicate:
@@ -170,21 +190,34 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
   });
 }
 
-/** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
-const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
+/** The exact singular/plural prefixes identify the one horizon fact without interpreting narrator wording. */
+export const UNTESTED_HORIZON_PREFIXES = [
+  "This chance uses the model's numbers as they are today",
+  "These chances use the model's numbers as they are today",
+] as const;
 
 /**
  * ⭐ A7, THE ONE RULE (DL 0df0e1 → Reasoning, 4 Oct; beat 2): the goal holds the brief's deadline (`goal_horizon_months`)
  * and no duration limit scores it, so the analysis says nothing about meeting it in time. The chat's host line
  * (`decisionInputLines`) and the Run's typed warning (`withUntestedHorizonWarning`) both say THIS sentence, so the two can
- * never disagree. `null` when there is no single goal, no held deadline, or a duration limit scores it.
+ * never disagree. Beside a chance, the short form also explains the present-number basis when no held month count
+ * requires the full deadline qualification. Event-by-date chances already model time and never owe this clause.
  */
-export function untestedHorizonLine(graph: unknown): string | null {
+export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean }): string | null {
   if (goalKindOf(graph) === 'share_by_date') return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
+  const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
+  const basis = `${prefix}; the model doesn't project how they change over time yet`;
   const within = withinMonths(goal);
-  return within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
+  if (within !== '' && !hasDurationLimit(graph)) {
+    const target = statedGoalTargetOf(recordOf(graph)!, goal);
+    const unit = target?.unit ?? '';
+    const money = readMoneyTotal(unit, typeof goal.label === 'string' ? goal.label : '');
+    const destination = target === null ? 'get there' : `reach ${sayFigure(target.value, money?.code ?? unit)}`;
+    return `${basis}, so it can't say whether you'll ${destination}${within}.`;
+  }
+  return opts?.besideChance ? `${basis}.` : null;
 }
 
 /** The code the Run carries A7 under: an `info` inference warning whose `message` a consumer shows verbatim. */
@@ -222,7 +255,7 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
   // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
   if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineOf(goal) === undefined ? chanceGoalDeadlineAsk(label) : null;
-  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
+  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`
     : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
 }
 
@@ -240,11 +273,11 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
   const leftOut = leftOutLines(graph, label);
-  const a7 = untestedHorizonLine(graph);
+  const a7 = untestedHorizonLine(graph, { plural: ctx.horizonPlural });
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
   const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
-  const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
+  const ask = wanted !== null && ownAskAlreadySaid(wanted, ctx.recentReplies ?? []) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
@@ -257,16 +290,16 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
  * increase, a ceiling where it is minimised, and neutral words otherwise — never "the least your costs must reach".
  */
 function targetAsk(graph: unknown, goal: Rec, label: string, within: string): string {
-  if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? I'll propose it as your target.`;
-  if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? I'll propose it as your target.`;
-  return `What figure should "${label}" reach or stay under${within}? I'll propose it as your target.`;
+  if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? ${TARGET_ASK_TAIL}`;
+  if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? ${TARGET_ASK_TAIL}`;
+  return `What figure should "${label}" reach or stay under${within}? ${TARGET_ASK_TAIL}`;
 }
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */
 export function isDecisionInputAsk(line: string): boolean {
   if (line === 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?') return true;
   if (line.startsWith('How long would ') && line.endsWith(' take with the team you have now?')) return true;
-  return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith('What should this model help you explore?');
+  return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith(OBJECTIVE_ASK_QUESTION);
 }
 
 /** The one framing or target ask, or null. */
@@ -284,12 +317,12 @@ export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): 
 export function withA7AfterGate(
   text: string,
   graph: unknown,
-  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan'>,
+  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan' | 'horizonPlural'>,
   statusText: string | null,
 ): string {
   // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.
   const owedLines = decisionInputLines(graph, { ...ctx, restingText: '', questionsToggle: false });
-  const a7 = owedLines.find((l) => l.startsWith(A7_OPENER));
+  const a7 = owedLines.find((l) => UNTESTED_HORIZON_PREFIXES.some((prefix) => l.startsWith(prefix)));
   if (a7 === undefined || text.includes(a7)) return text;
   const rest = textAtRest(text);
   if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;

@@ -4,12 +4,18 @@
  * b3-2 readback (`waveB3-unseen2-7addf05-readback-run1.json`, keys untouched). The expected line is the one the UI drew on
  * that Run (`waveB-screen-chance-lines-20261007.json`, source unseen-b3-2). Harness copied from the S2e route test.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
 import { SPREAD_NOTE_WITHOUT_DOWNSIDE } from '../../goal-target/goal-chance-licence.js';
 import type { AnswerShape } from '../../routing/answer-shape.js';
+import { untestedHorizonLine } from '../decision-input-ask.js';
+import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
+import type { ReplyComposeInput, ReplyComposition } from '../reply/compose-reply.js';
+import { runExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { goalKindOf } from '../../goal-target/goal-kind.js';
+import { teamShareMoments, extraShareMoments } from '../../goal-target/event-by-date-share.js';
 
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -30,6 +36,16 @@ const SIZE_QUESTION = 'How sure are you of that size?';
 const SCREEN_T1B_SAID_ONCE = SCREEN_T1B.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
 let analysisResult: Json = READ.analysis_result;
 let forwardedText = 'ok';
+let composeInput: ReplyComposeInput | undefined;
+let composition: ReplyComposition | undefined;
+vi.mock('../reply/compose-reply.js', async original => {
+  const actual = await original<typeof import('../reply/compose-reply.js')>();
+  return { ...actual, composeReplyShape: (input: ReplyComposeInput) => {
+    composeInput = input;
+    composition = actual.composeReplyShape(input);
+    return composition;
+  } };
+});
 
 const rows = new Map<string, Json>();
 const store = {
@@ -83,15 +99,15 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
+  beforeEach(() => { rows.clear(); forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
-  const turn = async (outputs: Record<string, unknown>[][], message: string): Promise<Body> => {
+  const turn = async (outputs: Record<string, unknown>[][], message: string, extra: Json = {}): Promise<Body> => {
     seq += 1;
     callModelOutputs = outputs;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message, turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`,
+      kind: 'message', scenario_id: SCENARIO, message, turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, ...extra,
     } });
     expect(r.statusCode, r.body).toBe(200);
     const b = r.json() as Body;
@@ -115,10 +131,15 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
-  const expectCoachingFaceBudget = (body: Body) => {
+  const expectMandatoryOverflow = (body: Body) => {
     expect(body._answer_shape, 'R2 T1b coaching reply carries one shape').toBeDefined();
-    const shown = [body._answer_shape!.headline, ...body._answer_shape!.bullets].join(' ');
-    expect(shown.trim().split(/\s+/u).length, shown).toBeLessThanOrEqual(80);
+    const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
+    const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
+    expect(units, 'exact mandatory finding identities, then horizon; no optional framing/W/E').toEqual([...SCREEN_T1B_SAID_ONCE, horizon]);
+    expect(units.join('\n')).not.toContain('What would change it:');
+    expect(units.join('\n')).not.toContain("Olumi's estimates:");
+    expect(composition?.measure?.face_over_word_budget).toBe(true);
+    writeFileSync('/private/tmp/accel-cs-contract-r2-t1b.json', JSON.stringify({ face: units.join('\n'), words: composition!.measure!.face_words, measure: composition!.measure }, null, 2));
   };
   const shortfallScreenLine = () => {
     READ = structuredClone(READ_T1B);
@@ -141,6 +162,181 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(lines[0]!.shortfall_note).toBeDefined();
     return lines[0]!;
   };
+
+  const oneChance = (goalFields: Json = {}, driver = false) => {
+    READ = structuredClone(READ_T1B);
+    const goal = READ.graph.nodes.find((n: Json) => n.kind === 'goal');
+    Object.assign(goal, { label: 'MRR', goal_threshold_raw: 20000, goal_threshold_cap: 25000,
+      goal_threshold_unit: '£/month', goal_horizon_months: 12 }, goalFields);
+    READ.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
+    analysisResult = structuredClone(READ.analysis_result);
+    analysisResult.enrichment.inference_warnings = [{
+      code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance is licensed.', form: 'each',
+      option_ids: ['raise_prices_10'], pct_by_option: { raise_prices_10: 67 },
+      target: { comparator: 'at_least', value: 20000, unit: '£/month' },
+      ...(driver ? { driver_by_option: { raise_prices_10: { kind: 'factor_value', factor_id: 'price_rise', quantity_id: 'price_rise',
+        side: 'low', cut_value: 0.05, cut_unit: '%', pct_if_side: 40, authored_by: 'user' } } } : {}),
+    }];
+    return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
+  };
+
+  it('SCOPE: ordinary converse keeps its lead and three bullets visible without draft or Run contract', async () => {
+    oneChance();
+    const text = 'The main risks are clear.\n- Churn could rise.\n- Adoption could lag.\n- Support costs could grow.';
+    const b = await turn([say(text)], 'What are the main risks?');
+    expect(b._agent.tool_calls).toEqual([]);
+    expect(composeInput?.faceContract).toBeUndefined();
+    expect(b.assistant_text.startsWith(text)).toBe(true);
+    expect(b._answer_shape).toBeUndefined();
+  });
+
+  it('B1 Paul Run: exact full horizon once, immediately after the chance, with one next step', async () => {
+    const line = oneChance();
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £20,000 within 12 months.";
+    const next = 'What evidence should we check next?';
+    const b = await turn(run(`Your comparison is ready. ${next}`), 'Run it');
+    expect(composeInput?.faceContract).toBe('run');
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expect(units.at(-1)).toBe(next);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+    writeFileSync('/private/tmp/accel-cs-contract-r2-b1.json', JSON.stringify({ face: units.join('\n'), words: composition!.measure!.face_words, body: b, measure: composition!.measure }, null, 2));
+  });
+
+  it.each(['by Q3', 'no deadline'] as const)('B3 %s: short horizon once on the face beside the chance', async deadline => {
+    const line = oneChance({ goal_horizon_months: undefined, ...(deadline === 'by Q3' ? { goal_deadline_as_stated: 'by Q3' } : {}) });
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+  });
+
+  it('no target + months: exact no-target horizon on the face once', async () => {
+    const line = oneChance({ goal_threshold_raw: undefined, goal_threshold: undefined, goal_threshold_cap: undefined });
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll get there within 12 months.";
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+  });
+
+  it('hiring Run: horizon carries its own target words rather than pricing assumptions', async () => {
+    const line = oneChance({ label: 'Hire engineers', goal_threshold_raw: 6, goal_threshold_unit: 'engineers', goal_horizon_months: 9 });
+    const horizon = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach 6 engineers within 9 months.";
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    expect(units[units.indexOf(line.chance) + 1]).toBe(horizon);
+    expect(count(b.assistant_text, horizon)).toBe(1);
+  });
+
+  it('share_by_date Run: event-by-date chances model time and carry no horizon clause anywhere', async () => {
+    oneChance();
+    const deadline = '2027-04-07', unit = '% of launch';
+    const team = teamShareMoments(6, 6, 10), extra = extraShareMoments(0.1, 6, 3, 5);
+    // The existing Science S2a graph: a held share sum with its real time/lead-time moments and fixed date.
+    READ.graph = { nodes: [
+      { id: 'launch_share', kind: 'goal', label: 'Launch share', goal_horizon: { deadline }, goal_horizon_months: 12,
+        goal_threshold_frame: 'level', goal_threshold: 1, goal_threshold_raw: 100, goal_threshold_cap: 100,
+        goal_threshold_unit: unit, goal_direction: '>=' },
+      { id: 'team_share', kind: 'factor', category: 'observable', label: 'Team launch share', observed_state: {
+        value: team.mean, std: team.sd, unit, cap: 100, source: 'user_override',
+        stated_time: { quantity: 'months_to_finish', low: 6, high: 10, unit: 'months', deadline, reference_date: '2026-10-07' } } },
+      { id: 'two_devs', kind: 'factor', category: 'controllable', label: 'Two developers', observed_state: {
+        value: 0, source: 'cee_inference', extra_share_by_date: { monthly_share: 10, lead_low: 3, lead_high: 5,
+          unit: `${unit} per month`, deadline, reference_date: '2026-10-07' } } },
+      { id: 'launch_decision', kind: 'decision', label: 'How to launch on time' },
+      { id: 'status_quo', kind: 'option', label: 'Carry on', is_baseline: true, interventions: { two_devs: { value: 0 } } },
+      { id: 'hire', kind: 'option', label: 'Two developers', interventions: { two_devs: { value: 1 } } },
+    ], edges: [
+      { from: 'team_share', to: 'launch_share', exists_probability: 0.8, strength: { mean: 1, std: 0.1 }, effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', definitional: true, natural_effect: {
+          amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
+          strength_mean: 1, strength_mean_frame: 'edge_strength' } } },
+      { from: 'two_devs', to: 'launch_share', exists_probability: 1, strength: { mean: extra.mean, std: extra.sd }, effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: {
+          amount: 20, amount_unit: unit, per_source_change: 1, per_source_change_unit: 'switch',
+          strength_mean: extra.mean, strength_mean_frame: 'edge_strength' } } },
+      ...['status_quo', 'hire'].flatMap(id => [
+        { from: 'launch_decision', to: id, strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: id, to: 'two_devs', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      ]),
+    ] };
+    analysisResult.enrichment.inference_warnings = [{ code: 'GOAL_CHANCE_LICENSED', form: 'each', severity: 'info',
+      message: 'Each option’s chance is licensed.', option_ids: ['status_quo', 'hire'], pct_by_option: { status_quo: 2, hire: 39 },
+      target: { comparator: 'at_least', value: 100, unit, by_date: deadline } }];
+    expect(goalKindOf(READ.graph)).toBe('share_by_date');
+    const lines = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
+    expect(lines).toHaveLength(2);
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expect(composeInput?.faceContract).toBe('run');
+    expect(composeInput?.horizonLine).toBeUndefined();
+    expect(b.assistant_text).not.toContain("uses the model's numbers as they are today");
+    expect(b.assistant_text).not.toContain("use the model's numbers as they are today");
+    expect(b.assistant_text).not.toContain("doesn't project");
+    const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join('\n');
+    for (const line of lines) expect(face).toContain(line.chance);
+  });
+
+  it('two chances: plural horizon once across the whole reply even when the narrator echoes its singular fact', async () => {
+    oneChance();
+    const licence = analysisResult.enrichment.inference_warnings[0];
+    licence.option_ids.push('keep_pricing_as_it_is');
+    licence.pct_by_option.keep_pricing_as_it_is = 20;
+    const singular = untestedHorizonLine(READ.graph)!;
+    const plural = untestedHorizonLine(READ.graph, { besideChance: true, plural: true })!;
+    const b = await turn(run(`Review the recorded assumptions.\n\n${singular}`), 'Run it');
+    const lines = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    expect(units[units.indexOf(lines.at(-1)!.chance) + 1]).toBe(plural);
+    expect(count(b.assistant_text, plural)).toBe(1);
+    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+  });
+
+  it('W current licensed Run: same selected result and graph; face order chance, horizon, W, E', async () => {
+    const line = oneChance({ goal_horizon_months: undefined }, true);
+    const expected = whatChangesFaceLine(analysisResult, READ.graph);
+    expect(expected).not.toBeNull();
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
+    const horizon = untestedHorizonLine(READ.graph, { besideChance: true })!;
+    expect(composeInput?.whatChanges).toBe(expected);
+    expect(units.indexOf(horizon)).toBeGreaterThanOrEqual(units.indexOf(line.chance) + 1);
+    expect(units[units.indexOf(horizon) + 1]).toBe(expected);
+    const e = units.findIndex(unit => unit.startsWith("Olumi's estimates:"));
+    if (e >= 0) expect(e).toBeGreaterThan(units.indexOf(expected!));
+  });
+
+  it('W stale selected Run: no W despite a licensed result', async () => {
+    oneChance({ goal_horizon_months: undefined }, true);
+    expect(whatChangesFaceLine(analysisResult, READ.graph)).not.toBeNull();
+    READ.analysis_state.run_state.kind = 'complete_stale';
+    const b = await turn([], 'Run it', { chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    expect(composeInput?.faceContract).toBe('run');
+    expect(composeInput?.whatChanges).toBeUndefined();
+    expect(b.assistant_text).not.toContain('What would change it:');
+  });
+
+  it('W stale Explain binding: a newer current licensed Run cannot supply W for the old control', async () => {
+    oneChance({ goal_horizon_months: undefined }, true);
+    const chip = runExplanationChip(SCENARIO, { graphHash: READ.graph_hash, analysisState: READ.analysis_state, analysisResult })!;
+    expect(chip).not.toBeNull();
+    expect(whatChangesFaceLine(analysisResult, READ.graph)).not.toBeNull();
+    READ.analysis_state.run_state.computed_at = '2026-10-08T11:00:00.000Z';
+    seq += 1;
+    callModelOutputs = [];
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: RUN_EXPLANATION_MESSAGE,
+      turn_id: `9c3d4e5f-6a7b-4c8d-9e0f-${String(seq).padStart(12, '0')}`, chip: { id: chip.id },
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    const b = response.json() as Body & { narration?: { status: string } };
+    expect(b.narration?.status).toBe('stale');
+    expect(composeInput?.faceContract).toBe('run');
+    expect(composeInput?.whatChanges).toBeUndefined();
+    expect(b.assistant_text).not.toContain('What would change it:');
+  });
 
   it('GP review P1: zero added lines still applies cleaned narration and removes a fabricated link count', async () => {
     shortfallScreenLine();
@@ -229,11 +425,12 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expectCoachingFaceBudget(b);
+    expectMandatoryOverflow(b);
     // B15 (#2783, DL): the lead-in opens the headline and is directly followed by the first screen chance finding; it
     // still introduces the list and never ends the reply on a colon.
     const lead = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
-    expect(b.assistant_text.startsWith(`${lead}\n${SCREEN_T1B[0]!}`), b.assistant_text).toBe(true);
+    expect(b._answer_shape!.headline).toBe(SCREEN_T1B[0]!);
+    expect(b._answer_shape!.detail).toContain(lead);
     expect(count(b.assistant_text, lead)).toBe(1);
     expect(b.assistant_text.trimEnd().endsWith(':'), 'never ends on a colon').toBe(false);
   });
@@ -243,8 +440,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run(`For reaching at least £126,000 monthly recurring revenue, on current information:\n\n${SCREEN_T1B.join(' ')}`), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expectCoachingFaceBudget(b);
-    expect(b.assistant_text.startsWith(`For reaching at least £126,000 monthly recurring revenue, on current information:\n${SCREEN_T1B[0]!}`), 'the first chance+depends unit keeps its question and still leads').toBe(true);
+    expectMandatoryOverflow(b);
+    expect(b._answer_shape!.headline, 'the first chance+depends unit keeps its question and still leads').toBe(SCREEN_T1B[0]!);
   });
 
   it('B19 r3: a completed reply preserves Agent chance phrasing and keeps the appended canonical unit on the face', async () => {

@@ -97,7 +97,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
   it('r12: the shared GP guided words and progress append precede the final composer', () => {
     pinGuidedBeforeComposer(ROUTE);
     const replayTextAt = ROUTE.indexOf('const replayGuidedText = guidedSizingReplyText(');
-    const replayConsumerAt = ROUTE.indexOf('const say = goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)');
+    const replayConsumerAt = ROUTE.indexOf('goal_chance: goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)');
     const replayComposerAt = ROUTE.indexOf(REPLAY_CALL);
     expect(replayTextAt).toBeGreaterThan(-1);
     expect(replayConsumerAt).toBeGreaterThan(replayTextAt);

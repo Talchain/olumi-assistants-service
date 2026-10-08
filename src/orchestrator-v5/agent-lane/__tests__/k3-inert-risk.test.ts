@@ -96,7 +96,7 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     const owed = decisionInputLines(g, { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     const [left, a7, ask] = owed;
     expect(left).toBe('"Founder burnout" (with "Founder hours", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Funding secured".');
-    expect(a7).toMatch(/^This model doesn't yet say whether any option gets there/);
+    expect(a7).toMatch(/^This chance uses the model's numbers as they are today/);
     const folded = `Your results are ready.\n\n${left}\n\n${ask}`;
     expect(withA7AfterGate(folded, g, { awaitingApproval: false, builtOrRan: true }, null)).toBe(`Your results are ready.\n\n${left}\n\n${a7}\n\n${ask}`);
   });
