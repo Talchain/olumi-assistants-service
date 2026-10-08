@@ -60,6 +60,7 @@ import {
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
+import { useAppendV6 } from '../session/supabase-store.js';
 import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict } from '../graph-revision-conflict.js';
@@ -1561,14 +1562,25 @@ async function dispatchEdgeStrengthEdit(
     // The integrity-strict pending read rejects a non-array, any invalid entry,
     // or a scenario mismatch. On either failure the prior row remains newest
     // and therefore authoritative: no refusal transcript is appended.
-    [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedScenarioStateStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(
-        payload.scenario_id,
-        requestId,
-      ),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(
+          payload.scenario_id,
+          requestId,
+        ),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(
+          payload.scenario_id,
+          requestId,
+        ),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -2036,11 +2048,19 @@ async function dispatchStructuralDelete(
     // append. On failure the prior row stays newest and authoritative: no
     // transcript is appended, because a degraded read gives no trusted base and
     // guessing at one is how a server model gets clobbered.
-    [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedScenarioStateStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -2472,7 +2492,11 @@ async function dispatchFactorValueEdit(
   let persistedGraph: unknown;
   let expectedRevision: number | undefined;
   try {
-    ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    if (useAppendV6()) {
+      ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    } else {
+      persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    }
   } catch (err) {
     // Fail CLOSED. A degraded read gives no trusted merge base, so writing
     // anything risks clobbering a model we cannot see. Surface it as a failed
@@ -3962,11 +3986,19 @@ async function dispatchStructuralRename(
     // a rename moves no hash, so there is no currency verdict to re-derive.
     // Issuing the read anyway would cost a round trip to compute a value that is
     // then discarded.
-    [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedScenarioStateStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -4333,11 +4365,19 @@ async function dispatchOptionStatusEdit(
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedScenarioStateStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -4707,11 +4747,19 @@ async function dispatchStructuralAdd(
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedScenarioStateStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -5074,11 +5122,19 @@ async function dispatchStructuralAddEdge(
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedScenarioStateStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -5469,7 +5525,11 @@ async function dispatchAddConstraintEdit(
   let persistedGraph: unknown;
   let expectedRevision: number | undefined;
   try {
-    ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    if (useAppendV6()) {
+      ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    } else {
+      persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    }
   } catch (err) {
     // Fail CLOSED: a degraded read gives no trusted base. Retryable 500.
     log.error(

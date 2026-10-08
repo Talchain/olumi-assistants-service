@@ -164,6 +164,7 @@ import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations, Preconditio
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { useAppendV6 } from "../orchestrator-v5/session/supabase-store.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { readRevisionConflictDetails, withRevisionConflictWire } from "../orchestrator-v5/graph-revision-conflict.js";
@@ -676,7 +677,7 @@ export default async function route(app: FastifyInstance) {
        * ⭐ EVERY PIECE ALREADY EXISTED; only the comparison was missing. The read
        * route returns `graph_identity_hash` (`assist.v1.scenario-graph.ts:536`),
        * this route already COMPUTES `expectedGraphIdentityHash` from its own base
-       * read (the `store.loadGraphAndBriefText` + `computeExpectedGraphCasHashes` block below)
+       * read (the `store.loadGraph` + `computeExpectedGraphCasHashes` block below)
        * and hands it to the atomic RPC in the `append` call — it simply never
        * checked it against anything the caller claimed. ⚠ Line numbers are
        * deliberately NOT cited: two earlier drafts of this docblock shipped
@@ -886,7 +887,7 @@ export default async function route(app: FastifyInstance) {
       // ── 4. The trusted CAS base — the SERVER's bytes, never the request's ─
       // ⛔ A READ FAILURE REFUSES THE WRITE (retryable 503), REVERSED 28 Sep 2026 (writer audit
       // finding 9). This read used to degrade to "uninstrumented", on the premise that failing
-      // would leave the user "permanently unable to register". `loadGraphAndBriefText` throws only
+      // would leave the user "permanently unable to register". Measured: `loadGraph` throws only
       // on a store ERROR (a missing row is `null`, `supabase-store.ts` loadGraphAndBriefText), so a
       // throw is an outage, not a stuck scenario, and a retry succeeds once it clears. The degrade
       // was not neutral: with no stored bytes, the #2080 limit carry and the #2162 edge-fact carry
@@ -906,9 +907,14 @@ export default async function route(app: FastifyInstance) {
       // re-derives — one helper, one base, so a lost-response retry still matches its own committed request hash.
       const withEntityRefs = <G,>(g: G): G => assignEntityRefs(g, baseGraphForInvariants).graph;
       try {
-        const state = await store.loadGraphAndBriefText(scenarioId);
-        const base = state.graph;
-        expectedRevision = state.revision;
+        let base: unknown;
+        if (useAppendV6()) {
+          const state = await store.loadGraphAndBriefText(scenarioId);
+          base = state.graph;
+          expectedRevision = state.revision;
+        } else {
+          base = await store.loadGraph(scenarioId);
+        }
         baseGraphForInvariants = base;
         const hashes = computeExpectedGraphCasHashes(base);
         expectedGraphIdentityHash = hashes.expectedGraphIdentityHash;
@@ -1335,7 +1341,7 @@ export default async function route(app: FastifyInstance) {
           // whose stored graph is already invalid stays registrable.
           //
           // ⚠ EXCEPT ON A FRESH SCENARIO, WHERE THIS IS ABSOLUTE — a stated
-          // decision, not a side effect. The combined read's graph is `null` (never
+          // decision, not a side effect. `store.loadGraph` returns `null` (never
           // `undefined`) for an absent scenario or a NULL `graph` column, and the
           // floor's observe-only degrade keys on a STRICT `=== undefined`. So a
           // `null` base takes the DELTA branch against an EMPTY baseline and

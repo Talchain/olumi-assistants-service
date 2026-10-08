@@ -62,6 +62,7 @@ import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { identityConfirmBaseIsWritable, isEditableGraph, type EditableGraph } from './editable-graph.js';
 import { commitDirectAnswer } from '../commit.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
+import { useAppendV6 } from '../session/supabase-store.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
@@ -891,7 +892,11 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   let expectedRevision: number | undefined;
   let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
   try {
-    ({ graph: before, revision: expectedRevision } = await store.loadGraphAndBriefText(input.scenarioId));
+    if (useAppendV6()) {
+      ({ graph: before, revision: expectedRevision } = await store.loadGraphAndBriefText(input.scenarioId));
+    } else {
+      before = await store.loadGraph(input.scenarioId);
+    }
     pendings = await store.readMostRecentPendingActions(input.scenarioId, { validation: 'strict' });
   } catch {
     return { kind: 'unverified', reason: 'canonical_read_failed', commitAttempted: false };

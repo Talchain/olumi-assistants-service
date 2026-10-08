@@ -99,6 +99,7 @@ import {
 import { TurnFenceRejectedError } from './session/turn-fence.js';
 import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
 import { readRevisionConflictDetails } from './graph-revision-conflict.js';
+import { useAppendV6 } from './session/supabase-store.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -14561,9 +14562,13 @@ export async function runTurnExecutor(
           hasServerModel = false;
         } else {
           try {
-            const recoveryBase = await loadPersistedScenarioStateStrict(context.session_id);
-            degradedRereadGraph = recoveryBase.graph;
-            canonicalRevision = recoveryBase.revision;
+            if (useAppendV6()) {
+              const recoveryBase = await loadPersistedScenarioStateStrict(context.session_id);
+              degradedRereadGraph = recoveryBase.graph;
+              canonicalRevision = recoveryBase.revision;
+            } else {
+              degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+            }
             hasServerModel = graphHasNodes(degradedRereadGraph);
             log.warn(
               {

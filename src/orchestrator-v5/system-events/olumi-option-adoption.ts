@@ -19,6 +19,7 @@ import {
 } from '../build-turn-context.js';
 import { commitDirectAnswer } from '../commit.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
+import { useAppendV6 } from '../session/supabase-store.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -124,10 +125,17 @@ export async function commitOlumiOptionAdoptionInProcess(
   let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>>;
   try {
-    [{ graph: before, revision: expectedRevision }, priorPendingActions] = await Promise.all([
-      loadPersistedScenarioStateStrict(input.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: before, revision: expectedRevision }, priorPendingActions] = await Promise.all([
+        loadPersistedScenarioStateStrict(input.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
+      ]);
+    } else {
+      [before, priorPendingActions] = await Promise.all([
+        loadPersistedGraphStrict(input.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
+      ]);
+    }
   } catch {
     return { status: 'refused', reason: 'canonical_read_failed' };
   }

@@ -1,0 +1,23 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+// STAGING_SEED_SHA = '1c834a0cbccddf384e53d4a7a4d9cde32f9c4325'
+
+exports[`Addendum 11 flag OFF — route-v2 store-interface parity > read_failure — staging_method_counts 1`] = `
+{
+  "claimTurnFence": 1,
+  "ensureScenarioExists": 1,
+  "loadGraph": 1,
+  "loadGraphAndBriefText": 1,
+  "readRecent": 1,
+}
+`;
+
+exports[`Addendum 11 flag OFF — route-v2 store-interface parity > success — staging_method_counts 1`] = `
+{
+  "append": 1,
+  "claimTurnFence": 1,
+  "ensureScenarioExists": 1,
+  "loadGraph": 1,
+  "loadGraphAndBriefText": 1,
+  "readRecent": 1,
+}
+`;

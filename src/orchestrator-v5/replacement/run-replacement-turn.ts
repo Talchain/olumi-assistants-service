@@ -484,11 +484,11 @@ export async function runReplacementTurn(
         if (isRevisionConflict(err)) {
           try {
             await requireReconfirmation(p.id);
-          } finally {
-            // Keep the known refusal typed even when recording it fails.
-            // With v6 enabled, the earlier pin still fences reconciliation.
-            throw err;
+          } catch {
+            // Recording failed; keep the typed refusal. With v6 enabled,
+            // the earlier pin still fences reconciliation.
           }
+          throw err;
         }
         // Still unknown. Left in flight deliberately: the next turn retries
         // under the same key. Swallowed rather than thrown because a
@@ -773,11 +773,11 @@ export async function runReplacementTurn(
               if (isRevisionConflict(err)) {
                 try {
                   await requireReconfirmation(proposalId);
-                } finally {
+                } catch {
                   // A checkpoint error must not become a generic tool result
                   // from which the model can incorrectly announce a save.
-                  throw err;
                 }
+                throw err;
               }
               // UNKNOWN. It stays in flight; the next turn reconciles. The
               // model is told exactly this, so it cannot resolve it either way.

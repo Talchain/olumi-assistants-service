@@ -59,6 +59,7 @@ let failNextAppend = false;
 let failGraphAndBriefTextRead = false;
 let failLoadGraph = false;
 let combinedReadCalls = 0;
+const graphReadScenarios: string[] = [];
 let requireRevision = false;
 let publicAppendStore: SupabaseSessionStore | null = null;
 const RECOVERY_REVISION = 8;
@@ -96,10 +97,12 @@ vi.mock('../session/index.js', () => ({
       entries_invalidated: [],
     }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => {
+    loadGraph: async (scenarioId: string) => {
+      graphReadScenarios.push(scenarioId);
       if (failLoadGraph) {
         throw new Error('loadGraph failed (injected): strict reread degraded');
       }
+      if (publicAppendStore) return publicAppendStore.loadGraph(scenarioId);
       return currentPersistedGraph;
     },
     loadGraphAndBriefText: async () => {
@@ -192,6 +195,7 @@ beforeEach(() => {
   failGraphAndBriefTextRead = false;
   failLoadGraph = false;
   combinedReadCalls = 0;
+  graphReadScenarios.length = 0;
   requireRevision = false;
   publicAppendStore = null;
 });
@@ -550,6 +554,7 @@ describe('F2 — degraded canonical read (must not clobber a server model)', () 
     expect(appendCalls[0]!.expectedRevision).toBe(RECOVERY_REVISION);
     expect(appendCalls[0]!.modelVersion).toBeDefined();
     expect(combinedReadCalls).toBe(2);
+    expect(graphReadScenarios).toEqual([]);
     expect((currentPersistedGraph as { nodes: unknown[] }).nodes)
       .toHaveLength((ECHO_GRAPH_STATE.nodes as unknown[]).length);
   });
@@ -605,7 +610,8 @@ describe('F2 — degraded canonical read (must not clobber a server model)', () 
     expect(appendCalls).toHaveLength(1);
     expect(appendCalls[0]!.expectedRevision).toBeUndefined();
     expect(appendCalls[0]!.modelVersion).toBeDefined();
-    expect(combinedReadCalls).toBe(2);
+    expect(combinedReadCalls).toBe(1);
+    expect(graphReadScenarios).toEqual([SCENARIO_ID]);
     expect(rpc).toHaveBeenCalledOnce();
     expect(scenarioReadColumns).toEqual(['graph, brief_text']);
     expect((currentPersistedGraph as { nodes: unknown[] }).nodes)
