@@ -35,6 +35,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { composeToolCallResponse } from '../compose.js';
+import { goalCoherenceAsk } from '../agent-lane/goal-coherence.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -924,7 +925,7 @@ export async function applyFactorValueEdit(
 
   // The SAME composer the NL lane uses — this is what maps the
   // `set_factor_value` fact to the boundary `graph_patch` block.
-  const response = composeToolCallResponse({
+  const composedResponse = composeToolCallResponse({
     answerKind: 'functional',
     orientation: '',
     confirmation: outcome.assistant_text,
@@ -932,6 +933,12 @@ export async function applyFactorValueEdit(
     stage: payload.stage,
     handlerFacts: outcome.handler_facts,
   });
+  const coherenceAsk = goalCoherenceAsk(mergedParse.data, { nodeId: event.target_id });
+  const response: OlumiResponse = coherenceAsk === null ? composedResponse : {
+    ...composedResponse,
+    assistant_text: `${composedResponse.assistant_text}\n\n${coherenceAsk.text}`,
+    suggested_actions: [...composedResponse.suggested_actions, ...coherenceAsk.controls],
+  };
 
   return {
     kind: 'mutated',
