@@ -277,6 +277,8 @@ interface SaidOnce {
 // The container's tail after 'because'/'since', and no 'not'/'n't' anywhere before it: a negated frame ('The result is not
 // withheld because …') can deny the reason as a cause. The quantifier 'no' ('No single option can be put forward yet,
 // because …', Paul's served text) is not a negation of the reason.
+/** Each 'because'/'since' with its spaces: what follows it to the end of the key is a candidate restated finding. */
+const REASON_TAIL = /\b(?:because|since)\s*/g;
 const SAID_AGAIN_AFTER = { test: (prefix: string): boolean => /\b(?:because|since)\s*$/.test(prefix) && !/\bnot\b/.test(prefix) };
 /** A 'not' / "n't" (straight or curly apostrophe) before the reason's 'because'/'since', on the original words. */
 const NEGATED_BEFORE_REASON = /(?:\bnot\b|n['’]t\b)[^]*\b(?:because|since)\b/i;
@@ -331,8 +333,14 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
     return !/[.!?]["'”’)\]*_`]{0,4}$/.test(t) || /^#{1,6}\s/.test(t) || /^(\*\*|__)[^*_].*(\*\*|__)$/.test(t)
       || (next !== undefined && BULLET_LINE.test(next) && sentencesOf(t).length === 1);
   };
+  // The next non-empty line after each line, in one backward pass (a slice per line is quadratic in lines: DL on #2801).
+  const nextNonEmpty: (string | undefined)[] = new Array(allLines.length);
+  for (let i = allLines.length - 1, seen: string | undefined; i >= 0; i -= 1) {
+    nextNonEmpty[i] = seen;
+    if (allLines[i]!.trim() !== '') seen = allLines[i];
+  }
   for (const [lineNo, raw] of allLines.entries()) {
-    const frameLine = isFrameLine(raw, allLines.slice(lineNo + 1).find((l) => l.trim() !== ''));
+    const frameLine = isFrameLine(raw, nextNonEmpty[lineNo]);
     if (frameLine) section += 1;
     const bullet = BULLET_LINE.exec(raw);
     const body = bullet?.[2] ?? raw;
@@ -403,62 +411,25 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
   const wholeWhereTyped = (idx: number): boolean => groups[idx]!.copies.every((c) => rankOf(c) < 0
     || typedRanges.some((r) => r.start === c.start && (r.end === c.end || r.end === coreEnd(c))));
 
-  // Aho-Corasick: all complete sentence keys are patterns; output links avoid copying suffix-match arrays.
-  const trie: { next: Map<string, number>; fail: number; output: number; groups?: number[] }[] = [
-    { next: new Map(), fail: 0, output: 0 },
-  ];
-  groups.forEach((group, idx) => {
-    let node = 0;
-    for (const char of group.key) {
-      let next = trie[node]!.next.get(char);
-      if (next === undefined) {
-        next = trie.length;
-        trie[node]!.next.set(char, next);
-        trie.push({ next: new Map(), fail: 0, output: 0 });
-      }
-      node = next;
-    }
-    (trie[node]!.groups ??= []).push(idx);
-  });
-  const queue = [...trie[0]!.next.values()];
-  for (let head = 0; head < queue.length; head += 1) {
-    const node = queue[head]!;
-    for (const [char, child] of trie[node]!.next) {
-      let fail = trie[node]!.fail;
-      while (fail !== 0 && !trie[fail]!.next.has(char)) fail = trie[fail]!.fail;
-      trie[child]!.fail = trie[fail]!.next.get(char) ?? 0;
-      const suffix = trie[child]!.fail;
-      trie[child]!.output = trie[suffix]!.groups !== undefined ? suffix : trie[suffix]!.output;
-      queue.push(child);
-    }
-  }
+  // Only the container's explanatory TAIL after 'because'/'since' says the same finding, so each container looks up its
+  // tails in the per-section key Map: linear in sentences, never a pairwise or substring scan (DL on #2801: timing 23.6×).
   const carrier = new Map<number, number>();
   const longestFirst = groups.map((_, idx) => idx).sort((a, b) => groups[b]!.key.length - groups[a]!.key.length || a - b);
   for (const idx of longestFirst) {
     if (carrier.has(idx)) continue;
-    let node = 0;
     const containerKey = groups[idx]!.key;
-    for (let at = 0; at < containerKey.length; at += 1) {
-      const char = containerKey[at]!;
-      while (node !== 0 && !trie[node]!.next.has(char)) node = trie[node]!.fail;
-      node = trie[node]!.next.get(char) ?? 0;
-      // ⛔ Only the container's explanatory TAIL says the same finding ("…, because <it>", "…: <it>"). A sentence inside any
-      // other frame ("It is not true that <it>", "If X, <it>") means something else, and both are kept.
-      if (at !== containerKey.length - 1) continue;
-      for (let match = node; match !== 0; match = trie[match]!.output) {
-        for (const found of trie[match]!.groups ?? []) {
-          if (groups[found]!.key.length < containerKey.length && groups[found]!.section === groups[idx]!.section
-            && SAID_AGAIN_AFTER.test(containerKey.slice(0, containerKey.length - groups[found]!.key.length))
-            // Negation read on the WORDS AS WRITTEN (the key drops apostrophes: "isn't" → "isnt"; Codex r7).
-            && !NEGATED_BEFORE_REASON.test(groups[idx]!.first.text)
-            // BOTH sentences are Olumi's own typed words (the route types the gate's "No single option … because <why>."
-            // by identity: Codex r6), the contained one a WHOLE obligation (its role moves whole: r2/r3). An untyped
-            // frame — hypothetical, conditional, reported — never absorbs a typed finding (Codex r8).
-            && groupTyped(found) && groupTyped(idx) && wholeWhereTyped(found)
-            && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
-        }
-      }
-
+    for (const reason of containerKey.matchAll(REASON_TAIL)) {
+      const prefix = containerKey.slice(0, reason.index! + reason[0].length);
+      const found = groupByKey.get(`${groups[idx]!.section}\u0000${containerKey.slice(prefix.length)}`);
+      // ⛔ A sentence inside any other frame ("It is not true that <it>", "If X, <it>") means something else, and both are kept.
+      if (found !== undefined && found !== idx && SAID_AGAIN_AFTER.test(prefix)
+        // Negation read on the WORDS AS WRITTEN (the key drops apostrophes: "isn't" → "isnt"; Codex r7).
+        && !NEGATED_BEFORE_REASON.test(groups[idx]!.first.text)
+        // BOTH sentences are Olumi's own typed words (the route types the gate's "No single option … because <why>."
+        // by identity: Codex r6), the contained one a WHOLE obligation (its role moves whole: r2/r3). An untyped
+        // frame — hypothetical, conditional, reported — never absorbs a typed finding (Codex r8).
+        && groupTyped(found) && groupTyped(idx) && wholeWhereTyped(found)
+        && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
     }
   }
   const keptByDrop = new Map<SentenceSpan, SentenceSpan>();
