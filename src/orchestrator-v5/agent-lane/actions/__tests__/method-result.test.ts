@@ -16,7 +16,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../../../../orchestrator/t
 import type { DecisionFlipDispatchResult, FlipLinkRef } from '../../../handlers/decision-flip-dispatch.js';
 import type { MethodReadback } from '../../method-turn/method-turn.js';
 import { composeStructuralChallengeReply, STRUCTURAL_CHALLENGE_LINES, structuralChallengePressId, structuralChallengeTurnFor, type StructuralChallengeTurn } from '../../method-turn/structural-challenge-turn.js';
-import { WHAT_CHANGES_PRESS_ID, whatChangesTurnFor } from '../../method-turn/what-changes-turn.js';
+import { linkTippingPointRows, WHAT_CHANGES_PRESS_ID, whatChangesTurnFor } from '../../method-turn/what-changes-turn.js';
 import { changeRowsAgreeWithHero, methodResultForEgress, testLinkMethodResult, whatChangesMethodResult } from '../method-result.js';
 
 type Json = Record<string, any>;
@@ -83,11 +83,23 @@ const D3 = SERVED.cases.find((c) => c.id === 'A-WHAT-CHANGES-NONE-MEASURABLE-SIL
 const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"switch_to_gcp","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"monthly_cloud_savings","to_id":"monthly_spend","status":"quoted","reason":null,"current_mean":-0.3555555555555555,"threshold":-0.09324009324009322,"replicate_thresholds":[-0.09324009324009322,-0.09572649572649569,-0.08578088578088575,-0.09324009324009322],"replicate_range":0.009945609945609946,"to_option_id":"stay_on_aws"},{"from_id":"monthly_cloud_overspend_during_migration","to_id":"monthly_spend","status":"no_change","reason":null,"current_mean":0.17777777777777776,"threshold":null,"replicate_thresholds":[null,null,null,null],"replicate_range":null,"to_option_id":null}]};
 const rbD3 = (): MethodReadback => ({ graph: D3.body.draft_graph, analysisState: D3.body.analysis_state, analysisResult: D3.body.analysis_result,
   optionParticipation: D3.body.option_participation, analysisReady: buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) });
-/** The served D3 result with its goal figures removed: a Run whose hero shows no goal chance at all (ruling 4's open case). */
-const noGoalFigures = (r: Record<string, any>): Record<string, any> => JSON.parse(JSON.stringify(r, (k, v) => (['probability_of_goal', 'goal_probability', 'goal_fit'].includes(k) ? undefined : v)));
 const D3_RUN = { graph_hash_at_run: D3.body.analysis_result.computed_against_hash as string, computed_at: D3.body.analysis_state.run_state.computed_at as string };
 const measured = (links: FlipLinkRef[]): DecisionFlipDispatchResult => ({ status: 'measured', block: ISL_D3_BLOCK as never, links, run: D3_RUN });
 const whatChanges = () => whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbD3(), async (links) => measured(links.slice(0, 2)));
+
+// Producer control: real RC row composer + T1b's stored display licence, with matching scored-option identities.
+async function licensedTurn() {
+  const turn = (await whatChanges())!;
+  const rows = linkTippingPointRows([{ ...ISL_D3_BLOCK.links[0]!, ...L1, to_option_id: RAISE },
+    { ...ISL_D3_BLOCK.links[1]!, from_id: 'starter_tier_subscribers', to_id: GOAL }], {
+    node: { [L1.from_id]: 'Customers lost from price rise', [GOAL]: 'Monthly recurring revenue', starter_tier_subscribers: 'Starter tier subscribers' },
+    option: Object.fromEntries(LABELS), leaderId: STARTER,
+  });
+  return { ...turn, reply: rows.map((r) => r.text).join(' '),
+    measured: { ...turn.measured!, run: { graph_hash_at_run: IDENTITY.graph_hash_at_run, computed_at: IDENTITY.computed_at },
+      optionIds: [RAISE, STARTER, KEEP], leaderId: STARTER, rows } };
+}
+const S3 = JSON.parse(readFileSync(new URL('../../../context/__tests__/fixtures/served-target-fit-S3-E-20260929.json', import.meta.url), 'utf8')).S3 as Json;
 
 describe('"Test without this link": rows are the reply\'s allowlisted lines, bound to the tested link', () => {
   it('completed on the served T1b Run: what was tested, each option\'s goal chance with its figures, not saved — in reply order', async () => {
@@ -164,6 +176,26 @@ describe('"Test without this link": rows are the reply\'s allowlisted lines, bou
     expect(limits.length).toBe(2);
   });
 
+  it('long goal and limit identities are bounded and distinct; full option and link refs survive', async () => {
+    const turn = await testLinkTurn({ from_id: 'f'.repeat(100), to_id: 't'.repeat(100) });
+    const option = 'o'.repeat(150);
+    const result = StructuralChallengeResultV1Schema.parse({ ...turn.result!, claims: [
+      { ...turn.result!.claims.find((c) => c.kind === 'goal_probability')!, option_id: option },
+      ...['a', 'b'].map((letter) => ({ kind: 'constraint_probability', option_id: option, constraint_id: letter.repeat(100),
+        baseline: 0.3, alternative: 0.6, target: null, constraint_boundary: null,
+        noise_verdict: 'signal', verdict: 'delta_only', basis: 'no_licensed_boundary', invariant_by_construction: false })),
+    ] });
+    const reply = composeStructuralChallengeReply({ result, labels: turn.labels, certainty: turn.certainty });
+    const rows = testLinkMethodResult({ ...turn, result, reply }, CTX)!.rows.filter((r) => /^(goal|limit):/.test(r.row_id));
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((r) => r.row_id)).size).toBe(3);
+    for (const row of rows) {
+      expect(row.row_id.length).toBeLessThanOrEqual(200);
+      expect(row.row_id).toMatch(/^(goal|limit):[a-f0-9]{32}$/);
+      expect(row.item_refs).toEqual([{ kind: 'option', id: option }, { kind: 'link', from_id: 'f'.repeat(100), to_id: 't'.repeat(100) }]);
+    }
+  });
+
   it('control pair: a stale test is a sidecar with no rows (completed has rows)', async () => {
     const stale = testLinkMethodResult(await testLinkTurn(L1, 'stale'), CTX)!;
     expect(stale).toMatchObject({ outcome: 'stale', rows: [] });
@@ -172,16 +204,17 @@ describe('"Test without this link": rows are the reply\'s allowlisted lines, bou
 });
 
 describe('"What would change this?": RC\'s measured lines only, and only beside a hero that agrees (ruling 4)', () => {
-  it('measured on the served D3 case: the quoted line, bound to its link and option; never the no_change line', async () => {
-    const turn = (await whatChanges())!;
+  it('valid T1b licence: producer ships the quoted row when its top equals the run-share top; the same licence with another top withholds', async () => {
+    const turn = await licensedTurn();
     expect(turn.outcome).toBe('measured');
-    const m = whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: noGoalFigures(D3.body.analysis_result) })!;
-    expect(m).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'measured', run: D3_RUN });
-    expect(m.rows.map((r) => r.row_id)).toEqual(['flip:monthly_cloud_savings->monthly_spend']);
-    expect(m.rows[0]!.item_refs).toEqual([{ kind: 'link', from_id: 'monthly_cloud_savings', to_id: 'monthly_spend' }, { kind: 'option', id: 'stay_on_aws' }]);
+    const m = whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: BLOCK })!;
+    expect(m).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'measured', run: { graph_hash_at_run: IDENTITY.graph_hash_at_run, computed_at: IDENTITY.computed_at } });
+    expect(m.rows.map((r) => r.row_id)).toEqual([`flip:${L1.from_id}->${L1.to_id}`]);
+    expect(m.rows[0]!.item_refs).toEqual([{ kind: 'link', ...L1 }, { kind: 'option', id: RAISE }]);
     expect(turn.reply).toContain(m.rows[0]!.text);
     expect(m.rows.some((r) => /would still be supported/.test(r.text))).toBe(false);
-    expect(turn.reply).toMatch(/would still be supported/); // control: the chat still says it
+    expect(turn.reply).toMatch(/would still be supported/);
+    expect(whatChangesMethodResult({ ...turn, measured: { ...turn.measured!, leaderId: RAISE } }, { ...CTX, run: null, analysisResult: BLOCK })).toMatchObject({ outcome: 'withheld', rows: [] });
     expect(methodResultForEgress(m, turn.reply)).toBe(m);
   });
 
@@ -189,13 +222,13 @@ describe('"What would change this?": RC\'s measured lines only, and only beside 
     const options = [RAISE, STARTER, KEEP];
     expect(changeRowsAgreeWithHero(BLOCK, options, STARTER)).toBe(true);
     expect(changeRowsAgreeWithHero(BLOCK, options, RAISE)).toBe(false);
-    // Withheld for one option: no order to compare → none. No goal chance shown at all (D3) → rows.
+    // Withheld for one option or no licence: no rows.
     const withheld = structuredClone(BLOCK);
     const lic = withheld.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
     lic.withheld_option_ids = [KEEP];
     delete lic.pct_by_option[KEEP];
     expect(changeRowsAgreeWithHero(withheld, options, STARTER)).toBe(false);
-    expect(changeRowsAgreeWithHero(noGoalFigures(D3.body.analysis_result), ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(true);
+    expect(changeRowsAgreeWithHero({}, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
     // A tie at the top and an option list without the top: none.
     const tied = structuredClone(BLOCK);
     tied.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').pct_by_option[RAISE] = 52;
@@ -211,15 +244,68 @@ describe('"What would change this?": RC\'s measured lines only, and only beside 
     expect(changeRowsAgreeWithHero(BLOCK, [RAISE, STARTER, KEEP, 'phased_gcp_migration'], STARTER)).toBe(false);
   });
 
-  it('Codex review P1: goal figures with no licence record withhold every row (the hero\'s ordering is unknown); control: no goal figure at all → rows', async () => {
-    // As served, D3 carries probability_of_goal 0.2908 / 0 and goal_fit with no GOAL_CHANCE_LICENSED record → fail closed.
-    expect(changeRowsAgreeWithHero(D3.body.analysis_result, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
-    const legacy = noGoalFigures(D3.body.analysis_result);
-    legacy.enrichment.option_comparison.forEach((r: Json, i: number) => { r.probability_of_goal = i === 0 ? 0.4 : 0.8; });
-    expect(changeRowsAgreeWithHero(legacy, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
-    expect(changeRowsAgreeWithHero(noGoalFigures(D3.body.analysis_result), ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(true);
+  it('no licence always withholds: served D3 and a result with no goal figures', async () => {
     const turn = (await whatChanges())!;
-    expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: D3.body.analysis_result })).toMatchObject({ outcome: 'withheld', rows: [] });
+    for (const analysisResult of [D3.body.analysis_result, {}]) {
+      expect(changeRowsAgreeWithHero(analysisResult, ['switch_to_gcp', 'stay_on_aws'], 'switch_to_gcp')).toBe(false);
+      expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult })).toMatchObject({ outcome: 'withheld', rows: [] });
+    }
+  });
+
+  it('S3 limits-only goal_fit with no licence withholds under DL A', async () => {
+    expect(S3.decision_brief.analysis_summary.goal_fit).toBe(0.981);
+    const analysisResult = { enrichment: S3 };
+    expect(changeRowsAgreeWithHero(analysisResult, S3.option_comparison.map((r: Json) => r.option_id), 'switch_to_gcp')).toBe(false);
+    expect(whatChangesMethodResult((await whatChanges())!, { ...CTX, run: null, analysisResult })).toMatchObject({ outcome: 'withheld', rows: [] });
+  });
+
+  const invalidLicences: [string, (lic: Json) => void][] = [
+    ['missing message', (lic) => { delete lic.message; }],
+    ['invalid severity', (lic) => { lic.severity = 'warning'; }],
+    ['without target', (lic) => { delete lic.target; }],
+    ['invalid target comparator', (lic) => { lic.target.comparator = 'towards'; }],
+    ['nonfinite target', (lic) => { lic.target.value = NaN; }],
+    ['invalid form', (lic) => { lic.form = 'unknown'; }],
+    ['missing scored identity', (lic) => { lic.option_ids = [RAISE, STARTER]; }],
+    ['missing point', (lic) => { delete lic.pct_by_option[KEEP]; }],
+    ['nonfinite point', (lic) => { lic.pct_by_option[KEEP] = Infinity; }],
+    ['fractional point', (lic) => { lic.pct_by_option[KEEP] = 0.4; }],
+    ['out of range point', (lic) => { lic.pct_by_option[KEEP] = 101; }],
+    ['unknown point identity', (lic) => { lic.pct_by_option.unknown = 20; }],
+    ['duplicate option identity', (lic) => { lic.option_ids.push(KEEP); }],
+    ['withheld carrying a point', (lic) => { lic.withheld_option_ids = [KEEP]; }],
+  ];
+  it.each(invalidLicences)('malformed licence %s withholds (control: valid T1b ships)', async (_name, mutate) => {
+    const analysisResult = structuredClone(BLOCK);
+    mutate(analysisResult.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED'));
+    const turn = await licensedTurn();
+    expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult })).toMatchObject({ outcome: 'withheld', rows: [] });
+    expect(whatChangesMethodResult(turn, { ...CTX, run: null, analysisResult: BLOCK })!.rows).toHaveLength(1);
+  });
+
+  it('duplicate licences and mixed range/point records withhold', () => {
+    const duplicate = structuredClone(BLOCK);
+    duplicate.enrichment.inference_warnings.push(duplicate.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED'));
+    expect(changeRowsAgreeWithHero(duplicate, [RAISE, STARTER, KEEP], STARTER)).toBe(false);
+    const mixed = structuredClone(BLOCK);
+    mixed.enrichment.inference_warnings.push({ code: 'GOAL_CHANCE_RANGE', range_by_option: { [KEEP]: { low_pct: 0, high_pct: 10 } } });
+    expect(changeRowsAgreeWithHero(mixed, [RAISE, STARTER, KEEP], STARTER)).toBe(false);
+    expect(changeRowsAgreeWithHero({ inference_warnings: [mixed.enrichment.inference_warnings.at(-1)] }, [RAISE, STARTER, KEEP], STARTER)).toBe(false);
+  });
+
+  it('100-char endpoint ids produce bounded, deterministic flip ids distinct for distinct links, preserving full refs', async () => {
+    const turn = await licensedTurn();
+    const links = [{ from_id: 'a'.repeat(100), to_id: 'b'.repeat(100) }, { from_id: 'a'.repeat(100), to_id: 'c'.repeat(100) }];
+    const input = { ...turn, measured: { ...turn.measured!, rows: links.map((link) => ({ ...turn.measured!.rows[0]!, link })) } };
+    const m = whatChangesMethodResult(input, { ...CTX, run: null, analysisResult: BLOCK })!;
+    expect(m.rows).toHaveLength(2);
+    expect(new Set(m.rows.map((r) => r.row_id)).size).toBe(2);
+    m.rows.forEach((r, i) => {
+      expect(r.row_id.length).toBeLessThanOrEqual(200);
+      expect(r.row_id).toMatch(/^flip:[a-f0-9]{32}$/);
+      expect(r.item_refs[0]).toEqual({ kind: 'link', ...links[i] });
+    });
+    expect(whatChangesMethodResult(input, { ...CTX, run: null, analysisResult: BLOCK })!.rows).toEqual(m.rows);
   });
 
   it('a hero that disagrees withholds every row (the chat reply is untouched)', async () => {

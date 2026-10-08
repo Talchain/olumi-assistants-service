@@ -12,10 +12,12 @@
  *   (2) no line that names the option most runs support reaches a row (the lead lines, the headline, `no_change`);
  *   (3) rows only for a `completed` / `measured` answer about the shown Run;
  *   (4) SCI-CHANGE rows only when the option most runs support is the option with the hero's highest displayed POINT
- *       goal chance, or when the hero shows no goal chance at all — otherwise no rows (fail-closed; chat unchanged).
+ *       goal chance under a valid stored licence for EVERY scored option — otherwise no rows (DL A / Science 6050913458).
  *       SCI-DEEP rows are exempt: they ARE goal-chance figures, from a same-seed recompute.
  */
-import { goalChanceSideOf } from '../../goal-target/goal-chance-sides.js';
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import { agentLicenceRecordOf } from '../../goal-target/goal-chance-licence.js';
 import { structuralChallengeRowsOf, type StructuralChallengeTurn } from '../method-turn/structural-challenge-turn.js';
 import type { WhatChangesTurn } from '../method-turn/what-changes-turn.js';
 import type { ItemRef } from './rank.js';
@@ -50,47 +52,59 @@ const linkRef = (from_id: string, to_id: string): ItemRef => ({ kind: 'link', fr
 /** One id inside a row id, encoded so a separator inside a canonical id (`a:b`) cannot make two rows one (Codex r2). */
 const idPart = (id: string): string => encodeURIComponent(id);
 
-/**
- * Ruling 4. True when the SCI-CHANGE rows may stand beside the hero: every option's displayed goal chance is a POINT and
- * the single highest one is `runShareTopId`, or no option shows a goal chance at all. A range, a withheld figure, a mix
- * of shown and unshown options, a tie at the top or an unreadable result: false.
- */
-const GOAL_FIGURE_KEYS = new Set(['probability_of_goal', 'goal_probability', 'goal_fit', 'pct_by_option', 'probability_of_goal_by_option']);
-/** True when any goal-probability figure sits anywhere in the result (bounded walk); unreadable → true (fail closed). */
-function carriesGoalFigure(result: unknown): boolean {
-  try {
-    const seen = new Set<unknown>(); let budget = 20000;
-    const walk = (v: unknown, depth: number): boolean => {
-      if (v === null || typeof v !== 'object' || seen.has(v) || depth > 24 || --budget < 0) return budget < 0;
-      seen.add(v);
-      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-        if (GOAL_FIGURE_KEYS.has(k) && x !== null && x !== undefined) return true;
-        if (walk(x, depth + 1)) return true;
-      }
-      return false;
-    };
-    return walk(result, 0);
-  } catch {
-    return true;
-  }
+/** Readable IDs stay stable; long identities use a 128-bit digest, with full IDs retained in item_refs. */
+function boundedRowId(kind: string, identity: readonly string[], readable: string): string {
+  return readable.length <= 120 ? readable
+    : `${kind}:${createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 32)}`;
 }
 
+// No complete licence schema is exported by the pinned schemas package. Start with CEE's strictest stored reader
+// (single record + form relationships), then validate the required display record as DGAI readGoalChanceLicence does.
+// Optional descriptive claims are additive; they do not authorize points or substitute for the target.
+const pointPct = z.number().finite().int().min(0).max(100);
+const displayLicenceSchema = z.object({
+  code: z.literal('GOAL_CHANCE_LICENSED'),
+  severity: z.literal('info'),
+  message: z.string(),
+  form: z.enum(['highest', 'highest_all_likely_to_miss', 'all_likely_to_miss', 'similar', 'each']),
+  option_ids: z.array(z.string().min(1)).min(2),
+  pct_by_option: z.record(pointPct),
+  target: z.object({ comparator: z.enum(['at_least', 'above', 'at_most', 'below']), value: z.number().finite(), unit: z.string().min(1) }),
+  withheld_option_ids: z.array(z.string()).optional(),
+  display_rounding_by_option: z.record(z.enum(['whole', 'nearest_5'])).optional(),
+}).passthrough().superRefine((r, ctx) => {
+  const withheld = new Set(r.withheld_option_ids ?? []);
+  if (new Set(r.option_ids).size !== r.option_ids.length
+    || ![...withheld].every((id) => r.option_ids.includes(id))
+    || withheld.size === r.option_ids.length
+    || !r.option_ids.every((id) => withheld.has(id) ? !Object.hasOwn(r.pct_by_option, id) : Object.hasOwn(r.pct_by_option, id))
+    || Object.keys(r.pct_by_option).some((id) => !r.option_ids.includes(id))
+    || (r.summary_withheld !== undefined && r.form !== 'each')) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent goal-chance display record' });
+  }
+});
+
+/** DL A / Science 6050913458: every scored option must have a licensed POINT; its unique top must be the run-share top. */
 export function changeRowsAgreeWithHero(analysisResult: unknown, optionIds: readonly string[], runShareTopId: string): boolean {
-  if (optionIds.length === 0 || !optionIds.includes(runShareTopId)) return false;
-  let sides;
+  if (optionIds.length === 0 || new Set(optionIds).size !== optionIds.length || !optionIds.includes(runShareTopId)) return false;
   try {
-    sides = optionIds.map((id) => ({ id, side: goalChanceSideOf(analysisResult, id) }));
+    const parsed = displayLicenceSchema.safeParse(agentLicenceRecordOf(analysisResult));
+    if (!parsed.success) return false;
+    const licence = parsed.data;
+    if (!optionIds.every((id) => licence.option_ids.includes(id)
+      && !licence.withheld_option_ids?.includes(id) && Object.hasOwn(licence.pct_by_option, id))) return false;
+    // A scored option recorded as a range cannot simultaneously authorize a point comparison.
+    const result = analysisResult as { enrichment?: { inference_warnings?: unknown }; inference_warnings?: unknown };
+    const warnings = [result.enrichment?.inference_warnings, result.inference_warnings]
+      .flatMap((v) => Array.isArray(v) ? v : []);
+    if (warnings.some((w) => w?.code === 'GOAL_CHANCE_RANGE'
+      && optionIds.some((id) => w.range_by_option != null && Object.hasOwn(w.range_by_option, id)))) return false;
+    const top = Math.max(...optionIds.map((id) => licence.pct_by_option[id]!));
+    const atTop = optionIds.filter((id) => licence.pct_by_option[id] === top);
+    return atTop.length === 1 && atTop[0] === runShareTopId;
   } catch {
     return false;
   }
-  // "No goal chance shown" only when the result carries no goal-probability figure at all: a Run without a licence record
-  // can still show point chances (`probability_of_goal` etc.), and its ordering is unknown here (Codex review P1). Fail closed.
-  if (sides.every(({ side }) => side.kind === 'not_recorded')) return !carriesGoalFigure(analysisResult);
-  if (!sides.every(({ side }) => side.kind === 'point')) return false;
-  const pct = (s: (typeof sides)[number]) => (s.side.kind === 'point' ? s.side.pct : -1);
-  const top = Math.max(...sides.map(pct));
-  const atTop = sides.filter((s) => pct(s) === top);
-  return atTop.length === 1 && atTop[0]!.id === runShareTopId;
 }
 
 const WHAT_CHANGES_OUTCOME: Record<WhatChangesTurn['outcome'], MethodResultOutcome> = {
@@ -114,7 +128,7 @@ export function whatChangesMethodResult(
   const rows = measured.rows
     .filter((row) => row.kind === 'quoted' || row.kind === 'below_a_tenth')
     .map((row): MethodResultRowV1 => ({
-      row_id: `flip:${idPart(row.link.from_id)}->${idPart(row.link.to_id)}`,
+      row_id: boundedRowId('flip', [row.link.from_id, row.link.to_id], `flip:${idPart(row.link.from_id)}->${idPart(row.link.to_id)}`),
       item_refs: [linkRef(row.link.from_id, row.link.to_id), { kind: 'option', id: row.option_id }],
       text: row.text,
       provenance: 'server_built',
@@ -138,8 +152,9 @@ export function testLinkMethodResult(turn: StructuralChallengeTurn, ctx: MethodR
   if (result.status !== 'completed') return { ...base, outcome: TEST_LINK_OUTCOME[result.status] ?? 'unavailable', rows: [] };
   const link = linkRef(result.alternative.from_id, result.alternative.to_id);
   const rows = structuralChallengeRowsOf(turn).map((row): MethodResultRowV1 => ({
-    row_id: row.option_id === undefined ? row.kind
-      : row.constraint_id !== undefined ? `${row.kind}:${idPart(row.option_id)}:${idPart(row.constraint_id)}` : `${row.kind}:${idPart(row.option_id)}`,
+    row_id: boundedRowId(row.kind, [row.option_id, row.constraint_id].filter((id): id is string => id !== undefined),
+      row.option_id === undefined ? row.kind
+        : row.constraint_id !== undefined ? `${row.kind}:${idPart(row.option_id)}:${idPart(row.constraint_id)}` : `${row.kind}:${idPart(row.option_id)}`),
     item_refs: row.kind === 'provisional' || row.kind === 'not_saved' ? []
       : row.option_id !== undefined ? [{ kind: 'option', id: row.option_id }, link] : [link],
     text: row.text,
