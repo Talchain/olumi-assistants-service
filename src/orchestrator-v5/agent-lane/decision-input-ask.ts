@@ -26,6 +26,7 @@ import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
+import { chanceShownFor, type OptionChanceCell } from './chance-shown.js';
 import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view.js';
 
 type Rec = Record<string, unknown>;
@@ -78,8 +79,8 @@ export interface DecisionInputAskContext {
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
   readonly builtOrRan: boolean;
-  /** The selected current Run's UI cells own the horizon's chance wording. */
-  readonly chanceCells?: readonly CanonicalAnalysisCell[];
+  /** The selected current Run's UI cells own chance wording, including each risk's option-bound disclosure. */
+  readonly chanceCells?: readonly OptionChanceCell[];
 }
 
 /** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
@@ -163,7 +164,7 @@ const withinMonths = (goal: Rec): string => {
  * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
-function leftOutLines(graph: unknown, goalLabel: string): string[] {
+function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[]): string[] {
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const allEdges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
@@ -182,7 +183,7 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
       // relies_on). Never read one shape blind: the served B1 draft 500'd on exactly that (27dfd9e5, 8 Oct).
       const optionId = recordOf(r.relies_on)?.option_id ?? recordOf(recordOf(r.draft_widening)?.hits)?.id;
       const option = nodes.find((n) => n.id === optionId && n.kind === 'option');
-      if (option !== undefined) return reliesOnRiskLine(labelOf(r), labelOf(option));
+      if (option !== undefined) return reliesOnRiskLine(labelOf(r), labelOf(option), chanceShownFor(cells, option.id as string));
     }
     // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
     // (DL condition 3), in words that stay true when one cause feeds two left-out risks.
@@ -398,7 +399,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   if (goal === undefined || label === '') return [];
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
-  const leftOut = leftOutLines(graph, label);
+  const leftOut = leftOutLines(graph, label, ctx.chanceCells ?? []);
   const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.

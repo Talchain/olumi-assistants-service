@@ -28,6 +28,7 @@ const B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', impor
   brief: string; graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec;
   analysis_ready: Rec; before_shape: AnswerShape; before_text: string;
 };
+const B1_WIDENED = JSON.parse(readFileSync(new URL('./fixtures/served-b1-widened-20261008.json', import.meta.url), 'utf8')) as Graph;
 // Reuse the captured Run that already licenses numeric goal chances; no chance is invented for this route row.
 const T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as {
   j: typeof FX.read & { brief_text: string };
@@ -35,6 +36,7 @@ const T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-read
 let currentRead = FX.read;
 let buildBrief = FX.brief;
 let buildWidened: WidenCounts | undefined;
+let withoutRun = false;
 let lastComposeInput: unknown;
 let withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['withholdDisclosureFor'];
 let lastBuildPayload: Rec;
@@ -123,6 +125,11 @@ describe('ONE reply contract through the build route', () => {
         return { graph: saved, graph_hash: 'empty', analysis_state,
           canonical_analysis_view: projectCanonicalAnalysisView({ graph: saved, analysisState: analysis_state as never }) };
       }
+      if (withoutRun) {
+        const analysis_state = { run_state: { kind: 'never_run' as const } };
+        return { graph: saved, graph_hash: currentRead.graph_hash, analysis_state,
+          canonical_analysis_view: projectCanonicalAnalysisView({ graph: saved, analysisState: analysis_state as never }) };
+      }
       // Reconstruct only the captured successful fact wrapper owned by this test's served graph read.
       const canonical_analysis_view = projectCanonicalAnalysisView({ graph: saved,
         runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
@@ -148,7 +155,7 @@ describe('ONE reply contract through the build route', () => {
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
   beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); askedToBuild = false;
     narrator = process.env.ONE_REPLY_CAPTURE_BASE === '1' ? FX.narrator : `${FX.narrator}\n\n${GOAL_CHANCE_CAPTURE}`;
-    currentRead = FX.read; buildBrief = FX.brief; buildWidened = undefined; lastComposeInput = undefined; info.mockClear(); });
+    currentRead = FX.read; buildBrief = FX.brief; buildWidened = undefined; withoutRun = false; lastComposeInput = undefined; info.mockClear(); });
   // #2851 supersedes the captured draft's automatic-card premise: Olumi's basis-less 250 is not a user level.
   // Keep the exact positive identity assertions on the same count explicitly ratified by the user; the original
   // capture remains untouched and has its own no-card route control below.
@@ -214,7 +221,7 @@ describe('ONE reply contract through the build route', () => {
     narrator = 'Your results are ready. You can view them now or ask me to explain them.';
   };
 
-  it('r13 widened draft: typed three-risk build result places the exact line after H and the risk note once in detail; replay identical', async () => {
+  it('FU1 withheld widened draft: typed receipt stays after H with no risk chance note or marker; replay identical', async () => {
     currentRead = structuredClone(FX.read);
     buildWidened = { options: 0, risks: 3 };
     narrator = 'Olumi built your pricing model.';
@@ -224,13 +231,44 @@ describe('ONE reply contract through the build route', () => {
     const input = lastComposeInput as ReplyComposeInput;
     expect(input.faceContract).toBe('draft');
     expect(input.widenedLine).toBe(line);
-    expect(input.widenedRiskNote).toBe(note);
+    expect(input.chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
+    expect(input.widenedRiskNote).toBeUndefined();
+    expect(input.widenedRiskMarker).toBeUndefined();
     expect(body._answer_shape, body.assistant_text).toBeDefined();
     expect(body._answer_shape!.bullets[0], 'the exact producer line is immediately after the headline').toBe(line);
     expect(count(body.assistant_text, line)).toBe(1);
     expect(face(body._answer_shape!)).not.toContain(note);
-    expect(count(body._answer_shape!.detail, note)).toBe(1);
-    expect(count(body.assistant_text, note)).toBe(1);
+    expect(count(body._answer_shape!.detail, note)).toBe(0);
+    expect(count(body.assistant_text, note)).toBe(0);
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
+  it('FU1 B1 no-Run draft: served widened risks keep the receipt and relies-on words, without chance copy; replay identical', async () => {
+    currentRead = { ...structuredClone(FX.read), graph: structuredClone(B1_WIDENED) };
+    currentRead.graph_hash = computeAnalysisAffectingGraphHash(currentRead.graph as never)!.slice(0, 16);
+    buildWidened = { options: 0, risks: 3 };
+    withoutRun = true;
+    narrator = 'Olumi built your pricing model.';
+    const body = await buildTurn();
+    const input = lastComposeInput as ReplyComposeInput;
+    process.stdout.write(`FU1_B1_DRAFT ${JSON.stringify({ text: body.assistant_text, shape: body._answer_shape,
+      chanceCells: input.chanceCells, widenedLine: input.widenedLine, widenedRiskNote: input.widenedRiskNote,
+      widenedRiskMarker: input.widenedRiskMarker })}\n`);
+    expect(input.chanceCells).toEqual([]);
+    expect(input.widenedLine).toBe(widenedLine(buildWidened));
+    expect(input.widenedRiskNote).toBeUndefined();
+    expect(input.widenedRiskMarker).toBeUndefined();
+    expect(body._answer_shape!.bullets[0]).toBe(widenedLine(buildWidened));
+    expect(count(body.assistant_text, widenedLine(buildWidened)!)).toBe(1);
+    expect(body.assistant_text).not.toContain(widenedRiskNote(buildWidened));
+    expect(body.assistant_text).not.toContain("Leaves out Olumi's added risks");
+    expect(body.assistant_text).not.toContain("and that option's chance doesn't include it yet");
+    const risks = currentRead.graph.nodes.filter(node => node.kind === 'risk' && node.draft_widening !== undefined);
+    for (const risk of risks) {
+      const option = currentRead.graph.nodes.find(node => node.id === ((risk.draft_widening as Rec).hits as Rec).id)!;
+      expect(body.assistant_text).toContain(`‘${risk.label}’: ‘${option.label}’ relies on this not happening.`);
+      expect(count(body.assistant_text, `‘${risk.label}’`)).toBe(1);
+    }
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
@@ -300,6 +338,8 @@ describe('ONE reply contract through the build route', () => {
     const input = lastComposeInput as ReplyComposeInput;
     const note = widenedRiskNote({ options: 0, risks: risks.length })!;
     const marker = widenedRiskMarker(risks)!;
+    process.stdout.write(`FU1_SHOWN_RUN ${JSON.stringify({ text: body.assistant_text, shape: body._answer_shape,
+      chanceCells: input.chanceCells, widenedRiskNote: input.widenedRiskNote, widenedRiskMarker: input.widenedRiskMarker })}\n`);
     expect(input.faceContract).toBe('run');
     expect(input.widenedLine, 'persisted risks owe disclosure, not a fresh draft receipt').toBeUndefined();
     expect(input.widenedRiskNote).toBe(note);
@@ -314,7 +354,37 @@ describe('ONE reply contract through the build route', () => {
     expect(face(body._answer_shape!)).not.toContain(note);
     expect(count(body._answer_shape!.detail, note)).toBe(1);
     expect(count(body.assistant_text, note)).toBe(1);
+    const riskOption = ((risks[0]!.draft_widening as Rec).hits as Rec).id;
+    expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'figure', option_id: riskOption }));
+    expect(count(body.assistant_text, "and that option's chance doesn't include it yet")).toBe(risks.length);
     await expectStoredAndReplayed(body, payload);
+  });
+
+  it('FU1 mixed Run: another option shows a chance while the risk option is withheld, keeping its relies-on words; replay identical', async () => {
+    useNumericChanceRead();
+    const risks = withOlumiAddedRisks();
+    const riskOption = ((risks[0]!.draft_widening as Rec).hits as Rec).id;
+    const enrichment = currentRead.analysis_result.enrichment as Rec;
+    enrichment.inference_warnings = [...enrichment.inference_warnings as Rec[], {
+      code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', option_ids: [riskOption], message: 'This option has no usable chance.' }];
+    saved = structuredClone(currentRead.graph);
+    const payload = { kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'Run analysis.',
+      chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } };
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    const input = lastComposeInput as ReplyComposeInput;
+    expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'withheld', option_id: riskOption }));
+    expect(input.chanceCells?.some(cell => cell.kind === 'figure' || cell.kind === 'range')).toBe(true);
+    expect(input.widenedRiskNote).toBe(widenedRiskNote({ options: 0, risks: risks.length }));
+    expect(input.widenedRiskMarker).toBe(widenedRiskMarker(risks));
+    expect(body.assistant_text).not.toContain("and that option's chance doesn't include it yet");
+    const option = currentRead.graph.nodes.find(node => node.id === riskOption)!;
+    for (const risk of risks) expect(body.assistant_text).toContain(`‘${risk.label}’: ‘${option.label}’ relies on this not happening.`);
+    await expectStoredAndReplayed(body, payload);
+    const replayInput = lastComposeInput as ReplyComposeInput;
+    expect(replayInput.widenedRiskNote).toBe(input.widenedRiskNote);
+    expect(replayInput.widenedRiskMarker).toBe(input.widenedRiskMarker);
   });
 
   it('r11b B1 automatic first Run: exact pilot face/detail uses one cell marker without the retired horizon clause', async () => {

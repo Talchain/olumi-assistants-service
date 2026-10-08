@@ -20,6 +20,8 @@ import { HORIZON_MARKER, WITHHOLD_FALLBACK_MARKER, type ReplyComposeInput, type 
 import { runExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 import { goalKindOf } from '../../goal-target/goal-kind.js';
 import { teamShareMoments, extraShareMoments } from '../../goal-target/event-by-date-share.js';
+import { preconditionRiskIds } from '../../../graph/inert-risk.js';
+import { WIDENED_RISK_MARKER_DOWN } from '../widened-risk-markers.js';
 
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -357,6 +359,61 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(withholdMarkers(b)).toEqual([]);
     expect(faceUnits(b)).toContain(HORIZON_MARKER);
     await expectStoredAndReplayed(b);
+  });
+
+  it('FU1 served B3: added risks beside its captured range and withheld option use their own chance cells; replay identical', async () => {
+    READ = structuredClone(READ_B3);
+    analysisResult = structuredClone(READ.analysis_result);
+    // Augment only the retained graph with typed zero-edge widening attachments. The served B3's Run roster,
+    // recorded 5–50% range, and native withhold warnings stay unchanged; its original risks have no widening stamps.
+    const goal = READ.graph.nodes.find((node: Json) => node.id === 'monthly_profit');
+    const risks = [
+      { id: 'fu1_shop_opening_delayed', label: 'Shop opening delayed', optionId: 'fourth_shop_in_clifton',
+        throughId: 'fourth_shop_operating' },
+      { id: 'fu1_loyalty_app_adoption_lags', label: 'Loyalty app adoption lags', optionId: 'loyalty_app',
+        throughId: 'loyalty_app_active' },
+    ].map(({ id, label, optionId, throughId }) => {
+      const option = READ.graph.nodes.find((node: Json) => node.id === optionId);
+      const through = READ.graph.nodes.find((node: Json) => node.id === throughId);
+      return { id, kind: 'risk', label, provenance: 'ai_inferred', proposed_by: 'olumi',
+        analysis_participation: 'retained_excluded', draft_widening: {
+          provenance: 'ai_suggested_widen', hits: { id: option.id, label: option.label, kind: 'option' },
+          through: { id: through.id, label: through.label, direction: 'negative' },
+          affects: { id: goal.id, label: goal.label, direction: 'negative' }, mechanism: 'relies_on',
+          relies_on: 'The option becoming active as planned.', watch_for: 'Launch milestones start slipping.',
+        } };
+    });
+    READ.graph.nodes.push(...risks);
+    const preconditions = preconditionRiskIds(READ.graph.nodes, READ.graph.edges,
+      (READ.graph.goal_constraints ?? []).map((constraint: Json) => constraint.node_id));
+    for (const risk of risks) expect(preconditions.has(risk.id), 'the added attachment is a valid excluded precondition').toBe(true);
+    expect(analysisResult.enrichment.inference_warnings).toEqual(READ_B3.analysis_result.enrichment.inference_warnings);
+
+    const body = await turn(run('Review the recorded assumptions.'), 'Run it');
+    const input = composeInput!;
+    const note = "Risks Olumi added aren't in the chance yet, so it may be too high.";
+    expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'range', option_id: 'fourth_shop_in_clifton' }));
+    expect(input.chanceCells).toContainEqual(expect.objectContaining({ kind: 'withheld', option_id: 'loyalty_app' }));
+    expect(body.assistant_text).toContain(SCREEN[0]!);
+    expect(input.widenedRiskNote).toBe(note);
+    expect(input.widenedRiskMarker).toBe(WIDENED_RISK_MARKER_DOWN);
+    expect(count(body.assistant_text, note)).toBe(1);
+    expect(count(body._answer_shape!.detail, note)).toBe(1);
+    const rangeLine = "‘Shop opening delayed’: ‘Fourth shop in Clifton’ relies on this not happening. This model can't yet apply that risk to that option alone, so the Run leaves it out, and that option's chance doesn't include it yet.";
+    const withheldLine = "‘Loyalty app adoption lags’: ‘Loyalty app’ relies on this not happening. This model can't yet apply that risk to that option alone, so the Run leaves it out.";
+    expect(count(body.assistant_text, rangeLine)).toBe(1);
+    expect(count(body.assistant_text, withheldLine)).toBe(1);
+    expect(body.assistant_text).not.toContain(`${withheldLine.slice(0, -1)}, and that option's chance doesn't include it yet.`);
+    const units = faceUnits(body);
+    const rangeIndex = units.findIndex(unit => unit.startsWith('‘Fourth shop in Clifton’: between about 5% and 50% chance'));
+    expect(rangeIndex).toBeGreaterThanOrEqual(0);
+    expect(units.indexOf(WIDENED_RISK_MARKER_DOWN)).toBeGreaterThan(rangeIndex);
+    expect(count(units.join('\n'), WIDENED_RISK_MARKER_DOWN)).toBe(1);
+    process.stdout.write(`FU1_B3_RUN ${JSON.stringify({ text: body.assistant_text, shape: body._answer_shape,
+      cells: input.chanceCells, note: input.widenedRiskNote, marker: input.widenedRiskMarker })}\n`);
+    await expectStoredAndReplayed(body);
+    expect(composeInput?.widenedRiskNote).toBe(note);
+    expect(composeInput?.widenedRiskMarker).toBe(WIDENED_RISK_MARKER_DOWN);
   });
 
   it.each([1, 2] as const)('r11b mixed %s historical figures: recorded permissions survive beside one withheld marker without a disclaimer', async shown => {

@@ -53,6 +53,8 @@ import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runt
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+import { isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
+import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
@@ -108,6 +110,7 @@ import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAge
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
+import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -639,7 +642,8 @@ function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
 }
 
 /** Persisted draft-widening provenance, not a risk's label or generic AI origin, owns Run disclosures. */
-function widenedRunWordsOf(graph: unknown): { widenedRiskNote?: string; widenedRiskMarker?: string } {
+function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[]): { widenedRiskNote?: string; widenedRiskMarker?: string } {
+  if (!chanceShownFor(cells)) return {};
   const nodes = (graph as { readonly nodes?: readonly GraphV3T['nodes'][number][] } | null | undefined)?.nodes;
   const addedRisks = Array.isArray(nodes) ? nodes.filter(node => node?.kind === 'risk'
     && node.draft_widening?.provenance === 'ai_suggested_widen') : [];
@@ -649,7 +653,7 @@ function widenedRunWordsOf(graph: unknown): { widenedRiskNote?: string; widenedR
 }
 
 /** The final scenario read owns the UI's cells; missing authority never licenses a substitute projection. */
-function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly CanonicalAnalysisCell[] {
+function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly OptionChanceCell[] {
   const view = read.canonicalAnalysisView as { schema?: unknown; source?: unknown; options?: unknown } | null | undefined;
   const options = view?.options;
   const valid = view?.schema === 'canonical_analysis_view.v1' && view.source === 'stored_run_facts'
@@ -676,7 +680,8 @@ function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scena
           && typeof (reason as { code?: unknown }).code === 'string'
           && ((reason as { message?: unknown }).message === null || typeof (reason as { message?: unknown }).message === 'string'));
     });
-  if (valid) return (options as { cell: CanonicalAnalysisCell }[]).map(row => row.cell);
+  if (valid) return (options as { option_id: string; cell: CanonicalAnalysisCell }[])
+    .map(row => ({ ...row.cell, option_id: row.option_id }));
   log.warn({ event: 'agent_lane.canonical_analysis_view_unavailable', scenario_id: scenarioId },
     'agent-lane: final scenario read has no valid canonical analysis cells');
   return [];
@@ -2450,7 +2455,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
-          ...widenedRunWordsOf(state.graph),
+          ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
@@ -2637,9 +2642,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `readBackState`), NOT the tool run's own blocks: a run's blocks can describe a
      * graph the user no longer has (independent review of #1760).
      */
-    // Counts every call that could WRITE, so a failed turn knows whether it is
-    // safe to release its claim (nothing sent) or must leave it (outcome unknown).
+    // Counts every call that could WRITE. Only a single-append door's known
+    // revision refusal proves it wrote nothing; earlier writes and unknown
+    // outcomes must keep the claim.
     let writesDispatched = 0;
+    const undoRefusedWrite = async <T>(write: () => Promise<T>): Promise<T> => {
+      try { return await write(); }
+      catch (err) {
+        // Undo only this refused attempt; an earlier step may already have written.
+        if (isRevisionConflict(err)) writesDispatched -= 1;
+        throw err;
+      }
+    };
     const releaseUnwrittenTurnClaim = async (): Promise<boolean> => {
       if (turnId === undefined || claimHash === undefined || writesDispatched !== 0 || typeof store.releaseTurnClaim !== 'function') return false;
       try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); return true; }
@@ -2654,7 +2668,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const readingDispatch: typeof dispatch = readCache.dispatch;
     const countingDispatch: typeof dispatch = async (path, body) => {
-      if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
+      const send = async () => promoteRevisionConflictResponse(await readingDispatch(path, body));
+      if (path.endsWith('/graph/register')) {
+        writesDispatched += 1;
+        return undoRefusedWrite(send);
+      }
+      // A v2 turn can commit through several subdoors before a later refusal.
+      // Its revision 409 cannot prove that the whole dispatched turn wrote nothing.
+      if (path === '/orchestrate/v2/turn') {
+        writesDispatched += 1;
+        return send();
+      }
       return readingDispatch(path, body);
     };
     /**
@@ -2721,9 +2745,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
         // S2b team_time uses this same fenced batch door and cached read-back.
         commitOptionLevels: async (input) => {
-          writesDispatched += 1;
           // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
-          return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
@@ -2735,32 +2761,44 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
           writesDispatched += 1;
-          return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
+          return undoRefusedWrite(() => {
+            return readCache.around(() => holdAddRiskInProcess(input, String(req.id)));
+          });
         },
         // ⭐ PJ-E-FIG (DL #72 5866036457): the add-factor door — ONE held change carrying the user's figures, in-process.
         holdAddFactor: async (input) => {
           writesDispatched += 1;
-          return readCache.around(() => holdAddFactorInProcess(input, String(req.id)));
+          return undoRefusedWrite(() => {
+            return readCache.around(() => holdAddFactorInProcess(input, String(req.id)));
+          });
         },
         commitLimitAdd: async (input) => {
-          writesDispatched += 1;
           const fenceRefused = () => ({ status: 'refused' as const, reason: 'turn_fence_refused' });
-          return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitAddInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitAddInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
-          return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitEditInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitEditInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         commitOlumiOptionAdoption: async (input) => {
           writesDispatched += 1;
-          return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOlumiOptionAdoptionInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOlumiOptionAdoptionInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          });
         },
         // ⭐ MG F1 T6 (#2471): an option's status, in-process, so "applied" rests on the writer's own typed outcome. It runs
         // as an Agent SUB-TURN, exactly as the HTTP dispatch it replaces did (:1499): the writer's narration is not the
         // conversation, so its row keeps no conversation text (#2352 class; DL CR on #2471 P2).
         commitOptionStatus: async (input) => {
           writesDispatched += 1;
-          return readCache.around(() => runAsAgentSubturn(input.scenario_id, () => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionStatusInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runAsAgentSubturn(input.scenario_id, () => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionStatusInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          });
         },
       },
     );
@@ -3720,10 +3758,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     } catch (err) {
       log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');
-      // Nothing was sent that could write: release the claim, so a retry of the
-      // SAME turn_id can run. If anything was sent, the claim stands — the
-      // outcome is unknown and the turn is never run twice.
+      // No possible writes remain: release the claim, so a retry of the SAME
+      // turn_id can run. Earlier writes or unknown outcomes keep the claim.
       const released = await releaseUnwrittenTurnClaim();
+      if (isRevisionConflict(err)) {
+        const refusal = { error: {
+          ...toErrorV1(err, req),
+          ...(turnId !== undefined ? { retry_safe: released } : {}),
+        } };
+        return reply.code(409).send(refusal.error);
+      }
       return reply.code(502).send({
         error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
         ...(turnId !== undefined ? { retry_safe: released } : {}),
@@ -4834,8 +4878,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
-        ? widenedRunWordsOf(readbackGraph) : {};
-      const widenNote = runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts));
+        ? widenedRunWordsOf(readbackGraph, chanceCells) : {};
+      const widenNote = chanceShownFor(chanceCells)
+        ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
       // The build keeps its Draft receipt after H even when it also ran. Bind that Run's marker beside its chance.
       const firstRunRiskMarker = faceContract === 'draft' && screenLines.length > 0
         ? runWidenWords.widenedRiskMarker : undefined;

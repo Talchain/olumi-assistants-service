@@ -55,12 +55,15 @@ import {
   GraphStaleWriteError,
   loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
   loadScenarioAnalysisFactsForRead,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
+import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict } from '../graph-revision-conflict.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
@@ -362,6 +365,8 @@ export interface DispatchSystemEventResult {
   readonly graphConflict?: {
     readonly recovery_action: 'refresh_and_reconfirm' | 'start_new_draft';
     readonly conflict_category: string;
+    readonly expected?: number;
+    readonly current?: number;
     /**
      * ⚠ ALWAYS ANALYSIS-SPACE (16-hex), NEVER the 64-hex identity hash.
      * See `readClientRecoverableBaseHash` — this field is the target of a
@@ -1145,7 +1150,15 @@ export function buildReaderOnlyRefusal(payload: SystemEventTurnPayload): OlumiRe
 export async function dispatchSystemEvent(
   params: DispatchSystemEventParams,
 ): Promise<DispatchSystemEventResult> {
-  const result = await dispatchSystemEventOperation(params);
+  let result: DispatchSystemEventResult;
+  try {
+    result = await dispatchSystemEventOperation(params);
+  } catch (err) {
+    if (!isRevisionConflict(err)) throw err;
+    result = { response: buildAcknowledgementResponse(params.payload), commitPerformed: false, graph: null,
+      graphConflict: { recovery_action: 'refresh_and_reconfirm', conflict_category: err.conflict_category,
+        expected_base_graph_hash: null, ...readRevisionConflictDetails(err) } };
+  }
   // A writer's post-commit verdict stays authoritative. Acknowledgements and
   // uncommitted refusals retain their existing return shape.
   if (result.freshness !== undefined || result.graphConflict !== undefined
@@ -1539,6 +1552,7 @@ async function dispatchEdgeStrengthEdit(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
@@ -1548,14 +1562,25 @@ async function dispatchEdgeStrengthEdit(
     // The integrity-strict pending read rejects a non-array, any invalid entry,
     // or a scenario mismatch. On either failure the prior row remains newest
     // and therefore authoritative: no refusal transcript is appended.
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(
-        payload.scenario_id,
-        requestId,
-      ),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(
+          payload.scenario_id,
+          requestId,
+        ),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(
+          payload.scenario_id,
+          requestId,
+        ),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -1755,6 +1780,7 @@ async function dispatchEdgeStrengthEdit(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -1780,6 +1806,7 @@ async function dispatchEdgeStrengthEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -2011,6 +2038,7 @@ async function dispatchStructuralDelete(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
@@ -2020,11 +2048,19 @@ async function dispatchStructuralDelete(
     // append. On failure the prior row stays newest and authoritative: no
     // transcript is appended, because a degraded read gives no trusted base and
     // guessing at one is how a server model gets clobbered.
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -2231,6 +2267,7 @@ async function dispatchStructuralDelete(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -2256,6 +2293,7 @@ async function dispatchStructuralDelete(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -2452,8 +2490,13 @@ async function dispatchFactorValueEdit(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   try {
-    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    if (useAppendV6()) {
+      ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    } else {
+      persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    }
   } catch (err) {
     // Fail CLOSED. A degraded read gives no trusted merge base, so writing
     // anything risks clobbering a model we cannot see. Surface it as a failed
@@ -2633,6 +2676,7 @@ async function dispatchFactorValueEdit(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });
@@ -2665,6 +2709,7 @@ async function dispatchFactorValueEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read, never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -3470,7 +3515,10 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),
   }, requestId));
-  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
   if (r.commitSkippedReason === 'refused_no_write') {
     const at = r.refusal?.index !== undefined ? input.levels[r.refusal.index] : undefined;
     const value = r.refusal?.valueIndex !== undefined ? input.values?.[r.refusal.valueIndex] : undefined;
@@ -3828,7 +3876,10 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
     requestId,
     Date.now(),
   );
-  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
   if (r.commitSkippedReason === 'refused_no_write') return { status: 'refused', reason: r.refusal?.reason ?? 'refused' };
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
@@ -3884,7 +3935,10 @@ export async function commitLimitAddInProcess(input: CommitLimitAddInput, reques
     requestId,
     Date.now(),
   );
-  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
   if (r.commitSkippedReason === 'refused_no_write') return { status: 'refused', reason: r.refusal?.reason ?? 'refused' };
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
@@ -3914,6 +3968,7 @@ async function dispatchStructuralRename(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
@@ -3931,11 +3986,19 @@ async function dispatchStructuralRename(
     // a rename moves no hash, so there is no currency verdict to re-derive.
     // Issuing the read anyway would cost a round trip to compute a value that is
     // then discarded.
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -4100,6 +4163,7 @@ async function dispatchStructuralRename(
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
       // "known-absent base" into "no base asserted" and darkens the CAS guard.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -4125,6 +4189,7 @@ async function dispatchStructuralRename(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
@@ -4294,16 +4359,25 @@ async function dispatchOptionStatusEdit(
   opts: { readonly fenceRefusalReachesCaller?: boolean } = {},
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -4449,6 +4523,7 @@ async function dispatchOptionStatusEdit(
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       contentGraph: result.mutatedGraph,
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -4476,6 +4551,7 @@ async function dispatchOptionStatusEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
@@ -4626,7 +4702,10 @@ export async function commitOptionStatusInProcess(input: CommitOptionStatusInput
   } as OptionStatusEditEvent;
   const payload = { kind: 'system_event', turn_id: input.turn_id, scenario_id: input.scenario_id, stage: 'frame', event } as SystemEventTurnPayload;
   const r = await dispatchOptionStatusEdit(payload, event, requestId, Date.now(), { fenceRefusalReachesCaller: true });
-  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
   if (r.writeOutcome?.attempt_wrote !== true) return { status: 'unconfirmed' };
   return { status: 'written', version_minted: r.writeOutcome.version_minted, model_version_receipt: r.writeOutcome.model_version_receipt };
 }
@@ -4662,16 +4741,25 @@ async function dispatchStructuralAdd(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -4825,6 +4913,7 @@ async function dispatchStructuralAdd(
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
       // "known-absent base" into "no base asserted" and darkens the CAS guard.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -4850,6 +4939,7 @@ async function dispatchStructuralAdd(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
@@ -5026,16 +5116,25 @@ async function dispatchStructuralAddEdge(
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
   let factsRead: WriteReplyAnalysisInputs;
   try {
-    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
-      loadPersistedGraphStrict(payload.scenario_id),
-      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
-    ]);
+    if (useAppendV6()) {
+      [{ graph: persistedGraph, revision: expectedRevision }, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedScenarioStateStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    } else {
+      [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+        loadPersistedGraphStrict(payload.scenario_id),
+        loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+        loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+      ]);
+    }
   } catch (err) {
     log.error(
       {
@@ -5187,6 +5286,7 @@ async function dispatchStructuralAddEdge(
       // SPREAD, never conditionally omitted — `supabase-store.ts` derives
       // `p_expected_base_known` from key PRESENCE.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -5212,6 +5312,7 @@ async function dispatchStructuralAddEdge(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
@@ -5422,8 +5523,13 @@ async function dispatchAddConstraintEdit(
   const payload = spec.turn;
   const event = { kind: spec.eventKind };
   let persistedGraph: unknown;
+  let expectedRevision: number | undefined;
   try {
-    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    if (useAppendV6()) {
+      ({ graph: persistedGraph, revision: expectedRevision } = await loadPersistedScenarioStateStrict(payload.scenario_id));
+    } else {
+      persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+    }
   } catch (err) {
     // Fail CLOSED: a degraded read gives no trusted base. Retryable 500.
     log.error(
@@ -5528,6 +5634,7 @@ async function dispatchAddConstraintEdit(
       // SPREAD, never conditionally omitted — see the fve writer's note: the
       // store derives the known-base CAS guard from key PRESENCE.
       ...cas,
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}),
       ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });
@@ -5554,6 +5661,7 @@ async function dispatchAddConstraintEdit(
         graphConflict: {
           recovery_action: 'refresh_and_reconfirm',
           conflict_category: err.conflict_category,
+          ...readRevisionConflictDetails(err),
           // Analysis-space (16-hex), from a FRESH read — never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),

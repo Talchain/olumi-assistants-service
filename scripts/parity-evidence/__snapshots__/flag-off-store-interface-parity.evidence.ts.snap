@@ -1,0 +1,69 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+// STAGING_SEED_SHA = '69ff73cf180efb4099c10446197661a33f9777da'
+
+exports[`Addendum 11 flag OFF — outer store-interface parity with origin/staging > draft preserves staging RPC arguments, ordered reads and successful commit [staging_method_counts] 1`] = `
+{
+  "append": 1,
+  "loadGraph": 1,
+  "readMostRecentPendingActions": 3,
+}
+`;
+
+exports[`Addendum 11 flag OFF — outer store-interface parity with origin/staging > edit initial brief read outage then save recovery preserves staging arguments, reads and success [staging_method_counts] 1`] = `
+{
+  "append": 1,
+  "countTurns": 1,
+  "loadGraph": 1,
+  "loadGraphAndBriefText": 2,
+  "readAnalysisInvalidatedAt": 1,
+  "readMostRecentCoachingState": 1,
+  "readMostRecentPendingActions": 4,
+  "readRecent": 2,
+  "readRecentAppliedMutationFactsFor": 1,
+  "readScenarioRunAnalysisFactsFor": 1,
+}
+`;
+
+exports[`Addendum 11 flag OFF — outer store-interface parity with origin/staging > edit mismatched client identity preserves staging RPC arguments, reads and success [staging_method_counts] 1`] = `
+{
+  "append": 1,
+  "countTurns": 1,
+  "loadGraph": 1,
+  "loadGraphAndBriefText": 2,
+  "readAnalysisInvalidatedAt": 1,
+  "readMostRecentCoachingState": 1,
+  "readMostRecentPendingActions": 4,
+  "readRecent": 2,
+  "readRecentAppliedMutationFactsFor": 1,
+  "readScenarioRunAnalysisFactsFor": 1,
+}
+`;
+
+exports[`Addendum 11 flag OFF — outer store-interface parity with origin/staging > register preserves staging RPC arguments, ordered reads and success [staging_method_counts] 1`] = `
+{
+  "append": 1,
+  "claimTurnFence": 1,
+  "loadGraph": 1,
+  "readMostRecentPendingActions": 3,
+}
+`;
+
+exports[`Addendum 11 flag OFF — outer store-interface parity with origin/staging > replacement apply preserves staging RPC arguments, ordered reads and verified success [staging_method_counts] 1`] = `
+{
+  "append": 1,
+  "loadGraph": 2,
+  "readMostRecentPendingActions": 2,
+  "readRecent": 1,
+}
+`;
+
+exports[`Addendum 11 flag OFF — outer store-interface parity with origin/staging > system event commit preserves staging RPC arguments, ordered reads and success [staging_method_counts] 1`] = `
+{
+  "append": 1,
+  "loadGraph": 1,
+  "readAnalysisInvalidatedAt": 1,
+  "readMostRecentPendingActions": 3,
+  "readRecent": 1,
+  "readScenarioRunAnalysisFactsFor": 1,
+}
+`;
