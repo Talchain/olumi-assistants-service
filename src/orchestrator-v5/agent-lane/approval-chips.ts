@@ -25,11 +25,10 @@ import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 import { linkEffectSourceLevels } from './link-effect-figures.js';
-import { namesSourceOf, linkEffectStatementClassification } from './stated-by-user.js';
+import { namesSourceOf, linkEffectStatementClassification, linkEffectTheUserStated } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
-import { statedInOneOf } from '../system-events/link-effect-edit.js';
-import { naturalFloorAmount, readLinkEffectFloorAnswer } from './link-effect-lower-bound.js';
-import { isRelativeLinkEffectAnswer, type LinkEffectClarificationReading } from '../system-events/link-effect-unit-reading.js';
+import { statedInOneOf, type LinkEffectStatement } from '../system-events/link-effect-edit.js';
+import { readLinkEffectClarificationAnswer, readLinkEffectCurrentFloorAnswer, type LinkEffectClarificationReading } from '../system-events/link-effect-unit-reading.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -480,30 +479,23 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
       + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
   }
   if (op.clarification !== undefined) {
-    if (op.clarification.statement_classification !== 'asserted' || typeof op.clarification.source_text !== 'string'
-      || op.clarification.from_id !== op.from || op.clarification.to_id !== op.to
-      || linkEffectStatementClassification(op.quote, op.clarification.source_text, { source: labels.from, target: labels.to }) !== 'asserted'
-      || op.clarification.quote !== op.quote || typeof op.clarification.answer !== 'string'
-      || (op.clarification.node_id !== op.from && op.clarification.node_id !== op.to)) return undefined;
-    if (op.clarification.floor !== undefined) {
-      const floor = op.clarification.floor;
-      const answer = readLinkEffectFloorAnswer(floor, op.clarification.answer);
-      if (!answer.ok || naturalFloorAmount(floor, answer.guess) !== e.amount
-        || answer.upper !== op.clarification.upper || floor.per_source_change !== e.per_source_change
-        || !statedInOneOf(floor.per_source_change_unit, [e.per_source_change_unit])) return undefined;
+    const clarification = op.clarification;
+    if (clarification.current_turn !== true || clarification.statement_classification !== 'asserted'
+      || clarification.source_text !== op.quote || clarification.from_id !== op.from || clarification.to_id !== op.to
+      || clarification.quote !== op.quote || clarification.answer !== op.quote || clarification.node_id !== op.to) return undefined;
+    const statedEnds = { source: labels.from, target: labels.to };
+    const statedScope = { quantities: [labels.from, labels.to] };
+    const shortAnswer = readLinkEffectClarificationAnswer(clarification, e as LinkEffectStatement, op.quote, statedEnds, statedScope);
+    if (!shortAnswer && (linkEffectStatementClassification(op.quote, op.quote, { source: labels.from, target: labels.to }) !== 'asserted'
+      || linkEffectTheUserStated(op.quote, e as LinkEffectStatement, { source: labels.from, target: labels.to }, { quantities: [labels.from, labels.to] }) !== null)) return undefined;
+    if (clarification.floor !== undefined) {
+      const floor = clarification.floor;
+      const answer = readLinkEffectCurrentFloorAnswer(clarification, e as LinkEffectStatement, op.quote, statedEnds, statedScope);
+      if (!shortAnswer || !answer.ok || answer.guess !== e.amount || answer.upper !== clarification.upper) return undefined;
       // AIQ: words pending
       disclosures.push(`Your recorded floor: “${floor.words}”.`
         + (answer.upper === undefined ? ' No range was supplied.'
           : ` Your plausible extremes are ${unsigned(floor.value, floor.unit)} and ${unsigned(answer.upper, floor.unit)}; your best guess is ${unsigned(answer.guess, floor.unit)}.`));
-    }
-    if (op.clarification.relative !== undefined) {
-      const basis = op.clarification.relative;
-      if (op.clarification.floor !== undefined || !isRelativeLinkEffectAnswer(op.clarification.answer)
-        || op.clarification.node_id !== op.to || basis.from_id !== op.from || basis.to_id !== op.to
-        || !Number.isFinite(basis.percent) || !Number.isFinite(basis.current_level) || typeof basis.current_level_unit !== 'string'
-        || basis.percent * basis.current_level / 100 !== e.amount || !meetsReading(e.amount_unit, basis.current_level_unit)) return undefined;
-      disclosures.push(`Relative basis: ${Math.abs(basis.percent)}% of the current ${unsigned(basis.current_level, basis.current_level_unit)} `
-        + `level of “${labels.to}” = ${signed(e.amount, e.amount_unit)}.`);
     }
     // AIQ: words pending
     disclosures.push(`Your clarification: “${op.clarification.answer}”.`);

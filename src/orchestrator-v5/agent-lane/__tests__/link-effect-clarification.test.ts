@@ -22,14 +22,19 @@ const carry = (prior: LinkEffectClarificationPending[], extra: Partial<Parameter
   linkEffectClarificationsForAnswerRow({ prior, next: [], consumedLinks: [], graph, graphHash: 'after-run',
     nowMs: Date.now(), typedByUser: false, ...extra });
 
-describe('stated-effect clarification licence and lifetime', () => {
-  it('round-trips the stored sentence; malformed fields cannot acquire the licence', () => {
+describe('context-only link-effect clarification and lifetime', () => {
+  it('round-trips context and resolved reading; malformed context is refused', () => {
     const ask = make();
     expect(parsePendingAction(JSON.parse(JSON.stringify(ask)))).toEqual(ask);
     for (const key of ['from_id', 'to_id', 'from_label', 'to_label', 'quote', 'question', 'refusal']) {
       expect(parsePendingAction({ ...ask, action: { ...ask.action, [key]: '' } })).toBeNull();
     }
     expect(parsePendingAction({ ...ask, action: { ...ask.action, value_text: {} } })).toBeNull();
+    for (const resolved_reading of ['points', 'relative'] as const) {
+      const resolved = { ...ask, action: { ...ask.action, resolved_reading } };
+      expect(parsePendingAction(JSON.parse(JSON.stringify(resolved)))).toEqual(resolved);
+    }
+    expect(parsePendingAction({ ...ask, action: { ...ask.action, resolved_reading: 'absolute-ish' } })).toBeNull();
     expect(linkEffectClarificationOnRefusal({ action: ask.action, message: 'I did not say those words.',
       scenarioId: SCENARIO, graph, emittedAtIso: ask.emitted_at_iso })).toBeNull();
   });
@@ -52,7 +57,7 @@ describe('stated-effect clarification licence and lifetime', () => {
   it('the same refused statement changes its question without renewing its lifetime', () => {
     const original = make();
     const prior = { ...original, expires_at_turn_count: 3 };
-    const refreshed = { ...make(), action: { ...original.action, question: 'You said at least one point. What bound do you mean?' } };
+    const refreshed = { ...make(Date.parse(original.emitted_at_iso) + 1), action: { ...original.action, question: 'You said at least one point. What bound do you mean?' } };
     const result = carry([prior], { next: [refreshed], typedByUser: true });
     expect(result).toEqual([{ ...prior, action: refreshed.action, expires_at_turn_count: 2 }]);
     expect(carry([{ ...prior, expires_at_turn_count: 1 }], { next: [refreshed], typedByUser: true })).toEqual([]);
@@ -66,7 +71,7 @@ describe('stated-effect clarification licence and lifetime', () => {
     expect(carry([replacement], { consumedLinks: [{ from_id: 'price', to_id: 'churn' }] })).toEqual([]);
   });
 
-  it('a removed link or a user-sized link expires the stored answer licence', () => {
+  it('a removed link or a user-sized link expires the context carrier', () => {
     const ask = make();
     expect(liveLinkEffectClarifications([ask], 'another-scenario', graph)).toEqual([]);
     expect(carry([ask], { graph: { ...graph, edges: [] } })).toEqual([]);
@@ -79,7 +84,7 @@ describe('stated-effect clarification licence and lifetime', () => {
     }
   });
 
-  it('a failed graph read preserves the statement with its bounded lifetime and licenses no answer', () => {
+  it('a failed graph read preserves bounded context and selects no tool answer', () => {
     const ask = make();
     for (const unknownGraph of [undefined, null, {}, { nodes: graph.nodes }, { edges: graph.edges }]) {
       expect(carry([ask], { graph: unknownGraph })).toEqual([ask]);
@@ -91,18 +96,38 @@ describe('stated-effect clarification licence and lifetime', () => {
     expect(linkEffectAnswerFirstCall(undefined, [ask], 'relative', false)).toBeUndefined();
   });
 
-  it('F1c RED: a legacy carrier without its original assertion classification cannot license a reading answer', () => {
-    const ask = make();
-    const legacy = { ...ask, action: { ...ask.action, statement_classification: undefined, source_text: undefined } };
-    expect(linkEffectAnswerFirstCall(state, [legacy], 'percentage points', false)).toBeUndefined();
-    expect(linkEffectAnswerFirstCall(state, [legacy], 'relative', false)).toBeUndefined();
+  it.each([
+    'I reject this claim: Raising Pro plan price by £1 will increase Monthly churn rate by 5%',
+    'Our supplier says raising Pro plan price by £1 will increase Monthly churn rate by 5 points.',
+    'As I said, raising Pro plan price by £1 will increase Monthly churn rate by 5 points.',
+  ])('any refusal of a named-link statement arms neutral context (%s)', quote => {
+    const ask = make(Date.now(), quote);
+    expect(ask.action.quote).toBe(quote);
+    expect(liveLinkEffectClarifications([ask], SCENARIO, graph)).toEqual([ask]);
+    expect(linkEffectAnswerFirstCall(state, [ask], 'points', false)).toBe(LINK_EFFECT_TOOL);
   });
 
-  it('forces only a definite reading answer for one unchanged canonical link', () => {
+  it('legacy classifications do not license figures or prevent a context-only reading reply', () => {
     const ask = make();
+    const legacy = { ...ask, action: { ...ask.action, statement_classification: undefined, source_text: undefined } };
+    expect(linkEffectAnswerFirstCall(state, [legacy], 'percentage points', false)).toBe(LINK_EFFECT_TOOL);
+    expect(linkEffectAnswerFirstCall(state, [legacy], 'relative', false)).toBe(LINK_EFFECT_TOOL);
+  });
+
+  it('an older arriving statement never replaces newer context for the same exact link', () => {
+    const older = make(Date.now() - 20, 'We expect Monthly churn rate to rise by 5 points for a £1 rise in Pro plan price.');
+    const newer = make(Date.now() - 10, 'We expect Monthly churn rate to rise by 10 points for a £1 rise in Pro plan price.');
+    expect(liveLinkEffectClarifications([newer, older], SCENARIO, graph)).toEqual([newer]);
+    expect(carry([newer], { next: [older], typedByUser: true }))
+      .toEqual([{ ...newer, expires_at_turn_count: newer.expires_at_turn_count - 1 }]);
+  });
+
+  it('selects the existing tool only for a definite reply to one unchanged canonical link', () => {
+    const ask = make();
+    expect(linkEffectAnswerFirstCall(state, [ask], 'points', false)).toBe(LINK_EFFECT_TOOL);
     expect(linkEffectAnswerFirstCall(state, [ask], 'one percentage point', false)).toBe(LINK_EFFECT_TOOL);
     expect(linkEffectAnswerFirstCall(state, [ask], 'relative', false)).toBe(LINK_EFFECT_TOOL);
-    for (const message of ['perhaps relative', 'Is it relative?', 'Yes', 'I increased the price', '1']) {
+    for (const message of ['perhaps relative', 'Is it relative?', 'Yes', 'I increased the price']) {
       expect(linkEffectAnswerFirstCall(state, [ask], message, false)).toBeUndefined();
     }
     expect(linkEffectAnswerFirstCall(state, [ask], 'relative', true)).toBeUndefined();

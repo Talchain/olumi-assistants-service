@@ -43,8 +43,7 @@ const onlyReads = (w: ReturnType<typeof world>) => {
 };
 
 describe('⭐ the served correction reads exactly as the same sentence without its "not" tail', () => {
-  // The served sentence's "1%" on a source measured in % then gets the points-or-share question (U3): the SAME answer its
-  // tail-free twin gets, never the denial it got on 13149d8 ("How much does … move …, using the figures you wrote?").
+  // The correction and its twin retain the same refusal state. RC2a carries each exact current statement in its ask.
   const TWIN = 'Each 1% price rise adds £600 a month to monthly recurring revenue.';
   it.each(['%', 'percentage points'])('one link, per-change unit %s: served sentence ≡ its twin, never a denial', async (unit) => {
     const run = async (said: string) => {
@@ -55,8 +54,12 @@ describe('⭐ the served correction reads exactly as the same sentence without i
     const served = await run(SAID);
     const twin = await run(TWIN);
     expect(served.r.why, JSON.stringify(served.r)).not.toBe('denied');
-    expect({ ok: served.r.ok, refusal: served.r.refusal, question: served.r.question })
-      .toEqual({ ok: twin.r.ok, refusal: twin.r.refusal, question: twin.r.question });
+    expect({ ok: served.r.ok, refusal: served.r.refusal })
+      .toEqual({ ok: twin.r.ok, refusal: twin.r.refusal });
+    for (const [result, quote] of [[served.r, SAID], [twin.r, TWIN]] as const) {
+      expect(result.question).toBe(`You said “${quote}”. What's your best single guess for how much ‘Price rise’ changes ‘monthly recurring revenue’, and what's the most it could plausibly be?`);
+      expect(result.link_effect_clarifications[0].quote).toBe(quote);
+    }
     onlyReads(served.w);
   });
 });

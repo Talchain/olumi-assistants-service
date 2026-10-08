@@ -116,7 +116,7 @@ export interface LinkEffectBound {
 const LOWER_BOUND_WORDS = 'at least|no less than|no fewer than|at minimum|(?:a |the )?minimum(?: of)?|upwards? of|more than|over|above';
 const UPPER_BOUND_WORDS = 'at most|no more than|no greater than|no higher than|no larger than|at maximum|(?:a |the )?maximum(?: of)?|up to|less than|under|below';
 const BOUND_BEFORE = new RegExp(`\\b(${LOWER_BOUND_WORDS}|${UPPER_BOUND_WORDS})\\s+`
-  + '(?:(?:increase|decrease|rise|fall|change|by|about|approximately)\\s+)*[+−-]?\\s*$', 'i');
+  + '(?:(?:increase|decrease|rise|fall|change|by|about|around|roughly|approximately|a|an)\\s+)*[+−-]?\\s*$', 'i');
 const LOWER_BOUND = new RegExp(`^(?:${LOWER_BOUND_WORDS})$`, 'i');
 const STRICT_BOUND = /^(?:more than|over|above|less than|under|below)$/i;
 // Units may be a short count or currency-period phrase; punctuation or a second figure cannot be crossed.

@@ -1,6 +1,6 @@
 /** The stated effect and its open question survive until that same link is resolved. */
-import { readLinkEffectFloorAnswer } from './link-effect-lower-bound.js';
-import { linkEffectStatementClassification } from './stated-by-user.js';
+import { findLinkEffectAmounts } from './link-effect-figures.js';
+import { linkEffectStatementNamesEndpoints, quoteSpansIn } from './stated-by-user.js';
 import { randomUUID } from 'node:crypto';
 import { computeSurvivingPriorPendings } from '../commit.js';
 import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../session/pending-action.js';
@@ -21,16 +21,22 @@ const records = (value: unknown): Rec[] => Array.isArray(value) ? value.map(reco
 const linkKey = (link: LinkEffectClarificationLink): string => JSON.stringify([link.from_id, link.to_id]);
 const isAsk = (pending: PendingAction | null): pending is LinkEffectClarificationPending => pending?.action.kind === 'elicit_link_effect_clarification';
 
-/** Legacy carriers are re-read too; no stored flag can turn a denial into an assertion. */
-export function linkEffectClarificationIsAssertion(action: Omit<LinkEffectClarificationAction, 'kind'>): boolean {
-  return (action.statement_classification === undefined || action.statement_classification === 'asserted')
-    && linkEffectStatementClassification(action.quote, action.source_text ?? action.quote,
-      { source: action.from_label, target: action.to_label }) === 'asserted';
+/** A reading answer supplies units only, never any number in the stored statement. */
+export function linkEffectResolvedReading(answer: string): 'points' | 'relative' | undefined {
+  const reply = answer.trim().replace(/^(?:I mean|I meant|it['’]?s|that['’]?s)\s+/i, '').replace(/[.!]$/, '').trim();
+  if (/^relative(?:\s+(?:change|increase|decrease))?$/i.test(reply)) return 'relative';
+  if (/^(?:(?:one|a|1(?:\.0+)?)\s+)?(?:percentage\s+)?points?$/i.test(reply)
+    || /^(?:absolute|percentage[-\s]point)(?:\s+(?:change|increase|decrease))?$/i.test(reply)) return 'points';
+  return undefined;
+}
+
+export function linkEffectBestGuessQuestion(action: Pick<LinkEffectClarificationAction, 'quote' | 'from_label' | 'to_label'>): string {
+  // AIQ: words pending
+  return `You said “${action.quote}”. What's your best single guess for how much ‘${action.from_label}’ changes ‘${action.to_label}’, and what's the most it could plausibly be?`;
 }
 
 /** A changed revision or a Run is not resolution; only the held link and its authorship decide. */
 function sameUnresolvedLink(ask: LinkEffectClarificationPending, graph: unknown): boolean {
-  if (!linkEffectClarificationIsAssertion(ask.action)) return false;
   const found = linkEffectTargetOf(graph, ask.action.from_id, ask.action.to_id);
   if (found.kind !== 'one') return false;
   const provenance = record(found.edge.provenance);
@@ -43,7 +49,7 @@ function latestPerLink(asks: readonly LinkEffectClarificationPending[]): LinkEff
   for (const ask of asks) {
     const key = linkKey(ask.action);
     const previous = byLink.get(key);
-    if (previous === undefined || Date.parse(ask.emitted_at_iso) >= Date.parse(previous.emitted_at_iso)) byLink.set(key, ask);
+    if (previous === undefined || Date.parse(ask.emitted_at_iso) > Date.parse(previous.emitted_at_iso)) byLink.set(key, ask);
   }
   return [...byLink.values()];
 }
@@ -59,17 +65,16 @@ export function liveLinkEffectClarifications(
 export function linkEffectClarificationOnRefusal(input: {
   action: Omit<LinkEffectClarificationAction, 'kind'>; message: string; scenarioId: string; graph: unknown; emittedAtIso: string;
 }): LinkEffectClarificationPending | null {
-  if (!input.message.includes(input.action.quote) || !linkEffectClarificationIsAssertion(input.action)
-    || linkEffectStatementClassification(input.action.quote, input.message,
-      { source: input.action.from_label, target: input.action.to_label }) !== 'asserted') return null;
+  if (quoteSpansIn(input.message, input.action.quote).length === 0
+    || !linkEffectStatementNamesEndpoints(input.action.quote, { source: input.action.from_label, target: input.action.to_label })) return null;
   const emittedMs = Date.parse(input.emittedAtIso);
   if (!Number.isFinite(emittedMs)) return null;
   const id = randomUUID();
   const pending = parsePendingAction({
     id, scenario_id: input.scenarioId, chip_id: `agent-link-effect-clarification:${id}`,
-    action: { kind: 'elicit_link_effect_clarification', ...input.action, statement_classification: 'asserted',
+    action: { kind: 'elicit_link_effect_clarification', ...input.action,
       source_text: input.action.source_text ?? input.message },
-    // A Run can change the hash; the exact held pair above is the answer's licence.
+    // A Run can change the hash; only the endpoints and question are carried.
     preconditions: { target_entity_ids: [input.action.from_id, input.action.to_id] },
     expires_at_turn_count: LINK_EFFECT_CLARIFICATION_TURN_TTL, emitted_at_iso: input.emittedAtIso,
     expires_at_iso: new Date(emittedMs + LINK_EFFECT_CLARIFICATION_WALL_TTL_MS).toISOString(),
@@ -94,7 +99,9 @@ export function linkEffectClarificationsForAnswerRow(input: {
   for (const old of prior) {
     const key = linkKey(old.action);
     if (consumed.has(key)) continue;
-    const replacement = nextByLink.get(key);
+    const arriving = nextByLink.get(key);
+    const replacement = arriving !== undefined && Date.parse(arriving.emitted_at_iso) > Date.parse(old.emitted_at_iso) ? arriving : undefined;
+    if (arriving !== undefined && replacement === undefined) nextByLink.delete(key);
     // Re-asking about the same stored statement changes the question, never resets its lifetime.
     if (replacement !== undefined && replacement.action.quote !== old.action.quote) continue;
     const candidate = { ...old, ...(replacement !== undefined ? { action: replacement.action } : {}),
@@ -119,9 +126,7 @@ export function linkEffectClarificationForReply(
   const entities = records(canonical.entities);
   const heldLinks = records(canonical.links);
   const live = asks.filter(ask => {
-    // The discarded surrounding text of a legacy quote cannot be reconstructed by a short unit answer.
-    if (ask.action.statement_classification !== 'asserted' || typeof ask.action.source_text !== 'string'
-      || !linkEffectClarificationIsAssertion(ask.action) || isPendingActionExpired(ask, Date.now())
+    if (isPendingActionExpired(ask, Date.now())
       || !entities.some(e => e.id === ask.action.from_id && e.label === ask.action.from_label)
       || !entities.some(e => e.id === ask.action.to_id && e.label === ask.action.to_label)) return false;
     const links = heldLinks.filter(l => l.from === ask.action.from_id && l.to === ask.action.to_id);
@@ -130,13 +135,10 @@ export function linkEffectClarificationForReply(
   if (live.length !== 1) return null;
   const ask = live[0]!;
   const text = typedMessage.trim();
-  const reading = /^(?:(?:I mean|I meant|it['’]?s|that['’]?s)\s+)?(?:relative(?:\s+(?:change|increase|decrease))?|(?:one|a|1(?:\.0+)?)\s+percentage\s+point|(?:\d+(?:\.\d+)?\s+percentage\s+points?)|percentage\s+points?|(?:an?\s+)?(?:absolute|percentage[-\s]point)(?:\s+(?:change|increase|decrease))?)[.!]?$/i;
-  if (ask.action.floor !== undefined) {
-    const answer = readLinkEffectFloorAnswer(ask.action.floor, text);
-    // Invalid ordered answers still enter the tool so their bounds are refused and the floor survives.
-    if (answer.ok || answer.refusal === 'outside_stated_bounds' || answer.refusal.startsWith('RANGE_')) return ask;
-  }
-  return reading.test(text) ? ask : null;
+  if (linkEffectResolvedReading(text) !== undefined) return ask;
+  // A best-guess reply must state a fresh figure. The capability and writer validate its terms.
+  return (ask.action.floor !== undefined || ask.action.resolved_reading !== undefined || ask.action.question.includes('best single guess'))
+    && findLinkEffectAmounts(text).length > 0 ? ask : null;
 }
 
 /** No chips, approval or other forced routes enter this reply gate. */

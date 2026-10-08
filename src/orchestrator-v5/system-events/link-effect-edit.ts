@@ -36,15 +36,14 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { linkEffectClarificationSettlesPoints, linkEffectClarificationSettlesRelative, prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero,
+import { readLinkEffectClarificationAnswer, readLinkEffectCurrentFloorAnswer, prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero,
   type LinkEffectClarificationReading, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
-import { centreRangeOfQuote, linkEffectStatementClassification, linkEffectStatementNamesEndpoints } from '../agent-lane/stated-by-user.js';
+import { centreRangeOfQuote, linkEffectStatementClassification, linkEffectTheUserStated, ownUnitsOf } from '../agent-lane/stated-by-user.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
-import { naturalFloorAmount, readLinkEffectFloorAnswer } from '../agent-lane/link-effect-lower-bound.js';
-import { boundedLinkEffectText, findLinkEffectAmounts } from '../agent-lane/link-effect-figures.js';
+import { boundedLinkEffectText } from '../agent-lane/link-effect-figures.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -452,16 +451,17 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const found = linkEffectTargetOf(graph, from, to);
   if (found.kind === 'refused') return refuse(found.reason);
   const edge = found.edge;
-  if (params.clarification !== undefined && (params.clarification.statement_classification !== 'asserted'
-    || typeof params.clarification.source_text !== 'string'
-    || params.clarification.from_id !== from || params.clarification.to_id !== to)) return refuse('unit_mismatch');
-  const originalSource = params.clarification?.source_text ?? params.quote;
+  const clarification = params.clarification;
+  if (clarification !== undefined && (clarification.current_turn !== true
+    || clarification.statement_classification !== 'asserted' || clarification.source_text !== params.quote
+    || clarification.answer !== params.quote || clarification.quote !== params.quote
+    || clarification.from_id !== from || clarification.to_id !== to || clarification.node_id !== to)) return refuse('unit_mismatch');
   const statedEnds = { source: String(nodes.find(n => n.id === from)?.label ?? from),
     target: String(nodes.find(n => n.id === to)?.label ?? to) };
-  if (typeof originalSource !== 'string' || linkEffectStatementClassification(params.quote, originalSource, statedEnds) !== 'asserted'
-    || (params.clarification?.statement_classification !== undefined && params.clarification.statement_classification !== 'asserted')
-    || (params.clarification?.from_id !== undefined && params.clarification.from_id !== from)
-    || (params.clarification?.to_id !== undefined && params.clarification.to_id !== to)) return refuse('unit_mismatch');
+  const statedScope = { quantities: nodes.map(n => String(n.label ?? n.id)), target_units: ownUnitsOf(nodes.find(n => n.id === to)!) };
+  const shortAnswer = readLinkEffectClarificationAnswer(clarification, effect, params.quote, statedEnds, statedScope);
+  if (!shortAnswer && linkEffectStatementClassification(params.quote, params.quote, statedEnds) !== 'asserted') return refuse('unit_mismatch');
+  if (clarification !== undefined && !shortAnswer && linkEffectTheUserStated(params.quote, effect, statedEnds, statedScope) !== null) return refuse('unit_mismatch');
 
   // ── REVISION-SAFE: the analysis revision AND every byte of this link are what the ask was prepared against ─────────
   if (computeAnalysisAffectingGraphHash(params.persistedGraph as never) !== expected.graph_hash
@@ -478,27 +478,10 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const floor = params.clarification?.floor;
   // The writer is the last word-to-size boundary: no definite unit or approval turns a bound into a mean.
   if (boundedLinkEffectText(params.quote) !== undefined && floor === undefined) return refuse('unit_mismatch');
-  const floorAnswer = floor === undefined ? undefined : readLinkEffectFloorAnswer(floor, params.clarification!.answer);
-  if (params.clarification !== undefined) {
-    if (floor !== undefined) {
-      // The approval records the person's guess, never the minimum, and binds the whole answer to the original link.
-      if (!isRec(params.clarification) || params.clarification.node_id !== to || params.clarification.quote !== params.quote
-        || (floor.from_id !== undefined && floor.from_id !== from) || (floor.to_id !== undefined && floor.to_id !== to)
-        || !linkEffectStatementNamesEndpoints(params.quote, statedEnds)
-        || floorAnswer?.ok !== true || naturalFloorAmount(floor, floorAnswer.guess) !== effect.amount
-        || floorAnswer.upper !== params.clarification.upper || floor.per_source_change !== effect.per_source_change
-        || !statedInOneOf(floor.per_source_change_unit, [effect.per_source_change_unit])
-        || boundedLinkEffectText(params.quote) === undefined
-        || findLinkEffectAmounts(boundedLinkEffectText(params.quote)!)[0]?.magnitude !== floor.value
-        || (floor.reading === 'absolute' ? !statedInOneOf(floor.unit, [effect.amount_unit])
-          : !statedInOneOf(effect.amount_unit, POINTS_STATED))) return refuse('unit_mismatch');
-    } else if (!isRec(params.clarification) || (!linkEffectClarificationSettlesPoints(params.clarification,
-      params.clarification.node_id === from ? from : to, params.quote,
-      params.clarification.node_id === from ? effect.per_source_change : effect.amount)
-      && !linkEffectClarificationSettlesRelative(params.clarification, params.persistedGraph, from, to, effect, params.quote))) {
-      return refuse('unit_mismatch');
-    }
-  }
+  const floorAnswer = floor === undefined ? undefined : readLinkEffectCurrentFloorAnswer(clarification, effect, params.quote, statedEnds, statedScope);
+  if (clarification !== undefined && floor !== undefined
+    && (!shortAnswer || floorAnswer?.ok !== true || floorAnswer.guess !== effect.amount
+      || floorAnswer.upper !== clarification.upper)) return refuse('unit_mismatch');
   const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote,
     { link_selected: params.link_selected === true, clarification: params.clarification });
   if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)
@@ -583,7 +566,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // sentence from a brief (`natural_effect.stated_range`, `end: 'centre'`), so the chat and the brief size it alike.
   const centre = floor === undefined ? centreRangeOfQuote(params.quote, effect) : undefined;
   const floorStd = floor !== undefined && floorAnswer?.ok === true && floorAnswer.std !== undefined
-    ? naturalFloorAmount(floor, floorAnswer.std) : undefined;
+    ? floorAnswer.std : undefined;
   const sizing = sizeLink(
     { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true,
       ...(floorStd !== undefined ? { effect_std: floorStd } : {}),

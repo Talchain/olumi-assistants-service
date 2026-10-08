@@ -54,7 +54,7 @@ function carriedLinkAsk(
 ): string | undefined {
   const action = clarifications.find(pending => pending.action.from_id === from && pending.action.to_id === to)?.action;
   // AIQ: words pending
-  return action === undefined ? undefined : `You said “${action.quote}”. ${action.question}`;
+  return action === undefined ? undefined : action.question.startsWith('You said') ? action.question : `You said “${action.quote}”. ${action.question}`;
 }
 
 /** The old part-to-target ask can span a path. Use its one carried edge only when that edge is unambiguous. */

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { statedRangeSpread } from '../../stated-range-spread.js';
+import { linkEffectFloorFromStatement, linkEffectFloorQuestion, type LinkEffectFloor } from '../../agent-lane/link-effect-lower-bound.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { boundedLinkEffectText, findLinkEffectBounds, hasLinkEffectRange } from '../../agent-lane/link-effect-figures.js';
 import { linkEffectQuoteContextMiss, linkEffectStatementClassification, linkEffectStatementNamesEndpoints, linkEffectTheUserStated } from '../../agent-lane/stated-by-user.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
-import { prepareLinkEffectUnitReadings, type LinkEffectClarificationReading } from '../link-effect-unit-reading.js';
+import { prepareLinkEffectUnitReadings, readLinkEffectClarificationAnswer, readLinkEffectCurrentFloorAnswer, type LinkEffectClarificationReading } from '../link-effect-unit-reading.js';
 
 const graph = {
   goal_node_id: 'profit',
@@ -106,17 +108,9 @@ describe('same-endpoint points answer bound into canonical approval', () => {
     },
   );
 
-  it('settles the stored sentence without changing its literal figure or verbatim quote', () => {
-    expect(prepareLinkEffectUnitReadings(graph, 'price', 'margin', effect, quote, { clarification })).toEqual({
-      unit_readings: [], points_at_zero: ['margin'],
-    });
-    const result = applyLinkEffectEdit(params());
-    expect(result.kind, JSON.stringify(result)).toBe('mutated');
-    if (result.kind !== 'mutated') return;
-    const held = result.mutatedGraph as { edges: { provenance: { source_quote: string; natural_effect: { amount: number; amount_unit: string } } }[] };
-    expect(held.edges[0]!.provenance.source_quote).toBe(quote);
-    expect(held.edges[0]!.provenance.natural_effect.amount).toBe(5);
-    expect(held.edges[0]!.provenance.natural_effect.amount_unit).toBe('percentage points');
+  it('a points-only reply preserves the question and cannot write a stored figure', () => {
+    expect(prepareLinkEffectUnitReadings(graph, 'price', 'margin', effect, quote, { clarification }).ask).toBeDefined();
+    expect(applyLinkEffectEdit(params())).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
 
   it('the existing bare-percent question and refusal remain unchanged without an answer marker', () => {
@@ -133,12 +127,12 @@ describe('same-endpoint points answer bound into canonical approval', () => {
     { ...clarification, answer: 'relative' },
     { ...clarification, answer: 'perhaps percentage points' },
     { ...clarification, answer: 'one percentage point' },
-  ])('refuses an answer that does not settle this endpoint and original literal figure: %j', marker => {
+    { ...clarification, answer: 'five percentage points' },
+  ])('a stored statement is never licensed by its answer: %j', marker => {
     expect(applyLinkEffectEdit(params(marker))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
 
-  it('a matching stated magnitude may clarify points; neither a changed answer nor an omitted marker can use its token', () => {
-    expect(applyLinkEffectEdit(params({ ...clarification, answer: 'five percentage points' })).kind).toBe('mutated');
+  it('changing or omitting the answer marker invalidates the approval token', () => {
     const approved = params();
     expect(applyLinkEffectEdit({ ...approved, clarification: { ...clarification, answer: 'relative' } })).toMatchObject({
       kind: 'refused', reason: 'reading_not_confirmed',
@@ -153,10 +147,10 @@ describe('same-endpoint points answer bound into canonical approval', () => {
     expect(applyLinkEffectEdit(reading)).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
 
-  it('a bounded current level does not refuse a separate definite effect and its explicit points answer', () => {
+  it('a bounded current level cannot make a stored effect writable through a points-only reply', () => {
     const baselineQuote = 'Current gross margin is at least 30%, and raising the café price by £1 will increase gross margin by 5%.';
     const approved = { ...params(), quote: baselineQuote, clarification: { ...clarification, quote: baselineQuote, source_text: baselineQuote } };
-    expect(applyLinkEffectEdit({ ...approved, reading_token: linkEffectReadingToken(approved) }).kind).toBe('mutated');
+    expect(applyLinkEffectEdit({ ...approved, reading_token: linkEffectReadingToken(approved) }).kind).toBe('refused');
   });
 
   it.each(['higher', 'lower', 'extra'])('recognizes the %s comparative as a change bound rather than a current level', comparative => {
@@ -175,5 +169,95 @@ describe('same-endpoint points answer bound into canonical approval', () => {
     };
     const result = applyLinkEffectEdit({ ...approved, reading_token: linkEffectReadingToken(approved) });
     expect(result).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+});
+
+
+const floor: LinkEffectFloor = { from_id: 'price', to_id: 'margin', value: 1, unit: 'percentage points', reading: 'points',
+  words: 'at least 1 point', per_source_change: 1, per_source_change_unit: '£', reading_answer: 'points',
+  source_quote: "This price increase will raise gross margin by at least 1%.", from_label: 'Café price', target_label: 'Gross margin' };
+function currentWrite(answer: string, amount: number, extra: Partial<LinkEffectClarificationReading> = {}) {
+  const shown = { ...params(null), quote: answer, effect: { ...effect, amount }, clarification: {
+    node_id: 'margin', from_id: 'price', to_id: 'margin', current_turn: true as const, statement_classification: 'asserted' as const,
+    source_text: answer, quote: answer, answer, reading: 'points' as const, ...extra,
+  } };
+  return applyLinkEffectEdit({ ...shown, reading_token: linkEffectReadingToken(shown) });
+}
+
+describe('RC2a current-turn-only canonical figures', () => {
+  it('a short current guess in the resolved points reading writes its own figure', () => {
+    const result = currentWrite('2', 2);
+    expect(result.kind, JSON.stringify(result)).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    expect((result.mutatedGraph as typeof graph).edges[0]!.provenance).toMatchObject({ source_quote: '2', natural_effect: {
+      amount: 2, amount_unit: 'percentage points', per_source_change: 1,
+    } });
+  });
+
+  it('a recorded floor plus current guess and upper uses Science h spread at 0.9', () => {
+    const result = currentWrite('2, at most 3', 2, { floor, upper: 3 });
+    expect(result.kind, JSON.stringify(result)).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    const spread = statedRangeSpread(1, 3, 0.9);
+    expect(spread.ok).toBe(true);
+    expect((result.mutatedGraph as typeof graph).edges[0]!.provenance).toMatchObject({ source_quote: '2, at most 3',
+      natural_effect: { amount: 2, per_source_change: 1 }, stated_effect_floor: { value: 1 }, stated_effect_upper: 3,
+      stated_effect_std: spread.ok ? spread.std : undefined });
+  });
+
+  it('a current guess alone preserves the floor without manufacturing an upper', () => {
+    const result = currentWrite('2 points', 2, { floor });
+    expect(result.kind, JSON.stringify(result)).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    const provenance = (result.mutatedGraph as typeof graph).edges[0]!.provenance;
+    expect(provenance).toMatchObject({ source_quote: '2 points', stated_effect_floor: { value: 1 } });
+    expect(provenance).not.toHaveProperty('stated_effect_upper');
+  });
+
+  it('a full current statement preserves a commensurate floor without inventing a range', () => {
+    const result = currentWrite('Raising the café price by £1 will increase gross margin by 2 points.', 2, { floor });
+    expect(result.kind, JSON.stringify(result)).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    const provenance = (result.mutatedGraph as typeof graph).edges[0]!.provenance;
+    expect(provenance).toMatchObject({ source_quote: 'Raising the café price by £1 will increase gross margin by 2 points.',
+      natural_effect: { amount: 2, per_source_change: 1 }, stated_effect_floor: { value: 1 } });
+    expect(provenance).not.toHaveProperty('stated_effect_upper');
+    expect(provenance).not.toHaveProperty('stated_effect_std');
+  });
+
+  it('only a full current source figure can satisfy a matching multi-unit floor', () => {
+    const quote = 'Raising the café price by £2 will increase gross margin by 2 points.';
+    const marker: LinkEffectClarificationReading = { node_id: 'margin', from_id: 'price', to_id: 'margin', quote, answer: quote,
+      source_text: quote, current_turn: true, statement_classification: 'asserted', reading: 'points', floor: { ...floor, per_source_change: 2 } };
+    const statement = { ...effect, amount: 2, per_source_change: 2 };
+    expect(readLinkEffectCurrentFloorAnswer(marker, statement, quote, { source: 'Café price', target: 'Gross margin' })).toEqual({ ok: true, guess: 2 });
+    expect(readLinkEffectCurrentFloorAnswer({ ...marker, quote: '2 points', answer: '2 points', source_text: '2 points' }, statement, '2 points').ok).toBe(false);
+    expect(readLinkEffectCurrentFloorAnswer({ ...marker, floor }, statement, quote, { source: 'Café price', target: 'Gross margin' }).ok).toBe(false);
+  });
+
+  it('a full fresh statement cannot consume a floor from another link', () => {
+    const result = currentWrite('Raising the café price by £1 will increase gross margin by 2 points.', 2,
+      { floor: { ...floor, to_id: 'another_target' } });
+    expect(result.kind).toBe('refused');
+  });
+
+  it.each(['points', 'relative', 'at least 2 points', 'I reject this claim: 2 points', 'According to our adviser: 2 points'])(
+    'no current best guess in %j can size the link', answer => {
+      expect(currentWrite(answer, 2, { floor }).kind).toBe('refused');
+    });
+
+  it('current guess cannot borrow the stored source denominator', () => {
+    const c: LinkEffectClarificationReading = { node_id: 'margin', from_id: 'price', to_id: 'margin', quote: '2 points', answer: '2 points',
+      source_text: '2 points', current_turn: true, statement_classification: 'asserted', reading: 'points' };
+    expect(readLinkEffectClarificationAnswer(c, { ...effect, amount: 2, per_source_change: 4.7 }, '2 points')).toBe(false);
+  });
+
+  it('mixed normalized/raw option frames do not derive a source change for a floor', () => {
+    const mixed = structuredClone(graph) as Record<string, any>;
+    mixed.nodes[1].observed_state = { value: 0.3, cap: 10, unit: '£', source: 'user_override' };
+    mixed.nodes.push({ id: 'raise', kind: 'option', label: 'Raise price', interventions: { price: { raw_value: 5, source: 'user_specified' } } });
+    const recorded = linkEffectFloorFromStatement(mixed, 'price', 'margin', floor.source_quote!, { ...effect, amount: 1, per_source_change: 4.7 }, 'percentage points');
+    expect(recorded).toMatchObject({ value: 1, per_source_change: 1 });
+    expect(linkEffectFloorQuestion(recorded!)).toBe(`You said “${floor.source_quote}”. What's your best single guess for how much ‘Café price’ changes ‘Gross margin’, and what's the most it could plausibly be?`);
   });
 });

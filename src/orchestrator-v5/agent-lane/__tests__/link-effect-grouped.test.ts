@@ -63,7 +63,7 @@ describe('propose_link_effect grouped natural effects', () => {
     expect(store.get(String(result.proposal_id))?.operations).toHaveLength(2);
   });
 
-  it('RT-6 step 3: a bare % on a % level in a grouped call is asked once (U3), never stored; the other links still prepare', async () => {
+  it('RC2a: a refused bare % in a group carries one best-guess question; other links still prepare', async () => {
     const { caps, store } = world();
     const bare = { ...links[1], per_source_change_unit: 'percent per month', quote: 'Every 1% monthly churn loses about 40 Pro plan paying subscribers' };
     const text = `${links[0].quote}. ${bare.quote}.`;
@@ -71,7 +71,8 @@ describe('propose_link_effect grouped natural effects', () => {
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result.links).toHaveLength(1);
     expect(result.not_prepared).toEqual([expect.objectContaining({ from_label: 'Monthly churn', refusal: 'unit_mismatch' })]);
-    expect(String(result.not_prepared[0].detail)).toContain('Is that a 1-point rise in \u201cMonthly churn\u201d (say 10% \u2192 11%), or 1% of today\u2019s level?');
+    expect(String(result.not_prepared[0].detail)).toContain("What's your best single guess for how much ‘Monthly churn’ changes ‘Pro plan paying subscribers’, and what's the most it could plausibly be?");
+    expect(result.link_effect_clarifications[0].quote).toBe(bare.quote);
     expect(store.get(String(result.proposal_id))?.operations).toHaveLength(1);
   });
 

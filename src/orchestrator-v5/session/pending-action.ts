@@ -275,9 +275,9 @@ export type PendingActionAction =
       readonly confirmation?: 'choice' | 'figure';
     }
   | {
-      /** A refused user-stated effect, carried with the one question that can clarify it. */
+      /** A refused statement and its open question. Context only; its quote never licenses a size. */
       readonly kind: 'elicit_link_effect_clarification';
-      /** Assertion status and its original surrounding words survive a short reading answer. */
+      /** Legacy metadata is retained as context, never as figure authority. */
       readonly statement_classification?: 'asserted';
       readonly source_text?: string;
       readonly from_id: string;
@@ -289,6 +289,7 @@ export type PendingActionAction =
       readonly question: string;
       readonly refusal: string;
       readonly value_text?: string;
+      readonly resolved_reading?: 'points' | 'relative';
       readonly floor?: LinkEffectFloor;
     }
   | GoalScopeReconciliation
@@ -1576,6 +1577,7 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (a.statement_classification !== undefined && a.statement_classification !== 'asserted') return null;
     if (a.source_text !== undefined && !bounded(a.source_text, 8000)) return null;
     if (a.value_text !== undefined && !bounded(a.value_text, 2000)) return null;
+    if (a.resolved_reading !== undefined && a.resolved_reading !== 'points' && a.resolved_reading !== 'relative') return null;
     if (a.floor !== undefined && !isLinkEffectFloor(a.floor)) return null;
   }
   if (a.kind === 'reconcile_goal_scope' && !GoalScopeReconciliationSchema.safeParse(a).success) return null;

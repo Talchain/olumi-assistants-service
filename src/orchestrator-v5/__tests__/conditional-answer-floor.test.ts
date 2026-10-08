@@ -127,6 +127,89 @@ describe('S-D.1b conditional answer floor', () => {
     expect(s.written[0]?.pending_actions).toEqual([]);
   });
 
+  it.each([false, true])('RC2a r2 P1: another request’s consumed clarification is not resurrected (CAS retry: %s)', async retry => {
+    const consumed = clarification('effect-consumed', 0);
+    // The slow caller saw this question, but the other request consumed it before the final read or during append.
+    const s = setup(retry ? [consumed] : [], retry ? [[]] : []);
+    const reconciled: string[][] = [];
+    await appendCheckedGraphWrite({ store: s.store, write: answer([consumed]), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set([consumed.chip_id]),
+        onReconciled: w => { reconciled.push((w.pending_actions ?? []).map(p => p.chip_id)); return w; } } });
+    expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(retry ? ['row-0', 'row-1'] : ['row-0']);
+    expect(reconciled).toEqual(retry ? [[consumed.chip_id], []] : [[]]);
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]?.pending_actions).toEqual([]);
+  });
+
+  it('RC2a r2 P1: final fallback read still drops a concurrently consumed clarification after three CAS moves', async () => {
+    const consumed = clarification('effect-consumed', 0);
+    const s = setup([consumed], [[consumed], [consumed], []]);
+    await s.run(answer([consumed]));
+    expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(['row-0', 'row-1', 'row-2', undefined]);
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]?.pending_actions).toEqual([]);
+  });
+
+  it('RC2a Run CONTROL: a question carried by the inner Run row remains present for the outer answer', async () => {
+    const question = clarification('effect-run-carried', 0);
+    // The real Run success commit threads priorPendingActions, carrying this same chip onto its own row.
+    const innerRunCarrier: PendingAction = { ...question, expires_at_turn_count: question.expires_at_turn_count - 1 };
+    const s = setup([innerRunCarrier], []);
+    const write = answer([question]);
+    await appendCheckedGraphWrite({ store: s.store, write, writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set([question.chip_id]) } });
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]).toBe(write);
+    expect(s.written[0]?.pending_actions).toEqual([question]);
+  });
+
+  it.each([false, true])('RC2a r2 P2: an older same-link arrival never replaces this response’s newer words (CAS retry: %s)', async retry => {
+    const newer = clarification('effect-newer', 2);
+    const older: PendingAction = { ...clarification('effect-older', 0),
+      action: { ...newer.action, quote: 'Churn will rise by 5%.', question: 'Older question', value_text: '5%' } };
+    // This response minted newer words; it had never seen the old row the other request later wrote.
+    const s = setup(retry ? [] : [older], retry ? [[older]] : []);
+    await appendCheckedGraphWrite({ store: s.store, write: answer([newer]), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set() } });
+    expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(retry ? ['row-0', 'row-1'] : ['row-0']);
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]?.pending_actions).toEqual([newer]);
+    expect(s.written[0]?.pending_actions?.[0]).toBe(newer);
+  });
+
+  it.each([false, true])('RC2a P1/P2: consuming a newer carried ask cannot restore an older same-link arrival (CAS retry: %s)', async retry => {
+    const newer = clarification('effect-newer-seen', 2);
+    const older: PendingAction = { ...clarification('effect-older-arriving', 0),
+      action: { ...newer.action, quote: 'Churn will rise by 5%.', question: 'Older question', value_text: '5%' } };
+    const s = setup(retry ? [newer] : [older], retry ? [[older]] : []);
+    await appendCheckedGraphWrite({ store: s.store, write: answer([newer]), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set([newer.chip_id]) } });
+    expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(retry ? ['row-0', 'row-1'] : ['row-0']);
+    expect(s.written).toHaveLength(1);
+    // Presence pruning retires the consumed newer ask; temporal ordering rejects the stale arrival.
+    expect(s.written[0]?.pending_actions).toEqual([]);
+  });
+
+  it('RC2a P2 CONTROL: same-time same-link arrival cannot replace the question this response prepared', async () => {
+    const prepared = clarification('effect-prepared', 2);
+    const sameTime: PendingAction = { ...clarification('effect-same-time', 2),
+      action: { ...prepared.action, question: 'Other question' } };
+    const s = setup([sameTime], []);
+    await appendCheckedGraphWrite({ store: s.store, write: answer([prepared]), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set() } });
+    expect(s.written[0]?.pending_actions).toEqual([prepared]);
+  });
+
+  it('RC2a context-only CONTROL: refused reported wording survives an unknown graph read without assertion classification', async () => {
+    const fresh: PendingAction = { ...clarification('effect-report', 2), action: {
+      ...clarification('effect-report', 2).action,
+      quote: 'A colleague says that Churn will rise by 5%.', value_text: '5%',
+    } };
+    const s = setup([], [[fresh]]);
+    await s.run(answer([]));
+    expect(s.written[0]?.pending_actions).toEqual([fresh]);
+  });
+
   it('RC2 F6 CONTROL: an arriving question replaces only the same exact pair and preserves a shared-target question', async () => {
     const old = clarification('effect-old', 0), unrelated = clarification('effect-unrelated', 1);
     const fresh: PendingAction = { ...clarification('effect-fresh', 2),

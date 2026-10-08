@@ -108,7 +108,7 @@
  *   narrower claim than one storage generation.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { linkEffectClarificationIsAssertion, liveLinkEffectClarifications } from './agent-lane/link-effect-clarification.js';
+import { liveLinkEffectClarifications } from './agent-lane/link-effect-clarification.js';
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
@@ -398,22 +398,30 @@ export async function appendCheckedGraphWrite(
       };
       if (params.heldProposals !== undefined) {
         const { isHeld, seenByThisRequest } = params.heldProposals;
-        const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
-        let kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
+        const onLatest = new Set(prior.filter(p => isHeld(p) || p.action.kind === 'elicit_link_effect_clarification')
+          .map(p => p.chip_id));
+        // Seen questions obey the same consumption check as held cards on EVERY fresh read, including a CAS retry.
+        let kept = supplied.filter(n => (!isHeld(n) && n.action.kind !== 'elicit_link_effect_clarification')
+          || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
         const graph = writesGraph ? write.graph : params.baseGraphForInvariants;
         const shapedGraph = graph !== null && typeof graph === 'object' && !Array.isArray(graph)
           && Array.isArray((graph as { nodes?: unknown }).nodes) && Array.isArray((graph as { edges?: unknown }).edges);
         // A missing graph read cannot establish resolution. Carry those words without granting an answer licence.
         const liveClarifications = shapedGraph ? liveLinkEffectClarifications(prior, write.scenario_id, graph)
-          : prior.filter(p => p.action.kind === 'elicit_link_effect_clarification' && linkEffectClarificationIsAssertion(p.action)
-            && !isPendingActionExpired(p, Date.now()));
+          : prior.filter(p => p.action.kind === 'elicit_link_effect_clarification' && !isPendingActionExpired(p, Date.now()));
+        const sameClarificationLink = (a: PendingAction, b: PendingAction): boolean =>
+          a.action.kind === 'elicit_link_effect_clarification' && b.action.kind === 'elicit_link_effect_clarification'
+          && a.action.from_id === b.action.from_id && a.action.to_id === b.action.to_id;
         const arrivingClarifications = liveClarifications.filter(p => !seenByThisRequest.has(p.chip_id)
-          && !kept.some(n => n.chip_id === p.chip_id));
-        // A fresh question replaces only its exact directed link, never another link that shares an endpoint.
+          && !kept.some(n => n.chip_id === p.chip_id)
+          // A consumed newer question must not license an older arrival either; compare BEFORE presence pruning too.
+          && ![...supplied, ...liveClarifications].some(n => sameClarificationLink(n, p)
+            && (Date.parse(n.emitted_at_iso) > Date.parse(p.emitted_at_iso)
+              || (supplied.includes(n) && Date.parse(n.emitted_at_iso) === Date.parse(p.emitted_at_iso)))));
+        // Only a NEWER question replaces this answer's exact directed link. An older or same-time arrival cannot win.
         kept = kept.filter(p => p.action.kind !== 'elicit_link_effect_clarification'
-          || !arrivingClarifications.some(n => n.action.kind === 'elicit_link_effect_clarification'
-            && p.action.kind === 'elicit_link_effect_clarification'
-            && n.action.from_id === p.action.from_id && n.action.to_id === p.action.to_id));
+          || !arrivingClarifications.some(n => sameClarificationLink(n, p)
+            && Date.parse(n.emitted_at_iso) > Date.parse(p.emitted_at_iso)));
         const arrivingHolds = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
         const arrived = [...arrivingHolds, ...arrivingClarifications];
         if (kept.length !== supplied.length || arrived.length > 0) {

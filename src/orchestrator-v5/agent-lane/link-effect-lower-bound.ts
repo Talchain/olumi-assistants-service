@@ -19,8 +19,8 @@ export interface LinkEffectFloor {
   readonly per_source_change: number;
   readonly per_source_change_unit: string;
   readonly reading_answer: string;
-  /** Only a stated current level licenses a relative-to-points conversion. */
-  readonly relative_base?: number;
+  readonly source_quote?: string;
+  readonly from_label?: string;
   readonly target_label?: string;
 }
 type Rec = Record<string, unknown>;
@@ -34,17 +34,13 @@ export function isLinkEffectFloor(v: unknown): v is LinkEffectFloor {
     && ((f.from_id === undefined && f.to_id === undefined) || words(f.from_id) && words(f.to_id)) && finite(f.value) && f.value > 0 && words(f.unit) && words(f.words)
     && finite(f.per_source_change) && f.per_source_change !== 0 && words(f.per_source_change_unit) && words(f.reading_answer)
     && (f.reading === 'points' || f.reading === 'absolute' || f.reading === 'relative')
-    && (f.reading !== 'relative' || finite(f.relative_base) && f.relative_base > 0);
-}
-
-export function naturalFloorAmount(floor: LinkEffectFloor, value: number): number {
-  return floor.reading === 'relative' ? value * floor.relative_base! / 100 : value;
+    && (f.source_quote === undefined || typeof f.source_quote === 'string' && f.source_quote.trim() !== '' && f.source_quote.length <= 8000)
+    && (f.from_label === undefined || words(f.from_label)) && (f.target_label === undefined || words(f.target_label));
 }
 
 export function linkEffectFloorQuestion(floor: LinkEffectFloor): string {
-  // AIQ: words pending. Science's sentence, including its question and coverage, is authoritative.
-  if (floor.exclusive !== true && floor.reading === 'points' && floor.value === 1 && /churn/i.test(floor.target_label ?? '')) return "You said churn will rise by at least 1 point. What's your best single guess, and what's the most it could plausibly be?";
-  return `You said the effect will be ${floor.words}. What's your best single guess, and what's the most it could plausibly be?`;
+  // AIQ: words pending
+  return `You said “${floor.source_quote ?? floor.words}”. What's your best single guess for how much ‘${floor.from_label ?? 'the source'}’ changes ‘${floor.target_label ?? 'the target'}’, and what's the most it could plausibly be?`;
 }
 
 export function readLinkEffectFloorAnswer(floor: LinkEffectFloor, answer: string):
@@ -93,7 +89,6 @@ export function linkEffectFloorFromStatement(graph: unknown, from: string, to: s
   const detected = findLinkEffectBounds(quote);
   const lower = detected.length === 1 && detected[0]!.direction === 'lower' ? detected[0] : undefined;
   if (lower === undefined) return null;
-  const bound = lower.text;
   const amount = lower.amount;
   // The scanner's bound span ends at the figure; its immediately following unit still settles the reading.
   const statedPoints = /^\s*(?:(?:percentage\s+)?points?|pp)\b/i.test(quote.slice(amount.index + amount.matchedText.length));
@@ -107,22 +102,13 @@ export function linkEffectFloorFromStatement(graph: unknown, from: string, to: s
   if (linkEffectStatementClassification(quote, quote, ends) !== 'asserted'
     || !linkEffectStatementNamesEndpoints(quote, ends)) return null;
   const relative = /^relative(?:\s+(?:change|increase|decrease))?[.!]?$/i.test(readingAnswer.trim());
-  const points = /^(?:(?:one|a|1(?:\.0+)?)\s+)?percentage\s+points?[.!]?$/i.test(readingAnswer.trim())
+  const points = /^(?:(?:one|a|1(?:\.0+)?)\s+)?(?:percentage\s+)?points?[.!]?$/i.test(readingAnswer.trim())
     || /^(?:absolute|percentage[-\s]point)(?:\s+(?:change|increase|decrease))?[.!]?$/i.test(readingAnswer.trim());
   if (amount.kind === 'percent' && !relative && !points && !statedPoints) return null;
   let per = effect.per_source_change;
   if (/\bthis\s+(?:price\s+)?(?:increase|rise|change)\b/i.test(quote)) {
-    const os = record(source?.observed_state);
-    const baseline = os?.raw_value ?? os?.value;
-    const changes = finite(baseline) ? nodes.filter(n => n.kind === 'option' && n.is_baseline !== true).flatMap(n => {
-      const intervention = record(record(n.interventions)?.[from]);
-      if (intervention?.source !== 'user_specified' && intervention?.source !== 'brief_extraction' && intervention?.source !== 'user_override') return [];
-      const value = intervention?.raw_value ?? (finite(intervention?.value) && finite(os?.cap) ? intervention.value * os.cap : undefined);
-      return finite(value) && value !== baseline ? [value - baseline] : [];
-    }) : [];
-    const unique = [...new Set(changes)];
-    if (unique.length !== 1) return null;
-    per = unique[0]!;
+    // No explicit source figure was stated: the ordinary basis is one source unit. Option frames supply no warrant.
+    per = 1;
   } else {
     // Removing the bound words only checks the source warrant; it never licenses the bound as a size.
     const unbounded = withoutLinkEffectBoundComparators(quote);
@@ -130,24 +116,12 @@ export function linkEffectFloorFromStatement(graph: unknown, from: string, to: s
     if (linkEffectTheUserStated(unbounded, effect, { source: String(nodes.find(n => n.id === from)?.label ?? ''), target: String(target?.label ?? '') },
       { quantities: nodes.map(n => String(n.label ?? '')), target_units: typeof targetUnit === 'string' ? [targetUnit] : [] }) !== null) return null;
   }
-  let base: number | undefined;
-  if (relative) {
-    const targetWords = String(target?.label ?? '').toLowerCase().split(/\W+/).filter(w => w.length > 2 && !/^(?:monthly|daily|rate|level|current)$/.test(w));
-    const level = findLinkEffectAmounts(quote).find(a => {
-      const clause = quote.slice(0, a.index).split(/[,;.!?]|\b(?:and|while|whereas)\b/i).at(-1) ?? '';
-      return a.kind === 'percent' && /\bcurrent\b/i.test(clause) && targetWords.some(w => new RegExp(`\\b${w}\\b`, 'i').test(clause))
-        && a.index < quote.indexOf(bound);
-    });
-    const os = record(target?.observed_state);
-    base = level?.magnitude ?? (os?.source === 'user_override' || os?.source === 'brief_extraction' ? os.raw_value as number : undefined);
-    if (!finite(base) || base <= 0) return null;
-  }
   const reading = relative ? 'relative' : amount.kind === 'percent' || points || statedPoints ? 'points' : 'absolute';
   const unit = reading === 'points' ? 'percentage points' : reading === 'relative' ? '%' : effect.amount_unit;
   const floor: LinkEffectFloor = { from_id: from, to_id: to, ...(lower.inclusive ? {} : { exclusive: true as const }), value: amount.magnitude, unit, reading,
     words: reading === 'points' ? `${lower.inclusive ? 'at least' : 'more than'} ${amount.magnitude} ${amount.magnitude === 1 ? 'point' : 'points'}` : `${lower.inclusive ? 'at least' : 'more than'} ${amount.magnitude}${reading === 'relative' ? '% relative' : ` ${unit}`}`,
     per_source_change: per, per_source_change_unit: effect.per_source_change_unit,
-    reading_answer: readingAnswer || unit, target_label: String(target?.label ?? ''), ...(base === undefined ? {} : { relative_base: base }) };
+    reading_answer: readingAnswer || unit, target_label: String(target?.label ?? ''), from_label: String(source?.label ?? ''), source_quote: quote };
   return isLinkEffectFloor(floor) ? floor : null;
 }
 
@@ -161,7 +135,9 @@ export function linkEffectFloorDisclosures(graph: unknown, asks: readonly LinkEf
     const strength = record(found.edge.strength);
     const natural = record(record(found.edge.provenance)?.natural_effect);
     if (!finite(strength?.mean)) return [];
-    const targetUnit = floor.reading === 'relative' ? 'percentage points' : floor.unit;
+    // A relative recorded bound is context, not a conversion licence or a commensurate absolute link size.
+    if (floor.reading === 'relative') return [];
+    const targetUnit = floor.unit;
     const normalUnit = (u: string): string | undefined => /^(?:%|percentage points?|points?|pp)$/i.test(u.trim()) ? 'points' : unitComparisonKey(u);
     let current: number | undefined;
     if (natural !== undefined && natural.strength_mean === strength.mean && natural.strength_mean_frame === 'edge_strength'
@@ -184,7 +160,7 @@ export function linkEffectFloorDisclosures(graph: unknown, asks: readonly LinkEf
       current = strength.mean * floor.per_source_change * targetFrame / sourceFrame;
     }
     if (!finite(current)) return [];
-    if (current >= naturalFloorAmount(floor, floor.value)) return [];
+    if (current >= floor.value) return [];
     // AIQ: words pending. Science's disclosure is verbatim, substituting labels and the user's bound words.
     return [`Olumi's current figure for how much ‘${action.from_label}’ affects ‘${action.to_label}’ is below your ‘${floor.words}’, so this Run likely understates churn and may flatter the price rise.`];
   });

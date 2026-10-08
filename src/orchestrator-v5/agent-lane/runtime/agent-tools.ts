@@ -369,14 +369,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how much an EXISTING link moves its target, as the user\u2019s own figures, when the user has just said it in numbers '
       + '(for example "every \u00a31 on the price loses us about 50 subscribers"). This does NOT change anything: it prepares ONE change and '
       + 'returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + 'Both magnitudes must be the user\u2019s own figures in ONE statement from THIS message. A live link_effect_clarifications entry in canonical state also licenses its exact stored quote for that same link, together with this reply answering its question. Never use another link\u2019s or an expired clarification. Record a lower bound with its open question; never choose its bound as a size. Once its reading is resolved, ask for the best single guess and the most it could plausibly be. For that answer, use the exact held quote, the guess as amount (relative guesses converted using the recorded relative_base), and the floor’s recorded per_source_change and units. If the upper end was also supplied, pass upper; a guess alone keeps the floor without a range. Deterministic number words '
+      + 'Both magnitudes must be the user’s own figures in ONE statement from THIS message. A link_effect_clarifications entry is CONTEXT ONLY: use its endpoints and resolved reading, NEVER its stored quote as a figure or as quote. After a points/relative answer, ask its best-single-guess question. For the numerical answer, quote THIS message verbatim and size only its figures in the link’s own terms; a short answer uses a one-unit source basis. Never derive the source change from an option or convert a relative percentage. If the answer does not state the figure in the link’s terms, ask again with one question. A recorded floor is a bound, never a size. When a best guess and plausible upper answer a commensurate floor, pass upper; a guess alone keeps the floor without a range. Deterministic number words '
       + 'are accepted ("two", "one and a half", "half a point", "about a point"); explicit percent levels such as '
       + '"from 8% to 4%" state a -4-point change. Never choose a figure from a range or invent a missing figure. '
       + '`amount` is your proposed signed change in the TARGET (negative when it falls); `per_source_change` is your '
       + 'proposed signed change in the SOURCE, each in its own unit. The approval card shows this reading in symbols '
       + 'AND words, with the verbatim quote, and explicitly discloses a reversal of the stored link direction. '
       + '`quote` is the user\u2019s complete statement copied exactly. It must identify both ends, unless the REQUEST\u2019s '
-      + 'canvas selection grounds this link or both ends; do not infer selection from your own output. A question or '
+      + 'canvas selection grounds this link or both ends, or one live clarification grounds a short CURRENT-turn numerical answer; do not infer selection from your own output. A question or '
       + 'denial is not a statement. A bare % needs the returned clarification: never resolve it yourself into points '
       + 'or a money change. A literal currency period ("per month", "a month", "a week", "a year") can supply an '
       + 'eligible unitless end\u2019s unit. Show the exact card and ask the user to approve or correct; nothing is recorded '
@@ -398,7 +398,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       amount_unit: { type: 'string', description: 'The target\u2019s unit (for a percentage level, "percentage points").' },
       per_source_change: { type: 'number', description: 'Your proposed signed reading of the user\u2019s source magnitude (non-zero), disclosed on the approval card.' },
       per_source_change_unit: { type: 'string', description: 'The source\u2019s unit.' },
-      quote: { type: 'string', description: 'The user\u2019s complete statement from THIS message, or the exact live stored statement being clarified, copied exactly with its punctuation.' },
+      quote: { type: 'string', description: 'The user\u2019s complete statement from THIS message, copied exactly with its punctuation.' },
       upper: { type: 'number', description: 'The plausible upper end supplied with the best guess answering a recorded lower-bound question, in that bound reading.' },
       }, []),
       oneOf: [
@@ -877,9 +877,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: the user's stated effect on one link (their figures + words); a capability set without it refuses plainly. */
   proposeLinkEffect?(ctx: AgentToolContext, args: {
-    links?: readonly { from_label: string; to_label: string; amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string }[];
+    links?: readonly { from_label: string; to_label: string; amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; upper?: number }[];
     from_label?: string; to_label?: string; amount?: number; amount_unit?: string;
-    per_source_change?: number; per_source_change_unit?: string; quote?: string;
+    per_source_change?: number; per_source_change_unit?: string; quote?: string; upper?: number;
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {
