@@ -57,7 +57,7 @@ describe('⭐ the served correction reads exactly as the same sentence without i
     expect({ ok: served.r.ok, refusal: served.r.refusal })
       .toEqual({ ok: twin.r.ok, refusal: twin.r.refusal });
     for (const [result, quote] of [[served.r, SAID], [twin.r, TWIN]] as const) {
-      expect(result.question).toBe(`You said “${quote}”. What's your best single guess for how much ‘Price rise’ changes ‘monthly recurring revenue’, and what's the most it could plausibly be?`);
+      expect(result.question).toBe(`You said ‘${quote}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
       expect(result.link_effect_clarifications[0].quote).toBe(quote);
     }
     onlyReads(served.w);

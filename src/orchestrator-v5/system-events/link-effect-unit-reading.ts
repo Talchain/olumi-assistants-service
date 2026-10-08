@@ -12,7 +12,9 @@ import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-v
 import type { LinkEffectStatement } from './link-effect-edit.js';
 import { mediatorReadings } from '../agent-lane/mediator-reading.js';
 import { canAdoptLabelUnit, labelHeadUnit } from '../agent-lane/label-head-unit.js';
-import { isLinkEffectFloor, linkEffectFloorQuestion, readLinkEffectFloorAnswer, type LinkEffectFloor } from '../agent-lane/link-effect-lower-bound.js';
+import { readLinkEffectCurrentGuess, type LinkEffectFloor } from '../agent-lane/link-effect-lower-bound.js';
+
+import { linkEffectBestGuessQuestion } from '../agent-lane/link-effect-question.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -35,7 +37,9 @@ export interface LinkEffectClarificationReading {
   readonly to_id?: string;
   readonly from_label?: string;
   readonly to_label?: string;
+  /** Legacy carrier content is ignored. No stored figure participates in admission or sizing. */
   readonly floor?: LinkEffectFloor;
+  readonly lower?: number;
   readonly upper?: number;
 }
 
@@ -53,48 +57,46 @@ function isCurrentClarification(clarification: LinkEffectClarificationReading | 
     && typeof effect.amount_unit === 'string' && typeof effect.per_source_change_unit === 'string';
 }
 
-/** A floor constrains only a current commensurate answer; no stored figure supplies a missing change. */
-export function readLinkEffectCurrentFloorAnswer(
+/** Admission and spread use only the current quoted guess and current plausible extremes. */
+export function readLinkEffectCurrentAnswer(
   clarification: LinkEffectClarificationReading | undefined, effect: LinkEffectStatement, quote: string,
   ends?: CurrentEffectEnds, scope?: CurrentEffectScope,
-): ReturnType<typeof readLinkEffectFloorAnswer> {
-  const floor = clarification?.floor;
-  const question = isLinkEffectFloor(floor) ? linkEffectFloorQuestion(floor)
-    : "What's your best single guess, and what's the most it could plausibly be, in the link's own units?";
-  const refuse = (refusal = 'unreadable_floor_answer'): ReturnType<typeof readLinkEffectFloorAnswer> => ({ ok: false, refusal, question });
-  if (!isCurrentClarification(clarification, effect, quote) || !isLinkEffectFloor(floor)
-    || floor.reading === 'relative' || floor.per_source_change !== effect.per_source_change
-    || floor.from_id !== undefined && floor.from_id !== clarification.from_id
-    || floor.to_id !== undefined && floor.to_id !== clarification.to_id
-    || answerUnitKey(floor.per_source_change_unit) !== answerUnitKey(effect.per_source_change_unit)
-    || (floor.reading === 'points' ? !pointsUnit(effect.amount_unit)
-      : answerUnitKey(floor.unit) !== answerUnitKey(effect.amount_unit))) return refuse();
-  const short = readLinkEffectFloorAnswer(floor, quote);
+): ReturnType<typeof readLinkEffectCurrentGuess> {
+  const question = linkEffectBestGuessQuestion({ quote });
+  const refuse = (refusal = 'unreadable_current_answer'): ReturnType<typeof readLinkEffectCurrentGuess> => ({ ok: false, refusal, question });
+  if (!isCurrentClarification(clarification, effect, quote)) return refuse();
+  const reading = pointsUnit(effect.amount_unit) ? 'points' : 'absolute';
+  const short = readLinkEffectCurrentGuess(quote, { reading, unit: effect.amount_unit }, question);
   if (short.ok) {
-    // The current short answer never supplies the source denominator of a prior multi-unit statement.
-    return effect.per_source_change === 1 && short.guess === effect.amount && short.upper === clarification.upper ? short : refuse('not_the_users_figure');
+    // A short answer never borrows the denominator from the recorded words.
+    return effect.per_source_change === 1 && short.guess === effect.amount
+      && (clarification.lower === undefined || short.lower === clarification.lower)
+      && (clarification.upper === undefined || short.upper === clarification.upper) ? short : refuse('not_the_users_figure');
   }
+  if (readSimpleCurrentEffectAnswer(clarification, effect, quote)) return { ok: true, guess: effect.amount };
   const namedEnds = ends ?? (typeof clarification.from_label === 'string' && typeof clarification.to_label === 'string'
     ? { source: clarification.from_label, target: clarification.to_label } : undefined);
-  if (namedEnds === undefined || clarification.upper !== undefined
+  if (namedEnds === undefined || clarification.lower !== undefined || clarification.upper !== undefined
+    || boundedLinkEffectText(quote) !== undefined
     || linkEffectTheUserStated(quote, effect, namedEnds, scope ?? { quantities: [namedEnds.source, namedEnds.target] }) !== null) return short;
-  if (effect.amount < floor.value || floor.exclusive === true && effect.amount === floor.value) return refuse('outside_stated_bounds');
-  // A full current statement gives a point only. No upper or spread is recovered from its other figures.
   return { ok: true, guess: effect.amount };
 }
 
-/**
- * A current quoted answer is bound to one carried link. Its own target figure alone supplies the size.
- * A short answer has a one-unit source basis; a full statement must state and bind its source change afresh.
- */
+/** Compatibility name for older callers; recorded floors are deliberately never read. */
+export const readLinkEffectCurrentFloorAnswer = readLinkEffectCurrentAnswer;
+
 export function readLinkEffectClarificationAnswer(
   clarification: LinkEffectClarificationReading | undefined, effect: LinkEffectStatement, quote: string,
   ends?: CurrentEffectEnds, scope?: CurrentEffectScope,
 ): boolean {
-  if (!isCurrentClarification(clarification, effect, quote)) return false;
-  if (clarification.floor !== undefined) return readLinkEffectCurrentFloorAnswer(clarification, effect, quote, ends, scope).ok;
+  return readLinkEffectCurrentAnswer(clarification, effect, quote, ends, scope).ok;
+}
+
+function readSimpleCurrentEffectAnswer(
+  clarification: LinkEffectClarificationReading, effect: LinkEffectStatement, quote: string,
+): boolean {
   if (effect.per_source_change !== 1 || quote.length > 400) return false;
-  if (clarification.upper !== undefined || boundedLinkEffectText(quote) !== undefined) return false;
+  if (clarification.lower !== undefined || clarification.upper !== undefined || boundedLinkEffectText(quote) !== undefined) return false;
   const amounts = findLinkEffectAmounts(quote);
   const amount = amounts.length === 1 ? amounts[0] : undefined;
   if (amount === undefined || amount.magnitude !== Math.abs(effect.amount) || amount.kind === 'percent') return false;
@@ -496,7 +498,7 @@ export function prepareLinkEffectUnitReadings(
     }
   }
   // A definite unit settles the reading only. It never makes an explicit lower/upper bound a point estimate.
-  if (boundedLinkEffectText(quote) !== undefined && options?.clarification?.floor === undefined && asks.length === 0) {
+  if (boundedLinkEffectText(quote) !== undefined && !readLinkEffectClarificationAnswer(options?.clarification, effect, quote) && asks.length === 0) {
     asks.push(`You said “${boundedLinkEffectText(quote)}”. What single change in “${String(target.label ?? target.id)}” do you mean, rather than a bound?`);
   }
   // One question even when both ends need clarification.

@@ -71,7 +71,7 @@ describe('propose_link_effect grouped natural effects', () => {
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result.links).toHaveLength(1);
     expect(result.not_prepared).toEqual([expect.objectContaining({ from_label: 'Monthly churn', refusal: 'unit_mismatch' })]);
-    expect(String(result.not_prepared[0].detail)).toContain("What's your best single guess for how much ‘Monthly churn’ changes ‘Pro plan paying subscribers’, and what's the most it could plausibly be?");
+    expect(String(result.not_prepared[0].detail)).toContain("What's your best single guess, and the lowest and highest it could plausibly be?");
     expect(result.link_effect_clarifications[0].quote).toBe(bare.quote);
     expect(store.get(String(result.proposal_id))?.operations).toHaveLength(1);
   });

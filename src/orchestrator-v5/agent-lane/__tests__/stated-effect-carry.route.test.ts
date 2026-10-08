@@ -13,8 +13,8 @@ let SID = randomUUID();
 const PAUL = 'Our current churn is 4%, and we predict it will at least increase 1% with this price increase. If it goes above 6%, we start to lose money, which is a serious problem.';
 const PAUL_QUOTE = 'Our current churn is 4%, and we predict it will at least increase 1% with this price increase.';
 const PAUL_QUESTION = 'Does "at least increase 1%" mean at least one percentage point, or a relative increase of at least 1%?';
-const bestGuessAsk = (quote: string, from: string, to: string): string =>
-  `You said “${quote}”. What's your best single guess for how much ‘${from}’ changes ‘${to}’, and what's the most it could plausibly be?`;
+const bestGuessAsk = (quote: string, _from: string, _to: string): string =>
+  `You said ‘${quote}’. What's your best single guess, and the lowest and highest it could plausibly be?`;
 const SCIENCE_ASK = bestGuessAsk(PAUL_QUOTE, 'Pro plan price', 'Monthly churn');
 const PAUL_ARGS = { from_label: 'Pro plan price', to_label: 'Monthly churn', amount: 1, amount_unit: '%',
   per_source_change: 1, per_source_change_unit: '£ per subscriber per month', quote: PAUL_QUOTE };
@@ -207,6 +207,100 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
   const marginArgs = (quote: string): Json => ({ from_label: 'Prices', to_label: 'Gross margin', amount: 5,
     amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: 'GBP', quote });
 
+  it.each([false, true])('RC2a-r3 P1 denied carrier floor cannot supply missing lower extreme (grouped=%s)', async grouped => {
+    marginLink();
+    graph.nodes.find((n: Json) => n.id === 'prices').label = 'Café price';
+    const quote = 'Raising the café price by £1 will increase gross margin by at least 5%';
+    const source = `I do not believe this claim: ${quote}`;
+    const held = seedClarification(true);
+    held.action = { ...held.action, from_id: 'prices', to_id: 'margin', from_label: 'Café price', to_label: 'Gross margin',
+      quote, source_text: source, statement_classification: 'asserted', question: bestGuessAsk(quote, 'Café price', 'Gross margin') };
+    pending.set(SID, [held]);
+    const propose = (args: Json): Json => calls(['propose_link_effect', grouped ? { links: [{ ...args, from_label: 'Café price' }] } : { ...args, from_label: 'Café price' }]);
+    script.push(propose({ ...marginArgs(quote), amount_unit: '%' }), message('Please state current figures.'));
+    await turn('points');
+    const before = structuredClone(graph);
+    const answer = '6, at most 7';
+    script.push(propose({ ...marginArgs(answer), amount: 6, upper: 7 }), message('Please state all extremes.'));
+    const body = await turn(answer);
+    const offered = cards(body);
+    expect.soft(offered).toEqual([]);
+    for (const card of offered) await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect.soft(doorCalls).toEqual([]);
+    expect(graph).toEqual(before);
+  });
+
+  it.each([false, true])('RC2a-r3 P1 stored floor never validates a fully named current 2-point write (unrelated=%s)', async unrelated => {
+    marginLink();
+    const held = seedClarification(true);
+    const quote = 'Raising prices by £1 will increase gross margin by at least 5 points.';
+    held.action = { ...held.action, from_id: 'prices', to_id: 'margin', from_label: 'Prices', to_label: 'Gross margin', quote,
+      resolved_reading: 'points', question: bestGuessAsk(quote, 'Prices', 'Gross margin'), floor: { from_id: 'prices', to_id: 'margin',
+        value: 5, unit: 'percentage points', reading: 'points', words: 'at least 5 points', per_source_change: 1,
+        per_source_change_unit: 'GBP', reading_answer: 'points', source_quote: quote } };
+    const other = structuredClone(held);
+    other.id = randomUUID(); other.chip_id += ':other';
+    other.action = { ...other.action, to_id: 'daily_visits', to_label: 'Daily visits', floor: undefined };
+    pending.set(SID, unrelated ? [held, other] : [held]);
+    const answer = 'Raising prices by £1 will increase gross margin by 2 points.';
+    script.push(calls(['propose_link_effect', { ...marginArgs(answer), amount: 2 }]), message('Review the current figure.'));
+    const body = await turn(answer);
+    const card = cards(body)[0];
+    expect(card, JSON.stringify(body)).toBeDefined();
+    await turn(card!.message, { source: 'chip', chip: { id: card!.id } });
+    expect(doorCalls).toHaveLength(1);
+    expect(doorCalls[0]!.link_effect.clarification?.floor).toBeUndefined();
+    expect(graph.edges.find((e: Json) => e.from === 'prices' && e.to === 'margin').provenance.natural_effect.amount).toBe(2);
+  });
+
+  it.each([[5, false], [999, false], [5, true], [999, true]] as const)(
+    'RC2a class MUTANT: stored floor %s cannot reach current range sigma or validation (grouped=%s)', async (storedFloor, grouped) => {
+      marginLink();
+      const held = seedClarification(true);
+      const quote = 'Raising prices by £1 will increase gross margin by at least 5 points.';
+      held.action = { ...held.action, from_id: 'prices', to_id: 'margin', from_label: 'Prices', to_label: 'Gross margin',
+        quote, resolved_reading: 'points', question: bestGuessAsk(quote, 'Prices', 'Gross margin'), floor: {
+          from_id: 'prices', to_id: 'margin', value: storedFloor, unit: 'percentage points', reading: 'points',
+          words: `at least ${storedFloor} points`, per_source_change: 1, per_source_change_unit: 'GBP', reading_answer: 'points' } };
+      pending.set(SID, [held]);
+      const answer = '6, lowest 2, highest 7';
+      const args = { ...marginArgs(answer), amount: 6, lower: 2, upper: 7 };
+      script.push(calls(['propose_link_effect', grouped ? { links: [args] } : args]), message('Review all current figures.'));
+      const body = await turn(answer);
+      const card = cards(body)[0];
+      expect(card, JSON.stringify(body)).toBeDefined();
+      await turn(card!.message, { source: 'chip', chip: { id: card!.id } });
+      const written = doorCalls[0]!.link_effect;
+      expect.soft(written.clarification.floor).toBeUndefined();
+      const edge = graph.edges.find((e: Json) => e.from === 'prices' && e.to === 'margin');
+      expect(edge.provenance.natural_effect.amount).toBe(6);
+      const fit = statedRangeSpread(2, 7, 0.9);
+      if (!fit.ok) throw new Error(fit.refusal);
+      expect(edge.strength.std * 6 / edge.strength.mean).toBeCloseTo(fit.std, 10);
+      expect(edge.provenance).toMatchObject({ stated_effect_lower: 2, stated_effect_upper: 7, stated_effect_std: fit.std });
+      expect(edge.provenance.stated_effect_floor).toBeUndefined();
+    },
+  );
+
+  it('RC2a audit RED: the card preserves the signs of both current plausible extremes', async () => {
+    marginLink();
+    const held = seedClarification(true);
+    held.action = { ...held.action, from_id: 'prices', to_id: 'margin', from_label: 'Prices', to_label: 'Gross margin',
+      quote: 'Raising prices by £1 will increase gross margin by 5 points.', resolved_reading: 'points',
+      question: bestGuessAsk('Raising prices by £1 will increase gross margin by 5 points.', 'Prices', 'Gross margin') };
+    pending.set(SID, [held]);
+    const answer = '-6, [-7, -2]';
+    script.push(calls(['propose_link_effect', { ...marginArgs(answer), amount: -6, lower: -7, upper: -2 }]), message('Review the current range.'));
+    const body = await turn(answer);
+    const card = cards(body)[0]!;
+    expect(card, JSON.stringify(body)).toBeDefined();
+    expect(card.detail).toContain('plausible extremes are −7');
+    expect(card.detail).toContain('and −2');
+    await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect(graph.edges.find((e: Json) => e.from === 'prices' && e.to === 'margin').provenance)
+      .toMatchObject({ stated_effect_lower: -7, stated_effect_upper: -2, natural_effect: { amount: -6 } });
+  });
+
   const R2_STORED_WORDS = [
     'Raising prices by £1 will increase gross margin by 5%',
     'I reject this claim: Raising prices by £1 will increase gross margin by 5%',
@@ -335,18 +429,21 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     expect(doorCalls).toEqual([]);
   });
 
-  it.each(['more than', 'over'])('strict floor CONTROL: the current guess must exceed the recorded minimum (%s)', async comparator => {
+  it.each(['more than', 'over'])('strict floor CONTROL: the current equality guess is a point independent of the recorded minimum (%s)', async comparator => {
     marginLink();
     const quote = `Raising prices by £1 will increase gross margin by ${comparator} 5 points.`;
     script.push(calls(['propose_link_effect', marginArgs(quote)]), message('Please give your best guess.'));
     await turn(quote);
     expect(clarifications()[0]!.action.floor).toMatchObject({ value: 5, exclusive: true });
     const answer = 'My best guess is 5 points.';
-    script.push(calls(['propose_link_effect', marginArgs(answer)]), message('Please give a guess above the minimum.'));
+    script.push(calls(['propose_link_effect', marginArgs(answer)]), message('Review your current guess.'));
     const body = await turn(answer);
-    expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'propose_link_effect', ok: false, refusal: 'outside_stated_bounds' }));
-    expect(cards(body)).toEqual([]);
-    expect(doorCalls).toEqual([]);
+    const card = cards(body)[0]!;
+    expect(card, JSON.stringify(body)).toBeDefined();
+    await turn(card.message, { source: 'chip', chip: { id: card.id } });
+    expect(doorCalls).toHaveLength(1);
+    expect(doorCalls[0]!.link_effect.clarification?.floor).toBeUndefined();
+    expect(graph.edges.find((e: Json) => e.from === 'prices' && e.to === 'margin').provenance.natural_effect.amount).toBe(5);
   });
 
   it.each([
@@ -452,26 +549,67 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     return card!;
   };
 
-  it('Paul RED: exact statement → points → best-guess ask → “2, at most 3” → current-turn card and canonical write', async () => {
+  describe.each([false, true])('Science 393023 latest figures (grouped=%s)', grouped => {
+    it.each([
+      ['0.5, lowest 0.2, highest 2', 0.5, 0.2, 2, true],
+      ['2, lowest 1, highest 3', 2, 1, 3, false],
+      ['2, lowest 0.2, highest 3', 2, 0.2, 3, true],
+      ['My best guess is 0.5 points.', 0.5, undefined, undefined, true],
+    ] as const)('stored floor is disclosure only: %s', async (answer, guess, lower, upper, disclose) => {
+      await resolvedFloor();
+      const args = { ...PAUL_ARGS, amount: guess, amount_unit: 'percentage points', per_source_change: 1,
+        quote: answer, ...(lower === undefined ? {} : { lower, upper }) };
+      script.push(calls(['propose_link_effect', grouped ? { links: [args] } : args]), message('Review your best guess.'));
+      const body = await turn(answer);
+      const card = cards(body)[0]!;
+      expect(card, JSON.stringify(body)).toBeDefined();
+      expect(card.detail).toContain(`→ +${guess} percentage points`);
+      const sentence = 'Earlier you said ‘at least 1 point’; Olumi now uses your latest figures.';
+      expect.soft(body.assistant_text.includes(sentence)).toBe(disclose);
+      expect.soft(answerWrite().assistantMessage).toBe(body.assistant_text);
+      expect(doorCalls).toEqual([]);
+      await turn(card.message, { source: 'chip', chip: { id: card.id } });
+      expect(doorCalls).toHaveLength(1);
+      expect(doorCalls[0]!.link_effect.clarification.floor).toBeUndefined();
+      const edge = effectEdge();
+      expect(edge.provenance.natural_effect.amount).toBe(guess);
+      expect(edge.provenance.stated_effect_floor).toBeUndefined();
+      if (lower !== undefined && upper !== undefined) {
+        const spread = statedRangeSpread(lower, upper, 0.9);
+        if (!spread.ok) throw new Error(spread.refusal);
+        expect(edge.strength.std * guess / edge.strength.mean).toBeCloseTo(spread.std, 10);
+        expect(edge.provenance).toMatchObject({ stated_effect_lower: lower, stated_effect_upper: upper,
+          stated_effect_std: spread.std });
+      }
+    });
+  });
+
+  it('Paul RED: exact statement → points → best-guess ask → incomplete “2, at most 3” asks once → current triplet card and canonical write', async () => {
     frameForCurrentUnitAnswers();
     script.push(calls(['propose_link_effect', PAUL_ARGS]), message('Please clarify the reading.'));
     const initial = await turn(PAUL);
     expect(cards(initial)).toEqual([]);
     expect(clarifications()).toHaveLength(1);
     await resolvedFloor('points', false);
-    const answer = '2, at most 3';
-    const card = await guessCard(answer, 2, { upper: 3 });
-    expect(card.detail).toContain('at least 1 point');
+    const incomplete = '2, at most 3';
+    script.push(calls(['propose_link_effect', { ...PAUL_ARGS, amount: 2, amount_unit: 'percentage points',
+      quote: incomplete, upper: 3 }]), message('Please give both current extremes.'));
+    const questioned = await turn(incomplete);
+    expect(cards(questioned)).toEqual([]);
+    expect(questioned.assistant_text.match(/\?/g)).toHaveLength(1);
+    const answer = '2, lowest 0.5, highest 3';
+    const card = await guessCard(answer, 2, { lower: 0.5, upper: 3 });
+    expect(card.detail).toContain('0.5');
     expect(clarifications()).toEqual([]);
     const approved = await turn(card.message, { source: 'chip', chip: { id: card.id } });
     expect(approved._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true }));
     expect(doorCalls).toHaveLength(1);
     expect(doorCalls[0]!.link_effect).toMatchObject({ quote: answer, effect: { amount: 2, per_source_change: 1 },
-      clarification: { current_turn: true, quote: answer, answer, reading: 'points', floor: { value: 1 }, upper: 3 } });
+      clarification: { current_turn: true, quote: answer, answer, reading: 'points', lower: 0.5, upper: 3 } });
     const edge = effectEdge();
     expect(edge.provenance.natural_effect).toMatchObject({ amount: 2, amount_unit: 'percentage points', per_source_change: 1 });
     expect(edge.provenance.source_quote).toBe(answer);
-    const fit = statedRangeSpread(1, 3, 0.9);
+    const fit = statedRangeSpread(0.5, 3, 0.9);
     if (!fit.ok) throw new Error(fit.refusal);
     expect(Math.abs(edge.strength.std * 2 / edge.strength.mean - fit.std)).toBeLessThan(1e-9);
   });
@@ -562,20 +700,20 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     expect(doorCalls).toEqual([]);
   });
 
-  it('guess-only CONTROL: a current guess writes its point and records the floor without an invented range', async () => {
+  it('guess-only CONTROL: a current guess writes its point without any stored floor or invented range', async () => {
     await resolvedFloor();
     const card = await guessCard('My best guess is 2 points.', 2);
     const body = await turn(card.message, { source: 'chip', chip: { id: card.id } });
     const edge = effectEdge();
     expect(edge.provenance.natural_effect.amount).toBe(2);
     expect(edge.strength.std).toBeCloseTo(Math.abs(edge.strength.mean) / 2, 12);
-    expect(edge.provenance.stated_effect_floor).toMatchObject({ value: 1, words: 'at least 1 point', per_source_change: 1 });
+    expect(edge.provenance.stated_effect_floor).toBeUndefined();
     expect(edge.provenance.stated_effect_upper).toBeUndefined();
     expect(edge.provenance.natural_effect.stated_range).toBeUndefined();
-    expect(body.assistant_text).toContain('at least 1 point');
+    expect(body.assistant_text).toContain('My best guess is 2 points.');
   });
 
-  it.each(['', 'Here is my estimate. '])('full-current-statement CONTROL: a verbatim current quote span sizes the link with its recorded floor (prefix=%s)', async prefix => {
+  it.each(['', 'Here is my estimate. '])('full-current-statement CONTROL: a verbatim current quote span sizes the link independently of its recorded floor (prefix=%s)', async prefix => {
     await resolvedFloor();
     const quote = 'Every £1 Pro plan price rise raises monthly churn by 2 points.';
     const currentText = `${prefix}${quote}`;
@@ -585,17 +723,17 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     const card = cards(offered)[0]!;
     expect(card, JSON.stringify(offered)).toBeDefined();
     expect(card.detail).toContain(quote);
-    expect(card.detail).toContain('at least 1 point');
+    expect(card.detail).not.toContain('Your recorded floor');
     expect(doorCalls).toEqual([]);
     expect(clarifications()).toEqual([]);
     await turn(card.message, { source: 'chip', chip: { id: card.id } });
     expect(doorCalls).toHaveLength(1);
     expect(doorCalls[0]!.link_effect).toMatchObject({ quote, effect: { amount: 2, per_source_change: 1 },
-      clarification: { current_turn: true, quote, floor: { value: 1, per_source_change: 1 } } });
+      clarification: { current_turn: true, quote } });
     const edge = effectEdge();
     expect(edge.provenance.source_quote).toBe(quote);
     expect(edge.provenance.natural_effect).toMatchObject({ amount: 2, amount_unit: 'percentage points', per_source_change: 1 });
-    expect(edge.provenance.stated_effect_floor).toMatchObject({ value: 1, per_source_change: 1 });
+    expect(edge.provenance.stated_effect_floor).toBeUndefined();
     expect(edge.strength.std).toBeCloseTo(Math.abs(edge.strength.mean) / 2, 12);
     expect(edge.provenance.stated_effect_upper).toBeUndefined();
     expect(edge.provenance.natural_effect.stated_range).toBeUndefined();
@@ -608,14 +746,14 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     expect(clarifications()).toEqual([]);
     await turn(card.message, { source: 'chip', chip: { id: card.id } });
     expect(doorCalls[0]!.link_effect).toMatchObject({ quote: answer, effect: { amount: 1, per_source_change: 1 },
-      clarification: { current_turn: true, quote: answer, answer, reading: 'points', floor: { value: 1 } } });
+      clarification: { current_turn: true, quote: answer, answer, reading: 'points' } });
     expect(effectEdge().provenance.natural_effect.amount).toBe(1);
   });
 
   it.each([
-    ['My best guess is 0.5 points; the most it could plausibly be is 3 points.', 0.5, 3, 'outside_stated_bounds'],
-    ['My best guess is 4 points; the most it could plausibly be is 3 points.', 4, 3, 'outside_stated_bounds'],
-    ['My best guess is 1 point; the most it could plausibly be is 1 point.', 1, 1, 'RANGE_ZERO_WIDTH'],
+    ['My best guess is 0.5 points; the lowest it could plausibly be is 1 point; the highest it could plausibly be is 3 points.', 0.5, 3, 'outside_stated_bounds'],
+    ['My best guess is 4 points; the lowest it could plausibly be is 1 point; the highest it could plausibly be is 3 points.', 4, 3, 'outside_stated_bounds'],
+    ['My best guess is 1 point; the lowest it could plausibly be is 1 point; the highest it could plausibly be is 1 point.', 1, 1, 'RANGE_ZERO_WIDTH'],
   ])('invalid-range CONTROL: current guess or helper refusal keeps the floor (%s)', async (answer, guess, upper, refusal) => {
     const held = await resolvedFloor();
     script.push(calls(['propose_link_effect', { ...PAUL_ARGS, amount: guess, amount_unit: 'percentage points',
@@ -643,7 +781,7 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
   it('writer CONTROL: a broad current-turn range is checked before any approval is offered', async () => {
     graph.nodes.find((n: Json) => n.id === 'monthly_churn').observed_state = { raw_value: 4, value: 0.04, cap: 100, unit: '%', source: 'user_override' };
     const held = await resolvedFloor();
-    const answer = 'My best guess is 2 points; the most it could plausibly be is 50 points.';
+    const answer = 'My best guess is 2 points; the lowest it could plausibly be is 1 point; the highest it could plausibly be is 50 points.';
     script.push(calls(['propose_link_effect', { ...PAUL_ARGS, amount: 2, amount_unit: 'percentage points',
       per_source_change: 1, quote: answer, upper: 50 }]), message('That range cannot hold across these options.'));
     const body = await turn(answer);

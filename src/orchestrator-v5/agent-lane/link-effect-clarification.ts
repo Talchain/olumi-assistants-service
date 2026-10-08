@@ -9,6 +9,7 @@ import { linkEffectTargetOf } from '../system-events/link-effect-edit.js';
 export const LINK_EFFECT_TOOL = 'propose_link_effect';
 export const LINK_EFFECT_CLARIFICATION_TURN_TTL = 6;
 export const LINK_EFFECT_CLARIFICATION_WALL_TTL_MS = 24 * 60 * 60_000;
+export { LINK_EFFECT_BEST_GUESS_QUESTION, linkEffectBestGuessQuestion } from './link-effect-question.js';
 export type LinkEffectClarificationPending = PendingAction & {
   readonly action: Extract<PendingAction['action'], { kind: 'elicit_link_effect_clarification' }>;
 };
@@ -30,9 +31,15 @@ export function linkEffectResolvedReading(answer: string): 'points' | 'relative'
   return undefined;
 }
 
-export function linkEffectBestGuessQuestion(action: Pick<LinkEffectClarificationAction, 'quote' | 'from_label' | 'to_label'>): string {
-  // AIQ: words pending
-  return `You said “${action.quote}”. What's your best single guess for how much ‘${action.from_label}’ changes ‘${action.to_label}’, and what's the most it could plausibly be?`;
+/** State changes replace a revision without renewing the original clarification's lifetime. */
+export function reviseLinkEffectClarification(
+  pending: LinkEffectClarificationPending, action: LinkEffectClarificationAction, emittedAtIso: string,
+): LinkEffectClarificationPending {
+  const emittedMs = Math.max(Date.parse(emittedAtIso), Date.parse(pending.emitted_at_iso) + 1);
+  if (!Number.isFinite(emittedMs)) throw new Error('Link-effect clarification revisions require an ISO timestamp.');
+  const id = randomUUID();
+  return { ...pending, id, chip_id: `agent-link-effect-clarification:${id}`,
+    emitted_at_iso: new Date(emittedMs).toISOString(), action };
 }
 
 /** A changed revision or a Run is not resolution; only the held link and its authorship decide. */
@@ -104,7 +111,7 @@ export function linkEffectClarificationsForAnswerRow(input: {
     if (arriving !== undefined && replacement === undefined) nextByLink.delete(key);
     // Re-asking about the same stored statement changes the question, never resets its lifetime.
     if (replacement !== undefined && replacement.action.quote !== old.action.quote) continue;
-    const candidate = { ...old, ...(replacement !== undefined ? { action: replacement.action } : {}),
+    const candidate = { ...(replacement ?? old), expires_at_iso: old.expires_at_iso,
       expires_at_turn_count: old.expires_at_turn_count + (input.typedByUser ? 0 : 1) };
     const survivor = computeSurvivingPriorPendings([candidate], [], [], input.graphHash, input.nowMs)[0];
     if (isAsk(survivor ?? null) && mayCarry(survivor as LinkEffectClarificationPending)) {
@@ -137,7 +144,7 @@ export function linkEffectClarificationForReply(
   const text = typedMessage.trim();
   if (linkEffectResolvedReading(text) !== undefined) return ask;
   // A best-guess reply must state a fresh figure. The capability and writer validate its terms.
-  return (ask.action.floor !== undefined || ask.action.resolved_reading !== undefined || ask.action.question.includes('best single guess'))
+  return (ask.action.resolved_reading !== undefined || ask.action.question.includes('best single guess'))
     && findLinkEffectAmounts(text).length > 0 ? ask : null;
 }
 

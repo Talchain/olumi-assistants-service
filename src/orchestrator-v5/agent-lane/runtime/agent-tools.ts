@@ -369,7 +369,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how much an EXISTING link moves its target, as the user\u2019s own figures, when the user has just said it in numbers '
       + '(for example "every \u00a31 on the price loses us about 50 subscribers"). This does NOT change anything: it prepares ONE change and '
       + 'returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + 'Both magnitudes must be the user’s own figures in ONE statement from THIS message. A link_effect_clarifications entry is CONTEXT ONLY: use its endpoints and resolved reading, NEVER its stored quote as a figure or as quote. After a points/relative answer, ask its best-single-guess question. For the numerical answer, quote THIS message verbatim and size only its figures in the link’s own terms; a short answer uses a one-unit source basis. Never derive the source change from an option or convert a relative percentage. If the answer does not state the figure in the link’s terms, ask again with one question. A recorded floor is a bound, never a size. When a best guess and plausible upper answer a commensurate floor, pass upper; a guess alone keeps the floor without a range. Deterministic number words '
+      + 'Both magnitudes must be the user’s own figures in ONE statement from THIS message. A link_effect_clarifications entry is CONTEXT ONLY: use its endpoints and resolved reading, NEVER its stored quote as a figure or as quote. After a points/relative answer, ask its best-single-guess question. For the numerical answer, quote THIS message verbatim and size only its figures in the link’s own terms; a short answer uses a one-unit source basis. Never derive the source change from an option or convert a relative percentage. If the answer does not state the figure in the link’s terms, ask again with one question. A recorded floor is disclosure context only: never use it to validate the current guess or supply any range extreme. Ask for the current best single guess and current lowest and highest plausible effects. Pass lower and upper only when both were stated in THIS turn alongside the guess; a guess alone is a point. Deterministic number words '
       + 'are accepted ("two", "one and a half", "half a point", "about a point"); explicit percent levels such as '
       + '"from 8% to 4%" state a -4-point change. Never choose a figure from a range or invent a missing figure. '
       + '`amount` is your proposed signed change in the TARGET (negative when it falls); `per_source_change` is your '
@@ -390,7 +390,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         amount: { type: 'number', description: 'The signed target change.' }, amount_unit: { type: 'string', description: 'The target unit.' },
         per_source_change: { type: 'number', description: 'The signed source change this is per.' }, per_source_change_unit: { type: 'string', description: 'The source unit.' },
         quote: { type: 'string', description: 'The exact user words for this link.' },
-        upper: { type: 'number', description: 'The plausible upper end supplied with the best guess answering a recorded lower-bound question, in that bound reading.' },
+        lower: { type: 'number', description: 'The lowest plausible effect stated in the current turn alongside the current best guess and highest plausible effect.' },
+        upper: { type: 'number', description: 'The highest plausible effect stated in the current turn alongside the current best guess and lowest plausible effect.' },
       }, ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote']), },
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
@@ -399,7 +400,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       per_source_change: { type: 'number', description: 'Your proposed signed reading of the user\u2019s source magnitude (non-zero), disclosed on the approval card.' },
       per_source_change_unit: { type: 'string', description: 'The source\u2019s unit.' },
       quote: { type: 'string', description: 'The user\u2019s complete statement from THIS message, copied exactly with its punctuation.' },
-      upper: { type: 'number', description: 'The plausible upper end supplied with the best guess answering a recorded lower-bound question, in that bound reading.' },
+      lower: { type: 'number', description: 'The lowest plausible effect stated in the current turn alongside the current best guess and highest plausible effect.' },
+      upper: { type: 'number', description: 'The highest plausible effect stated in the current turn alongside the current best guess and lowest plausible effect.' },
       }, []),
       oneOf: [
         { required: ['links'] },
@@ -877,9 +879,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: the user's stated effect on one link (their figures + words); a capability set without it refuses plainly. */
   proposeLinkEffect?(ctx: AgentToolContext, args: {
-    links?: readonly { from_label: string; to_label: string; amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; upper?: number }[];
+    links?: readonly { from_label: string; to_label: string; amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; lower?: number; upper?: number }[];
     from_label?: string; to_label?: string; amount?: number; amount_unit?: string;
-    per_source_change?: number; per_source_change_unit?: string; quote?: string; upper?: number;
+    per_source_change?: number; per_source_change_unit?: string; quote?: string; lower?: number; upper?: number;
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {

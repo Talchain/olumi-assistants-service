@@ -49,7 +49,7 @@ import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, linkEffectGaugeStatement, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
 import { mediatorReadings } from '../mediator-reading.js';
-import { prepareLinkEffectUnitReadings, readLinkEffectClarificationAnswer, readLinkEffectCurrentFloorAnswer, withPointsAtZero, type LinkEffectUnitReading, type LinkEffectClarificationReading } from '../../system-events/link-effect-unit-reading.js';
+import { prepareLinkEffectUnitReadings, readLinkEffectClarificationAnswer, readLinkEffectCurrentAnswer, withPointsAtZero, type LinkEffectUnitReading, type LinkEffectClarificationReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -58,7 +58,7 @@ import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-facto
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 import { liveLinkEffectClarifications, linkEffectClarificationForReply, linkEffectBestGuessQuestion, linkEffectResolvedReading, type LinkEffectClarificationAction, type LinkEffectClarificationPending } from '../link-effect-clarification.js';
-import { linkEffectFloorFromStatement, type LinkEffectFloor } from '../link-effect-lower-bound.js';
+import { linkEffectFloorFromStatement, linkEffectLatestFiguresDisclosure, type LinkEffectFloor } from '../link-effect-lower-bound.js';
 import { boundedLinkEffectText, findLinkEffectAmounts } from '../link-effect-figures.js';
 
 /**
@@ -2914,20 +2914,12 @@ export function createAgentCapabilities(
     // ⭐ S5t (Science d5 #87 6009444385, DL adopted): a frame the refit widened is said ONCE, in Science's words — read off
     // the model before approval and the read-back above, never the writer's own account. Only the one-link door refits.
     const reframed = approvedEffects.length === 1 ? reframedNodeIds(approvedRead.raw, check?.raw) : [];
-    // AIQ: words pending. The receipt keeps the confirmed floor, whether or not an upper end was supplied.
-    const floorReceipt = approvedEffects.flatMap(item => {
-      const floor = item.clarification?.floor;
-      if (floor === undefined) return [];
-      return [`Your recorded floor for how “${labelOf(item.from)}” affects “${labelOf(item.to)}” remains “${floor.words}”.`
-        + (item.clarification?.upper === undefined ? ' No range was supplied.'
-          : ` Your plausible extremes are ${floor.value} to ${item.clarification.upper} ${floor.unit}.`)];
-    }).join(' ');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: approvedEffects.length === 1
-        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.${floorReceipt === '' ? '' : ` ${floorReceipt}`}`
-        : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.${floorReceipt === '' ? '' : ` ${floorReceipt}`}`,
+        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.`
+        : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`,
     };
   };
 
@@ -3393,17 +3385,17 @@ export function createAgentCapabilities(
     ...(boundedLinkEffectText(quote) !== undefined ? { value_text: boundedLinkEffectText(quote) } : {}),
     ...(floor === undefined ? {} : { floor }), ...(reading === undefined ? {} : { resolved_reading: reading }) });
   const guessQuestion = (from: { label: string }, to: { label: string }, quote: string): string =>
-    linkEffectBestGuessQuestion({ from_label: from.label, to_label: to.label, quote });
+    linkEffectBestGuessQuestion({ quote });
   const readingOnlyReply = (reply: LinkEffectClarificationPending, text: string): boolean =>
     linkEffectResolvedReading(text) !== undefined && (findLinkEffectAmounts(text).length === 0
-      || reply.action.resolved_reading === undefined && reply.action.floor === undefined);
+      || reply.action.resolved_reading === undefined && !reply.action.question.includes('best single guess'));
   const currentAnswerReading = (reply: LinkEffectClarificationPending | null, from: string, to: string,
-    quote: string, text: string, upper: unknown, fromLabel: string, toLabel: string): LinkEffectClarificationReading | undefined => {
+    quote: string, text: string, lower: unknown, upper: unknown, fromLabel: string, toLabel: string): LinkEffectClarificationReading | undefined => {
     if (reply === null || quoteSpansIn(text, quote).length === 0 || readingOnlyReply(reply, text)) return undefined;
     return { current_turn: true, node_id: to, from_id: from, to_id: to, from_label: fromLabel, to_label: toLabel, quote, answer: quote,
       source_text: quote, statement_classification: 'asserted',
       ...(reply.action.resolved_reading === undefined ? {} : { reading: reply.action.resolved_reading }),
-      ...(reply.action.floor === undefined ? {} : { floor: reply.action.floor }),
+      ...(typeof lower === 'number' ? { lower } : {}),
       ...(typeof upper === 'number' ? { upper } : {}) };
   };
 
@@ -3669,6 +3661,7 @@ export function createAgentCapabilities(
           quote: string; edge_token: string; clarification?: LinkEffectClarificationReading; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; mediator_readings?: readonly LinkEffectMediatorReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string; question?: string }[] = [];
         const clarifications: LinkEffectClarificationAction[] = [];
+        const latestFiguresDisclosures: string[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
           const toLabel = String(entry.to_label ?? '');
@@ -3716,8 +3709,8 @@ export function createAgentCapabilities(
           }
           refusalSourceText = text;
           if (reply !== null && (readingOnlyReply(reply, text) || quoteSpansIn(text, entryQuote).length === 0)) {
-            const floor = reply.action.floor ?? linkEffectFloorFromStatement(working, from.id, to.id, reply.action.quote,
-              { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit }, text) ?? undefined;
+            const floor = reply.action.floor ?? (linkEffectStatementClassification(reply.action.quote, reply.action.source_text ?? reply.action.quote, { source: from.label, target: to.label }) === 'asserted' ? linkEffectFloorFromStatement(working, from.id, to.id, reply.action.quote,
+              { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit }, text) : null) ?? undefined;
             fail('not_the_users_figure', '', guessQuestion(from, to, reply.action.quote), floor);
             continue;
           }
@@ -3725,7 +3718,7 @@ export function createAgentCapabilities(
             fail('quote_not_verbatim', 'Nothing was prepared: this link’s quote must be the user’s own words from THIS message, copied exactly.');
             continue;
           }
-          const answerReading = currentAnswerReading(reply, from.id, to.id, entryQuote, text, entry.upper, from.label, to.label);
+          const answerReading = currentAnswerReading(reply, from.id, to.id, entryQuote, text, entry.lower, entry.upper, from.label, to.label);
           const clarification = answerReading === undefined ? {} : { clarification: answerReading };
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
@@ -3747,9 +3740,9 @@ export function createAgentCapabilities(
           const currentAnswer = readLinkEffectClarificationAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope);
           const classification = linkEffectStatementClassification(entryQuote, text, { source: from.label, target: to.label });
           if (classification !== 'asserted') { fail('not_the_users_statement', '', guessQuestion(from, to, reply?.action.quote ?? entryQuote)); continue; }
-          if (answerReading?.floor !== undefined && !currentAnswer) {
-            const answer = readLinkEffectCurrentFloorAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope);
-            fail(answer.ok ? 'not_the_users_figure' : answer.refusal, '', answer.ok ? undefined : answer.question);
+          if (answerReading !== undefined && !currentAnswer) {
+            const answer = readLinkEffectCurrentAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope);
+            fail(answer.ok ? 'not_the_users_figure' : answer.refusal, '', guessQuestion(from, to, reply!.action.quote));
             continue;
           }
           const bound = boundedLinkEffectText(entryQuote);
@@ -3815,6 +3808,9 @@ export function createAgentCapabilities(
           }
           // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
           const mediated = linkEffectMediatorReadings(unitView, from.id, to.id);
+          const latestFiguresDisclosure = linkEffectLatestFiguresDisclosure(reply?.action.floor,
+            readLinkEffectCurrentAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope), stated);
+          if (latestFiguresDisclosure !== undefined) latestFiguresDisclosures.push(latestFiguresDisclosure);
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
             ...unitReadings, ...labelReadings, ...clarification, ...(mediated.length > 0 ? { mediator_readings: mediated } : {}), ...consent,
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
@@ -3840,6 +3836,7 @@ export function createAgentCapabilities(
         proposals.put(proposal);
         return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
           resolved_link_effects: prepared.map(item => ({ from_id: item.from, to_id: item.to })),
+          ...(latestFiguresDisclosures.length > 0 ? { link_effect_latest_figure_disclosures: latestFiguresDisclosures } : {}),
           ...(clarifications.length > 0 ? { link_effect_clarifications: clarifications } : {}),
           links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said })),
           ...(notPrepared.length > 0 ? { not_prepared: notPrepared } : {}),
@@ -3883,14 +3880,14 @@ export function createAgentCapabilities(
         return refusalWithAsk('unreadable_effect', guessQuestion(from, to, reply?.action.quote ?? text));
       }
       if (reply !== null && (readingOnlyReply(reply, text) || quoteSpansIn(text, quote).length === 0)) {
-        const floor = reply.action.floor ?? linkEffectFloorFromStatement(g.raw, from.id, to.id, reply.action.quote,
-          { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit }, text) ?? undefined;
+        const floor = reply.action.floor ?? (linkEffectStatementClassification(reply.action.quote, reply.action.source_text ?? reply.action.quote, { source: from.label, target: to.label }) === 'asserted' ? linkEffectFloorFromStatement(g.raw, from.id, to.id, reply.action.quote,
+          { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit }, text) : null) ?? undefined;
         return refusalWithAsk('not_the_users_figure', guessQuestion(from, to, reply.action.quote), undefined, floor);
       }
       if (quoteSpansIn(text, quote).length === 0) {
         return refusalWithAsk('quote_not_verbatim', guessQuestion(from, to, reply?.action.quote ?? text));
       }
-      const answerReading = currentAnswerReading(reply, from.id, to.id, quote, text, args.upper, from.label, to.label);
+      const answerReading = currentAnswerReading(reply, from.id, to.id, quote, text, args.lower, args.upper, from.label, to.label);
       const clarification = answerReading === undefined ? {} : { clarification: answerReading };
       // RT-6: the binder checks numbers and link identity; the card asks consent to the Agent's reading.
       const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
@@ -3913,10 +3910,10 @@ export function createAgentCapabilities(
       const currentAnswer = readLinkEffectClarificationAnswer(answerReading, statedEffect, quote, statedEnds, statedScope);
       const classification = linkEffectStatementClassification(quote, text, statedEnds);
       if (classification !== 'asserted') return refusalWithAsk('not_the_users_statement', guessQuestion(from, to, reply?.action.quote ?? quote), classification);
-      if (answerReading?.floor !== undefined && !currentAnswer) {
-        const answer = readLinkEffectCurrentFloorAnswer(answerReading, statedEffect, quote, statedEnds, statedScope);
+      if (answerReading !== undefined && !currentAnswer) {
+        const answer = readLinkEffectCurrentAnswer(answerReading, statedEffect, quote, statedEnds, statedScope);
         return refusalWithAsk(answer.ok ? 'not_the_users_figure' : answer.refusal,
-          answer.ok ? guessQuestion(from, to, reply!.action.quote) : answer.question);
+          guessQuestion(from, to, reply!.action.quote));
       }
       const bound = boundedLinkEffectText(quote);
       if (bound !== undefined && !currentAnswer) {
@@ -3986,6 +3983,8 @@ export function createAgentCapabilities(
         public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,
       });
       proposals.put(proposal);
+      const latestFiguresDisclosure = linkEffectLatestFiguresDisclosure(reply?.action.floor,
+        readLinkEffectCurrentAnswer(answerReading, statedEffect, quote, statedEnds, statedScope), statedEffect);
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
@@ -3993,6 +3992,7 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said },
         resolved_link_effects: [{ from_id: from.id, to_id: to.id }],
+        ...(latestFiguresDisclosure === undefined ? {} : { link_effect_latest_figure_disclosures: [latestFiguresDisclosure] }),
         note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };

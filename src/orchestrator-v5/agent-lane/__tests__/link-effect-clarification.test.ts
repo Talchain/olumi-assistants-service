@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { parsePendingAction } from '../../session/pending-action.js';
 import {
-  LINK_EFFECT_TOOL, linkEffectAnswerFirstCall, linkEffectClarificationOnRefusal,
-  linkEffectClarificationsForAnswerRow, liveLinkEffectClarifications,
+  LINK_EFFECT_TOOL, LINK_EFFECT_BEST_GUESS_QUESTION, linkEffectAnswerFirstCall, linkEffectBestGuessQuestion,
+  linkEffectClarificationOnRefusal, linkEffectClarificationsForAnswerRow, liveLinkEffectClarifications,
+  reviseLinkEffectClarification,
   type LinkEffectClarificationPending,
 } from '../link-effect-clarification.js';
 
@@ -59,8 +60,55 @@ describe('context-only link-effect clarification and lifetime', () => {
     const prior = { ...original, expires_at_turn_count: 3 };
     const refreshed = { ...make(Date.parse(original.emitted_at_iso) + 1), action: { ...original.action, question: 'You said at least one point. What bound do you mean?' } };
     const result = carry([prior], { next: [refreshed], typedByUser: true });
-    expect(result).toEqual([{ ...prior, action: refreshed.action, expires_at_turn_count: 2 }]);
+    expect(result).toEqual([{ ...refreshed, expires_at_iso: prior.expires_at_iso, expires_at_turn_count: 2 }]);
     expect(carry([{ ...prior, expires_at_turn_count: 1 }], { next: [refreshed], typedByUser: true })).toEqual([]);
+  });
+
+  it('RC2a P2 fast points revision keeps its new identity and a slow original answer cannot erase it', () => {
+    const original = make(Date.now() - 20);
+    const prior = { ...original, expires_at_turn_count: 3 };
+    const fastPoints = reviseLinkEffectClarification(prior, { ...original.action,
+      resolved_reading: 'points' as const,
+      question: 'What is your best single guess and plausible range?',
+      floor: { value: 1, unit: 'percentage points', reading: 'points' as const, words: 'at least increase 1%',
+        per_source_change: 1, per_source_change_unit: 'GBP', reading_answer: 'points', source_quote: original.action.quote },
+    }, original.emitted_at_iso);
+    const latest = carry([prior], { next: [fastPoints], typedByUser: true });
+    expect(latest).toEqual([{ ...fastPoints, expires_at_turn_count: 2, expires_at_iso: original.expires_at_iso }]);
+    expect(latest[0]?.id).not.toBe(original.id);
+    expect(latest[0]?.chip_id).not.toBe(original.chip_id);
+    expect(carry(latest, { next: [original], typedByUser: false })).toEqual(latest);
+    expect(liveLinkEffectClarifications([original, ...latest], SCENARIO, graph)).toEqual(latest);
+  });
+
+  it('every reading, floor and question update mints a new revision without renewing its lifetime', () => {
+    const original = { ...make(), expires_at_turn_count: 3 };
+    const reading = reviseLinkEffectClarification(original, { ...original.action, resolved_reading: 'points' }, original.emitted_at_iso);
+    const floor = reviseLinkEffectClarification(reading, { ...reading.action,
+      floor: { value: 1, unit: 'percentage points', reading: 'points', words: 'at least increase 1%',
+        per_source_change: 1, per_source_change_unit: 'GBP', reading_answer: 'points', source_quote: original.action.quote },
+    }, original.emitted_at_iso);
+    const question = reviseLinkEffectClarification(floor, { ...floor.action,
+      question: linkEffectBestGuessQuestion(floor.action) }, original.emitted_at_iso);
+    const revisions = [original, reading, floor, question];
+    expect(new Set(revisions.map(ask => ask.id)).size).toBe(4);
+    expect(new Set(revisions.map(ask => ask.chip_id)).size).toBe(4);
+    expect(revisions.map(ask => Date.parse(ask.emitted_at_iso)))
+      .toEqual([0, 1, 2, 3].map(offset => Date.parse(original.emitted_at_iso) + offset));
+    for (const ask of revisions) {
+      expect(ask.expires_at_turn_count).toBe(original.expires_at_turn_count);
+      expect(ask.expires_at_iso).toBe(original.expires_at_iso);
+    }
+    for (const pending of [revisions, [...revisions].reverse()]) {
+      expect(liveLinkEffectClarifications(pending, SCENARIO, graph)).toEqual([question]);
+    }
+  });
+
+  it('the pending best-guess wording requests all three current figures from one constant', () => {
+    expect(LINK_EFFECT_BEST_GUESS_QUESTION)
+      .toBe("You said ‘<user's words>’. What's your best single guess, and the lowest and highest it could plausibly be?");
+    expect(linkEffectBestGuessQuestion({ quote: QUOTE }))
+      .toBe(`You said ‘${QUOTE}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
   });
 
   it('a newer statement supersedes only its own link, and a proposed card consumes the ask', () => {

@@ -28,7 +28,7 @@ import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf, linkEffectStatementClassification, linkEffectTheUserStated } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
 import { statedInOneOf, type LinkEffectStatement } from '../system-events/link-effect-edit.js';
-import { readLinkEffectClarificationAnswer, readLinkEffectCurrentFloorAnswer, type LinkEffectClarificationReading } from '../system-events/link-effect-unit-reading.js';
+import { readLinkEffectClarificationAnswer, readLinkEffectCurrentAnswer, type LinkEffectClarificationReading } from '../system-events/link-effect-unit-reading.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -488,15 +488,11 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     const shortAnswer = readLinkEffectClarificationAnswer(clarification, e as LinkEffectStatement, op.quote, statedEnds, statedScope);
     if (!shortAnswer && (linkEffectStatementClassification(op.quote, op.quote, { source: labels.from, target: labels.to }) !== 'asserted'
       || linkEffectTheUserStated(op.quote, e as LinkEffectStatement, { source: labels.from, target: labels.to }, { quantities: [labels.from, labels.to] }) !== null)) return undefined;
-    if (clarification.floor !== undefined) {
-      const floor = clarification.floor;
-      const answer = readLinkEffectCurrentFloorAnswer(clarification, e as LinkEffectStatement, op.quote, statedEnds, statedScope);
-      if (!shortAnswer || !answer.ok || answer.guess !== e.amount || answer.upper !== clarification.upper) return undefined;
-      // AIQ: words pending
-      disclosures.push(`Your recorded floor: “${floor.words}”.`
-        + (answer.upper === undefined ? ' No range was supplied.'
-          : ` Your plausible extremes are ${unsigned(floor.value, floor.unit)} and ${unsigned(answer.upper, floor.unit)}; your best guess is ${unsigned(answer.guess, floor.unit)}.`));
-    }
+    const answer = readLinkEffectCurrentAnswer(clarification, e as LinkEffectStatement, op.quote, statedEnds, statedScope);
+    if (!answer.ok || answer.guess !== e.amount) return undefined;
+    if (answer.lower !== undefined && answer.upper !== undefined) {
+      disclosures.push(`Your plausible extremes are ${signed(answer.lower, e.amount_unit)} and ${signed(answer.upper, e.amount_unit)}; your best guess is ${signed(answer.guess, e.amount_unit)}.`);
+    } else disclosures.push('No range was supplied.');
     // AIQ: words pending
     disclosures.push(`Your clarification: “${op.clarification.answer}”.`);
   }

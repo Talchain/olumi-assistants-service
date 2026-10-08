@@ -1,4 +1,4 @@
-import { LINK_EFFECT_TOOL, linkEffectAnswerFirstCall, linkEffectClarificationOnRefusal, linkEffectClarificationsForAnswerRow, liveLinkEffectClarifications, type LinkEffectClarificationPending, type LinkEffectClarificationAction } from '../orchestrator-v5/agent-lane/link-effect-clarification.js';
+import { LINK_EFFECT_TOOL, reviseLinkEffectClarification, linkEffectAnswerFirstCall, linkEffectClarificationOnRefusal, linkEffectClarificationsForAnswerRow, liveLinkEffectClarifications, type LinkEffectClarificationPending, type LinkEffectClarificationAction } from '../orchestrator-v5/agent-lane/link-effect-clarification.js';
 import { linkEffectFloorDisclosures } from '../orchestrator-v5/agent-lane/link-effect-lower-bound.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -3939,16 +3939,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const emittedAtIso = new Date().toISOString();
     const effectNext: LinkEffectClarificationPending[] = [];
     const effectConsumed: { from_id: string; to_id: string }[] = [];
+    const effectLatestFigureLines: string[] = [];
     for (let i = 0; i < result.tool_calls.length; i++) {
       if (result.tool_calls[i]?.name !== LINK_EFFECT_TOOL) continue;
       const toolResult = result.tool_results[i] as { link_effect_clarifications?: LinkEffectClarificationAction[];
-        resolved_link_effects?: { from_id: string; to_id: string }[] } | undefined;
+        resolved_link_effects?: { from_id: string; to_id: string }[]; link_effect_latest_figure_disclosures?: string[] } | undefined;
       for (const action of toolResult?.link_effect_clarifications ?? []) {
         const fresh = linkEffectClarificationOnRefusal({ action, message: [message, ...effectAsks.map(p => p.action.quote)].join('\n'),
           scenarioId, graph: readbackGraph, emittedAtIso });
-        if (fresh !== null) effectNext.push(fresh);
+        if (fresh !== null) {
+          const previous = effectAsks.find(p => p.action.from_id === action.from_id && p.action.to_id === action.to_id
+            && p.action.quote === action.quote);
+          effectNext.push(previous === undefined ? fresh : reviseLinkEffectClarification(previous, fresh.action, emittedAtIso));
+        }
       }
       effectConsumed.push(...toolResult?.resolved_link_effects ?? []);
+      if (result.tool_calls[i]?.ok) effectLatestFigureLines.push(...toolResult?.link_effect_latest_figure_disclosures ?? []);
     }
     let carriedEffects = mode === 'full' ? linkEffectClarificationsForAnswerRow({ prior: effectAsks, next: effectNext,
       consumedLinks: effectConsumed, graph: readbackGraph, graphHash, nowMs: Date.parse(emittedAtIso), typedByUser: typedByUser(body) }) : [];
@@ -4528,7 +4534,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (effectLapseLines.length > 0) {
       wireBody = { ...wireBody, assistant_text: withB3LinesAtRest(String(wireBody.assistant_text ?? ''), effectLapseLines) };
     }
-    const effectFloorLines = ranAnalysisThisTurn ? linkEffectFloorDisclosures(readbackGraph, carriedEffects) : [];
+    const effectFloorLines = [...(ranAnalysisThisTurn ? linkEffectFloorDisclosures(readbackGraph, carriedEffects) : []),
+      ...new Set(effectLatestFigureLines)];
     if (effectFloorLines.length > 0) {
       wireBody = { ...wireBody, assistant_text: withB3LinesAtRest(String(wireBody.assistant_text ?? ''), effectFloorLines) };
     }

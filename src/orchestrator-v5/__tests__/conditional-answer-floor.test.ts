@@ -190,10 +190,10 @@ describe('S-D.1b conditional answer floor', () => {
     expect(s.written[0]?.pending_actions).toEqual([]);
   });
 
-  it('RC2a P2 CONTROL: same-time same-link arrival cannot replace the question this response prepared', async () => {
+  it('RC2a P2 CONTROL: a same-time distinct-statement arrival cannot replace the question this response prepared', async () => {
     const prepared = clarification('effect-prepared', 2);
     const sameTime: PendingAction = { ...clarification('effect-same-time', 2),
-      action: { ...prepared.action, question: 'Other question' } };
+      action: { ...prepared.action, quote: 'Churn will rise by 5 points.', question: 'Other question' } };
     const s = setup([sameTime], []);
     await appendCheckedGraphWrite({ store: s.store, write: answer([prepared]), writesGraph: false,
       heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set() } });

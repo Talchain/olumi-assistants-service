@@ -47,8 +47,8 @@ const SCENARIOS = { f0eb03ac: 'f0eb03ac-f6c6-4e68-9631-fa41d29d693f', b8143909: 
   // Codex step-4 buddy r1's counterexample graph: café "Revenue" (GBP/month) beside a separate "Lift revenue".
   lift: '11f7c0de-0000-4000-8000-000000000001' } as const;
 const TAIL = ' Approve, or correct.';
-const bestGuessAsk = (quote: string, from: string, to: string): string =>
-  `You said “${quote}”. What's your best single guess for how much ‘${from}’ changes ‘${to}’, and what's the most it could plausibly be?`;
+const bestGuessAsk = (quote: string, _from: string, _to: string): string =>
+  `You said ‘${quote}’. What's your best single guess, and the lowest and highest it could plausibly be?`;
 const wasteHead = 'Record: +1 percentage point on "Production waste rate" → −0.5 percentage points in "gross margin": raising "Production waste rate" by 1 percentage point lowers "gross margin" by 0.5 percentage points.';
 const effect = (amount: number, amount_unit: string, per_source_change: number, per_source_change_unit: string): LinkEffectStatement => ({ amount, amount_unit, per_source_change, per_source_change_unit });
 // Card expectations are literals, independent of the production formatter and its interpretation.

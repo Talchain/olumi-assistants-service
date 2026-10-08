@@ -194,51 +194,60 @@ describe('RC2a current-turn-only canonical figures', () => {
     } });
   });
 
-  it('a recorded floor plus current guess and upper uses Science h spread at 0.9', () => {
-    const result = currentWrite('2, at most 3', 2, { floor, upper: 3 });
+  it('a recorded floor stays context while the current guess, lowest and highest supply spread at 0.9', () => {
+    const answer = '2, lowest 0.5, highest 3';
+    const result = currentWrite(answer, 2, { floor, upper: 3 });
     expect(result.kind, JSON.stringify(result)).toBe('mutated');
     if (result.kind !== 'mutated') return;
-    const spread = statedRangeSpread(1, 3, 0.9);
+    const spread = statedRangeSpread(0.5, 3, 0.9);
     expect(spread.ok).toBe(true);
-    expect((result.mutatedGraph as typeof graph).edges[0]!.provenance).toMatchObject({ source_quote: '2, at most 3',
-      natural_effect: { amount: 2, per_source_change: 1 }, stated_effect_floor: { value: 1 }, stated_effect_upper: 3,
+    const provenance = (result.mutatedGraph as typeof graph).edges[0]!.provenance;
+    expect(provenance).toMatchObject({ source_quote: answer,
+      natural_effect: { amount: 2, per_source_change: 1 }, stated_effect_lower: 0.5, stated_effect_upper: 3,
       stated_effect_std: spread.ok ? spread.std : undefined });
+    expect(provenance).not.toHaveProperty('stated_effect_floor');
   });
 
-  it('a current guess alone preserves the floor without manufacturing an upper', () => {
+  it('a current guess alone is a point and carries no recorded floor or invented range', () => {
     const result = currentWrite('2 points', 2, { floor });
     expect(result.kind, JSON.stringify(result)).toBe('mutated');
     if (result.kind !== 'mutated') return;
     const provenance = (result.mutatedGraph as typeof graph).edges[0]!.provenance;
-    expect(provenance).toMatchObject({ source_quote: '2 points', stated_effect_floor: { value: 1 } });
+    expect(provenance).toMatchObject({ source_quote: '2 points', natural_effect: { amount: 2 } });
+    expect(provenance).not.toHaveProperty('stated_effect_floor');
     expect(provenance).not.toHaveProperty('stated_effect_upper');
+    expect(provenance).not.toHaveProperty('stated_effect_std');
   });
 
-  it('a full current statement preserves a commensurate floor without inventing a range', () => {
+  it('a full current statement writes only its current point without carrying a recorded floor or range', () => {
     const result = currentWrite('Raising the café price by £1 will increase gross margin by 2 points.', 2, { floor });
     expect(result.kind, JSON.stringify(result)).toBe('mutated');
     if (result.kind !== 'mutated') return;
     const provenance = (result.mutatedGraph as typeof graph).edges[0]!.provenance;
     expect(provenance).toMatchObject({ source_quote: 'Raising the café price by £1 will increase gross margin by 2 points.',
-      natural_effect: { amount: 2, per_source_change: 1 }, stated_effect_floor: { value: 1 } });
+      natural_effect: { amount: 2, per_source_change: 1 } });
+    expect(provenance).not.toHaveProperty('stated_effect_floor');
     expect(provenance).not.toHaveProperty('stated_effect_upper');
     expect(provenance).not.toHaveProperty('stated_effect_std');
   });
 
-  it('only a full current source figure can satisfy a matching multi-unit floor', () => {
+  it('only a full current source figure supplies a multi-unit denominator; the recorded floor cannot validate it', () => {
     const quote = 'Raising the café price by £2 will increase gross margin by 2 points.';
     const marker: LinkEffectClarificationReading = { node_id: 'margin', from_id: 'price', to_id: 'margin', quote, answer: quote,
       source_text: quote, current_turn: true, statement_classification: 'asserted', reading: 'points', floor: { ...floor, per_source_change: 2 } };
     const statement = { ...effect, amount: 2, per_source_change: 2 };
     expect(readLinkEffectCurrentFloorAnswer(marker, statement, quote, { source: 'Café price', target: 'Gross margin' })).toEqual({ ok: true, guess: 2 });
     expect(readLinkEffectCurrentFloorAnswer({ ...marker, quote: '2 points', answer: '2 points', source_text: '2 points' }, statement, '2 points').ok).toBe(false);
-    expect(readLinkEffectCurrentFloorAnswer({ ...marker, floor }, statement, quote, { source: 'Café price', target: 'Gross margin' }).ok).toBe(false);
+    expect(readLinkEffectCurrentFloorAnswer({ ...marker, floor }, statement, quote, { source: 'Café price', target: 'Gross margin' }))
+      .toEqual({ ok: true, guess: 2 });
   });
 
-  it('a full fresh statement cannot consume a floor from another link', () => {
+  it('a floor from another link cannot refuse a fully named current statement', () => {
     const result = currentWrite('Raising the café price by £1 will increase gross margin by 2 points.', 2,
       { floor: { ...floor, to_id: 'another_target' } });
-    expect(result.kind).toBe('refused');
+    expect(result.kind, JSON.stringify(result)).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    expect((result.mutatedGraph as typeof graph).edges[0]!.provenance).not.toHaveProperty('stated_effect_floor');
   });
 
   it.each(['points', 'relative', 'at least 2 points', 'I reject this claim: 2 points', 'According to our adviser: 2 points'])(
@@ -258,6 +267,15 @@ describe('RC2a current-turn-only canonical figures', () => {
     mixed.nodes.push({ id: 'raise', kind: 'option', label: 'Raise price', interventions: { price: { raw_value: 5, source: 'user_specified' } } });
     const recorded = linkEffectFloorFromStatement(mixed, 'price', 'margin', floor.source_quote!, { ...effect, amount: 1, per_source_change: 4.7 }, 'percentage points');
     expect(recorded).toMatchObject({ value: 1, per_source_change: 1 });
-    expect(linkEffectFloorQuestion(recorded!)).toBe(`You said “${floor.source_quote}”. What's your best single guess for how much ‘Café price’ changes ‘Gross margin’, and what's the most it could plausibly be?`);
+    expect(linkEffectFloorQuestion(recorded!)).toBe(`You said ‘${floor.source_quote}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
+  });
+
+  it('RC2a class MUTANT: a stored floor getter cannot reach writer validation or spread', () => {
+    const unreadableFloor = { ...floor, get value(): number { throw new Error('stored floor reached the writer'); } };
+    let result: ReturnType<typeof currentWrite> | undefined;
+    expect(() => { result = currentWrite('2 points', 2, { floor: unreadableFloor }); }).not.toThrow();
+    expect(result?.kind).toBe('mutated');
+    if (result?.kind !== 'mutated') return;
+    expect((result.mutatedGraph as typeof graph).edges[0]!.provenance).not.toHaveProperty('stated_effect_floor');
   });
 });

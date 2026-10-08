@@ -1634,6 +1634,8 @@ export async function commitDirectAnswer(
     writesGraph,
     baseGraphForInvariants: metadata.baseGraphForInvariants,
     source: metadata.handler_id ?? undefined,
+    clarificationSeenByThisRequest: new Set((metadata.priorPendingActions ?? [])
+      .filter(p => p.action.kind === 'elicit_link_effect_clarification').map(p => p.chip_id)),
     write: {
       scenario_id: metadata.scenario_id,
       turn_id: metadata.turn_id,

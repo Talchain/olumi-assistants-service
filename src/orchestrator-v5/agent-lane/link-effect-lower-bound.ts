@@ -7,6 +7,7 @@ import { linkEffectTheUserStated, linkEffectStatementClassification, linkEffectS
 import { linkEffectEndUnits, linkEffectTargetOf, type LinkEffectStatement } from '../system-events/link-effect-edit.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectClarificationPending } from './link-effect-clarification.js';
+import { linkEffectBestGuessQuestion } from './link-effect-question.js';
 
 export interface LinkEffectFloor {
   readonly from_id?: string;
@@ -38,49 +39,92 @@ export function isLinkEffectFloor(v: unknown): v is LinkEffectFloor {
     && (f.from_label === undefined || words(f.from_label)) && (f.target_label === undefined || words(f.target_label));
 }
 
-export function linkEffectFloorQuestion(floor: LinkEffectFloor): string {
-  // AIQ: words pending
-  return `You said “${floor.source_quote ?? floor.words}”. What's your best single guess for how much ‘${floor.from_label ?? 'the source'}’ changes ‘${floor.target_label ?? 'the target'}’, and what's the most it could plausibly be?`;
+export function linkEffectFloorQuestion(floor: Pick<LinkEffectFloor, 'source_quote' | 'words'>): string {
+  return linkEffectBestGuessQuestion({ quote: floor.source_quote ?? floor.words });
 }
 
-export function readLinkEffectFloorAnswer(floor: LinkEffectFloor, answer: string):
-  { ok: true; guess: number; upper?: number; std?: number }
-  | { ok: false; refusal: string; question: string } {
-  if (!isLinkEffectFloor(floor) || typeof answer !== 'string' || answer.length > 400) {
-    return { ok: false, refusal: 'unreadable_floor', question: 'What is your stated minimum, your best single guess, and the most it could plausibly be, in the same units?' };
-  }
-  const amounts = findLinkEffectAmounts(answer);
+export type LinkEffectCurrentGuess =
+  { ok: true; guess: number; lower?: number; upper?: number; std?: number }
+  | { ok: false; refusal: string; question: string };
+
+// AIQ: words pending
+export const LINK_EFFECT_LATEST_FIGURES_DISCLOSURE = "Earlier you said ‘<user's floor words>’; Olumi now uses your latest figures.";
+
+/** The stored floor decides disclosure only, after the current figures have been admitted. */
+export function linkEffectLatestFiguresDisclosure(floor: LinkEffectFloor | undefined,
+  answer: LinkEffectCurrentGuess, effect: LinkEffectStatement): string | undefined {
+  if (!answer.ok || !isLinkEffectFloor(floor)) return undefined;
+  const sameUnit = floor.reading === 'points' ? /^(?:percentage\s+points?|points?|pp)$/i.test(effect.amount_unit.trim())
+    : unitComparisonKey(effect.amount_unit) === unitComparisonKey(floor.unit);
+  if (!sameUnit || unitComparisonKey(effect.per_source_change_unit) !== unitComparisonKey(floor.per_source_change_unit)) return undefined;
+  const basis = floor.per_source_change / effect.per_source_change;
+  if (!Number.isFinite(basis) || basis <= 0
+    || !(answer.guess * basis < floor.value || answer.lower !== undefined && answer.lower * basis < floor.value)) return undefined;
+  return LINK_EFFECT_LATEST_FIGURES_DISCLOSURE.replace("<user's floor words>", () => floor.words);
+}
+
+/** The parser receives units and a question, with no stored numerical fields in its input contract. */
+export function readLinkEffectCurrentGuess(answer: string,
+  metadata: Pick<LinkEffectFloor, 'reading' | 'unit'>, question: string): LinkEffectCurrentGuess {
+  const refuse = (refusal = 'unreadable_current_guess'): LinkEffectCurrentGuess => ({ ok: false, refusal, question });
+  if (typeof answer !== 'string' || answer.length > 400 || /\?|\bnot\b|\bdon['’]t\b/i.test(answer)) return refuse();
+  const amounts = findLinkEffectAmounts(answer).map(amount => {
+    const sign = /([+−-])\s*$/.exec(answer.slice(0, amount.index));
+    return { ...amount, start: sign?.index ?? amount.index,
+      value: (sign !== null && sign[1] !== '+' ? -1 : 1) * amount.magnitude };
+  });
   const first = amounts[0];
-  const question = linkEffectFloorQuestion(floor);
-  if (first === undefined || amounts.length > 2 || /\?|\b(?:not|no|less than|more than|between)\b/i.test(answer)) {
-    return { ok: false, refusal: 'unreadable_floor_answer', question };
-  }
-  const unitsMatch = (a: typeof first): boolean => floor.reading === 'points' ? a.kind === 'plain'
-    : floor.reading === 'relative' ? a.kind === 'plain' || a.kind === 'percent'
-      : a.kind === 'plain' || a.kind === 'currency' && unitComparisonKey(a.currencyCode ?? '') === unitComparisonKey(floor.unit);
-  if (amounts.some(a => !unitsMatch(a))) return { ok: false, refusal: 'unreadable_floor_answer', question };
-  const prefix = answer.slice(0, first.index).trim();
-  if (!/^(?:(?:my|the|our)\s+)?(?:(?:best(?:\s+single)?\s+)?(?:guess|estimate)(?:\s+is|\s*:)?\s*)?$/i.test(prefix)) {
-    return { ok: false, refusal: 'unreadable_floor_answer', question };
-  }
+  if (first === undefined || amounts.length > 3) return refuse();
+  const unitsMatch = (a: typeof first): boolean => metadata.reading === 'points' ? a.kind === 'plain'
+    : metadata.reading === 'relative' ? a.kind === 'plain' || a.kind === 'percent'
+      : a.kind === 'plain' || a.kind === 'currency'
+        && unitComparisonKey(a.currencyCode ?? '') === unitComparisonKey(metadata.unit)?.split('/')[0];
+  if (amounts.some(a => !unitsMatch(a))) return refuse();
+  const prefix = answer.slice(0, first.start).trim();
+  if (!/^(?:(?:my|the|our)\s+)?(?:(?:best(?:\s+single)?\s+)?(?:guess|estimate)(?:\s+is|\s*:)?\s*)?(?:(?:about|around|roughly|approximately)\s*)?$/i.test(prefix)) return refuse();
   const second = amounts[1];
-  const tail = answer.slice(first.index + first.matchedText.length, second?.index);
-  const unit = floor.reading === 'points' ? '(?:percentage\\s+)?points?|pp'
-    : floor.reading === 'relative' ? '(?:relative\\s+)?(?:percent|per\\s+cent|%)' : floor.unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const firstUnit = new RegExp(`^\\s*(?:${unit})?\\s*[.;,]?\\s*$`, 'i');
-  if (second === undefined && !firstUnit.test(tail)) return { ok: false, refusal: 'unreadable_floor_answer', question };
-  if (second !== undefined && (!new RegExp(`^\\s*(?:${unit})?\\s*[.;,]?\\s*(?:and\\s+)?(?:the\\s+)?(?:most(?:\\s+it\\s+could\\s+plausibly\\s+be)?|upper(?:\\s+end)?|maximum|at\\s+most)(?:\\s+is|\\s*:)?\\s*$`, 'i').test(tail)
-    || !firstUnit.test(answer.slice(second.index + second.matchedText.length)))) {
-    return { ok: false, refusal: 'unreadable_floor_answer', question };
+  const third = amounts[2];
+  const tail = answer.slice(first.index + first.matchedText.length, second?.start);
+  const unit = metadata.reading === 'points' ? '(?:percentage\\s+)?points?|pp'
+    : metadata.reading === 'relative' ? '(?:relative\\s+)?(?:percent|per\\s+cent|%)'
+      : metadata.unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const direction = '(?:(?:fewer|less|lower|down|more|extra|additional|higher|up)\\s+)?';
+  const unitTail = `\\s*${direction}(?:${unit})?\\s*`;
+  const lastUnit = new RegExp(`^${unitTail}[.!]?\\s*$`, 'i');
+  const currentValue = (amount: typeof first, suffix: string): number =>
+    /^\s*(?:fewer|less|lower|down)\b/i.test(suffix) ? -Math.abs(amount.value) : amount.value;
+  const guess = currentValue(first, tail);
+  if (second === undefined) return lastUnit.test(tail) ? { ok: true, guess } : refuse();
+  const lowerLabel = '(?:lowest(?:\\s+it\\s+could\\s+plausibly\\s+be)?|lower(?:\\s+end)?|minimum|at\\s+least)';
+  const upperLabel = '(?:highest(?:\\s+it\\s+could\\s+plausibly\\s+be)?|most(?:\\s+it\\s+could\\s+plausibly\\s+be)?|upper(?:\\s+end)?|maximum|at\\s+most)';
+  const labelledSeparator = (label: string): RegExp => new RegExp(`^${unitTail}[.;,]?\\s*(?:and\\s+)?(?:the\\s+)?${label}(?:\\s+is|\\s*:)?\\s*$`, 'i');
+  if (third === undefined) {
+    const completeTerms = labelledSeparator(`(?:${lowerLabel}|${upperLabel})`).test(tail)
+      && lastUnit.test(answer.slice(second.index + second.matchedText.length));
+    return refuse(completeTerms ? 'incomplete_current_range' : 'unreadable_current_guess');
   }
-  const guess = first.magnitude;
-  const upper = second?.magnitude;
-  if (guess < floor.value || floor.exclusive === true && guess === floor.value || upper !== undefined && guess > upper) return { ok: false, refusal: 'outside_stated_bounds',
-    question: `Your best guess must be ${floor.exclusive === true ? 'more than' : 'at least'} ${floor.value} ${floor.unit}${upper === undefined ? '' : ` and no more than ${upper} ${floor.unit}`}. What's your best single guess, and what's the most it could plausibly be?` };
-  if (upper === undefined) return { ok: true, guess };
-  const spread = statedRangeSpread(floor.value, upper, 0.9);
-  if (!spread.ok) return { ok: false, refusal: spread.refusal, question };
-  return { ok: true, guess, upper, std: spread.std };
+  const middle = answer.slice(second.index + second.matchedText.length, third.start);
+  const lastTail = answer.slice(third.index + third.matchedText.length);
+  const labelled = labelledSeparator(lowerLabel).test(tail) && labelledSeparator(upperLabel).test(middle)
+    && lastUnit.test(lastTail);
+  const bracketed = new RegExp(`^${unitTail}[;,]\\s*\\[\\s*$`, 'i').test(tail)
+    && new RegExp(`^${unitTail},\\s*$`, 'i').test(middle)
+    && new RegExp(`^${unitTail}\\]\\s*[.!]?\\s*$`, 'i').test(lastTail);
+  const between = new RegExp(`^${unitTail}[;,]\\s*between\\s*$`, 'i').test(tail)
+    && new RegExp(`^${unitTail}and\\s*$`, 'i').test(middle) && lastUnit.test(lastTail);
+  if (!labelled && !bracketed && !between) return refuse();
+  const lower = currentValue(second, middle); const upper = currentValue(third, lastTail);
+  if (lower > guess || guess > upper) return refuse('outside_stated_bounds');
+  const spread = statedRangeSpread(lower, upper, 0.9);
+  if (!spread.ok) return refuse(spread.refusal);
+  return { ok: true, guess, lower, upper, std: spread.std };
+}
+
+/** Compatibility for callers carrying question words; the stored floor value has no authority here. */
+export function readLinkEffectFloorAnswer(
+  context: Pick<LinkEffectFloor, 'reading' | 'unit' | 'source_quote' | 'words'>, answer: string,
+): LinkEffectCurrentGuess {
+  return readLinkEffectCurrentGuess(answer, { reading: context.reading, unit: context.unit }, linkEffectFloorQuestion(context));
 }
 
 /** Resolve the unit reading, recording the bound and the actual source change it refers to. */
@@ -160,7 +204,7 @@ export function linkEffectFloorDisclosures(graph: unknown, asks: readonly LinkEf
       current = strength.mean * floor.per_source_change * targetFrame / sourceFrame;
     }
     if (!finite(current)) return [];
-    if (current >= floor.value) return [];
+    if (current > floor.value || current === floor.value && floor.exclusive !== true) return [];
     // AIQ: words pending. Science's disclosure is verbatim, substituting labels and the user's bound words.
     return [`Olumi's current figure for how much ‘${action.from_label}’ affects ‘${action.to_label}’ is below your ‘${floor.words}’, so this Run likely understates churn and may flatter the price rise.`];
   });
