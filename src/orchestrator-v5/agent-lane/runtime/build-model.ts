@@ -37,6 +37,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
  */
 
 import { createHash } from 'node:crypto';
+import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
 import { verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
@@ -955,6 +956,42 @@ export function firstConstructInput(brief: string): string {
   return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
 }
 
+/** A missing option-to-goal mechanism, read from what admission actually kept. */
+export interface OutcomePathIssue {
+  readonly option: string;
+  readonly factors: readonly string[];
+  readonly dead_ends: readonly string[];
+  readonly issue: string;
+}
+
+export interface ConstructionGaps {
+  readonly path_missing: readonly { readonly option: string; readonly dead_ends: readonly string[] }[];
+}
+
+export function pathIssues(admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>): OutcomePathIssue[] {
+  const goals = admitted.nodes.filter((n) => n.kind === 'goal');
+  if (goals.length === 0) return []; // The existing no-goal refusal owns this case.
+  const refusedOptions = optionsWithoutGoalPath(admitted);
+  const nodeOf = new Map(admitted.nodes.map((n) => [n.id, n]));
+  const directed = admitted.edges.filter((e) => (e as { edge_type?: string }).edge_type !== 'bidirected');
+  const outgoing = new Map<string, string[]>();
+  for (const edge of directed) outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to]);
+  const goal = goals.map((n) => `"${n.label}"`).join(', ');
+  return admitted.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && refusedOptions.has(n.id)).map((option) => {
+    const factors = (outgoing.get(option.id) ?? []).map((id) => nodeOf.get(id)).filter((n) => n?.kind === 'factor').map((n) => n!.label);
+    const branch = reachableNodeIds(directed, [option.id]);
+    const terminals = [...branch].filter((id) => (outgoing.get(id) ?? []).length === 0);
+    // Admission normally breaks loops. A closed cycle still needs an honest name, not an empty dead-end list.
+    const dead_ends = [...new Set((terminals.length > 0 ? terminals : [...branch]).map((id) => nodeOf.get(id)?.label ?? id))];
+    const actsOn = factors.length > 0 ? factors.map((f) => `"${f}"`).join(', ') : 'no connected factor';
+    return {
+      option: option.label, factors, dead_ends,
+      issue: `"${option.label}" acts on ${actsOn}, whose links end at ${dead_ends.map((d) => `"${d}"`).join(', ')}; nothing it changes reaches ${goal}. `
+        + `Link what it changes, through a mechanism you can state in one line, to ${goal}, or say in unknowns which mechanism is missing.`,
+    };
+  });
+}
+
 export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] {
   return admitted.withheld
     .filter((w) => w.reason === 'loop_closing_link' && w.loop !== undefined && w.loop.length > 0)
@@ -1692,12 +1729,18 @@ export async function buildModelFromBrief(
    */
   const loops = loopIssues(admitted);
   const loopsAsked = needsSizeRetry ? [] : loops;
+  // Like loops, a path issue never moves an oversized draft onto the repair route.
+  const pathsAsked = needsSizeRetry ? [] : pathIssues(admitted);
+  const reachedOptions = (a: Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>): number => {
+    const refused = optionsWithoutGoalPath(a);
+    return a.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && !refused.has(n.id)).length;
+  };
   // A4: a written money range no link carries (never on the size route, where the retry only sheds).
   const rangesAsked = needsSizeRetry ? [] : uncarriedRangeIssues(brief, admitted, candidate);
   // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
   // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
   const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1784,10 +1827,13 @@ export async function buildModelFromBrief(
           // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
           retryOpen <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
+            || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(admitted))
             || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
             // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
             || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
             || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
+          (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(admitted))) &&
           // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
           chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
@@ -1804,6 +1850,7 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admissionCandidate = retryIdentity.model;
           admitted = retryAdmitted;
+          // #2854 sets admissionCandidate here
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
           gapResidual = retryIdentity.residual;
@@ -1832,6 +1879,10 @@ export async function buildModelFromBrief(
       trace = { retried: true, reasons, outcome: 'retry_failed' };
     }
   }
+  // Separate from projection losses: a missing path must not change existing disclosure counts or readers.
+  const constructionGaps: ConstructionGaps = {
+    path_missing: pathIssues(admitted).map(({ option, dead_ends }) => ({ option, dead_ends })),
+  };
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
 
   if (!size.within && !size.user_material_exceeds_limit) {
@@ -2320,6 +2371,7 @@ export async function buildModelFromBrief(
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
     projected_field_count: admitted.loss.length,
+    ...(constructionGaps.path_missing.length > 0 ? { construction_gaps: constructionGaps } : {}),
     ...(admitted.treated_as_context !== undefined ? { treated_as_context: admitted.treated_as_context } : {}),
     // Options that say what they DO, versus options that are inert. An inert
     // option can never be compared, whatever values arrive later.
