@@ -180,6 +180,22 @@ function getActiveProvider(): "openai" | "anthropic" | "fixtures" {
   return "openai"; // Default to OpenAI
 }
 
+/**
+ * The abort reason our OWN cancellation cap uses (callLLMForExtraction's timer). A call stopped at its cap is an
+ * expected budget outcome, logged at info as `cee.extraction.cap_reached`, never as a provider error: the 8 Oct
+ * classification found every "LLM extraction aborted" error was the agent factor review's own 5 s cap.
+ */
+export const EXTRACTION_CAP_REACHED = "extraction_cap_reached";
+
+function logExtractionFailure(provider: "openai" | "anthropic", abortSignal: AbortSignal, message: string, timeoutMs: number): void {
+  if (abortSignal.aborted && abortSignal.reason === EXTRACTION_CAP_REACHED) {
+    log.info({ event: "cee.extraction.cap_reached", provider, timeoutMs }, "LLM extraction stopped at its own time cap");
+    return;
+  }
+  log.error({ event: `cee.extraction.${provider}_error`, error: message },
+    `${provider === "openai" ? "OpenAI" : "Anthropic"} extraction call failed`);
+}
+
 // ============================================================================
 // Timeout Wrapper
 // ============================================================================
@@ -294,10 +310,7 @@ async function callOpenAI(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log.error(
-      { event: "cee.extraction.openai_error", error: message },
-      "OpenAI extraction call failed"
-    );
+    logExtractionFailure("openai", abortSignal, message, timeoutMs);
     return {
       response: null,
       success: false,
@@ -373,10 +386,7 @@ async function callAnthropic(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log.error(
-      { event: "cee.extraction.anthropic_error", error: message },
-      "Anthropic extraction call failed"
-    );
+    logExtractionFailure("anthropic", abortSignal, message, timeoutMs);
     return {
       response: null,
       success: false,
@@ -488,7 +498,7 @@ export async function callLLMForExtraction(
   if (options.signal?.aborted) onOuterAbort();
   // Cancel at the enrichment's own cap; withTimeout still settles if the SDK ignores cancellation.
   const cancellationTimer = options.signal !== undefined
-    ? setTimeout(() => abortController.abort(), options.timeoutMs ?? EXTRACTION_TIMEOUT_MS)
+    ? setTimeout(() => abortController.abort(EXTRACTION_CAP_REACHED), options.timeoutMs ?? EXTRACTION_TIMEOUT_MS)
     : undefined;
 
   try {
