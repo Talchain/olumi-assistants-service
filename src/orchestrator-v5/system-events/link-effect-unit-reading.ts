@@ -50,7 +50,7 @@ const answerUnitKey = (unit: string): string | undefined => unitComparisonKey(un
 type CurrentEffectEnds = { readonly source: string; readonly target: string };
 type CurrentEffectScope = Parameters<typeof linkEffectTheUserStated>[3];
 /** Partition only at another named link statement, never at a provider-selected quote boundary. */
-function currentEffectText(current: string, ends: CurrentEffectEnds | undefined, scope: CurrentEffectScope | undefined): string | null {
+export function currentEffectText(current: string, ends: CurrentEffectEnds | undefined, scope: CurrentEffectScope | undefined): string | null {
   if (ends === undefined) return current;
   const quantities = [...new Set([ends.source, ends.target, ...(scope?.quantities ?? [])])];
   const clauses: { start: number; text: string }[] = [];

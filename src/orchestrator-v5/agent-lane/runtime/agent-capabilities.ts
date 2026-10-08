@@ -53,7 +53,7 @@ import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, linkEffectGaugeStatement, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
 import { mediatorReadings } from '../mediator-reading.js';
-import { prepareLinkEffectUnitReadings, readLinkEffectClarificationAnswer, readLinkEffectCurrentAnswer, withPointsAtZero, type LinkEffectUnitReading, type LinkEffectClarificationReading } from '../../system-events/link-effect-unit-reading.js';
+import { currentEffectText, prepareLinkEffectUnitReadings, readLinkEffectClarificationAnswer, readLinkEffectCurrentAnswer, withPointsAtZero, type LinkEffectUnitReading, type LinkEffectClarificationReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { identityReceiptWords, proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -204,7 +204,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectStatementClassification, linkEffectStatementNamesEndpoints, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, clausesOf, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectStatementClassification, linkEffectStatementNamesEndpoints, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3486,12 +3486,17 @@ export function createAgentCapabilities(
     linkEffectResolvedReading(text) !== undefined && (findLinkEffectAmounts(text).length === 0
       || reply.action.resolved_reading === undefined && !reply.action.question.includes('best single guess'));
   const currentAnswerReading = (reply: LinkEffectClarificationPending | null, from: string, to: string,
-    quote: string, text: string, lower: unknown, upper: unknown, fromLabel: string, toLabel: string): LinkEffectClarificationReading | undefined => {
+    quote: string, text: string, lower: unknown, upper: unknown, fromLabel: string, toLabel: string,
+    quantities: string[]): LinkEffectClarificationReading | undefined => {
+    const ends = { source: fromLabel, target: toLabel };
+    // The same current-text partition is used at admission and by the writer. Other links' units and extremes
+    // cannot activate this link's answer path; a repeated statement stays whole so the reader refuses ambiguity.
+    const current = currentEffectText(text, ends, { quantities });
+    text = current ?? text;
     const spans = quoteSpansIn(text, quote);
     if (spans.length === 0 || reply !== null && readingOnlyReply(reply, text)) return undefined;
     if (reply === null) {
       const bounds = findLinkEffectBounds(text);
-      const ends = { source: fromLabel, target: toLabel };
       const currentNamesEnds = linkEffectStatementNamesEndpoints(text, ends);
       const start = spans[0]!;
       const end = start + quote.length;
@@ -3502,10 +3507,10 @@ export function createAgentCapabilities(
       const omittedUnit = lastAmount !== undefined && quote.slice(lastAmount.index + lastAmount.matchedText.length).trim() === ''
         && continuation !== '';
       const outside = `${text.slice(0, start)} ${text.slice(end)}`;
-      const repeatedCurrentLink = linkEffectStatementNamesEndpoints(outside, ends);
+      const repeatedCurrentLink = clausesOf(outside).some(sentence => linkEffectStatementNamesEndpoints(sentence, ends));
       const completeCurrentRange = bounds.length === 2 && bounds[0]!.direction === 'lower' && bounds[1]!.direction === 'upper';
       const currentRange = completeCurrentRange || bounds.length > 0 && quote !== text;
-      if (!currentNamesEnds || !currentRange && !omittedUnit && !repeatedCurrentLink) return undefined;
+      if (!currentNamesEnds || current !== null && !currentRange && !omittedUnit && !repeatedCurrentLink) return undefined;
     }
     return { current_turn: true, node_id: to, from_id: from, to_id: to, from_label: fromLabel, to_label: toLabel, quote: text, answer: text,
       source_text: text, statement_classification: 'asserted',
@@ -3844,11 +3849,12 @@ export function createAgentCapabilities(
             fail('quote_not_verbatim', 'Nothing was prepared: this link’s quote must be the user’s own words from THIS message, copied exactly.');
             continue;
           }
-          const answerReading = currentAnswerReading(reply, from.id, to.id, entryQuote, text, entry.lower, entry.upper, from.label, to.label);
-          const answerQuote = answerReading?.quote ?? entryQuote;
-          const clarification = answerReading === undefined ? {} : { clarification: answerReading };
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
+          const answerReading = currentAnswerReading(reply, from.id, to.id, entryQuote, text, entry.lower, entry.upper, from.label, to.label,
+            labelsOf(k => k !== 'option' && k !== 'decision'));
+          const answerQuote = answerReading?.quote ?? entryQuote;
+          const clarification = answerReading === undefined ? {} : { clarification: answerReading };
           const stated = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
           // ONE scope for admission, the figure question and the recorded sentence, so they cannot read different units.
           const endUnits = linkEffectEndUnits(working, from.id, to.id);
@@ -4033,12 +4039,13 @@ export function createAgentCapabilities(
       if (quoteSpansIn(text, quote).length === 0) {
         return refusalWithAsk('quote_not_verbatim', guessQuestion(from, to, reply?.action.quote ?? text));
       }
-      const answerReading = currentAnswerReading(reply, from.id, to.id, quote, text, args.lower, args.upper, from.label, to.label);
-      const answerQuote = answerReading?.quote ?? quote;
-      const clarification = answerReading === undefined ? {} : { clarification: answerReading };
       // RT-6: the binder checks numbers and link identity; the card asks consent to the Agent's reading.
       const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
         .map((n) => String(n.label ?? '')).filter((l) => l !== '');
+      const answerReading = currentAnswerReading(reply, from.id, to.id, quote, text, args.lower, args.upper, from.label, to.label,
+        labelsOf(k => k !== 'option' && k !== 'decision'));
+      const answerQuote = answerReading?.quote ?? quote;
+      const clarification = answerReading === undefined ? {} : { clarification: answerReading };
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
       const endUnits = linkEffectEndUnits(g.raw, from.id, to.id);
