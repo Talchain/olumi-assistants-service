@@ -48,6 +48,16 @@ function producerEnvelope(starterPoint = false): Rec {
   return envelope;
 }
 
+function reviewerEnvelope(): Rec {
+  const envelope = producerEnvelope();
+  envelope.option_comparison = envelope.option_comparison.filter((row: Rec) => [KEEP, STARTER].includes(row.option_id));
+  const starter = envelope.option_comparison.find((row: Rec) => row.option_id === STARTER);
+  starter.probability_of_goal = 1;
+  starter.outcome = { p10: 130000, p50: 140000, p90: 150000, std: 10000, mean: 140000 };
+  envelope.inference_warnings = [];
+  return envelope;
+}
+
 function produced(envelope = producerEnvelope(), graph = READ.graph): Rec {
   const enrichment = withGoalChanceLicence(envelope, graph, GOAL);
   const publicEnrichment = projectGoalProbabilitiesForTransport(enrichment, RUN.goal_certainty);
@@ -122,6 +132,35 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     for (const row of forAgent.enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
   });
 
+  it('reviewer row: an empty licence preserves Keep’s zero-spread reason and leaves unearned Starter none', () => {
+    const output = produced(reviewerEnvelope());
+    expect(licenceRecord(output.enrichment)).toMatchObject({ message: '', option_ids: [STARTER, KEEP],
+      pct_by_option: {}, withheld_option_ids: [STARTER, KEEP], withheld_reason_by_option: { [KEEP]: keepReason } });
+    const result = { enrichment: output.public_enrichment };
+    expect(goalChanceWithheldReasonsForAgent(result, STARTER)).toEqual([]);
+    expect(output.canonical_view.options.find((row: Rec) => row.option_id === STARTER).cell).toEqual({ kind: 'none' });
+    expect(goalChanceWithheldReasonsForAgent(result, KEEP)).toEqual([{ code: 'zero_spread', message: LINE }]);
+    expect(keepCell(output.canonical_view)).toEqual({ kind: 'withheld',
+      reasons: [{ code: 'zero_spread', message: LINE }], face: LINE });
+  });
+
+  it('licensed-point control: a withheld option without a warning still has reason_not_recorded', () => {
+    const envelope = reviewerEnvelope();
+    envelope.option_comparison.find((row: Rec) => row.option_id === STARTER).probability_of_goal = 0.97;
+    envelope.option_comparison.find((row: Rec) => row.option_id === KEEP).outcome = {
+      p10: 110000, p50: 120000, p90: 130000, std: 10000, mean: 120000,
+    };
+    const output = produced(envelope);
+    const stored = licenceRecord(output.enrichment)!;
+    expect(stored.pct_by_option).toEqual({ [STARTER]: 97 });
+    expect(stored.withheld_option_ids).toEqual([KEEP]);
+    expect(stored).not.toHaveProperty('withheld_reason_by_option');
+    expect(goalChanceWithheldReasonsForAgent({ enrichment: output.public_enrichment }, KEEP))
+      .toEqual([{ code: 'reason_not_recorded', message: null }]);
+    expect(keepCell(output.canonical_view)).toMatchObject({ kind: 'withheld',
+      reasons: [{ code: 'reason_not_recorded', message: null }] });
+  });
+
   it('Starter-point control: producer and transport stay byte-identical to staging; only Keep’s canonical reason and face gain the stored line', () => {
     const envelope = producerEnvelope(true);
     expect(JSON.stringify(goalChanceLicenceOf(envelope, READ.graph, GOAL)))
@@ -161,10 +200,11 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(licence).not.toHaveProperty('olumi_estimate_link_count');
   });
 
-  const malformed: { name: string; mutate: (record: Rec) => void }[] = [
+  const malformed: { name: string; mutate: (record: Rec) => void; expectedReasons?: { code: string; message: null }[] }[] = [
     { name: 'unknown option identity', mutate: record => { record.withheld_reason_by_option = { unknown: keepReason }; } },
     { name: 'reason on a non-withheld option', mutate: record => { record.withheld_option_ids = IDS.filter(id => id !== KEEP); } },
-    { name: 'conflicting displayed percentage', mutate: record => { record.pct_by_option[KEEP] = 0; } },
+    { name: 'conflicting displayed percentage', mutate: record => { record.pct_by_option[KEEP] = 0; },
+      expectedReasons: [{ code: 'reason_not_recorded', message: null }] },
     { name: 'unrecognised reason kind', mutate: record => { record.withheld_reason_by_option[KEEP].reason = 'other'; } },
     { name: 'unrecognised target side', mutate: record => { record.withheld_reason_by_option[KEEP].side = 'unknown'; } },
     { name: 'empty stored line', mutate: record => { record.withheld_reason_by_option[KEEP].line = ''; } },
@@ -172,12 +212,12 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     { name: 'multiline stored line', mutate: record => { record.withheld_reason_by_option[KEEP].line = `${LINE}\nextra`; } },
   ];
 
-  it.each(malformed)('fails closed for a malformed zero-spread reason: $name', ({ mutate }) => {
+  it.each(malformed)('fails closed for a malformed zero-spread reason: $name', ({ mutate, expectedReasons }) => {
     const record = structuredClone(goalChanceLicenceOf(producerEnvelope(), READ.graph, GOAL)) as Rec;
     mutate(record);
     const result = { inference_warnings: [record] };
     expect(goalChanceLicenceForAgent(result)).not.toHaveProperty('withheld_reason_by_option');
-    expect(goalChanceWithheldReasonsForAgent(result, KEEP)).not.toContainEqual({ code: 'zero_spread', message: LINE });
+    expect(goalChanceWithheldReasonsForAgent(result, KEEP)).toEqual(expectedReasons ?? []);
   });
 
   it('duplicate licence records speak no zero-spread reason through the Agent reader', () => {

@@ -133,9 +133,10 @@ export function goalChanceWithheldReasonsForAgent(result: unknown, optionId: str
   const licence = goalChanceLicenceForAgent(result);
   const zeroSpread = licence?.withheld_reason_by_option?.[optionId];
   if (zeroSpread !== undefined) return [{ code: zeroSpread.reason, message: zeroSpread.line }, ...reasons];
-  // Some retained licences attest withholding without a cause. Preserve that
-  // distinction from "none"; this marker explicitly claims no recorded cause.
-  return reasons.length > 0 ? reasons : licence?.withheld_option_ids?.includes(optionId)
+  // Only a licence with a point attests withholding without a recorded cause.
+  // An empty licence speaks only through its named zero-spread reasons.
+  const hasLicensedPoint = Object.keys(rec(agentLicenceRecordOf(result)?.pct_by_option) ?? {}).length > 0;
+  return reasons.length > 0 ? reasons : hasLicensedPoint && licence?.withheld_option_ids?.includes(optionId)
     ? [{ code: 'reason_not_recorded', message: null }] : [];
 }
 
