@@ -144,7 +144,7 @@ import {
   widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
-import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
+import { isWhatChangesPress, WHAT_CHANGES_PRESS_ID, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
@@ -398,6 +398,30 @@ function rememberMeasuredWhatChanges(key: string, measured: MeasuredWhatChanges)
     if (oldest !== undefined) measuredWhatChanges.delete(oldest);
   }
   measuredWhatChanges.set(key, measured);
+}
+/**
+ * ⭐ RUN-KEYED MEASURED ANSWER (DL GO 8 Oct, principle audit item 4): an explained, licensed Run starts the press's own
+ * computation beside its narrator, so the reply can carry its first sentence (`whatChangesFaceLine`) and the later press
+ * reuses it: one tipping computation per Run, never a second. Keyed by the bound Run's explanation id.
+ */
+const measuredByRun = new Map<string, WhatChangesTurn>();
+function rememberMeasuredForRun(key: string, turn: WhatChangesTurn): void {
+  measuredByRun.delete(key);
+  if (measuredByRun.size >= MEASURED_WHAT_CHANGES_MAX) {
+    const oldest = measuredByRun.keys().next().value;
+    if (oldest !== undefined) measuredByRun.delete(oldest);
+  }
+  measuredByRun.set(key, turn);
+}
+/** The Run's computation while it is still running: a press that arrives meanwhile waits for it, never starts a second. */
+const inflightByRun = new Map<string, Promise<WhatChangesTurn | null>>();
+function rememberInflightForRun(key: string, p: Promise<WhatChangesTurn | null>): void {
+  inflightByRun.set(key, p);
+  void p.finally(() => { if (inflightByRun.get(key) === p) inflightByRun.delete(key); });
+}
+/** The measured answer this scenario's bound Run already computed, if any (`runKey` = `runExplanationChip(...).id`). */
+export function settledWhatChangesForRun(scenarioId: string, runKey: string): WhatChangesTurn | undefined {
+  return measuredByRun.get(`${scenarioId}:${runKey}`);
 }
 /** SCI-DEEP binds the remembered typed presentation to today's Run; identical re-presentation permits stored words. */
 const PRESENTED_STRUCTURAL_CHALLENGES_MAX = 500;
@@ -2953,6 +2977,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         runToolOutputLicensesLeader(selectedRun),
         graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''),
         pairRead.withinBand, pairRead.userWrittenLinks, pairRead.frameRefitLinks);
+      // Audit item 4: the press's own measured answer, started beside the narrator (whatChangesTurnFor asks ISL only on a
+      // current Run with a licensed leader, the press's gate). COPY-SHAPE reads `settledWhatChangesForRun` after the narrator.
+      const wcRun = matches && config.features.whatChangesMeasuredEnabled ? runExplanationChip(scenarioId, st) : null;
+      const wcKnown = wcRun !== null && (measuredByRun.has(`${scenarioId}:${wcRun.id}`) || inflightByRun.has(`${scenarioId}:${wcRun.id}`));
+      const wcStarted = wcRun === null || wcKnown ? null
+        : whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, st, (candidateLinks) => dispatchDecisionFlip({
+          payload: { kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide', source: 'chip_click', message },
+          requestId: `${String(req.id)}:decision-flip-run`,
+          candidateLinks,
+        })).then((turn) => { if (turn?.outcome === 'measured') rememberMeasuredForRun(`${scenarioId}:${wcRun.id}`, turn); return turn; })
+          .catch(() => null);
+      if (wcRun !== null && wcStarted !== null) rememberInflightForRun(`${scenarioId}:${wcRun.id}`, wcStarted);
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -3240,7 +3276,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const boundRun = runExplanationChip(scenarioId, rb);
       if (boundRun !== null && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)
         && chipOperationOf(body) === WHAT_CHANGES_CHIP_OPERATION) {
-        const turn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
+        const turn = settledWhatChangesForRun(scenarioId, boundRun.id) ?? await inflightByRun.get(`${scenarioId}:${boundRun.id}`)
+          ?? await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
           payload: {
             kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
             source: 'chip_click', message,

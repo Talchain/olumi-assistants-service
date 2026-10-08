@@ -11,6 +11,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { RUN_EXPLANATION_MESSAGE, runExplanationChip } from '../run-explanation.js';
+import { whatChangesFaceLine } from '../method-turn/what-changes-turn.js';
 
 type Rec = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('../turn-context/__tests__/fixtures/rc-served-signal-cases.json', import.meta.url), 'utf8')) as { cases: { id: string; body: Rec }[] };
@@ -88,6 +90,7 @@ const WITHHELD: Record<string, () => void> = {
 
 describe('the real route: "What would change the result?" → measured tipping points, 0 model calls', () => {
   let app: FastifyInstance;
+  let settledWhatChangesForRun: typeof import('../../../routes/agent-v1-turn.js').settledWhatChangesForRun;
   let modelCalls = 0;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
@@ -101,7 +104,10 @@ describe('the real route: "What would change the result?" → measured tipping p
   /** A fresh import of the route is a fresh PROCESS: nothing remembered, the same store of committed rows. */
   const buildApp = async (): Promise<FastifyInstance> => {
     vi.resetModules();
-    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const route = await import('../../../routes/agent-v1-turn.js');
+    const { agentV1TurnRoute } = route;
+    // Read the cache owned by THIS route instance; resetModules makes a static import a different cache.
+    settledWhatChangesForRun = route.settledWhatChangesForRun;
     const app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => {
       const read = { graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: served.state,
@@ -136,6 +142,106 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as { assistant_text: string; suggested_actions: { id: string }[] };
   };
+
+  describe('Run-keyed what-changes computation: explanation → press', () => {
+    const FACE = "In this model, ‘Stay on AWS’ would be the first to be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now.";
+    const ANSWER = `${FACE} ‘Switch to GCP’ would still be supported by the most runs even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.`;
+    const boundRun = () => {
+      const chip = runExplanationChip(SCENARIO, { graphHash: 'h-d3', analysisState: served.state, analysisResult: served.result });
+      expect(chip).not.toBeNull();
+      return chip!;
+    };
+    const licensedWithoutCaveat = () => {
+      // The same D3 model/Run/leader under M1. M2's wire caveat intentionally precedes its measured paragraph.
+      served.ready = { ...canonical, analysis_admission: { ...canonical.analysis_admission, permitted_analysis_mode: 'comparative_leader' } };
+    };
+    const expectRunDispatch = () => {
+      expect(dispatch.calls).toHaveLength(1);
+      expect(dispatch.calls[0].payload).toMatchObject({
+        kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'decide',
+        source: 'chip_click', message: 'Explain this result',
+      });
+      expect(dispatch.calls[0].requestId).toMatch(/:decision-flip-run$/);
+      expect(dispatch.calls[0].candidateLinks.slice(0, 2)).toEqual([
+        { from_id: 'monthly_cloud_savings', to_id: 'monthly_spend' },
+        { from_id: 'monthly_cloud_overspend_during_migration', to_id: 'monthly_spend' },
+      ]);
+    };
+
+    it('WC-RUN-A: licensed current Run computes once during explanation; its exact cached face opens the press, with ZERO further flip calls', async () => {
+      licensedWithoutCaveat();
+      const run = boundRun();
+      await post(run.id, RUN_EXPLANATION_MESSAGE, randomUUID());
+      expectRunDispatch();
+      expect(modelCalls).toBe(1); // the narrator was driven as well as the measurement
+      await vi.waitFor(() => expect(settledWhatChangesForRun(SCENARIO, run.id)?.outcome).toBe('measured'));
+      const settled = settledWhatChangesForRun(SCENARIO, run.id)!;
+      expect(settled.reply).toBe(ANSWER);
+      expect(whatChangesFaceLine(settled)).toBe(FACE);
+      expect(settledWhatChangesForRun(`${SCENARIO}-other`, run.id)).toBeUndefined();
+      const runBKey = runExplanationChip(SCENARIO, { graphHash: 'h-d3', analysisState: runB(), analysisResult: served.result })!.id;
+      expect(runBKey).not.toBe(run.id);
+      expect(settledWhatChangesForRun(SCENARIO, runBKey)).toBeUndefined();
+
+      const callsBeforePress = dispatch.calls.length;
+      const press = await post(PRESS.id, PRESS.message, randomUUID());
+      expect(dispatch.calls).toHaveLength(1); // MUTANT: bypassing the cache/in-flight read makes this 2
+      expect(dispatch.calls.length - callsBeforePress).toBe(0);
+      expect(press.assistant_text).toBe(ANSWER);
+      expect(press.assistant_text.slice(0, FACE.length)).toBe(whatChangesFaceLine(settled));
+      expect(modelCalls).toBe(1);
+    });
+
+    it('WC-RUN-B: leader-withheld Run never dispatches or settles; the press keeps its exact existing coaching', async () => {
+      WITHHELD['leader claim revoked']();
+      const run = boundRun();
+      const unchanged = await post(PRESS.id, PRESS.message, randomUUID());
+      expect(dispatch.calls).toHaveLength(0);
+      await post(run.id, RUN_EXPLANATION_MESSAGE, randomUUID());
+      expect(dispatch.calls).toHaveLength(0);
+      expect(modelCalls).toBe(1);
+      expect(settledWhatChangesForRun(SCENARIO, run.id)).toBeUndefined();
+      const press = await post(PRESS.id, PRESS.message, randomUUID());
+      expect(press.assistant_text).toBe(unchanged.assistant_text);
+      expect(press.assistant_text).toBe("There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet.");
+      expect(dispatch.calls).toHaveLength(0);
+      expect(settledWhatChangesForRun(SCENARIO, run.id)).toBeUndefined();
+    });
+
+    it('WC-RUN-C: a press arriving while the explained Run is still measuring awaits that same promise; exactly ONE flip call total', async () => {
+      licensedWithoutCaveat();
+      const run = boundRun();
+      let release!: () => void;
+      dispatch.gate = new Promise<void>((resolve) => { release = resolve; });
+      let explanationP: ReturnType<typeof post> | undefined;
+      let pressP: ReturnType<typeof post> | undefined;
+      try {
+        explanationP = post(run.id, RUN_EXPLANATION_MESSAGE, randomUUID());
+        await vi.waitFor(() => expect(dispatch.calls).toHaveLength(1));
+        await explanationP; // narrator completes while the decision-flip promise is still held
+        expectRunDispatch();
+        expect(modelCalls).toBe(1);
+        expect(settledWhatChangesForRun(SCENARIO, run.id)).toBeUndefined();
+        const readsBeforePress = served.reads;
+        let pressSettled = false;
+        pressP = post(PRESS.id, PRESS.message, randomUUID()).then((reply) => { pressSettled = true; return reply; });
+        await vi.waitFor(() => expect(served.reads).toBeGreaterThan(readsBeforePress));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(pressSettled).toBe(false);
+        expect(dispatch.calls).toHaveLength(1);
+        dispatch.gate = null;
+        release();
+        const press = await pressP;
+        expect(dispatch.calls).toHaveLength(1);
+        expect(press.assistant_text).toBe(ANSWER);
+        expect(whatChangesFaceLine(settledWhatChangesForRun(SCENARIO, run.id))).toBe(FACE);
+      } finally {
+        dispatch.gate = null;
+        release();
+        await Promise.allSettled([explanationP, pressP].filter((p) => p !== undefined));
+      }
+    }, 30_000);
+  });
 
   it('W1: the press is answered from the measured block — RC\'s sentences, the turn\'s own follow-up, no model call', async () => {
     const body = await post(PRESS.id, PRESS.message);

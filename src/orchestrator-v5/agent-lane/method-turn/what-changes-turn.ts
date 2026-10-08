@@ -158,6 +158,16 @@ export interface WhatChangesTurn {
   /** Telemetry only: which answer this was. */
   readonly outcome: 'measured' | 'honest_limit' | 'stale' | 'model_unread';
   readonly actions: readonly SuggestedAction[];
+  /** A measured answer's opening: the frame plus its FIRST link sentence, the leading bytes of `reply`. */
+  readonly first?: string;
+}
+
+/**
+ * The Run reply's "what would change it" face line (COPY-SHAPE slot 2; DL principle audit item 4, 8 Oct): the press's
+ * own opening sentence, byte-equal, and only for a MEASURED answer. Anything else says nothing: never a guess.
+ */
+export function whatChangesFaceLine(turn: WhatChangesTurn | null | undefined): string | null {
+  return turn?.outcome === 'measured' && typeof turn.first === 'string' && turn.reply.startsWith(turn.first) ? turn.first : null;
 }
 
 export type AskDecisionFlip = (candidateLinks: readonly FlipLinkRef[]) => Promise<DecisionFlipDispatchResult>;
@@ -218,5 +228,6 @@ export async function whatChangesTurnFor(chipId: unknown, rb: MethodReadback, as
   });
   // RT-14 (DL #87 5993111927; principle 5992243567): an option is named only inside the model's frame. RC's per-link
   // sentences stay verbatim (the fixture row binds them); the frame opens the answer once.
-  return sentences.length === 0 ? honest() : { reply: `${IN_THIS_MODEL}${sentences.join(' ')}`, outcome: 'measured', actions };
+  return sentences.length === 0 ? honest()
+    : { reply: `${IN_THIS_MODEL}${sentences.join(' ')}`, outcome: 'measured', actions, first: `${IN_THIS_MODEL}${sentences[0]}` };
 }
