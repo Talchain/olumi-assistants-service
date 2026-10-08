@@ -140,7 +140,7 @@ import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, set
 import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
-  settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
+  settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, thinDraftOffer, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
   widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
@@ -4040,6 +4040,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
+    // Only propose_identity produces this stored operation; the pre-turn carrier excludes settled-card re-presses.
+    const identityResolved = result.tool_calls.some(c => c.ok === true && typeof c.proposal_id === 'string'
+      && (c.name === 'authorise_change' || (c.name === WITHDRAW_PROPOSAL && c.proposal_id === declinedHold))
+      && heldAtStart.some(h => {
+        const proposal = agentProposalOf(h);
+        return proposal !== undefined && proposal.proposal_id === c.proposal_id && proposal.operations.length === 1
+          && proposal.operations[0]?.op === 'confirm_identity';
+      }));
+    const thin = thinDraftOffer(readbackGraph, identityResolved
+      || result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true));
+    if (thin !== null && heldCardOffer.length === 0 && approvals.length === 0 && carriedApproval.length === 0
+      && fastPath !== 'method' && (fastPath !== 'approve' || identityResolved)) {
+      nextStepOffers.offered.splice(0, nextStepOffers.offered.length, ...firstOfEachId([
+        ...nextStepOffers.offered.filter(c => c.id === RUN_OFFER_CHIP.id), thin.press, ...nextStepOffers.offered,
+      ]).slice(0, 3));
+    }
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
