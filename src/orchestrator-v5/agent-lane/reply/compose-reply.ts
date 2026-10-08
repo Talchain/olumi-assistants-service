@@ -901,7 +901,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     for (const u of robustnessPool.length > REPLY_FACE_MAX_BULLETS ? [] : robustnessPool) {
       if (robustnessPoints.length >= pointSlots) break;
       const w = wordCount(u.text);
-      if (robustnessPoints.length > 0 && pointWords + w > REPLY_FACE_WORD_BUDGET) break;
+      if (pointWords + w > REPLY_FACE_WORD_BUDGET) break;
       robustnessPoints.push(u);
       pointWords += w;
     }
