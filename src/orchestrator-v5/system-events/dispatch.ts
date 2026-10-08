@@ -60,7 +60,7 @@ import {
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
-import { useAppendV6 } from '../session/supabase-store.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict } from '../graph-revision-conflict.js';

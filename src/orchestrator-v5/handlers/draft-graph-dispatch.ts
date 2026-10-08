@@ -83,7 +83,7 @@ import {
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
-import { useAppendV6 } from '../session/supabase-store.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';

@@ -35,7 +35,7 @@ import { buildAddRiskClarification } from './edit-templates/add-risk-template.js
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
-import { useAppendV6 } from '../session/supabase-store.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   buildEditGraphHandlerFact,

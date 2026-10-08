@@ -62,7 +62,7 @@ import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { identityConfirmBaseIsWritable, isEditableGraph, type EditableGraph } from './editable-graph.js';
 import { commitDirectAnswer } from '../commit.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
-import { useAppendV6 } from '../session/supabase-store.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';

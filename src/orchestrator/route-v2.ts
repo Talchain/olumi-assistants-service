@@ -160,7 +160,7 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 import { GraphStaleWriteError } from '../orchestrator-v5/build-turn-context.js';
 import { isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
 import type { GraphConflictFailureDetails } from '../orchestrator-v5/graph-conflict-recovery-keys.js';
-import { useAppendV6 } from '../orchestrator-v5/session/supabase-store.js';
+import { useAppendV6 } from '../orchestrator-v5/append-v6-flag.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
 // handed to the transport; see the draft_graph branch below).
 import { scheduleAutoRunAfterFreshDraft } from '../orchestrator-v5/handlers/auto-run-after-draft.js';

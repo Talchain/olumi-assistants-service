@@ -1,6 +1,8 @@
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
 import type { LegacyAnalysisEditFacts } from '../types/handler-fact.js';
+import { useAppendV6 } from '../append-v6-flag.js';
+export { USE_APPEND_V6, useAppendV6, __setUseAppendV6ForTest } from '../append-v6-flag.js';
 /**
  * Supabase-backed SessionStore implementation (slice B).
  *
@@ -207,20 +209,6 @@ function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
 // migration ships first; see 20260609120000_v5_conversation_content.sql).
 const V5_CONVERSATION_TURN_COLUMNS =
   'id, scenario_id, user_id, turn_id, turn_class, handler_id, request_hash, response_emitted, llm_calls_used, duration_ms, created_at, user_message, assistant_message';
-
-// Slice ii-a ships the existing v5 path. Commit B flips this one constant;
-// tests exercise the dormant revision read and RPC through the same reader.
-export const USE_APPEND_V6 = false;
-let appendV6Enabled: boolean = USE_APPEND_V6;
-
-export function useAppendV6(): boolean {
-  return appendV6Enabled;
-}
-
-/** Test-only seam; restore the shipped default after each v6 test. */
-export function __setUseAppendV6ForTest(value: boolean): void {
-  appendV6Enabled = value;
-}
 
 function isScenarioRevision(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;

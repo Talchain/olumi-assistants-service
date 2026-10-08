@@ -99,7 +99,7 @@ import {
 import { TurnFenceRejectedError } from './session/turn-fence.js';
 import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
 import { readRevisionConflictDetails } from './graph-revision-conflict.js';
-import { useAppendV6 } from './session/supabase-store.js';
+import { useAppendV6 } from './append-v6-flag.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,

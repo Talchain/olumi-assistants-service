@@ -1,4 +1,4 @@
-import { GraphStaleWriteError } from './session/store.js';
+import { GraphStaleWriteError } from './build-turn-context.js';
 
 type RevisionDetails = { readonly expected?: number; readonly current?: number };
 type RevisionConflict = RevisionDetails & { readonly conflict_category: string };

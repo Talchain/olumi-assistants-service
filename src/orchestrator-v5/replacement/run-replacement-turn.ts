@@ -82,7 +82,7 @@ import { buildSystemPrompt } from './system-prompt.js';
 import { composeTurn, type ComposeTurnResult } from './turn-composer.js';
 import type { ToolResponseBlock } from '../../adapters/llm/types.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
-import { useAppendV6 } from '../session/supabase-store.js';
+import { useAppendV6 } from '../append-v6-flag.js';
 
 /**
  * Core's authoritative write. Three outcomes, kept apart on purpose.
