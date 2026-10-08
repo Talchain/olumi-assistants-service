@@ -95,19 +95,35 @@ const fill = (template: string, slots: Readonly<Record<string, string>>): string
   template.replace(/\{(\w+)\}/g, (_m, k: string) => slots[k] ?? `{${k}}`);
 
 /**
+ * One of RC's sentences with what it is about (accel P24 / SCI-10, the typed twin): the link, the option it names, and
+ * which of RC's three forms it is. `renderLinkTippingPoints` is exactly these rows' text, so the chat and the
+ * `_method_result` rows can never say different words.
+ */
+export interface TippingPointRow {
+  readonly text: string;
+  readonly kind: keyof typeof LINK_COPY;
+  readonly link: { readonly from_id: string; readonly to_id: string };
+  /** `quoted`/`below_a_tenth`: the option that would first be supported by the most runs; `no_change`: the leader. */
+  readonly option_id: string;
+}
+
+/**
  * RC's sentence per link, or nothing: an absent link is silent, and a label that is unavailable is never invented
  * (the link goes silent instead). Option labels are quoted and keep their case; node labels follow the mid-sentence rule.
  */
-export function renderLinkTippingPoints(links: readonly FlipLink[], labels: LinkLabels): string[] {
-  const out: string[] = [];
+export function linkTippingPointRows(links: readonly FlipLink[], labels: LinkLabels): TippingPointRow[] {
+  const out: TippingPointRow[] = [];
   const leader = ownLabel(labels.option, labels.leaderId);
   for (const link of links) {
     const from = ownLabel(labels.node, link.from_id);
     const to = ownLabel(labels.node, link.to_id);
     if (from === undefined || to === undefined) continue;
     const nodeSlots = { from: midSentence(cut(from)), to: midSentence(cut(to)) };
+    const ref = { from_id: link.from_id, to_id: link.to_id };
     if (link.status === 'no_change') {
-      if (leader !== undefined) out.push(fill(LINK_COPY.no_change, { ...nodeSlots, leader: optionQuote(leader) }));
+      if (leader !== undefined) {
+        out.push({ text: fill(LINK_COPY.no_change, { ...nodeSlots, leader: optionQuote(leader) }), kind: 'no_change', link: ref, option_id: labels.leaderId });
+      }
       continue;
     }
     if (link.status !== 'quoted' || link.threshold === null || link.to_option_id === null) continue;
@@ -115,10 +131,14 @@ export function renderLinkTippingPoints(links: readonly FlipLink[], labels: Link
     const fraction = fractionOf(link.threshold, link.current_mean);
     if (other === undefined || fraction === null) continue;
     out.push(fraction === 'below_a_tenth'
-      ? fill(LINK_COPY.below_a_tenth, { ...nodeSlots, other: optionQuote(other) })
-      : fill(LINK_COPY.quoted, { ...nodeSlots, other: optionQuote(other), fraction }));
+      ? { text: fill(LINK_COPY.below_a_tenth, { ...nodeSlots, other: optionQuote(other) }), kind: 'below_a_tenth', link: ref, option_id: link.to_option_id }
+      : { text: fill(LINK_COPY.quoted, { ...nodeSlots, other: optionQuote(other), fraction }), kind: 'quoted', link: ref, option_id: link.to_option_id });
   }
   return out;
+}
+
+export function renderLinkTippingPoints(links: readonly FlipLink[], labels: LinkLabels): string[] {
+  return linkTippingPointRows(links, labels).map((row) => row.text);
 }
 
 const nodeLabelsOf = (graph: unknown): Record<string, string> => {
@@ -158,6 +178,14 @@ export interface WhatChangesTurn {
   /** Telemetry only: which answer this was. */
   readonly outcome: 'measured' | 'honest_limit' | 'stale' | 'model_unread';
   readonly actions: readonly SuggestedAction[];
+  /** A measured answer's typed rows (the reply's sentences, in order) and the Run they are about (accel P24 / SCI-10). */
+  readonly measured?: {
+    readonly rows: readonly TippingPointRow[];
+    readonly run: { readonly graph_hash_at_run: string; readonly computed_at: string };
+    readonly leaderId: string;
+    /** Every option of the Run, by id: ruling 4 reads each one's displayed goal chance. */
+    readonly optionIds: readonly string[];
+  };
 }
 
 export type AskDecisionFlip = (candidateLinks: readonly FlipLinkRef[]) => Promise<DecisionFlipDispatchResult>;
@@ -213,10 +241,17 @@ export async function whatChangesTurnFor(chipId: unknown, rb: MethodReadback, as
   const shown = shownRunOf(rb);
   if (shown === null || result.run.graph_hash_at_run !== shown.graph_hash_at_run || result.run.computed_at !== shown.computed_at) return honest();
   if (result.block.leader_option_id !== leaderId) return honest(); // never tipping points about another leader
-  const sentences = renderLinkTippingPoints(result.block.links, {
+  const rows = linkTippingPointRows(result.block.links, {
     node: nodeLabelsOf(rb.graph), option: s['model.option_labels'], leaderId,
   });
   // RT-14 (DL #87 5993111927; principle 5992243567): an option is named only inside the model's frame. RC's per-link
   // sentences stay verbatim (the fixture row binds them); the frame opens the answer once.
-  return sentences.length === 0 ? honest() : { reply: `${IN_THIS_MODEL}${sentences.join(' ')}`, outcome: 'measured', actions };
+  return rows.length === 0 ? honest() : {
+    reply: `${IN_THIS_MODEL}${rows.map((row) => row.text).join(' ')}`, outcome: 'measured', actions,
+    // Ruling 4 compares the options the Run scored (the status quo + every option it did not exclude), never an option
+    // kept in the graph but taken out of the Run, whose side would read withheld and drop every row (Codex r1).
+    measured: { rows, run: shown, leaderId, optionIds: [
+      ...(s['model.status_quo_option_id'] !== null ? [s['model.status_quo_option_id']] : []), ...s['model.non_sq_option_ids'],
+    ] },
+  };
 }

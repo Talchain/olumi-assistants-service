@@ -152,6 +152,33 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(body.suggested_actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
   });
 
+  it('W1b (DL A): served D3 has no valid licence, so the measured chat carries a withheld sidecar', async () => {
+    const turnId = randomUUID();
+    const shownRun = { graph_hash_at_run: served.result.computed_against_hash, computed_at: served.state.run_state.computed_at };
+    const body = await post(PRESS.id, PRESS.message, turnId) as unknown as Rec;
+    const m = body._method_result as Rec;
+    expect(m).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'withheld', scenario_id: SCENARIO, turn_id: turnId });
+    expect(m.run).toEqual(shownRun);
+    expect(body.analysis_state.run_state.computed_at).toBe(shownRun.computed_at);
+    expect(body.blocks.find((block: Rec) => block.type === 'analysis_result').computed_against_hash).toBe(shownRun.graph_hash_at_run);
+    expect(m.rows).toEqual([]);
+    expect(body.assistant_text).toMatch(/would be the first to be supported|would still be supported/);
+    expect(modelCalls).toBe(0);
+  });
+
+  it('W1c (accel P24 / SCI-10, ruling 4 fail-closed): as served, D3 carries goal figures with no licence record → the sidecar is withheld, no rows; the chat is unchanged', async () => {
+    const body = await post(PRESS.id, PRESS.message, randomUUID()) as unknown as Rec;
+    expect(body._method_result).toMatchObject({ v: 1, action_id: 'what_changes', outcome: 'withheld', rows: [] });
+    expect(body.assistant_text).toMatch(/would still be supported/);
+  });
+
+  it('W5b (DL A): when D3 goes stale at the final read, the reply refuses and its withheld sidecar has no rows', async () => {
+    dispatch.during = () => { served.state = { ...D3.body.analysis_state, run_state: { ...D3.body.analysis_state.run_state, kind: 'complete_stale' } }; };
+    const body = await post(PRESS.id, PRESS.message, randomUUID()) as unknown as Rec;
+    expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
+    expect(body._method_result).toMatchObject({ outcome: 'withheld', rows: [] });
+  });
+
   // One chip, two grounded answers (#2536 SCI-HERO coaching shares `agent-next-what-would-change`): anything the
   // measurement does not answer is the Run's own tipping-point coaching, exactly as served before this branch.
   const killSwitchOff = async <T>(fn: () => Promise<T>): Promise<T> => {
@@ -248,6 +275,9 @@ describe('the real route: "What would change the result?" → measured tipping p
       expect(first.assistant_text.endsWith(MEASURED), first.assistant_text).toBe(true);
       const again = await post(PRESS.id, PRESS.message, turn);
       expect(again.assistant_text).toBe(first.assistant_text);
+      expect((again as unknown as Rec)._method_result).toEqual((first as unknown as Rec)._method_result);
+      expect((again as unknown as Rec)._method_result.run).toEqual(D3_RUN);
+      expect((again as unknown as Rec)._method_result).toMatchObject({ outcome: 'withheld', rows: [] });
       expect(dispatch.calls).toHaveLength(1);
       expect(modelCalls).toBe(0);
     });
@@ -258,6 +288,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       const again = await post(PRESS.id, PRESS.message, turn);
       expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
       expect(again.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\.$/);
+      expect((again as unknown as Rec)._method_result).toBeUndefined();
       expect(dispatch.calls).toHaveLength(1);
     });
     it('R3: with the kill switch off, the retry is the coaching too', async () => {

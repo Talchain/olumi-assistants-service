@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { claimPermissionsFrom } from '../first-analysis.js';
-import { structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
+import { STRUCTURAL_CHALLENGE_LINES, structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
 
 type Rec = Record<string, any>;
 const LINK = { from_id: 'driver_retention', to_id: 'goal_value' };
@@ -10,9 +10,10 @@ const RUN_A = 'run-a';
 const RUN_B = 'run-b';
 const SCENARIO = '8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f6';
 const PRESS = structuralChallengePressId(LINK);
-const dispatch = vi.hoisted(() => ({ calls: [] as Rec[] }));
+const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], baseline: null as Rec | null }));
+const OPTIONS = [{ id: 'option_a', kind: 'option', label: 'Option A' }, { id: 'option_b', kind: 'option', label: 'Option B' }];
 const graphReads = vi.hoisted(() => ({ count: 0, noGraph: false }));
-const state = vi.hoisted(() => ({ run: 'run-a', permission: 'licensed' as 'licensed' | 'withdrawn', throws: false, noRun: false }));
+const state = vi.hoisted(() => ({ run: 'run-a', permission: 'licensed' as 'licensed' | 'withdrawn', throws: false, noRun: false, provisionalReceipt: false }));
 
 vi.mock('../../handlers/structural-challenge-dispatch.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -21,7 +22,7 @@ vi.mock('../../handlers/structural-challenge-dispatch.js', async (importOriginal
     const readState = { run_state: { kind: 'complete_current' }, requires_rerun: false,
       leader_claim: { permitted: state.permission === 'licensed', separation: 'separated' } };
     const permissions = claimPermissionsFrom(readState, { analysis_admission: { structurally_analysable: true,
-      permitted_analysis_mode: 'comparative_leader' } }, { requested: true });
+      permitted_analysis_mode: state.provisionalReceipt ? 'quantified_provisional' : 'comparative_leader' } }, { requested: true });
     return { read: { analysis_state: readState, analysis_result: { type: 'analysis_result' } },
       currentness: { readOk: true, permissions, fact: { fact_type: 'run_analysis', result: {
         run_id: state.run, scenario_id: SCENARIO, graph_hash_at_run: 'a'.repeat(16), computed_at: '2026-10-04T10:00:00.000Z',
@@ -34,6 +35,7 @@ vi.mock('../../handlers/structural-challenge-dispatch.js', async (importOriginal
     if (state.throws) throw new Error('offline SCI-DEEP dispatch exception');
     if (state.noRun) return { kind: 'no_run' };
     const baseline = { run_id: RUN_A, scenario_id: SCENARIO, graph_hash_at_run: 'a'.repeat(16), sent_digest: 'a'.repeat(64), seed_used: '7', n_samples: 1000 };
+    dispatch.baseline = baseline;
     const missing = params.link.from_id === 'absent';
     const bidirected = params.link.from_id === 'shared';
     const status = missing || bidirected ? 'unsupported' : state.permission === 'withdrawn' ? 'withheld' : state.run !== RUN_A ? 'stale' : 'completed';
@@ -42,9 +44,15 @@ vi.mock('../../handlers/structural-challenge-dispatch.js', async (importOriginal
     const permissions = claimPermissionsFrom(readState, { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } }, { requested: true });
     return { kind: 'result', result: { status, reason, baseline,
       alternative: { op: 'remove_link', ...params.link, origin: 'user_selected', sizing: 'unmarked' },
-      claims: status === 'completed' ? [{ kind: 'leader', baseline_option_id: 'option_a', alternative_option_id: 'option_a', verdict: 'holds', basis: 'within_noise', invariant_by_construction: false }] : [],
+      claims: status === 'completed' ? [{ kind: 'leader', baseline_option_id: 'option_a', alternative_option_id: 'option_a', verdict: 'holds', basis: 'within_noise', invariant_by_construction: false },
+        { kind: 'goal_probability', option_id: 'option_a', constraint_id: null, baseline: 0.53, alternative: 1,
+          target: null, constraint_boundary: null, noise_verdict: 'signal', verdict: 'changes', basis: 'certainty_boundary_crossed', invariant_by_construction: false },
+        { kind: 'constraint_probability', option_id: 'option_b', constraint_id: 'limit_cost', baseline: 0.3, alternative: 0.6,
+          target: null, constraint_boundary: null, noise_verdict: 'signal', verdict: 'delta_only', basis: 'no_licensed_boundary', invariant_by_construction: false }] : [],
       pair_provenance: null, not_compared: [], attribution_case: 'C2_unpaired', retention: 'not_retained' },
-      labels: new Map([['driver_retention', 'Driver retention'], ['goal_value', 'Goal value'], ['option_a', 'Option A']]),
+      labels: new Map([['driver_retention', 'Driver retention'], ['goal_value', 'Goal value'], ['option_a', 'Option A'], ['option_b', 'Option B'], ['limit_cost', 'Cost limit']]),
+      certainty: { baseline: [], alternative: [{ option_id: 'option_a', probability_of_goal: 1, earned: true }],
+        baselineDisplay: { option_a: 'about 53%' }, alternativeDisplay: { option_a: '100%' } },
       candidateLeaderLicence: 'permitted', baselineRunIdentity: { run_id: RUN_A, scenario_id: SCENARIO, graph_hash_at_run: 'a'.repeat(16), computed_at: '2026-10-04T10:00:00.000Z' },
       finalRead: { read: { analysis_state: readState }, currentness: { readOk: true, permissions, fact: {
         fact_type: 'run_analysis', result: { ...baseline, computed_at: '2026-10-04T10:00:00.000Z',
@@ -80,12 +88,12 @@ describe('agent route: structural challenge press', () => {
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => { graphReads.count += 1; if (graphReads.noGraph) return {}; return { graph: { nodes: [{ id: LINK.from_id, kind: 'factor', label: 'Driver retention' }, { id: LINK.to_id, kind: 'goal', label: 'Goal value' }], edges: [{ from: LINK.from_id, to: LINK.to_id }] }, graph_hash: 'graph-a', analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-04T10:00:00.000Z' } }, analysis_ready: { status: 'ready', may_run: true } }; });
+    app.post('/assist/v1/scenarios/:id/graph', async () => { graphReads.count += 1; if (graphReads.noGraph) return {}; return { graph: { nodes: [{ id: LINK.from_id, kind: 'factor', label: 'Driver retention' }, { id: LINK.to_id, kind: 'goal', label: 'Goal value' }, ...OPTIONS], edges: [{ from: LINK.from_id, to: LINK.to_id }] }, graph_hash: 'graph-a', analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-04T10:00:00.000Z' }, leader_claim: { permitted: state.permission === 'licensed', separation: 'separated' } }, analysis_ready: { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: state.provisionalReceipt ? 'quantified_provisional' : 'comparative_leader' } } }; });
     app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'normal', blocks: [] }));
     await app.register(agentV1TurnRoute); await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); turnId = randomUUID(); state.throws = false; state.noRun = false; graphReads.noGraph = false; store.releaseTurnClaim.mockClear(); store.storeDraftGraph.mockClear(); dispatch.calls.length = 0; graphReads.count = 0; store.append.mockClear(); vi.mocked(fetch).mockClear(); state.run = RUN_A; state.permission = 'licensed'; });
+  beforeEach(() => { rows.clear(); dispatch.baseline = null; state.provisionalReceipt = false; turnId = randomUUID(); state.throws = false; state.noRun = false; graphReads.noGraph = false; store.releaseTurnClaim.mockClear(); store.storeDraftGraph.mockClear(); dispatch.calls.length = 0; graphReads.count = 0; store.append.mockClear(); vi.mocked(fetch).mockClear(); state.run = RUN_A; state.permission = 'licensed'; });
   const post = async (chip: string | undefined, message = 'test') => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message, source: chip ? 'chip' : 'user', ...(chip ? { chip: { id: chip } } : {}) } }));
 
   it('current licensed Run: replies structurally, makes no model call, appends no graph change, and marks fastPath method', async () => {
@@ -93,6 +101,55 @@ describe('agent route: structural challenge press', () => {
     expect(response.statusCode).toBe(200); expect(body.assistant_text).toContain('Without the link'); expect(body._diagnostic_trace.fast_path).toBe('method');
     expect(dispatch.calls).toHaveLength(1); expect(dispatch.calls[0].link).toEqual(LINK); expect(dispatch.calls[0].requestId).toContain('structural-challenge');
     expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(store.storeDraftGraph).not.toHaveBeenCalled(); expect(body._agent.mutated).toBe(false); expect(body._agent?.tool_calls ?? []).toEqual([]);
+  });
+  it('accel P24 / SCI-10: a completed test carries its typed rows beside the reply, bound to the pressed link; a stale one carries none', async () => {
+    const body = (await post(PRESS)).json();
+    expect(body._method_result).toMatchObject({ v: 1, action_id: 'test_link', outcome: 'completed', scenario_id: SCENARIO, turn_id: turnId });
+    expect(body._method_result.run).toEqual({ graph_hash_at_run: dispatch.baseline!.graph_hash_at_run, run_id: dispatch.baseline!.run_id });
+    const rows = body._method_result.rows as Rec[];
+    expect(rows.map((r) => r.row_id)).toEqual(expect.arrayContaining(['tested', 'goal:option_a', 'limit:option_b:limit_cost', 'not_saved']));
+    for (const row of rows) {
+      expect(body.assistant_text).toContain(row.text);
+      expect(row.item_refs.filter((ref: Rec) => ref.kind === 'link')).toEqual(
+        row.row_id === 'provisional' || row.row_id === 'not_saved' ? [] : [{ kind: 'link', ...LINK }]);
+      if (row.row_id.startsWith('goal:') || row.row_id.startsWith('limit:')) {
+        const optionRefs = row.item_refs.filter((ref: Rec) => ref.kind === 'option');
+        expect(optionRefs).toHaveLength(1);
+        expect(OPTIONS.map((option) => option.id)).toContain(optionRefs[0].id);
+        expect(row.item_refs).toEqual([{ kind: 'option', id: row.row_id.startsWith('goal:') ? OPTIONS[0].id : OPTIONS[1].id }, { kind: 'link', ...LINK }]);
+      }
+      for (const figure of row.figures ?? []) expect(body.assistant_text).toContain(figure);
+      expect(row.text).not.toMatch(/\bleads?\b/);
+    }
+    expect(body.assistant_text).toMatch(/\bleads?\b/); // control: the lead line is in the chat, never in a row
+    turnId = randomUUID(); state.run = RUN_B;
+    const stale = (await post(PRESS)).json();
+    expect(stale._method_result).toMatchObject({ v: 1, action_id: 'test_link', outcome: 'stale', rows: [] });
+  });
+  it('builds rows from the final licensed presentation: a provisional final receipt adds its disclosure', async () => {
+    state.provisionalReceipt = true; // dispatch's receipt remains comparative; only the final receipt narrows it
+    const body = (await post(PRESS)).json();
+    expect(body.assistant_text).toContain(STRUCTURAL_CHALLENGE_LINES.provisional);
+    expect(body._method_result.rows.find((row: Rec) => row.row_id === 'provisional')).toMatchObject({
+      text: STRUCTURAL_CHALLENGE_LINES.provisional, item_refs: [],
+    });
+    expect(body._method_result.turn_id).toBe(turnId);
+  });
+  it('identical replay carries the same typed rows; a changed re-presentation carries no sidecar', async () => {
+    const first = (await post(PRESS)).json();
+    expect(first._method_result.rows.length).toBeGreaterThan(0);
+    const replay = (await post(PRESS)).json();
+    expect(replay._agent.replayed).toBe(true);
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(replay._method_result).toEqual(first._method_result);
+    expect(dispatch.calls).toHaveLength(1);
+    state.provisionalReceipt = true; // same Run, different deterministic licensed presentation
+    const changed = (await post(PRESS)).json();
+    expect(changed._agent.replayed).toBe(true);
+    expect(changed.assistant_text).not.toBe(first.assistant_text);
+    expect(changed.assistant_text).toContain(STRUCTURAL_CHALLENGE_LINES.provisional);
+    expect(changed._method_result).toBeUndefined();
+    expect(dispatch.calls).toHaveLength(1);
   });
   it('ordinary text does not dispatch and performs no extra route read-back', async () => {
     const before = graphReads.count; const response = await post(undefined, 'ordinary message');
