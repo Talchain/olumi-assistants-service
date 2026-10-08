@@ -124,7 +124,7 @@ import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigu
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
-import { withoutLeftOutOptionInclusionClaimsAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
+import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
@@ -2323,7 +2323,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      const gatedReplay = withoutLeftOutOptionInclusionClaimsAtEgress(driverGatedReplay, {
+      const gatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
         runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
@@ -4397,7 +4397,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      return withoutLeftOutOptionInclusionClaimsAtEgress(driverEditedView, {
+      return withLeftOutOptionCorrectionAtEgress(driverEditedView, {
         runOptionSet, optionParticipation, graph: readbackGraph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view', ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
@@ -4468,7 +4468,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),
       });
-      const edited = withoutLeftOutOptionInclusionClaimsAtEgress(driverEdited, {
+      const edited = withLeftOutOptionCorrectionAtEgress(driverEdited, {
         runOptionSet, optionParticipation, graph: readbackGraph ?? null,
         requestId: String(req.id), exitPath: 'agent_lane_v1_final', ...(turnId !== undefined ? { turnId } : {}),
       });

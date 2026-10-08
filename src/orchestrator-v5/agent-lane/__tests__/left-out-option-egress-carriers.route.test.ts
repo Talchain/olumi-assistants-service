@@ -135,7 +135,7 @@ describe('Q6 r1 production graph read → finalRead/replay → left-out-option e
       expect(response.statusCode, response.body).toBe(200);
       const body = response.json() as { assistant_text: string; _agent: { replayed?: boolean } };
       expect(body._agent.replayed, 'control: actual live finalRead egress').not.toBe(true);
-      expect(body.assistant_text).not.toContain(BULLET);
+      expect(body.assistant_text, 'nothing the narrator said is removed (DL scope ruling)').toContain(BULLET);
       const line = reason === 'olumi_proposed' ? OLUMI_LINE : PLAIN_LINE;
       expect(body.assistant_text.split(line).length - 1).toBe(1);
 
@@ -146,7 +146,7 @@ describe('Q6 r1 production graph read → finalRead/replay → left-out-option e
     },
   );
 
-  it('RED-before: replay re-reads not_analysable from the stored snapshot and filters formerly stored sent-option prose', async () => {
+  it('RED-before: replay re-reads not_analysable from the stored snapshot and corrects formerly stored sent-option prose', async () => {
     seed('not_analysable', true);
     const sent = await turn(REPLAY_TURN);
     expect(sent.statusCode, sent.body).toBe(200);
@@ -156,7 +156,7 @@ describe('Q6 r1 production graph read → finalRead/replay → left-out-option e
     const replay = await turn(REPLAY_TURN);
     expect(replay.statusCode, replay.body).toBe(200);
     expect(replay.json()._agent.replayed).toBe(true);
-    expect(replay.json().assistant_text).not.toContain(BULLET);
+    expect(replay.json().assistant_text, 'nothing the narrator said is removed (DL scope ruling)').toContain(BULLET);
     expect(replay.json().assistant_text.split(PLAIN_LINE).length - 1).toBe(1);
   });
 
