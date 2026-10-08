@@ -45,7 +45,7 @@ import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-te
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitOrdinaryCandidateModel, admittedPassesStructure, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -1833,11 +1833,8 @@ export async function buildModelFromBrief(
     }
   }
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
+  // Read before the later steps replace `admitted`; judged on the graph that would be registered (below).
   const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
-  if (eventFallbackRefusal !== undefined && draftedTeamPartOf(admitted) === null
-    && !admittedPassesStructure(admitted)) {
-    return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
-  }
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {
@@ -2164,6 +2161,11 @@ export async function buildModelFromBrief(
       ok: false, mutated: false, refusal: 'admitted_graph_invalid',
       issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
     };
+  }
+  // A flagged draft whose event slice failed keeps its ordinary graph unless that graph, as registered, cannot reach
+  // the goal (B3 086e4624). Reachability only: base registers kept user loops (construction-acyclic-verified-arms P-M10).
+  if (eventFallbackRefusal !== undefined && draftedTeamPartOf(parsed.data) === null && !admittedReachesGoal(parsed.data as never)) {
+    return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
   }
 
   /**

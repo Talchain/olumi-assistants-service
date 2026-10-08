@@ -3014,9 +3014,10 @@ export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
   };
 }
 
-/** The Run's reachability gate (readiness leaves inert risks out) read on an admitted model, before it is registered. */
-export function admittedPassesStructure(model: AdmittedModel): boolean {
-  return validateGraphStructure(model as never, { leaveOutInertRisks: true }).valid;
+/** Reachability only (readiness leaves inert risks out): the class a failed event slice used to fall into (B3 086e4624). */
+export function admittedReachesGoal(model: AdmittedModel): boolean {
+  return !validateGraphStructure(model as never, { leaveOutInertRisks: true }).violations
+    .some((v) => v.code === 'NO_PATH_TO_GOAL' || v.code === 'NO_GOAL');
 }
 
 /** Owned by construction, outside the drafter schema. The verdict that selected the prompt is never re-read. */
@@ -3067,7 +3068,7 @@ export function admitCandidateModel(
   const failedEvent = (detail: typeof EVENT_BY_DATE_REFUSALS[number]): AdmittedModel => {
     try {
       const ordinary = admitOrdinaryCandidateModel(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
-      if (admittedPassesStructure(ordinary)) {
+      if (admittedReachesGoal(ordinary)) {
         log.info({ event: 'cee.event_by_date.fallback_kept', missing_piece: detail.slice("Olumi couldn't connect your options to the launch date yet: ".length, -1) },
           'cee.event_by_date.fallback_kept');
         return ordinary;
