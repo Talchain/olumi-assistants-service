@@ -468,6 +468,29 @@ describe('RC6 said once', () => {
     everySentenceExceptReportedKept(text, c);
   });
 
+  it.each([['plain', 'Option A', 'Option B'], ['markdown', '## Option A', '## Option B'], ['bold', '**Option A**', '**Option B**']])(
+    'the same finding under two %s headings is two findings (Codex r6): both stay', (_form, a, b) => {
+      const text = [a, '- Revenue may dip in month one.', b, '- Revenue may dip in month one.', '- Cash runs short in month three.', context].join('\n');
+      const c = composeReplyShape({ text });
+      expect(c.measure!.said_once_dropped).toEqual([]);
+      expect(count(c.text, 'Revenue may dip in month one.')).toBe(2);
+    });
+  it.each([
+    ['explain_00_24_38', served.explain_00_24_38],
+    ['explain_00_30_46', served.explain_00_30_46],
+  ])('P1 %s when the closing is NOT typed (Codex r6: the route types only coHold.why, no period): the standalone copy still goes', (_id, text) => {
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: served.withhold_sentence.replace(/\.$/, '') }] });
+    expect(count(c.text, served.withhold_sentence)).toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([served.withhold_sentence]);
+    expect(c.reason).not.toBe('invariant_failed');
+  });
+  it('a negated "because" denies the reason: both stay', () => {
+    const reason = 'The price link is not sized.';
+    const text = [reason, context, 'The result is not withheld because the price link is not sized.'].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: reason }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(c.text).toContain(reason);
+  });
   it.each([['colon', 'Option A:', 'Option B:'], ['plain', 'Option A', 'Option B'], ['markdown', '## Option A', '## Option B'], ['bold', '**Option A**', '**Option B**']])(
     'repeated %s headings stay (Codex r4/r5): a finding is never re-parented under another option', (_form, a, b) => {
       const text = [a, '- Revenue may dip in month one.', b, '- Churn may rise above 4%.', a, '- Cash runs short in month three.', context].join('\n');

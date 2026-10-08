@@ -264,6 +264,8 @@ interface SentenceSpan {
   readonly text: string;
   readonly start: number;
   readonly end: number;
+  /** The heading section the sentence sits under (0 before any heading): equal words under two headings are two findings. */
+  readonly section?: number;
 }
 interface SaidOnce {
   readonly text: string;
@@ -272,7 +274,10 @@ interface SaidOnce {
   readonly questions: ReturnType<typeof openQuestionsSegment>;
 }
 /** The frame before a contained sentence that restates it as the container's reason (keys are normalised). */
-const SAID_AGAIN_AFTER = /(?:\bbecause|\bsince)\s*$/;
+// The container's tail after 'because'/'since', and no 'not'/'n't' anywhere before it: a negated frame ('The result is not
+// withheld because …') can deny the reason as a cause. The quantifier 'no' ('No single option can be put forward yet,
+// because …', Paul's served text) is not a negation of the reason.
+const SAID_AGAIN_AFTER = { test: (prefix: string): boolean => /\b(?:because|since)\s*$/.test(prefix) && !/\bnot\b|n't\b/.test(prefix) };
 /** Which typed copy of a repeated sentence stays: the strongest role (ask closes the face), then the first. */
 const SAID_ONCE_ROLE_RANK: Partial<Record<FaceObligationRole, number>> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1 };
 
@@ -314,7 +319,10 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
   const spans: SentenceSpan[] = [];
   const lines: { start: number; end: number; spans: SentenceSpan[] }[] = [];
   let lineAt = 0;
+  let section = 0;
   for (const raw of text.split('\n')) {
+    // A non-empty line that is not a finished sentence (no . ! ? at its end) is a heading/label: a new section starts.
+    if (raw.trim() !== '' && BULLET_LINE.exec(raw) === null && !/[.!?]["'”’)\]*_`]{0,4}$/.test(raw.trim())) section += 1;
     const bullet = BULLET_LINE.exec(raw);
     const body = bullet?.[2] ?? raw;
     const bodyAt = bullet === null ? 0 : raw.indexOf(body);
@@ -330,7 +338,7 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
       // any form ("Option A", "## Option A", "**Option A**", "Option A:") — frames what follows it, and removing a repeat
       // would re-parent findings under another heading (Codex r4/r5 on #2801).
       if (!/[.!?]["'”’)\]*_`]{0,4}$/.test(sentence.trim())) continue;
-      const span = { text: sentence, start, end };
+      const span = { text: sentence, start, end, section };
       spans.push(span);
       lineSpans.push(span);
     }
@@ -344,16 +352,17 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
     .filter((o) => o.start !== -1).sort((a, b) => b.start - a.start)[0];
   const askKeys = new Set(spans.filter((s) => closingAsk !== undefined && s.start >= closingAsk.start
     && s.end <= closingAsk.end).map((s) => saidOnceKey(s.text)));
-  const groups: { key: string; first: SentenceSpan; copies: SentenceSpan[] }[] = [];
+  const groups: { key: string; section: number; first: SentenceSpan; copies: SentenceSpan[] }[] = [];
   const groupByKey = new Map<string, number>();
   for (const span of spans) {
     const key = saidOnceKey(span.text);
     if (key === '') continue;
-    const prior = groupByKey.get(key);
+    const at = `${span.section ?? 0}\u0000${key}`;
+    const prior = groupByKey.get(at);
     if (prior !== undefined) groups[prior]!.copies.push(span);
     else {
-      groupByKey.set(key, groups.length);
-      groups.push({ key, first: span, copies: [span] });
+      groupByKey.set(at, groups.length);
+      groups.push({ key, section: span.section ?? 0, first: span, copies: [span] });
     }
   }
 
@@ -384,7 +393,7 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
     || typedRanges.some((r) => r.start === c.start && (r.end === c.end || r.end === coreEnd(c))));
 
   // Aho-Corasick: all complete sentence keys are patterns; output links avoid copying suffix-match arrays.
-  const trie: { next: Map<string, number>; fail: number; output: number; group?: number }[] = [
+  const trie: { next: Map<string, number>; fail: number; output: number; groups?: number[] }[] = [
     { next: new Map(), fail: 0, output: 0 },
   ];
   groups.forEach((group, idx) => {
@@ -398,7 +407,7 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
       }
       node = next;
     }
-    trie[node]!.group = idx;
+    (trie[node]!.groups ??= []).push(idx);
   });
   const queue = [...trie[0]!.next.values()];
   for (let head = 0; head < queue.length; head += 1) {
@@ -408,7 +417,7 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
       while (fail !== 0 && !trie[fail]!.next.has(char)) fail = trie[fail]!.fail;
       trie[child]!.fail = trie[fail]!.next.get(char) ?? 0;
       const suffix = trie[child]!.fail;
-      trie[child]!.output = trie[suffix]!.group !== undefined ? suffix : trie[suffix]!.output;
+      trie[child]!.output = trie[suffix]!.groups !== undefined ? suffix : trie[suffix]!.output;
       queue.push(child);
     }
   }
@@ -426,15 +435,17 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
       // other frame ("It is not true that <it>", "If X, <it>") means something else, and both are kept.
       if (at !== containerKey.length - 1) continue;
       for (let match = node; match !== 0; match = trie[match]!.output) {
-        const found = trie[match]!.group;
-        if (found !== undefined && groups[found]!.key.length < containerKey.length
-          && SAID_AGAIN_AFTER.test(containerKey.slice(0, containerKey.length - groups[found]!.key.length))
-          // Containment only between Olumi's OWN typed sentences (their meaning is known: the leader gate's "…, because
-          // <the withheld reason>"). Agent prose loses only exact copies (Codex r2 on #2801: a colon or untyped frame can
-          // invert or partially carry a finding).
-          && groupTyped(found) && groupTyped(idx) && wholeWhereTyped(found)
-          && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
+        for (const found of trie[match]!.groups ?? []) {
+          if (groups[found]!.key.length < containerKey.length && groups[found]!.section === groups[idx]!.section
+            && SAID_AGAIN_AFTER.test(containerKey.slice(0, containerKey.length - groups[found]!.key.length))
+            // The contained sentence must be a WHOLE typed obligation (Olumi's own words, its role moves to the
+            // container whole; Codex r2/r3 on #2801). The container may be the narrator's or the Explain composer's
+            // ("No single option can be put forward yet, because <the withheld reason>.": Codex r6, Paul's served text).
+            && groupTyped(found) && wholeWhereTyped(found)
+            && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
+        }
       }
+
     }
   }
   const keptByDrop = new Map<SentenceSpan, SentenceSpan>();
