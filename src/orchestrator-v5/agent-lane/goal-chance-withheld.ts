@@ -29,7 +29,7 @@ import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.
 
 import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
 import { guidedSizingActions, guidedSizingForRun, guidedSizingOnlyPlaceholders, guidedSizingReplyText,
-  legacyGuidedSizingReplyText, withoutStaleGuidedSizingWords, type GuidedSizingDraft } from './guided-sizing.js';
+  guidedSizingWordDraft, legacyGuidedSizingReplyText, withoutStaleGuidedSizingWords, type GuidedSizingDraft } from './guided-sizing.js';
 import { notTargetTestableSentence, untestableTargetTail, type TargetTestability } from '../admission/target-testability.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
@@ -164,7 +164,8 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   const suppliedGuidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : null;
   // A one-pair explanation changes words only; the established offer/hook eligibility stays with `guided`.
   const single = guided === undefined ? guidedSizingForRun(result, graph, true) : undefined;
-  const wordDraft = guided ?? (single?.total === 1 ? single : undefined);
+  const sentenceSource = guided ?? (single?.total === 1 ? single : undefined);
+  const wordDraft = guidedSizingWordDraft(sentenceSource);
   const block = recordOf(result);
   if (block === undefined) return undefined;
   const scoredIds = [...new Set(readOptionResultSources(recordOf(block.enrichment) ?? block).flat().map(r => r.option_id ?? r.id)
@@ -202,6 +203,8 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
     .map(a => a.label.slice(a.label.indexOf('?') + 1).trim()).filter(Boolean))].join(' ');
   const warnings = sourceWarnings.map(w => {
     if (w.code === GOAL_FIGURES_PLACEHOLDER_PATH && typeof w.message === 'string') {
+      // An empty producer-owned sentence scope must not revive this option's old warning as fallback words.
+      if (sentenceSource?.sentence_draft === null) return { ...w, message: '' };
       return { ...w, message: withoutStaleGuidedSizingWords(w.message.replace(UI_OPENING, '').trim(), promiseAllowed ? guided : undefined) };
     }
     if (w.code !== GOAL_FIGURES_TARGET_NOT_TESTABLE || graph === undefined || wordDraft?.target_verdict === undefined
