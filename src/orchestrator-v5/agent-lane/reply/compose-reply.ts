@@ -55,9 +55,10 @@ export const FACE_DEMOTION_ORDER = ['estimates', 'what_changes'] as const;
 
 /** Paul/DL/Science 93: expert wording belongs in detail; these exact markers must remain on the face. */
 export const HORIZON_MARKER = "At today's numbers; not projected forward yet";
-/** Science approval pending: keep the proposed robustness wording in this ONE constant. */
-export const ROBUSTNESS_MARKER = 'Not yet robust: small changes could flip it';
-export const WIDENED_RISK_MARKER = "Olumi's added risks aren't in this chance";
+/** Science 93 amendments (8 Oct): exact user-facing wording. */
+export const ROBUSTNESS_MARKER = 'Small changes could change the comparison';
+export const WIDENED_RISK_MARKER_TOO_HIGH = "Leaves out Olumi's added risks; may be too high";
+export const WIDENED_RISK_MARKER_MAY_MOVE = "Leaves out Olumi's added risks; may move";
 export const WITHHOLD_FALLBACK_MARKER = 'Not shown yet; why is under More detail';
 export const FIRMNESS_MARKER_PREFIX = "May look firmer: uses Olumi's ";
 
@@ -133,6 +134,8 @@ export interface ReplyComposeInput {
   readonly widenedLine?: string;
   /** Draft detail; Run must-face marker after chances, with the full note in detail. */
   readonly widenedRiskNote?: string;
+  /** P05b chooses the direction from typed edge signs; absent a marker, Run uses the conservative may-move form. */
+  readonly widenedRiskMarker?: string;
   readonly obligations?: readonly FaceObligation[];
   /** Code-authored disclosures owed once, under More detail even for a short reply. */
   readonly detailLines?: readonly string[];
@@ -622,13 +625,15 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     .concat(markerObligations);
   const horizonDetail = canMark && input.faceContract === 'run' ? input.horizonLine : undefined;
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
+  const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
+    ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
   const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set(markerObligations.map(o => o.text))];
   const faceHostLines = !faceContract || !canMark ? [] : [
     horizonDetail === undefined ? undefined : HORIZON_MARKER,
     input.faceContract === 'draft' ? input.widenedLine : undefined,
-    input.faceContract === 'run' && input.widenedRiskNote !== undefined ? WIDENED_RISK_MARKER : undefined,
+    widenedRiskMarker,
     input.whatChanges, input.estimatesLine,
   ].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
   const inputQuestions = openQuestionsSegment(input.text);
@@ -864,8 +869,8 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       : units.find((u) => u.text === HORIZON_MARKER);
     const widened = input.faceContract !== 'draft' || input.widenedLine === undefined ? undefined
       : units.find(u => u.text === asWritten(input.widenedLine!.trim()));
-    const widenedRisk = input.faceContract !== 'run' || input.widenedRiskNote === undefined ? undefined
-      : units.find(u => u.text === WIDENED_RISK_MARKER);
+    const widenedRisk = widenedRiskMarker === undefined ? undefined
+      : units.find(u => u.text === asWritten(widenedRiskMarker.trim()));
     const robustness = units.find(u => u.text === ROBUSTNESS_MARKER && u.obligation === 'caveat');
     // #2565 retains the Explain narrator's existing bullet identities when its finding has no screen chance.
     const robustnessPool = robustness === undefined || present.some(o => o.lead === true) || faceRun === undefined ? []

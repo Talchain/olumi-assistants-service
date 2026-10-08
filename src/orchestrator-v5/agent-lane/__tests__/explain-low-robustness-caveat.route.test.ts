@@ -43,7 +43,7 @@ const shapedNarrator = (n: number) => `${bulletedNarrator(n)} ${LONG_TAIL}`;
 const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** Exact public sentences, pinned independently of the selector so base/mutants cannot redefine the oracle. */
 const SENTENCE = 'The result is not yet robust — small changes could flip it.';
-const ROBUSTNESS_MARKER = 'Not yet robust: small changes could flip it';
+const ROBUSTNESS_MARKER = 'Small changes could change the comparison';
 const NO_FLIP_SENTENCE = 'The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.';
 const count = (text: string, sentence: string) => text.split(sentence).length - 1;
 const countSentenceCopies = (text: string, sentence: string) => {

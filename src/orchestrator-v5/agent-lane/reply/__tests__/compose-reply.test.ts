@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
   composeReplyShape, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
-  HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER,
+  HORIZON_MARKER, ROBUSTNESS_MARKER, WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE,
   type ReplyComposition, type FaceObligation,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
@@ -1482,7 +1482,7 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
       { role: 'caveat', text: note, subjects: ['starter'], disclosure: { kind: 'robustness' } },
       { role: 'ask', text: ask },
     ] });
-    expect(ROBUSTNESS_MARKER).toBe('Not yet robust: small changes could flip it');
+    expect(ROBUSTNESS_MARKER).toBe('Small changes could change the comparison');
     expect(c.shape!.bullets).toEqual([ROBUSTNESS_MARKER, ask]);
     assertDisclosure(c, ROBUSTNESS_MARKER, note);
   });
@@ -1606,22 +1606,31 @@ describe('r5 P05b widening inputs use the typed Draft/Run contract', () => {
   const count = (text: string, sentence: string) => text.split(sentence).length - 1;
 
   it('draft: widenedLine is mandatory immediately after H; widenedRiskNote is once in detail', () => {
-    const c = composeReplyShape({ faceContract: 'draft', text: [headline, context].join('\n\n'), widenedLine, widenedRiskNote });
+    const c = composeReplyShape({ faceContract: 'draft', text: [headline, context].join('\n\n'), widenedLine, widenedRiskNote,
+      widenedRiskMarker: WIDENED_RISK_MARKER_TOO_HIGH });
     expect(c.shape!.headline).toBe(headline);
     expect(c.shape!.bullets).toEqual([widenedLine]);
     expect(c.shape!.detail).toContain(widenedRiskNote);
     expect(face(c).join('\n')).not.toContain(widenedRiskNote);
     expect(count(c.text, widenedLine)).toBe(1);
     expect(count(c.shape!.detail, widenedRiskNote)).toBe(1);
+    expect(c.text).not.toContain(WIDENED_RISK_MARKER_TOO_HIGH);
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
   });
 
-  it('run: widenedLine goes to detail; the added-risks marker is must-face after chances, full note once in detail', () => {
+  it.each([
+    ['P05b too-high', WIDENED_RISK_MARKER_TOO_HIGH, "Leaves out Olumi's added risks; may be too high"],
+    ['P05b may-move', WIDENED_RISK_MARKER_MAY_MOVE, "Leaves out Olumi's added risks; may move"],
+    ['missing marker defaults to may-move', undefined, "Leaves out Olumi's added risks; may move"],
+  ] as const)('run: %s marker is must-face after chances, full note once in detail', (_row, widenedRiskMarker, expectedMarker) => {
     const c = composeReplyShape({ faceContract: 'run', text: [chance, context].join('\n\n'), widenedLine, widenedRiskNote,
+      widenedRiskMarker,
       obligations: [{ role: 'evidence', text: chance, lead: true, subjects: ['starter'] }] });
-    expect(WIDENED_RISK_MARKER).toBe("Olumi's added risks aren't in this chance");
+    if (widenedRiskMarker !== undefined) expect(widenedRiskMarker).toBe(expectedMarker);
     expect(c.shape!.headline).toBe(chance);
-    expect(c.shape!.bullets).toEqual([WIDENED_RISK_MARKER]);
+    expect(c.shape!.bullets).toEqual([expectedMarker]);
+    expect(count(c.text, expectedMarker)).toBe(1);
+    expect(c.shape!.detail).not.toContain(expectedMarker);
     for (const line of [widenedLine, widenedRiskNote]) {
       expect(face(c).join('\n')).not.toContain(line);
       expect(count(c.shape!.detail, line)).toBe(1);
@@ -1629,9 +1638,31 @@ describe('r5 P05b widening inputs use the typed Draft/Run contract', () => {
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
   });
 
+  it('run over budget: the supplied may-move marker stays beside the chance while optional W/E demote', () => {
+    const finding = `${chance} The comparison retains the team's strategic assumptions, causal relationships, evidence, disagreements and uncertainty for careful review before anyone relies on the result, while preserving the different contributions and expected outcomes that people will later compare with what actually happens. Participants can challenge each assumption and preserve different interpretations while testing the evidence behind the strategy. The chance remains conditional on these assumptions and the current model rather than resolving the outstanding questions for the team.`;
+    const whatChanges = 'Changing the current subscriber assumption would change the projected revenue the most.';
+    const estimatesLine = "Olumi's estimates: 5, see Check estimates.";
+    const c = composeReplyShape({ faceContract: 'run', text: [finding, context].join('\n\n'), widenedRiskNote,
+      widenedRiskMarker: WIDENED_RISK_MARKER_MAY_MOVE, whatChanges, estimatesLine,
+      obligations: [{ role: 'evidence', text: finding, lead: true, subjects: ['starter'] }] });
+    expect(c.shape!.headline).toBe(finding);
+    expect(c.shape!.bullets).toEqual([WIDENED_RISK_MARKER_MAY_MOVE]);
+    expect(c.measure!.face_over_word_budget).toBe(true);
+    for (const line of [widenedRiskNote, whatChanges, estimatesLine]) expect(count(c.shape!.detail, line)).toBe(1);
+    expect(c.shape!.detail).not.toContain(WIDENED_RISK_MARKER_MAY_MOVE);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+  });
+
+  it('run without a widened-risk note ignores the marker', () => {
+    const text = [chance, context].join('\n\n');
+    const obligations = [{ role: 'evidence' as const, text: chance, lead: true as const, subjects: ['starter'] }];
+    expect(composeReplyShape({ faceContract: 'run', text, obligations, widenedRiskMarker: WIDENED_RISK_MARKER_TOO_HIGH }))
+      .toEqual(composeReplyShape({ faceContract: 'run', text, obligations }));
+  });
+
   it('no contract: widening inputs are ignored and the text stays byte-identical', () => {
     const text = 'The strategy needs more evidence.';
-    const c = composeReplyShape({ text, widenedLine, widenedRiskNote });
+    const c = composeReplyShape({ text, widenedLine, widenedRiskNote, widenedRiskMarker: WIDENED_RISK_MARKER_TOO_HIGH });
     expect(c).toMatchObject({ text, shape: null, outcome: 'already_in_shape' });
     expect(c).toEqual(composeReplyShape({ text }));
   });
