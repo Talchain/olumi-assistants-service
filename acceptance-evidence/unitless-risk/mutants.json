@@ -1,0 +1,35 @@
+[
+  {
+    "name": "user-named-excluded",
+    "file": "src/orchestrator-v5/agent-lane/unitless-risk-exclusion.ts",
+    "filter": "NEVER \\(a\\): all risk words",
+    "exit_code": 1,
+    "assertion_red": true,
+    "restored": true,
+    "source_sha256": "c5ba44eb7267893ff0ba58456de5ee6bd92d7c9023fb9cd34e9df3063d7ea65c",
+    "mutant_sha256": "510df3d5b99d2a57b768023329fe9d4b4271e6c35492eb506f5dc2f10ced1cc1",
+    "summary": "Tests  1 failed | 14 skipped (15)"
+  },
+  {
+    "name": "limit-veto-dropped",
+    "file": "src/orchestrator-v5/agent-lane/unitless-risk-exclusion.ts",
+    "filter": "NEVER \\(d\\)",
+    "exit_code": 1,
+    "assertion_red": true,
+    "restored": true,
+    "source_sha256": "c5ba44eb7267893ff0ba58456de5ee6bd92d7c9023fb9cd34e9df3063d7ea65c",
+    "mutant_sha256": "9c409a06269b998c5e4d416cf81358d2fb47ae716277a8d56da20e5d893e7981",
+    "summary": "Tests  1 failed | 1 passed | 13 skipped (15)"
+  },
+  {
+    "name": "caveat-dropped",
+    "file": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts",
+    "filter": "PR-1 RED",
+    "exit_code": 1,
+    "assertion_red": true,
+    "restored": true,
+    "source_sha256": "633f3243840025250b079eb8b349661c2cc53421fb231104ee68fe648cb1b3c0",
+    "mutant_sha256": "659c696a62ae05c937860c67285689a7508e9707e69830bd5309389cdc8fa57d",
+    "summary": "Tests  3 failed | 10 skipped (13)"
+  }
+]

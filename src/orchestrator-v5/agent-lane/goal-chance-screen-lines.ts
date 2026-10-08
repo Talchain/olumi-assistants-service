@@ -26,6 +26,8 @@ import { sayDate } from '../goal-target/deadline-date.js';
 import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
+import { withB3LinesAtRest } from './decision-input-ask.js';
+import { sentencesOf } from './reply/compose-reply.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
@@ -44,6 +46,113 @@ export interface GoalChanceScreenLine {
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
 const CHANCE_LABEL = 'chance of meeting your goal, in this model';
+
+/**
+ * Science goals §(r)(b): ONE omission beside the chance for risks kept out by Olumi's draft-time producer family.
+ * Participation and authorship are the persisted carrier; no new node field or inference from a risk's label.
+ */
+export function unitlessRiskChanceCaveatForAgent(graph: unknown): string | undefined {
+  const g = rec(graph);
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(rec).filter((n): n is Rec => n !== undefined);
+  const excluded = nodes.filter(n => n.kind === 'risk' && n.analysis_participation === 'retained_excluded'
+    && n.provenance === 'ai_inferred' && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '');
+  if (excluded.length === 0) return undefined;
+  const goals = nodes.filter(n => n.kind === 'goal' && typeof n.id === 'string');
+  const byId = new Map(nodes.filter(n => typeof n.id === 'string').map(n => [n.id as string, n]));
+  const outgoing = new Map<string, Rec[]>();
+  for (const e of (Array.isArray(g?.edges) ? g.edges : []).map(rec)) {
+    if (e === undefined || typeof e.from !== 'string' || typeof e.to !== 'string' || !byId.has(e.to)) continue;
+    outgoing.set(e.from, [...(outgoing.get(e.from) ?? []), e]);
+  }
+  const signOf = (e: Rec): number => {
+    if (e.effect_direction === 'positive') return 1;
+    if (e.effect_direction === 'negative') return -1;
+    // An explicitly unknown sign stays unknown, even beside a placeholder strength.
+    if (e.effect_direction !== undefined) return 0;
+    const mean = rec(e.strength)?.mean;
+    return typeof mean === 'number' && Number.isFinite(mean) ? Math.sign(mean) : 0;
+  };
+  const pointsDown = (riskId: string): boolean => {
+    if (goals.length !== 1) return false;
+    const goalId = goals[0]!.id;
+    let reachesGoal = false;
+    const pending: { id: string; sign: number }[] = [{ id: riskId, sign: 1 }];
+    // At most three signed states per node: bounded even for a malformed cyclic graph. Unknown propagates as 0.
+    const visited = new Map<string, Set<number>>();
+    for (let at = 0; at < pending.length; at += 1) {
+      const state = pending[at]!;
+      const seen = visited.get(state.id) ?? new Set<number>();
+      if (seen.has(state.sign)) continue;
+      seen.add(state.sign);
+      visited.set(state.id, seen);
+      for (const e of outgoing.get(state.id) ?? []) {
+        const to = e.to as string;
+        const kind = byId.get(to)?.kind;
+        if (kind === 'option' || kind === 'decision') continue;
+        const sign = state.sign * signOf(e);
+        if (to === goalId) {
+          reachesGoal = true;
+          if (sign !== -1) return false;
+        } else pending.push({ id: to, sign });
+      }
+    }
+    return reachesGoal;
+  };
+  const first = excluded[0]!;
+  const others = excluded.length - 1;
+  const omission = `It doesn't yet include ‘${first.label}’${others === 0 ? '' : ` (and ${others} other risk${others === 1 ? '' : 's'} Olumi added)`}`;
+  return `${omission}, so it ${excluded.every(n => pointsDown(n.id as string)) ? 'may be too high' : "may move when they're included"}.`;
+}
+
+/** Place the omission after this turn's chance findings, including accepted narrator words and their qualifiers. */
+export function withUnitlessRiskChanceCaveat(text: string, lines: readonly GoalChanceScreenLine[], caveat?: string): string {
+  if (caveat === undefined || caveat.trim() === '') return text;
+  const foldedCaveat = foldQuotes(caveat);
+  let body = text;
+  // Own the ONE omission, even if the narrator put a copy elsewhere. Remove only exact copies (quotes aside).
+  for (let at = foldQuotes(body).lastIndexOf(foldedCaveat); at >= 0; at = foldQuotes(body).lastIndexOf(foldedCaveat)) {
+    const start = at > 0 && body[at - 1] === ' ' ? at - 1 : at;
+    body = `${body.slice(0, start)}${body.slice(at + caveat.length)}`;
+  }
+  let afterEvidence = -1;
+  const folded = foldQuotes(body);
+  // The existing chance reader accepts markdown styling and collapsed whitespace. Reuse its exact reading and find
+  // the source end by monotonic prefix search, so this placement reader cannot invent a competing normalizer.
+  const sameWordsEnd = (source: string, finding: string): number => {
+    if (!sameWordsIn(source, finding)) return -1;
+    let low = 0, high = source.length;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (sameWordsIn(source.slice(0, mid), finding)) high = mid;
+      else low = mid + 1;
+    }
+    return low;
+  };
+  const closingEnd = (source: string, end: number): number => end + /^["'”’`*_]{0,4}/.exec(source.slice(end))![0].length;
+  for (const line of lines) {
+    const findings = [line.chance, ...ownWordsLeadTexts(body, line, sentencesOf)];
+    for (const finding of findings) {
+      const at = folded.lastIndexOf(foldQuotes(finding));
+      let end = at < 0 ? sameWordsEnd(body, finding) : at + finding.length;
+      if (end < 0) continue;
+      end = closingEnd(body, end);
+      if (line.depends !== '') {
+        const gap = /^\s+/.exec(body.slice(end))?.[0] ?? '';
+        if (gap !== '') {
+          const tail = body.slice(end + gap.length);
+          const driverEnd = foldQuotes(tail).startsWith(foldQuotes(line.depends)) ? line.depends.length : sameWordsEnd(tail, line.depends);
+          // Only the immediately following driver's own words qualify; an unrelated prefix never extends the finding.
+          if (driverEnd >= 0 && sameWordsIn(line.depends, tail.slice(0, driverEnd))) {
+            end += gap.length + closingEnd(tail, driverEnd);
+          }
+        }
+      }
+      afterEvidence = Math.max(afterEvidence, end);
+    }
+  }
+  if (afterEvidence < 0) return withB3LinesAtRest(body, [caveat]);
+  return `${body.slice(0, afterEvidence)} ${caveat}${body.slice(afterEvidence)}`;
+}
 
 /** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
 export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {

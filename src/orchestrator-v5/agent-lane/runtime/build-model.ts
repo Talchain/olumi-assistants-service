@@ -2315,6 +2315,7 @@ export async function buildModelFromBrief(
       // A goal read as a two-part product: an extra direct parent re-pointed or taken out (`product-goal-extra-parent.ts`).
       ...admitted.loss.filter((l) => /\.rate_operand\./.test(l.field_path)).map((l) => l.reason),
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),
+      ...admitted.loss.filter((l) => l.field_path.endsWith('.unitless_risk_excluded')).map((l) => l.reason),
       ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>

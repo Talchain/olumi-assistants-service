@@ -214,4 +214,38 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b._agent.tool_calls.map((c) => c.name)).not.toContain('run_analysis');
     expect(b.assistant_text).not.toContain('between about');
   });
+
+  const addExcludedRisk = (label: string, direction?: string): void => {
+    const id = `omitted_risk_${READ.graph.nodes.length}`;
+    READ.graph.nodes.push({ id, kind: 'risk', label, provenance: 'ai_inferred', analysis_participation: 'retained_excluded' });
+    if (direction !== undefined) READ.graph.edges.push({ from: id, to: READ.graph.nodes.find((n: Json) => n.kind === 'goal').id,
+      effect_direction: direction, strength: { mean: direction === 'negative' ? -0.3 : 0.3, std: 0.15 } });
+  };
+  const omission = (tail: string) => `It doesn't yet include ‘Client backlash’${tail}`;
+
+  it('PR-1 RED: the sent Run reply puts its negative-risk omission directly after the chance evidence', async () => {
+    READ = structuredClone(READ_B3);
+    addExcludedRisk('Client backlash', 'negative');
+    const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
+    const caveat = omission(', so it may be too high.');
+    expect(count(b.assistant_text, caveat), b.assistant_text).toBe(1);
+    const chanceEnd = b.assistant_text.indexOf(SCREEN[0]!) + SCREEN[0]!.length;
+    expect(b.assistant_text.indexOf(caveat)).toBeGreaterThanOrEqual(chanceEnd);
+    expect(b.assistant_text.slice(chanceEnd, b.assistant_text.indexOf(caveat)).replace(/[\s*-]/g, '')).toBe('');
+    if (b._answer_shape) expect([b._answer_shape.headline, ...b._answer_shape.bullets].join(' ')).toContain(caveat);
+  });
+
+  it.each(['positive', undefined])('PR-1 RED: mixed or unknown (%s) directions are said as may move on the sent reply', async (direction) => {
+    READ = structuredClone(READ_B3);
+    addExcludedRisk('Client backlash', 'negative');
+    addExcludedRisk('Supplier response', direction);
+    const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
+    expect(count(b.assistant_text, omission(" (and 1 other risk Olumi added), so it may move when they're included.")), b.assistant_text).toBe(1);
+    expect(b.assistant_text).not.toContain('so it may be too high.');
+  });
+
+  it('PR-1 CONTROL: zero exclusions adds no omission to the sent reply', async () => {
+    const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
+    expect(b.assistant_text).not.toContain("It doesn't yet include");
+  });
 });

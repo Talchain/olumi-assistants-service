@@ -57,8 +57,8 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
  * label is written in the brief ("we're worried about backlash from our customers"). Deliberately BROAD: it decides what
  * is never removed, so any doubt (no brief, no word to check) reads as the user's.
  */
-const usersRisk = (r: { readonly label: string; readonly provenance?: string }, brief: string | undefined): boolean => {
-  if (r.provenance === 'explicit' || typeof brief !== 'string') return true;
+export const usersRisk = (r: { readonly label: string; readonly provenance?: string }, brief: string | undefined): boolean => {
+  if (r.provenance === 'explicit' || r.provenance === 'from_brief' || r.provenance === 'user_set' || typeof brief !== 'string') return true;
   const words = r.label.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [];
   const text = brief.toLowerCase();
   return words.length === 0 || words.every((w) => text.includes(w));

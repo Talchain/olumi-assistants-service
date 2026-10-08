@@ -103,7 +103,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed, unitlessRiskChanceCaveatForAgent, withUnitlessRiskChanceCaveat } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -2263,6 +2263,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
           rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
+          const riskCaveatNow = unitlessRiskChanceCaveatForAgent(state.graph);
+          rebuilt = withUnitlessRiskChanceCaveat(rebuilt, screenNow, riskCaveatNow);
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           replayObligations = [
             { role: 'host', text: RUN_RESULT_READY_TEXT },
@@ -2280,6 +2282,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               { role: 'evidence', text: l.chance, lead: true },
               ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends }]),
             ]),
+            ...(riskCaveatNow === undefined ? [] : [{ role: 'caveat' as const, text: riskCaveatNow, after_lead_evidence: true as const }]),
           ];
           replayNarration = { status: 'pending', run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
           boundControl.push(replayChip);
@@ -4426,6 +4429,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const explainsCurrentRun = fastPath === 'explain' && narrationStatus !== 'stale';
     /** The screen's chance lines this turn owes (required evidence: the reply composer keeps them on the face). */
     let screenLines: ReturnType<typeof goalChanceScreenLinesForAgent> = [];
+    let unitlessRiskCaveat: string | undefined;
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       const rangeCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent);
@@ -4436,6 +4440,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(turnId !== undefined ? { turn_id: turnId } : {}), added_count: ranged.added },
         'agent-lane: the screen\'s chance line was said by Olumi (the reply did not say it)');
       }
+      unitlessRiskCaveat = unitlessRiskChanceCaveatForAgent(readbackGraph);
+      wireBody = { ...wireBody, assistant_text: withUnitlessRiskChanceCaveat(String(wireBody.assistant_text), screenLines, unitlessRiskCaveat) };
     }
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
@@ -4629,6 +4635,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // With its spread note as ONE unit when the note follows it (never a chance on the face, its qualifier in detail).
           ...ownWordsLeadTexts(reply, l, sentencesOf).map((text): FaceObligation => ({ role: 'evidence', text, lead: true })),
         ]),
+        ...(unitlessRiskCaveat === undefined ? [] : [{ role: 'caveat' as const, text: unitlessRiskCaveat, after_lead_evidence: true as const }]),
         ...[basis, rootLine].filter((l): l is string => typeof l === 'string' && l.trim() !== '')
           .map((text) => ({ role: 'evidence' as const, text })),
         // The withheld goal chance's reason (S-E GOALS #2742: the chance-goal sentence speaks alone) is a withheld reason:

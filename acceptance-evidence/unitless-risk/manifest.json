@@ -1,0 +1,61 @@
+{
+  "head": "2334956288d3a87eaece7a5ab3d948b20a5f9dfb",
+  "at": "2026-10-08T12:10:26.636Z",
+  "files": {
+    "src/orchestrator-v5/agent-lane/unitless-risk-exclusion.ts": "c5ba44eb7267893ff0ba58456de5ee6bd92d7c9023fb9cd34e9df3063d7ea65c",
+    "src/orchestrator-v5/agent-lane/product-goal-extra-parent.ts": "087775c9eb350beabfbcd3734e8b1be1715166bfd3b2a9eb28af48d383772b0b",
+    "src/orchestrator-v5/agent-lane/admit-model.ts": "916e88d759773287f35e5b3c7db22c157484da763918fd51679d503bb8a60509",
+    "src/orchestrator-v5/agent-lane/runtime/build-model.ts": "f0a9d5cc08925f892901455163e3643d800006fd98188d014a76c4d1fdda4fdd",
+    "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": "633f3243840025250b079eb8b349661c2cc53421fb231104ee68fe648cb1b3c0",
+    "src/orchestrator-v5/agent-lane/reply/compose-reply.ts": "bb526f08589c54f86dec4e7928d32c03f0e50c8c4906b4f86f9ef1cceb095867",
+    "src/routes/agent-v1-turn.ts": "7a8a6237b14e76466511f0bcaf09355c97a0fde3765d6934ea054eb8cb347c31",
+    "src/orchestrator-v5/agent-lane/__tests__/unitless-risk-exclusion.test.ts": "c1596b5aea6f154479106f37e1774753d1a1911cb9b9852d9032176d3581846a",
+    "src/orchestrator-v5/agent-lane/__tests__/unitless-risk-chance-caveat.test.ts": "4f80bf59f8c3c00b28be02c64a442754d1ca793408dd00e658763e8639f44da0",
+    "src/orchestrator-v5/agent-lane/__tests__/goal-chance-screen-lines.route.test.ts": "66e63136ff3f8f26eaf710787a75dca7c3835f1f853933994fffa78b54d99c0c"
+  },
+  "replay_summary": {
+    "lab_drafts": 12,
+    "lab_withheld": 4,
+    "stored_graphs": 16,
+    "stored_graphs_withheld": 15,
+    "lab_withheld_before": 10,
+    "stored_graphs_withheld_before": 15,
+    "graph_indicative_withheld_after": 12
+  },
+  "tests_passed": 135,
+  "mutants": [
+    {
+      "name": "user-named-excluded",
+      "file": "src/orchestrator-v5/agent-lane/unitless-risk-exclusion.ts",
+      "filter": "NEVER \\(a\\): all risk words",
+      "exit_code": 1,
+      "assertion_red": true,
+      "restored": true,
+      "source_sha256": "c5ba44eb7267893ff0ba58456de5ee6bd92d7c9023fb9cd34e9df3063d7ea65c",
+      "mutant_sha256": "510df3d5b99d2a57b768023329fe9d4b4271e6c35492eb506f5dc2f10ced1cc1",
+      "summary": "Tests  1 failed | 14 skipped (15)"
+    },
+    {
+      "name": "limit-veto-dropped",
+      "file": "src/orchestrator-v5/agent-lane/unitless-risk-exclusion.ts",
+      "filter": "NEVER \\(d\\)",
+      "exit_code": 1,
+      "assertion_red": true,
+      "restored": true,
+      "source_sha256": "c5ba44eb7267893ff0ba58456de5ee6bd92d7c9023fb9cd34e9df3063d7ea65c",
+      "mutant_sha256": "9c409a06269b998c5e4d416cf81358d2fb47ae716277a8d56da20e5d893e7981",
+      "summary": "Tests  1 failed | 1 passed | 13 skipped (15)"
+    },
+    {
+      "name": "caveat-dropped",
+      "file": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts",
+      "filter": "PR-1 RED",
+      "exit_code": 1,
+      "assertion_red": true,
+      "restored": true,
+      "source_sha256": "633f3243840025250b079eb8b349661c2cc53421fb231104ee68fe648cb1b3c0",
+      "mutant_sha256": "659c696a62ae05c937860c67285689a7508e9707e69830bd5309389cdc8fa57d",
+      "summary": "Tests  3 failed | 10 skipped (13)"
+    }
+  ]
+}

@@ -93,6 +93,8 @@ export interface FaceObligation {
   readonly subjects?: readonly string[];
   /** B15: a typed screen goal-chance finding leads when present; its evidence rank is unchanged. */
   readonly lead?: true;
+  /** Science §(r)(b): this caveat stays directly after the chance evidence at its producer's insertion point. */
+  readonly after_lead_evidence?: true;
 }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
@@ -569,13 +571,14 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const present = once.obligations.sort((a, b) => b.text.length - a.text.length);
   // Overlapping obligations are ONE unit (the gate's closing can carry the ask): the larger span stands for both, and it
   // is the ask when it holds one, so it closes the face.
-  const owed: { role: FaceObligationRole; text: string; lead?: true; subjects?: readonly string[] }[] = [];
+  const owed: { role: FaceObligationRole; text: string; lead?: true; after_lead_evidence?: true; subjects?: readonly string[] }[] = [];
   for (const o of present) {
     const container = owed.find((k) => k.text.includes(o.text));
     if (container === undefined) owed.push({ ...o });
     else {
       if (ROLE_RANK[o.role] > ROLE_RANK[container.role]) container.role = o.role;
       if (o.lead === true) container.lead = true;
+      if (o.after_lead_evidence === true) container.after_lead_evidence = true;
       if (o.subjects !== undefined) container.subjects = [...new Set([...(container.subjects ?? []), ...o.subjects])];
     }
   }
@@ -693,9 +696,12 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   }
   const faceSet = new Set<Unit>([headline, ...fromPool, ...mustFace, ...(chanceLeadIn !== undefined ? [chanceLeadIn] : [])]);
   // Face bullets keep the reply's own order, except: a caveat on the finding opens them (#2565: "the Explain robustness
-  // caveat goes on the face as bullet 1"), and the ask closes them.
+  // caveat goes on the face as bullet 1"), and the ask closes them. The typed risk omission retains its producer's
+  // position directly after the chance evidence (Science §(r)(b)).
   const inOrder = units.filter((u) => faceSet.has(u) && u !== headline && u !== chanceLeadIn && u !== ask);
-  const faceBullets = [...inOrder.filter((u) => u.obligation === 'caveat'), ...inOrder.filter((u) => u.obligation !== 'caveat')];
+  const caveatFirst = (u: Unit): boolean => u.obligation === 'caveat'
+    && !present.some(o => o.after_lead_evidence === true && u.text.includes(o.text));
+  const faceBullets = [...inOrder.filter(caveatFirst), ...inOrder.filter(u => !caveatFirst(u))];
   if (ask !== undefined && ask !== headline) faceBullets.push(ask);
   const detailUnits = units.filter((u) => !faceSet.has(u));
 

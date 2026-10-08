@@ -23,6 +23,7 @@ import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type Quant
 import { limitSinkBranch } from '../../graph/limit-sink-branch.js';
 import { inertRiskBranch } from '../../graph/inert-risk.js';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
+import { excludeAddedUnitlessRisks, sayUnitlessRiskExcluded } from './unitless-risk-exclusion.js';
 import { foldPassThroughRateOntoUsersPrice, sayRateOperandIsUsersPrice } from './product-goal-rate-operand.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
 import { optionsCreating } from './option-creates.js';
@@ -203,7 +204,7 @@ export interface CandidateModel {
    * has nothing to read), so a goal fed by an outcome or a risk could never be sized in its own unit. Optional here: the
    * banked contract has neither field.
    * `analysis_participation` is never the drafter's (the strict schema has no such key): only
-   * `rerouteExtraParentsOfProductGoal` writes it, on Olumi's risk whose effect the model already carries (DL 5916217417).
+   * the adjacent extra-parent and unitless-risk admission steps write it, never the drafter.
    */
   readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded' }[];
   readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
@@ -3192,7 +3193,8 @@ function admitOnce(
   const { model: foldedModel, found: rateOperandFolds } = foldPassThroughRateOntoUsersPrice(restatedModel);
   // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
-  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  const { model: reroutedModel, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  const { model, excluded: excludedUnitlessRisks } = excludeAddedUnitlessRisks(reroutedModel, brief);
   const levelReading = { value: null as BriefGoalLevel | null };
 
   /**
@@ -3747,6 +3749,10 @@ function admitOnce(
       reason: sayExtraParentOfProductGoal(f),
       severity: 'warn',
     } as RepairEntry);
+  }
+  for (const label of excludedUnitlessRisks) {
+    loss.push({ field_path: `nodes[${ids.get(label) ?? label}].unitless_risk_excluded`, before: null,
+      after: 'retained_excluded', reason: sayUnitlessRiskExcluded(label), severity: 'info' } as RepairEntry);
   }
   for (const r of restatedChanges) {
     const levels = candidateModel.options.flatMap((o) => (o.interventions ?? [])
