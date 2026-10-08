@@ -484,6 +484,21 @@ describe('RC6 said once', () => {
     expect(c.measure!.said_once_dropped).toEqual([served.withhold_sentence]);
     expect(c.reason).not.toBe('invariant_failed');
   });
+  it.each([['markdown with a period', '## Option A.', '## Option B.'], ['bold with a period', '**Option A.**', '**Option B.**'], ['sentence above a list', 'Option A.', 'Option B.']])(
+    'repeated %s headings stay (Codex r7): a finding is never re-parented', (_form, a, b) => {
+      const text = [a, '- Revenue may dip in month one.', b, '- Churn may rise above 4%.', a, '- Cash runs short in month three.', context].join('\n');
+      const c = composeReplyShape({ text });
+      expect(c.measure!.said_once_dropped).toEqual([]);
+      const cash = c.text.indexOf('Cash runs short');
+      expect(c.text.lastIndexOf(a, cash)).toBeGreaterThan(c.text.lastIndexOf(b, cash));
+    });
+  it.each([['straight', "isn't"], ['curly', 'isn’t']])('a %s contraction negates too (Codex r7): both stay', (_form, isnt) => {
+    const reason = 'The price link is not sized.';
+    const text = [reason, context, `The result ${isnt} withheld because the price link is not sized.`].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: reason }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(c.text).toContain(reason);
+  });
   it('a negated "because" denies the reason: both stay', () => {
     const reason = 'The price link is not sized.';
     const text = [reason, context, 'The result is not withheld because the price link is not sized.'].join('\n\n');

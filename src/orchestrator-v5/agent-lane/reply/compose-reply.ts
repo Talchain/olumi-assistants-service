@@ -277,7 +277,9 @@ interface SaidOnce {
 // The container's tail after 'because'/'since', and no 'not'/'n't' anywhere before it: a negated frame ('The result is not
 // withheld because …') can deny the reason as a cause. The quantifier 'no' ('No single option can be put forward yet,
 // because …', Paul's served text) is not a negation of the reason.
-const SAID_AGAIN_AFTER = { test: (prefix: string): boolean => /\b(?:because|since)\s*$/.test(prefix) && !/\bnot\b|n't\b/.test(prefix) };
+const SAID_AGAIN_AFTER = { test: (prefix: string): boolean => /\b(?:because|since)\s*$/.test(prefix) && !/\bnot\b/.test(prefix) };
+/** A 'not' / "n't" (straight or curly apostrophe) before the reason's 'because'/'since', on the original words. */
+const NEGATED_BEFORE_REASON = /(?:\bnot\b|n['’]t\b)[^]*\b(?:because|since)\b/i;
 /** Which typed copy of a repeated sentence stays: the strongest role (ask closes the face), then the first. */
 const SAID_ONCE_ROLE_RANK: Partial<Record<FaceObligationRole, number>> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1 };
 
@@ -320,9 +322,18 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
   const lines: { start: number; end: number; spans: SentenceSpan[] }[] = [];
   let lineAt = 0;
   let section = 0;
-  for (const raw of text.split('\n')) {
-    // A non-empty line that is not a finished sentence (no . ! ? at its end) is a heading/label: a new section starts.
-    if (raw.trim() !== '' && BULLET_LINE.exec(raw) === null && !/[.!?]["'”’)\]*_`]{0,4}$/.test(raw.trim())) section += 1;
+  const allLines = text.split('\n');
+  // A heading frames what follows it (Codex r4/r5/r7 on #2801): a line that is not a finished sentence, a Markdown heading,
+  // a line wholly in bold, or one sentence directly above a bullet list. A heading starts a section and is never dropped.
+  const isFrameLine = (raw: string, next: string | undefined): boolean => {
+    const t = raw.trim();
+    if (t === '' || BULLET_LINE.exec(raw) !== null) return false;
+    return !/[.!?]["'”’)\]*_`]{0,4}$/.test(t) || /^#{1,6}\s/.test(t) || /^(\*\*|__)[^*_].*(\*\*|__)$/.test(t)
+      || (next !== undefined && BULLET_LINE.test(next) && sentencesOf(t).length === 1);
+  };
+  for (const [lineNo, raw] of allLines.entries()) {
+    const frameLine = isFrameLine(raw, allLines.slice(lineNo + 1).find((l) => l.trim() !== ''));
+    if (frameLine) section += 1;
     const bullet = BULLET_LINE.exec(raw);
     const body = bullet?.[2] ?? raw;
     const bodyAt = bullet === null ? 0 : raw.indexOf(body);
@@ -337,7 +348,7 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
       // Only a finished sentence (ending . ! ?) is a finding that can be said twice. Anything else — a heading or label in
       // any form ("Option A", "## Option A", "**Option A**", "Option A:") — frames what follows it, and removing a repeat
       // would re-parent findings under another heading (Codex r4/r5 on #2801).
-      if (!/[.!?]["'”’)\]*_`]{0,4}$/.test(sentence.trim())) continue;
+      if (frameLine || !/[.!?]["'”’)\]*_`]{0,4}$/.test(sentence.trim())) continue;
       const span = { text: sentence, start, end, section };
       spans.push(span);
       lineSpans.push(span);
@@ -438,6 +449,8 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
         for (const found of trie[match]!.groups ?? []) {
           if (groups[found]!.key.length < containerKey.length && groups[found]!.section === groups[idx]!.section
             && SAID_AGAIN_AFTER.test(containerKey.slice(0, containerKey.length - groups[found]!.key.length))
+            // Negation read on the WORDS AS WRITTEN (the key drops apostrophes: "isn't" → "isnt"; Codex r7).
+            && !NEGATED_BEFORE_REASON.test(groups[idx]!.first.text)
             // The contained sentence must be a WHOLE typed obligation (Olumi's own words, its role moves to the
             // container whole; Codex r2/r3 on #2801). The container may be the narrator's or the Explain composer's
             // ("No single option can be put forward yet, because <the withheld reason>.": Codex r6, Paul's served text).
