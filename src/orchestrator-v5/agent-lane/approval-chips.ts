@@ -262,12 +262,15 @@ export function approvalChipsFor(
   }
   // ⭐ S-E GOALS: the deadline card asks "Is your deadline 7 April 2027 (6 months from today)?" — the STORED card's words ride
   // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
-  if (tool === 'propose_new_limit') {
+  if (tool === 'propose_new_limit' || tool === 'propose_limit_change') {
     if (stored?.operations.length === 1 && stored.operations[0]?.op === 'set_limit') {
       const edit = APPROVE.propose_limit_change!;
-      return [{ id: approvalChipIdFor(proposalId), label: edit.label, message: edit.message, detail: stored.public_label }, AMEND_CHIP];
+      const value = stored.operations[0].value as { reserve?: NewLimitValue['reserve'] };
+      return [{ id: approvalChipIdFor(proposalId), label: edit.label, message: edit.message, detail: stored.public_label }, AMEND_CHIP,
+        ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
+          message: value.reserve.message, detail: value.reserve.detail }])];
     }
-    if (stored?.operations.length !== 1 || stored.operations[0]?.op !== 'add_limit'
+    if (tool !== 'propose_new_limit' || stored?.operations.length !== 1 || stored.operations[0]?.op !== 'add_limit'
       || held?.ok !== true || held.proposal_id !== stored.proposal_id || held.public_label !== stored.public_label) return [];
     const value = stored.operations[0].value as NewLimitValue;
     return [{ id: approvalChipIdFor(proposalId), label: 'Yes', message: approve.message, detail: stored.public_label },

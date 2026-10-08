@@ -304,6 +304,63 @@ describe('D-07: one approved limit on the quantity the user names', () => {
     expect(await w.approve(r, 'Yes, change that limit.')).toMatchObject({ applied: true });
     expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ constraint_id: 'existing-cost', value: 200000 })]);
   });
+  it.each([
+    [undefined, 'Yes, change that limit.', 200000],
+    ['an earlier budget quote', 'Yes, change that limit.', 200000],
+    [undefined, 'Use £180,000 instead.', 180000],
+    ['an earlier budget quote', 'Use £180,000 instead.', 180000],
+  ] as const)('r1 P1-4 existing budget keeps both readings and replaces quote %s → %s', async (source_quote, message, value) => {
+    const g = model(); g.goal_constraints = [{ constraint_id: 'existing-cost', node_id: COST, operator: '<=',
+      value: 150000, unit: '£', value_frame: 'level', provenance: 'explicit', label: 'Total cost',
+      ...(source_quote === undefined ? {} : { source_quote }) }];
+    const w = world(g); const before = w.graph(); const r = await w.propose();
+    expect(r).toMatchObject({ ok: true, mutated: false,
+      public_label: 'Change the limit on "Total cost" from at most £150,000 to at most £200,000' });
+    expect(r.note).toContain("You said you'd keep £20,000 back. Use £180,000 instead?");
+    expect(w.proposals.get(r.proposal_id as string)?.operations[0]).toMatchObject({ op: 'set_limit', path: COST,
+      value: { raw_value: 200000, source_quote: SERVED, reserve: { amount: 20000, alternative: 180000 } } });
+    const chips = w.chips(r);
+    expect(chips.map(c => c.label)).toEqual(['Change this limit', 'Change something first', 'Use £180,000']);
+    expect(chips[2]?.detail).toBe("You said you'd keep £20,000 back. Use £180,000 instead?");
+    expect(typedApprovalOf({ chip: chips[2] })).toBe(r.proposal_id);
+    expect(w.graph()).toEqual(before); expect(w.writes).toHaveLength(0);
+    expect(await w.approve(r, message)).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ constraint_id: 'existing-cost',
+      node_id: COST, value, unit: '£', source_quote: SERVED, value_frame: 'level' })]);
+    expect(w.graph().nodes).toEqual(before.nodes); expect(w.writes).toHaveLength(1);
+    expect(await w.approve(r, message)).toMatchObject({ already_applied: true, mutated: false });
+    expect(w.writes).toHaveLength(1);
+  });
+  it.each([['Yes, change that limit.', 200000], ['Use £180,000', 180000]] as const)('r1 P1-4 direct change door carries the same budget reading: %s', async (message, value) => {
+    const g = model(); g.goal_constraints = [{ constraint_id: 'existing-cost', node_id: COST, operator: '<=',
+      value: 150000, unit: '£', value_frame: 'level', provenance: 'explicit', label: 'Total cost', source_quote: 'old quote' }];
+    const w = world(g);
+    const r = await dispatchTool('propose_limit_change', JSON.stringify({ limit_label: 'Total cost', operator: '<=',
+      new_value: 200000, unit: '£', rationale: SERVED }), ctx(SERVED), w.caps);
+    const chips = approvalChipsFor([{ name: 'propose_limit_change', ok: r.ok, mutated: false,
+      proposal_id: r.proposal_id as string }], id => ({ proposal: w.proposals.get(id), result: r }));
+    expect(chips.map(c => c.label)).toEqual(['Change this limit', 'Change something first', 'Use £180,000']);
+    expect(await w.approve(r, message)).toMatchObject({ applied: true });
+    expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ constraint_id: 'existing-cost', value, source_quote: SERVED })]);
+  });
+  it.each([true, false])('r1 P1-4 changed-budget alternative cannot be forged (chip=%s)', async chip => {
+    const g = model(); g.goal_constraints = [{ constraint_id: 'existing-cost', node_id: COST, operator: '<=',
+      value: 150000, unit: '£', value_frame: 'level', provenance: 'explicit', label: 'Total cost' }];
+    const w = world(g); const before = w.graph(); const r = await w.propose();
+    const result = chip ? await w.approve(r, 'Use £190,000')
+      : await w.caps.authoriseChange(ctx('Use £190,000'), { proposal_id: r.proposal_id as string });
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'approval_words_mismatch' });
+    expect(w.graph()).toEqual(before); expect(w.writes).toHaveLength(0);
+  });
+  it.each(['if churn goes above 6%, we lose money', 'keep churn at most 6%',
+    'Our price is £6. If churn goes above 6%, we lose money'])('r1 P2 missing percent quantity adds no money recovery sentence: %s', async text => {
+    const g = model(); g.nodes = g.nodes.filter((n: Rec) => n.id !== COST);
+    g.edges = g.edges.filter((e: Rec) => e.from !== COST && e.to !== COST);
+    const w = world(g); const r = await w.propose(text, 6, 'Churn');
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'limit_not_bound' });
+    expect(r).not.toHaveProperty('reply'); expect(r).not.toHaveProperty('detail');
+    expect(w.chips(r)).toEqual([]); expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
+  });
   it('stale approval, rejected fence and forged alternative all leave the model untouched', async () => {
     const w = world(); const r = await w.propose(); const changed = w.graph(); changed.nodes[2].observed_state.raw_value = 160000; w.setGraph(changed);
     expect(await w.approve(r)).toMatchObject({ refusal: 'superseded' }); expect(w.writes).toHaveLength(0);

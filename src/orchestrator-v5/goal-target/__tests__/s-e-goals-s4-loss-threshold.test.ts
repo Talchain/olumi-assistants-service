@@ -90,7 +90,7 @@ function world(initial = model()) {
     proposal_id: typeof r.proposal_id === 'string' ? r.proposal_id : undefined }],
   id => ({ proposal: proposals.get(id), result: r }));
   const approve = (r: ToolResult, message = 'Yes, record that limit.') => caps.authoriseChange({ ...ctx(message),
-    typed_approval_of: r.proposal_id, typed_approval_words: message }, { proposal_id: r.proposal_id as string });
+    typed_approval_of: r.proposal_id as string, typed_approval_words: message }, { proposal_id: r.proposal_id as string });
   return { graph, writes, proposals, caps, propose, chips, approve };
 }
 afterEach(() => { port.store = undefined; });
@@ -141,11 +141,43 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     ['Acme churn above 6% we lose money', model()],
     ['Acme churn above 6% is unprofitable', model()],
     ['Our churn is 4%; growth above 6% we lose money', model()],
+    // Reviewer r1 corpus, verbatim: the entire production and its subject must be licensed.
+    ['we lose money once churn tops 6% of revenue', model()],
+    ['churn above 6% we lose money once churn tops 8%', model()],
+    ['is churn above 6% unprofitable', model()],
+    ['Their churn is 4%. If it goes above 6%, we lose money', model()],
+    ['Our growth is 4%. If it goes above 6%, we lose money', (() => {
+      const g = withGrowth(); g.nodes[5].observed_state.unit = 'fraction'; return g;
+    })()],
+    ['does churn above 6% mean we lose money', model()],
+    ['will churn above 6% be unprofitable', model()],
+    ['are churn above 6% unprofitable', model()],
+    ['churn above 6% we lose money tomorrow', model()],
+    ['churn every above 6% we lose money', model()],
+    ['churn month above 6% we lose money', model()],
+    ['churn churn above 6% we lose money', model()],
+    ['churn above -6% we lose money', model()],
+    ['churn above 6% and 8% we lose money', model()],
+    ['churn above 6% of customers we lose money', model()],
   ])('must not fire: %s', async (text, g) => {
     expect(readNewLimit(g, text, 6)).toBeNull();
     const w = world(g); const r = await w.propose(text);
     expect(r.ok).toBe(false); expect(w.chips(r)).toEqual([]);
     expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+
+  it.each(['His', 'Her', 'Its', "Acme's", 'Competitor', 'Rival'])('it preserves the antecedent owner: %s', owner => {
+    expect(readNewLimit(model(), `${owner} churn is 4%. If it goes above 6%, we lose money`, 6)).toBeNull();
+  });
+  it.each([
+    ['Our churn is 4%. Our growth is 4%. If it goes above 6%, we lose money', false],
+    ['Our growth is 4%. Our churn is 4%. If it goes above 6%, we lose money', true],
+    ['Their growth and our churn is 4%. If it goes above 6%, we lose money', true],
+    ['Our churn and their growth is 4%. If it goes above 6%, we lose money', false],
+  ] as const)('it uses the nearest quantity across units: %s', (text, admitted) => {
+    const g = withGrowth(); g.nodes[5].observed_state.unit = 'fraction';
+    if (admitted) expect(readNewLimit(g, text, 6)).toMatchObject({ node_id: CHURN, raw_value: 6 });
+    else expect(readNewLimit(g, text, 6)).toBeNull();
   });
 
   it.each(['change_abs', 'change_rel', 'change'])('a % quantity in %s frame is not a level ceiling', frame => {
@@ -181,6 +213,25 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     const g = model(); g.nodes[2].observed_state.unit = '%/month';
     expect(readNewLimit(g, 'churn above 6% a month we lose money', 6)).toMatchObject({ node_id: CHURN, operator: '<=', raw_value: 6, unit: '%/month' });
     expect(readNewLimit(g, 'churn above 6% a year we lose money', 6)).toBeNull();
+  });
+  it('the approval card displays the complete percent unit', async () => {
+    const g = model(); g.nodes[2].observed_state.unit = '%/month';
+    const w = world(g); const r = await w.propose('churn above 6% a month we lose money');
+    expect(r).toMatchObject({ ok: true, public_label: 'Keep churn at most 6% a month?' });
+    expect(w.chips(r)[0]?.detail).toBe('Keep churn at most 6% a month?');
+    expect(w.writes).toHaveLength(0);
+  });
+  it('the change card and approval receipt display the complete percent unit', async () => {
+    const g = model(); g.nodes[2].observed_state.unit = '%/month';
+    g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 5,
+      unit: '%/month', value_frame: 'level', provenance: 'explicit', label: 'Churn' }];
+    const text = 'churn above 6% a month we lose money';
+    const w = world(g); const r = await w.propose(text);
+    expect(r.public_label).toBe('Change the limit on "Churn" from at most 5% a month to at most 6% a month');
+    expect(w.chips(r)[0]?.detail).toBe(r.public_label); expect(w.writes).toHaveLength(0);
+    expect(await w.approve(r, 'Yes, change that limit.')).toMatchObject({ applied: true,
+      follow_up: 'The limit on "Churn" is now at most 6% a month (it was 5% a month), as you stated it.' });
+    expect(w.graph().goal_constraints[0]).toMatchObject({ value: 6, unit: '%/month', source_quote: text });
   });
   it.each(['annual churn above 6% we lose money', 'churn a year above 6% we lose money'])('a period before the percent stays in its own frame: %s', text => {
     const g = model(); g.nodes[2].observed_state.unit = '%/month';
@@ -308,7 +359,8 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     const g = model();
     const cases = (n: number) => [`if it${' '.repeat(n)}goes above 6%, we start to lose money`,
       `churn ${'goes aboveish 6% we start to lose money; '.repeat(Math.floor(n / 39))}`,
-      `churn ${'goes aboveish 6% we start to lose money, '.repeat(Math.floor(n / 39))}`];
+      `churn ${'goes aboveish 6% we start to lose money, '.repeat(Math.floor(n / 39))}`,
+      `${'churn '.repeat(Math.floor(n / 6))}; if it goes above 6%, we lose money`];
     const small = cases(20_000); const large = cases(160_000);
     expect(readNewLimit(g, large[1]!, 6)).toBeNull();
     expect(readNewLimit(g, large[2]!, 6)).toBeNull();
