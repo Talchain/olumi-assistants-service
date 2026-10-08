@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { goalCertaintyDecisions, goalCertaintyOfStoredResult } from '../goal-certainty.js';
+import { goalCertaintyDecisions, goalCertaintyOfStoredResult, placeholderGoalPaths } from '../goal-certainty.js';
 
 type Json = Record<string, any>;
 const FX = JSON.parse(
@@ -23,6 +23,91 @@ type Run = { graph: Json; option_comparison: Json[]; analysis_identity_evaluated
 /** The run's identity evaluations (served ids ["mrr"]; `level_source` DERIVED from R3's ISL code-read, see the fixture). */
 const decide = (run: Run) => goalCertaintyDecisions(run.graph, run.option_comparison, run.identity_evaluations);
 const byId = (ds: ReturnType<typeof decide>, id: string) => ds.find((d) => d.option_id === id);
+
+describe('accumulation cannot enter the product-ratio or sum-delta break-even reader', () => {
+  // Defensive read of a misplaced carrier: writers keep accumulation on a derived node, never on the goal.
+  // A stored malformed declaration must still not manufacture either kind of exact break-even.
+  const reading = (operation: 'accumulation' | 'product' | 'sum') => {
+    const accumulation = operation === 'accumulation';
+    const parts = accumulation ? ['stock_today', 'monthly_churn', 'monthly_inflow'] : ['stock_today', 'monthly_inflow'];
+    const graph = { nodes: [
+      { id: 'growth_driver', kind: 'factor', label: 'Growth effort', observed_state: { value: 0.1, raw_value: 1, unit: 'points' } },
+      { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { value: 0.75, raw_value: 1500, unit: 'subscribers', source: 'brief_extraction' } },
+      { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, unit: '%' } },
+      { id: 'monthly_inflow', kind: 'factor', label: 'New subscribers per month', observed_state: { value: 0.2, raw_value: 100, unit: 'subscribers per month' } },
+      { id: 'stock_month_12', kind: 'goal', label: 'Subscribers at month 12', goal_horizon_months: 12, goal_direction: '>', goal_threshold_raw: 1800,
+        observed_state: { value: 0.5, raw_value: 2000, unit: 'subscribers', source: 'brief_extraction' },
+        nonlinear_identity: { operation, factor_ids: parts, stated_in_brief: true,
+          ...(accumulation ? { horizon_months: 12, rate_scale: 0.01 } : {}) } },
+      { id: 'raise_effort', kind: 'option', label: 'Increase growth effort', interventions: { growth_driver: { value: 0.2, raw_value: 2 } } },
+    ], edges: [
+      { from: 'growth_driver', to: 'stock_today', strength: { mean: -0.2, std: 0.1 }, effect_direction: 'negative' },
+      ...parts.map((from) => ({ from, to: 'stock_month_12', strength: { mean: 1, std: 0.1 }, effect_direction: 'positive' })),
+    ] };
+    return goalCertaintyDecisions(graph, [{ option_id: 'raise_effort', probability_of_goal: 1 }],
+      [{ node_id: 'stock_month_12', evaluated: true, level_source: 'stated_level', ...(accumulation ? { horizon_months: 12 } : {}) }])
+      .find((d) => d.option_id === 'raise_effort')!;
+  };
+
+  it('ACCUMULATION: the node-bound reversal path gets neither ratio nor delta', () => {
+    const d = reading('accumulation');
+    expect(d).toMatchObject({ option_id: 'raise_effort', earned: false, no_break_even: 'no_exact_figure',
+      unsized_path: { from: 'growth_driver', enters_goal_through: 'stock_today' } });
+    expect(d.break_even).toBeUndefined();
+  });
+
+  it('PRODUCT CONTROL: the same node-bound path keeps its product ratio', () => {
+    expect(reading('product').break_even).toMatchObject({ kind: 'product', operand_id: 'stock_today', projected_if_held: 2000, threshold: 1800 });
+    expect(reading('product').break_even?.fraction).toBeCloseTo(0.1);
+  });
+
+  it('SUM CONTROL: the same node-bound path keeps its sum delta', () => {
+    expect(reading('sum').break_even).toMatchObject({ kind: 'sum', operand_id: 'stock_today', projected_if_held: 2000, threshold: 1800, margin: 200 });
+  });
+});
+
+describe('certainty and placeholder readers share accumulation attestation', () => {
+  const graph = (): Json => ({ nodes: [
+    { id: 'mrr', kind: 'goal', label: 'Monthly recurring revenue', goal_direction: '>=', goal_horizon_months: 12,
+      goal_threshold_raw: 1800, goal_threshold_unit: 'GBP/month',
+      observed_state: { value: 0.2, raw_value: 2000, unit: 'GBP/month' },
+      nonlinear_identity: { operation: 'product', factor_ids: ['price', 'stock_month_12'], stated_in_brief: true } },
+    { id: 'price', kind: 'factor', label: 'Price', observed_state: { value: 0.1, raw_value: 10, unit: 'GBP/subscriber/month' } },
+    { id: 'stock_month_12', kind: 'outcome', label: 'Subscribers at month 12', scale_frame: 1000,
+      nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'monthly_churn', 'monthly_inflow'],
+        horizon_months: 12, rate_scale: 0.01, stated_in_brief: false } },
+    { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { value: 0.25, raw_value: 250, unit: 'subscribers' } },
+    { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, unit: '%' } },
+    { id: 'monthly_inflow', kind: 'factor', label: 'Monthly inflow', observed_state: { value: 0.1, raw_value: 10, unit: 'subscribers/month' } },
+    { id: 'raise_churn', kind: 'option', label: 'Increase churn', interventions: { monthly_churn: { value: 0.04, raw_value: 4 } } },
+  ], edges: [
+    ...['stock_today', 'monthly_churn', 'monthly_inflow'].map(from => ({ from, to: 'stock_month_12',
+      strength: { mean: from === 'monthly_churn' ? -0.5 : 0.5, std: 0.2 },
+      effect_direction: from === 'monthly_churn' ? 'negative' : 'positive', provenance: { magnitude: 'olumi_placeholder' } })),
+    ...['price', 'stock_month_12'].map(from => ({ from, to: 'mrr', strength: { mean: 0.5, std: 0.2 },
+      effect_direction: 'positive', provenance: { magnitude: 'olumi_placeholder' } })),
+  ] });
+  const matching: Json = { node_id: 'stock_month_12', evaluated: true, operation: 'accumulation',
+    factor_ids: ['stock_today', 'monthly_churn', 'monthly_inflow'], horizon_months: 12 };
+  const goalEvaluation = { node_id: 'mrr', evaluated: true, operation: 'product',
+    factor_ids: ['price', 'stock_month_12'], level_source: 'stated_level' };
+
+  it.each([
+    ['stale month', { ...matching, horizon_months: 18 }],
+    ['reordered inputs', { ...matching, factor_ids: ['monthly_churn', 'stock_today', 'monthly_inflow'] }],
+    ['different node', { ...matching, node_id: 'another_stock_month_12' }],
+  ])('stock_month_12 with %s cannot earn certainty or hide its guessed churn link; matching attestation is the control', (_reason, withheld) => {
+    const g = graph();
+    const rows = [{ option_id: 'raise_churn', probability_of_goal: 1 }];
+    const rejected = [goalEvaluation, withheld];
+    expect(goalCertaintyDecisions(g, rows, rejected)).toEqual([expect.objectContaining({ option_id: 'raise_churn', earned: false })]);
+    expect(placeholderGoalPaths(g, ['raise_churn'], rejected)).toEqual([{ option_id: 'raise_churn',
+      links: [{ from: 'monthly_churn', to: 'stock_month_12' }] }]);
+    const control = [goalEvaluation, matching];
+    expect(goalCertaintyDecisions(g, rows, control)).toEqual([{ option_id: 'raise_churn', probability_of_goal: 1, earned: true }]);
+    expect(placeholderGoalPaths(g, ['raise_churn'], control)).toEqual([]);
+  });
+});
 
 /** Paul's graph with the lowering path's links SIZED (price → churn in points, churn → subscribers in subscribers). */
 function sizedPaul(): Run {

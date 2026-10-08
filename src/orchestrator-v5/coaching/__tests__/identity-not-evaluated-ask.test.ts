@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   composeIdentityNotEvaluatedAsk,
+  composeIdentityAskForNode,
   readIdentityAsk,
   sayFigure,
 } from '../identity-not-evaluated-ask.js';
@@ -227,5 +228,117 @@ describe('the composer says the ask for a blocked identity (RED on staging: gene
     expect(readIdentityAsk({ reason: 'identity_inconsistent', assistant_text: 'x' })).toBeNull();
     const r = composeHandlerFailureBody(blocked({ plot_primary_code: 'GRAPH_TOO_COMPLEX', identity_ask: { reason: 'nope' } }));
     expect(r.template_id).toBe('analysis_blocked_graph_too_complex');
+  });
+});
+
+describe('accumulation readers: ISL reasons and units are bound to the derived node', () => {
+  const graph = (): Rec => ({ nodes: [
+    { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { value: 0.75, raw_value: 1500, cap: 2000, unit: 'subscribers' } },
+    { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, cap: 100, unit: '%' } },
+    { id: 'monthly_inflow', kind: 'factor', label: 'New subscribers per month', observed_state: { value: 0.2, raw_value: 100, cap: 500, unit: 'subscribers per month' } },
+    { id: 'stock_month_12', kind: 'outcome', label: 'Subscribers at month 12', scale_frame: 4000,
+      nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'monthly_churn', 'monthly_inflow'], horizon_months: 12, rate_scale: 0.01, stated_in_brief: false } },
+    { id: 'price', kind: 'factor', label: 'Plan price', observed_state: { value: 0.49, raw_value: 49, cap: 100, unit: 'GBP per subscriber per month' } },
+    { id: 'mrr', kind: 'goal', label: 'MRR', goal_horizon_months: 12,
+      nonlinear_identity: { operation: 'product', factor_ids: ['price', 'stock_month_12'], stated_in_brief: true } },
+  ], edges: [
+    ...['stock_today', 'monthly_churn', 'monthly_inflow'].map((from) => ({ from, to: 'stock_month_12' })),
+    ...['price', 'stock_month_12'].map((from) => ({ from, to: 'mrr' })),
+  ] });
+  const critique = (withheld_reason: string): Rec[] => [{ code: 'IDENTITY_NOT_EVALUATED', identity: {
+    node_id: 'stock_month_12', participants: ['monthly_inflow', 'stock_today', 'monthly_churn'], withheld_reason,
+  } }];
+
+  it('RATE: new typed reason names factor_ids[1], even when participants arrive in another order', () => {
+    const ask = composeIdentityNotEvaluatedAsk(critique('identity_rate_out_of_range'), graph())!;
+    expect(ask).toMatchObject({ node_id: 'stock_month_12', reason: 'identity_rate_out_of_range', chip_label: 'Give its value',
+      assistant_text: '‘Monthly churn’ has to be below 100% a month for ‘Subscribers at month 12’ to be worked out: what is it today?' });
+    expect(ask.chip_message).toBe(ask.assistant_text);
+    expect(readIdentityAsk(ask)).toEqual(ask);
+  });
+
+  it('RATE CONTROL: a product never treats its second operand as monthly churn', () => {
+    const ask = composeIdentityNotEvaluatedAsk(typed({ withheld_reason: 'identity_rate_out_of_range' }), F.graph)!;
+    expect(ask).toMatchObject({ node_id: 'mrr', reason: 'unstated', chip_label: 'Check the figures' });
+    expect(ask.assistant_text).not.toContain('100% a month');
+  });
+
+  it('NON-FINITE: typed reason without affected ids follows the existing figure-check path', () => {
+    const ask = composeIdentityNotEvaluatedAsk(critique('identity_non_finite'), graph())!;
+    expect(ask).toMatchObject({ node_id: 'stock_month_12', reason: 'unstated', chip_label: 'Check the figures' });
+    expect(ask.assistant_text).toContain('Which of these figures needs correcting?');
+    expect(ask.assistant_text).not.toMatch(/what unit|100% a month/);
+  });
+
+  it('NON-FINITE CONTROL: the established unstated ask has the same words', () => {
+    const c = [{ code: 'IDENTITY_NOT_EVALUATED', affected_node_ids: ['stock_month_12', 'monthly_inflow', 'stock_today', 'monthly_churn'] }];
+    expect(composeIdentityNotEvaluatedAsk(critique('identity_non_finite'), graph()))
+      .toEqual(composeIdentityNotEvaluatedAsk(c, graph()));
+  });
+
+  it('FRAME: known part units never become a unit ask, with or without a stored derived level', () => {
+    for (const stored of [false, true]) {
+      const g = graph();
+      if (stored) node(g, 'stock_month_12').observed_state = { value: 0.5, raw_value: 2000, cap: 4000, unit: 'subscribers' };
+      const ask = composeIdentityNotEvaluatedAsk(critique('identity_frame_missing'), g)!;
+      expect(ask).toMatchObject({ node_id: 'stock_month_12', reason: 'unstated', chip_label: 'Check the figures' });
+      expect(ask.assistant_text).not.toMatch(/what unit|what is it today/);
+    }
+  });
+
+  it('FRAME NODE-UNIT: part units held on the node never become a unit ask', () => {
+    const g = graph();
+    for (const id of ['stock_today', 'monthly_churn', 'monthly_inflow']) {
+      const part = node(g, id);
+      part.unit = part.observed_state.unit;
+      delete part.observed_state.unit;
+    }
+    const ask = composeIdentityNotEvaluatedAsk(critique('identity_frame_missing'), g)!;
+    expect(ask).toMatchObject({ node_id: 'stock_month_12', reason: 'unstated', chip_label: 'Check the figures' });
+    expect(ask.assistant_text).not.toMatch(/what unit|what is it today/);
+  });
+
+  it('FRAME USER-READING: the user\'s stated part units never become a unit ask', () => {
+    const g = graph();
+    for (const id of ['stock_today', 'monthly_churn', 'monthly_inflow']) {
+      const part = node(g, id);
+      part.unit_reading = { unit: part.observed_state.unit, source: 'user_stated', source_quote: part.label };
+      delete part.observed_state.unit;
+    }
+    const ask = composeIdentityNotEvaluatedAsk(critique('identity_frame_missing'), g)!;
+    expect(ask).toMatchObject({ node_id: 'stock_month_12', reason: 'unstated', chip_label: 'Check the figures' });
+    expect(ask.assistant_text).not.toMatch(/what unit|what is it today/);
+  });
+
+  it('FRAME CONTROL: only an actually missing part unit is asked', () => {
+    const g = graph();
+    delete node(g, 'monthly_churn').observed_state.unit;
+    const ask = composeIdentityNotEvaluatedAsk(critique('identity_frame_missing'), g)!;
+    expect(ask).toMatchObject({ node_id: 'stock_month_12', reason: 'identity_frame_missing' });
+    expect(ask.assistant_text).toBe('I can\'t put “Monthly churn” on the same scale as “Subscribers at month 12”: what unit is it in?');
+    expect(ask.chip_message).not.toMatch(/Subscribers today|New subscribers per month/);
+  });
+
+  it('FRAME READING CONTROL: an Olumi-written unit is still missing the user\'s unit', () => {
+    const g = graph();
+    delete node(g, 'monthly_churn').observed_state.unit;
+    node(g, 'monthly_churn').unit_reading = { unit: '%', source: 'olumi_reading', source_quote: 'Churn could be a percentage' };
+    const ask = composeIdentityNotEvaluatedAsk(critique('identity_frame_missing'), g)!;
+    expect(ask).toMatchObject({ node_id: 'stock_month_12', reason: 'identity_frame_missing' });
+    expect(ask.assistant_text).toBe('I can\'t put “Monthly churn” on the same scale as “Subscribers at month 12”: what unit is it in?');
+  });
+
+  it('ZERO: valid zero churn never invents a product-reconciliation ask', () => {
+    const g = graph();
+    node(g, 'monthly_churn').observed_state = { value: 0, raw_value: 0, cap: 100, unit: '%' };
+    node(g, 'stock_month_12').observed_state = { value: 0.5, raw_value: 2000, cap: 4000, unit: 'subscribers' };
+    expect(node(g, 'stock_month_12').nonlinear_identity.operation).toBe('accumulation');
+    expect(composeIdentityAskForNode('stock_month_12', g)).toBeNull();
+  });
+
+  it('ZERO CONTROL: a stated product with a zero operand still asks about that operand', () => {
+    const g = clone(F.graph);
+    node(g, 'pro_paying_subscribers').observed_state = { value: 0, raw_value: 0, cap: 2000, unit: 'subscribers' };
+    expect(composeIdentityAskForNode('mrr', g)).toMatchObject({ node_id: 'mrr', reason: 'identity_zero_level' });
   });
 });

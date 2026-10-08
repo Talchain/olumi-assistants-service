@@ -15,7 +15,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, chancesWithheldByAGuess, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { EdgeV3, NodeV3 } from '../../../schemas/cee-v3.js';
@@ -62,6 +62,44 @@ const PRODUCTS: Record<string, { outcome: string; rate: string; count: string }>
 const RATE_UNIT = '£ per starter subscriber per month';
 const COUNT_FORECAST = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
 const COUNT_RANGE = { low: 80, high: 250, meaning: 'likely_range', source: 'brief_extraction', source_quote: COUNT_FORECAST };
+
+describe('accumulation preflight carries the same month as its declaration', () => {
+  it('stock_at_12 exact operands are evaluated at month 12; removing its carrier exposes the guessed links', () => {
+    const graph = {
+      nodes: [
+        { id: 'mrr', kind: 'goal', label: 'Monthly recurring revenue', goal_horizon_months: 12,
+          goal_direction: '>=', goal_threshold_raw: 20000, goal_threshold_unit: 'GBP/month',
+          goal_threshold_frame: 'level', goal_threshold_cap: 100000,
+          observed_state: { value: 0.196, raw_value: 19600, unit: 'GBP/month', cap: 100000 },
+          nonlinear_identity: { operation: 'product', factor_ids: ['price', 'stock_at_12'], stated_in_brief: true } },
+        { id: 'price', kind: 'factor', label: 'Price', observed_state: { value: 0.49, raw_value: 49,
+          unit: 'GBP/subscriber/month', cap: 100 } },
+        { id: 'stock_at_12', kind: 'outcome', label: 'Subscribers at month 12', scale_frame: 2000,
+          nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'monthly_churn', 'monthly_inflow'],
+            horizon_months: 12, rate_scale: 0.01, stated_in_brief: false } },
+        { id: 'stock_today', kind: 'factor', label: 'Subscribers today', observed_state: { value: 0.2, raw_value: 400,
+          unit: 'subscribers', cap: 2000 } },
+        { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3,
+          unit: '%', cap: 100 } },
+        { id: 'monthly_inflow', kind: 'factor', label: 'Monthly inflow', observed_state: { value: 0.2, raw_value: 20,
+          unit: 'subscribers/month', cap: 100 } },
+        { id: 'grow', kind: 'option', label: 'Grow the stock', interventions: { stock_today: { value: 0.25, raw_value: 500 } } },
+      ],
+      edges: [
+        ...['stock_today', 'monthly_churn', 'monthly_inflow'].map(from => ({ from, to: 'stock_at_12',
+          strength: { mean: 0.5, std: 0.3 }, provenance: { magnitude: 'olumi_placeholder' } })),
+        ...['price', 'stock_at_12'].map(from => ({ from, to: 'mrr', strength: { mean: 0.5, std: 0.3 },
+          provenance: { magnitude: 'olumi_placeholder' } })),
+      ],
+    };
+    const before = JSON.stringify(graph);
+    expect(chancesWithheldByAGuess(graph)).toBe(false);
+    expect(JSON.stringify(graph)).toBe(before);
+    const control = structuredClone(graph) as { nodes: Rec[]; edges: Rec[] };
+    delete control.nodes.find((n: Rec) => n.id === 'stock_at_12')!.nonlinear_identity;
+    expect(chancesWithheldByAGuess(control)).toBe(true);
+  });
+});
 
 function qualifiedPointCountDraft(): Rec {
   const candidate = structuredClone(FX.point_count.candidate);
