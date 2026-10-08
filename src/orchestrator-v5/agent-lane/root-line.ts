@@ -37,8 +37,8 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
   if (line.includes('\n')) return false;
   if (withoutProposalIds(line) !== line) return false;
   if (textAtRest(line) !== line) return false;
-  // The face composer splits this ask: a repeated label must survive in each question/disclosure partition too.
-  if (sentencesOf(line).some(sentence => textAtRest(sentence) !== sentence)) return false;
+  // The face composer splits this ask: test each partition as its displayed bullet, including the marker at its start.
+  if (sentencesOf(line).some(sentence => textAtRest(`• ${sentence}`) !== `• ${sentence}`)) return false;
   if (dropRankingSentences(line, rankingLabelContext(graph, analysisReady)).droppedSentences !== 0) return false;
   if (textNamesAnOption(line, optionRosterFromGraph(graph))) return false;
   // The leader vocabulary as the DELETING consumers read it (`textAssertsLeadingOption`: the egress vocabulary minus its

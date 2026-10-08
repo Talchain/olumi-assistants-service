@@ -4,6 +4,7 @@
  * .p45 patch candidate with GOAL_REACH_ROUTE_CANDIDATE=1; that evidence is candidate-only.
  * No identity writer, action handler, proposal store, reload route or Run payload builder is mocked.
  */
+import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import paul from '../../orchestrator-v5/agent-lane/__tests__/fixtures/goal-reach-paul-graph-632b92b9.json';
@@ -45,7 +46,9 @@ vi.mock('../../orchestrator/user-identity.js', async importOriginal => ({
   ...await importOriginal<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'verified', userId: OWNER }),
 }));
 vi.mock('../scenario-graph-analysis-read.js', async importOriginal => ({
-  ...await importOriginal<Record<string, unknown>>(), readScenarioAnalysis: async () => source.analysis,
+  ...await importOriginal<Record<string, unknown>>(), readScenarioAnalysis: async () => withCanonicalAnalysisView({
+    ...source.analysis, graph: source.graph, graph_hash: hashOf(source.graph), analysis_ready: READY,
+  }, scenario),
 }));
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }, emit: vi.fn(),
@@ -317,14 +320,16 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
     const reply = await run();
     expect(reply._answer_shape, reply.assistant_text).toBeDefined();
     const shape = reply._answer_shape!;
-    expect(shape.headline).toBe('Not shown yet; why is under More detail');
+    // r11d: this served result has no canonical option roster; zero withheld cells means zero marker.
+    expect(shape.headline).toBe(RUN_RESULT_READY_TEXT);
     const face = [shape.headline, ...shape.bullets].join('\n');
     expect(face).not.toContain(FINDING);
     expect(shape.detail.split(FINDING)).toHaveLength(2);
-    expect(face).not.toContain(RUN_RESULT_READY_TEXT);
+    expect(face).toContain(RUN_RESULT_READY_TEXT);
+    expect(face).not.toMatch(/Not shown(?::| yet;)/);
     // The typed Olumi-side fault owes no user question; its exact full finding is retained under More detail.
     expect(face.match(/\?/g) ?? []).toHaveLength(0);
-    expect(shape.detail).toContain(RUN_RESULT_READY_TEXT);
+    expect(shape.detail).not.toContain(RUN_RESULT_READY_TEXT);
     expect(shape.detail).toContain(RETAINED_RESULTS);
     for (const sentence of [FINDING, RETAINED_RESULTS, RUN_RESULT_READY_TEXT]) {
       expect(reply.assistant_text.split(sentence)).toHaveLength(2);

@@ -9,6 +9,7 @@
  * the reason is still said. The Run endpoint returns the SERVED d4 Run block; the model is scripted (0 LLM).
  * CONTROLS: the first Run (nothing asked yet) still asks; another question in the history does not silence this one.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -71,10 +72,10 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
       response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: D4.graph_hash, blocks: D4.blocks,
       analysis_ready: D4.analysis_ready, analysis_state: D4.analysis_state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: D4.draft_graph, graph_hash: D4.graph_hash, analysis_state: D4.analysis_state, analysis_ready: D4.analysis_ready,
       analysis_result: D4.blocks[0],
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);

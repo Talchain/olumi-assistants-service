@@ -8,6 +8,7 @@
  *   · CONTROL: a clean model sentence is sent after the code line;
  *   · the typed provisional view (C5b) with a movement claim is not shown; CONTROL: a clean view is (Codex pre-review P1).
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { sentencesOf, WITHHOLD_FALLBACK_MARKER } from '../reply/compose-reply.js';
@@ -87,8 +88,8 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
       graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
-      analysis_state: state(), analysis_result: SERVED.block, current_read: { run_delta: runDelta } }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
+      analysis_state: state(), analysis_result: SERVED.block, current_read: { run_delta: runDelta } }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);

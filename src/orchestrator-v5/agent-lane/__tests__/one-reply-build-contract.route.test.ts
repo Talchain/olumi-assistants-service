@@ -12,7 +12,7 @@ import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclos
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 import { identityCardOfferable, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
-import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
+import { projectCanonicalAnalysisView, type CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { thresholdReasonLine } from '../break-even.js';
 
 type Rec = Record<string, unknown>;
@@ -111,13 +111,13 @@ describe('ONE reply contract through the build route', () => {
     const { agentV1TurnRoute } = route;
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async req => {
-      const { recordCanonicalAnalysisViewInput } = await import('../../../routes/canonical-analysis-input-context.js');
       if (saved.nodes.length === 0) {
-        recordCanonicalAnalysisViewInput({ graph: saved }, req.headers['x-olumi-canonical-input-receipt'] as string | undefined);
-        return { graph: saved, graph_hash: 'empty', analysis_state: { run_state: { kind: 'never_run' } } };
+        const analysis_state = { run_state: { kind: 'never_run' as const } };
+        return { graph: saved, graph_hash: 'empty', analysis_state,
+          canonical_analysis_view: projectCanonicalAnalysisView({ graph: saved, analysisState: analysis_state as never }) };
       }
       // Reconstruct only the captured successful fact wrapper owned by this test's served graph read.
-      recordCanonicalAnalysisViewInput({ graph: saved,
+      const canonical_analysis_view = projectCanonicalAnalysisView({ graph: saved,
         runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
           scenario_id: (req.params as { id: string }).id, run_id: 'fixture-build-run', summary: currentRead.analysis_result.summary,
           leading_option_id: currentRead.analysis_result.leading_option_id, enrichment: currentRead.analysis_result.enrichment,
@@ -125,8 +125,8 @@ describe('ONE reply contract through the build route', () => {
         } } as never,
         analysisState: currentRead.analysis_state as never,
         analysisReady: (currentRead.current_read as Rec)?.analysis_ready,
-        currentResult: currentRead.analysis_result as never }, req.headers['x-olumi-canonical-input-receipt'] as string | undefined);
-      return { ...currentRead, graph: saved };
+        currentResult: currentRead.analysis_result as never });
+      return { ...currentRead, graph: saved, canonical_analysis_view };
     });
     app.post('/assist/v1/scenarios/:id/graph/register', async req => {
       saved = (req.body as { graph: Graph }).graph;

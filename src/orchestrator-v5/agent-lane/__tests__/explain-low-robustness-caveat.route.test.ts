@@ -3,6 +3,7 @@
  * bound Explain control with fixed narrator words, through the served-readback/store
  * harness from agent-run-reply-answer-shape.test.ts. No provider is contacted.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -116,10 +117,10 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH,
       blocks: [readbackResult], analysis_ready: readbackReady, analysis_state: readbackState,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState,
       analysis_ready: readbackReady, analysis_result: readbackResult,
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);

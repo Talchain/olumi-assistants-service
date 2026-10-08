@@ -10,6 +10,7 @@
  * pre-gate words were not captured; the narrator here writes the screen's own lines (author-reconstructed, which the gate
  * deletes, as Render shows it did).
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -66,10 +67,10 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [READ.analysis_result], analysis_ready: READ.analysis_ready, analysis_state: state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: READ.graph, graph_hash: READ.graph_hash, analysis_state: state,
       analysis_ready: READ.analysis_ready, analysis_result: READ.analysis_result,
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);

@@ -106,8 +106,7 @@ import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-g
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
-import { projectCanonicalAnalysisView, type CanonicalAnalysisCell, type CanonicalAnalysisViewInput } from './canonical-analysis-view.js';
-import { captureCanonicalAnalysisViewInput, currentCanonicalAnalysisInputReceipt } from './canonical-analysis-input-context.js';
+import type { CanonicalAnalysisCell } from './canonical-analysis-view.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -620,12 +619,37 @@ function withCellHorizon(text: string, graph: unknown, cells: readonly Canonical
   return text;
 }
 
-/** Same graph-read receipt and gates as the UI; unavailable receipt never invents a Run. */
-function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>): readonly CanonicalAnalysisCell[] {
-  return projectCanonicalAnalysisView({ ...read.canonicalAnalysisInput, graph: read.graph,
-    analysisState: read.analysisState as CanonicalAnalysisViewInput['analysisState'],
-    analysisReady: read.analysisReady, currentResult: read.analysisResult as CanonicalAnalysisViewInput['currentResult'],
-  }).options.map(row => row.cell);
+/** The final scenario read owns the UI's cells; missing authority never licenses a substitute projection. */
+function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly CanonicalAnalysisCell[] {
+  const view = read.canonicalAnalysisView as { schema?: unknown; source?: unknown; options?: unknown } | null | undefined;
+  const options = view?.options;
+  const valid = view?.schema === 'canonical_analysis_view.v1' && view.source === 'stored_run_facts'
+    && Array.isArray(options) && options.every(row => {
+      if (row === null || typeof row !== 'object' || typeof row.option_id !== 'string' || row.option_id.trim() === '') return false;
+      const cell = row.cell;
+      if (cell === null || typeof cell !== 'object') return false;
+      if (cell.kind === 'none') return true;
+      if (cell.kind === 'figure') return typeof cell.display === 'string' && cell.display.trim() !== '';
+      if (cell.kind === 'range') {
+        const detail = cell.detail, depends = detail?.depends_on;
+        return typeof cell.display === 'string' && cell.display.trim() !== '' && typeof detail?.range === 'string'
+          && depends !== null && typeof depends === 'object'
+          && ['link_strength', 'link_existence', 'stated_time'].includes(depends.kind)
+          && typeof depends.from_label === 'string' && typeof depends.to_label === 'string'
+          && ['all', 'unsized_links'].includes(depends.among)
+          && (detail.stated_time === undefined || (typeof detail.stated_time?.estimate === 'string'
+            && ['by_date', 'deliverable', 'chance_words', 'slow_time', 'fast_time'].every(key =>
+              detail.stated_time[key] === undefined || typeof detail.stated_time[key] === 'string')));
+      }
+      return cell.kind === 'withheld' && Array.isArray(cell.reasons) && cell.reasons.length > 0
+        && cell.reasons.every((reason: unknown) => reason !== null && typeof reason === 'object'
+          && typeof (reason as { code?: unknown }).code === 'string'
+          && ((reason as { message?: unknown }).message === null || typeof (reason as { message?: unknown }).message === 'string'));
+    });
+  if (valid) return (options as { cell: CanonicalAnalysisCell }[]).map(row => row.cell);
+  log.warn({ event: 'agent_lane.canonical_analysis_view_unavailable', scenario_id: scenarioId },
+    'agent-lane: final scenario read has no valid canonical analysis cells');
+  return [];
 }
 
 /** A7 typed `detail` (one role per unit: any other typing of the same line is replaced). Pure; unchanged when `a7` is null. */
@@ -1264,8 +1288,7 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
   if (scopeInput.issues.length === 0) {
     // Preserve ordinary permitted bytes. Only a scope-withheld verdict needs its canonical inputs reread on removal.
     if (state?.leader_claim?.withheld_reason !== WITHHELD_GOAL_SCOPE_UNRESOLVED) return read;
-    const captured = await captureCanonicalAnalysisViewInput(async () => ({ json: await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, goalScopeClaimInput: scopeInput }) }));
-    const current = captured.response.json;
+    const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, goalScopeClaimInput: scopeInput });
     // A different selected Run must never license the old readback's result. An unavailable/moved authority stays closed.
     if (current.analysis_state === null || JSON.stringify(current.analysis_state.run_state) !== JSON.stringify(state.run_state)) {
       return { ...read, scopeOpen: false, analysisState: { ...state,
@@ -1273,7 +1296,7 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
       } };
     }
     // Restore the verdict and its projected result from this SAME identity-bound canonical read.
-    return { ...read, canonicalAnalysisInput: captured.input, scopeOpen: false, analysisState: current.analysis_state, analysisResult: current.analysis_result ?? undefined };
+    return { ...read, canonicalAnalysisView: current.canonical_analysis_view, scopeOpen: false, analysisState: current.analysis_state, analysisResult: current.analysis_result ?? undefined };
   }
   const authorityAvailable = AnalysisStateV1Schema.safeParse(state).success;
   const base = authorityAvailable ? state! : composeAnalysisStateV1({ canonical: canonicalStateFromFreshness(NO_ANALYSIS_CONTEXT_DERIVATION), rawRobustness: null })!;
@@ -1301,8 +1324,8 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ canonicalAnalysisInput?: CanonicalAnalysisViewInput; graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
-  let canonicalAnalysisInput: CanonicalAnalysisViewInput | undefined;
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ canonicalAnalysisView?: unknown; graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+  let canonicalAnalysisView: unknown;
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1367,11 +1390,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   /** The persisted graph as read — the leader wire gate reads its option ROSTER, never a verdict. */
   let graph: unknown;
   try {
-    const captured = await captureCanonicalAnalysisViewInput(() => dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}));
-    const after = captured.response;
-    canonicalAnalysisInput = captured.input;
+    const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (after.status === 200) {
       graph = after.json.graph;
+      canonicalAnalysisView = after.json.canonical_analysis_view;
       scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
@@ -1528,7 +1550,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { canonicalAnalysisInput, graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
+  return { canonicalAnalysisView, graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1627,25 +1649,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const dispatchFor = (authorization: string | undefined): InternalDispatch =>
     async (path, body) => {
-      const perform = async () => {
-        const res = await app.inject({
-          method: 'POST',
-          url: path,
-          headers: {
-            ...internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization),
-            ...(currentCanonicalAnalysisInputReceipt() === undefined ? {} : {
-              'x-olumi-canonical-input-receipt': currentCanonicalAnalysisInputReceipt(),
-            }),
-          },
-          payload: body as Record<string, unknown>,
-        });
-        let json: Record<string, unknown> = {};
-        try { json = res.json() as Record<string, unknown>; } catch { json = {}; }
-        return { status: res.statusCode, json };
-      };
-      // Capabilities may seed the graph-read cache before readBackState. Capture that same read too.
-      return path.endsWith('/graph') && currentCanonicalAnalysisInputReceipt() === undefined
-        ? (await captureCanonicalAnalysisViewInput(perform)).response : perform();
+      const res = await app.inject({
+        method: 'POST',
+        url: path,
+        headers: internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization),
+        payload: body as Record<string, unknown>,
+      });
+      let json: Record<string, unknown> = {};
+      try { json = res.json() as Record<string, unknown>; } catch { json = {}; }
+      return { status: res.statusCode, json };
     };
 
 
@@ -2227,7 +2239,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
-      const replayChanceCells = replyChanceCells(state);
+      const replayChanceCells = replyChanceCells(state, scenarioId);
       const replayScopedDraftForRun = guidedSizingForRun(state.analysisResult, state.graph);
       const replayGuidedText = guidedSizingReplyText(replayScopedDraftForRun).guided;
       /**
@@ -3927,7 +3939,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState, analysisResult } = composedRead;
-    const chanceCells = replyChanceCells(composedRead);
+    const chanceCells = replyChanceCells(composedRead, scenarioId);
     const resultFirstRunCompleted = firstAnalysisResultFirst || (fastPath === 'run' && result.tool_results.some((r) => r.ran === true));
     // One final scoped draft supplies the words, the offered presses and the hook on this bound Run.
     const guidedDraftForRun = ((resultFirstRunCompleted && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null)
@@ -4910,7 +4922,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
-        : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
+        : fastPath === 'run' || fastPath === 'explain' ? (narratorWords !== null ? interpretBudget().model : null) : budget.model;
       const a7Repeat = await a7SaidLastTurn(readbackGraph, chanceCells, historyReader, scenarioId, turnId);
       const estimates = actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady,
         analysisResult, optionParticipation, identityEvaluated, guidance: guidanceHistory, pending: durablePending }).olumiEstimates;

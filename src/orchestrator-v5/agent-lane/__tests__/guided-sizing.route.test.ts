@@ -1,4 +1,5 @@
 /** Guided sizing through the real Agent reply and its existing link-effect approval door. */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -156,9 +157,9 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    const read = () => ({ graph, ...(!omitGraphHash ? { graph_hash: graphHashOverride ?? computeAnalysisAffectingGraphHash(graph as never) } : {}),
+    const read = () => withCanonicalAnalysisView({ graph, ...(!omitGraphHash ? { graph_hash: graphHashOverride ?? computeAnalysisAffectingGraphHash(graph as never) } : {}),
       analysis_state: analysisState, analysis_ready: FIXTURE.analysis_ready, analysis_result: result,
-      analysis_identity_evaluated_node_ids: ['mrr'], analysis_goal_certainty: [] });
+      analysis_identity_evaluated_node_ids: ['mrr'], analysis_goal_certainty: [] }, SCENARIO);
     app.post('/assist/v1/scenarios/:id/graph', async () => read());
     app.post('/orchestrate/v2/turn', async () => {
       runCalls += 1;
@@ -311,7 +312,8 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(first._answer_shape).toBeDefined();
     expect(first.assistant_text).not.toContain(producerGuided!);
     expect(first.assistant_text.split(GUIDED_WITHOUT_INVITE)).toHaveLength(2);
-    expect(first._answer_shape.headline).toBe("Not shown: MRR's current level is missing");
+    // r11d: recorded cell reasons own the marker; mixed unsized-links/other causes select the fallback.
+    expect(first._answer_shape.headline).toBe('Not shown yet; why is under More detail');
     expect(first._answer_shape.detail).toContain(GUIDED_WITHOUT_INVITE);
     expect(first._answer_shape.detail.split(reason)).toHaveLength(2);
     expect([first._answer_shape.headline, ...first._answer_shape.bullets].join('\n')).not.toContain(reason.replace(THRESHOLD_REST_STANDS, ''));

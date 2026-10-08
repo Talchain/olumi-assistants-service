@@ -1,4 +1,5 @@
 /** W1 R3: captured founder Run/auto Explain must carry the delivered ask. No provider/DB contacted. */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -147,8 +148,8 @@ describe('real Agent final-answer persistence, captured founder requests', () =>
       if (mutateOnRun !== undefined) graph = changedGraph(mutateOnRun);
       return FX.run;
     });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: HASH,
-      analysis_state: FX.run.analysis_state, analysis_ready: FX.run.analysis_ready, analysis_result: RESULT }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph, graph_hash: HASH,
+      analysis_state: FX.run.analysis_state, analysis_ready: FX.run.analysis_ready, analysis_result: RESULT }, SCENARIO));
     await app.register(agentV1TurnRoute); await app.ready();
   }, 120_000);
   afterEach(async () => { await app.close(); vi.unstubAllGlobals(); });

@@ -1,4 +1,5 @@
 /** Existing target-not-testable-beside-ranges.route harness: real route, fixed narrator, in-memory readback/store. */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -62,7 +63,7 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: 'restatement-h0', analysis_result: result, analysis_state: currentState, analysis_ready: ready }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph, graph_hash: 'restatement-h0', analysis_result: result, analysis_state: currentState, analysis_ready: ready }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);

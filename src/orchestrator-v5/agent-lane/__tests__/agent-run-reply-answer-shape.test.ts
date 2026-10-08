@@ -22,6 +22,7 @@
  *
  * The model call is a stubbed `fetch`: no provider is contacted.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -162,10 +163,10 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
       };
     });
     // The final readback — the ONLY source of the response's `analysis_result` block.
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: readbackReady,
       ...(readbackCarriesResult ? { analysis_result: readbackResult } : {}),
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);

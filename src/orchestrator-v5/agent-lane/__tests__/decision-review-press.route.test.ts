@@ -7,6 +7,7 @@
  * model. The leader is withheld here, so the wire's ranking drop and shared gate run over the review: every item must
  * reach the user whole.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -114,13 +115,13 @@ async function freshApp(): Promise<FastifyInstance> {
   app.post('/assist/v1/scenarios/:id/graph', async () => {
     graphReads += 1;
     const moved = graphReads > staleAfterReads;
-    return fixture === 'g2'
+    return withCanonicalAnalysisView(fixture === 'g2'
       ? { graph: graph(), graph_hash: HASH, analysis_ready: READY, analysis_state: state(moved ? 'complete_stale' : runKind), analysis_result: SERVED.block }
       : { graph: B5_STORED.graph, graph_hash: B5_STORED.graph_hash, analysis_ready: READY,
         // The served state's shape (0948Z: `usable_for_chips`/`usable_for_prose`), with a licensed leader.
         analysis_state: { ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: fixture === 'b5' ? '2026-10-05T03:48:55.163Z' : '2026-10-05T09:12:00.000Z' },
           leader_claim: fixture === 'b5' ? { permitted: true, separation: 'separated' } : { permitted: false, withheld_reason: 'separation_unavailable' } },
-        analysis_result: B5_BLOCK };
+        analysis_result: B5_BLOCK }, SCENARIO);
   });
   await app.register(agentV1TurnRoute);
   await app.ready();

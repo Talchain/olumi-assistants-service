@@ -5,6 +5,7 @@
  * that Run (`waveB-screen-chance-lines-20261007.json`, source unseen-b3-2). Harness copied from the S2e route test.
  */
 import { readFileSync } from 'node:fs';
+import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
@@ -41,6 +42,9 @@ let forwardedText = 'ok';
 let composeInput: ReplyComposeInput | undefined;
 let composition: ReplyComposition | undefined;
 let lastTurnPayload: Json;
+let runCompleted = false;
+let canonicalReadOverride: ((view: ReturnType<typeof projectCanonicalAnalysisView>) => unknown) | undefined;
+let warn: ReturnType<typeof vi.spyOn>;
 vi.mock('../reply/compose-reply.js', async original => {
   const actual = await original<typeof import('../reply/compose-reply.js')>();
   return { ...actual, composeReplyShape: (input: ReplyComposeInput) => {
@@ -91,31 +95,33 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute, agentTurnRequestHash } = await import('../../../routes/agent-v1-turn.js');
+    const { log } = await import('../../../utils/telemetry.js');
+    warn = vi.spyOn(log, 'warn');
     hashTurn = message => agentTurnRequestHash(SCENARIO, null, message);
     app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async () => ({
+    app.post('/orchestrate/v2/turn', async () => { runCompleted = true; return ({
       response_version: 2, assistant_text: forwardedText, suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [analysisResult], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
-    }));
-    app.post('/assist/v1/scenarios/:id/graph', async req => {
-      const { recordCanonicalAnalysisViewInput } = await import('../../../routes/canonical-analysis-input-context.js');
+    }); });
+    app.post('/assist/v1/scenarios/:id/graph', async () => {
       // The harness authors the successful fact wrapper around this captured Run; production never invents one.
-      recordCanonicalAnalysisViewInput({ graph: READ.graph,
+      const canonical_analysis_view = projectCanonicalAnalysisView({ graph: READ.graph,
         runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
           scenario_id: SCENARIO, run_id: 'fixture-screen-run', summary: analysisResult.summary,
           leading_option_id: analysisResult.leading_option_id, enrichment: analysisResult.enrichment,
           graph_hash_at_run: READ.graph_hash, computed_at: READ.analysis_state.run_state.computed_at,
         } } as never,
         analysisState: READ.analysis_state as never, analysisReady: READ.analysis_ready,
-        currentResult: analysisResult as never }, req.headers['x-olumi-canonical-input-receipt'] as string | undefined);
+        currentResult: analysisResult as never });
       return { graph: READ.graph, graph_hash: READ.graph_hash, analysis_result: analysisResult, analysis_state: READ.analysis_state,
-        analysis_ready: READ.analysis_ready };
+        analysis_ready: READ.analysis_ready, canonical_analysis_view: canonicalReadOverride === undefined
+          ? canonical_analysis_view : canonicalReadOverride(canonical_analysis_view) };
     });
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
-  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
+  afterAll(async () => { warn.mockRestore(); await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
@@ -227,6 +233,57 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
+
+  it.each([
+    ['missing', () => undefined],
+    ['null', () => null],
+    ['invalid options', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: {} })],
+    ['invalid cell', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: [{ option_id: 'bad', cell: { kind: 'figure' } }] })],
+    ['invalid range', (view: ReturnType<typeof projectCanonicalAnalysisView>) => ({ ...view, options: [{ option_id: 'bad', cell: { kind: 'range', display: 'between 1% and 2%', detail: {} } }] })],
+  ] as const)('r11d %s canonical_analysis_view: no marker, chance-free horizon, one warning on live and replay', async (_name, override) => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    canonicalReadOverride = override;
+    const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
+    expect(composeInput?.chanceCells).toEqual([]);
+    expect(withholdMarkers(b)).toEqual([]);
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    const warnings = () => warn.mock.calls.filter((call: unknown[]) => (call[0] as { event?: unknown } | undefined)?.event === 'agent_lane.canonical_analysis_view_unavailable');
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]![0]).toMatchObject({ scenario_id: SCENARIO });
+    await expectStoredAndReplayed(b);
+    expect(warnings()).toHaveLength(2); // Once for each reply, never for the turn's intermediate reads.
+  });
+
+  it('r11d READ wins: FINAL read cells override a disagreeing local projection on live and replay', async () => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    canonicalReadOverride = view => {
+      expect(view.options.length).toBeGreaterThan(0);
+      expect(view.options.every(row => row.cell.kind === 'withheld'), 'local projection would add a marker').toBe(true);
+      // Earlier reads remain withheld; only the read after Run carries the none cells used by the UI.
+      return runCompleted ? { ...view, options: view.options.map(row => ({ ...row, cell: { kind: 'none' as const } })) } : view;
+    };
+    const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
+    expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
+    expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'READ owns the cells').toBe(true);
+    expect(withholdMarkers(b), 'locally recomputed withholds cannot supply a marker').toEqual([]);
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    await expectStoredAndReplayed(b);
+    expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'replay READ owns the cells too').toBe(true);
+  });
+
+  it('r11d valid withheld cells with no recorded reason retain the fallback marker', async () => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    canonicalReadOverride = view => ({ ...view, options: view.options.map(row => ({ ...row,
+      cell: { kind: 'withheld' as const, reasons: [{ code: 'reason_not_recorded', message: null }] } })) });
+    const b = await turn(run('Your results are ready.'), 'Run it');
+    expect(withholdMarkers(b)).toEqual([WITHHOLD_FALLBACK_MARKER]);
+    expect(warn.mock.calls.filter((call: unknown[]) => (call[0] as { event?: unknown } | undefined)?.event === 'agent_lane.canonical_analysis_view_unavailable')).toEqual([]);
+    await expectStoredAndReplayed(b);
+  });
 
   it('r11b B1 pilot: withheld canonical cells give one face marker and the chance-free horizon once', async () => {
     READ = structuredClone(READ_B1);

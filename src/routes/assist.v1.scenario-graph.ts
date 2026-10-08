@@ -695,8 +695,6 @@ export default async function route(app: FastifyInstance) {
         requestId,
         goalScopeClaimInput: scopeInput,
         revision,
-        ...(typeof req.headers['x-olumi-canonical-input-receipt'] === 'string'
-          ? { canonicalAnalysisInputReceipt: req.headers['x-olumi-canonical-input-receipt'] } : {}),
         ...(snapshot !== undefined && snapshot !== null ? { analysisInvalidatedAt: snapshot.analysisInvalidatedAt } : {}),
       });
       // The selected block already has one public carrier, `analysis_result`.

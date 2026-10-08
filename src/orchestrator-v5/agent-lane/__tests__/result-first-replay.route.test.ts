@@ -5,6 +5,7 @@
  * offers the same bound control again; a deadlined interpret call is made once. Live route, the model stubbed, and a
  * store double that reads answer rows back as the real store does (snake_case columns).
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -68,8 +69,8 @@ async function freshApp(): Promise<FastifyInstance> {
     return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
       graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY };
   });
-  app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
-    analysis_state: state(), analysis_result: SERVED.block }));
+  app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
+    analysis_state: state(), analysis_result: SERVED.block }, SCENARIO));
   await app.register(agentV1TurnRoute);
   await app.ready();
   return app;

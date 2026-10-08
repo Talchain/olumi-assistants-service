@@ -13,6 +13,7 @@
  *   · the prior-facts read returns those persisted facts.
  * The explicit Run goes through the product's own `/orchestrate/v2/turn`, counted separately.
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -134,10 +135,11 @@ async function buildApp(): Promise<FastifyInstance> {
   const a = Fastify({ logger: false });
   a.post('/assist/v1/scenarios/:id/graph', async (req) => {
     const s = st((req.params as { id: string }).id);
-    if (!s.registered) return { graph: { nodes: [], edges: [] }, graph_hash: 'empty' };
+    const scenarioId = (req.params as { id: string }).id;
+    if (!s.registered) return withCanonicalAnalysisView({ graph: { nodes: [], edges: [] }, graph_hash: 'empty' }, scenarioId);
     const H = hashOf(s);
     const ran = s.facts.some((f) => (f.result as { graph_hash_at_run?: unknown }).graph_hash_at_run === H) || s.injectRunHashes.includes(H);
-    return {
+    return withCanonicalAnalysisView({
       graph: { ...s.graph, edges: [...s.graph.edges, ...s.extraEdges] },
       graph_hash: H,
       analysis_state: ran
@@ -145,7 +147,7 @@ async function buildApp(): Promise<FastifyInstance> {
         : { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } },
       ...(ran && knobs.runStateKind === 'complete_current' && !knobs.withholdResult ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: H, ...(knobs.analysisResultExtra ?? {}) } } : {}),
       ...(knobs.analysisReady !== undefined ? { analysis_ready: knobs.analysisReady } : {}),
-    };
+    }, scenarioId);
   });
   a.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
     const sid = (req.params as { id: string }).id;

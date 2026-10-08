@@ -20,6 +20,7 @@ import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE } from '../root-line.js';
+import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -103,9 +104,21 @@ async function freshApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
     graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
-  app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: graphWith(riskValued, riskLabel), graph_hash: HASH, analysis_ready: READY,
-    analysis_state: readback === 'stale' ? staleState() : state(),
-    ...(readback === 'no_result' ? {} : { analysis_result: SERVED.block }) }));
+  app.post('/assist/v1/scenarios/:id/graph', async () => {
+    const graph = graphWith(riskValued, riskLabel);
+    const analysis_state = readback === 'stale' ? staleState() : state();
+    const analysis_result = readback === 'no_result' ? null : SERVED.block;
+    // Reconstruct only the successful fact wrapper for the captured Run; the read's public result owns cell gating.
+    const canonical_analysis_view = projectCanonicalAnalysisView({ graph,
+      runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+        scenario_id: SCENARIO, run_id: 'fixture-unvalued-root-run', summary: SERVED.block.summary,
+        leading_option_id: SERVED.block.leading_option_id, enrichment: SERVED.block.enrichment,
+        graph_hash_at_run: HASH, computed_at: analysis_state.run_state.computed_at,
+      } } as never,
+      analysisState: analysis_state as never, analysisReady: READY, currentResult: analysis_result as never });
+    return { graph, graph_hash: HASH, analysis_ready: READY, analysis_state, canonical_analysis_view,
+      ...(analysis_result === null ? {} : { analysis_result }) };
+  });
   await app.register(agentV1TurnRoute);
   await app.ready();
   return app;

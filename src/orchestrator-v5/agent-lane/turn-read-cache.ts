@@ -12,7 +12,6 @@
  *
  * A reused read is a deep copy, so no caller can alter what another caller is given.
  */
-import { copyCanonicalAnalysisViewInput } from '../../routes/canonical-analysis-input-context.js';
 import type { InternalDispatch } from './runtime/agent-capabilities.js';
 import { withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 
@@ -34,11 +33,7 @@ const withoutFresh = (body: unknown): Record<string, unknown> => {
   const { fresh: _fresh, ...rest } = body as Record<string, unknown>;
   return rest;
 };
-const copy = (r: Read): Read => {
-  const json = structuredClone(r.json);
-  copyCanonicalAnalysisViewInput(r.json, json);
-  return { ...r, json };
-};
+const copy = (r: Read): Read => ({ ...r, json: structuredClone(r.json) });
 
 /**
  * ⭐ PJ-C1 BUILD TURN, LEVER 3 (DL GO #72 5868860230): `readOnlyPaths` are READS the caller names (the version list),

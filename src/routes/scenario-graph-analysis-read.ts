@@ -159,8 +159,7 @@ import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licenc
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './selected-run-figures.js';
-import { projectCanonicalAnalysisView, type CanonicalAnalysisView, type CanonicalAnalysisViewInput } from './canonical-analysis-view.js';
-import { recordCanonicalAnalysisViewInput } from './canonical-analysis-input-context.js';
+import { projectCanonicalAnalysisView, type CanonicalAnalysisView } from './canonical-analysis-view.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
@@ -276,8 +275,6 @@ export interface ReadScenarioAnalysisParams {
   readonly requestId: string;
   /** Atomic restore may supply the DB-returned marker and avoid a second read. */
   readonly analysisInvalidatedAt?: string | null;
-  /** Opaque active in-process receipt token; the selected Run never crosses the wire. */
-  readonly canonicalAnalysisInputReceipt?: string;
   /** Internal receipt from this same reconciled read; never added to the graph route's wire body. */
   readonly onCurrentnessRead?: (read: ScenarioAnalysisClaimSafetyRead & {
     /** The FULL permission from this same read; absent when the admission read was unavailable. */
@@ -292,11 +289,9 @@ export interface ReadScenarioAnalysisParams {
 export async function readScenarioAnalysis(
   params: ReadScenarioAnalysisParams,
 ): Promise<ScenarioAnalysisRead> {
-  const notAnswered = (): ScenarioAnalysisRead => {
-    const input: CanonicalAnalysisViewInput = { revision: params.revision };
-    recordCanonicalAnalysisViewInput(input, params.canonicalAnalysisInputReceipt);
-    return { ...NOT_ANSWERED, canonical_analysis_view: projectCanonicalAnalysisView(input) };
-  };
+  const notAnswered = (): ScenarioAnalysisRead => ({
+    ...NOT_ANSWERED, canonical_analysis_view: projectCanonicalAnalysisView({ revision: params.revision }),
+  });
   try {
     // A scenario with no graph has nothing for a hash to anchor to, so the
     // freshness derivation could only ever return `unknown /
@@ -648,14 +643,12 @@ export async function readScenarioAnalysis(
       ),
       graphHash,
     ) as AnalysisReadyPayload;
-    const canonicalInput: CanonicalAnalysisViewInput = {
-      revision: params.revision, graph: params.graph,
-      runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
-      derivation, analysisState, analysisReady, currentResult: boundResult,
-    };
-    recordCanonicalAnalysisViewInput(canonicalInput, params.canonicalAnalysisInputReceipt);
     return {
-      canonical_analysis_view: projectCanonicalAnalysisView(canonicalInput),
+      canonical_analysis_view: projectCanonicalAnalysisView({
+        revision: params.revision, graph: params.graph,
+        runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
+        derivation, analysisState, analysisReady, currentResult: boundResult,
+      }),
       ...(recording === undefined ? {} : { run_recording: recording }),
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })

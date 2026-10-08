@@ -5,6 +5,7 @@
  * and the Challenge said "Without sized profit effects, the model cannot test your £24,000 target." Harness copied from
  * decision-sensitivity-screen-gate.route.test.ts (real route, fixed narrator, no provider contacted).
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -60,10 +61,10 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [result], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: READ.graph, graph_hash: READ.graph_hash, analysis_state: READ.analysis_state,
       analysis_ready: READ.analysis_ready, analysis_result: result,
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
