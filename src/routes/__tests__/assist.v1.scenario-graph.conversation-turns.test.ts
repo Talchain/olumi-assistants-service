@@ -169,13 +169,13 @@ const NEWEST_FIRST = [
 beforeEach(() => { readRecent.mockResolvedValue(NEWEST_FIRST); });
 
 describe("the conversation, when asked", () => {
-  it.each([true, false])("r11 reload: binds only a recorded scored-goal identity (%s), preserving risk bytes", async scored => {
+  it.each([true, false])("r12 reload: replaces a licensed estimate point with or without a scored-goal snapshot (%s), preserving risk bytes", async scored => {
     const graph = { nodes: [
       { id: "raise", kind: "option", label: "Raise to £59" },
       { id: "keep", kind: "option", label: "Keep at £49" },
       { id: "revenue", kind: "goal", label: "Revenue goal" },
     ], edges: [] };
-    // Historical labels may come from the graph; scored identity must come from analysis_result.
+    // Historical labels may come from the graph; a legacy licence binds its named option and exact value itself.
     const result = { type: "analysis_result", ...(scored ? { input_snapshot: { goal_node_id: "revenue" } } : {}),
       enrichment: { inference_warnings: [{
       code: "GOAL_CHANCE_LICENSED", form: "each", option_ids: ["raise", "keep"],
@@ -196,8 +196,7 @@ describe("the conversation, when asked", () => {
     const response = await read(app, SCENARIO, { include_conversation_turns: true });
     expect(response.statusCode).toBe(200);
     const text = response.json().conversation_turns[0].assistant_message as string;
-    if (scored) expect(text).not.toContain(bare);
-    else expect(text).toBe(`${bare}\n${preserved}\n${labelled}`);
+    expect(text).not.toContain(bare);
     expect(text).toContain(labelled);
     expect(text.split(labelled).length - 1).toBe(1);
     expect(text).toContain(preserved);

@@ -103,7 +103,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
-import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -2172,6 +2172,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
       const replayScopedDraftForRun = guidedSizingForRun(state.analysisResult, state.graph);
+      const replayGuidedText = guidedSizingReplyText(replayScopedDraftForRun).guided;
       /**
        * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
        * rebuilt from the canonical readback, never from what the first attempt had in memory:
@@ -2205,7 +2206,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // unavailable reply). The SAME owner as the live turn, never a model call.
         const review = decisionReviewFor(scenarioId, { ...state,
           factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id)), recentReplies: await repliesToCheckAsks(
-          [goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun)?.say], store, scenarioId, turnId) });
+          [goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)?.say], store, scenarioId, turnId) });
         // S-B (Codex r1 P2-3 on #2751): an unbound review replays the live press's typed "can't yet" and its working exit.
         const pressed = review.bound ? null : decidePress({ id: DECISION_REVIEW_PRESS_ID }, actionFactsOf({ scenarioId, graph: state.graph,
           graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady, analysisResult: state.analysisResult,
@@ -2257,7 +2258,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
-          const say = goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun)?.say;
+          const say = goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)?.say;
           // The live Run turn's methods note (`disclosuresFor`, a Run on this turn) comes first in its owed lines.
           const indexNow = indexGoalWeightsMessages(state.analysisResult);
           const owedNow = [...indexNow, ...(typeof say === 'string' && say.trim() !== '' ? [say] : [])];
@@ -3834,9 +3835,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const guidedDraftForRun = ((resultFirstRunCompleted && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null)
       || (fastPath === 'explain' && narrationStatus === 'ready'))
       ? guidedSizingForRun(analysisResult, readbackGraph) : undefined;
+    const sizingCommit = result.tool_results.find(r => r.guided_sizing_commit === true);
+    const sizingProgress = sizingCommit !== undefined ? guidedSizingProgress(readbackGraph, analysisResult ?? sizingCommit.guided_sizing_run_result) : undefined;
+    const guidedReplyText = guidedSizingReplyText(guidedDraftForRun, sizingProgress);
     const finalGoalChance = (resultFirstRunCompleted || (fastPath === 'explain' && narrationStatus === 'ready'))
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
-      ? goalChanceWithheldForAgent(analysisResult, readbackGraph, guidedDraftForRun) : undefined;
+      ? goalChanceWithheldForAgent(analysisResult, readbackGraph, guidedDraftForRun, guidedReplyText.guided) : undefined;
     const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];
     /** The withheld goal chance's reason as owed this turn (pure; the same value as its owed line below), typed for the composer. */
     const goalChanceOwed = goalChanceLineOwed(goalChanceResults, text);
@@ -4102,12 +4106,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // The same selected Run as the words; the warning owns N. Re-check present sizing and never-reask before offering.
-    const sizingCommit = result.tool_results.find(r => r.guided_sizing_commit === true);
-    const sizingProgress = sizingCommit !== undefined ? guidedSizingProgress(readbackGraph, analysisResult ?? sizingCommit.guided_sizing_run_result) : undefined;
     // Reconcile the commit receipt's words to the FINAL stored read, including a concurrent second sizing.
     if (sizingCommit !== undefined) {
       text = text.replace(/\s*\d+ more to go; with 1 left, Olumi can show a range\./gu, '').trim();
-      if (sizingProgress !== undefined) text = `${text} ${sizingProgress.progress_line}`;
+      if (guidedReplyText.progress !== null) text = `${text} ${guidedReplyText.progress}`;
     }
     const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
     const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,

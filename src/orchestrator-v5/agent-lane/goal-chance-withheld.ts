@@ -26,7 +26,7 @@ import {
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 
 import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
-import { guidedSizingForRun, guidedSizingSentence, type GuidedSizingDraft } from './guided-sizing.js';
+import { guidedSizingForRun, guidedSizingReplyText, type GuidedSizingDraft } from './guided-sizing.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
@@ -132,9 +132,10 @@ const recordOf = (v: unknown): Record<string, unknown> | undefined =>
  * The typed code decides; a warning with no usable words is still withheld, with the opening alone (fail closed).
  */
 export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
-  ...scopedDraft: [] | [GuidedSizingDraft | undefined]): GoalChanceWithheld | undefined {
+  ...scopedDraft: [] | [GuidedSizingDraft | undefined] | [GuidedSizingDraft | undefined, string | null]): GoalChanceWithheld | undefined {
   // An explicitly supplied empty draft also owns the scope; do not fall back to another read.
   const guided = scopedDraft.length > 0 ? scopedDraft[0] : guidedSizingForRun(result, graph);
+  const guidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : guidedSizingReplyText(guided).guided;
   const block = recordOf(result);
   if (block === undefined) return undefined;
   const opening = Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}).length > 0
@@ -148,11 +149,11 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   if (warnings.length === 0) return undefined;
   // S-E GOALS (Codex buddy r1 on #2742): a chance goal's withhold speaks ALONE, ahead of every other cause, identical arms too.
   const chance = warnings.filter((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
-  if (chance.length > 0) return goalChanceFromWarnings(chance, opening, guided);
+  if (chance.length > 0) return goalChanceFromWarnings(chance, opening, guidedText);
   // Gate 1 v2 (Codex #2574 P1): identical options keep their own reason and scope, alone or beside any other withhold.
   const identical = warnings.filter((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
   const others = warnings.filter((w) => w.code !== GOAL_FIGURES_OPTIONS_IDENTICAL);
-  if (identical.length === 0) return goalChanceFromWarnings(others, opening, guided);
+  if (identical.length === 0) return goalChanceFromWarnings(others, opening, guidedText);
   const words = identical.map((w) => (typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : ''))
     .find((m) => m !== '') ?? '';
   const ids = [...new Set(identical.flatMap((w) => (Array.isArray(w.option_ids) ? w.option_ids : []))
@@ -162,7 +163,7 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   }
   // Mixed: the other cause keeps its own reader, note and words; the identical reason is added, and a scoped withhold
   // widens to the identical options too (an every-option withhold already covers them).
-  const base = goalChanceFromWarnings(others, opening, guided);
+  const base = goalChanceFromWarnings(others, opening, guidedText);
   return { ...base, say: words === '' ? base.say : `${base.say} ${words}`,
     ...(base.option_ids === undefined ? {} : { option_ids: [...new Set([...base.option_ids, ...ids])] }) };
 }
@@ -178,7 +179,7 @@ export const CHANCE_AS_GOAL_NOTE =
   + 'target for it, and never offer to size a link into it. Say `say` once, as written, when you describe the run.';
 
 /** The reader for every withhold code but gate 1 v2's; `warnings` is non-empty. */
-function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], opening: string, guided?: GuidedSizingDraft): GoalChanceWithheld {
+function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], opening: string, guidedText: string | null): GoalChanceWithheld {
   // S-E GOALS §2: a chance goal speaks alone, ahead of every other cause (`run-analysis.ts` writes no other beside it).
   const chance = warnings.find((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
   if (chance !== undefined) {
@@ -200,7 +201,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
       ...(scoped ? { option_ids: ids } : {}) };
     const others = warnings.filter(w => w.code !== GOAL_FIGURES_SHARE_APPROXIMATION);
     if (others.length === 0) return base;
-    const other = goalChanceFromWarnings(others, opening, guided);
+    const other = goalChanceFromWarnings(others, opening, guidedText);
     return { ...other, say: `${other.say} ${base.say}`, note: `${other.note} ${base.note}`,
       ...(other.option_ids !== undefined && base.option_ids !== undefined
         ? { option_ids: [...new Set([...other.option_ids, ...base.option_ids])] } : { option_ids: undefined }) };
@@ -208,8 +209,8 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
   // (S) speaks alone: CEE writes it only on a run PLoT did not already withhold (`run-analysis.ts`).
   if (warnings.every((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {
     const w = warnings[0]!;
-    const words = guided !== undefined && guided.total >= 2
-      ? [guidedSizingSentence(guided.total), guided.recovery_line].filter(Boolean).join(' ')
+    const words = guidedText !== null
+      ? guidedText
       : typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? opening : opening === RANGE_OPENING ? `${opening} ${words}` : words,
@@ -255,7 +256,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
     && warnings.some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
   const targetSay = warnings.filter((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)
     .map((w) => (typeof w.say === 'string' ? w.say.trim() : '')).find((s) => s !== '');
-  if (guided !== undefined && guided.total >= 2) {
+  if (guidedText !== null) {
     // DL round 2: level FIRST, then the ONE guided sizing list. The target producer supplies only its existing level
     // question, never its separate link clause. Older stored Runs retain that exact question in their say/message.
     const levelAsk = warnings.filter(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE).map(w => {
@@ -264,7 +265,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
       return words.match(/What's today's level of [^?]*\?/u)?.[0];
     }).find((s): s is string => typeof s === 'string' && s !== '');
     const say = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
-      levelAsk, guidedSizingSentence(guided.total), guided.recovery_line].filter((r): r is string => typeof r === 'string' && r !== '').join(' ');
+      levelAsk, guidedText].filter((r): r is string => typeof r === 'string' && r !== '').join(' ');
     const nodeIds = [...new Set(warnings.flatMap(w => Array.isArray(w.node_ids) ? w.node_ids : []).filter((id): id is string => typeof id === 'string'))];
     return { withheld: true, say, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
   }

@@ -121,11 +121,22 @@ describe('r11 option, scored goal and displayed value identity', () => {
     const text = 'Raise to £59: 67%.';
     expect(apply(text, run({ option_labels_by_option: { raise: line.label, keep: line.label } }))).toBe(text);
   });
-  it('requires a scored goal id on analysis_result, even beside a sole graph goal', () => {
+  it.each(['enrichment', 'stored'])('a legacy %s licence binds its named option and exact value without a scored-goal snapshot', source => {
     const { goal_node_id: _id, goal_label: _label, ...historical } = licence;
-    const noIdentity = { enrichment: { inference_warnings: [historical] } };
+    const noIdentity = source === 'enrichment'
+      ? { enrichment: { inference_warnings: [historical] } } : { inference_warnings: [historical] };
     const text = 'Raise to £59: 67%.';
-    expect(apply(text, noIdentity, { ...graph, goal_node_id: 'mrr' })).toBe(text);
+    expect(apply(text, noIdentity, { ...graph, goal_node_id: 'mrr' })).toBe(line.chance);
+    const risk = 'The chance of supplier failure is 67%.';
+    expect(apply(`${text}\n${risk}\n${line.chance}`, noIdentity)).toBe(`\n${risk}\n${line.chance}`);
+    for (const unrelated of ['Raise to £59: 65%.', risk, 'Monthly recurring revenue reaches its target in 67% of model runs.']) {
+      expect(apply(unrelated, noIdentity)).toBe(unrelated);
+    }
+  });
+  it('a legacy licence can bind a graph label when no label snapshot was stored', () => {
+    const { goal_node_id: _id, goal_label: _label, option_labels_by_option: _labels, ...historical } = licence;
+    const noIdentity = { enrichment: { inference_warnings: [historical] } };
+    expect(apply('Raise to £59: 67%.', noIdentity)).toBe(line.chance);
   });
   it('rejects conflicting scored goal identities on the same analysis_result', () => {
     const text = 'Raise to £59: 67%.';

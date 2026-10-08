@@ -17,6 +17,8 @@ import { describe, it, expect } from 'vitest';
 
 const ROUTE = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
 const RELOAD = readFileSync(new URL('../../../routes/assist.v1.scenario-graph.ts', import.meta.url), 'utf8');
+const WITHHOLDER = readFileSync(new URL('../goal-chance-withheld.ts', import.meta.url), 'utf8');
+const INSPECTOR = readFileSync(new URL('../../system-events/dispatch.ts', import.meta.url), 'utf8');
 const CALL = 'const composedReply = composeReplyShape(';
 const REGISTRATION = "app.post('/agent/v1/turn'";
 /** Functions that compose or rewrite reply text upstream of the composer; none may run after it. */
@@ -25,6 +27,7 @@ const TEXT_WRITERS = [
   'withA7AfterGate(', 'enforceAgentLaneLeaderClaimsAtWire(', 'enforceLeaderLicenceAtFinalEgress(',
   'withoutDriverAbsenceClaimsAtEgress(', 'withLeftOutOptionCorrectionAtEgress(',
   'withEstimateGoalPointsAtEgress(',
+  'guidedSizingReplyText(',
   'withoutProposalIds(', 'composeDirectAnswerResponse(', 'textAtRest(',
 ];
 
@@ -39,6 +42,17 @@ const textWrites = (slice: string): string[] => [
   ...[...slice.matchAll(/\bassistant_text\s*:\s*([^,}\n]{1,80})/g)].map((m) => `assistant_text: ${m[1]!.trim()}`),
   ...[...slice.matchAll(/\.assistant_text\s*=[^=]/g)].map((m) => m[0]),
 ];
+const GP_PROGRESS_APPEND = 'if (guidedReplyText.progress !== null) text = `${text} ${guidedReplyText.progress}`;';
+const pinGuidedBeforeComposer = (src: string): void => {
+  const ordered = [
+    'const guidedReplyText = guidedSizingReplyText(',
+    '? goalChanceWithheldForAgent(analysisResult, readbackGraph, guidedDraftForRun, guidedReplyText.guided)',
+    GP_PROGRESS_APPEND,
+    CALL,
+  ].map(part => src.indexOf(part));
+  for (const at of ordered) expect(at, 'GP producer, both text consumers and composer must exist').toBeGreaterThan(-1);
+  for (let i = 1; i < ordered.length; i++) expect(ordered[i - 1], 'GP text must precede the final composer').toBeLessThan(ordered[i]!);
+};
 
 describe('the reply composer is the ONE last writer of `assistant_text` on the Agent route', () => {
   // ⭐ 2b-0 (DL APPROVE #2783): the current-Run REPLAY applies the SAME composer to the same typed parts, and its shape
@@ -78,6 +92,29 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     expect(liveAt).toBeLessThan(ROUTE.indexOf(CALL));
     expect(liveAt).toBeLessThan(ROUTE.indexOf('const sentText = String(wireBody.assistant_text ?? text);'));
     expect(RELOAD).toContain('analysisResult: authority.analysisResult, graph: authority.graph, current,');
+  });
+
+  it('r12: the shared GP guided words and progress append precede the final composer', () => {
+    pinGuidedBeforeComposer(ROUTE);
+    const replayTextAt = ROUTE.indexOf('const replayGuidedText = guidedSizingReplyText(');
+    const replayConsumerAt = ROUTE.indexOf('const say = goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText)');
+    const replayComposerAt = ROUTE.indexOf(REPLAY_CALL);
+    expect(replayTextAt).toBeGreaterThan(-1);
+    expect(replayConsumerAt).toBeGreaterThan(replayTextAt);
+    expect(replayComposerAt).toBeGreaterThan(replayConsumerAt);
+    expect(afterComposer(ROUTE)).not.toContain('guidedReplyText.progress');
+    expect(WITHHOLDER).not.toContain('guidedSizingSentence(');
+    expect(ROUTE).not.toContain('${sizingProgress.progress_line}');
+    expect(INSPECTOR).toContain('const replyText = guidedSizingReplyText(undefined, progress);');
+    expect(INSPECTOR).toContain('assistant_text: `${response.assistant_text}\\n\\n${replyText.progress}`');
+  });
+
+  it('r12-MUTANT (in memory): moving the GP append after the composer breaks the index-order pin', () => {
+    const withoutAppend = ROUTE.replace(GP_PROGRESS_APPEND, '');
+    const at = withoutAppend.indexOf('    const sentText = String(wireBody.assistant_text ?? text);');
+    expect(at).toBeGreaterThan(withoutAppend.indexOf(CALL));
+    const mutant = `${withoutAppend.slice(0, at)}    ${GP_PROGRESS_APPEND}\n${withoutAppend.slice(at)}`;
+    expect(() => pinGuidedBeforeComposer(mutant)).toThrow();
   });
 
   it('2-MUTANT (in memory): a text write placed after the composer is caught', () => {

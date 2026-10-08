@@ -8,7 +8,8 @@ const plain = (s: string): string => foldQuotes(s).replace(/['"`*_]/g, '').repla
 
 /**
  * The shared live, stored-answer replay and conversation-reload boundary. Only a current licence's own percentage
- * AND an unambiguous option on its scored goal identify a goal point. All other sentence bytes and whitespace stay untouched.
+ * AND an unambiguous option identify a goal point. A recorded scored goal additionally binds goal-only narration;
+ * a legacy licence without that snapshot binds its named option and exact value itself. All other sentence bytes and whitespace stay untouched.
  * The screen producer owns the replacement, including its attribution and notes; each option is said once.
  */
 export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unknown }>(body: T, context: {
@@ -26,7 +27,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const goalIds = new Set([licence.goal_node_id, rec(run?.input_snapshot)?.goal_node_id,
     rec(enrichment?.input_snapshot)?.goal_node_id, run?.goal_node_id, enrichment?.goal_node_id]
     .filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
-  if (goalIds.size !== 1) return body;
+  if (goalIds.size > 1) return body;
   const [goalId] = goalIds;
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
@@ -108,8 +109,8 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         const percentages = [...figures.matchAll(/((?:(?:(?:no\s+)?(?:less|more|greater)\s+than|at\s+(?:least|most)|up\s+to|under|over|below|above|[<>]=?|[≤≥]|about|roughly|around|approximately|circa)\s*)*)([-+]?(?:\d[\d,]*(?:\.\d+)?|\.\d+))\s*(?:%|\bpercent\b|\bper\s+cent\b)/g)];
         // A named option binds its ID, even when another option licenses this percentage. A named other goal conflicts.
         const namedOptions = optionLabels.filter(o => names(subject, o.label));
-        if (namedOptions.length > 1 || goals.some(g => g?.id !== goalId
-          && typeof g?.label === 'string' && names(subject, g.label))) continue;
+        if (namedOptions.length > 1 || (goalId !== undefined && goals.some(g => g?.id !== goalId
+          && typeof g?.label === 'string' && names(subject, g.label)))) continue;
         const matched = lines.filter(l => {
           const pct = rec(licence.pct_by_option)?.[l.option_id];
           const valueMatches = percentages.some(p => {
@@ -122,7 +123,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
                 || (pct === 100 && value === 99 && ['>', 'more than'].includes(prefix));
           });
           return valueMatches && (namedOptions.length === 1 ? namedOptions[0]!.id === l.option_id
-            : typeof goalLabel === 'string' && names(subject, goalLabel));
+            : goalId !== undefined && typeof goalLabel === 'string' && names(subject, goalLabel));
         });
         // Goal-only narration must resolve exactly one (option_id, scored goal_id, displayed value), never guess a tie.
         if (matched.length !== 1) continue;

@@ -50,6 +50,16 @@ export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recover
 export const guidedSizingSentence = (total: number): string =>
   `Not shown yet: ${total} links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.`;
 
+/** The exact GP words for this reply, from its one scoped draft and fresh progress read. */
+export function guidedSizingReplyText(draft: GuidedSizingDraft | undefined,
+  progress?: { readonly progress_line: string }): { progress: string | null; guided: string | null } {
+  return {
+    progress: progress?.progress_line ?? null,
+    guided: draft !== undefined && draft.total >= 2
+      ? [guidedSizingSentence(draft.total), draft.recovery_line].filter(Boolean).join(' ') : null,
+  };
+}
+
 /** N comes solely from ONE typed placeholder warning. The SAME case-(c) verdict supplies conversion carve-outs. */
 export function guidedSizingFromWarning(warning: unknown, graph: unknown, identityEvaluations?: readonly unknown[],
   optionIds?: readonly string[], scoredGoalId?: unknown): GuidedSizingDraft | undefined {
@@ -235,7 +245,7 @@ export function guidedSizingProgress(graph: unknown, run?: unknown): { draft: Gu
 }
 
 export function guidedSizingProgressLine(graph: unknown, run?: unknown): string | null {
-  return guidedSizingProgress(graph, run)?.progress_line ?? null;
+  return guidedSizingReplyText(undefined, guidedSizingProgress(graph, run)).progress;
 }
 
 /** Bind the actual offered presses, never regenerate them for the hook. Identity is the caller's stored read + Run. */

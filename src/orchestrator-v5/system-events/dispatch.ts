@@ -3,7 +3,7 @@ import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
-import { bindGuidedSizing, guidedSizingActions, guidedSizingProgress } from '../agent-lane/guided-sizing.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingProgress, guidedSizingReplyText } from '../agent-lane/guided-sizing.js';
 import { runExplanationKeyForRecord } from '../agent-lane/run-explanation.js';
 
 /**
@@ -1513,6 +1513,7 @@ async function withInspectorSizingProgress(
     { type: 'analysis_result', computed_against_hash: freshness.graph_hash_at_run });
   // No stored Run means no guided-path offer exists to advance. Never invent a key.
   if (progress === undefined || runKey === null) return response;
+  const replyText = guidedSizingReplyText(undefined, progress);
   let recentReplies: Awaited<ReturnType<NonNullable<ReturnType<typeof getSessionStore>>['readRecent']>> = [];
   try {
     const rows = await getSessionStore()?.readRecent(payload.scenario_id, 20);
@@ -1524,7 +1525,8 @@ async function withInspectorSizingProgress(
     { remaining: progress.remaining, progress_line: progress.progress_line });
   return {
     ...response,
-    assistant_text: `${response.assistant_text}\n\n${progress.progress_line}`,
+    // This v2 functional system-event reply has no final reply-shape composer.
+    assistant_text: `${response.assistant_text}\n\n${replyText.progress}`,
     suggested_actions: [...response.suggested_actions, ...sizingActions],
     ...(guidedSizing !== undefined ? { guided_sizing: guidedSizing } : {}),
   };

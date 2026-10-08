@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
+import { guidedSizingReplyText } from '../guided-sizing.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../orchestrator/context/option-result-source.js';
@@ -355,6 +356,21 @@ describe('GUIDED PATH: multi-link withhold', () => {
 });
 
 describe('GUIDED PATH: progress from the stored graph after sizing', () => {
+  it('r12: one reply-text export preserves the exact guided and progress words, including recovery', () => {
+    const { graph, run } = draw2();
+    const draft = api.guidedSizingForRun?.(run, graph);
+    expect(draft).toBeDefined();
+    expect(guidedSizingReplyText(draft)).toEqual({ guided: WORDS_3, progress: null });
+    storedSize(graph, THREE[0].from, THREE[0].to);
+    const fresh = api.guidedSizingProgress?.(graph);
+    expect(fresh).toBeDefined();
+    expect(guidedSizingReplyText({ ...fresh!.draft, recovery_line: 'Existing recovery.' }, fresh))
+      .toEqual({ guided: `${WORDS_2} Existing recovery.`, progress: '2 more to go; with 1 left, Olumi can show a range.' });
+    expect(guidedSizingReplyText(undefined, fresh)).toEqual({ guided: null, progress: fresh!.progress_line });
+    expect(guidedSizingReplyText(undefined)).toEqual({ guided: null, progress: null });
+    expect(guidedSizingReplyText({ v: 1, total: 1, links: [] })).toEqual({ guided: null, progress: null });
+  });
+
   it('AFTER ONE SIZING: 2 more to go', () => {
     const { graph } = draw2();
     storedSize(graph, THREE[0].from, THREE[0].to);
