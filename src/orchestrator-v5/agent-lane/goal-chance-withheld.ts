@@ -288,7 +288,14 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
  * sentence verbatim, it is owed as its own line (`withDisclosures`). The latest run decides — an explicit Run, or the first
  * pass inside a build — and a later run that did not withhold owes nothing.
  */
-export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+export function goalChanceLineOwed(
+  toolResults: readonly unknown[], replyText: string,
+  opts: { readonly gateReasonOwed?: boolean; readonly identityAskOwed?: boolean } = {},
+): string | null {
+  // ONE reply contract: the typed identity ask owns an unconfirmed reading, even when the narrator already echoed
+  // it. A gate that is saying the same goal-chance cause owns that disclosure instead. Suppress here, at the producer,
+  // before any owed line exists; the composer never filters a duplicate concept out of the finished reply.
+  if (identityAskLineOwed(toolResults, '') !== null || opts.identityAskOwed === true || opts.gateReasonOwed === true) return null;
   const say = goalChanceSayFromThisTurn(toolResults);
   if (say === null || sameWordsIn(replyText, say)) return null;
   // MC D1 (Codex buddy r2 P2): a composite line (the opening + a warning's own words) owes only what the reply does not

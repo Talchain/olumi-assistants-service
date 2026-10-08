@@ -36,6 +36,26 @@ describe('goalChanceLineOwed', () => {
     expect(goalChanceLineOwed([build], PARAPHRASE)).toBe(SAY);
   });
 
+  it('ONE reply: a typed identity ask owns the unconfirmed reading, including when the narrator already echoed it', () => {
+    const ask = 'Olumi reads Total cost as Staff cost + Cloud cost. Is that how you work it out?';
+    const run = { ...runWithheld, identity_ask_say: ask };
+    expect(goalChanceLineOwed([run], 'The run is ready.')).toBeNull();
+    expect(goalChanceLineOwed([run], `The run is ready. ${ask}`)).toBeNull();
+    // A later Run without an identity ask clears its ownership; the reason is then owed in its own right.
+    expect(goalChanceLineOwed([run, runWithheld], 'The run is ready.')).toBe(SAY);
+  });
+
+  it('ONE reply: the gate owns its typed goal-chance reason, so the owed producer adds nothing beside it', () => {
+    expect(goalChanceLineOwed([runWithheld], PARAPHRASE, { gateReasonOwed: true })).toBeNull();
+    expect(goalChanceLineOwed([runWithheld], PARAPHRASE, { gateReasonOwed: false })).toBe(SAY);
+  });
+
+  it('ONE reply: a surviving typed identity card owns a build first pass without identity_ask_say', () => {
+    const build: Json = { ok: true, mutated: true, first_analysis: { ran: true, goal_chance: runWithheld.goal_chance } };
+    expect(goalChanceLineOwed([build], PARAPHRASE, { gateReasonOwed: false, identityAskOwed: true })).toBeNull();
+    expect(goalChanceLineOwed([build], PARAPHRASE, { gateReasonOwed: false, identityAskOwed: false })).toBe(SAY);
+  });
+
   it('the LATEST run decides: a later run that did not withhold owes nothing; a later withheld run owes its own', () => {
     expect(goalChanceLineOwed([runWithheld, runShown], PARAPHRASE)).toBeNull();
     expect(goalChanceLineOwed([runShown, runWithheld], PARAPHRASE)).toBe(SAY);
@@ -69,10 +89,12 @@ describe('goalChanceLineOwed', () => {
 
   it('WIRING: the route appends it with the owed disclosures, checked against the Agent\'s own text', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    // MC D1 (c): the Run's #416 ask is owed right after the goal-chance line, in the same list.
-    expect(src).toContain('...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),\n'
-      + '        // MC D1 (c): the Run\'s #416 ask, after its reason (never a bare "couldn\'t calculate it" with nothing to answer).\n'
-      + '        ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),\n      ];');
+    // ONE reply: the producer runs after the gate, so actual typed gate ownership decides whether a second line is owed.
+    expect(src).toContain("goalChanceLineOwed(result.tool_results, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance, identityAskOwed: identityAskOwnedByCard });");
+    expect(src).toContain('wireBody.assistant_text.includes(gateGoalChance.why)');
+    expect(src).toContain('owed.push(...goalLines);');
+    expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
+    expect(src).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     // Exact host-copy display normalisation preserves the narrator and the same owed lines.
     expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
     expect(src).toContain('withDisclosures(narrationText, owed)');

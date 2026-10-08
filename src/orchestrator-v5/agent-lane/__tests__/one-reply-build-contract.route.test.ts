@@ -1,0 +1,199 @@
+/** The real build route, with Paul's captured graph and narrator words; no provider is contacted. */
+import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { log } from '../../../utils/telemetry.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { sentenceMultiset } from '../reply/compose-reply.js';
+import { actionFactsOf } from '../actions/state.js';
+import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+
+type Rec = Record<string, unknown>;
+type Graph = { nodes: Rec[]; edges: Rec[] };
+type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_actions: Rec[];
+  pending_actions: { action: Rec }[]; action_bar?: { priority: Rec[]; more: Rec[] };
+  _agent: { tool_calls: { name: string; ok: boolean }[] } };
+const FX = JSON.parse(readFileSync(new URL('./fixtures/one-reply-paul-pricing.json', import.meta.url), 'utf8')) as {
+  brief: string; narrator: string; read: Rec & { graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec };
+};
+let currentRead = FX.read;
+let lastComposeInput: unknown;
+let saved: Graph = { nodes: [], edges: [] };
+let askedToBuild = false;
+// COMPLETE retains final prose, not the provider's raw message. Include its captured goal-chance explanation
+// so the preservation row can prove it remains in detail. The paired producer row below leaves it to the host.
+const GOAL_CHANCE_CAPTURE = "This run doesn’t show how often each option reaches the goal’s target. Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.";
+let narrator = `${FX.narrator}\n\n${GOAL_CHANCE_CAPTURE}`;
+const rows = new Map<string, Rec>();
+const store = {
+  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  readCommittedTurn: vi.fn(async (_sid: string, id: string) => rows.get(id) ?? null),
+  readRecent: vi.fn(async () => []), readFactsFor: vi.fn(async () => []),
+  readAnalysisInvalidatedAt: vi.fn(async () => null),
+  append: vi.fn(async (w: Rec) => {
+    const id = String(w.turn_id);
+    rows.set(id, { id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null,
+      user_message: w.userMessage ?? null, pending_actions: w.pending_actions ?? [], llm_calls_used: w.llm_calls_used ?? 0 });
+    return { id };
+  }),
+};
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
+vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
+  ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
+}));
+vi.mock('../reply/compose-reply.js', async (original) => {
+  const actual = await original<typeof import('../reply/compose-reply.js')>();
+  return { ...actual, composeReplyShape: (input: Parameters<typeof actual.composeReplyShape>[0]) => {
+    lastComposeInput = structuredClone(input);
+    return actual.composeReplyShape(input);
+  } };
+});
+// Reuse the event-risk build-route harness. Only construction's external generation/storage is replaced:
+// the actual capability, first analysis, identity card, final readback and reply producers still run.
+vi.mock('../runtime/build-model.js', async (original) => ({
+  ...await original<Record<string, unknown>>(),
+  buildModelFromBrief: async (scenarioId: string, _brief: unknown,
+    dispatch: (path: string, body: unknown) => Promise<unknown>) => {
+    await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, { graph: structuredClone(FX.read.graph) });
+    return { ok: true, mutated: true, model_version: { version_number: 1 }, graph_hash: FX.read.graph_hash };
+  },
+}));
+vi.mock('../../drafter-raw/index.js', () => ({
+  buildWithDrafterRawRecord: async (_ctx: unknown, _brief: unknown, _op: unknown, call: unknown,
+    build: (drafter: unknown) => Promise<unknown>) => build(call),
+}));
+vi.mock('../../handlers/chip-click-dispatch.js', async (original) => ({
+  ...await original<Record<string, unknown>>(),
+  dispatchChipClickRunAnalysis: async () => ({ outcome: 'ok', commitPerformed: true, graph: saved, mayNameLeadingOption: false,
+    analysisReady: (currentRead.current_read as Rec)?.analysis_ready,
+    response: { response_version: 2, assistant_text: 'A provisional first pass cannot put an option forward yet.',
+      suggested_actions: [], insights: [], blocks: [currentRead.analysis_result], analysis_state: currentRead.analysis_state } }),
+}));
+const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
+const face = (shape: AnswerShape) => [shape.headline, ...shape.bullets].join('\n');
+const count = (text: string, phrase: string) => text.split(phrase).length - 1;
+const words = (text: string) => text.trim().split(/\s+/u).filter(Boolean).length;
+
+describe('ONE reply contract through the build route', () => {
+  let app: FastifyInstance;
+  let info: ReturnType<typeof vi.spyOn>;
+  beforeAll(async () => {
+    vi.stubEnv('AGENT_LANE_ENABLED', 'true'); vi.stubEnv('AGENT_LANE_PREVIEW', 'false');
+    info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      if (!String(url).includes('openai')) throw new Error('Unexpected external call');
+      if (!askedToBuild) {
+        askedToBuild = true;
+        return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'build_model_from_brief',
+          call_id: 'build', arguments: JSON.stringify({ brief: FX.brief }) }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify(say(narrator)), { status: 200 });
+    }));
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    app = Fastify({ logger: false });
+    app.post('/assist/v1/scenarios/:id/graph', async () => saved.nodes.length === 0
+      ? { graph: saved, graph_hash: 'empty', analysis_state: { run_state: { kind: 'never_run' } } }
+      : { ...currentRead, graph: saved });
+    app.post('/assist/v1/scenarios/:id/graph/register', async req => {
+      saved = (req.body as { graph: Graph }).graph;
+      return { registered: true, graph_hash: FX.read.graph_hash, model_version: { version_number: 1 } };
+    });
+    app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
+      graph_hash: currentRead.graph_hash, blocks: [currentRead.analysis_result], analysis_state: currentRead.analysis_state,
+      analysis_ready: (currentRead.current_read as Rec)?.analysis_ready }));
+    app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [], next_cursor: null }));
+    await app.register(agentV1TurnRoute); await app.ready();
+  }, 120_000);
+  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+  beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); askedToBuild = false;
+    narrator = process.env.ONE_REPLY_CAPTURE_BASE === '1' ? FX.narrator : `${FX.narrator}\n\n${GOAL_CHANCE_CAPTURE}`;
+    currentRead = FX.read; lastComposeInput = undefined; info.mockClear(); });
+  async function buildTurn() {
+    const turnId = randomUUID();
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: turnId, message: FX.brief,
+    } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
+    expect(rows.get(turnId)?.assistant_message).toBe(body.assistant_text);
+    return body;
+  }
+
+  it('R1 Paul: one concise face, typed-card question in detail, RC4 census, plain units', async () => {
+    const body = await buildTurn();
+    const shapeLog = info.mock.calls.map(([entry]) => entry as Rec).find(e => e.event === 'agent_lane.reply_shaped');
+    const facts = actionFactsOf({ scenarioId: randomUUID(), graph: FX.read.graph, graphHash: FX.read.graph_hash,
+      analysisState: FX.read.analysis_state, analysisResult: FX.read.analysis_result,
+      analysisReady: (FX.read.current_read as Rec)?.analysis_ready });
+    expect(facts.olumiEstimates).not.toBeNull();
+    const wholeGraphAuthoredCount = deriveOlumiAuthoredValues(FX.read.graph).length;
+    expect(wholeGraphAuthoredCount, 'M3 control: whole-model authored figures differ from RC4 result census').not.toBe(facts.olumiEstimates!.count);
+    if (process.env.ONE_REPLY_CAPTURE_BASE === '1') {
+      writeFileSync('/private/tmp/accel-cs-contract-r1-base.json', JSON.stringify({ log: shapeLog,
+        census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
+      expect(shapeLog).toMatchObject({ outcome: 'kept_whole', reason: 'proposal' });
+      return;
+    }
+    writeFileSync('/private/tmp/accel-cs-contract-r1-final-debug.json', JSON.stringify({ input: lastComposeInput, log: shapeLog,
+      census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
+    expect(body._answer_shape, JSON.stringify(shapeLog)).toBeDefined();
+    const shown = face(body._answer_shape!);
+    expect(shown).toContain(`Olumi's estimates: ${facts.olumiEstimates!.count}, see Check estimates.`);
+    expect(words(shown)).toBeLessThanOrEqual(80);
+    const identity = "Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-induced churn’. Is that how you work it out?";
+    for (const phrase of ['Is that how you work it out?', identity, "hasn't been confirmed", 'current level']) {
+      expect(count(shown, phrase), `off face: ${phrase}`).toBe(0);
+      expect(count(body.assistant_text, phrase), `said once: ${phrase}`).toBe(1);
+    }
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape!));
+    const sentences = sentenceMultiset(body.assistant_text);
+    for (const sentence of new Set(sentences)) expect(sentences.filter(s => s === sentence), sentence).toHaveLength(1);
+    expect(body.assistant_text).not.toContain('£/subscriber/month');
+    expect(body.assistant_text).not.toContain('£/month');
+    writeFileSync('/private/tmp/accel-cs-contract-r1-final.json', JSON.stringify({ log: shapeLog, face: shown,
+      words: words(shown), census: facts.olumiEstimates!.count, wholeGraphAuthoredCount, body }, null, 2));
+  });
+
+  it('R1 producer control: the identity card owes no second goal-chance explanation', async () => {
+    narrator = FX.narrator;
+    const body = await buildTurn();
+    expect(body._answer_shape).toBeDefined();
+    expect(body.assistant_text).not.toContain("hasn't been confirmed");
+    expect(body.assistant_text).not.toContain('This run doesn’t show how often');
+    expect(body.suggested_actions).toContainEqual(expect.objectContaining({ label: "Yes, that's how" }));
+    expect(words(face(body._answer_shape!))).toBeLessThanOrEqual(80);
+  });
+
+  it('R3 withheld Run: its current-level reason is the face finding with one next step', async () => {
+    currentRead = structuredClone(FX.read);
+    saved = structuredClone(currentRead.graph);
+    const goal = saved.nodes.find(n => n.id === 'mrr')!;
+    delete goal.nonlinear_identity;
+    currentRead.graph = saved;
+    currentRead.graph_hash = computeAnalysisAffectingGraphHash(saved as never).slice(0, 16);
+    currentRead.analysis_result.computed_against_hash = currentRead.graph_hash;
+    (currentRead.current_read as Rec).computed_against_hash = currentRead.graph_hash;
+    (currentRead.current_read as Rec).current_analysis_hash = currentRead.graph_hash;
+    const enrichment = currentRead.analysis_result.enrichment as Rec;
+    enrichment.inference_warnings = (enrichment.inference_warnings as Rec[])
+      .filter(w => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE');
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'Run analysis.',
+      chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
+    } });
+    expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
+    const body = response.json() as Body;
+    expect(body._answer_shape, body.assistant_text).toBeDefined();
+    expect(body._answer_shape!.headline).toContain('current level');
+    const shown = face(body._answer_shape!);
+    expect(words(shown)).toBeLessThanOrEqual(80);
+    expect(count(shown, '?')).toBeLessThanOrEqual(1);
+    const currentLevelControl = body.action_bar?.priority.filter(a => a.action_id === 'set_current_level' && a.enabled === true) ?? [];
+    expect(count(shown, '?') + currentLevelControl.length, 'one resolving ask or current-level control').toBe(1);
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape!));
+    writeFileSync('/private/tmp/accel-cs-contract-r3-final.json', JSON.stringify({ face: shown, words: words(shown), body }, null, 2));
+  });
+});

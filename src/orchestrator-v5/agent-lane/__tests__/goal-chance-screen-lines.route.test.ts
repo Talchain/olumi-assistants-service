@@ -115,6 +115,11 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
+  const expectCoachingFaceBudget = (body: Body) => {
+    expect(body._answer_shape, 'R2 T1b coaching reply carries one shape').toBeDefined();
+    const shown = [body._answer_shape!.headline, ...body._answer_shape!.bullets].join(' ');
+    expect(shown.trim().split(/\s+/u).length, shown).toBeLessThanOrEqual(80);
+  };
   const shortfallScreenLine = () => {
     READ = structuredClone(READ_T1B);
     READ.analysis_state.leader_claim = { permitted: true };
@@ -224,6 +229,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
+    expectCoachingFaceBudget(b);
     // B15 (#2783, DL): the lead-in opens the headline and is directly followed by the first screen chance finding; it
     // still introduces the list and never ends the reply on a colon.
     const lead = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
@@ -237,6 +243,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run(`For reaching at least £126,000 monthly recurring revenue, on current information:\n\n${SCREEN_T1B.join(' ')}`), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
+    expectCoachingFaceBudget(b);
     expect(b.assistant_text.startsWith(`For reaching at least £126,000 monthly recurring revenue, on current information:\n${SCREEN_T1B[0]!}`), 'the first chance+depends unit keeps its question and still leads').toBe(true);
   });
 

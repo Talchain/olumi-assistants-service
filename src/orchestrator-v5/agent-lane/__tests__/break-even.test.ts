@@ -45,10 +45,10 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   it('RED (served F8): the paragraph the user reads answers the question, with the figures and whose they are', () => {
     const said = breakEvenLine(breakEvenFor(graph())!);
     expect(said).toContain('If MRR is Pro plan price × Pro paying subscribers (Olumi’s reading of your goal)');
-    expect(said).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
-    expect(said).toContain('At £59/month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
-    expect(said).toContain('At £54/month (Olumi’s estimate), MRR stays at least that while 273 or more');
-    expect(said).toContain('£20,000/month needs 339 at £59/month, 371 at £54/month or 409 at £49/month.');
+    expect(said).toContain('at £49 a month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700 a month today.');
+    expect(said).toContain('At £59 a month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
+    expect(said).toContain('At £54 a month (Olumi’s estimate), MRR stays at least that while 273 or more');
+    expect(said).toContain('£20,000 a month needs 339 at £59 a month, 371 at £54 a month or 409 at £49 a month.');
     expect(said).toContain('not the analysis ranking the options');
   });
 
@@ -56,9 +56,9 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     const be = breakEvenFor(graph((ns) => { (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP/subscriber/month'; }))!;
     expect(be.target, 'a "GBP/month" target meets a per-subscriber price').toBeDefined();
     const said = breakEvenLine(be);
-    expect(said).toContain('at £49/subscriber/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
-    expect(said).toContain('At £59/subscriber/month, MRR stays at least that while 250 or more of the 300 stay');
-    expect(said).toContain('£20,000/month needs 339 at £59/subscriber/month, 371 at £54/subscriber/month or 409 at £49/subscriber/month.');
+    expect(said).toContain('at £49 a month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700 a month today.');
+    expect(said).toContain('At £59 a month, MRR stays at least that while 250 or more of the 300 stay');
+    expect(said).toContain('£20,000 a month needs 339 at £59 a month, 371 at £54 a month or 409 at £49 a month.');
     expect(said).not.toMatch(/£[\d,]+\/subscriber\/month (?:today|needs)/);
   });
 
@@ -68,33 +68,33 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     // PRECONDITION: this is the served shape — the wire's `_agent.break_even` carried this unit and today's figure.
     expect(be).toMatchObject({ unit: 'GBP/subscriber/month', baseline_price: 49, baseline_volume: 200, baseline_goal: 9_800 });
     const said = breakEvenLine(be);
-    expect(said).toContain('MRR is £9,800/month today.');
+    expect(said).toContain('MRR is £9,800 a month today.');
     expect(said).not.toContain('£9,800/subscriber/month');
-    expect(said).toContain('£20,000/month needs 339 at £59/subscriber/month');
+    expect(said).toContain('£20,000 a month needs 339 at £59 a month');
   });
 
-  it('CONTRAST (the other served run, 053639Z/01, price GBP/month): the paragraph is byte-identical to what the wire carried', () => {
+  it('CONTRAST (the other served run, 053639Z/01, price GBP/month): only the money unit wording changes', () => {
     const f = JSON.parse(readFileSync(new URL('./fixtures/served-per-month-price-263dbd5.json', import.meta.url), 'utf8')) as { served_paragraph: string; nodes: unknown[]; edges: unknown[] };
-    expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph);
+    expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph.replace(/\/month/g, ' a month'));
   });
 
   it('RED (MG B1): a numbered period stays — "GBP per subscriber per 12 months" gives a readable total, not "GBP months"', () => {
     const said = breakEvenLine(breakEvenFor(graph((ns) => {
       (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP per subscriber per 12 months';
     }))!);
-    expect(said).toContain('MRR is £14,700/12 months today.');
+    expect(said).toContain('MRR is £14,700 per 12 months today.');
     expect(said).not.toContain('GBP months');
   });
 
-  it('CONTRAST: "GBP per seat per month" drops only the seat; a price with no per-unit word is unchanged', () => {
+  it('CONTRAST: "GBP per seat per month" and the plain monthly price both say money a month', () => {
     const perSeat = breakEvenLine(breakEvenFor(graph((ns) => {
       (node(ns, 'pro_plan_price').observed_state as Record<string, unknown>).unit = 'GBP per seat per month';
       node(ns, 'mrr').goal_threshold_unit = 'GBP per month';
     }))!);
-    expect(perSeat).toContain('at £49/seat/month and 300');
-    expect(perSeat).toContain('MRR is £14,700/month today.');
-    expect(perSeat).toContain('£20,000/month needs 339');
-    expect(breakEvenLine(breakEvenFor(graph())!)).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
+    expect(perSeat).toContain('at £49 a month and 300');
+    expect(perSeat).toContain('MRR is £14,700 a month today.');
+    expect(perSeat).toContain('£20,000 a month needs 339');
+    expect(breakEvenLine(breakEvenFor(graph())!)).toContain('at £49 a month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700 a month today.');
   });
 
   it('CONTRAST: no product identity on the goal → nothing (an additive goal is the analysis\'s to answer)', () => {
@@ -196,18 +196,18 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
 
   it('RED (F3, served 013636Z): an unscored goal target is named, with why, from the typed reason and the stored target', () => {
     expect(goalNotCheckedLine(graph(), NOT_CONVERTIBLE))
-      .toBe('Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.');
+      .toBe('Your MRR target of \u00a320,000 a month is not checked yet: the model has no current MRR figure to measure it against.');
   });
 
   it('CONTRAST (F3, R&C B1): a goal that HAS a current figure is named with no cause — the code has seven reasons', () => {
     const said = goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').observed_state = { baseline: 0.49, raw_value: 9800, unit: 'GBP/month' }; }), NOT_CONVERTIBLE);
-    expect(said).toBe('Your MRR target of \u00a320,000/month was not checked in this analysis.');
+    expect(said).toBe('Your MRR target of \u00a320,000 a month was not checked in this analysis.');
     expect(said).not.toContain('no current');
   });
 
   it('RED (served 0592c43): a target stored as "GBP per month" reads as the reply\'s own money, not "20,000 GBP per month"', () => {
     expect(goalNotCheckedLine(graph((ns) => { node(ns, 'mrr').goal_threshold_unit = 'GBP per month'; }), NOT_CONVERTIBLE))
-      .toBe('Your MRR target of \u00a320,000/month is not checked yet: the model has no current MRR figure to measure it against.');
+      .toBe('Your MRR target of \u00a320,000 a month is not checked yet: the model has no current MRR figure to measure it against.');
   });
 
   it('CONTRAST: a unit that is not a known currency is written as stored, "per" and all', () => {

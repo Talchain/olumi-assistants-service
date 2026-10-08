@@ -19,8 +19,9 @@ import { nonlinearIdentityForAgent } from './admit-model.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { deriveEmittedGoalDirection, heldComparatorSense, readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
-import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { totalUnitOfPerUnitPrice } from '../../cee/provenance/stated-amounts.js';
+import { readMoneyTotal, readUnitParts } from './same-unit.js';
+import { sayFigure } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { thresholdReasonOf, type ThresholdReason } from '../compose/claim-safety-cage.js';
 
@@ -167,25 +168,17 @@ export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): B
 }
 
 /**
- * The symbol for an ISO code, DERIVED from the one currency vocabulary (`utils/currency-alphabet.ts`, ROADMAP 2.972) —
- * never a second list here (`currency-vocabulary.union.test.ts` forbids the mirror). The first symbol the map gives the
- * code wins; a code the map does not know is written as the unit itself.
- */
-const symbolForCode = (code: string): string | undefined =>
-  Object.entries(CURRENCY_SYMBOL_TO_CODE).find(([, c]) => c === code.toUpperCase())?.[0];
-
-/**
- * A money figure in the price's unit ("GBP/month" → "£14,700/month"); otherwise the number and the unit. "GBP per month"
- * reads the same (served `0592c43`: the goal line said "20,000 GBP per month" beside the reply's own "£20k/month").
+ * The shared readers own the unit and the shared figure writer owns its display. A price is already named as the price
+ * factor here, so its per-item denominator is not repeated: "£49 a month", "£12,250 a month". Unread or numbered periods
+ * keep their stored words through `sayFigure`; no second unit grammar or currency formatter lives in this producer.
  */
 function money(n: number, unit: string): string {
-  const m = /^([A-Za-z]{3})\s*(?:(?:\/|\bper\s)\s*(.+))?$/i.exec(unit);
-  const digits = n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  const symbol = m === null ? undefined : symbolForCode(m[1]!);
-  if (m === null || symbol === undefined) return `${digits} ${unit}`;
-  // A lettered symbol reads with a space before the figure; a sign does not.
-  // "seat per month" reads "seat/month": one separator, as the slash form writes it.
-  return `${symbol}${/^[A-Za-z]+$/.test(symbol) ? ' ' : ''}${digits}${m[2] !== undefined ? `/${m[2].replace(/\s*\bper\s+/gi, '/')}` : ''}`;
+  const total = readMoneyTotal(totalUnitOfPerUnitPrice(unit), '');
+  if (total !== null) return sayFigure(n, `${total.code} a ${total.period}`);
+  const parts = readUnitParts(unit);
+  return parts?.kind === 'currency' && parts.scale === 1 && parts.period !== null
+    ? sayFigure(n, `${parts.code} a ${parts.period}`)
+    : sayFigure(n, unit);
 }
 const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' ? ' (an assumption you approved)' : ' (Olumi’s estimate)');
 /**
@@ -194,7 +187,7 @@ const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' 
  * subscribers" and "a loss of at most 248.388". A fractional count is said "about 1,469"; the stored level is untouched.
  */
 const count = (n: number): string =>
-  (Number.isInteger(n) ? n.toLocaleString('en-GB') : `about ${Math.round(n).toLocaleString('en-GB')}`);
+  (Number.isInteger(n) ? sayFigure(n, '') : `about ${sayFigure(Math.round(n), '')}`);
 /** "of the 1,300", or "of about 1,469" when the count is itself an estimate's quotient. */
 const ofThe = (n: number): string => `of ${Number.isInteger(n) ? 'the ' : ''}${count(n)}`;
 

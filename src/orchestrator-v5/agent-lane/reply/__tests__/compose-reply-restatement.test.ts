@@ -22,11 +22,12 @@ describe('D-03: the one composer moves narrator restatements by directed link id
     restatement,
     'Support cost affects MRR lost to support strain, whose strength is not sized in the model yet.',
     'The comparison turns on ‘Support cost’ to ‘MRR lost to support strain’.',
-  ])('keeps the typed closing on the face, and every sentence including "%s" in the reply', (narrator) => {
+  ])('keeps the typed closing in detail, and every sentence including "%s" in the reply', (narrator) => {
     const text = `${narrator} ${headline}\n\n${closing}\n\n${tail}`;
     const c = composeReplyShape({ text, graph, obligations: [obligation] });
     expect(c.outcome).toBe('shaped');
-    expect(face(c)).toContain(closing);
+    expect(face(c)).not.toContain(closing);
+    expect(c.shape!.detail).toContain(closing);
     expect(face(c)).not.toContain(narrator);
     expect(c.shape!.headline).toBe(headline);
     expect(c.shape!.detail).toContain(narrator);
@@ -39,7 +40,8 @@ describe('D-03: the one composer moves narrator restatements by directed link id
     const narrator = 'The link from ‘Monthly starter support…’ to ‘MRR lost to starter…’ has no size yet.';
     const text = `${narrator} ${headline}\n\n${typed}\n\n${tail}`;
     const c = composeReplyShape({ text, graph, obligations: [{ role: 'withheld_reason', text: typed, subjects: ['monthly_support→starter_loss'] }] });
-    expect(face(c)).toContain(typed);
+    expect(face(c)).not.toContain(typed);
+    expect(c.shape!.detail).toContain(typed);
     expect(face(c)).not.toContain(narrator);
     expect(c.shape!.detail).toContain(narrator);
     expect(c.measure?.restatements_to_detail).toBe(1);
@@ -60,9 +62,12 @@ describe('D-03: the one composer moves narrator restatements by directed link id
   it('CONTROL: no subjects gives the existing composer output, byte for byte', () => {
     const text = `${restatement} ${headline}\n\n${closing}\n\n${tail}`;
     const c = composeReplyShape({ text, graph, obligations: [{ role: 'withheld_reason', text: closing }] });
-    // Today's small-detail shortcut returns the original prose without attaching a sidecar.
+    // Subject-free typing cannot change the face selection; the closing still belongs in detail.
     expect(c).toEqual(composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: closing }] }));
-    expect(c).toMatchObject({ text, shape: null, outcome: 'already_in_shape', measure: { restatements_to_detail: 0 } });
+    expect(c).toMatchObject({ outcome: 'shaped', measure: { restatements_to_detail: 0 } });
+    expect(c.shape!.headline).toBe(restatement);
+    expect(c.shape!.detail).toContain(closing);
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset(text));
   });
 
   it('CONTROL: absent withheld text or subjects on a different role give no restatement licence', () => {
@@ -90,7 +95,8 @@ describe('D-03: the one composer moves narrator restatements by directed link id
       { role: 'withheld_reason', text: typed, subjects: obligation.subjects },
       { role: 'ask', text: 'What evidence sizes this link?' },
     ] });
-    expect(face(c)).toContain(typed);
+    expect(c.shape!.bullets).toEqual(['What evidence sizes this link?']);
+    expect(c.shape!.detail).toContain(closing);
     expect(face(c)).not.toContain(restatement);
     expect(face(c)).not.toContain(question);
     expect(c.shape!.detail).toContain(restatement);

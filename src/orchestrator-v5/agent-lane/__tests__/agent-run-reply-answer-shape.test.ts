@@ -1,14 +1,14 @@
 /**
  * ⭐ EVERY REPLY ON THE AGENT ROUTE ARRIVES IN ONE SHAPE (S-A REPLY SHAPE v1, lane COPY-SHAPE, 7 Oct 2026; Paul: "It was a
- * better length before with the three bullets as a construct"): a headline, at most three bullets, the rest under "More
+ * better length before with the three bullets as a construct"): a headline and the typed face lines, the rest under "More
  * detail" — through the real route, the ONE composer (`agent-lane/reply/compose-reply.ts`) at the end of
  * `routes/agent-v1-turn.ts`. It replaced `withAnalysisAnswerShape` (Run replies only, UI-SEM-090 / #69 5831886008).
  *
  * RE-PINNED ROWS, each against a DL ruling of 7 Oct (lane-copy-shape-DESIGN.md §8), never against the failure mode:
- *   · TYPED RESPONSE PROFILES by turn kind (AIE line review 6037446159 item 5): coaching (≤3 bullets, ≤75 face words),
+ *   · TYPED RESPONSE PROFILES by turn kind (AIE line review 6037446159 item 5): coaching (≤80 face words),
  *     method_step and proposal (never reshaped: rows 7a, 9 unchanged).
- *   · Must-face on coaching: the ONE ask, the withheld reason, the Explain caveat (#2565, bullet 1) and required evidence
- *     (the basis: B3-8). Receipts and status MAY move to detail (R1: rows 3, 12); every line is still kept exactly once.
+ *   · The face carries the finding, typed chance lines, the bounded estimates line and one next step. Unrelated caveats,
+ *     generic basis and narrator supporting points move to detail; every sentence is still kept exactly once.
  *   · A gate-edited reply (row 2), a reply with no result block (row 4) and a Run beside an earlier proposal's chip
  *     (row 7b) are shaped: the composer runs after every gate, so the "shape describes a stale text" reason is gone.
  *   · R2 a proposal that sets figures ships whole (rows 7a, 9: unchanged).
@@ -127,6 +127,7 @@ const unmarked = (line: string) => line.trim().replace(/^[•\-*]\s+/, '');
 /** The corpus's leak phrases are recorded with and without hyphens; compare with hyphens as spaces. */
 const unhyphen = (s: string) => s.replace(/-/g, ' ');
 const faceOf = (s: AnswerShape) => [s.headline, ...s.bullets].join('\n');
+const faceWords = (s: AnswerShape) => faceOf(s).split(/\s+/).filter(Boolean).length;
 
 describe('an analysis reply on the Agent route arrives headline first (`_answer_shape`)', () => {
   let app: FastifyInstance;
@@ -282,7 +283,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b._answer_shape, 'base keeps host_composed whole').toBeDefined();
     expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
     expect(b._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
-    expect(b._answer_shape!.bullets.length).toBeLessThanOrEqual(3);
+    expect(faceWords(b._answer_shape!)).toBeLessThanOrEqual(80);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
     expect(b._answer_shape!.detail).toContain(RUN_DISCLOSURE);
     for (const line of screen) {
@@ -454,7 +455,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('1. RUN: a bulleted served reply → `_answer_shape`; the text IS its derivation; headline = first sentence; the robustness caveat opens the face (#2565), then the reply’s own points in order within the 75-word face budget; nothing lost', async () => {
+  it('1. RUN: a bulleted served reply → `_answer_shape`; headline and typed lines face, unrelated caveat and narrator points remain in detail, nothing lost', async () => {
     const { b, turnId } = await typedRun(FOUR_BULLETS.text);
     expect(carriesResult(b), 'the control: the response carries the readback’s analysis_result').toBe(true);
     const shape = b._answer_shape;
@@ -466,11 +467,13 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(bulletLines, 'the control: the served reply has four bullets').toHaveLength(4);
     expect(shape!.headline).toBe('The model cannot yet support a yes/no on the £59 increase because it could not test your **monthly churn under 4%** requirement.');
     expect(FOUR_BULLETS.text.startsWith(shape!.headline), 'the headline is the reply’s own first sentence').toBe(true);
-    expect(shape!.bullets[0], 'the caveat on a named finding opens the face').toBe(ROBUSTNESS_CAVEAT);
-    const points = shape!.bullets.slice(1);
-    expect(points.length).toBeGreaterThan(0);
-    expect(points, 'the reply’s own points, in order').toEqual(bulletLines.slice(0, points.length));
-    expect(shape!.detail.startsWith(`- ${bulletLines[points.length]!}`), 'the next point goes behind More detail, verbatim').toBe(true);
+    expect(faceOf(shape!), 'an unbound firmness caveat names no typed face figure').not.toContain(ROBUSTNESS_CAVEAT);
+    expect(shape!.detail).toContain(ROBUSTNESS_CAVEAT);
+    expect(faceWords(shape!)).toBeLessThanOrEqual(80);
+    for (const point of bulletLines) {
+      expect(faceOf(shape!)).not.toContain(point);
+      expect(shape!.detail).toContain(point);
+    }
     expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the caveat is said exactly once').toHaveLength(2);
     for (const line of lines) expect(b.assistant_text, `kept: ${line.slice(0, 60)}…`).toContain(unmarked(line));
     expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the SAME text').toBe(b.assistant_text);
@@ -503,19 +506,14 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   it.each([
     ['one paragraph of two sentences', ONE_PARAGRAPH],
     ['four paragraphs', PARAGRAPHS_NO_BULLETS],
-  ])('3. RUN: a reply with NO bullets (%s): too little to hide → ships whole; longer → its sentences become the face bullets', async (what, text) => {
+  ])('3. RUN: a reply with NO bullets (%s): every coaching reply shapes and supporting sentences remain in detail', async (_what, text) => {
     const { b } = await typedRun(text);
     expect(carriesResult(b), 'the control: an analysis-bearing turn').toBe(true);
-    if (what === 'one paragraph of two sentences') {
-      // Headline + two bullets hold all of it: already in shape, byte-identical (the caveat follows the narrator).
-      expect('_answer_shape' in b).toBe(false);
-      expect(b.assistant_text).toBe(`${text} ${ROBUSTNESS_CAVEAT}`);
-      return;
-    }
     expect(b._answer_shape).toBeDefined();
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
-    expect(b._answer_shape!.bullets.length).toBeGreaterThan(0);
-    expect(b._answer_shape!.bullets.length).toBeLessThanOrEqual(3);
+    expect(faceWords(b._answer_shape!)).toBeLessThanOrEqual(80);
+    expect(faceOf(b._answer_shape!)).not.toContain(ROBUSTNESS_CAVEAT);
+    expect(b._answer_shape!.detail).toContain(ROBUSTNESS_CAVEAT);
     expect(text.startsWith(b._answer_shape!.headline)).toBe(true);
     expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the caveat is kept, once (R1: in detail)').toHaveLength(2);
     for (const para of text.split('\n\n')) for (const s of para.split(/(?<=[.!?])\s+(?=[A-Z])/)) expect(b.assistant_text).toContain(s.trim());
@@ -528,10 +526,12 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(without._answer_shape, 'base shipped this whole (Run replies only)').toBeDefined();
     expect(deriveAnswerTextFromShape(without._answer_shape!)).toBe(without.assistant_text);
     expect(without._answer_shape!.headline).toBe('The comparison cannot yet answer whether to raise Pro to £59, because neither of your decision constraints was successfully checked.');
-    // The narrator's points, in order, until the 75-word face budget (AIE §5); the rest sits in detail, verbatim.
-    const points = without._answer_shape!.bullets;
-    expect(points.length).toBeGreaterThan(0);
-    expect(CLEAN_BULLETS.text).toContain(`- ${points[0]!}`);
+    // The face carries typed lines only; ordinary narrator points remain in detail, even when there is spare budget.
+    expect(faceWords(without._answer_shape!)).toBeLessThanOrEqual(80);
+    for (const line of CLEAN_BULLETS.text.split('\n').filter((line) => /^\s*-\s+/.test(line))) {
+      expect(faceOf(without._answer_shape!)).not.toContain(unmarked(line));
+      expect(without._answer_shape!.detail).toContain(unmarked(line));
+    }
     expect(without._answer_shape!.detail).toContain('The next reasoning step is to define the churn limit on a measurable model quantity and supply the current MRR baseline.');
 
     readbackCarriesResult = true;
@@ -540,7 +540,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(withBlock._answer_shape, 'the control: with the block, the same shape').toEqual(without._answer_shape);
   });
 
-  it('5. RUN: a reply LONGER than the old collapse floor with no bullets → shaped; its first sentences are the face bullets', async () => {
+  it('5. RUN: a reply LONGER than the old collapse floor with no bullets → shaped; its supporting sentences remain in detail', async () => {
     const synth = synthesiseAnswerShapeFromText(LONG_NO_BULLETS);
     expect(deriveAnswerTextFromShape(synth!).length, 'the control: above the old floor').toBeGreaterThan(ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS);
 
@@ -550,8 +550,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     } };
     const { b } = await typedRun(LONG_NO_BULLETS);
     expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.bullets.length).toBeGreaterThan(0);
-    expect(b._answer_shape!.bullets.length).toBeLessThanOrEqual(3);
+    expect(faceWords(b._answer_shape!)).toBeLessThanOrEqual(80);
+    expect(b._answer_shape!.detail.length).toBeGreaterThan(0);
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
     expect(b._answer_shape!.headline).toBe(synth!.headline);
   });
@@ -614,11 +614,13 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
   });
 
-  it('B3-8 (AIE line review: required evidence is never hidden): the unavailable basis stays on the face, exactly once', async () => {
+  it('B3-8 ONE reply: the generic unavailable basis remains in detail, exactly once', async () => {
     readbackReady = FX.state.analysis_ready;
     const { b, turnId } = await typedRun(CLEAN_BULLETS.text);
     expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
-    if (b._answer_shape !== undefined) expect(faceOf(b._answer_shape), 'on the face').toContain(BASIS_UNAVAILABLE);
+    expect(b._answer_shape).toBeDefined();
+    expect(faceOf(b._answer_shape!)).not.toContain(BASIS_UNAVAILABLE);
+    expect(b._answer_shape!.detail).toContain(BASIS_UNAVAILABLE);
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 
@@ -638,7 +640,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
     expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
     expect(b.assistant_text).toContain(question);
-    expect('_answer_shape' in b).toBe(false);
+    expect(b._answer_shape).toBeDefined();
+    expect(faceOf(b._answer_shape!)).not.toContain(BASIS_UNAVAILABLE);
+    expect(b._answer_shape!.detail).toContain(BASIS_UNAVAILABLE);
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
     if (process.env.B3_WIRE_EVIDENCE) {
       b3WireCases.push({ source: 'actual Agent route; stubbed model/Run/readback', text: b.assistant_text, line: BASIS_UNAVAILABLE, question });
@@ -678,9 +682,13 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const b = await askedTurn(CLEAN_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a14', [runCall], 'Run the analysis and tell me what it says.') as Offered;
     expect(b._agent.tool_calls, 'the control: the Agent ran the analysis').toMatchObject([{ name: 'run_analysis', ok: true }]);
     expect(carriesResult(b), 'the control: the reply carries the result').toBe(true);
-    expect(b.assistant_text.split(TARGET_ASK), 'the control: the host appended its target ask, once').toHaveLength(2);
+    const [question, receipt] = sentencesOf(TARGET_ASK);
+    expect(b.assistant_text.split(question!), 'the one host question is retained once').toHaveLength(2);
+    expect(b.assistant_text.split(receipt!), 'the surrounding host receipt is retained once').toHaveLength(2);
     expect(b._answer_shape, 'base shipped this whole (a host line was in the text)').toBeDefined();
-    expect(b._answer_shape!.bullets.at(-1), 'the one ask closes the face').toBe(TARGET_ASK);
+    expect(b._answer_shape!.bullets.at(-1), 'one ask sentence closes the face').toBe(question);
+    expect(b._answer_shape!.detail).toContain(receipt!);
+    expect(faceWords(b._answer_shape!)).toBeLessThanOrEqual(80);
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
   });
 
