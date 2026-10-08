@@ -9,12 +9,62 @@ const SPACE = String.raw`[ \t]{0,8}`;
 const GAP = String.raw`[ \t]{1,8}`;
 const NUMBER = String.raw`[+-]?\d{1,6}(?:\.\d{1,6})?`;
 const PERCENT = String.raw`(?:%|percent\b)`;
+const ONE_IN = String.raw`(?:1|one)${GAP}in${GAP}${NUMBER}`;
 const PROBABILITY = new RegExp(
-  String.raw`(?<![\w.,+\-])(?:between${GAP}${NUMBER}${SPACE}(?:${PERCENT}${SPACE})?and${GAP}${NUMBER}${SPACE}${PERCENT}|${NUMBER}${SPACE}(?:${PERCENT}${SPACE})?(?:[-–]|${GAP}to${GAP})${SPACE}${NUMBER}${SPACE}${PERCENT}|(?:about${GAP})?${NUMBER}${SPACE}${PERCENT})`, 'gi',
+  String.raw`(?<![\w.,+\-])(?:${ONE_IN}|between${GAP}${NUMBER}${SPACE}(?:${PERCENT}${SPACE})?and${GAP}${NUMBER}${SPACE}${PERCENT}|${NUMBER}${SPACE}(?:${PERCENT}${SPACE})?(?:[-–]|${GAP}to${GAP})${SPACE}${NUMBER}${SPACE}${PERCENT}|(?:about${GAP})?${NUMBER}${SPACE}${PERCENT})`, 'gi',
 );
 const HORIZON = new RegExp(
   String.raw`\b(?:within|in|over|during)${GAP}(?:(?:the${GAP})?(?:next|coming|following)${GAP})?(\d{1,6}(?:\.\d{1,6})?|a|an|one)?${SPACE}(months?|years?|weeks?)\b`, 'gi',
 );
+
+/** Count syntax only: a likelihood without a stated time window remains an ordinary risk. */
+export function readStatedLikelihoodWithoutWindow(userText: string): boolean {
+  if (typeof userText !== 'string') return false;
+  return [...userText.matchAll(PROBABILITY)].length === 1 && [...userText.matchAll(HORIZON)].length === 0;
+}
+
+type FactorWordTrie = { children: Map<string, FactorWordTrie>; word?: string };
+const WORD_CHARACTER = /[\p{L}\p{N}_]/u;
+
+/** Match label words at user-word starts in one pass; classify only one Unicode code point at a time. */
+export function isFactorNamedByUser(label: string, userText: string): boolean {
+  if (typeof label !== 'string' || typeof userText !== 'string') return false;
+  const missing = new Set(label.toLowerCase().match(/\p{L}{3,}/gu) ?? []);
+  if (missing.size === 0) return false;
+  const root: FactorWordTrie = { children: new Map() };
+  for (const word of missing) {
+    let node = root;
+    for (const letter of word) {
+      let child = node.children.get(letter);
+      if (child === undefined) {
+        child = { children: new Map() };
+        node.children.set(letter, child);
+      }
+      node = child;
+    }
+    node.word = word;
+  }
+  const text = userText.toLowerCase();
+  let inWord = false;
+  let node: FactorWordTrie | undefined;
+  for (const character of text) {
+    if (!WORD_CHARACTER.test(character)) {
+      inWord = false;
+      node = undefined;
+      continue;
+    }
+    if (!inWord) {
+      inWord = true;
+      node = root;
+    }
+    node = node?.children.get(character);
+    if (node?.word !== undefined) {
+      missing.delete(node.word);
+      if (missing.size === 0) return true;
+    }
+  }
+  return false;
+}
 
 export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1T; quote: string } | undefined {
   if (typeof userText !== 'string') return undefined;
@@ -23,14 +73,30 @@ export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1
   if (probabilities.length !== 1 || horizons.length !== 1) return undefined;
   const probability = probabilities[0]!;
   const horizon = horizons[0]!;
-  // A bounded token reaches the existing numeric parser; never scan the whole hostile input there.
-  // The shared range parser reads unsigned bounds; refuse signed negative endpoints before it.
-  if (/^(?:(?:between|about)[ \t]{1,8})?-|(?:[-–]|\b(?:to|and))[ \t]{0,8}-/.test(probability[0])) return undefined;
-  const number = parseNumericValue(probability[0].replace(/percent\b/gi, '%'));
-  if (number === null || number.unit !== 'percent') return undefined;
-  const low = number.rangeMin ?? number.value;
-  const high = number.rangeMax ?? number.value;
-  if (low < 0 || high > 100 || low > high) return undefined;
+  let pLow: number;
+  let pHigh: number;
+  if (/^(?:1|one)[ \t]{1,8}in[ \t]{1,8}/i.test(probability[0])) {
+    // Invalid odds still count above, so another probability cannot silently win. Validate only a
+    // bounded token and suffix; the NUMBER cap must not turn a long/decimal denominator into odds.
+    const odds = /^(?:1|one)[ \t]{1,8}in[ \t]{1,8}(\d{1,4})$/i.exec(probability[0]);
+    const end = probability.index! + probability[0].length;
+    const suffix = userText.slice(end, end + 2);
+    if (odds === null || /^[\p{L}\p{N}_%]|^[.,]\p{N}/u.test(suffix)) return undefined;
+    const denominator = Number(odds[1]);
+    if (denominator < 2 || denominator > 1000) return undefined;
+    pLow = pHigh = Math.round(10000 / denominator) / 10000;
+  } else {
+    // A bounded token reaches the existing numeric parser; never scan the whole hostile input there.
+    // The shared range parser reads unsigned bounds; refuse signed negative endpoints before it.
+    if (/^(?:(?:between|about)[ \t]{1,8})?-|(?:[-–]|\b(?:to|and))[ \t]{0,8}-/.test(probability[0])) return undefined;
+    const number = parseNumericValue(probability[0].replace(/percent\b/gi, '%'));
+    if (number === null || number.unit !== 'percent') return undefined;
+    const low = number.rangeMin ?? number.value;
+    const high = number.rangeMax ?? number.value;
+    if (low < 0 || high > 100 || low > high) return undefined;
+    pLow = low / 100;
+    pHigh = high / 100;
+  }
   if (horizon[1] === undefined && !/\b(?:next|coming|following)\b/i.test(horizon[0])) return undefined;
   const count = horizon[1] === undefined || ['a', 'an', 'one'].includes(horizon[1].toLowerCase()) ? 1 : Number(horizon[1]);
   if (count <= 0) return undefined;
@@ -41,7 +107,7 @@ export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1
   if (!unit.startsWith('week') && Number.isInteger(count)
     && attestHorizon(horizon[0], { horizon_months: months }).status !== 'attested') return undefined;
   const parsed = EventRiskV1.safeParse({ version: 1,
-    occurrence: { p_low: low / 100, p_high: high / 100, basis: 'user', meaning: 'at_least_once_within_horizon' },
+    occurrence: { p_low: pLow, p_high: pHigh, basis: 'user', meaning: 'at_least_once_within_horizon' },
     horizon: { months: Math.max(0.1, months) },
   });
   if (!parsed.success) return undefined;
