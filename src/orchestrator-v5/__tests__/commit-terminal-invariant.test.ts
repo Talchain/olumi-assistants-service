@@ -73,6 +73,29 @@ const composed = () =>
 const hash = (g: unknown) =>
   computeAnalysisAffectingGraphHash(g as GraphStateIngress | null | undefined);
 
+describe('RC3 FIX-r1 terminal writer coverage', () => {
+  // RED at 8fb1959: these schema-valid links reached append through a direct commit.
+  it.each([
+    ['risk_release', 'goal'],
+    ['fac_a', 'risk_release'],
+  ])('rc3-commit-linked-precondition: %s → %s is refused before append', async (from, to) => {
+    const base = {
+      ...healthyGraph(),
+      nodes: [...healthyGraph().nodes,
+        { id: 'raise_59', kind: 'option', label: 'Raise Pro price to £59' },
+        { id: 'risk_release', kind: 'risk', label: 'Feature release slips', relies_on: { option_id: 'raise_59' } }],
+    };
+    const before = JSON.stringify(base);
+    const candidate = { ...base, edges: [...base.edges, { from, to, edge_type: 'causal' }] };
+    const { store, appendCalls } = makeSpyStore();
+    await expect(commitDirectAnswer(composed(), {
+      ...META, graph: candidate, graph_hash: hash(candidate)!, baseGraphForInvariants: base,
+    }, store)).rejects.toThrow("‘Feature release slips’ is tied to ‘Raise Pro price to £59’ and left out of the Run; this model can't link it yet.");
+    expect(appendCalls).toEqual([]);
+    expect(JSON.stringify(base)).toBe(before);
+  });
+});
+
 /** A structurally sound graph — the paired clean control for every violation. */
 function healthyGraph() {
   return {

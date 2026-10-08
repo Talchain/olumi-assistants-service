@@ -91,6 +91,11 @@ function toBlocker(err: unknown): MutationBlocker {
   // F1: the refusal's own words, under the existing build-failed code (held, fail-closed; no new wire literal).
   if (err instanceof UserFigureHeldError) return { code: CANDIDATE_BUILD_FAILED, readable: err.refusal };
   if (err instanceof D1HandlerError) {
+    // This named refusal is composed by the central structural rule from
+    // saved labels, unlike schema diagnostics that may contain raw payloads.
+    if (err.details?.violation_code === 'PRECONDITION_RISK_LINKED' && err.userGuidance !== undefined) {
+      return { code: GRAPH_INVARIANT_VIOLATED, readable: err.userGuidance };
+    }
     switch (err.code) {
       case 'GRAPH_INVARIANT_VIOLATED':
         return { code: GRAPH_INVARIANT_VIOLATED, readable: 'The candidate graph failed schema validation.' };

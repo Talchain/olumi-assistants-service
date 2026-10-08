@@ -56,6 +56,7 @@ import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURE
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -833,7 +834,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         },
       );
     }
-    const graphForAnalysis = participation.graph;
+    // RC3 a′: an option-bound precondition stays on the canvas, but is absent from the calculation until the engine
+    // can apply it to that option alone. Identity + zero incidence + no named limit is the SAME readiness predicate.
+    // PLoT cannot return a driver, sensitivity or worth-checking row for a risk it never receives. Project BEFORE the
+    // remaining compute readers; the snapshot and persisted graph (including the stamp) are untouched.
+    const graphForAnalysis = withoutPreconditionRisks(participation.graph, snapshot.graph);
 
     // --- 3. ONE request-level scale projection, on the FINAL option set -----
     // ROUND 4: the projection runs HERE — after the scaffold, immediately

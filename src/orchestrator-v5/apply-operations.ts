@@ -104,10 +104,10 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
-import { applyPatchOperations } from '../orchestrator/patch-applier.js';
+import { applyPatchOperations, PatchApplyError } from '../orchestrator/patch-applier.js';
 import { validatePatchOperations } from '../orchestrator/patch-validation.js';
 import { buildAppliedChanges, parseEditGraphResponse } from '../orchestrator/tools/edit-graph.js';
-import { hasInterventionRangeWrite } from './graph-management/field-safety.js';
+import { hasInterventionRangeWrite, hasReliesOnRiskWrite } from './graph-management/field-safety.js';
 import {
   clearInheritedInterventionSourceQuotes,
   omitInheritedInterventionRanges,
@@ -576,6 +576,9 @@ export function createApplyOperations(
       // Silent loss here would commit a subset under a whole-set receipt.
       return refuse('part of that change did not survive preparation, so I have not applied any of it');
     }
+    if (hasReliesOnRiskWrite(normalised)) {
+      return refuse('A precondition risk needs its dedicated proposal and approval; nothing was saved');
+    }
 
     const validated = validatePatchOperations(normalised, before);
     if (!validated.valid || validated.operations.length !== normalised.length) {
@@ -589,7 +592,8 @@ export function createApplyOperations(
     let applied: GraphV3T;
     try {
       applied = applyPatchOperations(before, operations);
-    } catch {
+    } catch (error) {
+      if (error instanceof PatchApplyError && error.code === 'PRECONDITION_RISK_LINKED') return refuse(error.message);
       return refuse('that change could not be applied to the model as it stands');
     }
 
