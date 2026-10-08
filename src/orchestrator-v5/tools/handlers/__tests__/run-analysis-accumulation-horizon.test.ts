@@ -6,6 +6,8 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
 import { definitionalLinkInUse, identityRunUseOfResult } from '../../../compose/definitional-links.js';
+import { GOAL_HORIZON_NOT_TESTED, withUntestedHorizonWarning } from '../../../agent-lane/decision-input-ask.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../../../orchestrator/context/option-result-source.js';
 import { GOAL_CHANCE_LICENSED } from '../../../goal-target/goal-chance-licence.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
@@ -57,6 +59,16 @@ async function run(graph: Rec, body: Rec = minimalFixture): Promise<{ wire: Rec;
 const driftWarnings = (result: Rec): Rec[] => (result.enrichment.inference_warnings ?? []).filter((w: Rec) => w.code === 'ACCUMULATION_HORIZON_DRIFT');
 
 describe('Run accumulation horizon drift — the wire copy uses the current deadline', () => {
+  it('a withdrawn accumulation marks the horizon untested even with a duration limit', () => {
+    const graph = { nodes: [{ id: 'mrr', kind: 'goal', goal_horizon_months: 6 }],
+      goal_constraints: [{ unit: 'months' }] };
+    expect(withUntestedHorizonWarning({}, graph)).toEqual({});
+    expect(withUntestedHorizonWarning({}, graph, true)).toEqual({ inference_warnings: [{
+      code: GOAL_HORIZON_NOT_TESTED, severity: 'info', node_ids: ['mrr'],
+      message: "This model doesn't yet say whether any option gets there within 6 months.",
+    }] });
+  });
+
   it('RED ROW subscribers_at_12: deadline changed to 6 drops only the wire carrier and records its exact warning', async () => {
     const graph = accumulationGraph(6);
     const storedBefore = clone(graph);
@@ -85,7 +97,7 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
       .toMatchObject({ carrier_id: CARRIER_ID, operation: 'accumulation' });
   });
 
-  it('ROW + CONTROL subscribers_at_12: the run licence reads withdrawn input links as ordinary Bernoulli links', async () => {
+  it('ROW + CONTROL subscribers_at_12: withdrawal re-withholds the goal chances; the matching deadline keeps its licence', async () => {
     const body = { ...clone(minimalFixture), option_comparison: [
       { option_id: 'raise_price_to_59', probability_of_goal: 0.7, win_probability: 0.7 },
       { option_id: 'raise_price_to_54', probability_of_goal: 0.4, win_probability: 0.3 },
@@ -101,19 +113,28 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
       graph.edges.find((e: Rec) => e.from === 'monthly_churn' && e.to === CARRIER_ID).exists_probability = 0.5;
       const { result } = await run(graph, body);
       const licence = result.enrichment.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_LICENSED);
-      expect(licence).toBeDefined();
-      licences.push(licence);
+      if (deadline === 6) {
+        expect(licence).toBeUndefined();
+        expect(result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({ code: GOAL_HORIZON_NOT_TESTED }));
+        expect(result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
+          code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: [CARRIER_ID],
+        }));
+        for (const row of result.enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
+      } else {
+        expect(licence).toBeDefined();
+        expect(licence.pct_by_option).toEqual({ raise_price_to_59: 70, raise_price_to_54: 40 });
+        licences.push(licence);
+      }
     }
-    expect(licences[0]).toMatchObject({ goal_node_id: 'mrr', form: 'each',
-      summary_withheld: { cause: 'olumi_existence_assumption', form: 'highest' } });
-    expect(licences[1]).toMatchObject({ goal_node_id: 'mrr', form: 'highest' });
-    expect(licences[1]!.summary_withheld).toBeUndefined();
+    expect(licences[0]).toMatchObject({ goal_node_id: 'mrr', form: 'highest' });
+    expect(licences[0]!.summary_withheld).toBeUndefined();
   });
 
   it('ROW subscribers_at_12: removing the deadline also withdraws the wire carrier', async () => {
     const graph = accumulationGraph(12);
     delete node(graph, 'mrr').goal_horizon_months;
     const { wire, result } = await run(graph);
+    expect(result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({ code: GOAL_HORIZON_NOT_TESTED }));
     expect(node(wire, CARRIER_ID).nonlinear_identity).toBeUndefined();
     expect(driftWarnings(result)).toEqual([{ code: 'ACCUMULATION_HORIZON_DRIFT', severity: 'warning', node_ids: [CARRIER_ID],
       message: "‘Pro subscribers at month 12’ is worked out to month 12, but your deadline is no longer set, so it wasn't used in this run." }]);

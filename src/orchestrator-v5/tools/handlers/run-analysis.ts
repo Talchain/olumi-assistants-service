@@ -53,7 +53,7 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
@@ -2197,9 +2197,16 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ A7 AS A TYPED FACT (DL 0df0e1, beat 2): a held deadline no duration limit scores is untested, and the Run says so
     // on the carrier a consumer reads, in A7's own sentence (`decision-input-ask.ts`, the one rule the chat line uses too).
     response = withShareByDateChanceGate(response, snapshot.rawPersistedGraph ?? snapshot.graph, snapshot.goal_node_id);
-    response = withUntestedHorizonWarning(response, graphForAnalysis);
+    response = withUntestedHorizonWarning(response, graphForAnalysis, accumulationDrift.warnings.length > 0);
     for (const warning of accumulationDrift.warnings) response = appendInferenceWarning(response, warning);
     if (accumulationDrift.warnings.length > 0) {
+      // The withdrawn identity was not evaluated: use #416's existing Run-wide withholding route before claim readers.
+      const scoredIds = goalFigureOptions(response).scored;
+      response = withholdOptionGoalFigures(response, new Set(scoredIds), {
+        code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, severity: 'warning',
+        message: accumulationDrift.warnings.map(w => w.message).join(' '),
+        node_ids: accumulationDrift.warnings.flatMap(w => w.node_ids as string[]), option_ids: scoredIds,
+      });
       // PLoT never saw the withdrawn carrier, so CEE records it in the existing run-use ledger for later link readers.
       const meta = isRecord(response._meta) ? response._meta : {};
       response = { ...response, _meta: { ...meta, identities_not_forwarded: [

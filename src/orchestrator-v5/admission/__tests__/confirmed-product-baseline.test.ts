@@ -60,9 +60,21 @@ describe('P45 confirmed-product baseline preserves the confirmed rate reading in
     expect(targetNotTestableWarning(g, verdict, [], 'GOAL_FIGURES_TARGET_NOT_TESTABLE')).toBeNull();
   });
 
+  it('a user-stated 0% churn with no raw_value supplies the accumulation input level', () => {
+    const g = accumulationGraph();
+    g.nodes.find((n: Rec) => n.id === 'churn').observed_state = { value: 0, unit: '%', source: 'user' };
+    const verdict = targetTestabilityOf(g);
+    expect(verdict).toEqual({ kind: 'unchecked', goal_id: 'mrr', unchecked: ['P5'] });
+    expect(targetNotTestableWarning(g, verdict, [], 'GOAL_FIGURES_TARGET_NOT_TESTABLE')).toBeNull();
+    delete g.nodes.find((n: Rec) => n.id === 'churn').observed_state.value;
+    expect(targetTestabilityOf(g)).toEqual({ kind: 'not_testable', goal_id: 'mrr',
+      failures: [{ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' }] });
+  });
+
   it.each(['stock_today', 'churn', 'inflow'])('accumulation subscribers_at_12 missing the level of %s cannot supply the goal baseline', id => {
     const g = accumulationGraph();
     delete g.nodes.find((n: Rec) => n.id === id).observed_state.raw_value;
+    delete g.nodes.find((n: Rec) => n.id === id).observed_state.value;
     expect(targetTestabilityOf(g)).toEqual({ kind: 'not_testable', goal_id: 'mrr',
       failures: [{ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' }] });
     // CONTROL: this same carrier with that part levelled meets the precondition.

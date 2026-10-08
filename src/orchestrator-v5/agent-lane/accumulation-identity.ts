@@ -70,7 +70,7 @@ function otherPeriodIn(unit: string): UnitPeriod | null {
 const OF_TODAY = /of today/i;
 
 /** Today's level in the user's own unit: the raw figure when the state is framed, else its value. */
-function levelOf(n: NodeLike): number | undefined {
+export function levelOf(n: NodeLike): number | undefined {
   const s = n.observed_state;
   const v = typeof s?.raw_value === 'number' ? s.raw_value : s?.value;
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;

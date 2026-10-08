@@ -28,6 +28,7 @@ import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
 import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.js';
 import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
+import { levelOf as accumulationInputLevelOf } from '../agent-lane/accumulation-identity.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -128,7 +129,7 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
       const parts = (carrier.factor_ids as string[]).map(partId => {
         const part = byId.get(partId);
         const os = isRec(part?.observed_state) ? part.observed_state : undefined;
-        return os !== undefined && finite(os.raw_value) ? os : undefined;
+        return part !== undefined && accumulationInputLevelOf({ id: partId, observed_state: os }) !== undefined ? os : undefined;
       });
       return parts.every(part => part !== undefined) ? { unit: parts[0]!.unit, label: String(id) } : undefined;
     }
