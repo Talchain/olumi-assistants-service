@@ -21,6 +21,7 @@ import {
   requiredNestedMemberNames,
 } from "../schemas/required-nested-merge.js";
 import type { PatchOperation } from "./types.js";
+import { stripInboundReadingLicence } from '../orchestrator-v5/goal-target/reading-licence-ingress.js';
 
 // ============================================================================
 // Error
@@ -93,7 +94,7 @@ export function applyPatchOperations(
     }
   }
 
-  return candidate;
+  return stripInboundReadingLicence(candidate);
 }
 
 // ============================================================================

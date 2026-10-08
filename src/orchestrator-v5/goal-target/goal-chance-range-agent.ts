@@ -33,6 +33,7 @@ export function runHasGoalChanceLicenceRecord(result: unknown): boolean {
 
 export interface GoalChanceRangeDisplay {
   readonly range: string;
+  readonly reading_sentence?: string;
   readonly stated_time?: {
     readonly estimate: string;
     readonly by_date?: string;
@@ -84,6 +85,7 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
       : time ? 'time estimate' : 'pace estimate';
     Object.defineProperty(out, optionId, { enumerable: true, configurable: true, value: {
       range: `between ${rangeEnd(v.low_pct)} and ${rangeEnd(v.high_pct).replace(/^about /, '')}`,
+      ...(rec(r.reading_sentence_by_option) !== undefined ? { reading_sentence: String((r.reading_sentence_by_option as Rec)[optionId]) } : {}),
       depends_on: { kind: v.kind, from_label: fromLabel, to_label: toLabel, among: v.among },
       ...(v.kind === 'stated_time' ? { stated_time: { estimate,
         ...(time && hasEstimate ? { slow_time: `${stated.high} months`, fast_time: `${stated.low} months` } : {}),
@@ -111,7 +113,7 @@ export function goalChanceNeedsGraphLabels(result: unknown): boolean {
 /** Scoped withholds remove only their own options; PLoT #416/#422 always withhold the whole Run. */
 export function goalChanceOptionWithheldForAgent(result: unknown, optionId: string): boolean {
   return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
-    && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
+    && ((w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED && w.reading_label_unavailable !== true) || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
       || !ids(w.option_ids) || w.option_ids.includes(optionId)));
 }
 
@@ -125,7 +127,7 @@ const RANGE_COMPATIBLE_WITHHOLDS: ReadonlySet<string> = new Set([GOAL_FIGURES_PL
 export function goalChanceRangeBarredForAgent(result: unknown, optionId: string): boolean {
   return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
     && !RANGE_COMPATIBLE_WITHHOLDS.has(w.code)
-    && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
+    && ((w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED && w.reading_label_unavailable !== true) || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
       || !ids(w.option_ids) || w.option_ids.includes(optionId)));
 }
 
@@ -153,6 +155,7 @@ export function goalChanceDriversForAgent(result: unknown, graph: unknown): { op
 
 /** Screen's ruled driver sentences, from the selected Run's stored licence only; never from raw driver rows. */
 export function goalChanceDriverDisplayForAgent(result: unknown, graph: unknown): Record<string, string> {
+  const labelledReading = agentLicenceRecordOf(result)?.reading_label !== undefined;
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
@@ -160,6 +163,8 @@ export function goalChanceDriverDisplayForAgent(result: unknown, graph: unknown)
   const asked = new Set<string>();
   const out: Record<string, string> = {};
   for (const { option_id: optionId, driver: d } of goalChanceDriversForAgent(result, graph)) {
+    // These subordinate percentages have no reading sentence or evaluation licence of their own.
+    if (labelledReading && d.kind !== 'link_strength') continue;
     let line: string;
     let question: string | undefined;
     let key: string | undefined;

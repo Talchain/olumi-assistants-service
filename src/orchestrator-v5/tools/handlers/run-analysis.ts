@@ -148,6 +148,9 @@ import {
 } from './level-limit-baseline.js';
 import { carryStatedLevelSpread, carrySwitchLevelSpread, statedLevelNodeIds, switchLevelNodeIds } from './stated-level-spread.js';
 import { carryUnconfirmedGoalProduct } from './unconfirmed-goal-product.js';
+import { heldChangeBlocksIdentity } from '../../agent-lane/identity-card.js';
+import { actionFactsOf } from '../../agent-lane/actions/state.js';
+import { stampGoalReading } from '../../goal-target/goal-reading-wire.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -1112,7 +1115,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // A graph saved before #2300 carries no identity where the card would offer Olumi's reading: that reading is carried
     // on this wire copy as the unconfirmed product #2300 would have minted, so PLoT #420 withholds the goal's figures
     // (`unconfirmed-goal-product.ts`). Nothing persisted; `graph_hash_at_run` is hashed from the raw persisted graph.
-    const wireGraph = carryUnconfirmedGoalProduct(switchGraph, snapshot.rawPersistedGraph ?? snapshot.graph);
+    const carriedGraph = carryUnconfirmedGoalProduct(switchGraph, snapshot.rawPersistedGraph ?? snapshot.graph);
+    const wireGraph = stampGoalReading(carriedGraph, snapshot.rawPersistedGraph ?? snapshot.graph);
     if (wireGraph !== switchGraph) {
       log.info(
         {
@@ -2802,7 +2806,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance), {
+        storedGraph: snapshot.rawPersistedGraph ?? snapshot.graph, wireGraph: plotPayload.graph, options: finalWireOptions,
+        confirmationAvailable: actionFactsOf({ scenarioId: args.scenario_id, graph: snapshot.rawPersistedGraph ?? snapshot.graph,
+          pending: invocation.context.most_recent_pending_actions ?? [] }).identityReading !== null
+          && !heldChangeBlocksIdentity(invocation.context.most_recent_pending_actions ?? []),
+      });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis);

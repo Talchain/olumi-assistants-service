@@ -35,6 +35,13 @@ export interface IdentityProposal {
   readonly words: string;
 }
 
+/** The definition checked on the stored graph; addend signs belong to the executed Run, not this reader. */
+export interface StoredReading {
+  readonly goal: { readonly id: string; readonly label: string };
+  readonly factors: readonly [{ readonly id: string; readonly label: string }, { readonly id: string; readonly label: string }];
+  readonly addends: readonly { readonly id: string; readonly label: string }[];
+}
+
 /** The approved-card door's limit on the displayed words (Canonical #2292). */
 export const CARD_WORDS_MAX = 400;
 
@@ -93,6 +100,13 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
  * cannot qualify. Callers check writability and dry-run the existing confirmation door.
  */
 function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
+  const reading = storedReadingOf(graph);
+  if (reading === null) return null;
+  return { outcome_id: reading.goal.id, operation: 'product', factor_ids: [reading.factors[0].id, reading.factors[1].id], words: storedCardWords(graph, reading) };
+}
+
+/** ONE Science §(e) predicate for the card and the outbound Run licence. Pure: never writes an identity or a stamp. */
+export function storedReadingOf(graph: unknown): StoredReading | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const goals = nodes.filter(n => n.kind === 'goal');
@@ -100,14 +114,30 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   const goal = goals[0]!;
   const goalId = text(goal.id);
   const goalLabel = text(goal.label);
+  // A pre-#2300 graph has no stored identity: reuse the existing goal-card detector, then check its temporary reading
+  // through this same predicate. A carrier card is not a goal identity and cannot license a goal stamp at this seam.
+  if (goalId !== undefined && !carriesIdentity(goal)) {
+    const legacy = proposeOnGoal(graph);
+    if (legacy === null || legacy.outcome_id !== goalId || !isRec(graph)) return null;
+    return storedReadingOf({ ...graph, nodes: nodes.map(n => n === goal ? { ...n, nonlinear_identity: {
+      operation: 'product', factor_ids: [...legacy.factor_ids], stated_in_brief: false,
+    } } : n) });
+  }
   const ids = unconfirmedProduct(goal);
   // Condition 1: exactly one valid stored reading over two distinct existing factors.
   if (goalId === undefined || goalLabel === undefined || ids === null || ids.length !== 2 || ids[0] === ids[1]
     || goal.analysis_participation === 'retained_excluded' || identityConflictsWithScope(goal)) return null;
-  // DL (8 Oct): ISL adds a LISTED addend's signed value, which the edge-sign words below cannot state; no card until build 2.
-  const listed = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity.addends : undefined;
-  if (listed !== undefined && !(Array.isArray(listed) && listed.length === 0)) return null;
   const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
+  // Science addendum 4 case (1): a LISTED levelless operand is refused by PLoT/ISL. Sized listed operands can join the
+  // definition, but their executed sign is deliberately absent here: the Run consumer must prove it separately.
+  const declaredAddends = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity.addends : undefined;
+  const sizedListed = Array.isArray(declaredAddends) && new Set(declaredAddends).size === declaredAddends.length
+    && declaredAddends.every(id => {
+      const os = typeof id === 'string' ? byId.get(id)?.observed_state : undefined;
+      return isRec(os) && typeof os.raw_value === 'number' && Number.isFinite(os.raw_value);
+    });
+  const listed = sizedListed ? [] : declaredAddends;
+  if (listed !== undefined && !(Array.isArray(listed) && listed.length === 0)) return null;
   const parts = ids.map(id => byId.get(id));
   if (parts.some(n => n === undefined || n.kind !== 'factor' || n.analysis_participation === 'retained_excluded')) return null;
   // Condition 2: the reading's factors are both direct parents (and therefore on the goal path).
@@ -132,7 +162,7 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   // definitional addend (edge provenance.definitional, node not the user's) joins the reading's words; anything else — a
   // user-authored or non-definitional risk or factor straight into the goal — means the goal is not this product: null.
   const USER_NODE = new Set(['from_brief', 'user_set', 'user_specified', 'user_stated', 'user']);
-  const addends: string[] = [];
+  const addends: { id: string; label: string }[] = [];
   for (const e of edges) {
     if (e.to !== goalId || typeof e.from !== 'string' || ids.includes(e.from) || e.edge_type === 'bidirected') continue;
     const n = byId.get(e.from);
@@ -140,13 +170,12 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     const prov = isRec(e.provenance) ? e.provenance : undefined;
     const userAuthored = (typeof n.provenance === 'string' && USER_NODE.has(n.provenance)) || prov?.source === 'user_specified';
     if (prov?.definitional !== true || userAuthored) return null;
-    const mean = isRec(e.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
-    const negative = e.effect_direction === 'negative' || (mean !== undefined && mean < 0);
-    addends.push(`${negative ? 'less' : 'plus'} ‘${text(n.label) ?? String(n.id)}’`);
+    addends.push({ id: e.from, label: text(n.label) ?? e.from });
   }
+  if (Array.isArray(declaredAddends) && !declaredAddends.every(id => addends.some(a => a.id === id))) return null;
   const [a, b] = parts as [Rec, Rec];
   const level = (n: Rec) => ({ unit: isRec(n.observed_state) ? text(n.observed_state.unit) : undefined, label: String(n.id) });
-  const goalUnit = text(goal.goal_threshold_unit);
+  const goalUnit = text(goal.goal_threshold_unit) ?? usersLevel(goal)?.unit;
   // Condition 3: use the existing unit reader, including Science's £/month × count confirmation form.
   if (readMoneyTotal(goalUnit, goalLabel) === null || unitsCompose(goalUnit, goalLabel, level(a), level(b)).kind === 'no') return null;
   const current = usersLevel(goal);
@@ -154,6 +183,8 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   // Science §(e) Q1.3 also covers a stated zero or unreadable current level; usersLevel's
   // legacy null for those must not turn a contradictory statement into an absent one.
   if (current === null && currentState !== undefined && classifyValueSource(currentState.source) === 'user_stated') return null;
+  const result: StoredReading = { goal: { id: goalId, label: goalLabel },
+    factors: [{ id: ids[0]!, label: text(a.label) ?? ids[0]! }, { id: ids[1]!, label: text(b.label) ?? ids[1]! }], addends };
   // Condition 4: a stated CURRENT level must reconcile at the factors' current raw values within the existing 5%.
   if (current !== null) {
     // Codex r1 P2: currency AND period read in the goal's own context ("Monthly recurring revenue" + GBP = £/month).
@@ -167,9 +198,21 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     if (operands[0] === null || operands[1] === null || !Number.isFinite(operands[0]!.value * operands[1]!.value)
       || reading(goal, goalLabel, current, operands[0]!, operands[1]!) === null) return null;
   }
-  const words = `Olumi reads ‘${goalLabel}’ as ‘${text(a.label) ?? ids[0]}’ × ‘${text(b.label) ?? ids[1]}’${addends.map(x => `, ${x}`).join('')}. Is that how you work it out?`;
+  const words = storedCardWords(graph, result);
   if (words.length > CARD_WORDS_MAX) return null;
-  return { outcome_id: goalId, operation: 'product', factor_ids: [ids[0]!, ids[1]!], words };
+  return result;
+}
+
+/** Preserve build 1's card words exactly. Its edge-derived words never supply the Run's executed addend sign. */
+function storedCardWords(graph: unknown, reading: StoredReading): string {
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const addends = reading.addends.map(a => {
+    const e = edges.find(e => e.from === a.id && e.to === reading.goal.id && e.edge_type !== 'bidirected');
+    const mean = isRec(e?.strength) && typeof e.strength.mean === 'number' ? e.strength.mean : undefined;
+    const negative = e?.effect_direction === 'negative' || (mean !== undefined && mean < 0);
+    return `${negative ? 'less' : 'plus'} ‘${a.label}’`;
+  });
+  return `Olumi reads ‘${reading.goal.label}’ as ‘${reading.factors[0].label}’ × ‘${reading.factors[1].label}’${addends.map(x => `, ${x}`).join('')}. Is that how you work it out?`;
 }
 
 type Rec2 = Rec;

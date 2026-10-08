@@ -88,7 +88,7 @@ describe('run_analysis wiring — the served graph\'s Run carries the reading to
     const rawBefore = JSON.stringify(snapshot.rawPersistedGraph);
     const hashBefore = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(snapshot.rawPersistedGraph));
     const { graph } = await sentGraph(snapshot);
-    expect(node(graph, 'mrr').nonlinear_identity).toEqual(INFERRED);
+    expect(node(graph, 'mrr').nonlinear_identity).toEqual({ ...INFERRED, reading_licence: 'olumi_reading', addends: [] });
     expect(node(snapshot.graph as Rec, 'mrr').nonlinear_identity).toBeUndefined();
     expect(JSON.stringify(snapshot.rawPersistedGraph)).toBe(rawBefore);
     expect(computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(snapshot.rawPersistedGraph))).toBe(hashBefore);

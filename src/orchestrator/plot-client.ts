@@ -50,6 +50,7 @@
 import { z } from "zod";
 import { DecisionFlipBlockV1Schema, type DecisionFlipBlockV1 } from "@talchain/schemas";
 import { config } from "../config/index.js";
+import { stripInboundReadingLicence } from '../orchestrator-v5/goal-target/reading-licence-ingress.js';
 import {
   PLOT_RUN_TIMEOUT_MS,
   PLOT_DECISION_FLIP_TIMEOUT_MS,
@@ -569,6 +570,9 @@ class PLoTClientImpl implements PLoTClient {
   async validatePatch(payload: Record<string, unknown>, requestId: string, opts?: PLoTClientRunOpts): Promise<ValidatePatchResult> {
     // H.5: Outbound structural validation
     validatePatchPayload(payload);
+    // A patch call cannot license a goal reading. Scrub both its base graph
+    // and operation values before the first fetch (and before retries).
+    const unlicensedPayload = stripInboundReadingLicence(payload);
 
     // FIX 2 (this lane): validate-patch carries the SAME two defects as
     // /v2/run — a retry re-armed the full timeout, and `turnSignal` never
@@ -576,7 +580,7 @@ class PLoTClientImpl implements PLoTClient {
     // cap this endpoint is cheap and fast, so a timeout here really can be a
     // transient blip rather than an internal failure above PLoT's own budget.
     return this.runWithRetry(
-      (attemptTimeoutMs: number) => this.validatePatchOnce(payload, requestId, attemptTimeoutMs, opts),
+      (attemptTimeoutMs: number) => this.validatePatchOnce(unlicensedPayload, requestId, attemptTimeoutMs, opts),
       'validate_patch',
       requestId,
       opts,

@@ -1,4 +1,5 @@
 /** Shared validation of stored range licences, for Agent and run_delta readers. */
+import { readingSentencesValid } from './goal-reading-label.js';
 import type { GoalChanceRange } from './goal-chance-range.js';
 
 type Rec = Record<string, unknown>;
@@ -43,5 +44,13 @@ export function goalChanceRangeRecordOf(value: unknown): GoalChanceRangeRecord |
     || !Object.values(ranges).every(validRange)
     || (r.horizon_untested !== undefined && r.horizon_untested !== true)
     || (r.horizon_line !== undefined && (r.horizon_untested !== true || !id(r.horizon_line)))) return undefined;
+  if (r.reading_licence !== undefined || r.reading_label !== undefined || r.reading_sentence_by_option !== undefined) {
+    const end = (n: number) => n === 0 ? 'less than 1%' : n === 100 ? 'more than 99%' : `about ${n}%`;
+    const figures = Object.fromEntries(Object.entries(ranges).map(([id, value]) => {
+      const range = value as GoalChanceRange;
+      return [id, `between ${end(range.low_pct)} and ${end(range.high_pct).replace(/^about /, '')}`];
+    }));
+    if (!readingSentencesValid(r.reading_label, r.reading_sentence_by_option, figures, ids as string[])) return undefined;
+  }
   return r as GoalChanceRangeRecord;
 }

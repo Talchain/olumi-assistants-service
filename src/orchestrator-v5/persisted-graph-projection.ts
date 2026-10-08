@@ -56,6 +56,7 @@ import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options
 import { reindexInterventionKeys } from './reindex-intervention-keys.js';
 import { refuseInadmissibleInterventionRanges } from './intervention-range.js';
 import { log } from '../utils/telemetry.js';
+import { stripInboundReadingLicence } from './goal-target/reading-licence-ingress.js';
 
 export interface PersistedGraphProjectionContext {
   readonly scenarioId?: string;
@@ -116,8 +117,9 @@ export function projectGraphForPersistence<T>(
   ctx: PersistedGraphProjectionContext = {},
 ): T {
   if (graph === undefined || graph === null) return graph;
-  assertNoScopedIdentityConflict(graph);
-  const repaired = repairGraphForPersistence(graph, ctx);
+  const unlicensed = stripInboundReadingLicence(graph);
+  assertNoScopedIdentityConflict(unlicensed);
+  const repaired = repairGraphForPersistence(unlicensed, ctx);
   const normalised = normaliseOptionInterventionContract(repaired, ctx);
   const admitted = admitInterventionRanges(normalised, ctx);
   const reconciled = reconcileTopLevelOptionsFromNodes(admitted, ctx);

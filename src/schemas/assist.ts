@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Graph } from "./graph.js";
+import { stripInboundReadingLicence } from '../orchestrator-v5/goal-target/reading-licence-ingress.js';
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { BiasType, TopologyPlanSchema, StrengthenItemActionType, GoalThresholdFrame } from "@talchain/schemas";
 
@@ -325,7 +326,7 @@ export const DraftGraphInput = z.object({
     goals: z.array(z.string().min(5).max(200)).max(5).optional(),
   }).optional(),
   // Optional refinement context for iterative drafting (Phase B)
-  previous_graph: Graph.optional(),
+  previous_graph: Graph.transform(stripInboundReadingLicence).optional(),
   refinement_mode: z
     .enum(["auto", "expand", "prune", "clarify"])
     .optional(),

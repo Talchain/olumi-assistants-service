@@ -38,8 +38,9 @@
  *   - Absent fields (no graph_state, no analysis_state, field = null) → pass
  *     through as null. Phase 1.5 accepts turns without graph (frame stage) and
  *     turns without analysis (pre-analysis decisions).
- *   - Unknown extra fields on nodes/edges/analysis objects → passthrough. The
- *     UI evolves faster than the boundary contract; we do not want to reject
+ *   - Unknown extra fields on nodes/edges/analysis objects → passthrough, except
+ *     wire-only goal-reading authority (`reading_licence`, `addends`) is stripped.
+ *     The UI evolves faster than the boundary contract; we do not want to reject
  *     payloads because of additive fields.
  *
  * Shape decisions recorded in Docs/v5/phase1.5-wire-investigation.md and plan
@@ -57,6 +58,7 @@ import { SelectedElementRefSchema } from '@talchain/schemas/boundary';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
+import { stripInboundReadingLicence } from '../goal-target/reading-licence-ingress.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
 
@@ -112,7 +114,10 @@ export const GraphStateIngressSchema = z
         }
       }
     }
-  });
+  })
+  // GR2: this boundary deliberately passes other additive fields through,
+  // but a caller cannot mint the authority for an outbound Run.
+  .transform(stripInboundReadingLicence);
 
 /**
  * Permissive analysis schema. Per plan correction #1: analysis arrives in

@@ -2,6 +2,7 @@ import { request } from "undici";
 import type { GraphT } from "../schemas/graph.js";
 import { config } from "../config/index.js";
 import { PLOT_VALIDATE_TIMEOUT_MS } from "../config/timeouts.js";
+import { stripInboundReadingLicence } from '../orchestrator-v5/goal-target/reading-licence-ingress.js';
 
 /**
  * Get engine base URL from centralized config (deferred for testability)
@@ -22,14 +23,15 @@ export async function validateGraph(
   try {
     const res = await request(`${getEngineBaseUrl()}/v1/validate`, {
       method: "POST",
-      body: JSON.stringify({ graph: g }),
+      // This validation endpoint cannot mint a Run's reading authority.
+      body: JSON.stringify({ graph: stripInboundReadingLicence(g) }),
       headers: { "content-type": "application/json" },
       headersTimeout: PLOT_VALIDATE_TIMEOUT_MS,
       bodyTimeout: PLOT_VALIDATE_TIMEOUT_MS,
     });
     const json = (await res.body.json()) as ValidateResponse;
     if (json.ok && json.normalized) {
-      return { ok: true, normalized: json.normalized };
+      return { ok: true, normalized: stripInboundReadingLicence(json.normalized) };
     }
     return { ok: false, violations: json.violations || ["unknown"] };
   } catch {

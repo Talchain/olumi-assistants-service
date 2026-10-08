@@ -1,4 +1,6 @@
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
+import { readingChanceSentence, readingRunDecision, readingSentencesValid, type GoalReadingRunInput, type ReadingLabel } from './goal-reading-label.js';
+import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 /**
  * ⭐ D3 MILESTONE 1, STEP 2 — EACH OPTION'S CHANCE OF MEETING THE GOAL, AND WHAT MAY BE SAID ABOUT IT (DL 0df0e1 #87
  * 6005048156 + plan 6006078553; Science d5 6005138341 / 6005279728 / 6005640764; Wording c6 6005196947 + rulings 6 Oct).
@@ -101,6 +103,9 @@ export interface GoalChanceLicence {
   readonly severity: 'info';
   readonly message: string;
   readonly form: GoalChanceForm;
+  readonly reading_licence?: 'olumi_reading';
+  readonly reading_label?: ReadingLabel;
+  readonly reading_sentence_by_option?: Readonly<Record<string, string>>;
   /** Every scored option, in the model's option order (the order the Run's own records carry). */
   readonly option_ids: readonly string[];
   /** Each LICENSED option's DISPLAYED whole percentage — the figure the sentence quotes. */
@@ -161,9 +166,11 @@ export function displayedGoalPct(p: number): number {
  */
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
-  sentThreshold?: SentGoalThreshold,
+  sentThreshold?: SentGoalThreshold, readingInput?: GoalReadingRunInput,
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
+  const reading = readingRunDecision(envelope, graph, goalId, readingInput);
+  if (reading.required && reading.label === null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
   const share = shareByDateGoalForChanceOf(graph);
@@ -191,6 +198,7 @@ export function goalChanceLicenceOf(
     recordOf.set(id, r);
     const p = r.probability_of_goal;
     option_ids.push(id);
+    if (reading.required && !reading.allowed.has(id)) { withheld.push(id); continue; }
     const precision = goalChancePrecisionOf(r);
     const step = precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision));
     const shareGate = share !== null && share.goal.id === goalId
@@ -237,7 +245,7 @@ export function goalChanceLicenceOf(
   // ⛔ INTERIM (d5 6009272273, DL adopted): a summary Olumi's own existence prior could have produced is not stated. J4 R17
   // read "highest" at 50/35 with the prior and 46/46 without it; MC draft 7 flipped its leader.
   const priorOnPath = summary !== 'each' && olumiExistenceOnGoalPath(graph, goalId, option_ids);
-  const form: GoalChanceForm = priorOnPath ? 'each' : summary;
+  const form: GoalChanceForm = priorOnPath || reading.required ? 'each' : summary;
   const existence = userLinkExistenceOn(graph, goalId, licensed);
   // ⭐ Rulings 1–4: each licensed option's main driver, or why it has none, once the producer emits driver blocks.
   const drivers: Record<string, GoalChanceDriver> = {};
@@ -260,6 +268,11 @@ export function goalChanceLicenceOf(
     form,
     option_ids,
     pct_by_option: pct,
+    ...(reading.label === null ? {} : { reading_licence: 'olumi_reading' as const, reading_label: reading.label, reading_sentence_by_option: Object.fromEntries(licensed.map(id => {
+      const option = nodes.find(n => n.id === id && n.kind === 'option');
+      const figure = pct[id] === 0 ? 'less than 1%' : pct[id] === 100 ? 'more than 99%' : `about ${pct[id]}%`;
+      return [id, readingChanceSentence(String(option!.label), figure, reading.label!)];
+    })) }),
     ...(spread === undefined && Object.keys(shortfall).length === 0 ? {} : { sent_threshold: sentThreshold }),
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
@@ -502,9 +515,44 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
-  sentThreshold?: SentGoalThreshold,
+  sentThreshold?: SentGoalThreshold, readingInput?: GoalReadingRunInput,
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold);
+  const reading = readingRunDecision(envelope, graph, goalId, readingInput);
+  if (isRec(envelope) && reading.required) {
+    const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
+    const withheld = new Set(records.flatMap(r => { const id = r.option_id ?? r.id;
+      return typeof id === 'string' && (reading.label === null || !reading.allowed.has(id)) ? [id] : []; }));
+    if (withheld.size > 0) {
+      const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+      const goal = nodes.find(n => n.id === goalId);
+      const identity = goal?.nonlinear_identity;
+      const parts = isRec(identity) && Array.isArray(identity.factor_ids) ? identity.factor_ids.map(id =>
+        `'${String(nodes.find(n => n.id === id)?.label ?? id)}'`).join(' × ') : 'other figures in the model';
+      const existing = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings.find(w =>
+        isRec(w) && w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED) : undefined;
+      const warning = isRec(existing) ? existing : { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, severity: 'warning',
+        node_ids: [goalId], option_ids: [...withheld], reading_label_unavailable: true,
+        message: `Not shown. '${String(goal?.label ?? goalId)}' depends on ${parts}, but this run couldn't calculate it that way, so the figures for each option would be wrong.` };
+      envelope = withholdOptionGoalFigures(envelope, withheld, warning) as E;
+    }
+  }
+  // A range keeps every placeholder/target gate and gets the SAME inline reading words.
+  if (isRec(envelope) && reading.required && Array.isArray(envelope.inference_warnings)) {
+    const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+    envelope = { ...envelope, inference_warnings: envelope.inference_warnings.map(w => {
+      if (!isRec(w) || w.code !== 'GOAL_CHANCE_RANGE' || !isRec(w.range_by_option) || !Array.isArray(w.option_ids)) return w;
+      const range_by_option = Object.fromEntries(Object.entries(w.range_by_option).filter(([id]) => reading.label !== null && reading.allowed.has(id)));
+      const option_ids = w.option_ids.filter(id => typeof id === 'string' && Object.hasOwn(range_by_option, id)) as string[];
+      const sentences = Object.fromEntries(option_ids.flatMap(id => {
+        const r = range_by_option[id]; const option = nodes.find(n => n.id === id && n.kind === 'option');
+        if (!isRec(r) || typeof r.low_pct !== 'number' || typeof r.high_pct !== 'number' || typeof option?.label !== 'string') return [];
+        const end = (n: number) => n === 0 ? 'less than 1%' : n === 100 ? 'more than 99%' : `about ${n}%`;
+        return [[id, readingChanceSentence(option.label, `between ${end(r.low_pct)} and ${end(r.high_pct).replace(/^about /, '')}`, reading.label!)]];
+      }));
+      return { ...w, range_by_option, option_ids, reading_licence: 'olumi_reading', reading_label: reading.label, reading_sentence_by_option: sentences };
+    }) } as E;
+  }
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, readingInput);
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
@@ -627,6 +675,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
   shortfall_note_by_option?: Readonly<Record<string, string>>;
+  reading_label?: ReadingLabel; reading_sentence_by_option?: Readonly<Record<string, string>>;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -650,6 +699,9 @@ export function goalChanceLicenceForAgent(result: unknown): {
     : r.similar_option_ids !== undefined) return undefined;
   if (r.withheld_option_ids !== undefined
     && (form !== 'each' || withheld === undefined || withheld.length === 0 || !withheld.every((id) => optionIds.includes(id)))) return undefined;
+  const hasReading = r.reading_licence !== undefined || r.reading_label !== undefined || r.reading_sentence_by_option !== undefined;
+  if (hasReading && (form !== 'each' || !readingSentencesValid(r.reading_label, r.reading_sentence_by_option,
+    goalChanceDisplayFromLicence(r) ?? {}, optionIds.filter(id => !withheld?.includes(id))))) return undefined;
   const sent = isRec(r.sent_threshold) ? r.sent_threshold : undefined;
   const notes = isRec(r.spread_note_by_option) ? r.spread_note_by_option : undefined;
   const validSent = sent !== undefined && finite(sent.value)
@@ -672,6 +724,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   return {
     form,
     option_ids: optionIds,
+    ...(hasReading ? { reading_label: r.reading_label as ReadingLabel, reading_sentence_by_option: r.reading_sentence_by_option as Record<string, string> } : {}),
     ...(validSent && sent !== undefined ? { sent_threshold: {
       value: sent.value as number,
       field: sent.field as SentGoalThreshold['field'],

@@ -26,6 +26,7 @@ import { sayDate } from '../goal-target/deadline-date.js';
 import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
+import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
@@ -56,15 +57,17 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
     .map((n) => [n.id as string, n.label as string]));
-  const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string): GoalChanceScreenLine[] => {
+  const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string, rangeReadingSentence?: string): GoalChanceScreenLine[] => {
     const label = labels.get(optionId);
     // An option the graph cannot name has no line (the screen drops it too); never an id.
     if (label === undefined) return [];
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
     const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
     const estimates = shareOptionEstimateWords(graph, optionId);
+    const readingSentence = rangeReadingSentence ?? facts.goal_chance_licence?.reading_sentence_by_option?.[optionId];
+    if (readingSentence !== undefined && !readingSentence.startsWith(`‘${label}’: `)) return [];
     return [{ option_id: optionId, label, figure,
-      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}.`
+      chance: (readingSentence ?? `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}.`)
         + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
       ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
       ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
@@ -96,7 +99,7 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
     const link = d.depends_on.kind === 'link_strength'
       ? `how strongly ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’, which isn’t sized in the model yet.`
       : `whether ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’ at all, which Olumi assumed.`;
-    return line(id, d.range, `${lead} ${link}`);
+    return line(id, d.range, `${lead} ${link}`, undefined, undefined, d.reading_sentence);
   });
   return [...points, ...ranges];
 }
@@ -122,7 +125,7 @@ export function chanceInOwnWords(sentence: string, l: GoalChanceScreenLine): boo
  * qualifier can never be split from its chance (Codex r3 on #2783 ed3964a6, P1). [] when the canonical line is present.
  */
 export function ownWordsLeadTexts(reply: string, l: GoalChanceScreenLine, sentencesOf: (row: string) => string[]): string[] {
-  if (l.shortfall_note !== undefined || reply.includes(l.chance)) return [];
+  if (l.shortfall_note !== undefined || l.chance.includes("(Olumi's reading") || reply.includes(l.chance)) return [];
   const said = reply.split('\n').map((row) => row.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, ''))
     .flatMap((row) => sentencesOf(row)).find((sentence) => chanceInOwnWords(sentence, l));
   if (said === undefined) return [];
@@ -148,6 +151,7 @@ function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
   // B19 r3: only this complete canonical unit pays a shortfall option; quote folding preserves source offsets.
   if (l.shortfall_note !== undefined) return foldQuotes(text).includes(foldQuotes(l.chance));
   if (sameWordsIn(text, l.chance)) return true;
+  if (l.chance.includes("(Olumi's reading")) return false;
   // The Agent's own phrasing ("Raise prices 10%: about 46%") gives the same figure: never said twice in two wordings.
   const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
   if (l.spread_note !== undefined) return text.split('\n').some(row =>
@@ -156,10 +160,9 @@ function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
   return p.includes(plain(l.label)) && p.includes(plain(l.figure));
 }
 
-/** Canonical shortfall units are opaque to the existing spread-only path, even when their spread words match. */
-function shortfallUnitsIn(text: string, lines: readonly GoalChanceScreenLine[]): { start: number; end: number }[] {
+function canonicalUnitsIn(text: string, lines: readonly GoalChanceScreenLine[]): { start: number; end: number }[] {
   const folded = foldQuotes(text);
-  const spans = lines.filter(l => l.shortfall_note !== undefined).flatMap(l => {
+  const spans = lines.flatMap(l => {
     const needle = foldQuotes(l.chance);
     const found: { start: number; end: number }[] = [];
     for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
@@ -170,14 +173,70 @@ function shortfallUnitsIn(text: string, lines: readonly GoalChanceScreenLine[]):
   return spans.filter((span, i) => i === 0 || span.start >= spans[i - 1]!.end);
 }
 
-function outsideShortfallUnits(text: string, lines: readonly GoalChanceScreenLine[], change: (part: string) => string): string {
+/** Canonical shortfall units are opaque to the existing spread-only path, even when their spread words match. */
+function shortfallUnitsIn(text: string, lines: readonly GoalChanceScreenLine[]): { start: number; end: number }[] {
+  return canonicalUnitsIn(text, lines.filter(l => l.shortfall_note !== undefined));
+}
+
+function outsideUnits(text: string, spans: readonly { start: number; end: number }[], change: (part: string) => string): string {
   let at = 0;
   let result = '';
-  for (const span of shortfallUnitsIn(text, lines)) {
+  for (const span of spans) {
     result += change(text.slice(at, span.start)) + text.slice(span.start, span.end);
     at = span.end;
   }
   return result + change(text.slice(at));
+}
+
+function outsideShortfallUnits(text: string, lines: readonly GoalChanceScreenLine[], change: (part: string) => string): string {
+  return outsideUnits(text, shortfallUnitsIn(text, lines), change);
+}
+
+/** A named chance sentence cannot shed the condition under which this Run licensed its figure. */
+function bareReadingChance(unit: string, l: GoalChanceScreenLine): boolean {
+  const plain = (value: string): string => value.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const sentence = plain(unit.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, ''));
+  const label = plain(l.label);
+  if (!/\d(?:[\d.,]*\d)?\s*%/.test(sentence)) return false;
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'u').test(sentence)) return false;
+  if (chanceInOwnWords(unit.trim(), l)) return true;
+  const percent = '(?:(?:about|less than|more than)\\s+)?\\d+(?:[.,]\\d+)?\\s*%';
+  const shorthand = new RegExp(`^(?:${percent}|between\\s+${percent}\\s+and\\s+${percent})[.!]?$`);
+  if (sentence.startsWith(`${label}:`) && shorthand.test(sentence.slice(label.length + 1).trim())) return true;
+  return /\b(?:chance|probability|likelihood)\b[^.!?]{0,100}\b(?:meet(?:ing)?|reach(?:ing)?|hit(?:ting)?|achiev(?:e|ing))\b[^.!?]{0,30}\b(?:goal|target)\b/.test(sentence);
+}
+
+function withReadingChances(text: string, lines: readonly GoalChanceScreenLine[]): { text: string; added: number } {
+  const readingLines = lines.filter(l => l.chance.includes("(Olumi's reading"));
+  let body = text;
+  let added = 0;
+  for (const l of readingLines) {
+    let supplied = alreadySaid(body, l);
+    // Protect complete canonical sentences together with their existing spread/shortfall notes.
+    const opaque = canonicalUnitsIn(body, lines.filter(line => line.shortfall_note !== undefined || readingLines.includes(line)));
+    body = outsideUnits(body, opaque, part => {
+      let end = 0;
+      return splitIntoRedactableUnits(foldQuotes(part)).map(foldedUnit => {
+        const unit = part.slice(end, end + foldedUnit.length);
+        end += unit.length;
+        if (!bareReadingChance(unit, l)) return unit;
+        const trailing = /\s*$/.exec(unit)![0];
+        if (supplied) return trailing;
+        supplied = true;
+        added += 1;
+        let chanceOnly = l.chance;
+        for (const note of [l.shortfall_note, l.spread_note]) {
+          if (note !== undefined && chanceOnly.endsWith(note)) chanceOnly = chanceOnly.slice(0, -note.length).trimEnd();
+        }
+        const notes = l.chance.slice(chanceOnly.length).trimStart();
+        const notesAlreadyFollow = notes !== '' && foldQuotes(part.slice(end)).trimStart().startsWith(foldQuotes(notes));
+        const prefix = /^[ \t]*(?:[-*•]|\d{1,3}[.)])\s+/.exec(unit)?.[0] ?? '';
+        return prefix + (notesAlreadyFollow ? chanceOnly : l.chance) + trailing;
+      }).join('');
+    });
+  }
+  return { text: body, added };
 }
 
 /** A lead-in the Agent left with nothing under it ("For reaching at least £126,000 …, on current information:"). */
@@ -191,7 +250,8 @@ const LIST_START = /^\s*(?:[-*•]|\d{1,3}[.)])\s/;
  * its existing wording, notes and driver sentence stay as they stand.
  */
 export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScreenLine[]): { text: string; added: number } {
-  let body = text;
+  const cleaned = withReadingChances(text, lines);
+  let body = cleaned.text;
   const hasShortfall = lines.some(l => l.shortfall_note !== undefined);
   const spreadBody = (value: string): string => {
     let masked = value;
@@ -202,7 +262,7 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
   };
   const removeSpread = (value: string, note: string): string => outsideShortfallUnits(value, lines, part => part.split(note).join(''));
   const owed: string[] = [];
-  let added = 0;
+  let added = cleaned.added;
   for (const l of lines) {
     if (l.shortfall_note !== undefined) {
       if (alreadySaid(body, l)) continue;
