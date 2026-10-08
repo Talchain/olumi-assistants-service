@@ -149,12 +149,14 @@ describe('a definitional link is typed only when its own size proves it (DL 5916
 
   it('the key is optional in the contract (a recorded candidate validates) and required in what is SENT', () => {
     const recorded = JSON.parse(readFileSync(new URL('./fixtures/lsF-A0-candidate-20260929.json', import.meta.url), 'utf8')).candidate as Json;
-    const onLinks = (errors: { instancePath: string }[] | null | undefined) => (errors ?? []).filter((x) => /^\/links\//.test(x.instancePath));
+    const onLinks = (errors: { instancePath: string; params?: { missingProperty?: string } }[] | null | undefined) => (errors ?? []).filter((x) => /^\/links\//.test(x.instancePath));
     const contract = new Ajv({ strict: false, allErrors: true }).compile(buildCandidateSchema());
     contract(recorded);
     expect(onLinks(contract.errors)).toEqual([]);
     const sent = new Ajv({ strict: false, allErrors: true }).compile(strictForTheDrafter(buildCandidateSchema()));
     sent(recorded);
-    expect(onLinks(sent.errors).length).toBe((recorded.links as unknown[]).length);
+    // Every recorded link misses exactly the keys required only when SENT: `definitional` and (#2848, Science §(p)(1)) `basis`.
+    const missing = onLinks(sent.errors).map((x) => `${x.instancePath}:${x.params?.missingProperty}`).sort();
+    expect(missing).toEqual((recorded.links as unknown[]).flatMap((_l, i) => [`/links/${i}:basis`, `/links/${i}:definitional`]).sort());
   });
 });
