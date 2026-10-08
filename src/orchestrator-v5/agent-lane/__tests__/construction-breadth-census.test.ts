@@ -7,7 +7,7 @@
  *
  * Breadth is a FLOOR for S7, not its done-definition (#87 6070861769: objective, capacity, partial-work ambiguity, provenance
  * and time preserved). Target 0 narrow. The baseline (scripts/ci/construction-breadth-baseline.json) may only shrink:
- * a newly narrow draft fails; a slice that fixes drafts lowers it.
+ * a newly narrow draft fails, and a fixed draft must leave the baseline in the PR that fixes it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,25 +38,36 @@ async function registeredGraph(row: CorpusRow): Promise<Rec | null> {
   return ((registered as Rec | null)?.graph as Rec | undefined) ?? null;
 }
 
-/** The ratchet: fail only on a draft narrow now that the baseline does not list, or on more narrow than the baseline. */
+/**
+ * The ratchet (Typecheck Drift style): fail on a draft narrow now that the baseline does not list, on more narrow than
+ * the baseline, and on a STALE baseline (an id listed that is now sufficient), so a fix lowers the baseline in the same
+ * PR and a later re-narrow of that draft fails.
+ */
 function ratchetFailures(narrow: readonly string[], baseline: Baseline): string[] {
   const allowed = new Set(baseline.narrow_ids);
-  const newly = narrow.filter(id => !allowed.has(id)).map(id => `newly narrow: ${id}`);
-  return narrow.length > baseline.narrow_count ? [...newly, `narrow ${narrow.length} > baseline ${baseline.narrow_count}`] : newly;
+  const now = new Set(narrow);
+  const failures = narrow.filter(id => !allowed.has(id)).map(id => `newly narrow: ${id}`);
+  if (narrow.length > baseline.narrow_count) failures.push(`narrow ${narrow.length} > baseline ${baseline.narrow_count}`);
+  const stale = baseline.narrow_ids.filter(id => !now.has(id));
+  if (stale.length > 0) failures.push(`stale baseline: remove ids ${stale.join(', ')}`);
+  return failures;
 }
 
 describe('S7 construction-breadth ratchet controls', () => {
   const base: Baseline = { narrow_count: 2, narrow_ids: ['a', 'b'] };
-  it('an all-sufficient (or empty) census passes', () => {
-    expect(ratchetFailures([], base)).toEqual([]);
+  it('an empty or all-sufficient census passes against an empty baseline', () => {
     expect(ratchetFailures([], { narrow_count: 0, narrow_ids: [] })).toEqual([]);
+    expect(ratchetFailures(['a', 'b'], base)).toEqual([]);
   });
   it('a planted narrow draft fails, even when another draft was fixed', () => {
     expect(ratchetFailures(['a', 'b', 'planted'], base)).toEqual(['newly narrow: planted', 'narrow 3 > baseline 2']);
-    expect(ratchetFailures(['a', 'planted'], base)).toEqual(['newly narrow: planted']);
+    expect(ratchetFailures(['a', 'planted'], base)).toEqual(['newly narrow: planted', 'stale baseline: remove ids b']);
   });
-  it('a baseline shrink is accepted', () => {
-    expect(ratchetFailures(['a'], base)).toEqual([]);
+  it('a fixed draft still listed fails by id; removing it passes; re-narrowing it then fails', () => {
+    expect(ratchetFailures(['a'], base)).toEqual(['stale baseline: remove ids b']);
+    const lowered: Baseline = { narrow_count: 1, narrow_ids: ['a'] };
+    expect(ratchetFailures(['a'], lowered)).toEqual([]);
+    expect(ratchetFailures(['a', 'b'], lowered)).toEqual(['newly narrow: b', 'narrow 2 > baseline 1']);
   });
 });
 
@@ -77,6 +88,6 @@ describe('S7 construction-breadth census (ratchet)', () => {
       const d = diagnoseDraft(graph);
       if (d.risks !== null || d.options !== null) narrow.push(row.id);
     }
-    expect(ratchetFailures(narrow, baseline), 'construction regressed (lower the baseline when a slice fixes drafts)').toEqual([]);
+    expect(ratchetFailures(narrow, baseline), 'construction regressed, or a fixed draft is still listed in the baseline').toEqual([]);
   }, 120_000);
 });
