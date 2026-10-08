@@ -403,6 +403,14 @@ describe('RC6 said once', () => {
     expect(faceOf(c).trimEnd().endsWith(q), faceOf(c)).toBe(true);
     expect(c.text.split(q)).toHaveLength(2);
   });
+  it('Codex r3 P1: a typed host container never takes one sentence out of a typed multi-sentence evidence unit', () => {
+    const typed = 'Revenue is £100. Churn is 5%.';
+    const host = 'The baseline needs confirmation because revenue is £100.';
+    const text = [host, longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'host', text: host }, { role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(faceOf(c)).toContain(typed);
+  });
   it('idempotent (Codex r1 P1-3): composing twice keeps the same face, the typed closing ask last both times', () => {
     const closing = 'HOW sure are you?';
     const text = [longContext, 'How sure are you?', 'Which assumption matters most?', closing].join('\n\n');

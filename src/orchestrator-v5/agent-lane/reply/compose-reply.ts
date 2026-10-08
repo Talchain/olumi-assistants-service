@@ -370,6 +370,10 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
     group.first = group.copies.find((c) => rankOf(c) === best)!;
   }
   const groupTyped = (idx: number): boolean => groups[idx]!.copies.some((c) => rankOf(c) >= 0);
+  // A typed copy may be contained away only when it IS a whole obligation (its role moves to the container whole); a
+  // sentence inside a larger typed unit never is (Codex r3 on #2801: the unit's other part would keep the role alone).
+  const wholeWhereTyped = (idx: number): boolean => groups[idx]!.copies.every((c) => rankOf(c) < 0
+    || typedRanges.some((r) => r.start === c.start && r.end === c.end));
 
   // Aho-Corasick: all complete sentence keys are patterns; output links avoid copying suffix-match arrays.
   const trie: { next: Map<string, number>; fail: number; output: number; group?: number }[] = [
@@ -420,7 +424,7 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
           // Containment only between Olumi's OWN typed sentences (their meaning is known: the leader gate's "…, because
           // <the withheld reason>"). Agent prose loses only exact copies (Codex r2 on #2801: a colon or untyped frame can
           // invert or partially carry a finding).
-          && groupTyped(found) && groupTyped(idx)
+          && groupTyped(found) && groupTyped(idx) && wholeWhereTyped(found)
           && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
       }
     }
