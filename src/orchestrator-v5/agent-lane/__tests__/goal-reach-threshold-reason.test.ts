@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { isOlumiSideThreshold, thresholdReasonOf, THRESHOLD_REASONS } from '../../compose/claim-safety-cage.js';
 import { goalNotCheckedLine, THRESHOLD_REST_STANDS } from '../break-even.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
+import { readMoneyTotal } from '../same-unit.js';
+import { sayFigure } from '../say-figure.js';
 
 type Rec = Record<string, any>;
 const DIR = new URL('./fixtures/plot-threshold-444/', import.meta.url);
@@ -91,11 +93,14 @@ describe('GOAL-REACH 3b — Science §(g) words, one sentence per reason', () =>
     }
   });
 
-  // Expected string = staging d5818884's own goalNotCheckedLine on this input (run from `git show HEAD:` before the change).
-  it('CONTROL: a pre-#444 payload (code, no reason) keeps today\'s words byte-identical', () => {
+  // The only word change from the staging control is the plain-unit reader's money rendering (DL workstream A).
+  it('CONTROL: a pre-#444 payload (code, no reason) keeps the cause and says its target in plain units', () => {
+    const moneyUnit = readMoneyTotal(goal().goal_threshold_unit, '');
+    expect(moneyUnit, 'the unchecked-target producer reads a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(20000, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£20,000 a month');
     const pre = result('missing_goal_baseline');
     for (const w of pre.enrichment.inference_warnings) if (w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE') delete w.detail;
-    expect(goalNotCheckedLine(graphOf(), pre)).toBe('Your MRR target of 20,000 £/month is not checked yet: the model has no current MRR figure to measure it against.');
+    expect(goalNotCheckedLine(graphOf(), pre)).toBe('Your MRR target of £20,000 a month is not checked yet: the model has no current MRR figure to measure it against.');
   });
 
   it('Science carve-out: the Olumi-side set is exactly the no-user-action reasons', () => {

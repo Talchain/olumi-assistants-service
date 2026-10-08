@@ -10,12 +10,15 @@
  * pre-gate words were not captured; the narrator here writes the screen's own lines (author-reconstructed, which the gate
  * deletes, as Render shows it did).
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type AnswerShape } from '../../routing/answer-shape.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { HORIZON_MARKER, REPLY_FACE_WORD_BUDGET } from '../reply/compose-reply.js';
+import { untestedHorizonLine } from '../decision-input-ask.js';
 
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -64,10 +67,10 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [READ.analysis_result], analysis_ready: READ.analysis_ready, analysis_state: state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({
       graph: READ.graph, graph_hash: READ.graph_hash, analysis_state: state,
       analysis_ready: READ.analysis_ready, analysis_result: READ.analysis_result,
-    }));
+    }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -99,18 +102,38 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     expect(count(SCREEN[1]!, SIZE_QUESTION)).toBe(1);
   });
 
-  it('RED at base: the narrator writes the screen’s lines, the leader gate deletes them, and the Explain reply still says each once, under its lead-in', async () => {
-    narrator = `No single option can be put forward: the comparison is a near tie.\n\n${LEAD}\n\n${SCREEN.join(' ')}`;
+  it('RED at base: the narrator writes the screen’s lines, the leader gate deletes them, and the Explain reply still leads with each exact finding, moving its optional frame to detail on mandatory overflow', async () => {
+    const nearTie = 'No single option can be put forward: the comparison is a near tie.';
+    narrator = `${nearTie}\n\n${LEAD}\n\n${SCREEN.join(' ')}`;
     const b = await press(await runThenExplainPayload());
     expect(b._diagnostic_trace.fast_path).toBe('explain');
     // RC6: the repeated question stays with the first typed chance+depends unit; only its later copy is dropped.
     const saidOnceLines = SCREEN.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
     for (const line of saidOnceLines) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    // B15 (#2783, DL): the lead-in opens the headline, directly followed by the first screen chance finding.
-    expect(b.assistant_text.startsWith(`${LEAD}\n${SCREEN[0]!}`), b.assistant_text).toBe(true);
     expect(b._answer_shape, 'RC6 re-binds the second unit instead of shipping obligation_unlocated whole').toBeDefined();
-    expect(b._answer_shape!.headline, 'the first unit and its question still lead, unchanged').toBe(`${LEAD}\n${SCREEN[0]!}`);
+    const shape = b._answer_shape!;
+    const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: true });
+    expect(horizon).not.toBeNull();
+    const mandatory = [...saidOnceLines, HORIZON_MARKER];
+    const face = [shape.headline, ...shape.bullets];
+    // r5 item 2: exact chance findings, their own notes/question and horizon marker remain mandatory over 80 words.
+    // The optional narrator frame is demoted with E/W; no screen finding or its question is shortened to make room.
+    expect(mandatory.join(' ').trim().split(/\s+/)).toHaveLength(113);
+    expect(mandatory.join(' ').trim().split(/\s+/).length).toBeGreaterThan(REPLY_FACE_WORD_BUDGET);
+    expect(face).toEqual(mandatory);
+    expect(shape.headline, 'the first unit and its question still lead, unchanged').toBe(SCREEN[0]!);
+    expect(b.assistant_text.startsWith(SCREEN[0]!), b.assistant_text).toBe(true);
+    expect(face.join('\n')).not.toContain(LEAD);
+    expect(count(shape.detail, LEAD), 'the optional frame remains exactly once under More detail').toBe(1);
+    expect(count(shape.detail, nearTie)).toBe(1);
+    expect(count(b.assistant_text, nearTie)).toBe(1);
+    expect(face.join('\n')).not.toContain(horizon!);
+    expect(count(face.join('\n'), HORIZON_MARKER), 'one plural marker after the chance lines').toBe(1);
+    expect(face.at(-1), 'the mandatory plural marker follows all exact chance findings').toBe(HORIZON_MARKER);
+    expect(count(shape.detail, horizon!), 'full producer horizon is verbatim once in detail').toBe(1);
+    expect(count(b.assistant_text, horizon!)).toBe(1);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
     expect(b._answer_shape!.bullets).toContain(saidOnceLines[1]!);
     expect(b._answer_shape!.bullets.join(' ')).not.toContain(SIZE_QUESTION);
     expect(count(b.assistant_text, LEAD)).toBe(1);

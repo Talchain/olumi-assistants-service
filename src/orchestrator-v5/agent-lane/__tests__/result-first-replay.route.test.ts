@@ -5,10 +5,15 @@
  * offers the same bound control again; a deadlined interpret call is made once. Live route, the model stubbed, and a
  * store double that reads answer rows back as the real store does (snake_case columns).
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { decisionInputAsk } from '../decision-input-ask.js';
+import { sentencesOf } from '../reply/compose-reply.js';
+import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
@@ -64,14 +69,14 @@ async function freshApp(): Promise<FastifyInstance> {
     return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
       graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY };
   });
-  app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
-    analysis_state: state(), analysis_result: SERVED.block }));
+  app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
+    analysis_state: state(), analysis_result: SERVED.block }, SCENARIO));
   await app.register(agentV1TurnRoute);
   await app.ready();
   return app;
 }
 
-type Body = { assistant_text: string; suggested_actions: { id: string }[]; narration?: { status: string; run_key: string };
+type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_actions: { id: string }[]; narration?: { status: string; run_key: string };
   blocks?: { type?: string }[]; _agent: { session_id: string } };
 
 describe('result-first on retry, lost response and failed explanation (live route)', () => {
@@ -184,7 +189,7 @@ describe('result-first on retry, lost response and failed explanation (live rout
     expect(explainIds(replay)).toEqual(explainIds(runB));
   });
 
-  it('RED (P1 @b30759b2): retry Run A after the figures changed and Run B completed → Olumi\'s fixed line, never A\'s stored figures — also after a restart', async () => {
+  it('RED (P1 @b30759b2): retry Run A after the figures changed and Run B completed → the current withheld finding and ready detail, never A\'s stored figures — also after a restart', async () => {
     const r1 = randomUUID();
     const runA = (await runTurn(r1)).json() as Body;
     // What request 1 stored can carry paragraphs built from ITS readback (the break-even arithmetic, the provisional
@@ -194,7 +199,19 @@ describe('result-first on retry, lost response and failed explanation (live rout
     computedAt = RUN_B;
     // What a live Run turn says on the CURRENT state: the replay must say the same, never A's paragraphs.
     const live = (await runTurn(randomUUID())).json() as Body;
-    expect(live.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    const finding = goalChanceWithheldForAgent(SERVED.block, GRAPH)!.say;
+    expect(finding).toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
+    const ask = decisionInputAsk(GRAPH, { restingText: `${RUN_RESULT_READY_TEXT}\n\n${finding}`,
+      questionsToggle: false, awaitingApproval: false, builtOrRan: true });
+    expect(ask).toBe('What figure should "MRR" reach or stay under? I\'ll propose it as your target.');
+    expect(live._answer_shape).toEqual({ headline: 'Not shown yet; why is under More detail', bullets: ['What figure should "MRR" reach or stay under?'],
+      detail: `${RUN_RESULT_READY_TEXT}\n\nI'll propose it as your target.\n\n${finding}` });
+    expect([live._answer_shape!.headline, ...live._answer_shape!.bullets].join('\n')).not.toContain(finding);
+    expect(live._answer_shape!.detail.split(finding)).toHaveLength(2);
+    expect(live.assistant_text).toBe(deriveAnswerTextFromShape(live._answer_shape!));
+    expect(live.assistant_text.split(RUN_RESULT_READY_TEXT)).toHaveLength(2);
+    expect([live._answer_shape!.headline, ...live._answer_shape!.bullets].join('\n').match(/\?/g)).toHaveLength(1);
+    for (const sentence of sentencesOf(ask!)) expect(live.assistant_text.split(sentence)).toHaveLength(2);
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await runTurn(r1)).json() as Body;

@@ -214,13 +214,14 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(route).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     expect(route).toContain('const askNow = identityAskLineFor(state.analysisResult, state.graph);');
-    // Contrast: the probe sees the goal-chance line it follows.
+    // ONE reply: the typed reason is owed after the gate only if the gate did not already say it.
+    expect(route).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
+    expect(route).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
     expect(route).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
-    expect(route).toContain('...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),');
   });
   it('R13 MUTANT: replacing the scoped owed owner with raw tool results is caught', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    const pin = '...[goalChanceLineOwed(goalChanceResults, text)].filter((x): x is string => x !== null),';
+    const pin = "goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,";
     expect(route.includes(pin)).toBe(true);
     expect(route.replace(pin, pin.replace('goalChanceResults', 'result.tool_results')).includes(pin)).toBe(false);
     expect(goalChanceLineOwed([{ ran: true, goal_chance: { withheld: true, say: 'The target cannot be tested yet.' } },
@@ -282,7 +283,7 @@ describe('Codex buddy r2', () => {
     const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
     const run = { ran: true, goal_chance: chance };
     expect(goalChanceLineOwed([run], `Here is the run. ${placeholder.message}`)).toBe(chance.say);
-    expect(goalChanceLineOwed([run], `This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`)).toBe(chance.say);
+    expect(goalChanceLineOwed([run], `This run doesn’t yet show each option’s chance of meeting your goal. ${placeholder.message}`)).toBe(chance.say);
     // Control: a reply that says neither owes the whole line.
     expect(goalChanceLineOwed([run], 'Here is the run.')).toBe(chance.say);
   });

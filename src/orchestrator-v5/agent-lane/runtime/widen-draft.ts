@@ -10,6 +10,7 @@ import { markOlumiOptions } from '../olumi-option-marker.js';
 import { budgetFor } from '../model-budgets.js';
 import { doorLevelOf, estimateLevelPersists } from './agent-capabilities.js';
 import { readIsBaseline } from '../../../cee/baseline-identity.js';
+import { WIDENED_RISK_MARKER_DOWN, WIDENED_RISK_MARKER_MOVE } from '../widened-risk-markers.js';
 
 type AdmissionArgs = Parameters<typeof admitCandidateModel>;
 interface FinalGraph {
@@ -303,8 +304,7 @@ export function widenedRiskNote(counts: WidenCounts): string | null {
   return counts.risks > 0 ? "Risks Olumi added aren't in the chance yet, so it may be too high." : null;
 }
 
-export const WIDENED_RISK_MARKER_DOWN = "Leaves out Olumi's added risks; may be too high";
-export const WIDENED_RISK_MARKER_MOVE = "Leaves out Olumi's added risks; may move";
+export { WIDENED_RISK_MARKER_DOWN, WIDENED_RISK_MARKER_MOVE };
 
 type AddedRisk = {
   readonly affects?: { readonly direction: 'positive' | 'negative' };

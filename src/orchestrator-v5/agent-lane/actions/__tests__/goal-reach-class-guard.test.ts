@@ -9,14 +9,14 @@ import { describe, expect, it } from 'vitest';
 import paulStored from '../../__tests__/fixtures/goal-reach-paul-graph-632b92b9.json';
 import {
   GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH,
-  GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE,
+  GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL,
   GOAL_FIGURES_SHARE_APPROXIMATION, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_FIGURES_WITHHELD_CODES, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { GOAL_FIGURES_NO_STATED_TARGET, withholdUnusableGoalChances } from '../../../goal-target/goal-chance-gate.js';
-import { withholdGoalFiguresForChanceGoal, withholdGoalFiguresForUntestableTarget } from '../../../tools/handlers/run-analysis.js';
+import { withholdGoalFiguresForChanceGoal, withholdGoalFiguresForMissingCurrentLevel, withholdGoalFiguresForUntestableTarget } from '../../../tools/handlers/run-analysis.js';
 import { detectIdenticalArms } from '../../../tools/handlers/identical-arms.js';
 import { goalChanceWithheldForAgent } from '../../goal-chance-withheld.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../goal-certainty.js';
@@ -163,6 +163,11 @@ const INVENTORY: Readonly<Record<string, { make: () => Fixture; resolves: readon
   [GOAL_FIGURES_PRODUCT_NOT_READ]: { make: productNotRead, resolves: ['confirm_reading'] },
   // GOAL-REACH 3b: the user's current level (set_current_level → the persisted ask → the existing card).
   [GOAL_FIGURES_TARGET_NOT_TESTABLE]: { make: targetNotTestable, resolves: ['set_current_level'] },
+  // The same engine refusal now also carries CEE's typed current-level cause; keep its resolving control in this inventory.
+  [GOAL_FIGURES_MISSING_CURRENT_LEVEL]: { make: () => {
+    const fixture = thresholdFixture('missing_goal_baseline');
+    return { ...fixture, result: withholdGoalFiguresForMissingCurrentLevel(fixture.result, fixture.graph) };
+  }, resolves: ['set_current_level'] },
   [GOAL_FIGURES_OPTIONS_IDENTICAL]: { make: identicalOptions, resolves: [] },
   [GOAL_FIGURES_PROBABILITY_UNUSABLE]: { make: () => {
     const graph = twoParentGraph(); const result = baselineResult();

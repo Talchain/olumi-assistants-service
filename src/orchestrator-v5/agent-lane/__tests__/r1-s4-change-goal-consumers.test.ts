@@ -15,6 +15,8 @@ import { ProposalStore } from '../proposal.js';
 import { userWordsOf } from '../stated-by-user.js';
 import { sayGoalChange } from '../limit-frame.js';
 import { goalNotCheckedLine } from '../break-even.js';
+import { readMoneyTotal } from '../same-unit.js';
+import { sayFigure } from '../say-figure.js';
 import { formatGoalTargetNotSavedText } from '../../compose/goal-target-receipt-guard.js';
 import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { createAddConstraintHandler } from '../../tools/handlers/add-constraint.js';
@@ -67,7 +69,10 @@ describe('S4C sayers: a change goal is said as the change, never as the stored f
   });
 
   it('S4C-2 CONTROL: the same goal as a LEVEL is said exactly as before ("target of <money>")', () => {
-    expect(goalNotCheckedLine(graphOf('level'), NOT_CONVERTIBLE)).toMatch(/^Your Cloud bill target of \S*38,250\S* is not checked yet: /);
+    const moneyUnit = readMoneyTotal(goalFields('level').goal_threshold_unit, '');
+    expect(moneyUnit, 'the unchecked-target producer reads a plain money total').toEqual({ code: 'GBP', period: 'month' });
+    expect(sayFigure(38250, `${moneyUnit!.code} a ${moneyUnit!.period}`)).toBe('£38,250 a month');
+    expect(goalNotCheckedLine(graphOf('level'), NOT_CONVERTIBLE)).toMatch(/^Your Cloud bill target of £38,250 a month is not checked yet: /);
   });
 
   it('S4C-3 RED: the "not saved" receipt names the surviving change as a change', () => {

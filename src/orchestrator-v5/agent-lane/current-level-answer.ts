@@ -7,6 +7,7 @@ import { unitPhraseFamily } from './unit-conflict.js';
 import { thresholdReasonOf } from '../compose/claim-safety-cage.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
+import { foldQuotes, sentencesOf } from './reply/compose-reply.js';
 
 export const CURRENT_LEVEL_TOOL = 'propose_goal_current_level';
 type Ask = PendingAction & { action: Extract<PendingAction['action'], { kind: 'elicit_goal_current_level' }> };
@@ -19,6 +20,16 @@ const names = (s: string, label: string): boolean => label.trim() !== '' && new 
 const UNCERTAIN = /\b(?:don['’]t know|do not know|not sure|unsure|no idea|don['’]t have|do not have|cannot|can['’]t|maybe|perhaps|probably|possibly|likely|unlikely|presumably|apparently|I think|I believe|I suspect|guess|might|could|would|will)\b/i;
 const CONDITIONAL = /\b(?:if|unless|provided|providing|assuming|as long as|on condition|subject to)\b/i;
 const QUESTION = /\?|^\s*(?:what|why|how|when|where|which|who|can|could|should|would|is|are|do|does)\b/i;
+
+/** The one composer may move the typed ask's context apart from its question; every exact sentence must survive. */
+function producerQuestionWasDelivered(sentText: string, question: string): boolean {
+  const normal = (sentence: string): string => plain(foldQuotes(sentence));
+  const delivered = new Set(sentText.split('\n')
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, ''))
+    .flatMap(sentencesOf).map(normal));
+  const required = sentencesOf(question).map(normal);
+  return required.length > 0 && required.every((sentence) => delivered.has(sentence));
+}
 
 /**
  * GOAL-REACH 3b: the Run's goal chance was refused, and the goal has no current level the user stated, so the resolving
@@ -124,7 +135,7 @@ export function currentLevelAskOnAnswer(input: {
   const warnings = [...records(result?.inference_warnings), ...records(rec(result?.enrichment)?.inference_warnings)];
   for (const warning of warnings) {
     const first = rec(warning.first_ask);
-    if (first?.kind !== 'goal_level' || typeof first.question !== 'string' || !plain(input.sentText).includes(plain(first.question))) continue;
+    if (first?.kind !== 'goal_level' || typeof first.question !== 'string' || !producerQuestionWasDelivered(input.sentText, first.question)) continue;
     const goal = nodes.find((n) => n.id === first.node_id && n.kind === 'goal');
     if (goal === undefined || typeof goal.label !== 'string') continue;
     const held = rec(goal.observed_state)?.unit ?? goal.goal_threshold_unit;
@@ -140,7 +151,7 @@ export function currentLevelAskOnAnswer(input: {
   }
   // GOAL-REACH 3b: the bar's set_current_level press delivered the threshold ask (the same words, one source).
   const asked = goalLevelAskOf(input.graph, input.analysisResult);
-  if (asked !== null && plain(input.sentText).includes(plain(asked.question))) {
+  if (asked !== null && producerQuestionWasDelivered(input.sentText, asked.question)) {
     const pa = parsePendingAction({
       id: randomUUID(), scenario_id: input.scenarioId, chip_id: 'agent-current-level-ask',
       action: { kind: 'elicit_goal_current_level', goal_id: asked.goal.id, goal_label: asked.goal.label, user_id: input.userId,

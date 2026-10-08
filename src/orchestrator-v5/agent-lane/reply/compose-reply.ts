@@ -10,29 +10,17 @@
  * `{headline, ≤3 bullets, detail}` (#481/#611, July). The Agent lane (22 Sep, #1687) writes free prose, and only a Run
  * reply with no host line, no approval and no gate edit was shaped (#1914). Every other reply shipped whole.
  *
- * THE CONTRACT (REPLY SHAPE v1):
- *   · FACE: one headline sentence + at most {@link REPLY_FACE_MAX_BULLETS} bullets. DETAIL: every other sentence,
- *     verbatim and in its original order, collapsed by the UI ("More detail"); the open-questions segment goes last,
- *     where the panel moves it to its own toggle.
- *   · Carried as the existing `_answer_shape` sidecar, with `assistant_text := deriveAnswerTextFromShape(shape)` (the
- *     identity tie). No schemas change: the sidecar already rides the additive extensions (DGAI `answerShape.ts`).
- *   · NEVER BY DELETING MEANING. RC6 removes only whole sentences already carried by another sentence (equal copies keep
- *     the first). The invariant compares the derived multiset with the input minus exactly those recorded copies;
- *     any other difference ships the input whole (fail closed). The Open Questions segment is untouched.
- *   · TYPED RESPONSE PROFILES (DL, AIE line review 6037446159 item 5), chosen deterministically by the TURN KIND:
- *       - `coaching` (an ordinary converse / Explain / Run / research reply): the face construct below;
- *       - `method_step` (a method press: pre-mortem): ONE structured prompt under the RC method contract; never reshaped
- *         (its worksheet is the chat verbatim, R3);
- *       - `proposal` (a turn that made a proposal): the typed card (approve chip, held card, preview) + the reply as its
- *         disclosure, never reshaped, so consent is never hidden (R2; S-D's proposal panel will carry the change).
- *   · MUST-FACE on a coaching reply (DL R1 + AIE): the headline, the ONE ask, the withheld reason, a caveat on a named
- *     finding, and required evidence (the screen's chance lines, the comparison's basis, a root treated as zero). Each is
- *     a {@link FaceObligation} by its exact text. Receipts and status may move to detail. The ask is the last bullet;
- *     other questions go to detail (D-12). Required evidence, caveats and consent are NEVER hidden: an obligation that is
- *     present but not locatable as one unit, or more obligations than the face holds, keeps the reply whole.
- *   · FACE BUDGET (AIE #87 6037293086 §5): ≤ {@link REPLY_FACE_WORD_BUDGET} words, one move, one ask. A reply that fits
- *     it whole with at most one question is ALREADY IN SHAPE: returned byte-identical, no sidecar.
- *   · NEVER DELETES A CHALLENGE (AIE §7): a challenge the face cannot hold sits under More detail; only said copies go.
+ * THE DRAFT/RUN FACE CONTRACT (the route opts in by typed turn identity):
+ *   · FACE: the selected headline/finding, the screen's typed chance lines with their own notes, optional typed
+ *     whatChanges and RC4 estimates lines, and one next step. A pending/suggested typed card owns its question;
+ *     every prose copy of that question stays in detail. Other host and narrator words stay in detail, verbatim.
+ *   · A withheld reason or firmness disclosure stays beside a face figure only when their typed subjects match.
+ *   · Optional estimates and whatChanges demote in that order over 80 visible words. Chance findings, their own
+ *     notes, horizon, matching figure disclosures and the next step stay; mandatory overflow is counted.
+ *   · Ordinary coaching retains the three-bullet pool, small-detail/short-reply passthrough and whole-reply exits.
+ *   · The existing method_step, proposal, leader_free_envelope and host_composed whole-reply paths are unchanged.
+ *   · `_answer_shape` and assistant_text have one identity: deriveAnswerTextFromShape(shape). RC6 removes only its
+ *     recorded whole-sentence copies; every other sentence is conserved. Open questions belong to detail.
  *
  * Pure and deterministic: no model, no I/O. The route logs {@link ReplyComposition.measure} on every turn, so each
  * model's compliance with the prompt half ({@link REPLY_SHAPE_INSTRUCTION}) is a count, not an impression.
@@ -41,16 +29,23 @@
  * `__tests__/compose-reply.test.ts`.
  */
 import { z } from 'zod';
+import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
+import { withoutProposalIds } from '../display-ids.js';
+import { WIDENED_RISK_MARKER_DOWN as WIDENED_RISK_MARKER_TOO_HIGH,
+  WIDENED_RISK_MARKER_MOVE as WIDENED_RISK_MARKER_MAY_MOVE } from '../widened-risk-markers.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
+
+export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
+export { REPLY_SHAPE_INSTRUCTION } from './reply-shape-instruction.js';
 
 /** Straight and curly quotes as one glyph each, length-preserving (offsets in the folded text are offsets in the original). */
 export function foldQuotes(text: string): string {
   return text.replace(/[‘’‚‛′]/g, "'").replace(/[“”„‟″]/g, '"');
 }
 
-/** The face holds the headline plus at most this many bullets (Paul's "three bullets as a construct"). */
+/** Ordinary coaching retains this cap; Draft/Run contracts count it without shipping prose whole. */
 export const REPLY_FACE_MAX_BULLETS = 3;
 /** The prompt's per-bullet target. The composer never cuts a bullet; one over the log bar is counted. */
 export const REPLY_BULLET_WORD_TARGET = 20;
@@ -60,29 +55,61 @@ const BULLET_WORD_LOG_BAR = 25;
  * hides one short sentence costs a click and saves nothing; the 18 Sep defect was hiding SUBSTANCE, #1478.)
  */
 export const REPLY_DETAIL_MIN_WORDS = 15;
-/**
- * ⭐ THE FACE BUDGET (AIE coaching quality target, #87 6037293086 §5: "1–3 short bullets, ≤~75 initial words"). A reply
- * that fits it whole and asks at most one question is already in shape; otherwise the face fills to it. Must-face lines
- * are never dropped to fit it (a must-face face over budget is counted, never cut).
- */
-export const REPLY_FACE_WORD_BUDGET = 75;
+/** The face word budget; irreducible mandatory Draft/Run overflow is counted, never cut. */
+export const REPLY_FACE_WORD_BUDGET = 80;
+/** The optional face lines demote in this one deterministic order; mandatory units never demote. */
+export const FACE_DEMOTION_ORDER = ['estimates', 'what_changes'] as const;
+
+/** Paul/DL/Science 93: expert wording belongs in detail; these exact markers must remain on the face. */
+export const HORIZON_MARKER = "At today's numbers; not projected forward yet";
+/** Science 93 amendments (8 Oct): exact user-facing wording. */
+export const ROBUSTNESS_MARKER = 'Small changes could change the comparison';
+export const WITHHOLD_FALLBACK_MARKER = 'Not shown yet; why is under More detail';
+export const FIRMNESS_MARKER_PREFIX = "May look firmer: uses Olumi's ";
+
+export type FaceDisclosure =
+  | { readonly kind: 'withhold'; readonly cause: 'missing_current_level' | 'unconfirmed_identity' | 'unsized_links' | 'no_target' | 'other'; readonly goalLabel?: string }
+  | { readonly kind: 'firmness'; readonly figure: string }
+  | { readonly kind: 'robustness' };
+
+/** Typed cause/figure only: a marker is never inferred from a note's prose. */
+export function markerForDisclosure(note: FaceDisclosure): string {
+  if (note.kind === 'robustness') return ROBUSTNESS_MARKER;
+  if (note.kind === 'firmness') return `${FIRMNESS_MARKER_PREFIX}${note.figure} as exact`;
+  switch (note.cause) {
+    case 'missing_current_level': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: ${note.goalLabel}'s current level is missing`;
+    case 'unconfirmed_identity': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: how ${note.goalLabel} is worked out isn't confirmed`;
+    case 'unsized_links': return "Not shown: some relationships aren't sized yet";
+    case 'no_target': return 'Not shown: no target figure yet';
+    case 'other': return WITHHOLD_FALLBACK_MARKER;
+  }
+}
+
+/** A recorded cell reason owns the chance marker; graph labels only supply its name. */
+export function withholdDisclosureForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): FaceDisclosure | null {
+  const withheld = cells.filter((cell): cell is Extract<CanonicalAnalysisCell, { kind: 'withheld' }> => cell.kind === 'withheld');
+  if (withheld.length === 0) return null;
+  const nodes = (graph as { nodes?: { kind?: string; label?: string }[] } | null)?.nodes;
+  const goals = Array.isArray(nodes) ? nodes.filter(node => node !== null && typeof node === 'object' && node.kind === 'goal') : [];
+  const goalLabel = goals.length === 1 && typeof goals[0]?.label === 'string' ? withoutProposalIds(goals[0].label).trim() : undefined;
+  const causes = new Set<Extract<FaceDisclosure, { kind: 'withhold' }>['cause']>();
+  for (const cell of withheld) for (const reason of cell.reasons) {
+    switch (reason.code) {
+      case 'GOAL_FIGURES_MISSING_CURRENT_LEVEL': causes.add('missing_current_level'); break;
+      case 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED':
+      case 'GOAL_FIGURES_PRODUCT_NOT_READ': causes.add('unconfirmed_identity'); break;
+      case 'GOAL_FIGURES_PLACEHOLDER_PATH': causes.add('unsized_links'); break;
+      default: causes.add('other');
+    }
+  }
+  return { kind: 'withhold', cause: causes.size === 1 ? [...causes][0]! : 'other',
+    ...(goalLabel === undefined || goalLabel === '' ? {} : { goalLabel }) };
+}
 
 /**
- * ⭐ THE PRODUCER HALF: one sentence every chat-writing model is given (joined into `AGENT_INSTRUCTIONS`, and appended to
- * `RESEARCH_INSTRUCTIONS`). Code only: it ships in the CEE build and is never written to a prompt store. No dash a user
- * could see quoted back, and no figure other than the two budgets.
- */
-export const REPLY_SHAPE_INSTRUCTION =
-  'Shape: begin with one short sentence that answers. Then give at most three bullets, each on its own line starting '
-  + 'with "- " and under 20 words: concise, action-oriented points grounded in this model (two bullets if you also ask a '
-  + 'question). Keep that part under 75 words, with one reasoning move and at most one question or next action; no '
-  + 'generic advice. Put any further explanation after the bullets, after a blank line: Olumi shows it under More '
-  + 'detail, so never repeat it in the bullets. If you ask a question, it stays your last sentence.';
-
-/**
- * A host line by its exact text. `ask`, `withheld_reason`, `caveat` and `evidence` must be seen without opening "More
- * detail"; `host` (a receipt, a status, CEE's own run words, the arithmetic) is one atomic part that may sit in detail (R1)
- * but is never split. In coaching with only typed host parts, the first part is the whole headline.
+ * A host line by exact typed identity. Lead evidence carries the screen finding; matching subjects bind a withheld
+ * reason/caveat to its face figure. Other host parts stay in detail. The last ask question is the one prose next step
+ * unless its typed control owns it. With only typed host parts, the first host part is the whole headline.
  */
 export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host' | 'detail';
 /** Overlapping obligations are one unit carrying the strongest role among them. */
@@ -91,8 +118,14 @@ export interface FaceObligation {
   readonly role: FaceObligationRole;
   readonly text: string;
   readonly subjects?: readonly string[];
+  /** The screen finding this separately written depends/spread/shortfall note belongs to. */
+  readonly companionOf?: string;
   /** B15: a typed screen goal-chance finding leads when present; its evidence rank is unchanged. */
   readonly lead?: true;
+  /** This finding and its typed presses already carry the visible next step. */
+  readonly ownsNextStep?: true;
+  /** Progressive-disclosure marker, supplied by the typed cause or note source. */
+  readonly disclosure?: FaceDisclosure;
 }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
@@ -107,9 +140,27 @@ export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope
 export interface ReplyComposeInput {
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
+  /** Only a typed Draft mutation or Run/Explain turn opts into the H/W/E/N face contract. */
+  readonly faceContract?: 'draft' | 'run';
+  /** Exact horizon disclosure owed beside on-face Run chances, after their own notes. */
+  readonly horizonLine?: string;
+  /** The canonical per-option cells, projected once by the route from the gated Run. */
+  readonly chanceCells?: readonly CanonicalAnalysisCell[];
+  /** P05b owns these words and counts; Draft face immediately after H, Run detail, ignored without a contract. */
+  readonly widenedLine?: string;
+  /** Draft detail; Run must-face marker after chances, with the full note in detail. */
+  readonly widenedRiskNote?: string;
+  /** P05b chooses the direction from typed edge signs; absent a marker, Run uses the conservative may-move form. */
+  readonly widenedRiskMarker?: string;
   readonly obligations?: readonly FaceObligation[];
   /** Code-authored disclosures owed once, under More detail even for a short reply. */
   readonly detailLines?: readonly string[];
+  /** Typed Run finding supplied by the host; after the chance lines, before estimates and the next step. */
+  readonly whatChanges?: string;
+  /** The route's RC4 census words; never counted or inferred from prose here. */
+  readonly estimatesLine?: string;
+  /** Exact questions already carried by this reply's pending/suggested typed control. */
+  readonly typedControlQuestions?: readonly string[];
   /** Node labels resolve narrator mentions to the typed directed link subjects. */
   readonly graph?: unknown;
   /** The typed response profile for this turn kind (default `coaching`). */
@@ -156,6 +207,8 @@ interface Unit {
   readonly kind: UnitKind;
   /** Verbatim words (a bullet without its marker). */
   readonly text: string;
+  /** Exact source gap after the prior segment of this same line (including no gap before punctuation). */
+  readonly joinBefore?: string;
   /** A bullet's own marker, kept when it stays in detail. */
   readonly marker?: string;
   /** Consecutive bullet lines of one paragraph share a run. */
@@ -206,7 +259,7 @@ function proseSegments(line: string, obligations: readonly FaceObligation[]): { 
   return sentencesOf(line).map((text) => ({ text }));
 }
 
-function parseUnits(text: string, obligations: readonly FaceObligation[], paraBase: number, lineBase: number): { units: Unit[]; paras: number; lines: number } {
+function parseUnits(text: string, obligations: readonly FaceObligation[], paraBase: number, lineBase: number, faceContract = false): { units: Unit[]; paras: number; lines: number } {
   const units: Unit[] = [];
   let para = paraBase;
   let run = -1;
@@ -228,7 +281,24 @@ function parseUnits(text: string, obligations: readonly FaceObligation[], paraBa
       lastWasBullet = true;
       const words = bullet[2]!.trim();
       const role = obligations.find((o) => words.includes(o.text))?.role;
-      units.push({ idx: 0, para, line: lineNo, kind: 'bullet', text: words, marker: bullet[1]!, run: paraBase * 1000 + run, ...(role !== undefined ? { obligation: role } : {}) });
+      if (!faceContract) {
+        units.push({ idx: 0, para, line: lineNo, kind: 'bullet', text: words, marker: bullet[1]!, run: paraBase * 1000 + run, ...(role !== undefined ? { obligation: role } : {}) });
+        return;
+      }
+      // A narrator/host bullet may contain a statement followed by its ask. N takes only the question sentence;
+      // the screen's atomic evidence (chance plus its own notes/questions) stays intact.
+      const atomicEvidence = obligations.some((o) => o.role === 'evidence' && o.text === words);
+      const segments = !atomicEvidence && sentencesOf(words).some((text) => QUESTION_END.test(text.trim()))
+        ? proseSegments(words, obligations) : [{ text: words, role }];
+      let end = 0;
+      for (const [index, segment] of segments.entries()) {
+        const text = segment.text.trim();
+        const at = words.indexOf(text, end);
+        units.push({ idx: 0, para, line: lineNo, kind: 'bullet', text,
+          ...(index === 0 ? {} : { joinBefore: words.slice(end, at) }),
+          marker: bullet[1]!, run: paraBase * 1000 + run, ...(segment.role !== undefined ? { obligation: segment.role } : {}) });
+        end = at + text.length;
+      }
       return;
     }
     lastWasBullet = false;
@@ -237,8 +307,14 @@ function parseUnits(text: string, obligations: readonly FaceObligation[], paraBa
       units.push({ idx: 0, para, line: lineNo, kind: 'heading', text: raw.trim() });
       return;
     }
-    for (const seg of proseSegments(raw, obligations)) {
-      units.push({ idx: 0, para, line: lineNo, kind: 'sentence', text: seg.text.trim(), ...(seg.role !== undefined ? { obligation: seg.role } : {}) });
+    let end = 0;
+    for (const [index, seg] of proseSegments(raw, obligations).entries()) {
+      const text = seg.text.trim();
+      const at = raw.indexOf(text, end);
+      units.push({ idx: 0, para, line: lineNo, kind: 'sentence', text,
+        ...(index === 0 ? {} : { joinBefore: raw.slice(end, at) }),
+        ...(seg.role !== undefined ? { obligation: seg.role } : {}) });
+      end = at + text.length;
     }
   });
   return { units, paras: para + 1, lines: lineBase + lines.length };
@@ -536,9 +612,55 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
  * Compose the reply's shape. Only recorded whole-sentence copies may be deleted; all other text is retained.
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
-  const detailLines = [...new Set((input.detailLines ?? []).filter((line) => line.trim() !== ''))];
+  const faceContract = input.faceContract !== undefined;
+  const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
+  const foldedInput = foldQuotes(input.text);
+  const disclosures = canMark ? (input.obligations ?? []).filter(o => o.disclosure !== undefined && o.ownsNextStep !== true)
+    .flatMap(o => {
+      const at = foldedInput.indexOf(foldQuotes(o.text));
+      if (at === -1) return [];
+      const written = input.text.slice(at, at + o.text.length);
+      // A typed reason fragment is not a licence to tear its enclosing sentence apart. Prefer the route's complete
+      // host/withheld part; absent that, bind the full source sentence by syntax alone, retaining every original byte.
+      const container = (input.obligations ?? []).filter(part => (part.role === 'host' || part.role === 'withheld_reason')
+        && part.ownsNextStep !== true && part.text.length > o.text.length && foldQuotes(part.text).includes(foldQuotes(written)))
+        .sort((a, b) => b.text.length - a.text.length).find(part => foldedInput.includes(foldQuotes(part.text)));
+      if (container !== undefined) {
+        const start = foldedInput.indexOf(foldQuotes(container.text));
+        return [{ ...o, text: input.text.slice(start, start + container.text.length) }];
+      }
+      const sentence = /[.!?]["'”’)\]*_`]*$/.test(written) ? undefined
+        : input.text.split('\n').flatMap(raw => sentencesOf(BULLET_LINE.exec(raw)?.[2] ?? raw)).find(part => part.includes(written));
+      return [{ ...o, text: sentence ?? written }];
+    }) : [];
+  const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
+  const chanceMarker = chanceDisclosure === null ? undefined : markerForDisclosure(chanceDisclosure);
+  const markerObligations = disclosures.filter(o => o.disclosure?.kind !== 'withhold').filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
+    || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
+      && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));
+  // The full typed note owns detail even when another host part contained it. Its marker carries the face identity.
+  const inputObligations = (input.obligations ?? []).filter(o => !disclosures.some(d => foldQuotes(o.text).includes(foldQuotes(d.text)) || foldQuotes(d.text).includes(foldQuotes(o.text))))
+    .concat(markerObligations, chanceMarker === undefined ? [] : [{ role: 'withheld_reason' as const, text: chanceMarker, ...((input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range') ? {} : { lead: true as const }) }]);
+  const horizonDetail = canMark && input.faceContract === 'run' ? input.horizonLine : undefined;
+  const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
+  const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
+  const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
+    ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, ...widenDetail]
+    .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
+  const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
+  const faceHostLines = !faceContract || !canMark ? [] : [
+    horizonDetail === undefined || !horizonBesideChance ? undefined : HORIZON_MARKER,
+    input.faceContract === 'draft' ? input.widenedLine : undefined,
+    widenedRiskMarker,
+    input.whatChanges, input.estimatesLine,
+  ].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
+  const inputQuestions = openQuestionsSegment(input.text);
+  const addedFaceLines = [...faceHostLines, ...markerLines].filter(line => !input.text.includes(line));
+  const sourceText = addedFaceLines.length === 0 ? input.text : [inputQuestions?.lead ?? input.text,
+    ...addedFaceLines, inputQuestions?.segment ?? '', inputQuestions?.after ?? ''].filter(Boolean).join('\n\n');
   // Move verbatim narrator copies to their typed detail position; never duplicate a risk sentence.
-  const body = detailLines.length === 0 ? input.text : detailLines.reduce((text, line) => text.replaceAll(line, ''), input.text)
+  const body = detailLines.length === 0 ? sourceText : detailLines.reduce((text, line) => text.replaceAll(line, ''), sourceText)
     .replace(/^[ \t]*[-•*][ \t]*$/gm, '').trim();
   const originalQuestions = detailLines.length === 0 ? null : openQuestionsSegment(body);
   // The questions toggle owns its segment; disclosures sit before it, never inside it.
@@ -557,8 +679,33 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     const at = foldedOriginal.indexOf(foldQuotes(t));
     return at === -1 ? t : originalText.slice(at, at + t.length);
   };
-  const originalPresent = [...(input.obligations ?? []), ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: asWritten(o.text.trim()) }))
+  const controlQuestions = (faceContract ? input.typedControlQuestions ?? [] : []).flatMap((question) =>
+    [question, ...sentencesOf(question).filter((sentence) => QUESTION_END.test(sentence.trim()))])
+    .map(asWritten).filter((question) => question !== '');
+  const separateControlQuestion = (o: FaceObligation): FaceObligation[] => {
+    if (o.role !== 'evidence') return [o];
+    const question = controlQuestions.find((q) => o.text.includes(q));
+    if (question === undefined) return [o];
+    const at = o.text.indexOf(question);
+    return [
+      ...separateControlQuestion({ ...o, text: o.text.slice(0, at).trim() }),
+      { role: 'detail' as const, text: question },
+      ...separateControlQuestion({ ...o, text: o.text.slice(at + question.length).trim() }),
+    ].filter((part) => part.text !== '');
+  };
+  const originalPresent = [...inputObligations, ...faceHostLines.map((text): FaceObligation => ({ role: 'host', text })), ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: asWritten(o.text.trim()) }))
     .filter((o) => o.text.length > 0 && originalText.includes(o.text))
+    .flatMap(separateControlQuestion)
+    // A typed withheld finding can lead without taking an adjacent host status along with it.
+    .flatMap((o): FaceObligation[] => {
+      if (!faceContract) return [o];
+      const finding = inputObligations.find((lead) => lead.lead === true && lead.role === 'withheld_reason'
+        && o.text !== asWritten(lead.text) && o.text.includes(asWritten(lead.text)));
+      if (finding === undefined) return [o];
+      const written = { ...finding, text: asWritten(finding.text) };
+      return proseSegments(o.text, [written]).map((part) => ({ ...o, text: part.text.trim(),
+        role: part.role ?? o.role, ...(part.text === written.text ? { lead: true as const } : {}) }));
+    })
     // In this explicit-detail path, questions already in their own toggle stay there.
     // Obligations in the ordinary reply remain subject to the same face checks.
     .filter((o) => originalQuestions === null || o.role !== 'ask'
@@ -566,7 +713,18 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     .sort((a, b) => b.text.length - a.text.length);
   const once = sayOnce(originalText, originalPresent);
   const text = once.text;
-  const present = once.obligations.sort((a, b) => b.text.length - a.text.length);
+  // RC6 first prefers the complete typed host copy. Only then split N into its one question sentence; splitting
+  // before copy selection would mistakenly type the narrator's earlier echo as the same host question.
+  const normalised = !faceContract ? once.obligations : once.obligations.flatMap((o): FaceObligation[] => o.role !== 'ask' ? [o] : sentencesOf(o.text).map((text) => ({
+    ...o, text, role: QUESTION_END.test(text.trim()) ? 'ask' as const : 'host' as const,
+  })));
+  const present = normalised.flatMap((o): FaceObligation[] => {
+    if (!faceContract) return [o];
+    const containedAsk = o.role !== 'ask' && o.role !== 'evidence'
+      && normalised.some((ask) => ask.role === 'ask' && o.text.includes(ask.text));
+    return containedAsk ? sentencesOf(o.text).map((text) => ({ ...o, text,
+      role: QUESTION_END.test(text.trim()) ? 'ask' as const : o.role })) : [o];
+  }).sort((a, b) => b.text.length - a.text.length);
   // Overlapping obligations are ONE unit (the gate's closing can carry the ask): the larger span stands for both, and it
   // is the ask when it holds one, so it closes the face.
   const owed: { role: FaceObligationRole; text: string; lead?: true; subjects?: readonly string[] }[] = [];
@@ -580,13 +738,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     }
   }
   const split = once.questions;
-  const before = parseUnits(split === null ? text : split.lead, owed, 0, 0);
-  const after = split === null || split.after === '' ? { units: [] as Unit[] } : parseUnits(split.after, owed, before.paras, before.lines + 1);
+  const before = parseUnits(split === null ? text : split.lead, owed, 0, 0, faceContract);
+  const after = split === null || split.after === '' ? { units: [] as Unit[] } : parseUnits(split.after, owed, before.paras, before.lines + 1, faceContract);
   const units: Unit[] = [...before.units, ...after.units].map((u, idx) => ({ ...u, idx }));
   const rawSplit = openQuestionsSegment(originalText);
   const rawUnits = once.dropped.length === 0 ? units : [
-    ...parseUnits(rawSplit?.lead ?? originalText, originalPresent, 0, 0).units,
-    ...(rawSplit === null ? [] : parseUnits(rawSplit.after, originalPresent, 0, 0).units),
+    ...parseUnits(rawSplit?.lead ?? originalText, originalPresent, 0, 0, faceContract).units,
+    ...(rawSplit === null ? [] : parseUnits(rawSplit.after, originalPresent, 0, 0, faceContract).units),
   ];
   const initialMeasure: ReplyMeasure = {
     words_in: wordCount(originalText), units_in: rawUnits.length,
@@ -638,8 +796,14 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // THE ONE ASK: the host's typed ask, else the reply's last question that is not itself another obligation (a screen
   // line that ends on its own question is evidence, kept in its place, never moved to close the face). Every other
   // question goes to detail (D-12).
-  const ask = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
-  const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u.obligation !== 'host' && u.obligation !== 'detail' && u !== ask);
+  // A control's exact typed question owns the next step. Its prose copies (including a narrator echo in a longer
+  // sentence) all remain in detail. This is question identity supplied by the route, never a prose classifier.
+
+  const controlAsk = (u: Unit): boolean => controlQuestions.some((question) => foldQuotes(u.text).includes(foldQuotes(question)));
+  const nextStepFinding = !faceContract ? undefined : units.find((u) => !controlAsk(u)
+    && present.some((o) => o.lead === true && o.ownsNextStep === true && u.text === o.text));
+  const selectedAsk = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
+  const ask = nextStepFinding !== undefined || (selectedAsk !== undefined && controlAsk(selectedAsk)) ? undefined : selectedAsk;
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
   const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u)));
@@ -655,11 +819,12 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // B15 (DL, 7 Oct): the first PRESENT screen goal-chance finding in text order leads, by identity alone.
   // `present` retains the marker even when overlapping obligations bind as one larger atomic unit. The unit must BE that
   // finding (exact text): a bullet that carries it beside other sentences (a run share) never leads (Codex r1 P1 #2783).
-  const goalChanceHeadline = units.find((u) => present.some((o) => o.lead === true && u.text === o.text));
+  const goalChanceHeadline = nextStepFinding
+    ?? units.find((u) => !controlAsk(u) && present.some((o) => o.lead === true && u.text === o.text));
   // A unit that carries a lead finding beside other words never leads by ANY selector (Codex r2 P2 #2783).
   const mixedLead = (u: Unit): boolean => present.some((o) => o.lead === true && u.text !== o.text && u.text.includes(o.text));
   const headline = goalChanceHeadline ?? hostHeadline ?? leadIn
-    ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
+    ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && !controlAsk(u) && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading' && eligible(u))
     ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host' && !mixedLead(u)) : undefined)
     ?? (units.length === 1 && eligible(units[0]!) && !mixedLead(units[0]!) ? units[0] : undefined);
@@ -674,31 +839,118 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const prior = headline === goalChanceHeadline && headline.idx > 0 ? units[headline.idx - 1]! : undefined;
   const chanceLeadIn = prior !== undefined && prior.kind === 'sentence' && prior.obligation === undefined && eligible(prior)
     && prior !== ask && prior.para >= headline.para - 1 && CHANCE_FRAME.test(prior.text.trim().replace(/["'”’)\]*_]{1,4}$/, '')) ? prior : undefined;
-  const headlineText = chanceLeadIn !== undefined ? `${chanceLeadIn.text}\n${headline.text}` : headline.text;
+  let headlineText = chanceLeadIn !== undefined ? `${chanceLeadIn.text}\n${headline.text}` : headline.text;
 
-  const mustFace = [...otherObligations.filter((u) => u !== headline), ...(ask !== undefined && ask !== headline ? [ask] : [])];
-  const slots = Math.max(0, REPLY_FACE_MAX_BULLETS - mustFace.length);
-  const pool = faceRun !== undefined
-    ? units.filter((u) => u.run === faceRun && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
-    : units.filter((u) => u.idx > headline.idx && u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u));
-  // Fill the face in order up to the bullet cap AND the word budget; must-face lines are counted first and always kept.
-  let faceWords = wordCount(headlineText) + mustFace.reduce((n, u) => n + wordCount(u.text), 0);
-  const fromPool: Unit[] = [];
-  for (const u of pool) {
-    if (fromPool.length >= slots) break;
-    const w = wordCount(u.text);
-    if (fromPool.length > 0 && faceWords + w > REPLY_FACE_WORD_BUDGET) break;
-    fromPool.push(u);
-    faceWords += w;
+  let faceSet: Set<Unit>;
+  let faceBullets: Unit[];
+  let faceWords: number;
+  if (!faceContract) {
+    const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u.obligation !== 'host' && u.obligation !== 'detail' && u !== ask);
+    const mustFace = [...otherObligations.filter((u) => u !== headline), ...(ask !== undefined && ask !== headline ? [ask] : [])];
+    const slots = Math.max(0, REPLY_FACE_MAX_BULLETS - mustFace.length);
+    const pool = faceRun !== undefined
+      ? units.filter((u) => u.run === faceRun && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
+      : units.filter((u) => u.idx > headline.idx && u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u));
+    // Fill the face in order up to the bullet cap AND the word budget; must-face lines are counted first and always kept.
+    faceWords = wordCount(headlineText) + mustFace.reduce((n, u) => n + wordCount(u.text), 0);
+    const fromPool: Unit[] = [];
+    for (const u of pool) {
+      if (fromPool.length >= slots) break;
+      const w = wordCount(u.text);
+      if (fromPool.length > 0 && faceWords + w > REPLY_FACE_WORD_BUDGET) break;
+      fromPool.push(u);
+      faceWords += w;
+    }
+    faceSet = new Set<Unit>([headline, ...fromPool, ...mustFace, ...(chanceLeadIn !== undefined ? [chanceLeadIn] : [])]);
+    // Face bullets keep the reply's own order, except: a caveat on the finding opens them (#2565: "the Explain robustness
+    // caveat goes on the face as bullet 1"), and the ask closes them.
+    const inOrder = units.filter((u) => faceSet.has(u) && u !== headline && u !== chanceLeadIn && u !== ask);
+    faceBullets = [...inOrder.filter((u) => u.obligation === 'caveat'), ...inOrder.filter((u) => u.obligation !== 'caveat')];
+    if (ask !== undefined && ask !== headline) faceBullets.push(ask);
+  } else {
+    // H is the selected finding. Other chances and their own notes remain atomic, without narrator pool fill.
+    const chanceUnits = units.filter((u) => u !== headline && !controlAsk(u)
+      && present.some((o) => o.lead === true && o.role === 'evidence' && u.text === o.text));
+    const findingUnits = [headline, ...chanceUnits];
+    const subjectsOf = (u: Unit): Set<string> => new Set(present.filter((o) => u.text.includes(o.text))
+      .flatMap((o) => o.subjects ?? []));
+    const companions = units.filter((u) => !findingUnits.includes(u) && present.some((o) =>
+      o.role === 'evidence' && o.companionOf !== undefined && u.text === o.text
+      && findingUnits.some((finding) => subjectsOf(finding).has(o.companionOf!))));
+    const exceptions = units.filter((u) => u !== headline && u !== ask && !companions.includes(u) && !controlAsk(u)
+      && (u.obligation === 'withheld_reason' || u.obligation === 'caveat')
+      && findingUnits.some((finding) => {
+        const figureSubjects = subjectsOf(finding);
+        return present.some((o) => (o.role === 'withheld_reason' || o.role === 'caveat') && u.text.includes(o.text)
+          && (o.subjects ?? []).some((subject) => figureSubjects.has(subject)));
+      }));
+    const horizon = input.faceContract !== 'run' || input.horizonLine === undefined || !horizonBesideChance ? undefined
+      : units.find((u) => u.text === HORIZON_MARKER);
+    const withhold = chanceMarker === undefined ? undefined : units.find(u => u.text === chanceMarker);
+    const widened = input.faceContract !== 'draft' || input.widenedLine === undefined ? undefined
+      : units.find(u => u.text === asWritten(input.widenedLine!.trim()));
+    const widenedRisk = widenedRiskMarker === undefined ? undefined
+      : units.find(u => u.text === asWritten(widenedRiskMarker.trim()));
+    const robustness = units.find(u => u.text === ROBUSTNESS_MARKER && u.obligation === 'caveat');
+    // #2565 retains the Explain narrator's existing bullet identities when its finding has no screen chance.
+    const robustnessPool = robustness === undefined || present.some(o => o.lead === true) || faceRun === undefined ? []
+      : units.filter(u => u.run === faceRun && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u));
+    let pointWords = wordCount(headlineText) + (robustness === undefined ? 0 : wordCount(robustness.text)) + (ask === undefined ? 0 : wordCount(ask.text));
+    const robustnessPoints: Unit[] = [];
+    const pointSlots = Math.max(0, REPLY_FACE_MAX_BULLETS - 1 - (ask === undefined ? 0 : 1));
+    for (const u of robustnessPool.length > REPLY_FACE_MAX_BULLETS ? [] : robustnessPool) {
+      if (robustnessPoints.length >= pointSlots) break;
+      const w = wordCount(u.text);
+      if (robustnessPoints.length > 0 && pointWords + w > REPLY_FACE_WORD_BUDGET) break;
+      robustnessPoints.push(u);
+      pointWords += w;
+    }
+    const whatChanges = input.whatChanges === undefined ? undefined : units.find((u) => u.text === asWritten(input.whatChanges!.trim()));
+    const estimates = input.estimatesLine === undefined ? undefined : units.find((u) => u.text === asWritten(input.estimatesLine!.trim()));
+    faceSet = new Set<Unit>([...findingUnits, ...companions, ...exceptions, ...robustnessPoints, ...[widened, widenedRisk, robustness, withhold].filter((u): u is Unit => u !== undefined), ...(horizon === undefined ? [] : [horizon]),
+      ...(whatChanges === undefined ? [] : [whatChanges]), ...(estimates === undefined ? [] : [estimates]),
+      ...(ask === undefined ? [] : [ask]), ...(chanceLeadIn === undefined ? [] : [chanceLeadIn])]);
+    const faceWordCount = (): number => wordCount(headlineText) + [...faceSet]
+      .filter((u) => u !== headline && u !== chanceLeadIn).reduce((count, u) => count + wordCount(u.text), 0);
+    // One ranked list demotes only optional E and W. Figure qualifications, own notes, horizon and N stay.
+    const optionalLines = { estimates, what_changes: whatChanges };
+    for (const rank of FACE_DEMOTION_ORDER) {
+      const optional = optionalLines[rank];
+      if (faceWordCount() <= REPLY_FACE_WORD_BUDGET) break;
+      if (optional !== undefined && optional !== headline && optional !== ask && !findingUnits.includes(optional)) faceSet.delete(optional);
+    }
+    // A narrator frame is optional when the chance already leads. Overflow consists of the mandatory set only.
+    if (faceWordCount() > REPLY_FACE_WORD_BUDGET && goalChanceHeadline !== undefined && chanceLeadIn !== undefined) {
+      faceSet.delete(chanceLeadIn);
+      headlineText = headline.text;
+    }
+    faceBullets = [];
+    const addExceptionsAfter = (finding: Unit): void => {
+      const figureSubjects = subjectsOf(finding);
+      const matching = exceptions.filter(exception => faceSet.has(exception) && !faceBullets.includes(exception)
+        && present.some(o => exception.text.includes(o.text) && (o.subjects ?? []).some(subject => figureSubjects.has(subject))));
+      const isMarker = (exception: Unit): boolean => markerLines.some(line => foldQuotes(line) === foldQuotes(exception.text));
+      // A typed disclosure qualifies its figure immediately; the figure's companion still follows the same figure.
+      faceBullets.push(...matching.filter(isMarker));
+      for (const companion of companions) {
+        if (!faceBullets.includes(companion) && present.some((o) => companion.text === o.text
+          && o.companionOf !== undefined && figureSubjects.has(o.companionOf))) faceBullets.push(companion);
+      }
+      faceBullets.push(...matching.filter(exception => !isMarker(exception)));
+    };
+    for (const line of [widened, ...(robustness !== undefined && !(present.find(o => o.text === ROBUSTNESS_MARKER)?.subjects?.length) ? [robustness] : [])]) if (line !== undefined && line !== headline) faceBullets.push(line);
+    addExceptionsAfter(headline);
+    for (const chance of chanceUnits) {
+      faceBullets.push(chance);
+      addExceptionsAfter(chance);
+    }
+    faceBullets.push(...robustnessPoints);
+    for (const line of [horizon, withhold, widenedRisk, whatChanges, estimates, ask]) {
+      if (line !== undefined && line !== headline && faceSet.has(line) && !faceBullets.includes(line)) faceBullets.push(line);
+    }
+    faceWords = faceWordCount();
   }
-  const faceSet = new Set<Unit>([headline, ...fromPool, ...mustFace, ...(chanceLeadIn !== undefined ? [chanceLeadIn] : [])]);
-  // Face bullets keep the reply's own order, except: a caveat on the finding opens them (#2565: "the Explain robustness
-  // caveat goes on the face as bullet 1"), and the ask closes them.
-  const inOrder = units.filter((u) => faceSet.has(u) && u !== headline && u !== chanceLeadIn && u !== ask);
-  const faceBullets = [...inOrder.filter((u) => u.obligation === 'caveat'), ...inOrder.filter((u) => u.obligation !== 'caveat')];
-  if (ask !== undefined && ask !== headline) faceBullets.push(ask);
   const detailUnits = units.filter((u) => !faceSet.has(u));
-
   const measure: ReplyMeasure = {
     ...initialMeasure,
     face_bullets: faceBullets.length,
@@ -706,30 +958,44 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     restatements_to_detail: restatements.size,
     face_words: wordCount(headlineText) + faceBullets.reduce((n, u) => n + wordCount(u.text), 0),
     face_bullets_over_word_bar: faceBullets.filter((u) => wordCount(u.text) > BULLET_WORD_LOG_BAR).length,
-    obligations_on_face: mustFace.length + (headline.obligation !== undefined ? 1 : 0),
+    obligations_on_face: [...faceSet].filter((u) => u.obligation !== undefined).length,
     face_over_cap: faceBullets.length > REPLY_FACE_MAX_BULLETS,
     face_over_word_budget: faceWords > REPLY_FACE_WORD_BUDGET,
     open_questions_segment: split !== null,
   };
-  // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
-  // too little would go behind "More detail" to be worth a click.
-  if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
-  if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS
-    // D-12: more than one question never ships whole on the face, however little would go to detail (RC6 can leave that).
-    && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
-  // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
-  if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
-  // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face
-  // line whose lead-in would go to detail ships the reply whole (counted), never a finding stripped of its frame.
-  if (units.some((u) => faceSet.has(u) && u !== headline && u.idx > 0 && !faceSet.has(units[u.idx - 1]!)
-    && units[u.idx - 1]!.kind === 'sentence' && /:["'”’)\]*]{0,4}$/.test(units[u.idx - 1]!.text))) {
-    return { text, shape: null, outcome: 'kept_whole', reason: 'lead_in_split', measure };
+  if (!faceContract) {
+    // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
+    // too little would go behind "More detail" to be worth a click.
+    if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+    if (split?.lead !== '' && goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS
+      // D-12: more than one question never ships whole on the face, however little would go to detail (RC6 can leave that).
+      && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+    // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
+    if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
+    // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face
+    // line whose lead-in would go to detail ships the reply whole (counted), never a finding stripped of its frame.
+    if (units.some((u) => faceSet.has(u) && u !== headline && u.idx > 0 && !faceSet.has(units[u.idx - 1]!)
+      && units[u.idx - 1]!.kind === 'sentence' && /:["'”’)\]*]{0,4}$/.test(units[u.idx - 1]!.text))) {
+      return { text, shape: null, outcome: 'kept_whole', reason: 'lead_in_split', measure };
+    }
+  } else if ((input.faceContract !== 'draft' || detailUnits.length === 0)
+    && split?.lead !== '' && faceHostLines.length === 0 && controlQuestions.length === 0 && goalChanceHeadline === undefined
+    && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) {
+    // A draft with units assigned to detail still owes its shape, even when no canonical chance cells exist.
+    // A contract reply that is already the whole face (≤ budget, at most one question, nothing for the contract to place:
+    // no chance, no horizon/W/E line, no card question to move) ships exactly as written, as on staging.
+    return { text, shape: null, outcome: 'already_in_shape', measure };
   }
-
-  const detail = [renderDetail(detailUnits), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
+  const detail = [renderDetail(detailUnits, faceContract), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
   // A typed host or goal-chance part can contain several sentences; narrator headlines keep the single-sentence contract.
-  const schema = goalChanceHeadline === undefined && hostHeadline === undefined ? AnswerShapeSchema
-    : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) });
+  // Typed chance findings and their notes can exceed the old three-bullet limit. The coaching contract is bounded
+  // by visible words; the legacy cap remains counted in telemetry, never an escape to the whole reply.
+  const schema = !faceContract
+    ? (goalChanceHeadline === undefined && hostHeadline === undefined ? AnswerShapeSchema
+      : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) }))
+    : goalChanceHeadline === undefined && hostHeadline === undefined
+      ? AnswerShapeSchema.extend({ bullets: z.array(z.string().trim().min(1)) })
+      : AnswerShapeSchema.extend({ headline: z.string().trim().min(1), bullets: z.array(z.string().trim().min(1)) });
   const parsed = schema.safeParse({ headline: headlineText, bullets: faceBullets.map((u) => u.text), detail });
   if (!parsed.success) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure };
   const shaped = deriveAnswerTextFromShape(parsed.data);
@@ -742,16 +1008,16 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
 }
 
 /** Detail in the reply's own order: sentences of one source line re-joined, bullets and headings on their own lines. */
-function renderDetail(units: readonly Unit[]): string {
+function renderDetail(units: readonly Unit[], faceContract = false): string {
   const paras: string[][] = [];
   let prev: Unit | undefined;
   for (const u of units) {
     if (prev === undefined || u.para !== prev.para) paras.push([]);
     const lines = paras.at(-1)!;
     const piece = u.kind === 'bullet' ? `${u.marker ?? '-'} ${u.text}` : u.text;
-    const joinsLine = prev !== undefined && u.kind === 'sentence' && prev.kind === 'sentence'
+    const joinsLine = prev !== undefined && (faceContract ? u.kind === prev.kind && u.kind !== 'heading' : u.kind === 'sentence' && prev.kind === 'sentence')
       && u.para === prev.para && u.line === prev.line && u.idx === prev.idx + 1;
-    if (joinsLine) lines[lines.length - 1] = `${lines.at(-1)!} ${piece}`;
+    if (joinsLine) lines[lines.length - 1] = faceContract ? `${lines.at(-1)!}${u.joinBefore ?? ' '}${u.text}` : `${lines.at(-1)!} ${piece}`;
     else lines.push(piece);
     prev = u;
   }
@@ -767,4 +1033,16 @@ export function withShapeOnlyIfItDerives<B extends { assistant_text?: unknown; _
   if (shape === undefined || deriveAnswerTextFromShape(shape) === body.assistant_text) return body;
   const { _answer_shape: _unproven, ...whole } = body;
   return whole as B;
+}
+
+/** Recover a canonical bullet-bearing presentation from durable answer bytes, without a model or mutable cache. */
+export function shapeFromDerivedAnswerText(text: string): AnswerShape | null {
+  const parts = text.split('\n\n');
+  const headline = parts[0];
+  const bulletBlock = parts[1];
+  if (headline === undefined || headline.trim() === '' || bulletBlock === undefined) return null;
+  const rows = bulletBlock.split('\n');
+  if (rows.length === 0 || rows.some(row => !row.startsWith('• ') || row.slice(2).trim() === '')) return null;
+  const shape: AnswerShape = { headline, bullets: rows.map(row => row.slice(2)), detail: parts.slice(2).join('\n\n') };
+  return deriveAnswerTextFromShape(shape) === text ? shape : null;
 }

@@ -264,7 +264,7 @@ describe('estimate goal points: every discovered assistant writer uses the ONE c
     expect(call).toBeDefined();
     const mutant = { ...source, text: `${source.text.slice(0, call!.getStart())}optionGatedReplay${source.text.slice(call!.end)}` };
     expect(unqualified([mutant]).filter(s => s.kind === 'assistant send')).toHaveLength(3);
-  });
+  }, GUARD_WALK_TIMEOUT_MS);
 
   it('later unknown spreads and raw nullish fallbacks cannot override a gated carrier', () => {
     const rel = 'src/orchestrator-v5/agent-lane/new-writer.ts';

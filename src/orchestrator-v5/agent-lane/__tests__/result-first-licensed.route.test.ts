@@ -4,6 +4,7 @@
  * the history time marker (item 2 withdrawn: the history write already prunes it). Fixture: Paul's served 09:48Z Run block (1 Oct, scenario 96c6f5f4), whose
  * PLoT warning named the withheld leader beside "the leading option's draws".
  */
+import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -53,8 +54,8 @@ describe('the two-request Run reads the licensed run on both requests (live rout
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
       graph_hash: HASH, blocks: [SERVED.block], analysis_state: state, analysis_ready: READY }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
-      analysis_state: state, analysis_result: SERVED.block, current_read: { run_delta: DELTA } }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => withCanonicalAnalysisView({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
+      analysis_state: state, analysis_result: SERVED.block, current_read: { run_delta: DELTA } }, SCENARIO));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
