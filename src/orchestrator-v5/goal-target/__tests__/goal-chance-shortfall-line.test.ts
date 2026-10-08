@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  floorSig2, goalChanceLicenceForAgent, goalChanceLicenceOf, shortfallNoteLabel, withGoalChanceLicence,
+  floorSig2, goalChanceLicenceForAgent, goalChanceLicenceOf, shortfallNoteLabel, SPREAD_NOTE_WITHOUT_DOWNSIDE, withGoalChanceLicence,
   type SentGoalThreshold,
 } from '../goal-chance-licence.js';
-import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../../agent-lane/goal-chance-screen-lines.js';
 import { sayFigureAsWritten } from '../../agent-lane/say-figure.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../orchestrator/context/option-result-source.js';
 
@@ -248,5 +248,57 @@ describe('B19 stored Agent licence — exact template and licensed option identi
   it('templates return the literal label for downstream graph binding', () => {
     expect(shortfallNoteLabel(RAISE_LINE)).toBe('Raise prices 10%');
     expect(shortfallNoteLabel(KEEP_LINE)).toBe('Keep pricing as is');
+  });
+});
+
+describe('B19 r2 complete option labels — prefix options keep their own chance and notes', () => {
+  const prefixLines = (): GoalChanceScreenLine[] => ['Raise', 'Raise prices'].map((label, i) => {
+    const spread_note = SPREAD_NOTE_WITHOUT_DOWNSIDE;
+    const shortfall_note = `In its worst 1 in 20 runs of this model, ‘${label}’ falls short of your target by £${i === 0 ? '15,000' : '16,000'} / month or more.`;
+    return {
+      option_id: i === 0 ? 'raise' : 'raise_prices', label, figure: 'about 46%', depends: '',
+      chance: `‘${label}’: about 46% chance of meeting your goal, in this model. ${spread_note} ${shortfall_note}`,
+      spread_note, shortfall_note,
+    };
+  });
+  const reply = 'Raise prices: about 46%.';
+
+  it('B19 r2 RED: Raise prices does not pay Raise’s own chance, spread or shortfall', () => {
+    const lines = prefixLines();
+    const [raise, raisePrices] = lines;
+    const completed = withScreenLinesOwed(reply, lines);
+    // The Agent's longer-label row receives only its own notes; the shorter option still owes its full unit.
+    expect(completed).toEqual({
+      text: `${reply} ${raisePrices!.spread_note} ${raisePrices!.shortfall_note}\n\n${raise!.chance}`,
+      added: 2,
+    });
+  });
+
+  it('B19 r2 RED: completing equal-figure prefix options twice is byte-identical', () => {
+    const lines = prefixLines();
+    const once = withScreenLinesOwed(reply, lines);
+    const twice = withScreenLinesOwed(once.text, lines);
+    expect(twice).toEqual({ text: once.text, added: 0 });
+  });
+
+  it('B19 r2 RED: canonical chance wording inside EnRaise does not pay the complete Raise label', () => {
+    const line: GoalChanceScreenLine = {
+      option_id: 'raise', label: 'Raise', figure: 'about 46%', depends: '',
+      chance: '‘Raise’: about 46% chance of meeting your goal, in this model.',
+    };
+    const embedded = 'EnRaise: about 46% chance of meeting your goal, in this model.';
+    expect(withScreenLinesOwed(embedded, [line])).toEqual({ text: `${embedded}\n\n${line.chance}`, added: 1 });
+  });
+
+  it('B19 r2 RED: a quote-delimited Raise cannot also pay the longer Raise prices label', () => {
+    const lines = prefixLines();
+    const [raise, raisePrices] = lines;
+    const quoted = '‘Raise’ prices: about 46%.';
+    const completed = withScreenLinesOwed(quoted, lines);
+    expect(completed).toEqual({
+      text: `${quoted} ${raise!.spread_note} ${raise!.shortfall_note}\n\n${raisePrices!.chance}`,
+      added: 2,
+    });
+    expect(withScreenLinesOwed(completed.text, lines)).toEqual({ text: completed.text, added: 0 });
   });
 });

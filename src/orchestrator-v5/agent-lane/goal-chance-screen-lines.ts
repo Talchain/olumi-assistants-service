@@ -18,6 +18,7 @@
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
+import { foldQuotes } from './quote-normalisation.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
@@ -72,15 +73,17 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
 }
 
 const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
+// Keep quote delimiters inside a candidate label: ‘Raise’ prices is not the option ‘Raise prices’.
+const labelWords = (t: string): string => foldQuotes(t).replace(/[*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
 interface Span { start: number; end: number }
 
-/** Match in the same plain words used for detection, retaining the span of the actual quoted/styled source. */
-function plainSpans(value: string, words: string): Span[] {
+/** Match normalized words, retaining the span of the actual quoted/styled source. */
+function plainSpans(value: string, words: string, normalise = plain): Span[] {
   const starts: number[] = [];
   const ends: number[] = [];
   let normalized = '';
   for (const m of value.matchAll(/['"‘’“”`*_]|\s+|[^]/g)) {
-    for (const c of plain(m[0])) {
+    for (const c of normalise(m[0])) {
       if (c === ' ' && normalized.endsWith(' ')) {
         ends[ends.length - 1] = m.index + m[0].length;
       } else {
@@ -90,7 +93,7 @@ function plainSpans(value: string, words: string): Span[] {
       }
     }
   }
-  const needle = plain(words);
+  const needle = normalise(words);
   const spans: Span[] = [];
   if (needle === '') return spans;
   for (let at = normalized.indexOf(needle); at >= 0; at = normalized.indexOf(needle, at + needle.length)) {
@@ -107,9 +110,25 @@ function withoutSpans(value: string, spans: readonly Span[]): string {
   return clean;
 }
 
+const WORD_CHARACTER = /[\p{L}\p{M}\p{N}_]/u;
+const QUOTE_CLOSE: Readonly<Record<string, string>> = { "'": "'", '"': '"', '‘': '’', '“': '”', '`': '`' };
+
+/** Complete option identities: a quoted label stands alone; an unquoted prefix cannot name a longer option. */
+function labelSpans(row: string, l: GoalChanceScreenLine, lines: readonly GoalChanceScreenLine[]): Span[] {
+  return plainSpans(row, l.label, labelWords).filter(label => {
+    const before = row.slice(0, label.start).replace(/[*_]+$/, '');
+    const after = row.slice(label.end).replace(/^[*_]+/, '');
+    const closing = QUOTE_CLOSE[before.at(-1) ?? ''];
+    if (closing !== undefined && after.startsWith(closing)) return true;
+    if (WORD_CHARACTER.test(plain(before).at(-1) ?? '') || WORD_CHARACTER.test(plain(after)[0] ?? '')) return false;
+    return !lines.some(other => other.option_id !== l.option_id && labelWords(other.label).length > labelWords(l.label).length
+      && plainSpans(row, other.label, labelWords).some(longer => longer.start <= label.start && longer.end >= label.end));
+  });
+}
+
 /** A named figure in its own clause; a note's orphaned option label cannot borrow a later option's figure. */
-function chanceSpans(row: string, l: GoalChanceScreenLine): (Span & { figureEnd: number })[] {
-  return plainSpans(row, l.label).flatMap(label => {
+function chanceSpans(row: string, l: GoalChanceScreenLine, lines: readonly GoalChanceScreenLine[]): (Span & { figureEnd: number })[] {
+  return labelSpans(row, l, lines).flatMap(label => {
     const figure = plainSpans(row, l.figure).find(span => span.start >= label.end
       && !/[.;]/.test(row.slice(label.end, span.start)));
     return figure === undefined ? [] : [{ start: label.start, end: figure.end, figureEnd: figure.end }];
@@ -135,7 +154,7 @@ function noteSpans(row: string, l: GoalChanceScreenLine, lines: readonly GoalCha
   for (const span of allShortfalls) {
     chanceRow = chanceRow.slice(0, span.start) + ' '.repeat(span.end - span.start) + chanceRow.slice(span.end);
   }
-  const chances = lines.flatMap(other => chanceSpans(chanceRow, other).map(span => ({ ...span, option_id: other.option_id })))
+  const chances = lines.flatMap(other => chanceSpans(chanceRow, other, lines).map(span => ({ ...span, option_id: other.option_id })))
     .sort((a, b) => a.start - b.start);
   const spreads = plainSpans(row, l.spread_note).filter(span => {
     if (pairs.some(pair => pair.start <= span.start && span.end <= pair.end)) return true;
@@ -159,23 +178,21 @@ function alreadySaid(text: string, l: GoalChanceScreenLine, lines: readonly Goal
     if (rows.flatMap(row => noteSpans(row, l, lines)).length !== notes.length) return false;
     if (l.shortfall_note === undefined) {
       // Keep the established spread-only wording/placement when its one owned note is already said.
-      return sameWordsIn(text, l.chance)
-        || rows.some(row => chanceSpans(row, l).length > 0 && noteSpans(row, l, lines).length === 1);
+      return rows.some(row => chanceSpans(row, l, lines).length > 0 && noteSpans(row, l, lines).length === 1);
     }
     return rows.some(row => {
       const p = plain(row);
-      return chanceSpans(p, l).some(chance => {
-        const notesAt = p.indexOf(plain(suffix), chance.figureEnd);
+      return chanceSpans(row, l, lines).some(chance => {
+        const figureEnd = plain(row.slice(0, chance.figureEnd)).length;
+        const notesAt = p.indexOf(plain(suffix), figureEnd);
         if (notesAt < 0) return false;
-        const figureTail = p.slice(chance.figureEnd, notesAt);
+        const figureTail = p.slice(figureEnd, notesAt);
         const stop = figureTail.search(/[.;]/);
         return stop < 0 || figureTail.slice(stop + 1).trim() === '';
       });
     });
   }
-  if (sameWordsIn(text, l.chance)) return true;
-  const p = plain(text);
-  return p.includes(plain(l.label)) && p.includes(plain(l.figure));
+  return text.split('\n').some(row => chanceSpans(row, l, lines).length > 0);
 }
 
 /** A lead-in the Agent left with nothing under it ("For reaching at least £126,000 …, on current information:"). */
@@ -206,12 +223,12 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
         // A shortfall itself names the option. Its orphaned label must not borrow another option's figure on that row.
         const candidate = withoutNotes(body);
         const rows = candidate.split('\n');
-        const rowAt = rows.findIndex(row => chanceSpans(row, l).length > 0);
+        const rowAt = rows.findIndex(row => chanceSpans(row, l, lines).length > 0);
         if (rowAt >= 0) {
           body = candidate;
           const cleanRows = body.split('\n');
           const row = cleanRows[rowAt]!;
-          const figureEnd = chanceSpans(row, l)[0]!.figureEnd;
+          const figureEnd = chanceSpans(row, l, lines)[0]!.figureEnd;
           const stop = row.slice(figureEnd).search(/[.;]/);
           const end = stop < 0 ? row.length : figureEnd + stop + 1;
           cleanRows[rowAt] = `${row.slice(0, end)} ${suffix}${row.slice(end)}`;
