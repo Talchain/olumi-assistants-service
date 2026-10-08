@@ -387,3 +387,22 @@ describe('the field set has ONE authority: field-safety derives it', () => {
     }
   });
 });
+
+// R3 base: 62603856286bcfb3ac37f88da18f8f0dafce7e56 / PR #2762.
+describe('R3 server-owned share_by_date re-registration', () => {
+  it.each(['forge', 'drop', 'remove edge'])('P1-C register refuses %s carrier; stored bytes unchanged', async mode => {
+    const base = clone(CAPTURE.read_after_edit.graph);
+    edgeOf(base, TARGET).provenance = { ...(edgeOf(base, TARGET).provenance as Rec), share_by_date: {
+      role: 'team', team_id: TARGET.from, goal_id: TARGET.to, deliverable: 'the feature launch', unresolved_option_ids: ['event_option_1'],
+    } };
+    const w = world(base), submitted = clone(base);
+    const e = edgeOf(submitted, TARGET);
+    if (mode === 'forge') (e.provenance as Rec).share_by_date = { ...((e.provenance as Rec).share_by_date as Rec), unresolved_option_ids: [] };
+    if (mode === 'drop') delete (e.provenance as Rec).share_by_date;
+    if (mode === 'remove edge') submitted.edges = submitted.edges.filter(x => x !== e);
+    const response = await post({ graph: submitted });
+    expect(response.statusCode, response.body).toBe(409);
+    expect(w.appends).toHaveLength(0);
+    expect(w.stored()).toEqual(base);
+  });
+});

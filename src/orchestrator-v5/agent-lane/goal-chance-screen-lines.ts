@@ -1,3 +1,7 @@
+import { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
+export { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
+import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
+import { shareOptionEstimateWords } from '../goal-target/share-by-date-run.js';
 /**
  * ⭐ S4c (Wave B4/B5, 7 Oct): THE SCREEN'S CHANCE LINES ARE SAID BY OLUMI.
  *
@@ -18,6 +22,7 @@
  * "…on current information:" style lead-in, else as a closing paragraph.
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { sayDate } from '../goal-target/deadline-date.js';
 import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
@@ -43,6 +48,10 @@ const CHANCE_LABEL = 'chance of meeting your goal, in this model';
 /** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
 export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
   const facts = goalChanceFactsForAgent(result, graph, current);
+  const share = shareByDateGoalOf(graph);
+  const chanceWords = facts.goal_chance_words !== undefined ? `${facts.goal_chance_words}, in this model`
+    : share === null ? CHANCE_LABEL
+      : `${shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)}, in this model`;
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
@@ -53,18 +62,36 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
     if (label === undefined) return [];
     // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
     const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
-    return [{ option_id: optionId, label, figure, chance: `‘${label}’: ${figure} ${CHANCE_LABEL}.`
-      + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
+    const estimates = shareOptionEstimateWords(graph, optionId);
+    return [{ option_id: optionId, label, figure,
+      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}.`
+        + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
       ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
       ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
   };
-  const points = facts.goal_chance_licence?.form === 'each' && facts.goal_chance_display !== undefined
-    ? facts.goal_chance_licence.option_ids.flatMap((id) => {
+  const points = (facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null) && facts.goal_chance_display !== undefined
+    ? facts.goal_chance_licence!.option_ids.flatMap((id) => {
       const figure = facts.goal_chance_display![id];
       return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '',
         facts.goal_chance_licence?.spread_note_by_option?.[id], facts.goal_chance_licence?.shortfall_note_by_option?.[id]);
     }) : [];
   const ranges = Object.entries(facts.goal_chance_range_display ?? {}).flatMap(([id, d]) => {
+    if (d.depends_on.kind === 'stated_time') {
+      const label = labels.get(id), stated = d.stated_time;
+      if (label === undefined || stated === undefined) return [];
+      const words = stated.deliverable !== undefined && stated.by_date !== undefined
+        ? shareGoalChanceWords(stated.deliverable, stated.by_date)
+        : `chance of meeting your goal${stated.by_date === undefined ? '' : ` by ${sayDate(stated.by_date)}`}`;
+      const estimates = shareOptionEstimateWords(graph, id);
+      const tail = `in this model${estimates === '' ? '' : `, ${estimates}`}`;
+      const extremeEndpoints = d.range === 'between less than 1% and more than 99%'
+        && stated.slow_time !== undefined && stated.fast_time !== undefined;
+      return [{ option_id: id, label, figure: d.range,
+        chance: extremeEndpoints
+          ? `‘${label}’: less than 1% ${words} if it takes ${stated.slow_time}, and more than 99% if it takes ${stated.fast_time}, ${tail}.`
+          : `‘${label}’: ${d.range} ${words}, ${tail}, from the slow end of your ${stated.estimate} to the fast end.`,
+        depends: '' }];
+    }
     const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';
     const link = d.depends_on.kind === 'link_strength'
       ? `how strongly ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’, which isn’t sized in the model yet.`

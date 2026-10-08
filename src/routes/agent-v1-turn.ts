@@ -2496,6 +2496,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }
           : {}),
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
+        // S2b team_time uses this same fenced batch door and cached read-back.
         commitOptionLevels: async (input) => {
           writesDispatched += 1;
           // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
