@@ -15,6 +15,7 @@ import { detectCycles } from "../../utils/graphGuards.js";
 import { normaliseOptionInterventions } from "../extraction/intervention-extractor.js";
 import { CANONICAL_ID_REGEX } from "../utils/id-normalizer.js";
 import { ALLOWED_EDGE_KIND_PAIRS } from "../../validators/graph-validator.types.js";
+import { isPlaceholderLink } from '../magnitude/link-sizing.js';
 
 /**
  * Normalise raw response options before schema validation.
@@ -481,7 +482,8 @@ function validateEdges(response: CEEGraphResponseV3T): ValidationWarningV3T[] {
       (fromKindCheck === "decision" && toKindCheck === "option") ||
       (fromKindCheck === "option" && toKindCheck === "factor");
 
-    if (!isStructuralEdge && Math.abs(edge.strength.mean) < NEGLIGIBLE_THRESHOLD) {
+    // Science 393023 LICENCE ruling 3 (P53x, Codex #2819 P2): a placeholder's default mean is never called negligible.
+    if (!isStructuralEdge && !isPlaceholderLink(edge) && Math.abs(edge.strength.mean) < NEGLIGIBLE_THRESHOLD) {
       warnings.push({
         code: "NEGLIGIBLE_STRENGTH",
         severity: "info",
