@@ -242,11 +242,14 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain('edited?.ok ? { ...toolCtx, typed_approval_of: target, proposal_edits: undefined } : toolCtx, capabilities, mode);');
     // S-C (#2744): the widen Add press's ONE card (a dispatch site), and two reads of the SAME typed-words carrier
     // (`toolCtx.user_text`: the risks turn's and the wire's gap signal) — never the history.
-    expect(route).toContain('await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode)');
+    // RC3 (a′, #2803): the widen Add press names it twice, like the approve site: a precondition press carries the
+    // server-reminted `widen_relies_on` marker on the SAME typed-words context (never model- or history-authored).
+    expect(route).toContain('await dispatchTool(call.tool, JSON.stringify(call.args),');
+    expect(route).toContain('call.relies_on === undefined ? toolCtx : { ...toolCtx, widen_relies_on: { option_id: call.relies_on.option_id } }, capabilities, mode);');
     expect(route.match(/toolCtx\.user_text \?\? ''/g)?.length, 'the gap signal reads the typed-words carrier only').toBe(2);
     // Item 3 (Canvas, 7 Oct; DL D1): the drawn-link press's ONE forced call is a dispatch site on the SAME typed carrier.
     expect(route).toContain('result = await drawnLinkPress(');
     expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the ten dispatch sites (the approve site twice), the state read and two typed-words reads').toBe(15);
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the ten dispatch sites (the approve and widen-Add sites twice), the state read and two typed-words reads').toBe(16);
   });
 });
