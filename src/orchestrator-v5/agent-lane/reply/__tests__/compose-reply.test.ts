@@ -14,6 +14,7 @@
  * Quality's 17 real gpt-5.6-terra replies (`compose/__tests__/fixtures/leader-gate-real-replies.json`). Text from outside
  * this author's head.
  */
+import { steadyAttestationKey } from '../../../goal-target/horizon-basis.js';
 import { RUN_RESULT_READY_TEXT } from '../../run-explanation.js';
 import { noLeaderBecauseSentences } from '../../withheld-leader-fail-closed.js';
 import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/goal-kind.js';
@@ -1829,10 +1830,12 @@ describe('Science §(ad) time-bound goal reply details', () => {
   });
 
   it('steady user attestation adds the verbatim Why line once in detail without a horizon disclaimer', () => {
+    const SCENARIO = '5e0fbc03-8af8-488e-b02f-82c25499e59e';
     const steady = { nodes: [{ ...graph.nodes[0]!, horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: graph.nodes[0]!.goal_horizon_months }] };
     const chance = 'Starter tier: about 46% chance of meeting your goal, in this model.';
+    Object.assign(steady.nodes[0]!, { horizon_basis_key: steadyAttestationKey(steady.nodes[0]!, SCENARIO) });
     const why = goalHorizonSteadyWhyLine(steady)!;
-    const c = composeReplyShape({ faceContract: 'run', graph: steady, text: [chance, context, why].join('\n\n'),
+    const c = composeReplyShape({ faceContract: 'run', graph: steady, scenarioId: SCENARIO, text: [chance, context, why].join('\n\n'),
       chanceCells: [{ kind: 'figure', display: 'about 46%' }],
       obligations: [{ role: 'evidence', text: chance, lead: true, subjects: ['starter'] }],
       horizonLine: "This chance uses the model's numbers as they are today." });

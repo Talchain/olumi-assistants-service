@@ -15,7 +15,9 @@ import {
 import { GOAL_CHANCE_LICENSED } from '../../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../../goal-target/goal-chance-range.js';
 import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
+import { steadyAttestationKey } from '../../goal-target/horizon-basis.js';
 
+const SCENARIO = '5e0fbc03-8af8-488e-b02f-82c25499e59e';
 type Rec = Record<string, unknown>;
 type Json = Record<string, any>;
 const READ_B3: Json = JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')).j;
@@ -235,15 +237,17 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
   });
 
   it('user_set steady_attested is the month-H chance basis and owes no horizon disclaimer', () => {
-    const graph = graphWith({ horizon_basis: 'steady_attested', provenance: 'user_set' });
-    expect(goalHorizonVerdict(graph)).toBe('steady_attested');
+    const graph = graphWith({ horizon_basis: 'steady_attested', provenance: 'user_set',
+      horizon_basis_source: 'user_stated', horizon_basis_months: 12 });
+    Object.assign(graph.nodes[0]!, { horizon_basis_key: steadyAttestationKey(graph.nodes[0]!, SCENARIO) });
+    expect(goalHorizonVerdict(graph, undefined, SCENARIO)).toBe('steady_attested');
     expect(untestedHorizonLine(graph)).toBe(FULL); // Historical identity remains available to exact-copy normalization.
     expect(untestedHorizonLineForCells(graph, TWO_FIGURES)).toBeNull();
     expect(decisionInputLines(graph, {
       restingText: 'Run ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false, chanceCells: TWO_FIGURES,
     })).toEqual([]);
     const previous = { inference_warnings: [{ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: FULL }] };
-    expect(withUntestedHorizonWarning(previous, graph, TWO_FIGURES).inference_warnings).toEqual([{
+    expect(withUntestedHorizonWarning(previous, graph, TWO_FIGURES, false, SCENARIO).inference_warnings).toEqual([{
       code: GOAL_HORIZON_STEADY_ATTESTED, severity: 'info', node_ids: ['goal'],
       message: 'You said ‘Monthly recurring revenue’ stays about where it is over 12 months unless you act, so this is its chance once each option is in effect.',
     }]);

@@ -19,6 +19,7 @@ import {
   withShortHorizonBesideChance,
   withUntestedHorizonWarning,
 } from '../../../agent-lane/decision-input-ask.js';
+import { steadyAttestationKey } from '../../../goal-target/horizon-basis.js';
 import { GOAL_CHANCE_LICENSED } from '../../../goal-target/goal-chance-licence.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { goalKindOf } from '../../../goal-target/goal-kind.js';
@@ -168,6 +169,7 @@ describe('Science §(ad) replaces a held-horizon disclaimer with typed withhold'
     Object.assign(steadyGoal, {
       horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: steadyGoal.goal_horizon_months,
     });
+    steadyGoal.horizon_basis_key = steadyAttestationKey(steadyGoal, SCENARIO);
     const result = await runOn(graph);
     expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(false);
     expect(horizonWarnings(result)).toEqual([]);

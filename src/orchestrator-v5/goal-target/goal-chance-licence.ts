@@ -327,7 +327,7 @@ export function goalChanceLicenceOf(
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
     ...(goalHorizonVerdict(horizonGraph, envelope, scenarioId) === 'steady_attested' ? { horizon_basis: { basis: 'steady_attested' as const, source: 'user_stated' as const,
-      months: goal!.horizon_basis_months as number, why: steadyHorizonWhy(String(goal!.label), goal!.horizon_basis_months as number) } } : {}),
+      months: goal!.goal_horizon_months as number, why: steadyHorizonWhy(String(goal!.label), goal!.goal_horizon_months as number) } } : {}),
     message: licensed.length === 0 ? '' : `Each option’s ${share === null ? 'chance of meeting your goal'
       : shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)} is licensed on this Run.`,
     form,

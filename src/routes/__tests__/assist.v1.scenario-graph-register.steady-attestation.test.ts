@@ -97,7 +97,7 @@ describe('register/import cannot attest a steady goal — real register route, a
     expect(horizonSteadyAttested(stored, SCENARIO)).toBe(false);
     const licence = goalChanceLicenceOf({ option_comparison: [
       { option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 },
-    ], inference_warnings: [] }, stored, goalOf(graph).id, undefined, undefined, SCENARIO);
+    ], inference_warnings: [] }, stored, goalOf(graph).id, undefined, undefined, stored, SCENARIO);
     expect(licence, 'control: a valid chance licence survives the import').not.toBeNull();
     expect(licence).not.toHaveProperty('horizon_basis');
   });

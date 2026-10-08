@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto';
 import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { describe, expect, it } from 'vitest';
 import { horizonSteadyAttested, steadyAttestationKey, stripSteadyAttestation } from '../horizon-basis.js';
+import { goalHorizonVerdict } from '../goal-horizon-verdict.js';
 import { applyGoalSteadyEdit } from '../goal-steady-write.js';
 import { goalChanceLicenceOf, goalChanceLicenceForAgent, agentLicenceRecordOf, withGoalChanceLicence } from '../goal-chance-licence.js';
-import { untestedHorizonLine, untestedHorizonLineForCells, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import { NodeV3 } from '../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -50,29 +51,30 @@ describe('Science §(ad)(3): the USER answer is bound to goal meaning, month and
     delete goal.horizon_basis_source;
     expect(horizonSteadyAttested({ nodes: [goal] }, SCENARIO)).toBe(false);
   });
-  it('H edited 9→12: predicate false and untested line returns again', () => {
+  it('H edited 9→12: predicate false and horizon withholds again', () => {
     const graph = admitted();
     goalOf(graph).goal_horizon_months = 12;
     expect(horizonSteadyAttested(graph, SCENARIO)).toBe(false);
-    expect(untestedHorizonLine(graph, { besideChance: true, scenarioId: SCENARIO })).not.toBeNull();
-    expect(goalChanceLicenceOf(envelope(), graph, goalOf(graph).id, undefined, undefined, SCENARIO)).not.toHaveProperty('horizon_basis');
+    expect(goalHorizonVerdict(graph, undefined, SCENARIO)).toBe('withhold');
+    expect(goalChanceLicenceOf(envelope(), graph, goalOf(graph).id, undefined, undefined, graph, SCENARIO)).not.toHaveProperty('horizon_basis');
     expect(applyGoalSteadyEdit(graph, { goal_id: goalOf(graph).id, months: 9 }, SCENARIO)).toMatchObject({ kind: 'refused', reason: 'goal_month_changed' });
   });
   it.each([null, [], {}, { kind: 'factor', goal_horizon_months: 9, ...triple },
     { kind: 'goal', goal_horizon_months: 0, ...triple }, { kind: 'goal', goal_horizon_months: 1.5, ...triple }])('malformed/non-goal fails: %j', goal => {
     expect(horizonSteadyAttested({ nodes: [goal] }, SCENARIO)).toBe(false);
   });
-  it('licence carries Science’s exact Why through both Agent readers; both warning readers return null', () => {
+  it('licence carries Science’s exact Why through both Agent readers; the horizon is attested without an untested warning', () => {
     const graph = admitted();
     const goal = goalOf(graph);
     const why = `You said ‘${goal.label}’ stays about where it is over 9 months unless you act, so this is its chance once each option is in effect.`;
-    const licence = goalChanceLicenceOf(envelope(), graph, goal.id, undefined, undefined, SCENARIO)!;
+    const licence = goalChanceLicenceOf(envelope(), graph, goal.id, undefined, undefined, graph, SCENARIO)!;
     expect(licence.horizon_basis).toEqual({ basis: 'steady_attested', source: 'user_stated', months: 9, why });
-    const run = withGoalChanceLicence(envelope(), graph, goal.id, undefined, undefined, SCENARIO);
+    const run = withGoalChanceLicence(envelope(), graph, goal.id, undefined, undefined, graph, SCENARIO);
     expect(goalChanceLicenceForAgent(run)?.horizon_basis).toEqual(licence.horizon_basis);
     expect(agentLicenceRecordOf(run)?.horizon_basis).toEqual(licence.horizon_basis);
-    expect(untestedHorizonLine(graph, { scenarioId: SCENARIO })).toBeNull();
-    expect(untestedHorizonLineForCells(graph, [], SCENARIO)).toBeNull();
+    expect(goalHorizonVerdict(graph, undefined, SCENARIO)).toBe('steady_attested');
+    expect(withUntestedHorizonWarning(envelope(), graph, [], false, SCENARIO).inference_warnings
+      .some(w => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
     const stale = { ...run, inference_warnings: [...run.inference_warnings,
       { code: 'GOAL_HORIZON_NOT_TESTED', message: 'old month' }] };
     expect(withUntestedHorizonWarning(stale, graph, [], true, SCENARIO).inference_warnings.some(w => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
@@ -118,7 +120,7 @@ describe('P45 temporal binding and carrier precedence', () => {
     goal[field] = field === 'label' ? 'Annual recurring revenue' : field === 'id' ? 'other_goal' : '£/year';
     expect(goal.goal_horizon_months).toBe(9);
     expect(horizonSteadyAttested(graph, SCENARIO)).toBe(false);
-    const licence = goalChanceLicenceOf(envelope(), graph, goal.id, undefined, undefined, SCENARIO);
+    const licence = goalChanceLicenceOf(envelope(), graph, goal.id, undefined, undefined, graph, SCENARIO);
     expect(licence?.horizon_basis).toBeUndefined();
     expect(computeAnalysisAffectingGraphHash(graph as never)).not.toBe(hash);
   });
@@ -126,7 +128,7 @@ describe('P45 temporal binding and carrier precedence', () => {
     const graph = admitted();
     expect(horizonSteadyAttested(graph, SCENARIO)).toBe(true);
     expect(horizonSteadyAttested(graph, 'different-scenario')).toBe(false);
-    expect(goalChanceLicenceOf(envelope(), graph, goalOf(graph).id, undefined, undefined, 'different-scenario')).not.toHaveProperty('horizon_basis');
+    expect(goalChanceLicenceOf(envelope(), graph, goalOf(graph).id, undefined, undefined, graph, 'different-scenario')).not.toHaveProperty('horizon_basis');
   });
   it('absent scenario, missing key and a mismatched key fail closed', () => {
     const graph = admitted();
@@ -146,7 +148,7 @@ describe('P45 temporal binding and carrier precedence', () => {
       SCENARIO, goal.id, goal.label.trim().toLowerCase().replace(/\s+/g, ' '), goal.goal_threshold_unit ?? null, 9,
     ])).digest('hex').slice(0, 32));
   });
-  it('attested + UNCONFIRMED accumulation carrier: predicate false and final warning returns', () => {
+  it('attested + UNCONFIRMED accumulation carrier: predicate false and final horizon withholds', () => {
     const graph = admitted();
     const cells: readonly CanonicalAnalysisCell[] = [{ kind: 'figure', display: '60%' }];
     const before = withUntestedHorizonWarning(envelope(), graph, cells, false, SCENARIO);
@@ -156,12 +158,10 @@ describe('P45 temporal binding and carrier precedence', () => {
       nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'churn', 'inflow'],
         horizon_months: 9, rate_scale: 0.01, stated_in_brief: false } });
     expect(horizonSteadyAttested(graph, SCENARIO)).toBe(false);
-    expect(untestedHorizonLine(graph, { besideChance: true, scenarioId: SCENARIO })).not.toBeNull();
+    expect(goalHorizonVerdict(graph, undefined, SCENARIO)).toBe('withhold');
     const warned = withUntestedHorizonWarning(envelope(), graph, cells, false, SCENARIO);
-    expect(warned.inference_warnings).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'GOAL_HORIZON_NOT_TESTED', message: untestedHorizonLineForCells(graph, cells, SCENARIO) }),
-    ]));
-    expect(goalChanceLicenceOf(envelope(), graph, goalOf(graph).id, undefined, undefined, SCENARIO)).not.toHaveProperty('horizon_basis');
+    expect(goalHorizonVerdict(graph, warned, SCENARIO)).toBe('withhold');
+    expect(goalChanceLicenceOf(envelope(), graph, goalOf(graph).id, undefined, undefined, graph, SCENARIO)).not.toHaveProperty('horizon_basis');
   });
   it('shared ingress strip removes all four fields from every node without changing other meaning', () => {
     const graph = admitted();
@@ -182,8 +182,8 @@ describe('Run attestation uses the stored graph before carrier projection', () =
     const stored = structuredClone(calculation);
     stored.nodes.push({ id: 'excluded_stock', kind: 'outcome', label: 'Stock',
       nonlinear_identity: { operation: 'accumulation', stated_in_brief: false } });
-    expect(goalChanceLicenceOf(envelope(), calculation, goalOf(calculation).id, undefined, undefined, SCENARIO)?.horizon_basis).toBeDefined();
-    const licence = withGoalChanceLicence(envelope(), calculation, goalOf(calculation).id, undefined, undefined, SCENARIO, stored);
+    expect(goalChanceLicenceOf(envelope(), calculation, goalOf(calculation).id, undefined, undefined, calculation, SCENARIO)?.horizon_basis).toBeDefined();
+    const licence = withGoalChanceLicence(envelope(), calculation, goalOf(calculation).id, undefined, undefined, stored, SCENARIO);
     expect(agentLicenceRecordOf(licence)?.horizon_basis).toBeUndefined();
   });
 });

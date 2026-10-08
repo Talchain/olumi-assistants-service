@@ -15,7 +15,8 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { untestedHorizonLine } from '../decision-input-ask.js';
-import { horizonSteadyAttested } from '../../goal-target/horizon-basis.js';
+import { horizonSteadyAttested, steadyAttestationKey } from '../../goal-target/horizon-basis.js';
+import { applyGoalSteadyEdit } from '../../goal-target/goal-steady-write.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForUntestedHorizon } from '../../tools/handlers/run-analysis.js';
@@ -240,10 +241,35 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(JSON.stringify(body)).not.toContain('Add monthly changes');
   }, 60_000);
 
+  it('S4 joined: B2 H9 withholds, the real user press licences steady, another scenario withholds again', async () => {
+    const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
+    expect(goal(graph).goal_horizon_months).toBe(9);
+    expect(graph.nodes.some((node: Rec) => node.nonlinear_identity?.operation === 'accumulation')).toBe(false);
+    expect(goalHorizonVerdict(graph, undefined, SCENARIO)).toBe('withhold');
+    const withheld = await realRun(graph);
+    expect(withheld.result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
+      code: HORIZON_WITHHOLD, option_ids: expect.arrayContaining(optionIds(graph)),
+    }));
+    expect(withheld.result.enrichment.option_comparison).toHaveLength(optionIds(graph).length);
+    for (const row of withheld.result.enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
+    const pressed = applyGoalSteadyEdit(graph, { goal_id: goal(graph).id, months: 9 }, SCENARIO);
+    expect(pressed.kind).toBe('mutated');
+    if (pressed.kind !== 'mutated') throw new Error('The user press was not written');
+    graph = pressed.mutatedGraph;
+    expect(goalHorizonVerdict(graph, undefined, SCENARIO)).toBe('steady_attested');
+    const admitted = await realRun(graph);
+    expect(admitted.result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
+      code: 'GOAL_CHANCE_LICENSED',
+      horizon_basis: { basis: 'steady_attested', source: 'user_stated', months: 9, why: WHY },
+    }));
+    expect(goalHorizonVerdict(graph, admitted.result.enrichment, 'another-scenario')).toBe('withhold');
+  }, 60_000);
+
   it.skipIf(CAPTURE_BASELINE)('same served B2 + user attestation: its licensed range survives, Why once, no disclaimer', async () => {
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
+    goal(graph).horizon_basis_key = steadyAttestationKey(goal(graph), SCENARIO);
     const body = await turn();
-    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment)).toBe('steady_attested');
+    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment, SCENARIO)).toBe('steady_attested');
     expect(currentFact!.result.enrichment.inference_warnings.some((warning: Rec) => [HORIZON_WITHHOLD, 'GOAL_HORIZON_NOT_TESTED'].includes(warning.code))).toBe(false);
     // Raise's independently unsized links remain a separate refusal in the exact served model.
     expect(lastView.options.some(row => row.cell.kind === 'figure' || row.cell.kind === 'range')).toBe(true);
@@ -270,8 +296,9 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(withheld.result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({ code: HORIZON_WITHHOLD }));
     for (const row of withheld.result.enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
+    goal(graph).horizon_basis_key = steadyAttestationKey(goal(graph), SCENARIO);
     const body = await turn();
-    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment)).toBe('steady_attested');
+    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment, SCENARIO)).toBe('steady_attested');
     expect(lastView.options).toHaveLength(3);
     expect(lastView.options.every(row => row.cell.kind === 'figure')).toBe(true);
     expect(body.assistant_text).toContain('%');
@@ -282,7 +309,10 @@ describe('Science §(ad) through the producer and reply route', () => {
   }, 60_000);
 
   it.skipIf(CAPTURE_BASELINE).each([false, true])('retired exact narrator horizon identities are removed (steady=%s)', async steady => {
-    if (steady) Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
+    if (steady) {
+      Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
+      goal(graph).horizon_basis_key = steadyAttestationKey(goal(graph), SCENARIO);
+    }
     const copies = [OLD_HORIZON, untestedHorizonLine(graph, { normalizationOnly: true }),
       untestedHorizonLine(graph, { plural: true, normalizationOnly: true })].filter((line): line is string => line !== null);
     const body = await turn([NARRATOR, ...copies].join(' '));
@@ -295,6 +325,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   it.skipIf(CAPTURE_BASELINE)('steady zero-spread option reads the same tolerant horizon facts as the producer', async () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
+    goal(graph).horizon_basis_key = steadyAttestationKey(goal(graph), SCENARIO);
     const keep = providerBodyOverride!.option_comparison.find((row: Rec) => row.option_id === 'keep_current_pricing');
     keep.probability_of_goal = 0;
     keep.outcome = { ...keep.outcome, mean: 120000, std: 0, p10: 120000, p50: 120000, p90: 120000 };
@@ -325,20 +356,23 @@ describe('Science §(ad) through the producer and reply route', () => {
 });
 
 describe.skipIf(CAPTURE_BASELINE)('Science §(ad) typed selector and unchanged controls', () => {
-  // P45's pinned predicate (8 Oct): kind goal, positive-integer H, steady_attested, source user_stated, attested month === H.
-  const steady = (patch: Record<string, unknown> = {}) => ({ kind: 'goal', goal_horizon_months: 9, horizon_basis: 'steady_attested',
-    horizon_basis_source: 'user_stated', horizon_basis_months: 9, ...patch });
+  // User attestation is bound to the single goal's meaning, month and scenario.
+  const steady = (patch: Record<string, unknown> = {}) => {
+    const g = { id: GOAL, label: 'Monthly recurring revenue', kind: 'goal', goal_horizon_months: 9,
+      horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: 9, ...patch };
+    return { nodes: [{ ...g, horizon_basis_key: steadyAttestationKey(g, SCENARIO) }] };
+  };
   it.each(['ai_inferred', 'from_brief', 'drafter', undefined])('steady flag is not user attestation with source %s', source => {
-    expect(horizonSteadyAttested(steady({ horizon_basis_source: source }))).toBe(false);
+    expect(horizonSteadyAttested(steady({ horizon_basis_source: source }), SCENARIO)).toBe(false);
   });
   it('accepts only a positive integer H, a user_stated source and the same attested month', () => {
-    expect(horizonSteadyAttested(steady())).toBe(true);
+    expect(horizonSteadyAttested(steady(), SCENARIO)).toBe(true);
     for (const horizon of [undefined, 0, -1, 1.5, '9', Number.NaN]) {
-      expect(horizonSteadyAttested(steady({ goal_horizon_months: horizon }))).toBe(false);
+      expect(horizonSteadyAttested(steady({ goal_horizon_months: horizon }), SCENARIO)).toBe(false);
     }
-    expect(horizonSteadyAttested(steady({ goal_horizon_months: 12 })), 'a deadline edit voids the attestation').toBe(false);
-    expect(horizonSteadyAttested(steady({ kind: 'factor' }))).toBe(false);
-    expect(horizonSteadyAttested({ ...steady(), horizon_basis_source: undefined, provenance: 'user_set' }),
+    expect(horizonSteadyAttested(steady({ goal_horizon_months: 12 }), SCENARIO), 'a deadline edit voids the attestation').toBe(false);
+    expect(horizonSteadyAttested(steady({ kind: 'factor' }), SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(steady({ horizon_basis_source: undefined, provenance: 'user_set' }), SCENARIO),
       'goal provenance alone is not the attestation').toBe(false);
   });
   it('no H leaves the exact envelope object and bytes unchanged', () => {

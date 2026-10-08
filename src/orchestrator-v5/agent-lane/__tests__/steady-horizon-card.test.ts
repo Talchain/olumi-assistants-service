@@ -119,7 +119,7 @@ describe('steady horizon: one held card through the existing approved batch door
       runs += 1;
       const graph = jsonbGraph();
       const env = withUntestedHorizonWarning(withGoalChanceLicence({ option_comparison: [
-        { option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, graph, goalOf(graph).id, undefined, undefined, SCENARIO), graph, [], false, SCENARIO);
+        { option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, graph, goalOf(graph).id, undefined, undefined, jsonbGraph(), SCENARIO), graph, [], false, SCENARIO);
       return { assistant_text: 'Analysis complete.', blocks: [{ type: 'analysis_result', data: env }],
         analysis_ready: { status: 'ready', may_run: true }, tool_results: [{ name: 'run_analysis', ran: true }], ...env };
     });
@@ -182,7 +182,7 @@ describe('steady horizon: one held card through the existing approved batch door
     const rerun = await run();
     expect(runs).toBe(2);
     expect((rerun.suggested_actions as Chip[]).some(c => c.label === STEADY_HORIZON_ANSWER)).toBe(false);
-    const licence = withGoalChanceLicence({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, jsonbGraph(), goalOf(jsonbGraph()).id, undefined, undefined, SCENARIO);
+    const licence = withGoalChanceLicence({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 }], inference_warnings: [] }, jsonbGraph(), goalOf(jsonbGraph()).id, undefined, undefined, jsonbGraph(), SCENARIO);
     const clean = withUntestedHorizonWarning(licence, jsonbGraph(), [], false, SCENARIO);
     expect(clean.inference_warnings).toEqual(expect.arrayContaining([expect.objectContaining({ horizon_basis: expect.objectContaining({ source: 'user_stated', months: 9, why: `You said ‘${goalOf(jsonbGraph()).label}’ stays about where it is over 9 months unless you act, so this is its chance once each option is in effect.` }) })]));
     expect(clean.inference_warnings.some((w: { code: string }) => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
