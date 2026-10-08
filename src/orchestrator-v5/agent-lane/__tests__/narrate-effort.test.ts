@@ -17,6 +17,7 @@ import { budgetFor, callEffortFor, conversationBudgetFor } from '../model-budget
 import { approvalChipsFor, NOT_ON_NARRATION, proposalsAwaitingApproval } from '../approval-chips.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { composeProposalReply } from '../proposal-reply.js';
+import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
 
 /** agent-capabilities.ts `proposeNewRisk`, held (its success shape). */
 const HELD = {
@@ -267,6 +268,33 @@ describe('narration recovery from the known held result', () => {
     ].join('\n\n'));
     expect(JSON.stringify(r.items)).not.toContain('Unfinished');
     expect(callModel).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['cause', HELD_RISK_CAUSE_NOTE, HELD_RISK],
+    ['window', HELD_RISK_WINDOW_NOTE, {
+      ...HELD_RISK,
+      public_label: 'Approve 2 changes',
+      held_message: "Yes, add risk 'Competitor price or AI-feature response' and link 'Competitor price or AI-feature response' to 'MRR'.",
+      risk: { ...HELD_RISK.risk, driven_by: [] as string[] },
+    }],
+  ] as const)('RED Path 2 %s: rejected narration keeps the held-risk note awaiting approval', async (_kind, note, fixture) => {
+    const held = { ...fixture, note: `${HELD_RISK.note} ${note}` };
+    const riskArgs = { ...args, label: held.risk.label, affects: [{ target_label: 'MRR', direction: 'negative' }] };
+    const caps = { proposeNewRisk: vi.fn(async () => held) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn((tool: string, parsedArgs: unknown, result: unknown) => composeProposalReply(tool, parsedArgs, result, base.message));
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [{ ...call, arguments: JSON.stringify(riskArgs) }] })
+      .mockRejectedValueOnce(new Error('openai_500'));
+    const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
+    recovered(r, held);
+    expect(riskArgs.whole_request).toBe(false);
+    expect(composeReply).toHaveBeenCalledTimes(2);
+    expect(composeReply.mock.results.map((result) => result.value)).toEqual([null, null]);
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(r.assistant_text).toContain(note);
+    expect(r.assistant_text).not.toMatch(/\bI(?:'|’| ha)ve added\b/i);
+    expect(r.assistant_text).toContain('until you approve');
   });
 
   // ⛔ P44 #2: recovery may drop conversational gates, but must not re-ask a figure the user stated.

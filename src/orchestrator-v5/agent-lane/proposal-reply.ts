@@ -20,6 +20,7 @@ import { formatFactorValue } from '../compose/format-factor-value.js';
 import { sayFigureExactly, twoStateLevelWords } from './say-figure.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
+import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from './held-risk-notes.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -160,12 +161,12 @@ function newRiskReply(r: Rec): string | null {
   if (risk.likelihood !== undefined && (likelihood === undefined || likelihood.basis !== 'user'
     || typeof likelihood.p_low_pct !== 'number' || typeof likelihood.p_high_pct !== 'number'
     || typeof likelihood.horizon_months !== 'number' || !nonEmpty(likelihood.quote))) return null;
-  const causeNote = "I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen.";
+  const causeNote = HELD_RISK_CAUSE_NOTE;
   const droppedDrivers = r.dropped_drivers === undefined ? []
     : Array.isArray(r.dropped_drivers) && r.dropped_drivers.every(nonEmpty) ? r.dropped_drivers as string[] : null;
   if (droppedDrivers === null) return null;
   const droppedNote = `I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.`;
-  const windowNote = 'You gave a likelihood but no time window, so I\'ve added it as an ordinary risk. Say how soon (for example "within 6 months") and I\'ll add it as an event that may happen.';
+  const windowNote = HELD_RISK_WINDOW_NOTE;
   return reply(subject, [
     ...(likelihood !== undefined ? [`It may happen (about ${likelihood.p_low_pct}${likelihood.p_low_pct === likelihood.p_high_pct ? '' : `–${likelihood.p_high_pct}`}% within ${likelihood.horizon_months} months), as you said.`] : []),
     ...(typeof r.note === 'string' && r.note.includes(causeNote) ? [causeNote] : []),

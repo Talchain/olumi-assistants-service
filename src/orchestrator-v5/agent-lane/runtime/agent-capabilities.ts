@@ -18,6 +18,7 @@ import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event
  */
 
 import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
+import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
 import { parseDrawnLinkPress } from '../drawn-link-press.js';
 import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
@@ -8260,9 +8261,9 @@ export function createAgentCapabilities(
         ...(droppedDrivers.length > 0 ? { dropped_drivers: droppedDrivers } : {}),
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
-          + (stated !== undefined && riskCauses.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : '')
+          + (stated !== undefined && riskCauses.length > 0 ? ' ' + HELD_RISK_CAUSE_NOTE : '')
           + (droppedDrivers.length > 0 ? ` I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.` : '')
-          + (stated === undefined && readStatedLikelihoodWithoutWindow(userText) ? ' You gave a likelihood but no time window, so I\'ve added it as an ordinary risk. Say how soon (for example "within 6 months") and I\'ll add it as an event that may happen.' : ''),
+          + (stated === undefined && readStatedLikelihoodWithoutWindow(userText) ? ' ' + HELD_RISK_WINDOW_NOTE : ''),
       };
     },
 
