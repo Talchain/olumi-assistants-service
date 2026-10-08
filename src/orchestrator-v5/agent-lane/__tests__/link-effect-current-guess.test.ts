@@ -21,11 +21,11 @@ const question = (quote: string): string =>
 function floorAsk(floor: LinkEffectFloor): LinkEffectClarificationPending {
   return {
     id: 'floor-ask', scenario_id: 'scenario', chip_id: 'agent-link-effect-clarification:floor-ask',
-    emitted_at_iso: '2026-10-08T00:00:00.000Z', expires_at_turn_count: 6,
+    emitted_at_iso: '2026-10-08T00:00:00.000Z', expires_at_iso: '2026-10-09T00:00:00.000Z', expires_at_turn_count: 6,
     preconditions: { target_entity_ids: ['price', 'margin'] },
     action: { kind: 'elicit_link_effect_clarification', from_id: 'price', to_id: 'margin',
       from_label: 'Café price', to_label: 'Gross margin', quote: FLOOR.source_quote!,
-      question: question(FLOOR.source_quote!), floor },
+      question: question(FLOOR.source_quote!), refusal: 'not_the_users_statement', floor },
   };
 }
 

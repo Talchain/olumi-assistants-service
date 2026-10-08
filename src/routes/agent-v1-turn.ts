@@ -4541,13 +4541,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view', ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
     })();
-    // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
-    // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
-    // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
-    if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
-      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
-      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
-    }
     let pendingPreview: ProposalPreview | undefined;
     /**
      * ⭐ T2 — THE GUIDANCE ROW (M1; `turn-context/guidance-wire.ts`): at most one coaching row (+ one edits row) from this
@@ -4699,6 +4692,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...new Set(effectLatestFigureLines)];
     if (effectFloorLines.length > 0) {
       wireBody = { ...wireBody, assistant_text: withB3LinesAtRest(String(wireBody.assistant_text ?? ''), effectFloorLines) };
+    }
+    // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
+    // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
+    // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
+    if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
+      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
+      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
     }
     /**
      * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a

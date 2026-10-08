@@ -218,6 +218,8 @@ describe('dial A — the recorded-ask window', () => {
       'clarify_v2_round',
       'draft_graph',
       'edit_graph_add_risk',
+      // RC2a Rule 1 + Rule 5 (rc2a.md:7,11): context-only carrier keeps its own expiry; it is not a widened bare-number ask.
+      'elicit_link_effect_clarification',
       'proposed_concept',
       'reconcile_goal_scope',
       'run_analysis',

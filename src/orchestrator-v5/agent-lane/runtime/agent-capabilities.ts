@@ -204,7 +204,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectStatementClassification, linkEffectStatementNamesEndpoints, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectStatementClassification, linkEffectStatementNamesEndpoints, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -244,6 +244,7 @@ import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
+import { shareKind } from '../../../utils/unit-alphabet.js';
 import { quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
@@ -1516,6 +1517,17 @@ function stillReadUnitReadings(graph: unknown, item: { readonly from: string; re
   const fresh = prepareLinkEffectUnitReadings(graph, item.from, item.to, item.effect, item.quote, { link_selected: item.link_selected === true }).unit_readings;
   return item.unit_readings.filter((r) => fresh.some((f) => f.node_id === r.node_id && f.unit_reading.unit === r.unit_reading.unit
     && f.unit_reading.source_quote === r.unit_reading.source_quote));
+}
+
+/**
+ * ⭐ FU-1 (DL 0df0e1, "never re-ask what the user has closed"): a DENIAL that says the link does not change at all ("It
+ * doesn't change.", `saysNoChange`) ends the ask. Nothing is recorded and nothing is asked: the restatement ask itself
+ * promised "If “T” does not change, the link stays as it is", so asking again for "the figures you wrote" breaks that
+ * promise. Any other denial (a corrected size or direction, a denied figure) still gets its ask (Codex r1 + r2 on #2664).
+ */
+function linkEffectDeniedWords(from: { label: string }, to: { label: string }): string {
+  return 'Nothing was prepared. Tell the user exactly this: "'
+    + `Nothing is recorded: the link from \u201c${from.label}\u201d to \u201c${to.label}\u201d stays as it is."`;
 }
 
 /**
@@ -3475,14 +3487,28 @@ export function createAgentCapabilities(
       || reply.action.resolved_reading === undefined && !reply.action.question.includes('best single guess'));
   const currentAnswerReading = (reply: LinkEffectClarificationPending | null, from: string, to: string,
     quote: string, text: string, lower: unknown, upper: unknown, fromLabel: string, toLabel: string): LinkEffectClarificationReading | undefined => {
-    if (quoteSpansIn(text, quote).length === 0 || reply !== null && readingOnlyReply(reply, text)) return undefined;
+    const spans = quoteSpansIn(text, quote);
+    if (spans.length === 0 || reply !== null && readingOnlyReply(reply, text)) return undefined;
     if (reply === null) {
-      const bounds = findLinkEffectBounds(quote);
-      if (bounds.length !== 2 || bounds[0]!.direction !== 'lower' || bounds[1]!.direction !== 'upper'
-        || !linkEffectStatementNamesEndpoints(quote, { source: fromLabel, target: toLabel })) return undefined;
+      const bounds = findLinkEffectBounds(text);
+      const ends = { source: fromLabel, target: toLabel };
+      const currentNamesEnds = linkEffectStatementNamesEndpoints(text, ends);
+      const start = spans[0]!;
+      const end = start + quote.length;
+      // Ordinary unbounded statements keep their existing admission and verbatim quote. Extend a figure-ending
+      // quote only when its own sentence continues, so a clipped current unit cannot disappear into a provider span.
+      const lastAmount = findLinkEffectAmounts(quote).at(-1);
+      const continuation = /[.!?]\s*$/.test(quote) ? '' : text.slice(end).split(/[;,.!?\n]/, 1)[0]!.trim();
+      const omittedUnit = lastAmount !== undefined && quote.slice(lastAmount.index + lastAmount.matchedText.length).trim() === ''
+        && continuation !== '';
+      const outside = `${text.slice(0, start)} ${text.slice(end)}`;
+      const repeatedCurrentLink = linkEffectStatementNamesEndpoints(outside, ends);
+      const completeCurrentRange = bounds.length === 2 && bounds[0]!.direction === 'lower' && bounds[1]!.direction === 'upper';
+      const currentRange = completeCurrentRange || bounds.length > 0 && quote !== text;
+      if (!currentNamesEnds || !currentRange && !omittedUnit && !repeatedCurrentLink) return undefined;
     }
-    return { current_turn: true, node_id: to, from_id: from, to_id: to, from_label: fromLabel, to_label: toLabel, quote, answer: quote,
-      source_text: quote, statement_classification: 'asserted',
+    return { current_turn: true, node_id: to, from_id: from, to_id: to, from_label: fromLabel, to_label: toLabel, quote: text, answer: text,
+      source_text: text, statement_classification: 'asserted',
       ...(reply?.action.resolved_reading === undefined ? {} : { reading: reply.action.resolved_reading }),
       ...(typeof lower === 'number' ? { lower } : {}),
       ...(typeof upper === 'number' ? { upper } : {}) };
@@ -3776,6 +3802,10 @@ export function createAgentCapabilities(
                 reply === null ? undefined : linkEffectClarificationLineage(reply)));
               if (reply !== null) clarificationSources.set(linkEffectClarificationLineage(reply), reply);
             }
+            // The existing ask is still owed even when these words cannot arm a named-link carrier.
+            if (!canCarry && question !== undefined) {
+              detail = preserveReason ? `${detail} Then ask: "${question}"` : linkEffectUnitAskWords(question, { label: fromLabel }, { label: toLabel });
+            }
             notPrepared.push({ from_label: fromLabel, to_label: toLabel, refusal, detail, ...(question === undefined ? {} : { question }) });
           };
           const entryQuote = typeof entry.quote === 'string' ? entry.quote.trim() : '';
@@ -3815,6 +3845,7 @@ export function createAgentCapabilities(
             continue;
           }
           const answerReading = currentAnswerReading(reply, from.id, to.id, entryQuote, text, entry.lower, entry.upper, from.label, to.label);
+          const answerQuote = answerReading?.quote ?? entryQuote;
           const clarification = answerReading === undefined ? {} : { clarification: answerReading };
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
@@ -3833,32 +3864,41 @@ export function createAgentCapabilities(
             else fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
             continue;
           }
-          const currentAnswer = readLinkEffectClarificationAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope);
+          const currentAnswer = readLinkEffectClarificationAnswer(answerReading, stated, answerQuote, { source: from.label, target: to.label }, statedScope);
           const classification = linkEffectStatementClassification(entryQuote, text, { source: from.label, target: to.label });
-          if (classification !== 'asserted') { fail('not_the_users_statement', '', guessQuestion(from, to, reply?.action.quote ?? entryQuote)); continue; }
+          if (classification !== 'asserted') {
+            if (classification === 'denied' && saysNoChange(entryQuote, text)) {
+              notPrepared.push({ from_label: fromLabel, to_label: toLabel, refusal: 'not_the_users_statement', detail: linkEffectDeniedWords(from, to) });
+            } else {
+              fail('not_the_users_statement', '', classification === 'reported'
+                ? guessQuestion(from, to, reply?.action.quote ?? entryQuote)
+                : linkEffectStatementAsk(classification, from.label, to.label));
+            }
+            continue;
+          }
           if (answerReading !== undefined && !currentAnswer) {
-            const answer = readLinkEffectCurrentAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope);
+            const answer = readLinkEffectCurrentAnswer(answerReading, stated, answerQuote, { source: from.label, target: to.label }, statedScope);
             fail(answer.ok ? 'not_the_users_figure' : answer.refusal, '', guessQuestion(from, to, reply?.action.quote ?? entryQuote));
             continue;
           }
           const bound = boundedLinkEffectText(entryQuote);
           if (bound !== undefined && !currentAnswer) {
             const floor = linkEffectFloorFromStatement(working, from.id, to.id, entryQuote, stated, '') ?? undefined;
-            const unitAsk = floor === undefined && stated.amount_unit === '%' ? prepareLinkEffectUnitReadings(working, from.id, to.id, stated, entryQuote).ask : undefined;
+            const unitAsk = floor === undefined && shareKind(stated.amount_unit) === 'percent' ? prepareLinkEffectUnitReadings(working, from.id, to.id, stated, entryQuote).ask : undefined;
             fail('not_the_users_statement', '', unitAsk ?? guessQuestion(from, to, entryQuote), floor);
             continue;
           }
           const miss = currentAnswer ? null : linkEffectQuoteContextMiss(entryQuote, text)
             ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label }, statedScope);
           if (miss !== null) {
-            const question = reply !== null || linkEffectStatementNamesEndpoints(entryQuote, { source: from.label, target: to.label })
+            const question = reply !== null || (miss !== 'figures_not_in_statement' || findLinkEffectAmounts(entryQuote).length > 0 || findLinkEffectAmounts(text).length === 0) && linkEffectStatementNamesEndpoints(entryQuote, { source: from.label, target: to.label })
               ? guessQuestion(from, to, reply?.action.quote ?? entryQuote)
               : linkEffectStatementAsk(miss, from.label, to.label,
                 linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, statedScope.target_units)?.question);
             fail(miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement', '', question);
             continue;
           }
-          const said = answerReading !== undefined ? entryQuote : statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label }, statedScope) ?? entryQuote;
+          const said = answerReading !== undefined ? answerQuote : statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label }, statedScope) ?? entryQuote;
           const endpoints = linkEffectTargetOf(working, from.id, to.id);
           if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
             fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
@@ -3906,7 +3946,7 @@ export function createAgentCapabilities(
           // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
           const mediated = linkEffectMediatorReadings(unitView, from.id, to.id);
           const latestFiguresDisclosure = linkEffectLatestFiguresDisclosure(reply?.action.floor,
-            readLinkEffectCurrentAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope), stated);
+            readLinkEffectCurrentAnswer(answerReading, stated, answerQuote, { source: from.label, target: to.label }, statedScope), stated);
           if (latestFiguresDisclosure !== undefined) latestFiguresDisclosures.push(latestFiguresDisclosure);
           if (reply !== null) resolvedClarificationLineages.add(linkEffectClarificationLineage(reply));
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
@@ -3994,6 +4034,7 @@ export function createAgentCapabilities(
         return refusalWithAsk('quote_not_verbatim', guessQuestion(from, to, reply?.action.quote ?? text));
       }
       const answerReading = currentAnswerReading(reply, from.id, to.id, quote, text, args.lower, args.upper, from.label, to.label);
+      const answerQuote = answerReading?.quote ?? quote;
       const clarification = answerReading === undefined ? {} : { clarification: answerReading };
       // RT-6: the binder checks numbers and link identity; the card asks consent to the Agent's reading.
       const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
@@ -4013,29 +4054,36 @@ export function createAgentCapabilities(
           ? { ok: false, mutated: false, refusal: 'no_such_link', detail: linkEffectNoSuchLinkWords(g.raw, from, to) }
           : { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
       }
-      const currentAnswer = readLinkEffectClarificationAnswer(answerReading, statedEffect, quote, statedEnds, statedScope);
+      const currentAnswer = readLinkEffectClarificationAnswer(answerReading, statedEffect, answerQuote, statedEnds, statedScope);
       const classification = linkEffectStatementClassification(quote, text, statedEnds);
-      if (classification !== 'asserted') return refusalWithAsk('not_the_users_statement', guessQuestion(from, to, reply?.action.quote ?? quote), classification);
+      if (classification !== 'asserted') {
+        if (classification === 'denied' && saysNoChange(quote, text)) {
+          return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: classification, detail: linkEffectDeniedWords(from, to) };
+        }
+        return refusalWithAsk('not_the_users_statement', classification === 'reported'
+          ? guessQuestion(from, to, reply?.action.quote ?? quote)
+          : linkEffectStatementAsk(classification, from.label, to.label), classification);
+      }
       if (answerReading !== undefined && !currentAnswer) {
-        const answer = readLinkEffectCurrentAnswer(answerReading, statedEffect, quote, statedEnds, statedScope);
+        const answer = readLinkEffectCurrentAnswer(answerReading, statedEffect, answerQuote, statedEnds, statedScope);
         return refusalWithAsk(answer.ok ? 'not_the_users_figure' : answer.refusal,
           guessQuestion(from, to, reply?.action.quote ?? quote));
       }
       const bound = boundedLinkEffectText(quote);
       if (bound !== undefined && !currentAnswer) {
         const floor = linkEffectFloorFromStatement(g.raw, from.id, to.id, quote, statedEffect, '') ?? undefined;
-        const unitAsk = floor === undefined && statedEffect.amount_unit === '%' ? prepareLinkEffectUnitReadings(g.raw, from.id, to.id, statedEffect, quote).ask : undefined;
+        const unitAsk = floor === undefined && shareKind(statedEffect.amount_unit) === 'percent' ? prepareLinkEffectUnitReadings(g.raw, from.id, to.id, statedEffect, quote).ask : undefined;
         return refusalWithAsk('not_the_users_statement', unitAsk ?? guessQuestion(from, to, quote), 'unclear_figure', floor);
       }
       const miss = currentAnswer ? null : linkEffectQuoteContextMiss(quote, text) ?? linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
       if (miss !== null) {
-        const question = reply !== null || linkEffectStatementNamesEndpoints(quote, statedEnds)
+        const question = reply !== null || (miss !== 'figures_not_in_statement' || findLinkEffectAmounts(quote).length > 0 || findLinkEffectAmounts(text).length === 0) && linkEffectStatementNamesEndpoints(quote, statedEnds)
           ? guessQuestion(from, to, reply?.action.quote ?? quote)
           : linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds, statedScope.target_units)?.question);
         return refusalWithAsk(miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement', question,
           miss === 'figures_not_in_statement' ? undefined : miss);
       }
-      const said = answerReading !== undefined ? quote : statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
+      const said = answerReading !== undefined ? answerQuote : statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
       const endpoints = linkEffectTargetOf(g.raw, from.id, to.id);
       if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
         return { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
@@ -4093,7 +4141,7 @@ export function createAgentCapabilities(
       });
       proposals.put(proposal);
       const latestFiguresDisclosure = linkEffectLatestFiguresDisclosure(reply?.action.floor,
-        readLinkEffectCurrentAnswer(answerReading, statedEffect, quote, statedEnds, statedScope), statedEffect);
+        readLinkEffectCurrentAnswer(answerReading, statedEffect, answerQuote, statedEnds, statedScope), statedEffect);
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,

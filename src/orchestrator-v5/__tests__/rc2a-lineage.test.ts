@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { commitDirectAnswer } from '../commit.js';
+import { commitDirectAnswer, type CommitMetadata } from '../commit.js';
 import { composeDirectAnswerResponse } from '../compose.js';
 import { appendCheckedGraphWrite } from '../persist-graph-write.js';
 import { linkEffectClarificationOnRefusal, linkEffectClarificationsForAnswerRow, reviseLinkEffectClarification,
@@ -57,7 +57,8 @@ function consumedStore(initial: readonly PendingAction[], consumeDuringAppend: b
 
 /** Only the transport is a fake: commit + reconciliation + the real production store methods run unchanged. */
 function productionStore(pending: readonly PendingAction[]) {
-  const rpc = vi.fn(async () => ({ data: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', error: null }));
+  const rpc = vi.fn(async (_name: string, _args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }> =>
+    ({ data: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', error: null }));
   const client = { rpc, from: vi.fn(() => {
     let columns = '';
     const query = {
@@ -152,7 +153,8 @@ describe('RC2a fix 2: clarification lineage and the production commit shape', ()
     await expect(commitDirectAnswer(
       composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'The model is ready.', stage: 'frame' }),
       { scenario_id: SCENARIO, turn_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', turn_class: 'handler',
-        handler_id: handler, request_hash: `sha256:${handler}`, llm_calls_used: 0, duration_ms: 1,
+        // Real legacy internal graph-handler IDs intentionally exercise the RPC shape outside the shared handler enum.
+        handler_id: handler as unknown as CommitMetadata['handler_id'], request_hash: `sha256:${handler}`, llm_calls_used: 0, duration_ms: 1,
         handler_facts: [], graph: GRAPH, baseGraphForInvariants: GRAPH, priorPendingActions: [] }, s.store)).resolves.toBeDefined();
     expect(s.rpc).toHaveBeenCalledTimes(1);
     const [rpcName, args] = s.rpc.mock.calls[0]! as unknown as [string, Record<string, unknown>];

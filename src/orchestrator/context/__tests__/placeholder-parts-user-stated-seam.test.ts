@@ -30,11 +30,12 @@ function graph(target: Rec): Rec {
 const OPTIONS = [{ interventions: { price: 59 } }];
 const nodesOf = (g: Rec) => g.nodes as Rec[];
 const edgesOf = (g: Rec) => g.edges as Rec[];
-const write = (g: Rec, to: string, effect: Rec) => applyLinkEffectEdit({
+// RC2a Rule 2 (rc2a.md:8): a unit/figure witness must be the current user's actual words, not an opaque authorship label.
+const write = (g: Rec, to: string, effect: Rec, quote: string) => applyLinkEffectEdit({
   persistedGraph: g, from: 'price', to, effect: effect as never,
   expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, 'price', to)! },
-  quote: 'stated by the user',
-  reading_token: linkEffectReadingToken({ from: 'price', to, effect: effect as never, quote: 'stated by the user' }),
+  quote,
+  reading_token: linkEffectReadingToken({ from: 'price', to, effect: effect as never, quote }),
 });
 
 describe('a link the USER sized ends the R-c withhold on the limit it moves', () => {
@@ -44,7 +45,7 @@ describe('a link the USER sized ends the R-c withhold on the limit it moves', ()
     expect(placeholderPartsFinding('subs', nodesOf(g), edgesOf(g), OPTIONS)?.reason).toBe(PLACEHOLDER_PARTS_REASON);
   });
   it('SEAM: "every £1 loses about 50 subscribers", written by #2274, is sized for R-c: no withhold', () => {
-    const r = write(graph(SUBS), 'subs', { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' });
+    const r = write(graph(SUBS), 'subs', { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' }, 'Every £1 on the Pro plan price loses about 50 Pro subscribers.');
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     if (r.kind !== 'mutated') return;
     const g = r.mutatedGraph as Rec;
@@ -58,7 +59,7 @@ describe('a link the USER sized ends the R-c withhold on the limit it moves', ()
     const CHURN = { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, cap: 100, unit: '%', source: 'user_override' } };
     const before = graph(CHURN);
     expect(placeholderPartsFinding('churn', nodesOf(before), edgesOf(before), OPTIONS)?.reason, 'CONTROL').toBe(PLACEHOLDER_PARTS_REASON);
-    const r = write(before, 'churn', { amount: 0.1, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: '£' });
+    const r = write(before, 'churn', { amount: 0.1, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: '£' }, 'Every £1 on the Pro plan price adds 0.1 percentage points of Monthly churn.');
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     if (r.kind !== 'mutated') return;
     const g = r.mutatedGraph as Rec;

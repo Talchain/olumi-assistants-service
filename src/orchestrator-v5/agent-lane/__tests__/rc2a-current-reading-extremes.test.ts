@@ -48,7 +48,7 @@ function writerWithoutMarker(quote: string, amount: number) {
   return applyLinkEffectEdit({ ...params, reading_token: linkEffectReadingToken(params) });
 }
 async function capability(grouped: boolean, quote: string, amount: number, reading?: 'points' | 'relative',
-  amountUnit = 'percentage points', bounds: { lower?: number; upper?: number } = {}, carryAsk = true) {
+  amountUnit = 'percentage points', bounds: { lower?: number; upper?: number } = {}, carryAsk = true, providerQuote = quote) {
   const store = new ProposalStore();
   const calls: string[] = [];
   const dispatch: InternalDispatch = async path => {
@@ -59,7 +59,7 @@ async function capability(grouped: boolean, quote: string, amount: number, readi
   const ask = carryAsk ? pending(reading) : null;
   if (carryAsk) expect(ask).not.toBeNull();
   const caps = createAgentCapabilities(dispatch, store, undefined, 'full', undefined, { readPendingActions: async () => ask === null ? [] : [ask] });
-  const args = { from_label: 'Prices', to_label: 'Gross margin', ...effect(amount, amountUnit), quote, ...bounds };
+  const args = { from_label: 'Prices', to_label: 'Gross margin', ...effect(amount, amountUnit), quote: providerQuote, ...bounds };
   const result = await caps.proposeLinkEffect!({ scenario_id: scenarioId, authenticated_user_id: null, request_id: 'rc2a-reading-extremes', user_text: quote },
     grouped ? { links: [args] } : args) as Json;
   return { result, store, calls };
@@ -76,6 +76,36 @@ function oneRefusal(outcome: Awaited<ReturnType<typeof capability>>, expectedQue
 }
 
 describe('RC2a fix 2 current unit reading enforcement', () => {
+  it.each([false, true])('P1 current-unit RED: stored points cannot override current relative percent, grouped=%s', async grouped => {
+    const current = 'Raising prices by £1 will increase gross margin by 4 relative percent';
+    oneRefusal(await capability(grouped, current, 4, 'points'));
+  });
+  it.each([false, true])('P1 current-unit quote-span RED: provider cannot omit the current relative unit, grouped=%s', async grouped => {
+    const providerQuote = 'Raising prices by £1 will increase gross margin by 4';
+    const current = `${providerQuote} relative percent`;
+    oneRefusal(await capability(grouped, current, 4, 'points', 'percentage points', {}, true, providerQuote));
+  });
+  it.each([false, true])('the first current statement cannot clip its explicit relative unit, grouped=%s', async grouped => {
+    const providerQuote = 'Raising prices by £1 will increase gross margin by 4';
+    const current = `${providerQuote} relative percent`;
+    oneRefusal(await capability(grouped, current, 4, undefined, 'percentage points', {}, false, providerQuote),
+      `You said ‘${providerQuote}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
+  });
+  it('P1 current-unit RED: canonical writer refuses points against the current relative percent', () => {
+    const current = 'Raising prices by £1 will increase gross margin by 4 relative percent';
+    expect(writer(current, 4, 'points')).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+  it.each([false, true])('ambiguous current statements for the same link cannot select the convenient unit, grouped=%s', async grouped => {
+    const first = 'Raising prices by £1 will increase gross margin by 4 points.';
+    const current = `${first} Raising prices by £1 will increase gross margin by 6 relative percent.`;
+    oneRefusal(await capability(grouped, current, 4, 'points', 'percentage points', {}, true, first));
+  });
+  it.each([false, true])('without a stored ask, repeated current claims for the same link remain refused, grouped=%s', async grouped => {
+    const first = 'Raising prices by £1 will increase gross margin by 4 points.';
+    const current = `${first} Raising prices by £1 will increase gross margin by 6 relative percent.`;
+    oneRefusal(await capability(grouped, current, 4, undefined, 'percentage points', {}, false, first),
+      `You said ‘${first}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
+  });
   it.each([false, true])('P1 RED reviewer repro: resolved relative + bare 4 + provider points refuses one question, grouped=%s', async grouped => {
     oneRefusal(await capability(grouped, '4', 4, 'relative'));
   });
@@ -150,6 +180,84 @@ describe('RC2a fix 2 first current statement has the same unit and range enforce
 
 describe('RC2a fix 2 current extremes are mandatory in every door', () => {
   const outside = 'Raising prices by £1 will increase gross margin by 6 points; lowest 7 points; highest 8 points';
+  it.each([false, true])('P1 current-extremes quote-span RED: the provider quote cannot drop the current extremes, grouped=%s', async grouped => {
+    oneRefusal(await capability(grouped, outside, 6, 'points', 'percentage points', {}, true, outside.split(';')[0]!));
+  });
+  it.each([false, true])('P1 first-current-extremes quote-span RED: without a stored ask, the provider cannot drop extremes, grouped=%s', async grouped => {
+    oneRefusal(await capability(grouped, outside, 6, undefined, 'percentage points', {}, false, outside.split(';')[0]!),
+      `You said ‘${outside.split(';')[0]}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
+  });
+  it.each([
+    'lowest 7 points',
+    'highest 8 points; lowest 7 points',
+    'lowest 2 points; lowest 3 points; highest 8 points',
+  ])('a provider cannot truncate incomplete or ambiguous current bounds: %s', async suffix => {
+    const providerQuote = 'Raising prices by £1 will increase gross margin by 6 points';
+    oneRefusal(await capability(false, `${providerQuote}; ${suffix}`, 6, undefined, 'percentage points', {}, false, providerQuote),
+      `You said ‘${providerQuote}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
+  });
+  it.each([false, true])('ambiguous same-link current ranges cannot select a convenient triplet, grouped=%s', async grouped => {
+    const first = 'Raising prices by £1 will increase gross margin by 6 points; lowest 2 points; highest 8 points.';
+    const current = `${first} Raising prices by £1 will increase gross margin by 6 points; lowest 7 points; highest 9 points.`;
+    oneRefusal(await capability(grouped, current, 6, 'points', 'percentage points', {}, true, first));
+  });
+  it('the canonical writer refuses multiple current claims for the same link', () => {
+    const current = 'Raising prices by £1 will increase gross margin by 4 points. Raising prices by £1 will increase gross margin by 6 relative percent.';
+    expect(writer(current, 4, 'points')).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+  it.each([false, true])('a shorter provider quote retains a valid whole-current range through canonical writing, grouped=%s', async grouped => {
+    const current = 'Raising prices by £1 will increase gross margin by 6 points; lowest 2 points; highest 8 points';
+    const { result, store } = await capability(grouped, current, 6, 'points', 'percentage points', {}, true, current.split(';')[0]!);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const operation = store.get(String(result.proposal_id))!.operations[0]!;
+    const params = { persistedGraph: graph, ...(operation.value as Json),
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, edge_token: linkEffectEdgeToken(graph, 'price', 'margin')! } };
+    const written = applyLinkEffectEdit({ ...params, reading_token: linkEffectReadingToken(params as never) } as never);
+    expect(written.kind, JSON.stringify(written)).toBe('mutated');
+    if (written.kind !== 'mutated') return;
+    const spread = statedRangeSpread(2, 8, 0.9);
+    expect((written.mutatedGraph as Json).edges[0].provenance).toMatchObject({
+      source_quote: current, stated_effect_lower: 2, stated_effect_upper: 8, stated_effect_std: spread.ok ? spread.std : undefined,
+    });
+  });
+  it('grouped current statements retain each target range and unit through canonical writing', async () => {
+    const groupedGraph = { ...graph, nodes: [...graph.nodes, { id: 'cost', kind: 'factor', label: 'Daily costs',
+      observed_state: { value: 0.1, raw_value: 10, cap: 100, unit: '£', source: 'user_override' } }],
+    edges: [...graph.edges, { ...graph.edges[0]!, to: 'cost' }] };
+    const margin = 'Raising prices by £1 will increase gross margin by 6 points';
+    const cost = 'Raising prices by £1 will increase daily costs by £4';
+    const current = `${margin}; lowest 2 points; highest 8 points. ${cost}; lowest £1; highest £5`;
+    const store = new ProposalStore();
+    const dispatch: InternalDispatch = async path => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: groupedGraph,
+        graph_hash: computeAnalysisAffectingGraphHash(groupedGraph as never) } };
+      throw new Error(`unexpected dispatch ${path}`);
+    };
+    const caps = createAgentCapabilities(dispatch, store);
+    const result = await caps.proposeLinkEffect!({ scenario_id: scenarioId, authenticated_user_id: null,
+      request_id: 'grouped-current-scopes', user_text: current }, { links: [
+      { from_label: 'Prices', to_label: 'Gross margin', ...effect(6), quote: margin },
+      { from_label: 'Prices', to_label: 'Daily costs', ...effect(4, '£'), quote: cost },
+    ] }) as Json;
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.not_prepared, JSON.stringify(result)).toBeUndefined();
+    expect(store.get(String(result.proposal_id))!.operations).toHaveLength(2);
+    let working: unknown = groupedGraph;
+    for (const operation of store.get(String(result.proposal_id))!.operations) {
+      const value = operation.value as Json;
+      const params = { persistedGraph: working, ...value,
+        expected: { graph_hash: computeAnalysisAffectingGraphHash(working as never)!,
+          edge_token: linkEffectEdgeToken(working, 'price', value.to)! } };
+      const written = applyLinkEffectEdit({ ...params, reading_token: linkEffectReadingToken(params as never) } as never);
+      expect(written.kind, JSON.stringify(written)).toBe('mutated');
+      if (written.kind !== 'mutated') return;
+      working = written.mutatedGraph;
+    }
+    expect((working as Json).edges.map((edge: Json) => edge.provenance)).toMatchObject([
+      { natural_effect: { amount_unit: 'percentage points' }, stated_effect_lower: 2, stated_effect_upper: 8 },
+      { natural_effect: { amount_unit: '£' }, stated_effect_lower: 1, stated_effect_upper: 5 },
+    ]);
+  });
   it.each([false, true])('P1 RED exact reviewer repro: named 6 with lowest 7 and highest 8 refuses when provider omits bounds, grouped=%s', async grouped => {
     const outcome = await capability(grouped, outside, 6, 'points');
     oneRefusal(outcome);

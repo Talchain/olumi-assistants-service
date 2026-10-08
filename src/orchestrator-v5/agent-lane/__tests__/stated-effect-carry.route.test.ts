@@ -92,7 +92,7 @@ let runRead: Json | undefined;
 let runStatus = 200;
 let runHasResult = true;
 let beforeProviderReply: (() => void) | undefined;
-const pending = new Map<string, unknown[]>();
+const pending = new Map<string, readonly unknown[]>();
 const writes: SessionTurnWrite[] = [];
 const rows = new Map<string, Json>();
 const script: Json[] = [];
@@ -194,7 +194,8 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     }));
     const { log } = await import('../../../utils/telemetry.js');
     vi.spyOn(log, 'info').mockImplementation((entry) => {
-      if (entry?.event === 'agent_lane.reply_shaped') replyShapeLogs.push(entry);
+      if (typeof entry === 'object' && entry !== null && 'event' in entry
+        && entry.event === 'agent_lane.reply_shaped') replyShapeLogs.push(entry);
     });
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
@@ -839,10 +840,11 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     expect(clarifications()).toEqual([]);
     await turn(card.message, { source: 'chip', chip: { id: card.id } });
     expect(doorCalls).toHaveLength(1);
-    expect(doorCalls[0]!.link_effect).toMatchObject({ quote, effect: { amount: 2, per_source_change: 1 },
-      clarification: { current_turn: true, quote } });
+    // RC2a review C class rule (8 Oct): whole CURRENT turn text is the authority; canonical evidence must retain it.
+    expect(doorCalls[0]!.link_effect).toMatchObject({ quote: currentText, effect: { amount: 2, per_source_change: 1 },
+      clarification: { current_turn: true, quote: currentText } });
     const edge = effectEdge();
-    expect(edge.provenance.source_quote).toBe(quote);
+    expect(edge.provenance.source_quote).toBe(currentText);
     expect(edge.provenance.natural_effect).toMatchObject({ amount: 2, amount_unit: 'percentage points', per_source_change: 1 });
     expect(edge.provenance.stated_effect_floor).toBeUndefined();
     expect(edge.strength.std).toBeCloseTo(Math.abs(edge.strength.mean) / 2, 12);
@@ -1102,8 +1104,11 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     expect(face).toContain(SCIENCE_ASK);
     const { heldChangeName } = await import('../proposal-object/record.js');
     const { heldLapseSentence } = await import('../proposal-object/reply.js');
+    const { parsePendingAction } = await import('../../session/pending-action.js');
     for (const hold of holds) {
-      const lapse = heldLapseSentence(heldChangeName(hold), 'idle');
+      const parsedHold = parsePendingAction(hold);
+      expect(parsedHold).not.toBeNull();
+      const lapse = heldLapseSentence(heldChangeName(parsedHold!), 'idle');
       expect(body.assistant_text.split(lapse)).toHaveLength(2);
     }
     for (const line of latest) {

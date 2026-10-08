@@ -26,7 +26,14 @@ function write(g: Rec, stated: LinkEffectStatement, quote: string, reading: Link
     reading_token: linkEffectReadingToken(shown), frameRefit: true });
 }
 function card(stated: LinkEffectStatement, quote: string, reading: LinkEffectClarificationReading) {
-  return linkEffectReadingOf({ operations: [{ op: 'set_link_effect', value: { from: 'prices', to: 'daily_visits', effect: stated, quote, clarification: reading } }] } as StructuredProposal,
+  const proposal: StructuredProposal = {
+    proposal_id: 'relative-reading', scenario_id: 'scenario', user_id: null,
+    base_graph_identity_hash: 'graph', provenance: { authored_by: 'user_stated' },
+    validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Record the stated effect',
+    operations: [{ op: 'set_link_effect', path: 'prices::daily_visits',
+      value: { from: 'prices', to: 'daily_visits', effect: stated, quote, clarification: reading } }],
+  };
+  return linkEffectReadingOf(proposal,
     { from: 'Prices', to: 'Daily visits' });
 }
 
