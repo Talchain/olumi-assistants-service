@@ -2342,6 +2342,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       graphForAnalysis,
       snapshot.goal_constraints ?? (snapshot.rawPersistedGraph as { goal_constraints?: unknown } | undefined)?.goal_constraints,
       finalWireOptions,
+      snapshot.goal_node_id,
     );
     if (strictThresholdPins.size > 0) {
       log.info(

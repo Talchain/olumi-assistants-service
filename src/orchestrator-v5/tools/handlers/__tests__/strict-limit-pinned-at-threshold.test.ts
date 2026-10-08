@@ -91,6 +91,7 @@ interface Outcome {
   readonly wireLimit: Rec | undefined;
   readonly wireChurn: Record<string, unknown>;
   readonly wireBaseline: unknown;
+  readonly wireEdges: ReadonlyArray<Rec>;
   readonly todayWithinLimit: unknown;
   readonly replyFacts: ReadonlyArray<Rec>;
 }
@@ -99,6 +100,10 @@ interface CurrentFrame {
   readonly priceMovesChurn?: boolean;
   readonly baseline?: number;
   readonly decoyToday?: number;
+  readonly unchangedParent?: boolean;
+  readonly priceChurnExistence?: number;
+  readonly priceChurnRange?: boolean;
+  readonly churnUnit?: string;
 }
 
 /** The PLoT request `run_analysis` sends for `rows` (one option may pin churn), and the verdict it persists. */
@@ -106,6 +111,27 @@ async function plotLimit(rows: Rec[], pin?: Pin, today = 0.04, producerProbabili
   const goal_constraints = rows.map((r) => JSON.parse(JSON.stringify(r)) as Rec);
   const graph: Rec = { ...graphWith(rows[0]!, pin, today), goal_constraints };
   if (frame.priceMovesChurn === false) graph.edges = (graph.edges as Rec[]).filter((e) => !(e.from === 'fac_price' && e.to === 'fac_churn'));
+  if (frame.priceChurnExistence !== undefined) {
+    graph.edges = (graph.edges as Rec[]).map((e) => e.from === 'fac_price' && e.to === 'fac_churn'
+      ? { ...e, exists_probability: frame.priceChurnExistence } : e);
+  }
+  if (frame.priceChurnRange === true) {
+    graph.edges = (graph.edges as Rec[]).map((e) => {
+      if (e.from !== 'fac_price' || e.to !== 'fac_churn') return e;
+      const provenance = e.provenance as Rec;
+      return { ...e, provenance: { ...provenance, natural_effect: {
+        ...(provenance.natural_effect as Rec), stated_range: { low: 0.5, high: 1.5, text: '0.5 to 1.5', end: 'centre' },
+      } } };
+    });
+  }
+  if (frame.unchangedParent === true) {
+    (graph.nodes as Rec[]).push({ id: 'fac_experience', kind: 'factor', label: 'Customer experience' });
+    (graph.edges as Rec[]).push({ from: 'fac_experience', to: 'fac_churn', strength: { mean: -0.2, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' });
+  }
+  if (frame.churnUnit !== undefined) {
+    const node = (graph.nodes as Rec[]).find((n) => n.id === 'fac_churn')!;
+    node.observed_state = { ...(node.observed_state as Rec), unit: frame.churnUnit };
+  }
   if (frame.baseline !== undefined) {
     const node = (graph.nodes as Rec[]).find((n) => n.id === 'fac_churn')!;
     node.observed_state = { ...(node.observed_state as Rec), baseline: frame.baseline };
@@ -180,6 +206,7 @@ async function plotLimit(rows: Rec[], pin?: Pin, today = 0.04, producerProbabili
     wireLimit: ((sent?.goal_constraints as Rec[] | undefined) ?? []).find((c) => c.constraint_id === LIMIT_ID),
     wireChurn,
     wireBaseline,
+    wireEdges: ((sent?.graph as Rec | undefined)?.edges as Rec[] | undefined) ?? [],
     todayWithinLimit: replyLimit?.today_within_limit,
     replyFacts,
   };
@@ -214,7 +241,7 @@ describe('Paul\'s exact limit: keeping monthly churn UNDER 4%', () => {
   });
 
   it('BASELINE RED: value 3.9%, preserved baseline 4% — reply and untouched-option analysis read the same strict tie', async () => {
-    const r = await plotLimit([underFour], undefined, 0.039, undefined, { priceMovesChurn: false, baseline: 0.04 });
+    const r = await plotLimit([underFour], undefined, 0.039, undefined, { priceMovesChurn: false, unchangedParent: true, baseline: 0.04 });
     expect(r.wireBaseline, 'analysis preserves the existing fac_churn baseline').toBe(0.04);
     expect(r.todayWithinLimit, 'gc_u2 on fac_churn uses the effective analysis level').toBe('at_threshold');
     expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'unevaluated', mayName: false });
@@ -222,11 +249,54 @@ describe('Paul\'s exact limit: keeping monthly churn UNDER 4%', () => {
   });
 
   it('BASELINE RED: value 4%, preserved baseline 3.9% — reply and untouched-option analysis keep the producer result', async () => {
-    const r = await plotLimit([underFour], undefined, 0.04, undefined, { priceMovesChurn: false, baseline: 0.039 });
+    const r = await plotLimit([underFour], undefined, 0.04, undefined, { priceMovesChurn: false, unchangedParent: true, baseline: 0.039 });
     expect(r.wireBaseline, 'analysis preserves the existing fac_churn baseline').toBe(0.039);
     expect(r.todayWithinLimit, 'gc_u2 on fac_churn uses the effective analysis level').toBe(true);
     expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'evaluated_feasible', mayName: true });
     expect(r.perLimit).toEqual(SCORED);
+  });
+
+  it.each([
+    [underFour, 0.041, 0.04, false, 'evaluated_infeasible', false, SCORED, 0],
+    [atMostFour, 0.041, 0.04, false, 'evaluated_infeasible', false, SCORED, 0],
+    [underFour, 0.04, 0.041, 'at_threshold', 'unevaluated', false, WITHHELD_FOR_THE_PIN, undefined],
+    [atMostFour, 0.04, 0.041, true, 'evaluated_feasible', true, SCORED, undefined],
+  ] as const)('ROOT RED: %s at current %s with stale baseline %s reads the root value', async (row, today, baseline, replyFact, state, mayName, perLimit, probability) => {
+    const r = await plotLimit([row], undefined, today, probability, { priceMovesChurn: false, baseline });
+    expect(r.wireBaseline, 'the stored baseline is preserved on the wire, but ISL reads this root at value').toBe(baseline);
+    expect(r.replyFacts.find((fact) => fact.constraint_id === LIMIT_ID && fact.node_id === 'fac_churn'), 'identity-bound root reply fact').toMatchObject({ today_within_limit: replyFact });
+    expect({ state: r.state, mayName: r.mayName }, 'root reply and untouched-option verdict use the engine-read current value').toEqual({ state, mayName });
+    expect(r.perLimit).toEqual(perLimit);
+  });
+
+  it('EXISTENCE ZERO RED: an absent price→churn link does not exempt the price option from its unchanged strict tie', async () => {
+    const r = await plotLimit([underFour], undefined, 0.04, undefined, { priceChurnExistence: 0, unchangedParent: true });
+    expect(r.wireEdges.find((edge) => edge.from === 'fac_price' && edge.to === 'fac_churn'), 'the ordinary user-sized link is absent on the engine wire').toMatchObject({ exists_probability: 0 });
+    expect(r.wireEdges.find((edge) => edge.from === 'fac_experience' && edge.to === 'fac_churn'), 'another unchanged parent keeps the limited node non-root').toMatchObject({ exists_probability: 1 });
+    expect(r.wireBaseline).toBe(0.04);
+    expect(r.todayWithinLimit).toBe('at_threshold');
+    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'unevaluated', mayName: false });
+    expect(r.perLimit).toEqual(WITHHELD_FOR_THE_PIN);
+  });
+
+  it('EFFECTIVE EXISTENCE CONTROL: stored zero on a user-range-held price→churn link remains a path on the engine wire', async () => {
+    const r = await plotLimit([underFour], undefined, 0.04, undefined, {
+      priceChurnExistence: 0, priceChurnRange: true, unchangedParent: true,
+    });
+    expect(r.wireEdges.find((edge) => edge.from === 'fac_price' && edge.to === 'fac_churn'), 'the analysis hold takes effective existence to one').toMatchObject({ exists_probability: 1 });
+    expect(r.todayWithinLimit).toBe('at_threshold');
+    expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'evaluated_feasible', mayName: true });
+    expect(r.perLimit).toEqual(SCORED);
+  });
+
+  it.each([strictRow, atMostRow])('PERIOD RED: relabelled annual limit %s has no monthly reply fact and restores the annual wire unit', async (base) => {
+    const annual = { ...base, provenance_unit_relabelled: {
+      rule: 'rule1-limit-period', pre_normalisation_value: 10, pre_normalisation_unit: '% per year',
+    } };
+    const r = await plotLimit([annual], undefined, 0.03, undefined, { priceMovesChurn: false, unchangedParent: true, churnUnit: '% per month' });
+    expect(r.replyFacts.find((fact) => fact.constraint_id === LIMIT_ID && fact.node_id === 'fac_churn'), 'annual limit cannot establish a monthly today fact').not.toHaveProperty('today_within_limit');
+    expect(r.wireLimit).toMatchObject({ constraint_id: LIMIT_ID, node_id: 'fac_churn', unit: '% per year' });
+    expect(r.wireBaseline, 'annual-vs-monthly veto prevents carrying a monthly baseline').toBeUndefined();
   });
 
   it('IDENTITY DECOY: duplicate Monthly churn labels at <=4 each receive their own current-level fact', async () => {
@@ -317,11 +387,11 @@ describe('a NON-leading option pins it', () => {
 });
 
 describe('strictLimitsPinnedAtThreshold — the same frame, from the two proofs `level-limit-baseline.ts` owns', () => {
-  const pctNode = { id: 'n', kind: 'factor', label: 'Churn', observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '%' } };
+  const pctNode = { id: 'n', kind: 'factor', label: 'Churn', observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '%', source: 'brief_extraction' } };
   const pctRow = (extra: Rec = {}): Rec => ({ constraint_id: 'c', node_id: 'n', operator: '<=', operator_as_stated: '<', value: 10, unit: '%', value_frame: 'level', ...extra });
   const opts = (level: number) => [{ option_id: 'o1', interventions: { n: level } }, { option_id: 'o2', interventions: {} }];
-  const pinned = (graph: Rec, rows: Rec[], options: Rec[]) =>
-    Object.fromEntries([...strictLimitsPinnedAtThreshold(graph, rows, options)].map(([o, ids]) => [o, [...ids]]));
+  const pinned = (graph: Rec, rows: Rec[], options: Rec[], goalNodeId?: string) =>
+    Object.fromEntries([...strictLimitsPinnedAtThreshold(graph, rows, options, goalNodeId)].map(([o, ids]) => [o, [...ids]]));
 
   it('a "%" limit on a node framed on 100: 0.10 is "10 %" → pinned; 0.099 is not', () => {
     expect(pinned({ nodes: [pctNode] }, [pctRow()], opts(0.1))).toEqual({ o1: ['c'] });
@@ -337,6 +407,34 @@ describe('strictLimitsPinnedAtThreshold — the same frame, from the two proofs 
     expect(pinned(graph, [row], [{ option_id: 'carry_on', interventions: {} }])).toEqual({ carry_on: ['c'] });
   });
 
+  it.each([
+    { name: 'constraint role', observed_state: { ...pctNode.observed_state, stated_role: 'constraint' } },
+    { name: 'retained-excluded node', analysis_participation: 'retained_excluded' },
+  ])('READER ONLY: $name keeps its carrier but supplies no inherited today tie', (extra) => {
+    const node = { ...pctNode, ...extra };
+    const row = pctRow({ value: 4 });
+    const graph = { nodes: [{ id: 'upstream', kind: 'factor' }, node], edges: [{ from: 'upstream', to: 'n' }] };
+    expect(carryLevelLimitBaselines(graph, [row]).nodes[1]).toMatchObject({ observed_state: { baseline: 0.04 } });
+    expect(pinned(graph, [row], [{ option_id: 'carry_on', interventions: {} }])).toEqual({});
+  });
+
+  it.each(['bidirected', 'retained-excluded'] as const)('CARRIER ROOT TEST: a %s parent preserves the non-root baseline read', (parentType) => {
+    const node = { ...pctNode, observed_state: { ...pctNode.observed_state, value: 0.039, raw_value: 3.9, baseline: 0.04 } };
+    const graph = { nodes: [{ id: 'upstream', kind: 'factor',
+      ...(parentType === 'retained-excluded' ? { analysis_participation: 'retained_excluded' } : {}) }, node],
+    edges: [{ from: 'upstream', to: 'n', ...(parentType === 'bidirected' ? { edge_type: 'bidirected' } : {}) }] };
+    expect(pinned(graph, [pctRow({ value: 4 })], [{ option_id: 'upstream_option', interventions: { upstream: 0.59 } }])).toEqual({ upstream_option: ['c'] });
+  });
+
+  it('GOAL ID RED: a non-root limited factor selected as the goal has no carried baseline or inherited tie', () => {
+    const row = pctRow({ value: 4 });
+    const graph = { nodes: [{ id: 'upstream', kind: 'factor' }, pctNode], edges: [{ from: 'upstream', to: 'n' }] };
+    const wire = carryLevelLimitBaselines(graph, [row], 'n');
+    expect(wire.nodes.find((node) => node.id === 'n')).toMatchObject({ observed_state: { value: 0.04 } });
+    expect((wire.nodes.find((node) => node.id === 'n') as Rec).observed_state).not.toHaveProperty('baseline');
+    expect(pinned(graph, [row], [{ option_id: 'carry_on', interventions: {} }], 'n'), 'the strict reader must use the carrier\'s explicit goal identity').toEqual({});
+  });
+
   it('R3 UNTOUCHED RED: every option without a churn set inherits today\'s strict threshold, preserving option ids', () => {
     expect(pinned({ nodes: [pctNode] }, [pctRow({ value: 4 })], [
       { option_id: 'carry_on', interventions: {} },
@@ -347,16 +445,48 @@ describe('strictLimitsPinnedAtThreshold — the same frame, from the two proofs 
 
   it('BASELINE-GUARD RED: value 3.9%, baseline 4% inherits the analysis baseline tie by option and constraint identities', () => {
     const node = { ...pctNode, observed_state: { ...pctNode.observed_state, value: 0.039, raw_value: 3.9, baseline: 0.04 } };
-    expect(pinned({ nodes: [node] }, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({ untouched: ['c'] });
+    const graph = { nodes: [{ id: 'unchanged', kind: 'factor' }, node], edges: [{ from: 'unchanged', to: 'n', exists_probability: 1 }] };
+    expect(pinned(graph, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({ untouched: ['c'] });
   });
 
   it('BASELINE-GUARD RED: value 4%, baseline 3.9% preserves the producer result by option and constraint identities', () => {
     const node = { ...pctNode, observed_state: { ...pctNode.observed_state, baseline: 0.039 } };
-    expect(pinned({ nodes: [node] }, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({});
+    const graph = { nodes: [{ id: 'unchanged', kind: 'factor' }, node], edges: [{ from: 'unchanged', to: 'n', exists_probability: 1 }] };
+    expect(pinned(graph, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({});
+  });
+
+  it.each([[0.041, 0.04, {}], [0.04, 0.041, { untouched: ['c'] }]] as const)('ROOT-GUARD RED: current %s, stale baseline %s uses the root value', (value, baseline, expected) => {
+    const node = { ...pctNode, observed_state: { ...pctNode.observed_state, value, raw_value: value * 100, baseline } };
+    expect(pinned({ nodes: [node], edges: [] }, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual(expected);
+  });
+
+  it.each(['<', undefined] as const)('PERIOD-GUARD RED: monthly 3%% with annual 10%% limit has no inherited tie (%s)', (operator) => {
+    const node = { ...pctNode, observed_state: { ...pctNode.observed_state, value: 0.03, raw_value: 3, baseline: 0.10, unit: '% per month' } };
+    const row = pctRow({ operator_as_stated: operator, provenance_unit_relabelled: {
+      rule: 'rule1-limit-period', pre_normalisation_value: 10, pre_normalisation_unit: '% per year',
+    } });
+    const graph = { nodes: [{ id: 'unchanged', kind: 'factor' }, node], edges: [{ from: 'unchanged', to: 'n', exists_probability: 1 }] };
+    expect(pinned(graph, [row], [{ option_id: 'untouched', interventions: {} }]), 'an annual threshold baseline cannot create a monthly strict tie').toEqual({});
+  });
+
+  it('EXISTENCE-GUARD RED: a zero-existence price path with another unchanged parent leaves the limited level tied', () => {
+    const graph = { nodes: [{ id: 'price', kind: 'factor' }, { id: 'unchanged', kind: 'factor' }, pctNode], edges: [
+      { from: 'price', to: 'n', exists_probability: 0 },
+      { from: 'unchanged', to: 'n', exists_probability: 1 },
+    ] };
+    const wire = carryLevelLimitBaselines(graph, [pctRow({ value: 4 })]);
+    expect(wire.nodes.find((node) => node.id === 'n')).toMatchObject({ observed_state: { baseline: 0.04 } });
+    expect(pinned(graph, [pctRow({ value: 4 })], [{ option_id: 'price_option', interventions: { price: 0.59 } }])).toEqual({ price_option: ['c'] });
+  });
+
+  it('EXISTENCE STRUCTURE CONTROL: a zero-only parent remains non-root and retains its preserved baseline', () => {
+    const node = { ...pctNode, observed_state: { ...pctNode.observed_state, value: 0.039, raw_value: 3.9, baseline: 0.04 } };
+    const graph = { nodes: [{ id: 'unchanged', kind: 'factor' }, node], edges: [{ from: 'unchanged', to: 'n', exists_probability: 0 }] };
+    expect(pinned(graph, [pctRow({ value: 4 })], [{ option_id: 'untouched', interventions: {} }])).toEqual({ untouched: ['c'] });
   });
 
   it('CAUSAL-PATH RED: direct and multi-hop intervened ancestors keep their producer results by option identity', () => {
-    const graph = { nodes: [pctNode], edges: [{ from: 'price', to: 'n' }, { from: 'campaign', to: 'price' }] };
+    const graph = { nodes: [{ id: 'price', kind: 'factor' }, { id: 'campaign', kind: 'factor' }, pctNode], edges: [{ from: 'price', to: 'n' }, { from: 'campaign', to: 'price' }] };
     expect(pinned(graph, [pctRow({ value: 4 })], [
       { option_id: 'direct_price', interventions: { price: 0.59 } },
       { option_id: 'upstream_campaign', interventions: { campaign: 0.7 } },
@@ -366,7 +496,7 @@ describe('strictLimitsPinnedAtThreshold — the same frame, from the two proofs 
   });
 
   it('CAUSAL-PATH controls: reverse and bidirected edges do not move the limited node', () => {
-    const graph = { nodes: [pctNode], edges: [
+    const graph = { nodes: [{ id: 'price', kind: 'factor' }, { id: 'campaign', kind: 'factor' }, pctNode], edges: [
       { from: 'n', to: 'price' },
       { from: 'campaign', to: 'n', edge_type: 'bidirected' },
     ] };

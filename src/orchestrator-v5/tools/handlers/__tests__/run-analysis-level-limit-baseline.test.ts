@@ -25,9 +25,96 @@ import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot, type ScenarioReader } from '../run-analysis.js';
-import { carryLevelLimitBaselines, levelLimitBaselineNodeIds } from '../level-limit-baseline.js';
+import { carryLevelLimitBaselines, levelLimitBaselineNodeIds, levelLimitReadsOnNodeLevel, levelLimitReadsOnNodeCap } from '../level-limit-baseline.js';
+import { deriveInferredValues } from '../../../coaching/inferred-value-disclosure.js';
+import { percentPeriodsDiffer } from '../../../agent-lane/admit-constraint.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
+
+// FROZEN HEAD REFERENCE: copied verbatim from git show HEAD:src/orchestrator-v5/tools/handlers/level-limit-baseline.ts.
+// Only export keywords are removed to keep the original predicates and carrier test-local.
+const frozenHeadCarryLevelLimitBaselines = (() => {
+type Rec = Record<string, unknown>;
+
+const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+function statedUnitAcrossPeriod(c: Rec, node: Rec | undefined): string | undefined {
+  if (node === undefined || typeof c.unit !== 'string' || c.unit.trim() !== '%') return undefined;
+  const stamp = c.provenance_unit_relabelled;
+  if (!isRec(stamp) || typeof stamp.pre_normalisation_unit !== 'string') return undefined;
+  const os = isRec(node.observed_state) ? node.observed_state : {};
+  const nodeUnit = typeof os.unit === 'string' ? os.unit : undefined;
+  return percentPeriodsDiffer(stamp.pre_normalisation_unit, nodeUnit) ? stamp.pre_normalisation_unit : undefined;
+}
+
+function levelHasAnAuthor(node: Rec, os: Rec): boolean {
+  const source = typeof os.source === 'string' ? os.source : undefined;
+  if (source !== undefined && (source === 'brief_extraction' || source.startsWith('user'))) return true;
+  return deriveInferredValues({ nodes: [node] }).length === 1;
+}
+
+function levelLimitBaselineNodeIds(
+  graph: unknown,
+  goalConstraints: unknown,
+  goalNodeId?: string,
+  _options?: ReadonlyArray<Record<string, unknown>>,
+): Set<string> {
+  const out = new Set<string>();
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
+  const nodes = graph.nodes.filter(isRec);
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
+  const scoredTargets = new Set(
+    edges
+      .filter((e) => {
+        const k = kindById.get(e.from);
+        return typeof k === 'string' && k !== 'option' && k !== 'decision';
+      })
+      .map((e) => e.to),
+  );
+  for (const c of goalConstraints) {
+    if (!isRec(c) || c.value_frame !== 'level' || typeof c.value !== 'number') continue;
+    const node = nodes.find((n) => n.id === c.node_id);
+    if (node === undefined || typeof node.id !== 'string') continue;
+    if (node.kind !== 'factor' || node.id === goalNodeId || !scoredTargets.has(node.id)) continue;
+    const os = node.observed_state;
+    if (!isRec(os) || typeof os.value !== 'number' || !Number.isFinite(os.value) || os.baseline !== undefined) continue;
+    if (!levelHasAnAuthor(node, os)) continue;
+    if (statedUnitAcrossPeriod(c, node) !== undefined) continue;
+    const unit = typeof c.unit === 'string' ? c.unit : undefined;
+    // ⭐ R-c is PER OPTION since AIQ #72 5900908629 (lock A PJ-A3, R3 5900778834: #2268's per-limit gate here dropped
+    // churn's baseline for ALL options when one added option moved churn through a placeholder, so Paul's churn ≤ 4% went
+    // unscored). The baseline now always carries, so PLoT scores every option; the options a placeholder moves have
+    // their own P withheld after the run (`collectLimitLevelOwners` → `withholdOptionLimitScores`, `run-analysis.ts`).
+    const onLevel = levelLimitReadsOnNodeLevel(c.value, unit, node, os);
+    const onCap = !onLevel && levelLimitReadsOnNodeCap(graph, c, node, os);
+    if (!onLevel && !onCap) continue;
+    out.add(node.id);
+  }
+  return out;
+}
+
+/** The wire graph with each such node's current level carried as its baseline. Returns `graph` itself when none. */
+function carryLevelLimitBaselines<G>(
+  graph: G,
+  goalConstraints: unknown,
+  goalNodeId?: string,
+  options?: ReadonlyArray<Record<string, unknown>>,
+): G {
+  const ids = levelLimitBaselineNodeIds(graph, goalConstraints, goalNodeId, options);
+  if (ids.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  return {
+    ...graph,
+    nodes: graph.nodes.map((n: unknown) =>
+      isRec(n) && typeof n.id === 'string' && ids.has(n.id) && isRec(n.observed_state)
+        ? { ...n, observed_state: { ...n.observed_state, baseline: n.observed_state.value } }
+        : n,
+    ),
+  } as G;
+}
+
+  return carryLevelLimitBaselines;
+})();
 
 const faithful = JSON.parse(
   readFileSync('src/orchestrator-v5/agent-lane/__tests__/fixtures/faithful.json', 'utf-8'),
@@ -100,6 +187,60 @@ function hand(target: Record<string, unknown>) {
   };
 }
 const PCT10 = (id: string) => [{ node_id: id, operator: '<=', value: 10, unit: '%', value_frame: 'level' }];
+
+
+describe('PARITY: the carrier retains its frozen HEAD output', () => {
+  const fixtures = [
+    { name: 'constraint-role node', target: { observed_state: { value: 0.07, raw_value: 7, cap: 100, source: 'brief_extraction', stated_role: 'constraint' } } },
+    { name: 'bidirected-only parent', edge: { edge_type: 'bidirected' } },
+    { name: 'retained-excluded node', target: { analysis_participation: 'retained_excluded' } },
+    { name: 'retained-excluded parent', parent: { analysis_participation: 'retained_excluded' } },
+    { name: 'root', root: true },
+    { name: 'root with stale baseline', root: true, target: { observed_state: { value: 0.07, raw_value: 7, source: 'brief_extraction', baseline: 0.04 } } },
+    { name: 'non-root without baseline' },
+    { name: 'non-root with baseline', target: { observed_state: { value: 0.07, raw_value: 7, source: 'brief_extraction', baseline: 0.04 } } },
+    { name: 'implicit graph goal ID', graphGoal: 'n' },
+    { name: 'explicit goal ID', goalNodeId: 'n' },
+    { name: 'duplicate IDs retain their own levels', duplicate: true },
+  ];
+
+  it.each(fixtures)('PARITY: $name deep-equals the frozen reference', (fixture) => {
+    const { target, parent, edge, root, graphGoal, goalNodeId, duplicate } = fixture as {
+      target?: Record<string, unknown>; parent?: Record<string, unknown>; edge?: Record<string, unknown>;
+      root?: boolean; graphGoal?: string; goalNodeId?: string; duplicate?: boolean;
+    };
+    const original = hand({ id: 'n', ...target });
+    const graph = {
+      ...original,
+      ...(graphGoal === undefined ? {} : { goal_node_id: graphGoal }),
+      nodes: original.nodes.map((node) => node.id === 'f' ? { ...node, ...parent } : node),
+      edges: original.edges.filter((e) => !root || e.to !== 'n').map((e) => e.to === 'n' ? { ...e, ...edge } : e),
+    };
+    if (duplicate) graph.nodes.push({ id: 'n', kind: 'factor', label: 'Duplicate', scale_frame: 100,
+      observed_state: { value: 0.12, raw_value: 12, source: 'brief_extraction' } });
+    const before = structuredClone(graph);
+    const expected = frozenHeadCarryLevelLimitBaselines(graph, PCT10('n'), goalNodeId, NO_OPTIONS);
+    expect(carryLevelLimitBaselines(graph, PCT10('n'), goalNodeId, NO_OPTIONS)).toEqual(expected);
+    expect(graph, 'the persisted input remains untouched').toEqual(before);
+  });
+});
+
+describe('R2 correction: reader refusals never alter the carrier', () => {
+  it('a constraint-role node retains the HEAD baseline carrier', () => {
+    const graph = hand({ id: 'n', observed_state: {
+      value: 0.07, raw_value: 7, cap: 100, source: 'brief_extraction', stated_role: 'constraint',
+    } });
+    expect(levelLimitBaselineNodeIds(graph, PCT10('n'))).toEqual(new Set(['n']));
+    expect(carryLevelLimitBaselines(graph, PCT10('n')).nodes[2]).toMatchObject({ observed_state: { baseline: 0.07 } });
+  });
+
+  it('a bidirected-only parent remains a scored target for the HEAD carrier', () => {
+    const graph = hand({ id: 'n' });
+    graph.edges = graph.edges.map((e) => e.to === 'n' ? { ...e, edge_type: 'bidirected' } : e);
+    expect(levelLimitBaselineNodeIds(graph, PCT10('n'))).toEqual(new Set(['n']));
+    expect(carryLevelLimitBaselines(graph, PCT10('n')).nodes[2]).toMatchObject({ observed_state: { baseline: 0.07 } });
+  });
+});
 
 describe('a level limit on a non-root node is checked against that node\'s current level', () => {
   // ── RED before #1919: no baseline, so ISL refuses `missing_target_baseline` ──

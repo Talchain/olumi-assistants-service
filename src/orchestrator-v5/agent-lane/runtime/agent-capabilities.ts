@@ -202,7 +202,8 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { meetsLimit } from '../limit-operator-words.js';
-import { effectiveLevelLimitCurrentLevel, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
+import { levelLimitNodeDecision, thresholdOnNodeLevel } from '../../tools/handlers/level-limit-baseline.js';
+import { isRetainedExcluded } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { runWithStatedGoalOperator } from '../stated-goal-operator-context.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
@@ -1320,7 +1321,9 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       const stated = statedOperatorOf(c);
       const unit = str(c.unit) ? (c.unit.startsWith('%') ? c.unit : ` ${c.unit}`) : '';
       const node = g.nodes.find((n) => n.id === c.node_id);
-      const today = node === undefined ? undefined : effectiveLevelLimitCurrentLevel(g.raw, c, node as Record<string, unknown>);
+      const decision = node === undefined ? undefined : levelLimitNodeDecision(g.raw, c, node as Record<string, unknown>,
+        str(g.raw.goal_node_id) ? g.raw.goal_node_id : undefined);
+      const today = node?.observed_state?.stated_role === 'constraint' || isRetainedExcluded(node) ? undefined : decision?.engineReadLevel;
       const threshold = c.value_frame === 'level' && node !== undefined
         ? thresholdOnNodeLevel(g.raw, c, node as Record<string, unknown>, c.value as number) : undefined;
       return {

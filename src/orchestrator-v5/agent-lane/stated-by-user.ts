@@ -918,15 +918,21 @@ const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:plea
  * The one reading both `bandTheUserWrote` and `comparatorTheUserWrote` apply, so the two cannot drift.
  */
 type Reading = { readonly said: 'asked' } | { readonly said: 'denied' } | { readonly said: 'affirmed'; readonly clauseBefore: string };
+const sentenceBeforeAt = (turnText: string, index: number): string => {
+  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
+  return turnText.slice(start, index);
+};
+/** The same clause boundary for affirmation and for a comparator's own written figure. */
+const clauseBeforeAt = (turnText: string, index: number): string =>
+  sentenceBeforeAt(turnText, index).replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
 function readingAt(turnText: string, index: number): Reading {
   // The sentence the words sit in, and the part of their clause before them (a clause restarts after , ; : a dash, or "but").
-  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
   const endAt = turnText.slice(index).search(/[.!?\n]/);
   const sentenceEnd = endAt < 0 ? '' : turnText.charAt(index + endAt);
-  const sentenceBefore = turnText.slice(start, index);
+  const sentenceBefore = sentenceBeforeAt(turnText, index);
   if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) return { said: 'asked' };
   // "anything but strong" denies it: read as a negator, never as a clause break.
-  const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
+  const clauseBefore = clauseBeforeAt(turnText, index);
   if (NEGATOR.test(clauseBefore)) return { said: 'denied' };
   return { said: 'affirmed', clauseBefore };
 }
@@ -1012,6 +1018,8 @@ export function holdsABandWord(words: unknown): boolean {
  *   "no more than" are read whole, never as a negated "less than" / "more than".
  * - A strict phrase completed with "or equal to", or a figure followed by "or less / more" (and their direction
  *   synonyms), is inclusive. Read the whole completion before its strict fragment; a suffix needs a stated figure.
+ *   Beside a prefix comparator, the suffix must belong to that comparator's own figure and clause, never a repeat of
+ *   the same value elsewhere ("under 4%. Last year, 4% or more of cancellations …").
  * - ASKED ("Is at least \u00a360k realistic?") says nothing; DENIED anywhere in the turn ("not at least", "must not fall
  *   below") or BOTH directions in one turn \u2192 null. Every miss makes the Agent ask which the user means.
  * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" holds two
@@ -1029,14 +1037,23 @@ export function comparatorTheUserWrote(turnText: string | null | undefined): Sta
   if (typeof turnText !== 'string') return null;
   const said = new Set<StatedComparator>();
   const figures = findStatedAmounts(turnText);
-  for (const m of turnText.matchAll(COMPARATOR_WORDS)) {
-    const words = m[1]!.toLowerCase().replace(/\s+/g, ' ');
+  const comparators = [...turnText.matchAll(COMPARATOR_WORDS)].map((match) => ({
+    match, words: match[1]!.toLowerCase().replace(/\s+/g, ' '),
+  }));
+  const prefixes = comparators.filter(({ match, words }) => !words.startsWith('or ')
+    && readingAt(turnText, match.index).said === 'affirmed');
+  const prefixFigureIds = new Set(prefixes.flatMap(({ match }) => {
+    const figure = figures.find((amount) => amount.index >= match.index + match[0].length
+      && amount.index - clauseBeforeAt(turnText, amount.index).length <= match.index);
+    return figure === undefined ? [] : [figure.index];
+  }));
+  for (const { match: m, words } of comparators) {
     const suffix = words.startsWith('or ');
     const figure = suffix ? figures.find((amount) => {
       const end = amount.index + amount.matchedText.length;
       return end <= m.index && /^\s*$/.test(turnText.slice(end, m.index));
     }) : undefined;
-    if (suffix && figure === undefined) continue;
+    if (suffix && (figure === undefined || (prefixes.length > 0 && !prefixFigureIds.has(figure.index)))) continue;
     const reading = readingAt(turnText, figure?.index ?? m.index);
     if (reading.said === 'asked') continue;
     if (reading.said === 'denied') return null;

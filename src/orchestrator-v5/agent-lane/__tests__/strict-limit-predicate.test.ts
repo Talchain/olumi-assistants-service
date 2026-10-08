@@ -45,16 +45,19 @@ async function modelLimits(graph: Rec): Promise<Rec[]> {
   return result.limits as Rec[];
 }
 
-async function modelLimit(level: number | undefined, operatorAsStated?: '<', frame = 'level', raw = level, observed: Rec = {}, unit = '%') {
+async function modelLimit(level: number | undefined, operatorAsStated?: '<', frame = 'level', raw = level, observed: Rec = {}, unit = '%', fixture: { nonRoot?: boolean; constraint?: Rec; goalNodeId?: string; retainedExcluded?: boolean } = {}) {
   const graph = {
+    ...(fixture.goalNodeId === undefined ? {} : { goal_node_id: fixture.goalNodeId }),
     nodes: [
       { id: 'goal_mrr', kind: 'goal', label: 'MRR' },
       { id: 'monthly_churn_rate', kind: 'factor', label: 'Monthly churn rate', scale_frame: 100,
+        ...(fixture.retainedExcluded ? { analysis_participation: 'retained_excluded' } : {}),
         ...(level === undefined ? {} : { observed_state: { value: level / 100, raw_value: raw, unit, source: 'user_override', ...observed } }) },
-    ], edges: [],
+      ...(fixture.nonRoot ? [{ id: 'unchanged_parent', kind: 'factor', label: 'Customer experience' }] : []),
+    ], edges: fixture.nonRoot ? [{ from: 'unchanged_parent', to: 'monthly_churn_rate', exists_probability: 1 }] : [],
     goal_constraints: [{ constraint_id: LIMIT_ID, node_id: 'monthly_churn_rate', label: 'Monthly churn rate',
       operator: '<=', ...(operatorAsStated === undefined ? {} : { operator_as_stated: operatorAsStated }),
-      value: 4, unit, value_frame: frame, provenance: 'explicit' }],
+      value: 4, unit, value_frame: frame, provenance: 'explicit', ...fixture.constraint }],
   };
   const limits = await modelLimits(graph);
   expect(limits).toHaveLength(1);
@@ -87,12 +90,52 @@ describe('R2/R4/R5: the reply reads a computed fact for the stored strict churn 
   it.each([
     [3.9, 0.04, 'at_threshold'],
     [4, 0.039, true],
-  ] as const)('effective today uses preserved baseline: value %s%%, baseline %s', async (level, baseline, expected) => {
-    expect((await modelLimit(level, '<', 'level', level, { baseline })).today_within_limit).toBe(expected);
+  ] as const)('non-root effective today uses preserved baseline: value %s%%, baseline %s', async (level, baseline, expected) => {
+    expect((await modelLimit(level, '<', 'level', level, { baseline }, '%', { nonRoot: true })).today_within_limit).toBe(expected);
+  });
+  it.each([
+    [4.1, 0.04, '<', false],
+    [4.1, 0.04, undefined, false],
+    [4, 0.041, '<', 'at_threshold'],
+    [4, 0.041, undefined, true],
+  ] as const)('ROOT RED: value %s%% overrides stale baseline %s for stated %s', async (level, baseline, operator, expected) => {
+    const limit = await modelLimit(level, operator, 'level', level, { baseline });
+    expect(limit, `identity-bound root ${LIMIT_ID} on monthly_churn_rate`).toMatchObject({
+      constraint_id: LIMIT_ID, node_id: 'monthly_churn_rate', today_within_limit: expected,
+    });
+  });
+  it.each(['<', undefined] as const)('PERIOD RED: a relabelled annual %% limit supplies no monthly today fact (%s)', async (operator) => {
+    const limit = await modelLimit(3, operator, 'level', 3, { baseline: 0.10 }, '% per month', {
+      nonRoot: true,
+      constraint: { value: 10, unit: '%', provenance_unit_relabelled: {
+        rule: 'rule1-limit-period', pre_normalisation_value: 10, pre_normalisation_unit: '% per year',
+      } },
+    });
+    expect(limit).toMatchObject({ constraint_id: LIMIT_ID, node_id: 'monthly_churn_rate', value: 10 });
+    expect(limit, 'annual constraint is not a fact about monthly churn, even beside a threshold baseline').not.toHaveProperty('today_within_limit');
+    expect(limit).not.toHaveProperty('today_within_limit_instruction');
   });
   it('a stored limit used for positioning is not today\'s measurement or a does-not-meet instruction', async () => {
     const limit = await modelLimit(4, '<', 'level', 4, { stated_role: 'constraint' });
     expect(limit).not.toHaveProperty('today_within_limit');
+    expect(limit).not.toHaveProperty('today_within_limit_instruction');
+  });
+  it('READER ONLY: a retained-excluded non-root node supplies no today fact or instruction', async () => {
+    const limit = await modelLimit(4, '<', 'level', 4, {}, '%', { nonRoot: true, retainedExcluded: true });
+    expect(limit).not.toHaveProperty('today_within_limit');
+    expect(limit).not.toHaveProperty('today_within_limit_instruction');
+  });
+  it('AUTHOR RED: an unattested current value supplies no today fact or instruction', async () => {
+    const limit = await modelLimit(4, '<', 'level', 4, { source: undefined });
+    expect(limit).not.toHaveProperty('today_within_limit');
+    expect(limit).not.toHaveProperty('today_within_limit_instruction');
+  });
+  it('GOAL ID RED: an explicitly selected non-root factor goal supplies no carried today fact', async () => {
+    const limit = await modelLimit(4, '<', 'level', 4, {}, '%', {
+      nonRoot: true, goalNodeId: 'monthly_churn_rate',
+    });
+    expect(limit).toMatchObject({ constraint_id: LIMIT_ID, node_id: 'monthly_churn_rate' });
+    expect(limit, 'the explicit goal id is the same input the analysis baseline carrier reads').not.toHaveProperty('today_within_limit');
     expect(limit).not.toHaveProperty('today_within_limit_instruction');
   });
   it.each([

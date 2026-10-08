@@ -494,6 +494,32 @@ describe('comparatorTheUserWrote — the direction is the user\'s own words, aff
     expect(comparatorTheUserWrote('Keep churn or above.')).toBeNull();
   });
 
+  it('R2 P2: a same-value inclusive suffix in another clause does not change the strict target', () => {
+    const words = 'Keep monthly churn under 4%. Last year, 4% or more of cancellations were involuntary';
+    expect(comparatorTheUserWrote(words), 'the suffix belongs to last year’s cancellations, not the monthly-churn target').toBe('below');
+  });
+
+  it('R2 P2 writer: preserves the strict target beside a same-value historical suffix decoy', async () => {
+    const words = 'Keep monthly churn under 4%. Last year, 4% or more of cancellations were involuntary';
+    const w = world(graphWith([{ id: 'churn', kind: 'goal', label: 'Monthly churn', goal_threshold_unit: '%' }]));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(words), {
+      constraint_type: 'at_most', value: 4, unit: '%', rationale: 'The user stated their churn target.',
+    });
+    expect(p.public_label, 'the approval card binds to churn’s strict target, not the historical 4%').toBe('Set the goal "Monthly churn" to below 4%');
+    expect(p).not.toHaveProperty('direction_choice');
+    expect(store.get(String(p.proposal_id))?.operations).toEqual([{ op: 'set_goal_target', path: 'churn',
+      value: { constraint_type: 'below', raw_value: 4, unit: '%' } }]);
+    const approved = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [words]), {
+      proposal_id: String(p.proposal_id),
+    });
+    expect(approved).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
+    const row = w.graph().goal_constraints?.find((limit) => limit['node_id'] === 'churn');
+    expect(row, 'the strict comparator is stored on this goal’s own row').toEqual(expect.objectContaining({
+      node_id: 'churn', operator: '<=', operator_as_stated: '<', value: 4, unit: '%',
+    }));
+  });
+
   it.each([
     ['keep churn under 4%', 'at_most', 'below'],
     ['keep churn below 4%', 'at_most', 'below'],
