@@ -95,6 +95,8 @@ export interface CandidateLink {
   readonly effect_per_source_change?: number | null;
   /** Who stated the size. `null`/absent falls back to the link's own `provenance`. */
   readonly effect_provenance?: string | null;
+  /** The drafter's one-line reason its own size holds (Science §(p)(1)); carried as `provenance.basis`. */
+  readonly basis?: string | null;
   /**
    * The drafter's word that this link holds BY DEFINITION (DL #75 5916504679). Never enough on its own:
    * `definitionalLink` checks it deterministically before any edge carries the type.
@@ -113,7 +115,7 @@ export interface AdmittedEdge {
    * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
    */
   /** `definitional`: the size holds by definition, checked (`definitionalLink`); absent on every other edge. */
-  provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true; mean_projected?: true };
+  provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true; mean_projected?: true; basis?: string };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -315,6 +317,9 @@ export function admitCandidateLinks(
           magnitude: sized.magnitude!,
           ...(sized.natural_effect !== undefined ? { natural_effect: sized.natural_effect } : {}),
           ...(definitionalLink(link, sized) ? { definitional: true as const } : {}),
+          // Science §(p)(1): Olumi's own size carries the one-line reason it holds (never on a user's size or a placeholder).
+          ...(sized.magnitude === 'olumi_estimate' && typeof link.basis === 'string' && link.basis.trim() !== ''
+            ? { basis: link.basis.trim().slice(0, 300) } : {}),
         },
       };
       projected_fields[key] = projected;

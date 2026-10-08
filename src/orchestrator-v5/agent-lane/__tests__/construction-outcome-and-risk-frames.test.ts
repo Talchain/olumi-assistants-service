@@ -195,12 +195,13 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     expect(sent.length).toBeGreaterThanOrEqual(1);
     const items = (s: Record<string, unknown>, k: string) => ((s.properties as Record<string, { items: { required: string[] } }>)[k]!.items);
     for (const s of sent) for (const k of ['risks', 'outcomes']) expect(items(s, k).required).toEqual(['label', 'provenance', 'unit', 'plausible_max']);
-    // The link's `definitional` (DL 5916504679) is the other key optional in the contract and required when sent.
-    for (const s of sent) expect(items(s, 'links').required.at(-1)).toBe('definitional');
+    // The link's `definitional` (DL 5916504679) and `basis` (#2848, Science §(p)(1)) are the other keys optional in the
+    // contract and required when sent.
+    for (const s of sent) expect(items(s, 'links').required.slice(-2)).toEqual(['definitional', 'basis']);
     const contract = buildCandidateSchema();
     const back = structuredClone(sent[0]!);
     for (const k of ['risks', 'outcomes']) items(back, k).required = ['label', 'provenance'];
-    items(back, 'links').required = items(back, 'links').required.filter((k) => k !== 'definitional');
+    items(back, 'links').required = items(back, 'links').required.filter((k) => k !== 'definitional' && k !== 'basis');
     // S-E GOALS S2b: the event-by-date keys are optional in the contract (recorded candidates predate them) and required
     // when sent (strict output), exactly as `definitional` is.
     const goal = (back.properties as Record<string, { required: string[] }>).goal!;
