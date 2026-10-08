@@ -41,6 +41,21 @@ const HELD_RISK = {
   },
   note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
 };
+/** E07 / LONE() from proposal-reply-one-call.test.ts: salary level missing, no figure refused by the tool. */
+const HELD_OPTION = {
+  ok: true, mutated: false, proposal_id: 'gmh_96353050be8c',
+  public_label: 'Approve 5 changes',
+  held_message: "Yes, add option 'Hire one senior and two juniors', with 'New senior engineers hired' at 1 engineer and 'New junior engineers hired' at 2 engineers, link 'Decision: ship the new platform' to 'Hire one senior and two juniors', link 'Hire one senior and two juniors' to 'New senior engineers hired' and link 'Hire one senior and two juniors' to 'New junior engineers hired'.",
+  held_detail: "Add option 'Hire one senior and two juniors'…",
+  base_revision: 'a'.repeat(64),
+  option: { label: 'Hire one senior and two juniors', linked_from: 'Decision: ship the new platform', acts_on: ['New senior engineers hired', 'New junior engineers hired', 'Annual salary spend'] },
+  levels: [
+    { factor: 'New senior engineers hired', value: 1, unit: 'engineers', stated_by: 'user' },
+    { factor: 'New junior engineers hired', value: 2, unit: 'engineers', stated_by: 'user' },
+    { factor: 'Annual salary spend', value: null, still_needed: true },
+  ],
+  note: 'Nothing has changed yet. Show the user the option … call authorise_change with this proposal_id once they agree.',
+};
 const REFUSED = { ok: false, mutated: false, refusal: 'not_prepared', detail: 'Olumi could not prepare that as one change.' };
 
 describe('hopOnlyHeldProposals', () => {
@@ -252,6 +267,45 @@ describe('narration recovery from the known held result', () => {
     ].join('\n\n'));
     expect(JSON.stringify(r.items)).not.toContain('Unfinished');
     expect(callModel).toHaveBeenCalledTimes(2);
+  });
+
+  // ⛔ P44 #2: recovery may drop conversational gates, but must not re-ask a figure the user stated.
+  it.each([
+    { name: 'RED P44 #2: an omitted user figure keeps the honesty gate on recovery', message: 'Add that option with annual salary spend of £250,000.', hasFigure: true },
+    { name: 'CONTROL P44 #2: no user figure allows the composed recovery reply', message: 'Add that option.', hasFigure: false },
+  ])('$name', async ({ message, hasFigure }) => {
+    const optionArgs = {
+      label: HELD_OPTION.option.label, rationale: 'r', whole_request: false,
+      acts_on: [
+        { factor_label: 'New senior engineers hired', direction: 'positive', level: { value: 1, unit: 'engineers' } },
+        { factor_label: 'New junior engineers hired', direction: 'positive', level: { value: 2, unit: 'engineers' } },
+        { factor_label: 'Annual salary spend', direction: 'positive' },
+      ],
+    };
+    const caps = { proposeNewOption: vi.fn(async () => HELD_OPTION) } as unknown as AgentCapabilities;
+    const composeReply = vi.fn((tool: string, parsedArgs: unknown, result: unknown) => composeProposalReply(tool, parsedArgs, result, message));
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [{ type: 'function_call', call_id: 'c1', name: 'propose_new_option', arguments: JSON.stringify(optionArgs) }] })
+      .mockRejectedValueOnce(new Error('openai_500'));
+    const r = await runAgentTurn({ ...base, message, composeReply } as never, caps, callModel as never);
+    expect(composeReply.mock.results.map((result) => result.value)).toEqual([null, null]);
+    if (hasFigure) {
+      expect(r.assistant_text).not.toContain('Tell me the figure');
+      expect(r.assistant_text).toBe(`I have prepared this change: ${HELD_OPTION.public_label}. Nothing is changed until you approve it.`);
+    } else {
+      expect(r.assistant_text).toBe([
+        `I’ve prepared this change: ${HELD_OPTION.held_message.replace(/^Yes, /, '').replace(/\.$/, '')}.`,
+        'It doesn’t set a level for ‘Annual salary spend’ yet. Tell me the figure and I’ll set it.',
+        'Approve these 5 changes?',
+      ].join('\n\n'));
+    }
+    expect(r.stopped_reason).toBe('answered');
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(r.tool_calls).toEqual([{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: HELD_OPTION.proposal_id }]);
+    expect(r.tool_results).toEqual([HELD_OPTION]);
+    expect(r.mutated).toBe(false);
+    expect(approvalChipsFor(r.tool_calls).map((chip) => chip.id)).toContain(`agent-approve-proposal:${HELD_OPTION.proposal_id}`);
+    expect(r.items.at(-1)).toEqual({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: r.assistant_text }] });
   });
 
   // ⭐ P44 (a) / Codex #2781 r5: unknown result keys retain the last-resort label sentence.

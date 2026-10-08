@@ -396,6 +396,11 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
   if (recordOf(args)?.whole_request !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
+  return composeRecoveredProposalReply(tool, args, result, userMessage);
+}
+
+/** Recovery drops conversational gates, but must not ignore or re-ask a figure the user already gave. */
+export function composeRecoveredProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
   const r = recordOf(result);
   // event_risk.v1 slice 2a: this door deterministically carries these user words outside the LLM arguments.
   const likelihood = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;

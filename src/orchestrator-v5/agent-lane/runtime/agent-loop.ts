@@ -21,7 +21,7 @@
 import { randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
-import { composeHeldResultReply } from '../proposal-reply.js';
+import { composeRecoveredProposalReply } from '../proposal-reply.js';
 import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
@@ -479,8 +479,9 @@ export async function runAgentTurn(
     const held = lastHeldCall!; // `narrateNext` is true only after a hop whose every call held a proposal.
     const composed = input.composeReply?.(held.name, held.args, held.result);
     // ⛔ P44 (a) / Codex #2781 r5: failed conversational gates must not hide the held result's disclosures.
+    // Preserve the user-figure honesty gate; an absent runtime message is treated as ''.
     const recoveredReply = typeof composed === 'string' && composed.trim() !== '' ? composed
-      : composeHeldResultReply(held.name, held.result);
+      : composeRecoveredProposalReply(held.name, held.args, held.result, input.message ?? '');
     const label = held.result.public_label;
     const text = typeof recoveredReply === 'string' && recoveredReply.trim() !== '' ? recoveredReply
       : typeof label === 'string' && label.trim() !== ''

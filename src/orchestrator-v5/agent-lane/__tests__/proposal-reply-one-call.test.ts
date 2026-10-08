@@ -12,7 +12,7 @@
  *   - a result key outside the tool's allowlist (a disclosure kind with no template) falls back.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { composeHeldResultReply, composeProposalReply } from '../proposal-reply.js';
+import { composeHeldResultReply, composeProposalReply, composeRecoveredProposalReply } from '../proposal-reply.js';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { AGENT_TOOLS, type AgentCapabilities } from '../runtime/agent-tools.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
@@ -108,6 +108,21 @@ describe('held-result replies preserve the existing templates', () => {
     const heldReply = composeHeldResultReply(tool, result);
     expect(heldReply).not.toBeNull();
     expect(composeProposalReply(tool, WHOLE, result, 'Add it.')).toBe(heldReply);
+  });
+
+  it.each(rows)('$name: whole request without a question has normal/recovered composer parity', ({ tool, result }) => {
+    const message = 'Add it.';
+    expect(composeProposalReply(tool, WHOLE, result, message))
+      .toBe(composeRecoveredProposalReply(tool, WHOLE, result, message));
+  });
+
+  it.each([
+    { name: 'refused figure', result: E07, message: 'We could also consider one senior and two juniors.' },
+    { name: 'omitted user figure', result: LONE(), message: 'Add one senior and two juniors with annual salary spend of £250,000.' },
+  ])('$name: whole request without a question preserves null parity', ({ result, message }) => {
+    const recoveredReply = composeRecoveredProposalReply('propose_new_option', WHOLE, result, message);
+    expect(recoveredReply).toBeNull();
+    expect(composeProposalReply('propose_new_option', WHOLE, result, message)).toBe(recoveredReply);
   });
 
   // ⛔ P44 (a) / Codex #2781 r5: whole_request gates conversation, never the held-result disclosures.
