@@ -1,3 +1,6 @@
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 /**
  * Agent lane — the capabilities, each delegating to an existing Olumi path.
  *
@@ -16,7 +19,7 @@
 
 import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
 import { parseDrawnLinkPress } from '../drawn-link-press.js';
-import { readStatedEventRisk, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -201,7 +204,7 @@ import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
-import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -1283,7 +1286,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
-      ...(goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
+      ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
+        : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
@@ -1667,12 +1671,14 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     const chancePermitted = legacyRun
       ? current && goalChance === undefined && permissions.leader_may_be_named === true
       : goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
+    const projectedChance = chancePermitted && typeof row?.probability_of_goal === 'number'
+      ? goalChancePointForAgent(row.probability_of_goal, goalChanceDisplay?.[id], shownChance.get(id)) : undefined;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
-      ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
-        ? { probability_of_goal: shownChance.get(id) ?? row.probability_of_goal } : {}),
+      ...(projectedChance !== undefined && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
+        ? { probability_of_goal: projectedChance } : {}),
       ...(decision !== undefined && !Object.hasOwn(goalFacts.goal_chance_range_display ?? {}, id) ? { goal_certainty: decision } : {}),
     }];
   }) : [];
@@ -3024,6 +3030,40 @@ export function createAgentCapabilities(
     };
   };
 
+  /** The approved current-team duration goes through the single atomic team-time writer. */
+  const applyTeamTime = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!, a = op.value as ApprovedTeamTime;
+    if (op.path !== a.team_id || opts.commitOptionLevels === undefined) return { ok: false, mutated: false, applied: false, refusal: 'unavailable' };
+    const part = draftedTeamPartOf(approvedRead.raw);
+    if (part === null || part.team.id !== a.team_id || part.goal.id !== a.goal_id || goalDeadlineOf(part.goal) !== a.deadline) {
+      return { ok: false, mutated: false, applied: false, refusal: 'superseded' };
+    }
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: approvedRead.graph_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#team-time`), links: [], levels: [], team_time: a });
+    if (res.status === 'unconfirmed') {
+      const reread = await readGraph(ctx.scenario_id), held = draftedTeamPartOf(reread?.raw);
+      if (reread !== null && held !== null
+        && teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), reread.raw)
+        && teamSharePostimageIsScoped(approvedRead.raw, reread.raw, a.team_id)) {
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [a.team_id], receipts: [] });
+      }
+      return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed' };
+    }
+    if (res.status !== 'committed') return { ok: false, mutated: false, applied: false, refusal: res.status };
+    const check = await readGraph(ctx.scenario_id);
+    const held = draftedTeamPartOf(check?.raw);
+    if (held === null || !teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), check?.raw)) {
+      return { ok: false, mutated: true, applied: false, refusal: 'not_verified' };
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    proposals.markApplied(parent.proposal_id, receipts);
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      observed_state: held.team.observed_state,
+      ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
+  };
+
   /**
    * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
    * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
@@ -3064,9 +3104,24 @@ export function createAgentCapabilities(
       turn_id: authorisationTurnId(`${parent.proposal_id}#deadline`),
       links: [],
       levels: [],
-      goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null },
+      goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
+        ...(draftedTeamPartOf(approvedRead.raw) !== null ? { reference_date: (op.value as { reference?: string }).reference } : {}) },
     });
+    // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
+    if ((res.status === 'committed' || res.status === 'unconfirmed') && draftedTeamPartOf(approvedRead.raw) !== null) {
+      const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline,
+        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference });
+      const postimage = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : undefined;
+      if (postimage !== undefined) proposals.markPartial(parent.proposal_id, {
+        revision: computeAnalysisAffectingGraphHash(postimage as never)!, landed: [op.path], receipts: [], expected_postimage: postimage,
+      });
+    }
     if (res.status === 'unconfirmed') {
+      const reread = await readGraph(ctx.scenario_id);
+      if (reread !== null && goalDeadlineOf(reread.nodes.find(n => n.id === op.path)) === v.deadline
+        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
+      }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
         detail: 'This deadline was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
     }
@@ -3085,8 +3140,8 @@ export function createAgentCapabilities(
     }
     proposals.markApplied(parent.proposal_id, receipts);
     return {
-      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
-      follow_up: `Your deadline for "${String(goal.label)}" is now ${date}.`,
+      ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      follow_up: `Your deadline for "${String(check?.nodes.find(n => n.id === op.path)?.label ?? goal.label)}" is now ${date}.`,
     };
   };
 
@@ -4197,6 +4252,10 @@ export function createAgentCapabilities(
       const goal = goals[0]!;
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
+      if (isEventShareForecast(g.raw)) {
+        return { ok: false, mutated: false, refusal: 'goal_measures_a_forecast',
+          detail: 'This goal measures the forecast share finished by its deadline. Its full-deliverable target stays held. Type the soonest and latest times with your current team, for example "6–10 months".' };
+      }
       if (goalKindOf(goal) === 'chance_of_event') {
         return { ok: false, mutated: false, refusal: 'goal_measures_a_chance',
           detail: `The goal "${goal.label}" is measured as a chance of an event, which Olumi works out, so it takes no target figure. Nothing was prepared. `
@@ -4322,6 +4381,41 @@ export function createAgentCapabilities(
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
             + (levelLeftOut.host_line !== undefined ? '; Olumi already tells the user it was not included, so do not repeat it.' : '.') : ''),
       };
+    },
+
+    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
+    async proposeTeamTime(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const stated = readTeamTime(ctx.user_turn_text);
+      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
+        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
+          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineOf(part.goal);
+      if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
+        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+      const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()) };
+      if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
+        detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
+      if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
+        return { ok: false, mutated: false, refusal: 'already_held',
+          detail: a.low_months === a.high_months ? 'Your most likely time is already held. Type the soonest and latest times with your current team, for example "6–10 months".'
+            : 'That team-time range is already held. To change it, type the new soonest and latest times, for example "6–9 months".' };
+      }
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
+        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === 'set_team_time')) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
+        base_revision: g.graph_hash, team_time: a };
     },
 
     /**
@@ -5421,6 +5515,10 @@ export function createAgentCapabilities(
       }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const recovery = proposals.partialProgressOf(args.proposal_id);
+      if (recovery?.expected_postimage !== undefined && !isDeepStrictEqual(recovery.expected_postimage, before.raw)) {
+        return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: args.proposal_id };
+      }
       const decision = proposals.authorise({
         proposal_id: args.proposal_id,
         scenario_id: ctx.scenario_id,
@@ -5834,6 +5932,7 @@ export function createAgentCapabilities(
       // door is wired here, nothing is written and the Agent says so — never a strength-only or register fallback.
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
@@ -8076,7 +8175,19 @@ export function createAgentCapabilities(
         }
         links.push({ to_id: res.node.id, effect_direction: dir });
       }
-      for (const c of causedBy as { factor_label?: unknown; direction?: unknown }[]) {
+      // Only the user's turn may author the likelihood or name its drivers.
+      const userText = ctx.user_turn_text ?? ctx.user_text ?? '';
+      const stated = readStatedEventRisk(userText);
+      const driverLabels = stated === undefined ? [] : causedBy.map((c) => {
+        const asked = String(c?.factor_label ?? '');
+        const resolved = resolveNamed(g, asked, (node) => node.kind === 'factor');
+        return resolved.kind === 'one' ? resolved.node.label : asked;
+      });
+      const droppedDrivers = stated !== undefined && causedBy.length > 0
+        && !driverLabels.some((driver) => isFactorNamedByUser(driver, userText)) ? driverLabels : [];
+      const riskCauses = droppedDrivers.length > 0 ? [] : causedBy;
+      const eventRisk = riskCauses.length === 0 ? stated : undefined;
+      for (const c of riskCauses as { factor_label?: unknown; direction?: unknown }[]) {
         const asked = String(c?.factor_label ?? '');
         const dir = direction(c?.direction);
         const res = resolveNamed(g, asked, (n) => n.kind === 'factor');
@@ -8106,9 +8217,6 @@ export function createAgentCapabilities(
           detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const riskId = built.proposal.riskId;
-      // event_risk.v1 slice 2a: whole_request is a boolean; only trusted turn words author a figure.
-      const stated = readStatedEventRisk(ctx.user_turn_text ?? ctx.user_text ?? '');
-      const eventRisk = causedBy.length === 0 ? stated : undefined;
       const res = await opts.holdAddRisk({
         scenario_id: ctx.scenario_id,
         // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
@@ -8157,9 +8265,12 @@ export function createAgentCapabilities(
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
           how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
         },
+        ...(droppedDrivers.length > 0 ? { dropped_drivers: droppedDrivers } : {}),
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
-          + (stated !== undefined && causedBy.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : ''),
+          + (stated !== undefined && riskCauses.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : '')
+          + (droppedDrivers.length > 0 ? ` I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.` : '')
+          + (stated === undefined && readStatedLikelihoodWithoutWindow(userText) ? ' You gave a likelihood but no time window, so I\'ve added it as an ordinary risk. Say how soon (for example "within 6 months") and I\'ll add it as an event that may happen.' : ''),
       };
     },
 

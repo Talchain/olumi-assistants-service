@@ -89,7 +89,7 @@ import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtim
 import { agentProposals as proposals, executableWaitingProposal, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
-import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, isDecisionInputAsk, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
@@ -1578,7 +1578,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
       ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
       // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
-      ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
+      // P44 S1: a call that only states a held proposal takes the model's banked `narrate` effort (`narrateEffortFor`).
+      ...(callEffortFor(budget, req) !== undefined ? { reasoning: { effort: callEffortFor(budget, req) } } : {}),
       max_output_tokens: req.max_output_tokens,
     };
     const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
@@ -2495,6 +2496,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }
           : {}),
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
+        // S2b team_time uses this same fenced batch door and cached read-back.
         commitOptionLevels: async (input) => {
           writesDispatched += 1;
           // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
@@ -4482,6 +4484,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: `${l.chance} ${l.depends}`, lead: true as const }]),
           { role: 'evidence', text: l.chance, lead: true },
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends }]),
+          ...[l.spread_note, l.shortfall_note].filter((note): note is string => note !== undefined)
+            .map((text): FaceObligation => ({ role: 'evidence', text })),
           // B15: where the narrator gave this figure in its own accepted words (so nothing was added), THAT sentence is
           // the finding: typed as leading evidence, by this option's label and screen figure (Codex P1, DL 6049287605).
           // With its spread note as ONE unit when the note follows it (never a chance on the face, its qualifier in detail).

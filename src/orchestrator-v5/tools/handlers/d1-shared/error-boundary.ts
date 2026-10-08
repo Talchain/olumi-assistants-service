@@ -8,7 +8,9 @@
  * ladder produces the right wire mapping (INTERNAL_ERROR with cause_kind
  * preserved for telemetry / chip selection).
  *
- * The wrapper is transparent for any other thrown class — Zod errors,
+ * A held deadline-forecast definition also refuses through the recoverable
+ * precondition path, with specific recovery words. The wrapper is transparent
+ * for every other thrown class — Zod errors,
  * `HandlerResultInvalidError`, `HandlerInvocationFailedError`, and plain
  * Errors propagate unchanged.
  */
@@ -18,7 +20,8 @@ import {
   HandlerInvocationFailedError,
   type HandlerInvocationFailedCause,
 } from '../../handler-errors.js';
-import { D1HandlerError, type D1ErrorCode } from './errors.js';
+import { D1HandlerError, SHARE_BY_DATE_OWNERSHIP_GUIDANCE, type D1ErrorCode } from './errors.js';
+import { ShareByDateOwnershipError } from '../../../goal-target/share-by-date-carrier.js';
 
 const CAUSE_BY_D1_CODE: Record<D1ErrorCode, HandlerInvocationFailedCause> = {
   PARAMETER_INVALID: 'parameter_invalid_at_execute',
@@ -35,6 +38,18 @@ export async function runD1Handler(
   try {
     return await body();
   } catch (err) {
+    if (err instanceof ShareByDateOwnershipError) {
+      throw new HandlerInvocationFailedError(err.message, {
+        cause_kind: 'precondition_unmet_at_execute',
+        retryable: false,
+        details: {
+          handler_id: handlerId,
+          reason_code: 'SHARE_BY_DATE_SERVER_OWNED',
+          specific_issue: SHARE_BY_DATE_OWNERSHIP_GUIDANCE,
+        },
+        cause: err,
+      });
+    }
     if (err instanceof D1HandlerError) {
       throw new HandlerInvocationFailedError(err.message, {
         cause_kind: CAUSE_BY_D1_CODE[err.code],

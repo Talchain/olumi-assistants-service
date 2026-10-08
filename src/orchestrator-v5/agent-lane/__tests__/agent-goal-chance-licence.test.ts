@@ -216,12 +216,14 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });
   it('(10) both reporting rules add the exact range/deadline words and retain the existing bans', () => {
-    const rangeRule = 'For an option in goal_chance_range_display, say its range text exactly as given, then “ chance of meeting your goal, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
+    const rangeRule = 'For other options in goal_chance_range_display, say its range text exactly as given, then “ chance of meeting your goal, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
     const horizonRule = 'When goal_horizon_line is present and you state any goal chance or range, add that sentence verbatim once, right after the chance or range.';
     const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
     const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
     for (const rule of [runRule, savedRule]) {
       expect(rule).toContain(rangeRule);
+      expect(rule).toContain('use goal_chance_words verbatim');
+      expect(rule).toContain('stated_time.chance_words verbatim');
       expect(rule).toContain(horizonRule);
     }
     expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');

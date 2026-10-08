@@ -120,6 +120,7 @@ const BECAUSE: Record<keyof typeof DISABLED, string> = {
   needs_current_analysis: 'it needs a current analysis first.',
   needs_goal: 'the model needs a goal first.',
   needs_option: 'the model needs at least one option first.',
+  already_waiting: 'a suggested change is waiting for your yes. Approve it, or change something first.',
 };
 
 function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {

@@ -630,12 +630,12 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     removeDriverAbsenceClaims(text);
     expect(performance.now() - t0).toBeLessThan(50);
   });
-  // 4× the input, calibrated batches (scalingRatio): linear ≈ 4×, quadratic ≈ 16×. (A 2× step at 4–8 ms read 3.5× on CI, #2727.)
-  it('LINEAR TIME: 4× the repeated limb costs under 8× (quadratic would be 16×)', () => {
-    const [small, large] = [1000, 4000].map((n) => 'does not establish which assumption deserves '.repeat(n));
+  it('LINEAR TIME: 8× the repeated limb costs under 22× (quadratic would be 64×)', () => {
+    const [small, large] = [1000, 8000].map((n) => 'does not establish which assumption deserves '.repeat(n));
     const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
     const m = scalingRatio(() => run(small), () => run(large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
 
@@ -908,12 +908,12 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
   it.each([
     ['the verb-object limb', (n: number) => 'prevents goal chances for '.repeat(n)],
     ['the passive limb', (n: number) => 'chances are withheld for '.repeat(n)],
-  // 4× the input, calibrated batches (scalingRatio): linear ≈ 4×, quadratic ≈ 16× (a 2× step flaked at 3.5× on CI).
-  ])('LINEAR TIME: 4× %s costs under 8× (quadratic would be 16×)', (_name, make) => {
-    const [small, large] = [make(1000), make(4000)];
+  ])('LINEAR TIME: 8× %s costs under 22× (quadratic would be 64×)', (_name, make) => {
+    const [small, large] = [make(1000), make(8000)];
     const run = (text: string): void => { ALL_WITHHELD_CLAIM.test(text); removeAllWithheldClaims(text); DRIVER_ABSENCE_CLAIM.test(text); };
     const m = scalingRatio(() => run(small), () => run(large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
 
@@ -1050,7 +1050,7 @@ const B7_CH1 = JSON.parse(fixture('waveB7-unseen1-7e3f8fb-challenge-turn001.json
 const B7_EX2 = JSON.parse(fixture('waveB7-unseen2-7e3f8fb-explain-turn003.json')) as Json;
 const B7_T1B = JSON.parse(fixture('waveB7-t1b-7e3f8fb-explain-turn003.json')) as Json;
 /**
- * Every egress class on `head` + n spaces + "x": the cost at 80,000 over the cost at 20,000 (scalingRatio, calibrated
+ * Every egress class on `head` + n spaces + "x": the cost at 160,000 over the cost at 20,000 (scalingRatio, calibrated
  * batches). Single-call 5k -> 20k samples read 8.18–10.24× on CI runners (7 Oct, #2765 and five other runs).
  */
 const egressCostRatio = (head: string): ReturnType<typeof scalingRatio> => {
@@ -1058,7 +1058,7 @@ const egressCostRatio = (head: string): ReturnType<typeof scalingRatio> => {
     DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
     removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
   };
-  const [small, large] = [20000, 80000].map((n) => `${head}${' '.repeat(n)}x`);
+  const [small, large] = [20000, 160000].map((n) => `${head}${' '.repeat(n)}x`);
   return scalingRatio(() => run(small), () => run(large));
 };
 
@@ -1118,17 +1118,17 @@ describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () 
     expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
   });
 
-  // 4× the whitespace (5,000 → 20,000), min of 5 timings: linear ≈ 4×, quadratic ≈ 16×. Never an absolute bar: a CI runner
-  // read 81 ms where the Mac read under 50 (#2736).
+  // Calibrated batches at 20,000 → 160,000 spaces replace the absolute bar that read 81 ms on CI (#2736).
   it.each([
     ['"which change" + whitespace', "hasn't established which change"],
     ['"sensitivity and tipping points" + whitespace', 'sensitivity and tipping points'],
     ['"which assumption most affects the" + whitespace', 'which assumption most affects the'],
     ['"supplies no" + whitespace', 'supplies no'],
     ['a consequence + whitespace', "Values are Olumi's; sensitivity was not measured, so"],
-  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+  ])('LINEAR TIME: %s, 8× the input costs under 22×', (_name, head) => {
     const m = egressCostRatio(head);
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
 
@@ -1190,9 +1190,10 @@ describe('Cut 9 PROD, keys untouched: two wordings that passed prod cut 8 and cu
   it.each([
     ['"which assumption matters most to the" + whitespace', 'which assumption matters most to the'],
     ['"does not establish a single most consequential" + whitespace', 'does not establish a single most consequential'],
-  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+  ])('LINEAR TIME: %s, 8× the input costs under 22×', (_name, head) => {
     const m = egressCostRatio(head);
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
 
@@ -1240,8 +1241,9 @@ describe('Wave B8, keys untouched: "the biggest driver" (S2j, a superlative noun
     ['"does not establish the biggest" + whitespace', 'does not establish the biggest'],
     ['"the biggest driver" + whitespace (predicative)', 'the biggest driver'],
     ['"does not establish the main driver of" + whitespace (another-quantity guard)', 'does not establish the main driver of'],
-  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+  ])('LINEAR TIME: %s, 8× the input costs under 22×', (_name, head) => {
     const m = egressCostRatio(head);
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
