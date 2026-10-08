@@ -867,6 +867,11 @@ export function createSetFactorValueHandler(): HandlerFn {
       // `delete`, for the reason given for `elicited_from` above. The NODE-LEVEL
       // spelling is withdrawn below, beside `provenance`.
       delete (merged as { extractionType?: unknown }).extractionType;
+      // #2848: `frame_source: 'olumi_convention'` says OLUMI chose this cap. A write that changes the cap makes it
+      // someone else's, so the marker (and the factor-detail disclosure it drives) goes with the old cap.
+      if (after.cap !== undefined && after.cap !== priorObserved.cap) {
+        delete (merged as { frame_source?: unknown }).frame_source;
+      }
       /**
        * ⛔⛔ AND THE FALSIFIED SCALE DECLARATION — see the long note above the merge.
        *

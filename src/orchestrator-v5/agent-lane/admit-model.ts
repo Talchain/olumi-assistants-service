@@ -57,7 +57,7 @@ import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, 
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames, basisStatesOpposite, carriesBasis } from './convention-frame.js';
+import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames, hasBasis } from './convention-frame.js';
 import { sayFigure } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
@@ -3277,9 +3277,9 @@ function admitOnce(
     && (l.direction === 'positive' || l.direction === 'negative')
     // #2842 review r2 #7 (Science §(v)(2)): a flow → stock size is never rescued, whichever end would move.
     && !(isFlowUnit(unitOfLabel(l.from)) && !isFlowUnit(unitOfLabel(l.to)))
-    // Science's condition 3 for a rescue: the size carries its §(p) basis, and the basis does not state the opposite sign.
-    && carriesBasis(l.basis, l.direction)
-    ? [{ from: l.from, to: l.to, amount: l.effect_amount, per: l.effect_per_source_change }] : []));
+    ? [{ from: l.from, to: l.to, amount: l.effect_amount, per: l.effect_per_source_change,
+      // Science's condition 3: only a size carrying its §(p) basis may SEED a rescue; every size is protected (no harm).
+      seed: hasBasis(l.basis) && Math.sign(l.effect_amount / l.effect_per_source_change) === (l.direction === 'positive' ? 1 : -1) }] : []));
   // Today's frame of a link end: a factor's drafted range, or an outcome's or risk's (the goal's is not known here, so a
   // link into it can be rescued only by narrowing its source).
   const rangeOf = (label: string): number | undefined => {
@@ -4218,6 +4218,7 @@ function admitOnce(
   }
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map(n => [n.id, magnitudeNodeFor(n)]));
   const sizing = new Map<string, LinkSizing>();
+  const basisDroppedBySign = new Set<string>();
   for (const l of resolvable) {
     if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
     const source = magnitudeNodeById.get(l.from);
@@ -4237,20 +4238,20 @@ function admitOnce(
     // ⭐ SCIENCE §(u)(b): for an OLUMI-drafted size the drawn direction is the one source of sign, and the size is
     // |amount| per |change| (P44 arm: +3, +2.5 and +10,368 were written on links drawn as negative, and all were set aside
     // as `sign_conflict`). Never a user's size: their sign wins and a conflict there is asked, exactly as before.
-    // ⚠ Science's guard "a basis that states the opposite direction is set aside, not resolved" has no carrier yet: the
-    // drafter link has no basis text (rowed as a tripwire in convention-frame-and-sign.test.ts).
+    // ⭐ SCIENCE §(u)(b) OPTION E (Science 8 Oct, after #2848 buddy r1 broke a verb-list guard): nothing reads the basis.
+    // A resolved conflict DROPS the drafter's basis (it may state the sign we just overrode), so the size is basis-less:
+    // it never seeds a rescue and never counts as basis-bearing (§(p)(1)). Logged by link id below.
     const userClaimed = user_stated || signRefusedLinks.has(l) || l.provenance_source === 'user_specified'
-      || (l.effect_provenance ?? l.provenance) === 'explicit'
-      // Science §(u)(b): a basis STATING the opposite direction is not resolved; it stays set aside as today.
-      || basisStatesOpposite(l.basis, l.direction);
+      || (l.effect_provenance ?? l.provenance) === 'explicit';
     const signed = olumiSignedSize(l, userClaimed);
     if (signed.resolved) {
+      if (hasBasis(l.basis)) basisDroppedBySign.add(`${l.from}::${l.to}`);
       loss.push({
         field_path: `edges[${l.from}::${l.to}].effect_amount`,
         before: { effect_amount: l.effect_amount ?? null, effect_per_source_change: l.effect_per_source_change ?? null },
-        after: { effect_amount: signed.amount, effect_per_source_change: signed.per },
+        after: { effect_amount: signed.amount, effect_per_source_change: signed.per, basis_dropped: hasBasis(l.basis) },
         reason: `Olumi's drafted size for this link was written with a sign against the link's own direction (${l.direction}); `
-          + 'the direction is the sign, so the size is read as the same amount in that direction.',
+          + 'the direction is the sign, so the size is read as the same amount in that direction, without its basis.',
         severity: 'info',
       } as RepairEntry);
     }
@@ -4270,6 +4271,9 @@ function admitOnce(
   }
 
   const linkResult = admitCandidateLinks(resolvable, sizing);
+  for (const e of linkResult.edges) {
+    if (basisDroppedBySign.has(`${e.from}::${e.to}`)) delete (e.provenance as { basis?: string }).basis;
+  }
   // Reviewed Fi writer: carry the very sentence C2/W3/C1/SIGN-1 validated, through
   // the existing stored statement field. User edits retain their own provenance.
   for (const [link, sentence] of boundByLink) {
@@ -5044,7 +5048,7 @@ function admitOnce(
       const { defaulted: _projection, ...edge } = e;
       // The identity is OLUMI'S reading (`stated_in_brief: false`), so the link's source is too: a drafter's `explicit`
       // (`brief_extraction`) would read, once `defaulted` is gone, as a user-stated material parameter (MG sweep N1).
-      const { reasoning: _guess, source: _drafted, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
+      const { reasoning: _guess, basis: _guessBasis, source: _drafted, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
       const natural_effect = { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: source.unit ?? unit,
         strength_mean: beta, strength_mean_frame: 'edge_strength' as const };
       return { ...edge, strength: { mean: beta, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,

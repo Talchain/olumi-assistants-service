@@ -169,7 +169,11 @@ export function olumiSignedSize(
   return { amount: sign * Math.abs(amount), per: Math.abs(per), resolved: true };
 }
 
-export interface SizedLinkReach { readonly from: string; readonly to: string; readonly amount: number; readonly per: number }
+export interface SizedLinkReach {
+  readonly from: string; readonly to: string; readonly amount: number; readonly per: number;
+  /** May this link SEED a rescue (Science condition 3: it carries its basis)? Every link is protected by NO HARM. */
+  readonly seed: boolean;
+}
 export interface RescuedLink { readonly from: string; readonly to: string; readonly reframed: readonly string[]; readonly frames: { readonly from?: number; readonly to?: number } }
 
 /**
@@ -180,7 +184,8 @@ export interface RescuedLink { readonly from: string; readonly to: string; reado
  *  2. NO HARM: with every chosen frame in place, a frame is dropped wherever a link that was representable today stops
  *     being so, or a link whose other end has no known frame would read a larger β (a wider source, a narrower target).
  *     Repeated until nothing changes; it only ever removes, so it ends.
- * Returns the factors re-framed and the links that are representable only because of them. Pure.
+ * Only a SEED link (one carrying its basis) can call for a rescue; every link is protected, and a frame that would newly
+ * rescue a non-seed link is dropped too. Returns the factors re-framed and the links representable only because of them.
  */
 export function rescueConventionFrames(
   links: readonly SizedLinkReach[],
@@ -198,7 +203,7 @@ export function rescueConventionFrames(
   const applied = new Set<string>();
   for (const l of links) {
     const was = beta(l, today);
-    if (was === undefined || was <= 1) continue;
+    if (!l.seed || was === undefined || was <= 1) continue;
     for (const ends of [[l.from], [l.to], [l.from, l.to]]) {
       if (!ends.every((e) => convention.has(e))) continue;
       const b = beta(l, (x) => (ends.includes(x) ? convention.get(x) : today(x)));
@@ -213,7 +218,8 @@ export function rescueConventionFrames(
       if (touched.length === 0) continue;
       const was = beta(l, today); const now = beta(l, final);
       let harmed: boolean;
-      if (was !== undefined) harmed = was <= 1 && (now === undefined || now > 1);
+      // #2848 buddy r1 #3: a link that is NOT a seed (no basis) must not be newly rescued as a side effect either.
+      if (was !== undefined) harmed = (was <= 1 && (now === undefined || now > 1)) || (!l.seed && was > 1 && now !== undefined && now <= 1);
       else {
         // The other end has no known frame: the re-framed end must not raise β (a source may only narrow, a target only widen).
         harmed = touched.some((e) => {
@@ -237,23 +243,8 @@ export function rescueConventionFrames(
   return { applied: [...applied], rescued };
 }
 
-/** Effect verbs, by the direction they state (a closed list: Science §(u)(b) "raises" vs an authored decrease). */
-const RAISES = /\b(raise[sd]?|raising|increase[sd]?|increasing|add[sd]?|adding|lift(?:s|ed|ing)?|boost(?:s|ed|ing)?|grow(?:s|n|ing)?|grew|push(?:es|ed|ing)? up|drive[sd]? up|driving up)\b/i;
-const LOWERS = /\b(lower(?:s|ed|ing)?|reduce[sd]?|reducing|cut(?:s|ting)?|remove[sd]?|removing|decrease[sd]?|decreasing|lose[sd]?|losing|lost|drop(?:s|ped|ping)?|shrink(?:s|ing)?|shrank|erode[sd]?|eroding|push(?:es|ed|ing)? down|drive[sd]? down|driving down)\b/i;
-const NEGATION = /\b(not|never|no|n't|without)\b|n't\b/i;
-
 /**
- * ⭐ SCIENCE §(u)(b) GUARD: the drafter's own basis STATES the opposite direction to the link it drew ("adds subscribers"
- * on a link drawn as negative). Only an unambiguous statement counts: effect verbs of ONE direction and no negation.
- * Verbs of both directions ("raising the price reduces demand") or none say nothing about the sign. Pure.
+ * Does the drafter's size carry its §(p)(1) basis? Presence only: Olumi never reads the text (Science §(u)(b) option E,
+ * 8 Oct, after #2848 buddy r1 showed a closed verb list misreads comparatives, source-side verbs and negations).
  */
-export function basisStatesOpposite(basis: string | null | undefined, direction: string): boolean {
-  if (typeof basis !== 'string' || basis.trim() === '' || NEGATION.test(basis)) return false;
-  const up = RAISES.test(basis); const down = LOWERS.test(basis);
-  if (up === down) return false;
-  return (direction === 'negative' && up) || (direction === 'positive' && down);
-}
-
-/** A basis Olumi can carry (Science §(u) condition 3 for a rescue): a non-empty line not stating the opposite direction. */
-export const carriesBasis = (basis: string | null | undefined, direction: string): boolean =>
-  typeof basis === 'string' && basis.trim() !== '' && !basisStatesOpposite(basis, direction);
+export const hasBasis = (basis: string | null | undefined): boolean => typeof basis === 'string' && basis.trim() !== '';

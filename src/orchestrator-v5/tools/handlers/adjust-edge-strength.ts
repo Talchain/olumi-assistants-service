@@ -567,6 +567,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             magnitude: _magnitude,
             mean_projected: _projectedMean,
             reasoning: _reasoning,
+            // #2848: Olumi's basis line explains Olumi's size; it goes with that size.
+            basis: _basis,
             clamped_from: _clampedFrom,
             // ⭐ F1 (d5 6006667946): the user's sentence that stated the figure goes WITH the figure. Kept, it read as the
             // source of a size the link no longer holds (the stale quote the red team saw, #87 6006627551).

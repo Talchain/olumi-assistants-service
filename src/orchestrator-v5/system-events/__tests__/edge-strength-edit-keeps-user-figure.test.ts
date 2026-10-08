@@ -211,6 +211,15 @@ describe('⭐ F1 — the writer refuses for EVERY caller (the legacy NL path rea
     expect(graph).toStrictEqual(before);
   });
 
+  it('#2848: a user’s strength on Olumi’s estimate drops Olumi’s `basis` with Olumi’s size', async () => {
+    const graph = heldGraph(0.62, 'olumi_estimate');
+    (edgeIn(graph).provenance as Record<string, unknown>).basis = 'bigger deals need more support';
+    const outcome = await createAdjustEdgeStrengthHandler()(invocation(graph, 0.3));
+    const stored = edgeIn(outcome.mutated_graph);
+    expect(stored.strength.mean).toBe(0.3);
+    expect(stored.provenance).not.toHaveProperty('basis');
+  });
+
   it('with the user’s replace authority it writes, drops the quote with the figure, and says what it replaced', async () => {
     const outcome = await createAdjustEdgeStrengthHandler()(invocation(heldGraph(0.62), 0.3, true));
     const stored = edgeIn(outcome.mutated_graph);

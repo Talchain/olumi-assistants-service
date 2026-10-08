@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema } from '../runtime/build-model.js';
-import { basisStatesOpposite, rescueConventionFrames } from '../convention-frame.js';
+import { rescueConventionFrames } from '../convention-frame.js';
 
 type Factor = { label: string; unit: string; level: number | null; max: number; known?: boolean; provenance?: string };
 type Link = { from: string; to: string; direction: 'positive' | 'negative'; amount: number | null; per?: number | null; prov?: string | null; basis?: string | null };
@@ -242,16 +242,16 @@ describe('NO HARM: a convention frame that would break a link representable toda
   it('the pure rule: each end is today\'s frame or the formula\'s, never a third value; harm removes, it never adds', () => {
     const today = (x: string) => ({ a: 200, b: 15, c: 2000 } as Record<string, number>)[x];
     // a → b needs a's 98 (β 2 → 0.98); b → c is fine today (β 0.18) and with b unchanged stays fine.
-    const r1 = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1 }, { from: 'b', to: 'c', amount: 24, per: 1 }], today, new Map([['a', 98]]));
+    const r1 = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1, seed: true }, { from: 'b', to: 'c', amount: 24, per: 1, seed: true }], today, new Map([['a', 98]]));
     expect(r1.applied).toEqual(['a']);
     expect(r1.rescued).toEqual([{ from: 'a', to: 'b', reframed: ['a'], frames: { from: 98 } }]);
     // b's formula 150 would rescue nothing and harm b → c (24 × 150 ÷ 2000 = 1.8): never applied.
-    const r2 = rescueConventionFrames([{ from: 'b', to: 'c', amount: 24, per: 1 }], today, new Map([['b', 150]]));
+    const r2 = rescueConventionFrames([{ from: 'b', to: 'c', amount: 24, per: 1, seed: true }], today, new Map([['b', 150]]));
     expect(r2.applied).toEqual([]);
     // an unknown far end (the goal): a source may only NARROW.
-    const r3 = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1 }, { from: 'a', to: 'goal', amount: 1, per: 1 }], today, new Map([['a', 98]]));
+    const r3 = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1, seed: true }, { from: 'a', to: 'goal', amount: 1, per: 1, seed: true }], today, new Map([['a', 98]]));
     expect(r3.applied).toEqual(['a']);
-    const r4 = rescueConventionFrames([{ from: 'b', to: 'c', amount: 200, per: 1 }, { from: 'b', to: 'goal', amount: 1, per: 1 }], today, new Map([['b', 30]]));
+    const r4 = rescueConventionFrames([{ from: 'b', to: 'c', amount: 200, per: 1, seed: true }, { from: 'b', to: 'goal', amount: 1, per: 1, seed: true }], today, new Map([['b', 30]]));
     expect(r4.applied).toEqual([]);
   });
 });
@@ -367,30 +367,49 @@ describe('§(u)(b) an OLUMI-drafted size takes its sign from the drawn direction
     expect(Object.keys(schema.properties.links.items.properties)).toContain('basis');
   });
 
-  it('Science §(u)(b) guard: a basis STATING the opposite direction is not resolved — it stays set aside as today', () => {
-    const a = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'negative', amount: 3, basis: 'Higher churn adds subscribers each month' }]));
-    const e = edgeOf(a, 'Monthly churn', 'Pro paying subscribers');
-    expect(e.provenance?.magnitude).not.toBe('olumi_estimate');
-    expect(lossText(a)).not.toMatch(/effect_amount :: Olumi's drafted size/);
-    // CONTROL: a basis that agrees with the drawn direction is resolved as before.
-    const b = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'negative', amount: 3, basis: 'More churn removes paying subscribers' }]));
-    expect(edgeOf(b, 'Monthly churn', 'Pro paying subscribers').provenance?.natural_effect?.amount).toBe(-3);
+  it('Science §(u)(b) option E: a sign-conflicted size is resolved from the direction and loses its basis, whatever the basis says', () => {
+    // The buddy's r1 cases for a verb list: an opposite statement, a comparative, a source-side verb, a negation. None is read.
+    for (const basis of ['Higher churn adds subscribers each month', 'Fewer cancellations than sign-ups', 'Churn drove growth',
+      'A price rise does not add subscribers', 'More churn removes paying subscribers']) {
+      const a = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'negative', amount: 3, basis }]));
+      const e = edgeOf(a, 'Monthly churn', 'Pro paying subscribers');
+      expect(e.provenance?.natural_effect?.amount, basis).toBe(-3);
+      // Not basis-bearing for §(p)(1) licensing: the carrier is ABSENT on the edge.
+      expect(e.provenance, basis).not.toHaveProperty('basis');
+      const logged = (a.loss as unknown as { field_path?: string; after?: { basis_dropped?: boolean } }[])
+        .find((x) => x.field_path?.endsWith('.effect_amount') && x.field_path.includes('::'));
+      expect(logged?.after?.basis_dropped, basis).toBe(true);
+    }
+    // CONTROL: the same size with the sign AGREEING keeps its basis.
+    const b = admit(candidate([CHURN(5), SUBS(1300, 2000)], [{ from: 'Monthly churn', to: 'Pro paying subscribers', direction: 'negative', amount: -3, basis: 'Churn removes subscribers' }]));
+    expect((edgeOf(b, 'Monthly churn', 'Pro paying subscribers').provenance as { basis?: string }).basis).toBe('Churn removes subscribers');
   });
 
-  it('the guard\'s corpus: unambiguous opposite statements fire; mixed, verb-less, negated or agreeing ones never do', () => {
-    const fires: [string, 'positive' | 'negative'][] = [
-      ['Higher churn adds subscribers each month', 'negative'], ['A price rise raises new sign-ups', 'negative'],
-      ['Each point of churn increased paying customers', 'negative'], ['Churn lifts the customer count', 'negative'],
-      ['More support load reduces retention', 'positive'], ['A bigger team lowers delivery capacity', 'positive'],
-      ['Extra hires cut throughput', 'positive'], ['Discounts erode margin', 'positive'],
-    ];
-    const silent: [string, 'positive' | 'negative'][] = [
-      ['Raising the price reduces new sign-ups', 'negative'], ['Cutting the price raises demand', 'negative'],
-      ['Churn and subscribers move together', 'negative'], ['A price rise does not add subscribers', 'negative'],
-      ['More churn removes paying subscribers', 'negative'], ['A price rise lifts churn', 'positive'], ['', 'negative'],
-    ];
-    for (const [b, d] of fires) expect(basisStatesOpposite(b, d), b).toBe(true);
-    for (const [b, d] of silent) expect(basisStatesOpposite(b, d), b).toBe(false);
+  it('Science option E: a sign-conflicted size (its basis dropped) never seeds a rescue in admission; the agreeing one does', () => {
+    const c = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, amount: 24, basis: 'churn removes subscribers' }]));
+    expect(frameOf(c, 'Monthly churn')).toBe(100);
+    expect(JSON.stringify(c.nodes)).not.toContain('frame_source');
+    // CONTROL: the same size written with the agreeing sign is rescued (churn framed at 13).
+    const ok = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, basis: 'churn removes subscribers' }]));
+    expect(frameOf(ok, 'Monthly churn')).toBe(13);
+  });
+
+  it('#2848 r1 #2: a size whose sign AGREES with its direction but whose basis is set aside never seeds a rescue; a sign-matching one with a basis does', () => {
+    const today = (x: string) => ({ a: 200, b: 15 } as Record<string, number>)[x];
+    expect(rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1, seed: false }], today, new Map([['a', 98]])).applied).toEqual([]);
+    expect(rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1, seed: true }], today, new Map([['a', 98]])).applied).toEqual(['a']);
+  });
+
+  it('#2848 r1 #3: a frame that would ALSO rescue a link with no basis is harm, so it is not applied', () => {
+    const today = (x: string) => ({ a: 200, b: 15, c: 15 } as Record<string, number>)[x];
+    // a → b (basis) and a → c (no basis) both need a's 98: rescuing a → c would size it without its basis.
+    const r = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1, seed: true }, { from: 'a', to: 'c', amount: 0.15, per: 1, seed: false }],
+      today, new Map([['a', 98]]));
+    expect(r.applied).toEqual([]);
+    // CONTROL: the second link already representable today is untouched by a's narrowing → applied.
+    const ok = rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1, seed: true }, { from: 'a', to: 'c', amount: 0.01, per: 1, seed: false }],
+      today, new Map([['a', 98]]));
+    expect(ok.applied).toEqual(['a']);
   });
 
   it('Science §(p)(1) carrier: an Olumi estimate keeps its basis on the edge; a user\'s size and a placeholder never get one', () => {
