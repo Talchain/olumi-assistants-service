@@ -44,6 +44,16 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     expect(goalChanceLicenceOf({ option_comparison: spread }, graph, 'mrr', earnedBy(spread))!.pct_by_option.keep_pro_price_at_49).toBe(100);
   });
 
+  it('⭐ RED (served form since 6 Oct): float-noise std with identical deciles is zero spread (B1 72ce907d Keep: std 1.67e-16)', () => {
+    const noise = { ...fixedRates[0], outcome: { p10: 20900, p50: 20900, p90: 20900, std: 1.67e-16 } };
+    expect(goalCertaintyDecisions(graph, [noise], undefined)).toEqual([]);
+    const noiseOnly = { ...fixedRates[0], outcome: { p50: 20900, std: 3.3e-10 } };
+    expect(goalCertaintyDecisions(graph, [noiseOnly], undefined)).toEqual([]);
+    // CONTRAST: the smallest REAL spread in the census (B1 £59, std 0.0045 on a 0–1 frame) is a spread.
+    const real = { ...fixedRates[0], outcome: { p10: 0.79, p50: 0.8, p90: 0.81, std: 0.0045 } };
+    expect(goalCertaintyDecisions(graph, [real], undefined).map(d => d.option_id)).toEqual(['keep_pro_price_at_49']);
+  });
+
   it('a record with no std reads its spread from p10/p90; no outcome block is not "zero spread"', () => {
     const noStd = { ...fixedRates[0], outcome: { p10: 20900, p50: 20900, p90: 20900 } };
     expect(goalCertaintyDecisions(graph, [noStd], undefined)).toEqual([]);

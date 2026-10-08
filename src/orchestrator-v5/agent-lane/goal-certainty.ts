@@ -304,15 +304,22 @@ function sayMismatch(
       + `can’t check what ‘${label(found.from)}’ does to it.`;
 }
 
-/** Every valid draw gave this option the same goal value: the record's own spread is exactly zero. */
+/**
+ * Every valid draw gave this option the same goal value. Served Runs since 6 Oct carry the zero as floating-point noise
+ * (std 1.1e-16 … 3.3e-10 with p10 === p90; census over 17,927 stored Runs, 8 Oct), so identical deciles decide first and
+ * a std counts as zero within a relative tolerance far below any real spread (the smallest real one in that census:
+ * B1 £59, std 0.0045 on a 0–1 frame).
+ */
+const ZERO_SPREAD_RELATIVE = 1e-9;
 function zeroSpread(r: Rec): boolean {
   const o = isRec(r.outcome) ? r.outcome : undefined;
   if (o === undefined) return false;
-  const std = num(o.std);
-  if (std !== undefined) return std === 0;
   const p10 = num(o.p10);
   const p90 = num(o.p90);
-  return p10 !== undefined && p90 !== undefined && p10 === p90;
+  if (p10 !== undefined && p90 !== undefined && p10 === p90) return true;
+  const std = num(o.std);
+  const scale = Math.max(Math.abs(num(o.p50) ?? num(o.mean) ?? 0), 1);
+  return std !== undefined && std >= 0 && std <= ZERO_SPREAD_RELATIVE * scale;
 }
 
 /**

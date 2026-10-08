@@ -111,7 +111,9 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   if (a === null || b === null) return null;
   // ⛔ #2851 (DL ruling 2, identity PARTS only): a product part's level is the user's figure or none, the card's own rule
   // (`identityPartsWithoutLevel`); Olumi's basis-less figure is a missing level, so no implied goal level comes from it.
-  if (identityPartsWithoutLevel(graph, [aId, bId]).length > 0) return null;
+  // A month-N accumulation part contributes S₀ here (`levelFor`), so S₀ is the level the user's-figure rule reads.
+  const levelIds = [aNode, bNode].map((n) => { const s = accumulationStockFor(n, byId); return typeof s?.id === 'string' ? s.id : String(n.id); });
+  if (identityPartsWithoutLevel(graph, levelIds).length > 0) return null;
   const label = words(node.label);
   if (label === null || words(aNode.label) === null || words(bNode.label) === null) return null;
   // ⛔ A percentage is a rate of change or a share, never a count of the goal's units (buddy r2 P1): fail closed.

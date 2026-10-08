@@ -101,6 +101,12 @@ describe('products over an accumulation reconcile against S₀, never S_N', () =
     expect(goalCoherenceAsk(g, { nodeId: PRICE, previousRaw: 48 })).toMatchObject({ implied: 12250, ratio: 12.25 });
   });
 
+  it('CONTRAST (#2851 user-figure rule through S₀): Olumi\'s inferred S₀ gives no implied level', () => {
+    const g = graph();
+    node(g, STOCK).observed_state = { raw_value: 250, value: 250, unit: 'subscribers', source: 'cee_inference' };
+    expect(goalCoherenceAsk(g, { nodeId: PRICE, previousRaw: 48 })).toBeNull();
+  });
+
   it('admission preserves the month-N product without comparing its 999 against today’s MRR', () => {
     expect(admitStoredProductDeclaration(graph(), { outcome_id: GOAL, factor_ids: [PRICE, AT12] })).toEqual({ ok: true });
   });

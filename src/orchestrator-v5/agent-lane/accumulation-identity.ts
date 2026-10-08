@@ -21,6 +21,7 @@
  *  · the outcome carries no other identity and is a part of the admitted goal product.
  * `stated_in_brief` follows all three input levels, never the drafter's declaration stamp alone. Pure.
  */
+import { periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { canonicalLabel } from './model-primitives.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { classifyValueSource, reflectsAHumanAct } from '../../cee/graph-readiness/obligation-provenance.js';
@@ -54,8 +55,17 @@ export interface AccumulationLoss {
 }
 
 const QUANTITY = new Set(['factor', 'outcome', 'risk']);
-/** A period other than a month, named in the rate's unit ("% per year", "%/yr", "% annual"). Refused, never converted. */
-const OTHER_PERIOD = /\b(year|yr|annual|annum|p\.?a\.?|quarter|week|day|daily|weekly)\b/i;
+/**
+ * A period other than a month, named in the rate's unit ("% per year", "%/yr", "% annual"). Refused, never converted.
+ * Read through THE ONE UNIT VOCABULARY (`utils/unit-alphabet.ts`), never a private list.
+ */
+function otherPeriodIn(unit: string): UnitPeriod | null {
+  for (const word of unit.toLowerCase().match(/[a-z]+(?:\.[a-z]+)*\.?/g) ?? []) {
+    const period = periodNoun(word) ?? periodAdverb(word);
+    if (period !== null && period !== 'month') return period;
+  }
+  return null;
+}
 /** The definitional "% of today" unit (`TODAY_UNIT`) is a level, never a rate. */
 const OF_TODAY = /of today/i;
 
@@ -143,8 +153,9 @@ export function admitAccumulationIdentities(
     }
     const unit = typeof rate.observed_state?.unit === 'string' ? rate.observed_state.unit : undefined;
     // Science 393023 (a): per year is ASKED for per month, never converted ("30% a year" is ambiguous).
-    if (unit !== undefined && isPercentScaledUnit(unit) && OTHER_PERIOD.test(unit)) {
-      refuse(`"${String(rate.label)}" is given per ${/quarter/i.test(unit) ? 'quarter' : /week/i.test(unit) ? 'week' : /day|daily/i.test(unit) ? 'day' : 'year'}, not per month; give it per month and Olumi can use it`); continue;
+    const otherPeriod = unit !== undefined && isPercentScaledUnit(unit) ? otherPeriodIn(unit) : null;
+    if (otherPeriod !== null) {
+      refuse(`"${String(rate.label)}" is given per ${otherPeriod}, not per month; give it per month and Olumi can use it`); continue;
     }
     if (unit === undefined || !isPercentScaledUnit(unit) || OF_TODAY.test(unit)) {
       refuse(`"${String(rate.label)}" is not stated as a percentage per month`); continue;
