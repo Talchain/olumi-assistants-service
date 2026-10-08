@@ -115,7 +115,6 @@ import { repairGraphForPersistence } from '../repair-graph-for-persistence.js';
 import { guidanceHistoryOf, GUIDANCE_HISTORY_LIMIT, parseAnswerGuidance } from '../agent-lane/turn-context/guidance-history.js';
 import type { GuidanceState } from '../agent-lane/guidance/index.js';
 import { isAgentAnswerRow } from './conversation-as-seen.js';
-import { toTypedRunRows } from '../runs/typed-run-rows.js';
 
 function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
@@ -212,8 +211,6 @@ const V5_CONVERSATION_TURN_COLUMNS =
 // Phase 2(c) ships inert. Change by code only after the Paul-gated step 3
 // migration/cutover; the same constant gates the new column read and RPC.
 export const USE_APPEND_V6 = false;
-// Phase 2(a) is inert until cutover. v7 includes v6's revision CAS and reads.
-export const USE_APPEND_V7 = false;
 
 function isScenarioRevision(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -494,17 +491,6 @@ export class SupabaseSessionStore implements SessionStore {
       p_user_message: write.userMessage ?? null,
       p_assistant_message: write.assistantMessage ?? null,
     };
-
-    // v7 delegates unchanged v6/v5, whose contract requires a graph and
-    // model-version carrier. Analysis-only turns currently have neither;
-    // cutover must not silently commit them through a legacy RPC without runs.
-    if (USE_APPEND_V7 && write.handler_facts.some(fact => fact.fact_type === 'run_analysis')
-      && (write.modelVersion === undefined || write.graph == null)) {
-      throw new StateCommitFailedError(
-        'append_turn_atomic_v7 cannot persist an analysis-only turn through the existing v6/v5 contract. ' +
-          'Typed-run cutover requires a revision-aware run-only append path; no legacy write was attempted.',
-      );
-    }
 
     // ATOMIC graph CAS (CEE_V5_GRAPH_CAS_RPC). Route graph-bearing writes to
     // append_turn_atomic_v3 (in-transaction FOR UPDATE + compare) when the
@@ -1583,8 +1569,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_version_creation_kind: version.creation_kind,
       p_version_source_turn_id: version.source_turn_id,
     };
-    const useRevisionAppend = USE_APPEND_V6 || USE_APPEND_V7;
-    const { data, error } = useRevisionAppend
+    const { data, error } = USE_APPEND_V6
       ? await this.callAppendTurnAtomicV6(write, rpcArgs)
       : await this.client.rpc('append_turn_atomic_v5', rpcArgs);
 
@@ -1628,14 +1613,6 @@ export class SupabaseSessionStore implements SessionStore {
       // the only thing left to get right is telling the operator why, exactly
       // as `append_turn_atomic_v4`'s PGRST202 does at :1114-1127.
       if (errCode(error) === 'PGRST202') {
-        if (USE_APPEND_V7) {
-          throw new StateCommitFailedError(
-            'append_turn_atomic_v7 is not present in this database (PGRST202). ' +
-              'Phase 2(a) requires migrations 20261008160000_phase2_c_scenario_revision ' +
-              'and 20261008170000_phase2_a_typed_runs before cutover; no legacy fallback is safe.',
-            { cause: error, rpc_code: errCode(error) },
-          );
-        }
         if (USE_APPEND_V6) {
           throw new StateCommitFailedError(
             'append_turn_atomic_v6 is not present in this database (PGRST202). ' +
@@ -1661,47 +1638,33 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     const parsed = parseAtomicVersionedAppend(data);
-    if (useRevisionAppend && !isScenarioRevision(data?.revision)) {
-      throw new StateCommitFailedError(
-        `${USE_APPEND_V7 ? 'append_turn_atomic_v7' : 'append_turn_atomic_v6'} returned an invalid scenario revision`,
-      );
+    if (USE_APPEND_V6 && !isScenarioRevision(data?.revision)) {
+      throw new StateCommitFailedError('append_turn_atomic_v6 returned an invalid scenario revision');
     }
     if (generation !== null) {
       this.emitFenceEvaluated(write, 'current', generation, null, 'atomic_append');
     }
     this.cache.invalidateAll(write.scenario_id);
     await this.resolveDraftLossAfterGraphCommit(write);
-    return useRevisionAppend ? { ...parsed, revision: data.revision } : parsed;
+    return USE_APPEND_V6 ? { ...parsed, revision: data.revision } : parsed;
   }
 
-  /** v7 implies this v6 revision path; never refresh the expected value here. */
+  /** Fresh-turn revision CAS on the new path; never refresh the expected value here. */
   private async callAppendTurnAtomicV6(write: SessionTurnWrite, rpcArgs: Record<string, unknown>) {
-    const rpcName = USE_APPEND_V7 ? 'append_turn_atomic_v7' : 'append_turn_atomic_v6';
     if (!isScenarioRevision(write.expectedRevision)) {
       throw new StateCommitFailedError(
-        `${rpcName} requires a non-negative safe-integer revision from the turn-start read`,
+        'append_turn_atomic_v6 requires a non-negative safe-integer revision from the turn-start read',
       );
     }
-    const runs = USE_APPEND_V7 ? write.handler_facts.flatMap((fact) => {
-      if (fact.fact_type !== 'run_analysis') return [];
-      const mapped = toTypedRunRows(fact, { scenarioId: write.scenario_id });
-      if ('ok' in mapped) return [mapped.ok];
-      // A malformed historical fact cannot discard other runs in this turn.
-      // Preserve its legacy fact; log only the mapper's bounded reason.
-      log.warn({ event: 'v5.typed_run.quarantine', scenario_id: write.scenario_id,
-        turn_id: write.turn_id, reason: mapped.quarantine }, 'Typed run projection quarantined one fact');
-      return [];
-    }) : [];
-    const result = await this.client.rpc(rpcName, {
+    const result = await this.client.rpc('append_turn_atomic_v6', {
       ...rpcArgs,
       p_expected_revision: write.expectedRevision,
-      ...(USE_APPEND_V7 ? { p_runs: runs } : {}),
     });
     // Classify the v6-only refusal before the shared fence, OLGC1 and generic
     // handlers in appendAtomicVersioned; all other RPC errors pass through.
     if (errCode(result.error) === 'OLRV1') {
       throw new GraphStaleWriteError(
-        `${rpcName} rejected a stale revision for scenario ${write.scenario_id}; refresh and reconfirm.`,
+        `append_turn_atomic_v6 rejected a stale revision for scenario ${write.scenario_id}; refresh and reconfirm.`,
         {
           conflict_category: 'revision_conflict',
           cause: result.error,
@@ -2698,7 +2661,7 @@ export class SupabaseSessionStore implements SessionStore {
     readonly briefText: string | null;
     readonly revision?: number;
   }> {
-    return this.readGraphAndBriefText(scenarioId, USE_APPEND_V6 || USE_APPEND_V7);
+    return this.readGraphAndBriefText(scenarioId, USE_APPEND_V6);
   }
 
   private async readGraphAndBriefText(scenarioId: string, includeRevision: boolean): Promise<{

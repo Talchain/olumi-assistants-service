@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { toTypedRunRows } from '../typed-run-rows.js';
+import { TYPED_RUN_PAYLOAD_PATHS, toTypedRunRows } from '../typed-run-rows.js';
 
 type Json = Record<string, any>;
 const captured = (path: string): Json => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')).j;
@@ -43,6 +43,28 @@ function mapFact(fact: Json) {
 }
 
 describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
+  it('pins the SQL trigger payload paths to the specification and captured Run fields', () => {
+    const sql = readFileSync(new URL('../../../../supabase/migrations/20261008170000_phase2_a_typed_runs.sql', import.meta.url), 'utf8');
+    const sqlPaths = [...sql.matchAll(/^-- payload_path: (.+)$/gm)].map(match => match[1]);
+    expect(sqlPaths).toEqual(TYPED_RUN_PAYLOAD_PATHS);
+
+    const fact = factFromRead(succeeded);
+    const mapped = mapFact(fact);
+    if (!('ok' in mapped)) throw new Error(mapped.quarantine);
+    expect(mapped.ok.run_id).toBe(fact.result.run_id);
+    expect(mapped.ok.computed_at).toBe(fact.result.computed_at);
+    expect(mapped.ok.canonical_request_hash).toBe(fact.result.input_snapshot.sent_digest);
+    expect(mapped.ok.input_snapshot).toEqual(fact.result.input_snapshot);
+    const licence = fact.result.enrichment.inference_warnings.find((warning: Json) => warning.code === 'GOAL_CHANCE_LICENSED');
+    for (const comparison of fact.result.enrichment.option_comparison) {
+      const option = mapped.ok.options.find(row => row.option_id === comparison.option_id)!;
+      expect(option.chance).toBe(comparison.probability_of_goal);
+      expect(option.low).toBe(comparison.probability_of_goal_precision.interval_lower);
+      expect(option.high).toBe(comparison.probability_of_goal_precision.interval_upper);
+      expect(option.driver).toEqual(licence.driver_by_option[comparison.option_id] ?? null);
+    }
+  });
+
   it('maps every captured succeeded option and binds the exact recorded input digest', () => {
     const fact = factFromRead(succeeded);
     const before = clone(fact);

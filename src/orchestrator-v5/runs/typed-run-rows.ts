@@ -21,6 +21,47 @@ const nonEmpty = (value: unknown): value is string => typeof value === 'string' 
 const probability = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 
+/**
+ * Persisted payload paths read by this specification and the SQL fact trigger.
+ * [] denotes array entries; {option_id} denotes a key bound to that option.
+ * The licence fields below belong to the single GOAL_CHANCE_LICENSED warning.
+ * noop is a v5_handler_facts column, not part of the serialised payload.
+ * Keep the migration header's `payload_path` comments in this exact order.
+ */
+export const TYPED_RUN_PAYLOAD_PATHS = [
+  'fact_type',
+  'fact_version',
+  'result.scenario_id',
+  'result.run_id',
+  'result.computed_at',
+  'result.input_snapshot',
+  'result.input_snapshot.sent_digest',
+  'result.enrichment.analysis_status',
+  'result.enrichment.option_comparison',
+  'result.enrichment.option_comparison[].option_id',
+  'result.enrichment.option_comparison[].probability_of_goal',
+  'result.enrichment.option_comparison[].probability_of_goal_precision.basis',
+  'result.enrichment.option_comparison[].probability_of_goal_precision.method',
+  'result.enrichment.option_comparison[].probability_of_goal_precision.confidence_level',
+  'result.enrichment.option_comparison[].probability_of_goal_precision.n_informative',
+  'result.enrichment.option_comparison[].probability_of_goal_precision.n_met',
+  'result.enrichment.option_comparison[].probability_of_goal_precision.interval_lower',
+  'result.enrichment.option_comparison[].probability_of_goal_precision.interval_upper',
+  'result.enrichment.inference_warnings[]',
+  'result.inference_warnings[]',
+  'result.enrichment.inference_warnings[].code',
+  'result.enrichment.inference_warnings[].option_ids',
+  'result.enrichment.inference_warnings[].form',
+  'result.enrichment.inference_warnings[].similar_option_ids',
+  'result.enrichment.inference_warnings[].leader_option_id',
+  'result.enrichment.inference_warnings[].next_option_id',
+  'result.enrichment.inference_warnings[].withheld_option_ids',
+  'result.enrichment.inference_warnings[].pct_by_option.{option_id}',
+  'result.enrichment.inference_warnings[].horizon_untested',
+  'result.enrichment.inference_warnings[].summary_withheld',
+  'result.enrichment.inference_warnings[].driver_by_option.{option_id}',
+] as const;
+
 export interface TypedRunRowsContext {
   readonly scenarioId: string;
   /** Only the identity of the graph this frozen Run evaluated, when attested by the caller. */
@@ -39,7 +80,7 @@ export interface TypedRunOptionRow {
   readonly driver: RecordValue | null;
 }
 
-/** Flat p_runs element. SQL owns scenario/user/revision/fact_id and supplies the option rows' run_id. */
+/** Reference mapping for the SQL trigger; SQL owns scenario/user/revision/fact_id and the option rows' run_id. */
 export interface TypedRunRows {
   readonly run_id: string;
   readonly canonical_request_hash: string;
