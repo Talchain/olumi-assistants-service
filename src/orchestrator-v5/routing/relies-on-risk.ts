@@ -61,9 +61,10 @@ export function hasReliesOnRiskStampChange(before: unknown, after: unknown): boo
 }
 
 /** Re-mintable disclosure: stored identity plus the current option label, with no model-authored copy. */
-export function reliesOnRiskLine(riskLabel: string, optionLabel: string): string {
+export function reliesOnRiskLine(riskLabel: string, optionLabel: string, besideChance = true): string {
   return `‘${riskLabel}’: ‘${optionLabel}’ relies on this not happening. This model can't yet apply that risk to that option alone, `
-    + "so the Run leaves it out, and that option's chance doesn't include it yet.";
+    + 'so the Run leaves it out'
+    + (besideChance ? ", and that option's chance doesn't include it yet." : '.');
 }
 
 /** The hold/card readers derive this from the same stamped add_node, never a sticky text member. */

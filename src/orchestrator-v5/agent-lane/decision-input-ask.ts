@@ -22,8 +22,10 @@ import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
+import { chanceShownFor, type OptionChanceCell } from './chance-shown.js';
 import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view.js';
 
 type Rec = Record<string, unknown>;
@@ -76,8 +78,8 @@ export interface DecisionInputAskContext {
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
   readonly builtOrRan: boolean;
-  /** The selected current Run's UI cells own the horizon's chance wording. */
-  readonly chanceCells?: readonly CanonicalAnalysisCell[];
+  /** The selected current Run's UI cells own chance wording, including each risk's option-bound disclosure. */
+  readonly chanceCells?: readonly OptionChanceCell[];
 }
 
 /** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
@@ -161,7 +163,7 @@ const withinMonths = (goal: Rec): string => {
  * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
-function leftOutLines(graph: unknown, goalLabel: string): string[] {
+function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[]): string[] {
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const allEdges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
@@ -180,7 +182,7 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
       // relies_on). Never read one shape blind: the served B1 draft 500'd on exactly that (27dfd9e5, 8 Oct).
       const optionId = recordOf(r.relies_on)?.option_id ?? recordOf(recordOf(r.draft_widening)?.hits)?.id;
       const option = nodes.find((n) => n.id === optionId && n.kind === 'option');
-      if (option !== undefined) return reliesOnRiskLine(labelOf(r), labelOf(option));
+      if (option !== undefined) return reliesOnRiskLine(labelOf(r), labelOf(option), chanceShownFor(cells, option.id as string));
     }
     // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
     // (DL condition 3), in words that stay true when one cause feeds two left-out risks.
@@ -196,6 +198,23 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
   });
 }
 
+/**
+ * The goal is projected AT its own month (graph-only twin of the Run's `accumulationTestedAtGoalHorizon`, so chat and
+ * Run agree): the user's confirmed goal product binds a confirmed accumulation carrier whose horizon is the goal's
+ * held month. Then nothing about the horizon is owed: the model does project over time, to that deadline.
+ */
+function goalProjectedAtItsMonth(graph: unknown): boolean {
+  const goal = goalOf(graph);
+  if (goal === undefined || !Number.isInteger(goal.goal_horizon_months)) return false;
+  const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
+  if (product?.operation !== 'product' || product.stated_in_brief !== true) return false;
+  const nodes = recordOf(graph)?.nodes;
+  return Array.isArray(nodes) && product.factor_ids.some((id) => {
+    const carrier = NodeV3.shape.nonlinear_identity.safeParse(nodes.map(recordOf).find((n) => n?.id === id)?.nonlinear_identity).data;
+    return carrier?.operation === 'accumulation' && carrier.stated_in_brief === true && carrier.horizon_months === goal.goal_horizon_months;
+  });
+}
+
 /** The exact singular/plural prefixes identify the one horizon fact without interpreting narrator wording. */
 export const UNTESTED_HORIZON_PREFIXES = [
   "This chance uses the model's numbers as they are today",
@@ -206,6 +225,7 @@ const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 
 /** One horizon form for the reply and stored Run, from the same cells the UI reads. */
 export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): string | null {
+  if (goalProjectedAtItsMonth(graph)) return null;
   const shown = cells.filter(cell => cell.kind === 'figure' || cell.kind === 'range').length;
   if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1 });
   if (goalKindOf(graph) === 'share_by_date') return null;
@@ -232,7 +252,7 @@ export function statedTargetWords(graph: unknown): string | null {
  * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
  */
 export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean }): string | null {
-  if (goalKindOf(graph) === 'share_by_date') return null;
+  if (goalKindOf(graph) === 'share_by_date' || goalProjectedAtItsMonth(graph)) return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
@@ -383,7 +403,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   if (goal === undefined || label === '') return [];
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
-  const leftOut = leftOutLines(graph, label);
+  const leftOut = leftOutLines(graph, label, ctx.chanceCells ?? []);
   const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
