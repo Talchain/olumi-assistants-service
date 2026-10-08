@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { SessionTurnWrite } from '../../orchestrator-v5/session/store.js';
 import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js';
@@ -12,7 +13,7 @@ import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-
 import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js';
 
 const { port, source, identity, finalOffers } = vi.hoisted(() => ({
-  port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(),
+  port: { append: vi.fn(), appendIfLatest: undefined as undefined | ((...a: unknown[]) => unknown), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(),
     ensureScenarioExists: vi.fn(), getScenarioOwner: vi.fn(), scenarioExists: vi.fn(),
     readExistingScenario: vi.fn(), isScenarioMember: vi.fn(), readMostRecentPendingActions: vi.fn() },
   source: { analysis: {} as Record<string, unknown> },
@@ -70,6 +71,8 @@ let app: FastifyInstance;
 const selections: string[] = [];
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 
+const MIGRATION = readFileSync(new URL('../../../supabase/migrations/20261006230000_agent_answer_offers.sql', import.meta.url), 'utf8');
+const SQL_OFFER_ID = /^agent-[a-z0-9-]{1,80}$/;
 // Only the database transport is fake: the real store's writer, hot projection and narrow reader run.
 const client = {
   from: () => {
@@ -94,6 +97,22 @@ const client = {
   },
   rpc: async (name: string, args: Record<string, unknown>) => {
     rpcCalls.push({ name, args });
+    // The migration's own offer check (20261006230000, reached from append_agent_answer_if_latest too), transcribed:
+    // a row the database would refuse is refused here, before anything is written.
+    if ((name === 'append_agent_answer_with_offers' || name === 'append_agent_answer_if_latest') && args.p_suggested_actions != null) {
+      const offers = args.p_suggested_actions as Record<string, unknown>[];
+      const bad = !Array.isArray(offers) || offers.length < 1 || offers.length > 8 || offers.some(o => o === null || typeof o !== 'object'
+        || Object.keys(o).some(k => k !== 'id' && k !== 'label' && k !== 'message')
+        || typeof o.id !== 'string' || typeof o.label !== 'string' || typeof o.message !== 'string'
+        || !SQL_OFFER_ID.test(o.id) || o.id === 'agent-run-analysis'
+        || [...o.label].length < 1 || [...o.label].length > 80 || [...o.message].length < 1 || [...o.message].length > 400);
+      if (bad) return { data: null, error: { code: 'P0001', message: 'invalid plain-text answer offer' } };
+    }
+    // 20261007090000: the latest non-claim row must still be the one the caller read, or nothing is written.
+    if (name === 'append_agent_answer_if_latest'
+      && (table.find(r => r.scenario_id === args.p_scenario_id && !String(r.turn_id).endsWith(':claim'))?.id ?? null) !== args.p_expected_latest_row_id) {
+      return { data: { status: 'latest_moved' }, error: null };
+    }
     const prior = table.find(r => r.scenario_id === args.p_scenario_id && r.turn_id === args.p_turn_id);
     const id = prior?.id ?? `11111111-1111-4111-8111-${String(table.length + 1).padStart(12, '0')}`;
     if (!prior) table.unshift({ id, scenario_id: args.p_scenario_id, user_id: OWNER,
@@ -106,9 +125,18 @@ const client = {
       agent_guidance: args.p_agent_guidance ?? null, suggested_actions: args.p_suggested_actions ?? null,
       suggested_actions_run_key: args.p_suggested_actions_run_key ?? null });
     return { data: name === 'append_agent_answer_with_offers' || name === 'append_agent_answer_with_guidance'
+      || (name === 'append_agent_answer_if_latest' && (args.p_suggested_actions != null || args.p_agent_guidance != null))
       ? { id, replayed_prior_turn: !!prior && prior.request_hash === args.p_request_hash,
         prior_turn_conflict: !!prior && prior.request_hash !== args.p_request_hash } : id, error: null };
   },
+};
+/** The conditional answer append the deployed store takes (the AIE failures were on it); only rows that ask for it. */
+const conditionalAppend = () => {
+  port.appendIfLatest = (w: unknown, o: unknown) => realStore.appendIfLatest(w as SessionTurnWrite, o as never);
+  port.readMostRecentPendingActions.mockImplementation(async (sid: string, o?: { onLatestRowId?: (id: string | null) => void }) => {
+    o?.onLatestRowId?.((table.find(r => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim'))?.id as string | undefined) ?? null);
+    return latest;
+  });
 };
 const coldStore = () => {
   realStore = new SupabaseSessionStore(client as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 });
@@ -120,7 +148,7 @@ const coldStore = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks(); serial += 1; scenario = `6f1e2d3c-4b5a-4e6d-9c7b-${String(serial).padStart(12, '0')}`;
-  table = []; latest = []; selections.length = 0; rpcCalls.length = 0; identity.userId = OWNER; finalOffers.value = null;
+  port.appendIfLatest = undefined; table = []; latest = []; selections.length = 0; rpcCalls.length = 0; identity.userId = OWNER; finalOffers.value = null;
   source.analysis = { analysis_state: CURRENT, analysis_result: RESULT,
     current_read: { analysis_ready: READY, result: RESULT }, analysis_constraint_verdict_state: null };
   coldStore();
@@ -228,6 +256,34 @@ describe('X4 real commit door → cold graph-read door', () => {
     expect(table.find(r => r.turn_id === 'aaaaaaa3-aaaa-4aaa-8aaa-aaaaaaaaaaa3')?.suggested_actions).toEqual([EXPECTED[1]]);
     coldStore(); expect((await read()).conversation_turns.at(-1).suggested_actions).toEqual([EXPECTED[1]]);
   });
+  it('RED row 7b (AIE 6048621134): a widen Add press in the final answer never costs the answer its row; it stays live, unstored', async () => {
+    // The harness's offer check is the migration's own, word for word.
+    expect(MIGRATION).toContain(`(v_action->>'id') !~ '${SQL_OFFER_ID.source}'`);
+    expect(MIGRATION).toContain(`RAISE EXCEPTION 'invalid plain-text answer offer'`);
+    await positive(); conditionalAppend();
+    const add = { id: 'agent-widen-add:0123456789abcdef', label: 'Add', message: 'Add the risk ‘Existing customers downgrade’ to ‘Launch Starter Tier’.' };
+    finalOffers.value = [add, EXPECTED[0]!];
+    const live = await ask('aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4'); expect(live.suggested_actions).toEqual([add, EXPECTED[0]]);
+    expect(table.find(r => r.turn_id === 'aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4')?.suggested_actions).toEqual([EXPECTED[0]]);
+    expect(rpcCalls.filter(c => c.args.p_turn_id === 'aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4').map(c => c.name)).toEqual(['append_agent_answer_if_latest']);
+    coldStore(); expect((await read()).conversation_turns.at(-1)).toMatchObject({ turn_id: 'aaaaaaa4-aaaa-4aaa-8aaa-aaaaaaaaaaa4', suggested_actions: [EXPECTED[0]] });
+  });
+  it('row 7c (retry-safe): the same widen-Add answer sent again under its turn id replays the one recorded answer; no second row', async () => {
+    await positive();
+    const add = { id: 'agent-widen-add:0123456789abcdef', label: 'Add', message: 'Add the risk ‘Existing customers downgrade’ to ‘Launch Starter Tier’.' };
+    finalOffers.value = [add, EXPECTED[0]!];
+    conditionalAppend();
+    const first = await ask('aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5');
+    const provider = vi.mocked(fetch).mock.calls.length;
+    const again = await ask('aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5');
+    expect(vi.mocked(fetch).mock.calls.length, 'the retry runs no model call').toBe(provider);
+    expect(rpcCalls.filter(c => c.args.p_turn_id === 'aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5').map(c => c.name), 'one append, never a second')
+      .toEqual(['append_agent_answer_if_latest']);
+    expect(table.filter(r => r.turn_id === 'aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5')).toHaveLength(1);
+    expect(again.assistant_text).toBe(first.assistant_text);
+    expect(rpcCalls.filter(c => c.args.p_turn_id === 'aaaaaaa5-aaaa-4aaa-8aaa-aaaaaaaaaaa5').every(c => c.args.p_suggested_actions == null
+      || (c.args.p_suggested_actions as { id: string }[]).every(o => SQL_OFFER_ID.test(o.id)))).toBe(true);
+  }, 30_000);
   it('row 8: a viewer member still receives no conversation or answer offers', async () => {
     await positive(); identity.userId = MEMBER; port.isScenarioMember.mockResolvedValue(true);
     const before = port.readLatestAnswerOffers.mock.calls.length;

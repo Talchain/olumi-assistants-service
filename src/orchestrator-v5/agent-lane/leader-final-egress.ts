@@ -27,7 +27,7 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
 import { WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../compose/analysis-state-v1.js';
-import type { LeaderLicence } from '../compose/leader-licence.js';
+import { leaderLicenceFromState, type LeaderLicence } from '../compose/leader-licence.js';
 import { isCodeShaped, keyNamesLeader, LICENSED_LABEL_KEYS } from './licensed-run-view.js';
 import {
   findLeaderClaims,
@@ -172,6 +172,53 @@ function chipAssertsLeader(chip: unknown, labels: readonly string[]): boolean {
 }
 
 /**
+ * What the gate reads to decide whether a control ships: the licence, the option roster's sources and the scope
+ * restriction. Built ONCE per state read ({@link leaderGateInputsOf}) and handed to every reader of that read.
+ */
+export type LeaderGateInputs = Pick<LeaderFinalEgressOpts, 'licence' | 'graph' | 'analysisReady' | 'leaderClaimWithheldReason' | 'scopeAuthorityUnavailable'>;
+
+/** The gate's inputs from ONE state read: nothing is taken from a second read, so two readers of it cannot disagree. */
+export function leaderGateInputsOf(read: {
+  readonly analysisState?: unknown; readonly analysisReady?: unknown; readonly graph?: unknown; readonly scopeAuthorityUnavailable?: boolean;
+}): LeaderGateInputs {
+  const reason = (read.analysisState as { leader_claim?: { withheld_reason?: unknown } } | null | undefined)?.leader_claim?.withheld_reason;
+  return {
+    licence: leaderLicenceFromState(read.analysisState, read.analysisReady),
+    ...(read.scopeAuthorityUnavailable !== undefined ? { scopeAuthorityUnavailable: read.scopeAuthorityUnavailable } : {}),
+    ...(typeof reason === 'string' ? { leaderClaimWithheldReason: reason } : {}),
+    graph: read.graph ?? null,
+    analysisReady: read.analysisReady,
+  };
+}
+
+function rosterLabels(opts: Pick<LeaderGateInputs, 'graph' | 'analysisReady'>): string[] {
+  return [...new Set([...optionRosterFromGraph(opts.graph), ...optionRosterFromAnalysisReady(opts.analysisReady)])];
+}
+
+/**
+ * A surviving scope issue with no authority or roster has no safe prose interpretation: the gate ships the leader-free
+ * envelope, which carries no control at all. This consumes the canonical restriction; no text classifier grants or
+ * withholds permission here.
+ */
+function scopeHasNoSafeReading(opts: LeaderGateInputs, labels: readonly string[]): boolean {
+  return opts.leaderClaimWithheldReason === WITHHELD_GOAL_SCOPE_UNRESOLVED && (opts.scopeAuthorityUnavailable === true || labels.length === 0);
+}
+
+/**
+ * ⭐ WOULD THIS CONTROL REACH THE USER? The gate's own answer for one control, asked BEFORE the reply's words are fixed.
+ * The gate removed a search control whose query compared the options while the reply still said "it runs only if you
+ * press the control" (staging 7 Oct 2026, `removed_paths: ["suggested_actions[0]"]`).
+ *
+ * It is built from the two predicates the gate below runs (`scopeHasNoSafeReading`, then "3: chips"), so it decides
+ * nothing the gate does not. It cannot foresee the gate THROWING: that replaces the whole reply, words and controls.
+ */
+export function controlSurvivesLeaderGate(chip: unknown, opts: LeaderGateInputs): boolean {
+  if (opts.licence !== 'withheld') return true;
+  const labels = rosterLabels(opts);
+  return !scopeHasNoSafeReading(opts, labels) && !chipAssertsLeader(chip, labels);
+}
+
+/**
  * The prose a reply is replaced by when the final egress itself fails: the shared gate's fixed withheld line (DL 380e54
  * 5932098302 item 1). Leader-free by that module's own build-time probe.
  */
@@ -271,11 +318,9 @@ export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unkno
   let proseEdited = false;
   try {
     const names = optionNamesAndIds(opts.graph, opts.analysisReady);
-    const labels = [...new Set([...optionRosterFromGraph(opts.graph), ...optionRosterFromAnalysisReady(opts.analysisReady)])];
+    const labels = rosterLabels(opts);
 
-    // A surviving scope issue with no authority or roster has no safe prose interpretation. This consumes the
-    // canonical restriction; no text classifier grants or withholds permission here.
-    if (opts.leaderClaimWithheldReason === WITHHELD_GOAL_SCOPE_UNRESOLVED && (opts.scopeAuthorityUnavailable === true || labels.length === 0)) {
+    if (scopeHasNoSafeReading(opts, labels)) {
       log.warn({ event: 'agent_lane.scope_leader_egress_unavailable', request_id: opts.requestId, exit_path: opts.exitPath,
         authority_unavailable: opts.scopeAuthorityUnavailable === true, roster_unavailable: labels.length === 0 },
       'agent-lane: unresolved scope has no verified authority or roster — using the leader-free envelope');

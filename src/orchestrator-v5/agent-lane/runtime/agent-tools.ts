@@ -922,7 +922,7 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
+    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
@@ -950,6 +950,11 @@ export interface AgentCapabilities {
   proposeIdentity?(ctx: AgentToolContext): Promise<ToolResult>;
   /** C5: the Agent's own provisional view on a withheld turn (`../provisional-view.ts`). Optional: absent ⇒ refused plainly. */
   giveProvisionalView?(ctx: AgentToolContext, args: { view: string; reasoning: string; confirm_step: string }): Promise<ToolResult>;
+  /**
+   * Whether a search control quoting this query would reach the user on this turn (the final egress gate's own chip
+   * rule, read by the route from its readback). Absent ⇒ every sendable query is accepted, as before.
+   */
+  researchControlShowable?(ctx: AgentToolContext, query: string): Promise<boolean>;
 }
 
 export async function dispatchTool(
@@ -1056,12 +1061,27 @@ export async function dispatchTool(
     case 'offer_public_research': {
       // Pure: nothing is searched here. The route turns the query into the one control that can send it.
       const query = sendableQuery(args.query);
-      return query === null
-        ? { ok: false, mutated: false, refusal: 'query_not_sendable',
-          detail: 'That query cannot be offered: write it as one line of at most 200 characters. Nothing was searched.' }
-        : { ok: true, mutated: false, offered_query: query,
-          detail: 'The user now sees a control that searches the web for exactly this query. Nothing has been searched yet: '
-            + 'tell them what the search would look for and that it runs only if they press it.' };
+      if (query === null) {
+        return { ok: false, mutated: false, refusal: 'query_not_sendable',
+          detail: 'That query cannot be offered: write it as one line of at most 200 characters. Nothing was searched.' };
+      }
+      // ⭐ ACCEPTED ⇒ ON THE WIRE. The answer below tells the model the user sees a control, so it is given only when the
+      // control will survive the final egress gate. A query that gate would remove is refused here, with the way out.
+      // A read that throws refuses the offer (fail closed): a control that may not arrive is never promised.
+      let showable = true;
+      if (caps.researchControlShowable !== undefined) {
+        try { showable = (await caps.researchControlShowable(ctx, query)) === true; } catch { showable = false; }
+      }
+      if (!showable) {
+        return { ok: false, mutated: false, refusal: 'query_cannot_be_shown',
+          detail: 'That query cannot be shown as a control here: it reads as putting one option ahead of another, and this '
+            + 'analysis names no leading option. The user sees NO control and nothing was searched. Either offer ONE '
+            + 'neutral public question that names no option as better, or tell the user that no search is on offer. '
+            + 'Never say a control is there.' };
+      }
+      return { ok: true, mutated: false, offered_query: query,
+        detail: 'The user now sees a control that searches the web for exactly this query. Nothing has been searched yet: '
+          + 'tell them what the search would look for and that it runs only if they press it.' };
     }
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.

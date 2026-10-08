@@ -40,10 +40,12 @@ const HOST_SHA = 'a9c847ef37063cd1e5e25c6b8810cbe9b6f16aef83f188dce728923d5ea46a
 // + S-A REPLY_SHAPE_INSTRUCTION joined after the reply-length sentence (lane COPY-SHAPE, 7 Oct; Paul: "the three bullets
 //   as a construct"; AIE #87 6037293086 §5: under 75 words, one move, one ask): 33,758 → 34,302 bytes (+1 space +543 =
 //   exactly the sentence's bytes). Derived from the SENT body.
-// + S-E GOALS S2b share-by-date sentences in the host contract (7 Oct): 34,302 → 34,984 bytes (+682, the host delta). Derived
-//   from the SENT body.
-const RENDERED_SHA = 'd256559b528df8c8bcded122276e1dc8d2659b2658df411c7e9c5514a0d63687';
-const RENDERED_BYTES = 34_984;
+// + S-E GOALS S2b share-by-date sentences in the host contract (7 Oct): +682 bytes, the host delta. Derived from the SENT body.
+// #2783 (B15): + 193 bytes = exactly " " + MODEL_RELATIVE_NAMING_INSTRUCTION's new last sentence ("When the result gives
+// options' chances of meeting the goal, lead with those chances …; never open with the share."), nothing else.
+// Combined (#2762 merge of staging): 34,302 + 682 + 193 = 35,177 bytes; sha re-derived from the SENT body.
+const RENDERED_SHA = '915133bab1213750f377f06c8db09e70d750dac20e633c55711cee65d7dfda7e';
+const RENDERED_BYTES = 35_177;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';

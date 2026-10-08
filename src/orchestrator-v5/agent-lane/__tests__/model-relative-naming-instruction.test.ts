@@ -13,6 +13,10 @@ import { enforceAgentLaneLeaderClaimsAtWire, rankingLabelContext, sentenceRanksO
 import { enforceLeaderLicenceAtFinalEgress } from '../leader-final-egress.js';
 
 describe('the model-relative naming rule', () => {
+  it('B15: leads with goal chances and keeps the run share as supporting detail (exact pin)', () => {
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain("When the result gives options' chances of meeting the goal, lead with those chances as the rules below allow, and give any run share after them as supporting detail; never open with the share.");
+  });
+
   it('names an option only in the one model-relative form, with or without its share of runs', () => {
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('when the rules above let you name a leading option, name it only as “In this model, N% of runs supported ‘X’”');
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('If the result gives no such share, make no claim about how runs fell: say what the result rests on instead.');

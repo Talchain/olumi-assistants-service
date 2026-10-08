@@ -155,8 +155,9 @@ afterEach(async () => {
   for (const p of agentProposals.outstanding(scenario, OWNER)) agentProposals.discard(p.proposal_id);
 });
 
-type Offer = { action_id: string; press_id: string; enabled: boolean; offer_key: string; label: string; disabled_reason?: string; why_now?: string };
-type Bar = { v: number; state_key: string; revision: { graph_hash: string | null; run_key: string | null }; priority: Offer[]; standard: Offer[]; more: Offer[] };
+type Offer = { action_id: string; press_id: string; enabled: boolean; offer_key: string; label: string; user_line: string; disabled_reason?: string; why_now?: string };
+type Bar = { v: number; state_key: string; revision: { graph_hash: string | null; run_key: string | null }; priority: Offer[]; standard: Offer[]; more: Offer[];
+  bias_risk?: { v: 1; items: { claim_id: string; press_id: string; offer_key: string }[] } };
 type Body = { assistant_text: string; suggested_actions: { id: string; label: string; message: string }[]; action_bar?: Bar;
   _action?: Record<string, unknown>; _agent?: { tool_calls?: { name: string; proposal_id?: string }[] }; _diagnostic_trace?: { fast_path?: string } };
 let turnSerial = 0;
@@ -263,7 +264,8 @@ describe('the same offer pressed twice prepares ONE card (amendment 6)', () => {
     const approve = first.suggested_actions.find((a) => a.id.startsWith('agent-approve-proposal:'))!;
     const second = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
     expect(second._agent?.tool_calls ?? []).toEqual([]);
-    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal']);
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal', `agent-decline-proposal:${approve.id.slice('agent-approve-proposal:'.length)}`]);
     expect(agentProposals.outstanding(scenario, OWNER).length).toBe(1);
     expect(second._action).toMatchObject({ outcome: 'ran', reason: 'already_waiting' });
   });
@@ -311,6 +313,39 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     setState('withheld', (() => { const g = structuredClone(D1.graph) as { edges: Record<string, unknown>[] }; g.edges[0]!.strength = { mean: 0.91, std: 0.05 }; return g; })());
     const after = (await reload()).action_bar!;
     expect(after.state_key).not.toBe(before.state_key);
+  });
+  it('P45: the bias-risk row rides the live bar and reloads byte-identical; every item presses an enabled offer on that same bar', async () => {
+    setState('licensed'); coldStore();
+    const live = (await turn({ message: 'Where are we?' })).action_bar!;
+    expect(live.bias_risk?.items.map(i => i.claim_id)).toEqual(['DSK-B-007', 'DSK-B-001']);
+    const offers = [...live.priority, ...live.standard, ...live.more];
+    for (const item of live.bias_risk!.items) {
+      expect(offers.find(o => o.offer_key === item.offer_key && o.press_id === item.press_id && o.enabled), item.claim_id).toBeDefined();
+    }
+    const again = (await reload()).action_bar!;
+    expect(JSON.stringify(again.bias_risk)).toBe(JSON.stringify(live.bias_risk));
+  });
+  it('P45 slice 3 RED: licensed bias_check press lists both model items, zero model calls, ran receipt, and identical reload bar', async () => {
+    setState('licensed');
+    const b = await press('act:bias_check');
+    expect(modelCalls).toBe(0);
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(b._action).toMatchObject({ action_id: 'bias_check', outcome: 'ran' });
+    expect(b._action?.science).toBeUndefined();
+    expect(b.assistant_text.startsWith('Checked: Narrow framing, Anchoring.')).toBe(true);
+    expect(b.assistant_text).toContain("Narrow framing: where the pattern could bite: ‘Phased GCP migration’, ‘Switch to GCP’. One test: press ‘More options’.");
+    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘Migration preparation effort’. One test: press ‘Anchoring’.");
+    const claim = resolveDskClaimProvenance('DSK-B-001')!;
+    expect(b.assistant_text).toContain(`Decision-science claim: ${claim.claim_title} · ${claim.evidence_strength} evidence`);
+    expect(b.assistant_text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);
+    const offers = offersOf(b.action_bar!);
+    expect(b.suggested_actions).toEqual(['more_options', 'bias_anchoring'].map(action_id => {
+      const offer = offers.find(o => o.action_id === action_id)!;
+      expect(offer.enabled, action_id).toBe(true);
+      return { id: offer.press_id, label: offer.label, message: offer.user_line };
+    }));
+    coldStore();
+    expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(b.action_bar));
   });
   it('the three captured bars are the committed fixtures DGAI binds to (pre-Run, withheld Run, licensed Run)', async () => {
     scenario = '6f1e2d3c-4b5a-4e6d-9c7b-00000000f1c5';
@@ -440,7 +475,9 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     expect(b.assistant_text).toBe(expected);
     expect(b.assistant_text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
     expect(b.suggested_actions).toEqual([]);
-    expect(b._action?.science).toBeUndefined(); // two options + current Run: canonicalStageOf reads decide
+    // Two options + current Run: canonicalStageOf reads decide, a compared Run; DSK-B-001 applies there (Science 393023 decide→evaluate).
+    expect(b._action?.science).toEqual(id === 'bias_anchoring' ? resolveDskClaimProvenance('DSK-B-001') : undefined);
+    expect(JSON.stringify(b._action).match(/DSK-B-001/g)?.length ?? 0).toBe(id === 'bias_anchoring' ? 1 : 0);
     for (const action_id of ['bias_anchoring', 'check_estimates']) expect(b.action_bar!.more.find(o => o.action_id === action_id)).toMatchObject({ enabled: true });
     coldStore();
     expect((await reload()).action_bar).toEqual(b.action_bar);

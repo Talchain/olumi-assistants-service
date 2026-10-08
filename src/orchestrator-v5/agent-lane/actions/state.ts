@@ -21,6 +21,7 @@ import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 import { approvalChipIdFor, typedApprovalOf } from '../approval-chips.js';
 import type { StageType } from '@talchain/schemas/boundary';
+import type { OptionFrame } from './bias-triggers.js';
 import type { GoalPathFactor, ValueAuthorship } from '../turn-context/guidance-signals.js';
 import { canonicalStageOf } from '../method-turn/method-turn.js';
 import { goalChanceDriversForAgent } from '../../goal-target/goal-chance-range-agent.js';
@@ -57,6 +58,8 @@ export interface ActionFacts {
   readonly canonicalStage: StageType | null;
   readonly estimateCandidates: readonly (GoalPathFactor & { readonly figure: string })[];
   readonly estimateDriverIds: readonly string[];
+  /** Goal-path factors whose value is Olumi's (estimate or accepted), BEFORE the display-scale filter: the bias check's "could Anchoring be checked" fact. */
+  readonly olumiEstimateCount: number;
   readonly revision: ActionRevision;
   /** 16-hex hash of (scenario, revision): the bar's identity (contract v1.1: state_key is the revision's hash). */
   readonly stateKey: string;
@@ -75,6 +78,8 @@ export interface ActionFacts {
   /** `goal_horizon.deadline` (YYYY-MM-DD) when the goal holds one: the pre-mortem's horizon (contract v1.1 item 4). */
   readonly deadline: string | null;
   readonly ownOptionCount: number;
+  /** The option set's typed frame (guidance signals), read by the bias-risk row (P45). */
+  readonly optionFrame: OptionFrame;
   readonly goalPathFactorCount: number;
   readonly riskCount: number;
   readonly outcomeCount: number;
@@ -146,7 +151,8 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     runAdmissible: typeof ready?.may_run === 'boolean' ? ready.may_run : ready?.status === 'ready',
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
-    estimateCandidates: [], estimateDriverIds: [], canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
+    optionFrame: { nonSqOptionLabels: [], statusQuoPresent: false, sameLever: false },
+    estimateCandidates: [], estimateDriverIds: [], olumiEstimateCount: 0, canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
   const nodes = raw.nodes.map(rec);
   try {
@@ -173,6 +179,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
         if (value === undefined || !displayScaleEstablished(value, rec(node.observed_state)?.value, unit)) return [];
         return [{ ...f, figure: proposalFigure(value, unit) }];
       }),
+      olumiEstimateCount: signals['model.goal_path_factors'].filter(f => f.value_authorship === 'olumi_estimate' || f.value_authorship === 'olumi_accepted').length,
       estimateDriverIds: runKey === null ? [] : goalChanceDriversForAgent(read.analysisResult, read.graph)
         .flatMap(({ driver }) => driver.kind === 'factor_value' && driver.authored_by === 'olumi' ? [driver.factor_id as string] : []),
       // RC's own goal read (slice 1 unchanged); the goal's kind, target, label and date come from the SOLE goal only.
@@ -182,6 +189,11 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       targetPresent: goal !== undefined && statedGoalTargetOf(raw, goal) !== null,
       deadline,
       ownOptionCount: signals['model.non_sq_option_ids'].length,
+      optionFrame: {
+        nonSqOptionLabels: signals['model.non_sq_option_ids'].map(id => signals['model.option_labels'][id] ?? ''),
+        statusQuoPresent: signals['model.status_quo_option_id'] !== null,
+        sameLever: signals['model.same_lever'],
+      },
       goalPathFactorCount: signals['model.goal_path_factor_ids'].length,
       riskCount: signals['model.risk_ids'].length,
       outcomeCount: raw.nodes.map(rec).filter(n => n?.kind === 'outcome').length,

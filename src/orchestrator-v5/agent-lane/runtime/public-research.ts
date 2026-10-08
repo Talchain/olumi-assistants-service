@@ -66,6 +66,42 @@ export function approvedQueryOf(chipId: unknown, message: unknown): string | nul
   return q !== null && chipMessage(q) === message.trim() && `${RESEARCH_CHIP_PREFIX}${queryId(q)}` === chipId ? q : null;
 }
 
+/** What a reply ends with when a search the Agent offered has NO control under it. Fixed words, no option named. */
+export const RESEARCH_NOT_ON_OFFER_TEXT = 'No web search is on offer with this reply.';
+/** The same, when another search the Agent offered does have its control. */
+export const RESEARCH_ONLY_SHOWN_TEXT = 'Only the web search shown below is on offer with this reply.';
+/** Why, when the control was withheld for its wording: the user can ask again, so the reply is not a dead end. */
+export const RESEARCH_WORDING_REASON_TEXT = 'The search question took a side between your options, which this analysis does not support. Ask for a search on a neutral question instead.';
+
+/**
+ * ⭐ THE REPLY'S WORDS FOLLOW THE CONTROLS IT CARRIES. `offer_public_research` tells the model "the user now sees a
+ * control", and the model says so. Whether the control ships is decided on the turn's FINAL read, which a Run later in
+ * the same turn can change (Codex buddy on #2746: accepted on a licensed Run, withheld by the reply). So the answer is
+ * settled here, on the body as it ships: a control `survives` rejects is taken off, and a reply left without a control
+ * the Agent offered says so in fixed words. Every offered control shown ⇒ the SAME body, untouched.
+ *
+ * ⚠ RUN IT AFTER EVERY GATE THAT CAN EDIT THE REPLY (buddy r2): a sentence added earlier was removed by a later edit, and
+ * a copy of these words inside a sentence the gate then deleted was trusted. `place` puts the sentence where the reader
+ * sees it (the route keeps it out from behind the questions toggle); it owns "already said", on the FINAL words.
+ */
+export function withResearchControlTruth<T extends { assistant_text?: unknown; suggested_actions?: unknown }>(
+  body: T, offered: readonly { readonly id: string }[], survives: (chip: unknown) => boolean,
+  place: (text: string, sentence: string) => string = (text, sentence) => [text.trimEnd(), sentence].filter((part) => part !== '').join('\n\n'),
+): T {
+  if (offered.length === 0) return body;
+  const offeredIds = new Set(offered.map((chip) => chip.id));
+  const idOf = (chip: unknown): unknown => (chip as { id?: unknown } | null | undefined)?.id;
+  const actions: unknown[] = Array.isArray(body.suggested_actions) ? body.suggested_actions : [];
+  const kept = actions.filter((chip) => !offeredIds.has(idOf(chip) as string) || survives(chip));
+  const shown = new Set(kept.map(idOf).filter((id) => offeredIds.has(id as string)));
+  if (shown.size === offeredIds.size) return body;
+  const sentence = [
+    shown.size === 0 ? RESEARCH_NOT_ON_OFFER_TEXT : RESEARCH_ONLY_SHOWN_TEXT,
+    ...(offered.some((chip) => !survives(chip)) ? [RESEARCH_WORDING_REASON_TEXT] : []),
+  ].join(' ');
+  return { ...body, suggested_actions: kept, assistant_text: place(typeof body.assistant_text === 'string' ? body.assistant_text : '', sentence) } as T;
+}
+
 /** The ONE Responses request: the approved query only, native web search required and bounded, sources included. */
 export function researchRequestBody(query: string, model: string): Record<string, unknown> {
   return {
