@@ -88,6 +88,8 @@ import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-ev
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../orchestrator-v5/agent-lane/runtime/widen-draft.js';
+import { preconditionRiskIds } from '../graph/inert-risk.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -579,11 +581,12 @@ function userTextsForEgress(typed: readonly string[], knownRows?: RecentTextRows
 async function decisionLinesAskedOnce(
   graph: unknown, ctx: DecisionInputAskContext, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined,
 ): Promise<string[]> {
-  const lines = decisionInputLines(graph, ctx);
+  const inputAskGraph = withoutWidenedRisksForInputAsk(graph);
+  const lines = decisionInputLines(inputAskGraph, ctx);
   if (!lines.some(isDecisionInputAsk) || typeof store.readRecent !== 'function') return lines;
   try {
     const recentReplies = await recentAgentReplies(store, scenarioId, exceptTurnId);
-    return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies }) : lines;
+    return recentReplies.length > 0 ? decisionInputLines(inputAskGraph, { ...ctx, recentReplies }) : lines;
   } catch (err) {
     log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
     return lines;
@@ -618,6 +621,41 @@ function withCellHorizon(text: string, graph: unknown, cells: readonly Canonical
     untestedHorizonLine(graph, { besideChance: true, plural: true }), untestedHorizonLineForCells(graph, [])];
   for (const variant of new Set(variants)) if (variant !== null && variant !== line) text = text.replaceAll(variant, line ?? '');
   return text;
+}
+
+/** The latest successful build's typed receipt owns the draft words; narrator prose is never a receipt. */
+function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
+  for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
+    const call = result.tool_calls[i]!;
+    if (call.name !== 'build_model_from_brief' || !call.ok || !call.mutated) continue;
+    const raw = result.tool_results[i]?.widened;
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const counts = raw as Partial<WidenCounts>;
+    return typeof counts.options === 'number' && Number.isSafeInteger(counts.options) && counts.options >= 0
+      && typeof counts.risks === 'number' && Number.isSafeInteger(counts.risks) && counts.risks >= 0
+      ? { options: counts.options, risks: counts.risks } : null;
+  }
+  return null;
+}
+
+/** Persisted draft-widening provenance, not a risk's label or generic AI origin, owns Run disclosures. */
+function widenedRunWordsOf(graph: unknown): { widenedRiskNote?: string; widenedRiskMarker?: string } {
+  const nodes = (graph as { readonly nodes?: readonly GraphV3T['nodes'][number][] } | null | undefined)?.nodes;
+  const addedRisks = Array.isArray(nodes) ? nodes.filter(node => node?.kind === 'risk'
+    && node.draft_widening?.provenance === 'ai_suggested_widen') : [];
+  const note = widenedRiskNote({ options: 0, risks: addedRisks.length });
+  const marker = widenedRiskMarker(addedRisks);
+  return note === null || marker === null ? {} : { widenedRiskNote: note, widenedRiskMarker: marker };
+}
+
+/** Widening owns these excluded risks' disclosure. The older input ask only understands RC3's relies_on stamp. */
+function withoutWidenedRisksForInputAsk(graph: unknown): unknown {
+  const g = graph as GraphV3T | null | undefined;
+  if (!Array.isArray(g?.nodes) || !Array.isArray(g.edges)) return graph;
+  const excluded = preconditionRiskIds(g.nodes, g.edges, (g.goal_constraints ?? []).map(c => c.node_id));
+  const nodes = g.nodes.filter(node => !(excluded.has(node.id)
+    && node.draft_widening?.provenance === 'ai_suggested_widen'));
+  return nodes.length === g.nodes.length ? graph : { ...g, nodes };
 }
 
 /** The final scenario read owns the UI's cells; missing authority never licenses a substitute projection. */
@@ -2371,7 +2409,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
           rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
-          replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
+          replayText = withA7AfterGate(rebuilt, withoutWidenedRisksForInputAsk(state.graph), atRest, null);
           const guidedReplayFinding = replayGuidedText !== null && replayText.includes(replayGuidedText) ? replayGuidedText : null;
           replayObligations = [
             ...(guidedReplayFinding === null ? [] : [{ role: 'host' as const, text: guidedReplayFinding,
@@ -2471,6 +2509,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
+          ...widenedRunWordsOf(state.graph),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}) });
@@ -4733,7 +4772,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
     if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
-      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
+      const withA7 = withA7AfterGate(wireBody.assistant_text, withoutWidenedRisksForInputAsk(readbackGraph), decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
 
     }
@@ -4849,7 +4888,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
-      const reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
+      let reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
@@ -4858,6 +4897,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const faceContract = result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true)
         ? 'draft' as const : fastPath === 'run' || fastPath === 'explain' || screenLines.length > 0 || goalChanceOwed !== null || coHold !== undefined
           ? 'run' as const : undefined;
+      const widenCounts = widenedCountsOfBuild(result);
+      const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
+      const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
+        ? widenedRunWordsOf(readbackGraph) : {};
+      const widenNote = runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts));
+      // The build keeps its Draft receipt after H even when it also ran. Bind that Run's marker beside its chance.
+      const firstRunRiskMarker = faceContract === 'draft' && screenLines.length > 0
+        ? runWidenWords.widenedRiskMarker : undefined;
+      if (firstRunRiskMarker !== undefined && !reply.includes(firstRunRiskMarker)) reply = withDisclosures(reply, [firstRunRiskMarker]);
       const horizonLine = faceContract === 'run' ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;
       const whatChanges = faceContract === 'run' && selectedRunCurrent && (fastPath !== 'explain' || explainsCurrentRun)
         ? whatChangesFaceLine(analysisResult, readbackGraph ?? null) : null;
@@ -4870,6 +4918,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const guidedRunFinding = faceContract === 'run' && guidedReplyText.guided !== null && reply.includes(guidedReplyText.guided)
         ? guidedReplyText.guided : undefined;
       const obligations: FaceObligation[] = [
+        ...(firstRunRiskMarker === undefined ? [] : [{ role: 'caveat' as const, text: firstRunRiskMarker,
+          subjects: screenLines.map(line => line.option_id) }]),
         ...(guidedRunFinding === undefined ? [] : [{ role: 'host' as const, text: guidedRunFinding, lead: true as const,
           ownsNextStep: true as const }]),
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
@@ -4945,6 +4995,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         text: reply,
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
+        ...(widenReceipt === null ? {} : { widenedLine: widenReceipt }),
+        ...(widenNote === null ? {} : { widenedRiskNote: widenNote }),
+        ...(runWidenWords.widenedRiskMarker === undefined ? {} : { widenedRiskMarker: runWidenWords.widenedRiskMarker }),
         ...(horizonLine === null ? {} : { horizonLine }),
         ...(whatChanges === null ? {} : { whatChanges }),
         ...(faceContract !== undefined && profile === 'coaching' && estimates !== null && estimates.count > 0
