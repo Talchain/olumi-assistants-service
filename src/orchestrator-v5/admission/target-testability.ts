@@ -1,5 +1,5 @@
 import { linkList } from '../agent-lane/unsized-path-cause.js';
-import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity-evaluations.js';
+import { evaluatedIdentityCarriers, exactIdentityOperandLinks, identityCanCarryExactLinks } from './identity-evaluations.js';
 /**
  * ⭐ IS THE GOAL'S TARGET TESTABLE, BEFORE ANY RUN (DECISION-REPRESENTATION-v1 row 4; PTL A #77 5912737934).
  *
@@ -249,7 +249,8 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
     }
   }
   const operands = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
-  const exactLinks = new Set(edges.filter(e => (isRec(e.provenance) && e.provenance.definitional === true) || operands.has(e)));
+  const exactLinks = new Set(edges.filter(e => (isRec(e.provenance) && e.provenance.definitional === true
+    && identityCanCarryExactLinks(nodes, byId.get(e.to)?.nonlinear_identity)) || operands.has(e)));
   const reached = new Set<unknown>();
   const paths = ids.map(option_id => {
     const seen = new Set<unknown>(seeds.get(option_id) ?? []);
@@ -344,7 +345,8 @@ export function targetTestabilityOf(
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
     const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
-    const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false).map((n) => n.id));
+    const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false
+      && identityCanCarryExactLinks(nodes, n.nonlinear_identity)).map((n) => n.id));
     // An inferred identity THIS Run evaluated carries only its OWN operand links exactly, as the licence reads them
     // (`reachedGoalPaths` exactLinks); any other link into it stays a guess (Codex buddy r1 F2, #2644).
     const evaluatedOperand = (e: Record<string, unknown>): boolean => {
