@@ -150,7 +150,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import type { FactorEnrichmentT } from '../schemas/enrichment.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
+import { readStoredOptionParticipation, runOptionSetForCopy, type RecordedRunOptionSet, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { claimPermissionsFrom, type ClaimPermissions } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { readRunRecordingMarker, type RunRecordingMarker } from '../orchestrator-v5/run-recording.js';
@@ -220,6 +220,8 @@ export interface ScenarioAnalysisRead {
    * ABSENT when the fact records none (an older Run): a consumer then may not infer a cause from the node.
    */
   readonly analysis_option_participation?: StoredOptionParticipation;
+  /** The SAME selected fact's complete option roster. The display block intentionally omits input_snapshot. */
+  readonly analysis_run_option_set?: RecordedRunOptionSet;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the SELECTED fact's engine evaluated (`identity_evaluations`,
    * `evaluated: true`, read by `evaluatedIdentityNodeIds` off the fact's own `enrichment`) under the SAME gates as
@@ -682,7 +684,10 @@ export async function readScenarioAnalysis(
             // 52f8cd: the Olumi options the selected Run left out, and why — the ONE reader both legs use.
             ...(() => {
               const participation = readStoredOptionParticipation((fact.result as { option_participation?: unknown }).option_participation);
-              return participation === undefined ? {} : { analysis_option_participation: participation };
+              return {
+                ...(participation === undefined ? {} : { analysis_option_participation: participation }),
+                analysis_run_option_set: runOptionSetForCopy(fact.result, participation, params.graph),
+              };
             })(),
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }

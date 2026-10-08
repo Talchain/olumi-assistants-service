@@ -411,6 +411,11 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // about what the file DOES, not about which words it contains.
     // 7 Oct 2026 (W9c #2724) — INCIDENTAL. The pre-mortem checker's decision-claim pattern rejects comparative
     // designations of an option ("the stronger option", "strongest option"); a leader-claim guard, not a magnitude.
+    // 8 Oct 2026 (RC4 slice 1, #2812) — INCIDENTAL. The narrator count backstop recognises COUNT words ("nine",
+    // "twenty-one") and figure nouns ("values", "link sizes", "strengths") to remove a sentence stating how many of
+    // Olumi's figures there are; it never reads, maps or emits a magnitude band.
+    'orchestrator-v5/agent-lane/olumi-estimates-feeding-result.ts':
+      'Count-word detector for the RC4 narrator backstop (sentence removal); no magnitude alphabet, no band word->value map.',
     'orchestrator-v5/agent-lane/guidance/method-turn-check.ts':
       'Leader-claim pattern ("stronger/strongest option") in the pre-mortem checker; no alphabet, no word->value map, no parsing.',
     'orchestrator-v5/replacement/system-prompt.ts':

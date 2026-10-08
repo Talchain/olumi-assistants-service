@@ -12,6 +12,7 @@ function facts(over: Partial<ActionFacts> = {}): ActionFacts {
     estimateCandidates: [],
     estimateDriverIds: [],
     olumiEstimateCount: 0,
+    olumiEstimates: null,
     revision: { graph_hash: null, run_key: null },
     stateKey: '',
     readable: true,
