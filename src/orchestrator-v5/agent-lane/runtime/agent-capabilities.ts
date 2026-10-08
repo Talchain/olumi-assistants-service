@@ -8844,6 +8844,20 @@ export function createAgentCapabilities(
       // the user stated in this message, else its own (a new figure alone keeps it: `limit-edit.ts`).
       const nowOp = statedOperatorOf(row) ?? operator;
       const becomesOp = stated ?? nowOp;
+      // S4's loss line does not authorise relaxing a tighter held limit. In this same level/unit,
+      // the held endpoint meeting the inclusive loss ceiling makes its entire upper range safe,
+      // including a strict held endpoint or an equal inclusive limit. Both proposal doors pass here.
+      if (lossBound !== null && interpretation !== null && operator === lossBound.operator
+        && meetsLimit(before, lossBound.operator, lossBound.raw_value) === true) {
+        const label = typeof row['label'] === 'string' && row['label'].trim() !== '' ? row['label'] : node.label;
+        // An equal inclusive limit is not tighter: it already sits on the line.
+        const same = nowOp !== '<' && before === lossBound.raw_value;
+        const reply = `Your limit already keeps ‘${label}’ ${nowOp === '<' ? 'under' : 'at or below'} ${figureOf(before)}, `
+          + (same ? `the line where you'd lose money, so I've left it as is.`
+            : `which is tighter than the ${limitFigure(lossBound.raw_value, lossBound.unit)} where you'd lose money, so I've left it as is.`);
+        return { ok: false, mutated: false, refusal: 'limit_already_tighter', reply,
+          detail: `Say exactly this one line, once, with no chip: ${reply}` };
+      }
       if (before === value && becomesOp === nowOp) {
         return { ok: false, mutated: false, refusal: 'already_that_figure',
           detail: `The limit on "${node.label}" is already ${figureOf(value)}, so nothing needs to change. Tell the user so.` };
