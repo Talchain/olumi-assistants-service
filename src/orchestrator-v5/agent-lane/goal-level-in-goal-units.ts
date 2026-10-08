@@ -11,6 +11,7 @@
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { readMoneyTotal, readUnitParts } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
+import { levelBeforeTermsTail } from './identity-proposal.js';
 
 export const GOAL_LEVEL_FROM_IDENTITY_INPUTS = 'GOAL_LEVEL_FROM_IDENTITY_INPUTS';
 /** ISL's template (robustness_analyzer_v2.py): `{level:,.2f} in its own units;`. Bounded: no backtracking run. */
@@ -50,7 +51,8 @@ function sayGoalLevels(warnings: unknown, graph: unknown): unknown {
     const goal = Array.isArray(nodes)
       ? nodes.map(rec).find((n) => n !== undefined && (id !== undefined ? n.id === id : n.kind === 'goal')) : undefined;
     changed = true;
-    return { ...r, message: r.message.replace(OWN_UNITS, `: ${goalLevelWords(value, goal)};`) };
+    // Science goals §(i) (2): a level its inputs give is BEFORE a "less"/"plus" term with no figure yet (served 7f9fe459).
+    return { ...r, message: r.message.replace(OWN_UNITS, `: ${goalLevelWords(value, goal)}${levelBeforeTermsTail(graph)};`) };
   });
   return changed ? next : warnings;
 }
