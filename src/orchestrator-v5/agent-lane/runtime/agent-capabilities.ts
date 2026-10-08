@@ -2423,9 +2423,12 @@ export function createAgentCapabilities(
       const into = after!.edges.filter((e) => e.to === rid);
       // Opens `Added "<label>"` exactly as the option sentence does: an unquoted "Added the …" is a model-style completion
       // claim the write narrator strips (`write-outcome.ts` CLAIM_OPENER), which dropped this whole sentence (measured).
-      sentences.push(`Added "${String(risk.label ?? rid)}" as a risk, affecting ${out.map((e) => labelOf(e.to)).join(', ')}`
-        + (into.length > 0 ? ` and driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : '')
-        + `; ${howStronglyWords([...out, ...into])}`);
+      // Only the ties it HAS are said (DL 58e392, 8 Oct; Paul's try-guide step 12 read "affecting ;" for a precondition
+      // risk with no out-link): no empty list, and no "how strongly" with no link to size.
+      const ties = [out.length > 0 ? `affecting ${out.map((e) => labelOf(e.to)).join(', ')}` : '',
+        into.length > 0 ? `driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : ''].filter((t) => t !== '');
+      sentences.push(`Added "${String(risk.label ?? rid)}" as a risk${ties.length > 0 ? `, ${ties.join(' and ')}` : ''}`
+        + (out.length + into.length > 0 ? `; ${howStronglyWords([...out, ...into])}` : '.'));
     }
     // ⭐ PJ-E-FIG: the factors the add-factor door added, each with the user's figure (`GM_HELD_USER_TODAY_KEY`).
     const userTodayMember = readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) ?? [];
@@ -8841,6 +8844,20 @@ export function createAgentCapabilities(
       // the user stated in this message, else its own (a new figure alone keeps it: `limit-edit.ts`).
       const nowOp = statedOperatorOf(row) ?? operator;
       const becomesOp = stated ?? nowOp;
+      // S4's loss line does not authorise relaxing a tighter held limit. In this same level/unit,
+      // the held endpoint meeting the inclusive loss ceiling makes its entire upper range safe,
+      // including a strict held endpoint or an equal inclusive limit. Both proposal doors pass here.
+      if (lossBound !== null && interpretation !== null && operator === lossBound.operator
+        && meetsLimit(before, lossBound.operator, lossBound.raw_value) === true) {
+        const label = typeof row['label'] === 'string' && row['label'].trim() !== '' ? row['label'] : node.label;
+        // An equal inclusive limit is not tighter: it already sits on the line.
+        const same = nowOp !== '<' && before === lossBound.raw_value;
+        const reply = `Your limit already keeps ‘${label}’ ${nowOp === '<' ? 'under' : 'at or below'} ${figureOf(before)}, `
+          + (same ? `the line where you'd lose money, so I've left it as is.`
+            : `which is tighter than the ${limitFigure(lossBound.raw_value, lossBound.unit)} where you'd lose money, so I've left it as is.`);
+        return { ok: false, mutated: false, refusal: 'limit_already_tighter', reply,
+          detail: `Say exactly this one line, once, with no chip: ${reply}` };
+      }
       if (before === value && becomesOp === nowOp) {
         return { ok: false, mutated: false, refusal: 'already_that_figure',
           detail: `The limit on "${node.label}" is already ${figureOf(value)}, so nothing needs to change. Tell the user so.` };

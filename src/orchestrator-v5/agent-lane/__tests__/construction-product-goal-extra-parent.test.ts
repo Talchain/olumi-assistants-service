@@ -164,4 +164,73 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
     const { graph } = await build(draft((c) => { c.links[3].effect_amount = null; c.links[3].effect_per_source_change = null; c.links[3].effect_provenance = null; }));
     expect(edge(graph, 'Monthly churn', 'Paying subscribers')).toBeUndefined();
   });
+
+  /**
+   * Science goals §(e) addendum 6 + its correction (8 Oct, P48 552acb7d on CEE b7653047): the drafter typed the volume
+   * operand "Pro paying subscribers" as an OUTCOME (no unit, no level), so the volume lookup over factors found nothing and
+   * Olumi's placeholder risk "Price sensitivity" (caused only by the price) stayed straight into MRR: no card on Paul's brief.
+   */
+  const outcomeVolume = (edit: (c: Json) => void = () => {}) => draft(c => {
+    // Paul's brief states only the TARGET (552acb7d's goal has no current level), so §(e) condition 4 is vacuous there.
+    Object.assign(c.goal, { baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
+    c.factors = c.factors.filter((f: Json) => f.label !== 'Paying subscribers');
+    c.outcomes = [{ label: 'Paying subscribers', provenance: 'inferred' }];
+    c.risks = [{ label: 'Price sensitivity', provenance: 'ai_proposed' }];
+    c.links = [
+      link('Pro plan price', 'Monthly recurring revenue', 'positive'),
+      link('Paying subscribers', 'Monthly recurring revenue', 'positive'),
+      link('Pro plan price', 'Monthly churn', 'positive', 0.5, 10, 'ai_proposed'),
+      link('Monthly churn', 'Paying subscribers', 'negative', -12, 1, 'ai_proposed'),
+      link('Pro plan price', 'Price sensitivity', 'positive'),
+      link('Price sensitivity', 'Monthly recurring revenue', 'negative'),
+    ];
+    edit(c);
+  });
+  it('ROW (add. 6, 552acb7d shape): an OUTCOME volume operand is the volume — Olumi\'s price-only risk is kept out of the Run (the price already reaches subscribers via churn) and the card is offered', async () => {
+    const { model, found } = rerouteExtraParentsOfProductGoal(outcomeVolume(), BRIEF);
+    expect(found).toEqual([expect.objectContaining({ kind: 'kept_out_already_carried', from: 'Price sensitivity', volume: 'Paying subscribers', via: ['Monthly churn'] })]);
+    expect((model.risks ?? []).find(r => r.label === 'Price sensitivity')?.analysis_participation).toBe('retained_excluded');
+    const { graph } = await build(outcomeVolume());
+    expect(proposeProductIdentity(graph)).not.toBeNull();
+  });
+  it('ROW (add. 6): with no other price → subscribers route, the unsized risk link is RE-POINTED to the outcome volume; the card is offered', async () => {
+    const shape = (c: Json) => { c.links = c.links.filter((l: Json) => !(l.from === 'Monthly churn' && l.to === 'Paying subscribers')); };
+    const { found } = rerouteExtraParentsOfProductGoal(outcomeVolume(shape), BRIEF);
+    expect(found).toEqual([expect.objectContaining({ kind: 'rerouted_unsized', from: 'Price sensitivity', volume: 'Paying subscribers' })]);
+    const { graph } = await build(outcomeVolume(shape));
+    expect(edge(graph, 'Price sensitivity', 'Paying subscribers')).toBeDefined();
+    expect(edge(graph, 'Price sensitivity', 'GOAL')).toBeUndefined();
+    expect(proposeProductIdentity(graph)).not.toBeNull();
+  });
+  const noAltRoute = (c: Json) => { c.links = c.links.filter((l: Json) => !(l.from === 'Monthly churn' && l.to === 'Paying subscribers')); };
+  it('Codex r1 P1-3: a risk the USER named (explicit), with no other price route, is never re-pointed — the link stays into MRR', () => {
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.risks = [{ label: 'Price sensitivity', provenance: 'explicit' }]; });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
+    expect(found).toEqual([]);
+    expect(model.links.filter(l => l.from === 'Price sensitivity').map(l => l.to)).toEqual(['Monthly recurring revenue']);
+  });
+  it('Codex r1 P1-2: a SIZED link into the goal is never converted into an outcome volume (no unit to state it in)', () => {
+    // Churn must NOT already reach the volume (else it is an addend, kept before the sized branch is reached).
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.links.push(link('Monthly churn', 'Monthly recurring revenue', 'negative', -735, 1, 'ai_proposed')); });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
+    expect(found.some(f => f.kind === 'rerouted')).toBe(false);
+    expect(model.links.some(l => l.from === 'Monthly churn' && l.to === 'Monthly recurring revenue' && l.effect_amount === -735)).toBe(true);
+  });
+  it('Codex r1 P2: a DEFINITIONAL link into the goal is an addend — kept where it is, even with an outcome volume', () => {
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.links.find((l: Json) => l.from === 'Price sensitivity' && l.to === 'Monthly recurring revenue').definitional = true; });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
+    expect(found).toEqual([]);
+    expect(model.links.filter(l => l.from === 'Price sensitivity').map(l => l.to)).toEqual(['Monthly recurring revenue']);
+  });
+  it('CONTROL (add. 6 correction: never a user-authored link): the USER stated the risk → MRR link, no other route → left exactly as drafted, no card', async () => {
+    const shaped = outcomeVolume(c => { noAltRoute(c); c.links.find((l: Json) => l.from === 'Price sensitivity' && l.to === 'Monthly recurring revenue').provenance = 'explicit'; });
+    const { model, found } = rerouteExtraParentsOfProductGoal(shaped, BRIEF);
+    expect(found).toEqual([]);
+    expect(model.links.filter(l => l.from === 'Price sensitivity').map(l => l.to)).toEqual(['Monthly recurring revenue']);
+    expect(proposeProductIdentity((await build(shaped)).graph)).toBeNull();
+  });
+  it('CONTROL: an outcome that is NOT an operand of the declared product is never the volume', () => {
+    const { found } = rerouteExtraParentsOfProductGoal(outcomeVolume(c => { c.identities[0].factors = ['Pro plan price', 'Something else']; }), BRIEF);
+    expect(found).toEqual([]);
+  });
 });
