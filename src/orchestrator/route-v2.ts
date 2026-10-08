@@ -158,7 +158,9 @@ import {
 } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { GraphStaleWriteError } from '../orchestrator-v5/build-turn-context.js';
+import { isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
 import type { GraphConflictFailureDetails } from '../orchestrator-v5/graph-conflict-recovery-keys.js';
+import { useAppendV6 } from '../orchestrator-v5/append-v6-flag.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
 // handed to the transport; see the draft_graph branch below).
 import { scheduleAutoRunAfterFreshDraft } from '../orchestrator-v5/handlers/auto-run-after-draft.js';
@@ -3531,6 +3533,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             event_kind: ingress.event.kind,
             recovery_action: sysResult.graphConflict.recovery_action,
             conflict_category: sysResult.graphConflict.conflict_category,
+            ...(sysResult.graphConflict.conflict_category === 'revision_conflict'
+              ? { expected: sysResult.graphConflict.expected, current: sysResult.graphConflict.current }
+              : {}),
             expected_base_graph_hash:
               sysResult.graphConflict.expected_base_graph_hash,
             ...(sysResult.graphConflict.edge !== undefined
@@ -3546,7 +3551,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           },
           'V5 system event graph conflict — returning 409 with refresh-reconfirm BoundaryError envelope',
         );
-        return reply.code(409).send(boundaryError);
+        return reply.code(409).send(withRevisionConflictWire(boundaryError, sysResult.graphConflict));
       }
       // ⭐ A VERIFIED NO-OP IS A SUCCESS, NOT A FAILURE. The server looked and the
       // model already holds what was asked for. Nothing committed, nothing
@@ -4588,6 +4593,26 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       priorTurnsRead === 'unknown' || fenceReadFromShortCircuit === 'unknown';
     const isContinuationScenario =
       hasPriorCommittedTurns || admittedLiveTurnFromShortCircuit || continuationReadUnknown;
+    // The combined snapshot is used only by the dormant v6 path. OFF keeps
+    // staging's strict graph reader, memo, read order and failure handling.
+    let persistedScenarioStateMemo:
+      | { readonly ok: true; readonly value: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> }
+      | { readonly ok: false; readonly error: unknown }
+      | null = null;
+    const loadPersistedScenarioStateOnce = async (): Promise<Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>> => {
+      if (persistedScenarioStateMemo === null) {
+        try {
+          persistedScenarioStateMemo = {
+            ok: true,
+            value: await loadPersistedScenarioStateStrict(ingress.scenario_id),
+          };
+        } catch (err) {
+          persistedScenarioStateMemo = { ok: false, error: err };
+        }
+      }
+      if (!persistedScenarioStateMemo.ok) throw persistedScenarioStateMemo.error;
+      return persistedScenarioStateMemo.value;
+    };
     // ROADMAP 2.308 / System B — ONE route-level strict graph read, shared by
     // no-model unstranding, semantic empty-workspace intake, configure-option
     // anchoring, and the edit-lane reload below. TurnExecutor may later perform
@@ -4599,6 +4624,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       | { readonly ok: false; readonly error: unknown }
       | null = null;
     const loadPersistedGraphOnce = async (): Promise<unknown> => {
+      if (useAppendV6()) return (await loadPersistedScenarioStateOnce()).graph;
       if (persistedGraphMemo === null) {
         try {
           persistedGraphMemo = {
@@ -5681,9 +5707,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             recovery_action: 'refresh_and_reconfirm',
             conflict_category: err.conflict_category,
             expected_base_graph_hash: err.expected_base_graph_hash ?? null,
+            ...readRevisionConflictDetails(err),
           } satisfies GraphConflictFailureDetails;
           const { phase: _phase, ...recoveryKeys } = recovery;
-          return reply.code(409).send(buildCommitFailureBoundaryError({
+          return reply.code(409).send(withRevisionConflictWire(buildCommitFailureBoundaryError({
             validator: 'turn_commit',
             reason: 'graph_write_conflict',
             retryable: false,
@@ -5691,7 +5718,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             stage: ingress.stage,
             errorCode: 'GRAPH_DIVERGED',
             preStageExtras: { failure_type: 'GRAPH_DIVERGED', ...recoveryKeys },
-          }));
+          }), recovery));
         }
         // The unified pipeline threw — surface a typed BoundaryError. The
         // dispatcher already logged the details; re-log here with the
@@ -8266,6 +8293,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
           request: req,
           graphState: effectiveGraphState!,
+          // ON only: graph and revision come from the same server snapshot.
+          // OFF passes exactly staging's dispatcher arguments.
+          ...(useAppendV6() && resolvedGraphState !== null
+            ? { persistedEditBase: await loadPersistedScenarioStateOnce() }
+            : {}),
           analysisState: extensions.analysisState ?? null,
           // System B edit continuity: carry identities only. The dispatcher
           // resolves them against this exact edit graph and admits prompt focus
@@ -8384,6 +8416,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
         }
       } catch (err) {
+        if (isRevisionConflict(err)) {
+          const recovery = { conflict_category: err.conflict_category, ...readRevisionConflictDetails(err) };
+          return reply.code(409).send(withRevisionConflictWire(buildCommitFailureBoundaryError({
+            validator: 'turn_commit', reason: 'graph_write_conflict', retryable: false,
+            requestId, stage: ingress.stage, errorCode: 'GRAPH_DIVERGED',
+            preStageExtras: { failure_type: 'GRAPH_DIVERGED', recovery_action: 'refresh_and_reconfirm', ...recovery },
+          }), recovery));
+        }
         log.error(
           {
             request_id: requestId,
@@ -8804,7 +8844,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           'V5 turn — graph CAS conflict; returning 409 with refresh-reconfirm BoundaryError envelope',
         );
         // 409: recoverable divergence — nothing clobbered (txn rolled back).
-        return reply.code(409).send(boundaryError);
+        return reply.code(409).send(withRevisionConflictWire(boundaryError, {
+          conflict_category: typeof conflictRecovery?.conflict_category === 'string'
+            ? conflictRecovery.conflict_category : '',
+          expected: typeof conflictRecovery?.expected === 'number' ? conflictRecovery.expected : undefined,
+          current: typeof conflictRecovery?.current === 'number' ? conflictRecovery.current : undefined,
+        }));
       }
       log.error(
         {
