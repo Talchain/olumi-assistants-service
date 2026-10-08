@@ -318,6 +318,8 @@ export interface HandlerInvocation {
     readonly limitChange?: import('../routing/baseline-answer-mutation.js').BaselineLimitChange;
   };
   /** Existing server-side proposal frame, relayed only after exact confirmed-tuple matching. */
+  /** Approved S4 limit wording, verbatim from the proposing message (max 200). */
+  readonly confirmedConstraintSourceQuote?: string;
   readonly confirmedConstraintValueFrame?: import('@talchain/schemas').GoalThresholdFrameType;
   /**
    * ⭐ A2 follow-up (DL verdict on #2180): the comparator the user STATED for the limit on this write, TYPED (the Agent's

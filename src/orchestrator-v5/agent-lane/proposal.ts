@@ -88,6 +88,8 @@ export interface ProposalOperation {
      * user's. Never adds a limit, never the goal's own target.
      */
     | 'set_limit'
+    /** S-E S4: one new limit on an existing quantity, via add_constraint. */
+    | 'add_limit'
     /**
      * ⭐ ONE LINK OF A SET OF LINK STRENGTHS (DL #72 5871594233; seam Canonical 5871633483) — `path` is `from::to`, `value`
      * is `{magnitude, intent, expected, band, author}`. A set is written ONLY whole: every link through the canonical link
