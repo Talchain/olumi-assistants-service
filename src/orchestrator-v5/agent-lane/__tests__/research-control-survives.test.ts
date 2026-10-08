@@ -212,17 +212,17 @@ describe('an accepted search offer has its control on the wire', () => {
     const b = await turn();
     expect(controls(b)).toEqual([]);
     expect(b.assistant_text, 'the gate edited the sentence that named a leader').not.toContain('is the best option');
-    // Contract order (i): "RESEARCH_* words stay on the face per #2746". The composer places the two fixed
-    // control-truth lines in separate face bullets, then the next step; their old contiguous suffix is not the contract.
-    expect(b._answer_shape, 'the delivered research truth has a shaped face').toBeDefined();
-    const shape = b._answer_shape!;
-    const face = [shape.headline, ...(shape.bullets ?? [])].join('\n');
+    // Contract (#2746, #2843): RESEARCH_* words are never hidden behind "More detail". A shaped reply carries them on its
+    // face; a reply short enough to ship whole (no shape, so no detail) shows every word at rest. #2843 r11b dropped the
+    // leader closing as a chance-refusal source, so this 48-word reply now ships whole, which also meets the contract.
+    const shape = b._answer_shape;
+    const face = shape === undefined ? b.assistant_text : [shape.headline, ...(shape.bullets ?? [])].join('\n');
     for (const truth of [RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_WORDING_REASON_TEXT]) {
       expect(b.assistant_text.split(truth).length - 1, `delivered exactly once: ${truth}`).toBe(1);
       expect(face.split(truth).length - 1, `must-face research truth: ${truth}`).toBe(1);
-      expect(shape.detail ?? '', 'no research truth is hidden or duplicated in detail').not.toContain(truth);
+      if (shape !== undefined) expect(shape.detail ?? '', 'no research truth is hidden or duplicated in detail').not.toContain(truth);
     }
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
+    if (shape !== undefined) expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
   });
 
   it('CONTRAST: the same turn with a neutral query keeps its control, and nothing is added to the reply', async () => {
