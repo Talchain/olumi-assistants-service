@@ -1,0 +1,66 @@
+{
+  "generated_at_utc": "2026-10-08T08:24:35.296692+00:00",
+  "branch": "dl/event-risk-precondition-offer",
+  "head": "b31021623cfb13c43d395e9e0dbf1e6751c4a482",
+  "checks": {
+    "targeted": {
+      "passed": 71,
+      "failed": 0
+    },
+    "RC3_widen_regressions": {
+      "passed": 54,
+      "failed": 0
+    },
+    "base_offer_corpus": {
+      "failed": 18,
+      "passed": 8,
+      "skipped": 26
+    },
+    "punctuation_before_fix": {
+      "failed": 5
+    },
+    "canonical_race_before_fix": {
+      "failed": 1
+    },
+    "trigger_false_mutant": {
+      "failed": 1,
+      "passed": 3
+    },
+    "baseline_mutant": {
+      "failed": 4
+    },
+    "source_typecheck": "passed",
+    "targeted_lint": "passed",
+    "diff_check": "passed"
+  },
+  "limitations": [
+    "Corpus raw model arguments absent; nine inputs explicitly reconstructed",
+    "No merge/deployment; two-draw served witness outstanding",
+    "Existing new-offer replay predicate unchanged"
+  ],
+  "files": {
+    "src/orchestrator-v5/routing/chat-risk-precondition.ts": "94b2721577f804ad1ba9da8bd95bb87dc71a76c3040e3792bfd78761b205b65a",
+    "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": "a263df0689be2f34d0ac3608a0ef071ee8197e80fa5a93b861ca7cc21c254d60",
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "240ddfc827fe82f376c1ea42d25446fab4747b1197f972415b992f03b72df5e3",
+    "src/routes/agent-v1-turn.ts": "fafef713833298d7331dd9ddce58d8dcebf68edd2113455e5e08797ac6494360",
+    "src/orchestrator-v5/agent-lane/proposal-reply.ts": "5ac877a527eb101f3a81e21c6bbacf6684a04a4ebfdaa63b1d6f7bafb2e0879c",
+    "src/orchestrator-v5/agent-lane/__tests__/agent-chat-precondition-door-seam.test.ts": "5a97f5cb70c0d8392784dc7fafa15d033293e72f47e30902e008044d443964af",
+    "src/orchestrator-v5/routing/__tests__/chat-risk-precondition-offer.test.ts": "4cfbc05b13621689f76a5a6f9f5bc88d42559cbc60318bb58fab88b08e4177e6",
+    "src/orchestrator-v5/agent-lane/__tests__/fixtures/chat-precondition/p44-six-served-draws.json": "e01189922603d2dcd9e93e7c95a254346999b2d81dcc7205cbe3cb92e6d2df4a",
+    "src/orchestrator-v5/agent-lane/__tests__/fixtures/chat-precondition/stored-runner-add-risk-corpus.json": "ea7009951dd7b923ab37e346267a22485dacb54e4a394b676ec91abcfdfa6335",
+    "acceptance-evidence/chat-precondition-offer/RC3-widen-regressions.log": "5b5fc54f71706cb0d692985bb7c78c2fb1ae941ed7f4ad0fe64ab47ded6d409a",
+    "acceptance-evidence/chat-precondition-offer/RED-canonical-read-race.log": "01daf13ebdbc332649ccf8bf210481e2936a96b1f5b759a2d299d1b427487384",
+    "acceptance-evidence/chat-precondition-offer/RED-on-base-corpus.log": "39d9718282ce6ce60f0daea21fa2508f9a2435de88150205529bf4dc5b0e7001",
+    "acceptance-evidence/chat-precondition-offer/RED-on-base.log": "0d0fbfdf542dc8be3fa42ff5d64087fefd857a387f0c1b4a00275535caf33a23",
+    "acceptance-evidence/chat-precondition-offer/RED-punctuation.log": "230ba64f22751665a15637952fbb866d626aa4937d7489668a44c6fc8773674d",
+    "acceptance-evidence/chat-precondition-offer/REPORT.md": "60645cf643d375558255cd902c4c18429eccd30ff5e3b93a23c78429f84cdb32",
+    "acceptance-evidence/chat-precondition-offer/check-mutants.py": "9e9fab74cec09aec567ad7f9572462c148f220b99e83bf5672013a5115bc62f0",
+    "acceptance-evidence/chat-precondition-offer/corpus-provenance.md": "40691e8ce7f3599d9b90e2bbedf763fd5c0645934951245b5f0cfbed374f33c8",
+    "acceptance-evidence/chat-precondition-offer/lint.log": "3c23dd552478765e77e8886dd2b250dd1e8062a5821187c71c9676c1a57ffde1",
+    "acceptance-evidence/chat-precondition-offer/mutant-baseline-also-offered.log": "4f6cdf6fee1bab96cf99a558a0819acfb82e305e3bd5a9341d3568227b9eebb7",
+    "acceptance-evidence/chat-precondition-offer/mutant-trigger-always-false.log": "e850dd5cb1c07e0b5d6badcaf6bdaf5740249d81e70988a1105cc9eb301b2bc8",
+    "acceptance-evidence/chat-precondition-offer/mutants.json": "1a70c0a6c2cf39b7210230933ba9780a8b220f2a55d35b43318a4b9842ef48cc",
+    "acceptance-evidence/chat-precondition-offer/targeted-GREEN.log": "71821359418fe0b34767e18f08eaadef1545fa5757a536b90dd5e7e2377f2a02",
+    "acceptance-evidence/chat-precondition-offer/typecheck.log": "3c23dd552478765e77e8886dd2b250dd1e8062a5821187c71c9676c1a57ffde1"
+  }
+}

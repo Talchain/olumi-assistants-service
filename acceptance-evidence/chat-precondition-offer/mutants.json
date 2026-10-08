@@ -1,0 +1,15 @@
+{
+  "restored_source_sha256": "94b2721577f804ad1ba9da8bd95bb87dc71a76c3040e3792bfd78761b205b65a",
+  "rows": [
+    {
+      "mutant": "trigger-always-false",
+      "test_exit": 1,
+      "row_filter": "chat-precondition-offer-(p44|competitor|no-timing|valid-lease)"
+    },
+    {
+      "mutant": "baseline-also-offered",
+      "test_exit": 1,
+      "row_filter": "chat-precondition-offer-(p44|baseline|all-baseline)"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "mutant": "ordinary-card-alongside-choices",
+  "test_exit": 1,
+  "restored_source_sha256": "d5f8fcd3d98a399c25cd2e2be781877d733f4f3faaef4d82007ad343f38127aa",
+  "source_restored": true
+}

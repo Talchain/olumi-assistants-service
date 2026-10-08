@@ -211,7 +211,7 @@ export interface CheckedGraphAppendParams {
     readonly seenByThisRequest: ReadonlySet<string>;
     readonly offeredChipIds?: ReadonlySet<string>;
     /** Re-project the answer sidecar and say capacity lapses from this final pending read, before the append. */
-    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[]) => SessionTurnWrite;
+    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[], latest: readonly PendingAction[]) => SessionTurnWrite;
   };
 }
 
@@ -434,7 +434,7 @@ export async function appendCheckedGraphWrite(
         if (params.heldProposals !== undefined) heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(params.heldProposals.isHeld));
         write = { ...write, pending_actions: merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
       }
-      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
+      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap, prior);
     }
     if (writesGraph) assertNoScopedIdentityConflict(write.graph);
 

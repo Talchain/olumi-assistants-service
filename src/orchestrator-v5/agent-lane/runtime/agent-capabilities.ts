@@ -23,7 +23,8 @@ import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
 import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
 import { parseDrawnLinkPress } from '../drawn-link-press.js';
 import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
-import { chatRiskPreconditionFor } from '../../routing/chat-risk-precondition.js';
+import { chatRiskPreconditionFor, chatRiskPreconditionOffersFor, chatRiskPreconditionOptionsFor, chatRiskPreconditionTimingFor } from '../../routing/chat-risk-precondition.js';
+import { hasRiskPreconditionChoice } from '../chat-risk-precondition-choice.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -2160,8 +2161,8 @@ export function createAgentCapabilities(
     return '';
   };
 
-  const readGraph = async (scenarioId: string): Promise<GraphRead | null> => {
-    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+  const readGraph = async (scenarioId: string, fresh = false): Promise<GraphRead | null> => {
+    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, fresh ? { fresh: true } : {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     const notModelled = notModelledOfRead(r.json.not_modelled);
@@ -2286,6 +2287,12 @@ export function createAgentCapabilities(
     if (hold === undefined) {
       return { ok: false, mutated: false, refusal: 'unknown_proposal', proposal_id: ref,
         detail: 'That change is no longer waiting (it expired, or the model changed since it was offered), so nothing was applied. Offer to prepare it again.' };
+    }
+    // A timing ambiguity keeps the ordinary risk change held, with no approval until the user chooses its meaning.
+    // Check the latest durable hold here too: a guessed approval id cannot bypass the withheld card.
+    if (hasRiskPreconditionChoice(hold)) {
+      return { ok: false, mutated: false, refusal: 'precondition_choice_required', proposal_id: ref,
+        detail: 'Nothing changed. Choose the option that relies on this risk, or choose that it lowers MRR for every option, before approving the change.' };
     }
     const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
     if (ctx.proposal_edits === undefined && ctx.typed_approval_words !== copy.message) {
@@ -8339,7 +8346,8 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'no_affects',
           detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
       }
-      const g = await readGraph(ctx.scenario_id);
+      // A host-bound precondition press must see other writers, beyond this turn's cached resolver read.
+      const g = await readGraph(ctx.scenario_id, widenPrecondition !== undefined);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // A model label is only a lease: the HOST mints the stamp, through exactly the existing widen hold path.
       // Invalid/unrelated/ambiguous/baseline labels are ignored; their ordinary links are left intact.
@@ -8351,8 +8359,11 @@ export function createAgentCapabilities(
           detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
       }
       const preconditionOption = precondition === undefined ? undefined : g.nodes.find((n) => n.id === precondition.option_id && n.kind === 'option');
-      if (precondition !== undefined && preconditionOption === undefined) {
-        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'The option this risk relies on is no longer in the model. Nothing was prepared.' };
+      // The press resolver and this canonical read can see different revisions. A host marker never exempts
+      // its option from the current baseline/identity screen before the existing door holds the stamped risk.
+      if (precondition !== undefined && (preconditionOption === undefined
+        || !chatRiskPreconditionOptionsFor(g).some((option) => option.option_id === precondition.option_id))) {
+        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'The option this risk relies on is no longer available as a non-baseline option. Nothing was prepared.' };
       }
       if (g.nodes.some((n) => norm(n.label) === norm(label))) {
         return { ok: false, mutated: false, refusal: 'risk_exists',
@@ -8465,6 +8476,11 @@ export function createAgentCapabilities(
       }
       const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
       const effect = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises it' : 'lowers it');
+      // An unleased call keeps its ordinary card. The host only offers the ambiguity in the STORED context;
+      // choosing an option still goes through the existing host-bound RC3 press, hold and approval.
+      const preconditionOffers = precondition === undefined ? chatRiskPreconditionOffersFor(label, g, g.brief_text) : [];
+      const timing = preconditionOffers.length > 0 ? chatRiskPreconditionTimingFor(label, g, g.brief_text) : undefined;
+      const threatenedLabels = [...new Set(built.proposal.links.filter((l) => l.from === riskId).map((l) => labelOfId(l.to)))];
       return {
         ok: true, mutated: false,
         proposal_id: ref,
@@ -8472,6 +8488,11 @@ export function createAgentCapabilities(
         held_message: res.held_message,
         ...(res.detail !== undefined && res.detail.trim() !== '' ? { held_detail: res.detail } : {}),
         base_revision: g.graph_hash,
+        ...(timing === undefined ? {} : {
+          precondition_offers: preconditionOffers,
+          precondition_offer_line: `${timing.source === 'brief' ? 'Your brief launches' : 'The model’s framing times'} the change ${timing.phrase}, `
+            + `so ‘${label}’ may be something one option relies on, rather than a threat to ${threatenedLabels.join(' and ')} for every option. Which is it?`,
+        }),
         risk: {
           label,
           ...(precondition === undefined ? {} : { relies_on: { option_id: precondition.option_id, option_label: preconditionOption!.label } }),

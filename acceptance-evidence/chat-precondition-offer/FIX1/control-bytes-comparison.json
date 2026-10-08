@@ -1,0 +1,52 @@
+{
+  "base_head": "b31021623cfb13c43d395e9e0dbf1e6751c4a482",
+  "test_file": "src/orchestrator-v5/agent-lane/__tests__/agent-chat-precondition-door-seam.test.ts",
+  "test_filter": "FIX1-control-bytes",
+  "base": {
+    "path": "/private/tmp/accel-er-offer-cee/acceptance-evidence/chat-precondition-offer/FIX1/control-bytes-base.json",
+    "sha256": "e88e2c6e02c27f1aff649b21f6e2e639773fe21dff4ca0903fb0bfc3b2aa5840",
+    "bytes": 196624,
+    "controls": 12
+  },
+  "final": {
+    "path": "/private/tmp/accel-er-offer-cee/acceptance-evidence/chat-precondition-offer/FIX1/control-bytes-final.json",
+    "sha256": "e88e2c6e02c27f1aff649b21f6e2e639773fe21dff4ca0903fb0bfc3b2aa5840",
+    "bytes": 196624,
+    "controls": 12
+  },
+  "byte_identical": true,
+  "source_bytes_restored": true,
+  "source_backup_directory": "/private/tmp/offer-fix1-control-bytes-g_tpwr6_",
+  "saved_sources": [
+    {
+      "path": "src/routes/agent-v1-turn.ts",
+      "sha256": "d5f8fcd3d98a399c25cd2e2be781877d733f4f3faaef4d82007ad343f38127aa",
+      "bytes": 381868
+    },
+    {
+      "path": "src/orchestrator-v5/routing/chat-risk-precondition.ts",
+      "sha256": "94b2721577f804ad1ba9da8bd95bb87dc71a76c3040e3792bfd78761b205b65a",
+      "bytes": 8340
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts",
+      "sha256": "2513973105f5749c2f153f166dc32ed7b1e2849ce604446e09a187d6a58978b8",
+      "bytes": 673770
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/proposal-reply.ts",
+      "sha256": "5ac877a527eb101f3a81e21c6bbacf6684a04a4ebfdaa63b1d6f7bafb2e0879c",
+      "bytes": 33648
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts",
+      "sha256": "a263df0689be2f34d0ac3608a0ef071ee8197e80fa5a93b861ca7cc21c254d60",
+      "bytes": 80094
+    },
+    {
+      "path": "src/routes/assist.v1.scenario-graph.ts",
+      "sha256": "8278e5d2b162504e250fbf9467fdcce0d39485e69c365031324db127018ddc39",
+      "bytes": 55607
+    }
+  ]
+}

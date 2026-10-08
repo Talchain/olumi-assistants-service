@@ -107,6 +107,7 @@ import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLines
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { hasRiskPreconditionChoice, isRiskMrrChoicePress, riskMrrChoiceHoldFor, riskPreconditionChoiceActions, riskPreconditionChoiceTurnId, withRiskPreconditionChoice, withoutRiskPreconditionChoice } from '../orchestrator-v5/agent-lane/chat-risk-precondition-choice.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
@@ -139,11 +140,12 @@ import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/b
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor, methodReplySurvives } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
-  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
+  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskAddPressFor, riskHeldReply, risksTurnForReadback,
   settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
   widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import { chatRiskPreconditionOptionsFor } from '../orchestrator-v5/routing/chat-risk-precondition.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
@@ -2139,7 +2141,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const r = proposalRecord(p, read.graph, Number.isFinite(emittedAt) ? emittedAt : Date.now());
         return r && r.base_graph_hash === read.graphHash ? [r] : [];
       });
-      const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
+      const replayChoices = currentPending.filter(p => turnId !== undefined && riskPreconditionChoiceTurnId(p) === turnId)
+        .flatMap(p => riskPreconditionChoiceActions(p, read.graph));
+      const replayRecords = currentPending.filter(p => !hasRiskPreconditionChoice(p)).flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
         .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso))
         // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record.
         .map(r => priorRecords.find(old => old.proposal_id === r.proposal_id) ?? r);
@@ -2333,13 +2337,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const replayCard = replayRecords[0];
-      const replayActions = firstOfEachId([...stillValid, ...boundControl]);
+      const replayActions = replayChoices.length > 0 ? firstOfEachId(replayChoices) : firstOfEachId([...stillValid, ...boundControl]);
       const methodTerminalReplay = approvedProposal === undefined && (whatChangesReplay || isMethodPress(explanationId)
         || widenTargetOf(explanationId, message) !== null || isWidenAddPressId(explanationId) || pressedChipIsStructural
         || actionPressOf(body['chip']) !== null
         || (chiplessRetry && (prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
-      if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
+      if (replayChoices.length === 0 && !decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: replayComposed !== null ? replayComposed.text : withoutProposalIds(replayText),
@@ -2730,7 +2734,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let runOutcomeKind: RunOutcome['kind'] | undefined;
     /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
     let runOutcomeText: string | undefined;
+    let riskChoiceToReoffer: PendingAction | undefined;
+    let riskChoiceReofferActions: OfferedAction[] | null = null;
     let result: AgentTurnResult | undefined;
+    // Terminal host-bound choice: re-offer the SAME held card, never call the risk proposer or a model again.
+    const riskChoicePressId = (body['chip'] as { id?: unknown } | undefined)?.id;
+    if (isRiskMrrChoicePress(riskChoicePressId)) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      const latest = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+      riskChoiceToReoffer = riskMrrChoiceHoldFor(riskChoicePressId, message, latest, rb.graph);
+      const record = riskChoiceToReoffer === undefined ? undefined : proposalRecord(riskChoiceToReoffer, rb.graph);
+      const text = record?.approve_action.detail
+        ?? 'That choice no longer matches the held change. Nothing in the model changed.';
+      riskChoiceReofferActions = record === undefined ? []
+        : [record.approve_action as OfferedAction, AMEND_CHIP, record.decline_action as OfferedAction];
+      fastPath = 'method';
+      result = { assistant_text: text, items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0,
+        stopped_reason: 'answered', timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0,
+          tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
+
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
         (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
@@ -3783,7 +3806,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
           heldLapseLines = [...setAside.map((h) => heldDeclineSentence(heldChangeLabel(h))), ...heldLapseLines];
         }
-        heldRecords = liveHolds.flatMap((h) => { const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r]; });
+        if (riskChoiceToReoffer !== undefined) liveHolds = liveHolds.map(h =>
+          riskMrrChoiceHoldFor(riskChoicePressId, message, [h], readbackGraph) !== undefined ? withoutRiskPreconditionChoice(h) : h);
+        heldRecords = liveHolds.filter(h => !hasRiskPreconditionChoice(h)).flatMap((h) => { const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r]; });
       } catch (err) {
         log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: refusing to erase unresolved scope or approval on a failed pending read');
         throw err;
@@ -3923,10 +3948,44 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     })();
     const approvalCalls = callsThatCanConsumeProposals(result.tool_calls);
     // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
-    const approvals = approvalChipsFor(
+    let approvals = approvalChipsFor(
       approvalCalls,
       (id) => ({ proposal: proposals.get(id), result: result.tool_results.find((r) => r.proposal_id === id) }),
     );
+    // Retain the ordinary risk hold, but ask for its interpretation before exposing any approval.
+    // Re-check option identity and baseline status on the final read; the press checks them again when chosen.
+    const currentPreconditionOptions = chatRiskPreconditionOptionsFor(readbackGraph);
+    const preconditionOfferCards = result.tool_results.flatMap((r) => {
+      const risk = r.risk as { label?: unknown; relies_on?: unknown } | undefined;
+      if (r.ok !== true || r.mutated !== false || typeof risk?.label !== 'string' || risk.relies_on !== undefined
+        || !approvalCalls.some((c) => c.name === 'propose_new_risk' && c.ok && c.proposal_id === r.proposal_id)
+        || !approvals.some((c) => typedApprovalOf({ chip: { id: c.id } }) === r.proposal_id)
+        || !Array.isArray(r.precondition_offers) || typeof r.precondition_offer_line !== 'string') return [];
+      const actions = r.precondition_offers.flatMap((raw: unknown) => {
+        const option = raw as { option_id?: unknown; option_label?: unknown } | null;
+        if (option === null || typeof option !== 'object' || !currentPreconditionOptions.some((o) => o.option_id === option.option_id && o.option_label === option.option_label)) return [];
+        const press = riskAddPressFor({ label: risk.label as string, mechanism: 'relies_on',
+          hits: { id: option.option_id as string, label: option.option_label as string, kind: 'option' } });
+        return press.message.length <= 600 ? [press] : [];
+      });
+      return actions.length === 0 || !liveHolds.some(h => heldProposalId(h) === r.proposal_id) ? []
+        : [{ actions, line: r.precondition_offer_line, proposalId: r.proposal_id as string }];
+    });
+    const riskChoiceTurnId = turnId ?? (preconditionOfferCards.length > 0 ? randomUUID() : undefined);
+    const choiceHoldForAnswer = (hold: PendingAction): PendingAction => {
+      const offer = preconditionOfferCards.find(c => c.proposalId === heldProposalId(hold));
+      if (offer !== undefined) return withRiskPreconditionChoice(hold, readbackGraph, offer.actions, offer.line, riskChoiceTurnId);
+      return riskChoiceToReoffer !== undefined && riskMrrChoiceHoldFor(riskChoicePressId, message, [hold], readbackGraph) !== undefined
+        ? withoutRiskPreconditionChoice(hold) : hold;
+    };
+    liveHolds = liveHolds.map(choiceHoldForAnswer);
+    heldRecords = liveHolds.filter(h => !hasRiskPreconditionChoice(h)).flatMap(h => {
+      const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r];
+    });
+    const preconditionOfferActions = liveHolds.filter(h => preconditionOfferCards.some(c => c.proposalId === heldProposalId(h)))
+      .flatMap(h => riskPreconditionChoiceActions(h, readbackGraph));
+    approvals = approvals.filter(a => !liveHolds.some(h => hasRiskPreconditionChoice(h) && a.id === approvalChipIdFor(heldProposalId(h))));
+
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
@@ -3962,7 +4021,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
-    const offeredSpecific: OfferedAction[] = fastPath === 'method' && actionReply !== null
+    const offeredSpecific: OfferedAction[] = riskChoiceReofferActions !== null ? riskChoiceReofferActions : fastPath === 'method' && actionReply !== null
       // S-B, terminal: a typed "can't yet" offers its working exits (or the waiting card it re-offers), nothing else.
       ? firstOfEachId(actionReplyChips)
       : fastPath === 'method' && tippingTurn !== null
@@ -3986,6 +4045,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? firstOfEachId(decisionReviewChips(decisionReviewTurn))
       : firstOfEachId([
       ...approvals,
+      ...preconditionOfferActions,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
@@ -4040,7 +4100,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
-    const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
+    const offeredNow: OfferedAction[] = preconditionOfferActions.length > 0 ? firstOfEachId(preconditionOfferActions)
+      : firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
     // must not drop what a restart needs to find it).
@@ -4292,7 +4353,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
-      assistant_text: fastPath === 'method' ? narration.text
+      assistant_text: preconditionOfferCards.length > 0 ? preconditionOfferCards.map(c => c.line).join('\n')
+        : fastPath === 'method' ? narration.text
         : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText),
           [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
@@ -4737,7 +4799,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id, label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
-    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
+    const rowTurnId = riskChoiceTurnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
@@ -4757,9 +4819,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // declined meanwhile is never resurrected, and one another request minted meanwhile is never erased.
           heldProposals: { isHeld: isHeldProposal, seenByThisRequest: heldSeenThisTurn,
             offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
-            onReconciled: (write, overCap) => {
+            onReconciled: (write, overCap, latest) => {
+              // The decline consents to one displayed revision, while RC3 replaces the same gmh_ handle.
+              // Bind this presentation update to the floor's CAS read; a newer same-handle hold wins.
+              const reofferSuperseded = riskChoiceToReoffer !== undefined
+                && riskMrrChoiceHoldFor(riskChoicePressId, message, latest, readbackGraph) === undefined;
+              const triggerSuperseded = preconditionOfferCards.some(c => {
+                const supplied = durablePending.find(p => heldProposalId(p) === c.proposalId);
+                const current = latest.find(p => heldProposalId(p) === c.proposalId);
+                const expected = supplied === undefined ? undefined : proposalRecord(supplied, readbackGraph);
+                const actual = current === undefined ? undefined : proposalRecord(current, readbackGraph);
+                return actual === undefined || expected?.revision !== actual.revision || expected?.digest !== actual.digest;
+              });
+              write = { ...write, pending_actions: (write.pending_actions ?? []).map(p => {
+                const guarded = hasRiskPreconditionChoice(p) || riskChoiceToReoffer?.chip_id === p.chip_id;
+                if (!guarded) return choiceHoldForAnswer(p);
+                const current = latest.find(h => h.chip_id === p.chip_id);
+                const suppliedRecord = proposalRecord(p, readbackGraph);
+                const currentRecord = current === undefined ? undefined : proposalRecord(current, readbackGraph);
+                if (current !== undefined && (suppliedRecord?.revision !== currentRecord?.revision
+                  || suppliedRecord?.digest !== currentRecord?.digest)) {
+                  return current;
+                }
+                return reofferSuperseded && riskChoiceToReoffer?.chip_id === p.chip_id && current !== undefined
+                  ? current : choiceHoldForAnswer(p);
+              }) };
               reconciledPending = write.pending_actions ?? [];
-              heldRecords = (write.pending_actions ?? []).flatMap(p => {
+              heldRecords = (write.pending_actions ?? []).filter(p => !hasRiskPreconditionChoice(p)).flatMap(p => {
                 const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
               });
               overCapAtAppend = overCap;
@@ -4778,8 +4864,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 && fastPath !== 'method' && !decisionReviewRequested
                 && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
                   || heldRecords.some(r => r.proposal_id === approvedProposal))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
-              wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
+              const choiceSuperseded = reofferSuperseded || triggerSuperseded;
+              if (choiceSuperseded) actions.splice(0, actions.length);
+              wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions),
+                ...(choiceSuperseded ? { assistant_text: 'That choice no longer matches the held change. Nothing in the model changed.',
+                  _answer_shape: undefined } : {}) };
               return { ...write,
+                ...(choiceSuperseded ? { assistantMessage: wireBody.assistant_text as string } : {}),
                 pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
                 suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message })) };
             } },

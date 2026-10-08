@@ -11,6 +11,9 @@ import { parseAnswerOffers } from '../../orchestrator-v5/agent-lane/answer-offer
 import { createProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
 import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js';
+import { proposalRecord } from '../../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { riskAddPressFor } from '../../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import { withRiskPreconditionChoice, withoutRiskPreconditionChoice, riskPreconditionChoiceActions } from '../../orchestrator-v5/agent-lane/chat-risk-precondition-choice.js';
 
 const { port, source, identity, finalOffers } = vi.hoisted(() => ({
   port: { append: vi.fn(), appendIfLatest: undefined as undefined | ((...a: unknown[]) => unknown), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(),
@@ -191,6 +194,84 @@ const positive = async () => {
   for (const action of body.conversation_turns.at(-1).suggested_actions) expect(Object.keys(action).sort()).toEqual(['id', 'label', 'message']);
   return body;
 };
+
+const CHOICE_TURN = 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+const CHOICE_LINE = 'Your brief launches the change with the next Pro feature release, so ‘Feature release slips’ may be something one option relies on, rather than a threat to MRR for every option. Which is it?';
+const CHOICE_GRAPH = { nodes: [
+  { id: 'mrr', kind: 'goal', label: 'MRR' },
+  { id: 'keep', kind: 'option', label: 'Keep current Pro price', is_baseline: true },
+  { id: 'raise_59', kind: 'option', label: 'Raise Pro price to £59' },
+  { id: 'raise_54', kind: 'option', label: 'Raise Pro price to £54' },
+], edges: [] };
+/** Real product-hold projection, JSONB transport and cold reload; the ordinary hold remains durable but unoffered. */
+const seedRiskChoice = async () => {
+  const graph = structuredClone(CHOICE_GRAPH);
+  const hash = computeAnalysisAffectingGraphHash(graph)!;
+  const emitted = new Date().toISOString();
+  const hold = parsePendingAction({
+    id: 'ccccccc1-cccc-4ccc-8ccc-ccccccccccc1', scenario_id: scenario, chip_id: 'gmh_0123456789ab',
+    action: { kind: 'apply_proposed_change', proposal_ref: 'gmh_0123456789ab', public_label: 'Approve 2 changes',
+      public_message: 'Approve the proposed changes.', inline_patch: { handler_id: 'graph_management_held_v1', operations: [
+        { op: 'add_node', path: 'feature_release_slips', value: { id: 'feature_release_slips', kind: 'risk', label: 'Feature release slips' } },
+        { op: 'add_edge', path: 'feature_release_slips::mrr', value: { from: 'feature_release_slips', to: 'mrr', strength: { mean: -0.5 } } },
+      ] } },
+    preconditions: { graph_hash: hash }, emitted_at_iso: emitted, expires_at_turn_count: 24,
+    expires_at_iso: new Date(Date.now() + 86_400_000).toISOString(),
+  })!;
+  expect(hold).not.toBeNull();
+  const card = proposalRecord(hold, graph)!;
+  expect(card, 'positive ordinary-card twin is genuinely projectable').toBeDefined();
+  const optionPresses = graph.nodes.filter(node => node.kind === 'option' && node.id !== 'keep').map(node =>
+    riskAddPressFor({ label: 'Feature release slips', mechanism: 'relies_on', hits: { id: node.id, label: node.label, kind: 'option' } }));
+  const marked = withRiskPreconditionChoice(hold, graph, optionPresses, CHOICE_LINE, CHOICE_TURN);
+  const choices = riskPreconditionChoiceActions(marked, graph);
+  expect(choices.map(action => action.label)).toEqual(['Add to ‘Raise Pro price to £59’', 'Add to ‘Raise Pro price to £54’', 'It lowers MRR for every option']);
+  // The real production parser rehydrates the marker after the JSONB serialization boundary.
+  latest = [parsePendingAction(JSON.parse(JSON.stringify(marked)))!];
+  port.readExistingScenario.mockResolvedValue({ userId: OWNER, graph, briefText: 'Launch the change with the next Pro feature release.', analysisInvalidatedAt: null });
+  source.analysis = { analysis_state: { run_state: { kind: 'none' }, usable_for_chips: false },
+    current_read: { analysis_ready: { status: 'blocked', may_run: false } }, analysis_constraint_verdict_state: null };
+  await realStore.append({ scenario_id: scenario, turn_id: CHOICE_TURN, turn_class: 'direct_answer', handler_id: null,
+    request_hash: 'agent_turn:risk-choice-reload', response_emitted: true, llm_calls_used: 0, duration_ms: 0, handler_facts: [],
+    pending_actions: latest, userMessage: 'Add a risk: Feature release slips — MRR will be lower.', assistantMessage: CHOICE_LINE });
+  coldStore();
+  return { graph, card, choices };
+};
+
+describe('FIX1 hidden ordinary risk hold → cold graph reload', () => {
+  it('RED row (e): restores the three exact choices without a Run or plain-text offer row, and withholds the ordinary card', async () => {
+    const { card, choices } = await seedRiskChoice();
+    expect(table.find(row => row.turn_id === CHOICE_TURN)?.suggested_actions).toBeNull();
+    expect(table.find(row => row.turn_id === CHOICE_TURN)?.suggested_actions_run_key).toBeNull();
+    const providerCalls = vi.mocked(fetch).mock.calls.length;
+    const body = await read();
+    expect(body.conversation_turns.at(-1)).toMatchObject({ turn_id: CHOICE_TURN, assistant_message: CHOICE_LINE, suggested_actions: choices });
+    expect(body).not.toHaveProperty('proposal_fields');
+    expect(body.held_proposal_offers ?? []).toEqual([]);
+    expect(JSON.stringify(body.action_bar ?? {})).not.toContain(card.approve_action.id);
+    expect(vi.mocked(fetch).mock.calls.length, 'cold reload performs no provider call').toBe(providerCalls);
+    expect(latest[0]?.chip_id, 'withholding presentation retains the original ordinary hold').toBe(card.proposal_id);
+  });
+
+  it('RED stale digest: refuses choice reconstruction and still keeps the changed ordinary hold unapprovable', async () => {
+    await seedRiskChoice();
+    latest = latest.map(hold => ({ ...hold, action: { ...hold.action, public_message: 'Changed ordinary card words.' } } as PendingAction));
+    const body = await read();
+    noOffers(body);
+    expect(body).not.toHaveProperty('proposal_fields');
+    expect(body.held_proposal_offers ?? []).toEqual([]);
+  });
+
+  it('CONTROL after ordinary choice: removing only the choice marker restores the original card projection unchanged', async () => {
+    const { card } = await seedRiskChoice();
+    latest = latest.map(withoutRiskPreconditionChoice);
+    const body = await read();
+    noOffers(body);
+    expect(body.proposal_fields.proposals).toHaveLength(1);
+    expect(body.proposal_fields.proposals[0]).toMatchObject({ proposal_id: card.proposal_id, revision: card.revision,
+      digest: card.digest, approve_action: card.approve_action });
+  });
+});
 
 describe('X4 real commit door → cold graph-read door', () => {
   it('RED row 1: final Agent answer offers the witnessed three next steps and the LAST restored turn retains them', async () => {

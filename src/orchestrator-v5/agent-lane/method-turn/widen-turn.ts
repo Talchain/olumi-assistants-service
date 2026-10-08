@@ -37,6 +37,7 @@ import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { chanceGoalDeadlineAsk, goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
+import { chatRiskPreconditionOptionsFor } from '../../routing/chat-risk-precondition.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -1010,8 +1011,16 @@ export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGate
   return { kept: [...kept.filter((k) => !k.shared), ...kept.filter((k) => k.shared)], dropped, shared_preconditions: sharedPreconditions };
 }
 
+/** Chat's deterministic offer needs only the chosen option: no synthetic factor or goal identity. */
+type OptionPreconditionPress = {
+  readonly label: string;
+  readonly mechanism: 'relies_on';
+  readonly hits: { readonly id: string; readonly label: string; readonly kind: 'option' };
+};
+type RiskAddPressInput = Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects' | 'mechanism'> | OptionPreconditionPress;
+
 /** The Add press's message: the user's own words in the transcript, naming the risk, what it hits and its refs by label. */
-function riskAddMessage(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects' | 'mechanism'>): string {
+function riskAddMessage(s: RiskAddPressInput): string {
   const target = s.hits.kind === 'option' ? `to ${quote(s.hits.label)}` : 'for every option';
   if (s.mechanism === 'relies_on') {
     return `Add the risk ${quote(s.label)} to ${quote(s.hits.label)}: that option relies on this not happening. `
@@ -1024,12 +1033,15 @@ function riskAddMessage(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | '
  * The press id binds the mechanism, message AND the node identities it was minted on (Codex r1 P1 on #2744): a label that later
  * names another node (a rename plus a new node with the old name) recomputes to a different id and is refused.
  */
-const addPressId = (message: string, ids: readonly [string, string, string], mechanism: RiskSuggestion['mechanism']): string =>
+const addPressId = (message: string, ids: readonly string[], mechanism: RiskSuggestion['mechanism']): string =>
   `${WIDEN_ADD_PREFIX}${createHash('sha256').update(JSON.stringify([message, ...ids, mechanism]), 'utf8').digest('hex').slice(0, 16)}`;
 
-export function riskAddPressFor(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects' | 'mechanism'>): SuggestedAction {
+export function riskAddPressFor(s: RiskAddPressInput): SuggestedAction {
   const message = riskAddMessage(s);
-  return { id: addPressId(message, [s.hits.id, s.through.id, s.affects.id], s.mechanism), label: `Add ${quote(s.label)}`, message };
+  // Preserve every existing More risks id; chat's option-only offer binds just the identity it actually uses.
+  const ids = 'through' in s ? [s.hits.id, s.through.id, s.affects.id] : [s.hits.id];
+  return { id: addPressId(message, ids, s.mechanism),
+    label: 'through' in s ? `Add ${quote(s.label)}` : `Add to ${quote(s.hits.label)}`, message };
 }
 
 export function isWidenAddPressId(id: unknown): boolean {
@@ -1067,6 +1079,22 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
   if (!isWidenAddPressId(chipId) || typeof message !== 'string' || message.length > 600) return null;
   const m = message.trim();
   if (!m.startsWith(ADD_PREFIX_WORDS)) return null;
+  // Reconstruct option-only offers before More risks' factor/goal gate. Strip a KNOWN suffix rather than parsing
+  // curly quotes inside the user's risk/option labels; only current, unique, non-baseline ids can mint the same press.
+  for (const option of chatRiskPreconditionOptionsFor(rb.graph)) {
+    const hits = { id: option.option_id, label: option.option_label, kind: 'option' as const };
+    const suffix = riskAddMessage({ label: '', mechanism: 'relies_on', hits }).slice(ADD_PREFIX_WORDS.length);
+    if (!m.endsWith(suffix)) continue;
+    const label = m.slice(ADD_PREFIX_WORDS.length, m.length - suffix.length);
+    if (label.trim() === '') continue;
+    const minted = riskAddPressFor({ label, mechanism: 'relies_on', hits });
+    if (minted.message !== m || minted.id !== chipId) continue;
+    return {
+      tool: 'propose_new_risk', relies_on: { option_id: option.option_id, option_label: option.option_label },
+      args: { label, affects: [], caused_by: [],
+        rationale: 'The user chose this option precondition from the timing ambiguity in the stored context.', whole_request: true },
+    };
+  }
   const end = m.indexOf('’', ADD_PREFIX_WORDS.length);
   const label = end < 0 ? '' : m.slice(ADD_PREFIX_WORDS.length, end);
   if (label === '' || label.length > 60) return null;

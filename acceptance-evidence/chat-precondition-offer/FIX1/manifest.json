@@ -1,0 +1,66 @@
+{
+  "head": "b31021623cfb13c43d395e9e0dbf1e6751c4a482",
+  "branch": "dl/event-risk-precondition-offer",
+  "scope": "working tree only; no commit/push/deploy",
+  "tests_passed": 202,
+  "test_files": 10,
+  "nontrigger_control_count": 12,
+  "rows": {
+    "a": "PASS",
+    "a-direct": "PASS",
+    "b": "PASS",
+    "c-unknown": "PASS",
+    "c-stale": "PASS",
+    "c-floor-race": "PASS",
+    "d": "PASS",
+    "e-warm-replay": "PASS",
+    "e-cold-replay": "PASS",
+    "e-graph-reload": "PASS"
+  },
+  "files": [
+    {
+      "path": "src/orchestrator-v5/agent-lane/chat-risk-precondition-choice.ts",
+      "sha256": "1acec74df8ed28ba6734e27943ee27196532bfa57dd6b567ca336f2f8a2eca2b"
+    },
+    {
+      "path": "src/routes/agent-v1-turn.ts",
+      "sha256": "d5f8fcd3d98a399c25cd2e2be781877d733f4f3faaef4d82007ad343f38127aa"
+    },
+    {
+      "path": "src/routes/assist.v1.scenario-graph.ts",
+      "sha256": "8278e5d2b162504e250fbf9467fdcce0d39485e69c365031324db127018ddc39"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts",
+      "sha256": "2513973105f5749c2f153f166dc32ed7b1e2849ce604446e09a187d6a58978b8"
+    },
+    {
+      "path": "src/orchestrator-v5/persist-graph-write.ts",
+      "sha256": "22cbabe90b11c84da40b67d320a9184cf624fa210b3ceaeeda1376cca530e156"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/chat-risk-precondition.ts",
+      "sha256": "94b2721577f804ad1ba9da8bd95bb87dc71a76c3040e3792bfd78761b205b65a"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts",
+      "sha256": "a263df0689be2f34d0ac3608a0ef071ee8197e80fa5a93b861ca7cc21c254d60"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/proposal-reply.ts",
+      "sha256": "4fd7cd07d494db44a3679c9cd2bbca3ded8f95cc09fa941d9d819476e0cc68ee"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/agent-chat-precondition-door-seam.test.ts",
+      "sha256": "afa747ea599e38852d7791eb1d86a9e7bf9c931ed7f661ddd706c3e103917c29"
+    },
+    {
+      "path": "src/routes/__tests__/x4-answer-offers-reload.test.ts",
+      "sha256": "49c39146c30a373caf1a1c1d34fe46827fdc9d07fd0b205a00498f8fe092ed63"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/__tests__/chat-risk-precondition-offer.test.ts",
+      "sha256": "4cfbc05b13621689f76a5a6f9f5bc88d42559cbc60318bb58fab88b08e4177e6"
+    }
+  ]
+}
