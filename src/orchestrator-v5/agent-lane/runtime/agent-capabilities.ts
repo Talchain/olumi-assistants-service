@@ -3006,7 +3006,7 @@ export function createAgentCapabilities(
     // ⭐ S5t (Science d5 #87 6009444385, DL adopted): a frame the refit widened is said ONCE, in Science's words — read off
     // the model before approval and the read-back above, never the writer's own account. Only the one-link door refits.
     const reframed = approvedEffects.length === 1 ? reframedNodeIds(approvedRead.raw, check?.raw) : [];
-    const progress = guidedSizingProgressLine(check!.raw);
+    const progress = guidedSizingProgressLine(check!.raw, approvedRead.analysis_result);
     const receipt = approvedEffects.length === 1
       ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.`
       : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`;
@@ -3014,6 +3014,7 @@ export function createAgentCapabilities(
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       guided_sizing_commit: true,
       guided_sizing_run_key: runExplanationKeyForRecord(ctx.scenario_id, approvedRead.analysis_state, approvedRead.analysis_result),
+      guided_sizing_run_result: approvedRead.analysis_result,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: progress === null ? receipt : `${receipt} ${progress}`,
     };

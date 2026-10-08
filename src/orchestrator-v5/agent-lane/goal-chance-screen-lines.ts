@@ -26,10 +26,9 @@ import { sayDate } from '../goal-target/deadline-date.js';
 import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
-import { assembleGuidanceSignals } from './turn-context/guidance-signals.js';
-import { narratorCountGuard, olumiEstimatesFeedingResult } from './olumi-estimates-feeding-result.js';
-import { validatedDefinitionForGraph } from '../goal-target/held-user-links.js';
-import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
+import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
+import { goalChanceEstimateLinkCount } from './goal-chance-estimate-attribution.js';
+import { sentencesOf } from './reply/compose-reply.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
@@ -62,16 +61,8 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
       : `${shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)}, in this model`;
   // §(i) amendment: RC4 owns k. Reuse its existing goal-path signal inputs, never a second sizing/count rule.
   // Specialised deadline points keep their existing chance words and option-specific time/pace disclosures.
-  const storedGraph = rec(graph);
-  const analysedGraph = storedGraph !== undefined && Array.isArray(storedGraph.nodes)
-    ? asAnalysed({ ...storedGraph, nodes: storedGraph.nodes }) : graph;
-  const signals = facts.goal_chance_display !== undefined
-    ? assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph: analysedGraph,
-      analysisState: undefined, analysisResult: result, leaderLicensed: false }) : undefined;
-  const k = signals === undefined ? 0 : olumiEstimatesFeedingResult({
-    validatedDefinitionForLink: validatedDefinitionForGraph(analysedGraph),
-    goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'],
-  }).links.length;
+  const k = facts.goal_chance_display === undefined ? 0
+    : facts.goal_chance_licence?.olumi_estimate_link_count ?? goalChanceEstimateLinkCount(graph);
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
@@ -226,8 +217,9 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
   const authorised: string[] = [];
   let body = text;
   if (lines.some(l => l.olumi_estimate_link_count !== undefined)) {
-    for (const l of lines) if (l.olumi_estimate_link_count !== undefined) {
-      const sentence = estimatePointSentence(l), folded = foldQuotes(body), needle = foldQuotes(sentence);
+    for (const l of lines) {
+      const sentence = l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l);
+      const folded = foldQuotes(body), needle = foldQuotes(sentence);
       const positions: number[] = [];
       for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) positions.push(at);
       for (const at of positions.reverse()) {
@@ -237,6 +229,17 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
       }
     }
     body = narratorCountGuard(body, null).text;
+    // Only a complete producer-bound point may narrate these goal chances. The masked canonical
+    // sentences retain their bytes; any bare goal figure is removed before the labelled lines are owed.
+    body = body.split(/(\u0000GP_ESTIMATE_POINT_\d+\u0000)/).map(part =>
+      part.startsWith('\u0000GP_ESTIMATE_POINT_') ? part : part.split('\n').map(row => {
+        const sentences = sentencesOf(row);
+        const kept = sentences.filter(sentence => {
+          const plain = sentence.replace(/[*_`]/g, '');
+          return !/\d+(?:\.\d+)?\s*%\s+(?:chance|probability)\b/i.test(plain);
+        });
+        return kept.length === sentences.length ? row : kept.join(' ');
+      }).join('\n')).join('');
     for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000`).join(chance);
   }
   const hasShortfall = lines.some(l => l.shortfall_note !== undefined);

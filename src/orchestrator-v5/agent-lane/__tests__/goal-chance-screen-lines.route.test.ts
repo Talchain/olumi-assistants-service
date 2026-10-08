@@ -122,6 +122,21 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     return lines[0]!;
   };
 
+  it('GP review P1: zero added lines still applies cleaned narration and removes a fabricated link count', async () => {
+    shortfallScreenLine();
+    analysisResult.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
+    const line = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
+    expect(line.olumi_estimate_link_count).toBe(1);
+    const canonical = [line.chance, line.depends].filter(Boolean).join(' ');
+    const narration = `${canonical} Olumi's estimates feed 99 links.`;
+    const cleaned = withScreenLinesOwed(narration, [line]);
+    expect(cleaned.added).toBe(0);
+    expect(cleaned.text).not.toContain('99 links');
+    const b = await turn(run(narration), 'Run it');
+    expect(b.assistant_text).not.toContain('99 links');
+    expect(b.assistant_text).toContain(line.chance);
+  });
+
   it('fixture control: the served readback carries a range record and withholds the leader on a current Run', () => {
     expect(READ.analysis_result.enrichment.inference_warnings.map((w: Json) => w.code)).toContain('GOAL_CHANCE_RANGE');
     expect(READ.analysis_state.leader_claim.permitted).toBe(false);

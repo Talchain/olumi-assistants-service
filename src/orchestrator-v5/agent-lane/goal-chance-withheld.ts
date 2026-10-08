@@ -211,7 +211,8 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
     const words = guided !== undefined ? (guided.total > 0 ? guidedSizingSentence(guided.total) : '')
       : typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
-    return { withheld: true, say: words === '' ? opening : words, node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
+    return { withheld: true, say: words === '' ? opening : opening === RANGE_OPENING ? `${opening} ${words}` : words,
+      node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
   }
   // Gate 5 covers EVERY option and keeps its existing explanation when a per-option path also withholds.
   const product = warnings.find((w) => w.code === GOAL_FIGURES_PRODUCT_NOT_READ);

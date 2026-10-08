@@ -252,7 +252,9 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     const lines = goalChanceScreenLinesForAgent(pointWordRun(graph), graph, true);
     expect(lines).toHaveLength(2);
     const bare = '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.';
-    expect(withScreenLinesOwed(bare, [lines[0]!]).text).toContain('using Olumi\'s estimates for 1 link (see Check estimates)');
+    const text = withScreenLinesOwed(bare, [lines[0]!]).text;
+    expect(text).toContain('using Olumi\'s estimates for 1 link (see Check estimates)');
+    expect(text).not.toContain(bare);
   });
 
   it('MUTANT: placeholder with an estimate tag and a natural effect is STILL a placeholder → RED', () => {
@@ -277,13 +279,13 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
 
   it.each([1, 7])('MUTANT: k from any non-RC4 count → RED (producer sentinel %i differs from graph and value counts)', k => {
     const graph = byDoor.natural!.graph;
-    const run = pointWordRun(graph);
     const base = estimatesFor(graph);
     const sentinel = { ...base, count: 19, values: Array.from({ length: 12 }, (_, i) => ({ kind: 'value' as const,
       id: `sentinel-value-${i}`, label: 'Sentinel value', goal_distance: 0 })), links: Array.from({ length: k }, (_, i) => ({
       kind: 'link' as const, id: `sentinel-link-${i}`, label: 'Sentinel link', goal_distance: 0 })) };
     const spy = vi.spyOn(estimateProducer, 'olumiEstimatesFeedingResult').mockReturnValue(sentinel);
     try {
+      const run = pointWordRun(graph); // RC4 attribution is stored by the Run producer, before either renderer reads it.
       const lines = goalChanceScreenLinesForAgent(run, graph, true);
       expect(spy).toHaveBeenCalled();
       expect(lines[0]!.chance).toBe(`‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'link' : 'links'} (see Check estimates).`);

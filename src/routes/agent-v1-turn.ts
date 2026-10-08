@@ -103,7 +103,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
-import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingQuestions, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress } from '../orchestrator-v5/agent-lane/guided-sizing.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -630,6 +630,16 @@ async function repliesToCheckAsks(lines: readonly (string | null | undefined)[],
     log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — owed questions are said');
     return [];
   }
+}
+
+/** Guided sizing reads the same answer window, retaining recorded edge press identity beside its text. */
+async function guidedSizingHistory(store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<GuidedSizingHistory[]> {
+  if (typeof store.readRecent !== 'function') return [];
+  try {
+    return (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
+      .filter(t => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
+      .slice(0, RECENT_REPLIES_READ);
+  } catch { return []; }
 }
 
 /** `lines` with each already-asked closing question dropped, IN PLACE (a line that was only that question goes). */
@@ -1881,9 +1891,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const message = typeof body.message === 'string' ? body.message : '';
     /** RT-1: what the user had selected on the canvas (`selection-context.ts`); resolved below against the turn's state. */
     const guidedPress = parseGuidedSizingPress(body['chip']);
-    // Stored edge id, else endpoints: resolve through the canonical selection reader. No graph or write enters here.
+    // Ingress edge_id has no authority: only the chip's encoded pair enters the canonical selection reader.
     const selectedElements = guidedPress === null ? parseSelectedElements(body['selected_elements'])
-      : { node_ids: [], edge_ids: [guidedPress.edge_id ?? `${guidedPress.from}->${guidedPress.to}`] };
+      : { node_ids: [], edge_ids: [`${guidedPress.from}->${guidedPress.to}`] };
     const sessionId = typeof body.agent_session_id === 'string' && body.agent_session_id.length > 0
       ? body.agent_session_id
       : `sess_${scenarioId}`;
@@ -2341,7 +2351,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready'
         ? guidedSizingForRun(state.analysisResult, state.graph) : undefined;
       const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
-        await repliesToCheckAsks(guidedSizingQuestions(replayGuidedDraft, state.graph), store, scenarioId, turnId));
+        await guidedSizingHistory(store, scenarioId, turnId));
       replayActions.push(...replayGuidedActions);
       const replayGuided = bindGuidedSizing(replayGuidedDraft, replayGuidedActions, {
         graph_hash: state.graphHash ?? '', run_key: replayNarration?.run_key ?? '',
@@ -4060,7 +4070,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       || (fastPath === 'explain' && narrationStatus === 'ready'))
       ? guidedSizingForRun(analysisResult, readbackGraph) : undefined;
     const sizingCommit = result.tool_results.find(r => r.guided_sizing_commit === true);
-    const sizingProgress = sizingCommit !== undefined ? guidedSizingProgress(readbackGraph) : undefined;
+    const sizingProgress = sizingCommit !== undefined ? guidedSizingProgress(readbackGraph, analysisResult ?? sizingCommit.guided_sizing_run_result) : undefined;
     // Reconcile the commit receipt's words to the FINAL stored read, including a concurrent second sizing.
     if (sizingCommit !== undefined) {
       text = text.replace(/\s*\d+ more to go; with 1 left, Olumi can show a range\./gu, '').trim();
@@ -4068,7 +4078,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
     const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,
-      await repliesToCheckAsks(guidedSizingQuestions(guidedDraft, readbackGraph), store, scenarioId, undefined));
+      await guidedSizingHistory(store, scenarioId, undefined));
     offeredNow.push(...guidedActions);
     const guidedSizing = bindGuidedSizing(guidedDraft, guidedActions, {
       graph_hash: graphHash ?? '',
@@ -4464,8 +4474,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const rangeCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent);
       const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines);
+      if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
       if (ranged.added > 0) {
-        wireBody = { ...wireBody, assistant_text: ranged.text };
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
           ...(turnId !== undefined ? { turn_id: turnId } : {}), added_count: ranged.added },
         'agent-lane: the screen\'s chance line was said by Olumi (the reply did not say it)');

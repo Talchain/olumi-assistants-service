@@ -25,7 +25,7 @@ import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { textNamesLeadingOption } from '../../../compose/leading-option-egress-guard.js';
-import { notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
+import { convertingOlumiEstimate, notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 
@@ -35,6 +35,9 @@ const F = JSON.parse(readFileSync(new URL('./fixtures/bprime-rt10b.json', import
 };
 const SCENARIO = '078e521e-907b-4444-96c9-b9a49472b766';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+// Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE
+// with a natural effect that converts into goal units." The two converting upstream estimates leave this list.
+
 
 /** What ISL answers for each direction CEE can send. */
 const BODY_FOR = { minimise: F.plot_body_minimise, none: F.plot_body_at_least };
@@ -138,7 +141,7 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(sentence).toMatch(/^Olumi can compare your options, but can't yet test them against your target \(at most 400 cancellations \/ month\), because it needs today's level of monthly cancellations/);
     const warning = (result.enrichment.inference_warnings as Json[]).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
     expect(warning.message).toBe(`Not shown. ${sentence}`);
-    expect(notTargetTestableSentence(F.graph_with_target, verdict)).toContain('and from Late-delivery cancellations to monthly cancellations and 3 more.');
+    expect(notTargetTestableSentence(F.graph_with_target, verdict)).toContain('and from Late-delivery cancellations to monthly cancellations and 1 more.');
     const tail = untestableTargetTail(F.graph_with_target, verdict)!;
     expect(warning.say).toBe(tail);
     expect(goalChanceWithheldForAgent(result)?.say).toBe(tail);
@@ -153,8 +156,25 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     if (verdict.kind !== 'not_testable') throw new Error('the long-list precondition is absent');
     expect(verdict.failures.find((failure) => failure.case === 'c')?.links?.length).toBeGreaterThanOrEqual(4);
     const warning = targetNotTestableWarning(graph, verdict, [], GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
-    expect(warning.message).toBe("Not shown. Olumi can compare your options, but can't yet test them against your target (at most 400 cancellations / month), because it needs today's level of monthly cancellations and a size for the links from Pauses taken instead of cancellations by returning customers to monthly cancellations and 5 more. What's today's level of monthly cancellations?");
+    expect(warning.message).toBe("Not shown. Olumi can compare your options, but can't yet test them against your target (at most 400 cancellations / month), because it needs today's level of monthly cancellations and a size for the links from Pauses taken instead of cancellations by returning customers to monthly cancellations and 3 more. What's today's level of monthly cancellations?");
     expect(warning.message.length).toBeLessThanOrEqual(400);
+  });
+
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: %s keeps both upstream links in the target requirement', (kind) => {
+    const graph = clone(F.graph_with_target);
+    const estimates = graph.edges.filter((edge: Json) => convertingOlumiEstimate(edge, graph));
+    expect(estimates).toHaveLength(2);
+    for (const edge of estimates) {
+      if (kind === 'placeholder') edge.provenance.magnitude = 'olumi_placeholder';
+      else delete edge.provenance.natural_effect;
+      expect(convertingOlumiEstimate(edge, graph)).toBe(false);
+    }
+    const verdict = targetTestabilityOf(graph);
+    expect(verdict.kind).toBe('not_testable');
+    if (verdict.kind !== 'not_testable') throw new Error('the refused-conversion precondition is absent');
+    expect(verdict.failures.find((failure) => failure.case === 'c')?.links).toHaveLength(6);
+    expect(notTargetTestableSentence(graph, verdict)).toContain('and from Late-delivery cancellations to monthly cancellations and 3 more.');
+    expect(untestableTargetTail(graph, verdict)).toContain("What's today's level of monthly cancellations?");
   });
 
   it('MAXIMISE CONTRAST ("at least 400"): the shares are the at-least body\'s, and the lead never says "came out lowest"', async () => {

@@ -103,7 +103,7 @@ describe('GUIDED PATH round 6 — Paul 632b92b9, without graph repair', () => {
     // (c): all three stored estimates convert; identities/definitions do not
     // turn these into an invented guided journey.
     const ends = endsOfGraph(graph);
-    const estimates = graph.edges.filter((e: Json) => linkSizing(e) === 'olumi_estimate');
+    const estimates: Json[] = graph.edges.filter((e: Json) => linkSizing(e) === 'olumi_estimate');
     const conversionRows = estimates.map((e: Json) => ({ id: `${e.from}->${e.to}`,
       converts: convertingOlumiEstimate(e, graph), definition_unit: validatedDefinition(e, ends(e)) ?? null }));
     expect(conversionRows).toEqual([

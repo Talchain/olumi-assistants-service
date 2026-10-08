@@ -282,7 +282,9 @@ describe('rule 2 (served d4): the user\'s chain collapsed into Olumi\'s £600 is
     const { g, trace } = await build(FX['draft-4']);
     expect(ids(g)).toContain('mrr_lost_to_price_driven_churn');
     expect(trace.reasons?.chain).toBe(1);
-    expect(gates(g).failures).toContain('goal_path_unsized');
+    // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
+    // effect that converts into goal units." The £600 churn estimate stays uncertain, but no longer blocks the chance.
+    expect(gates(g)).toEqual({ placeholder: [], target: 'testable', failures: [] });
   });
   it('RED → GREEN: the retry draws both user links, bound with their quotes and range; the product is gone; chances show', async () => {
     const { g, trace } = await build(FX['draft-4'], { retry: usersChain });
@@ -311,7 +313,18 @@ describe('rule 2 (served d4): the user\'s chain collapsed into Olumi\'s £600 is
 
 describe('P5 is unchanged: a guess on a goal path still withholds', () => {
   it('CONTROL: a guess ON a goal path still withholds (served d4 first draft)', async () => {
-    expect(gates((await build(FX['draft-4'])).g).failures).toEqual(['goal_path_unsized']);
+    // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
+    // effect that converts into goal units." The held £600 natural effect converts, so the chance is now testable.
+    expect(gates((await build(FX['draft-4'])).g)).toEqual({ placeholder: [], target: 'testable', failures: [] });
+  });
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: the same retained churn %s still blocks', async kind => {
+    const { g } = await build(FX['draft-4']);
+    const e = g.edges.find((x: Rec) => x.from === 'price_rise' && x.to === 'mrr_lost_to_price_driven_churn');
+    expect(e).toBeDefined();
+    if (kind === 'placeholder') { e.provenance.magnitude = 'olumi_placeholder'; e.strength.defaulted = true; }
+    else delete e.provenance.natural_effect;
+    expect(gates(g).target).toBe('not_testable');
+    expect(gates(g).failures).toContain(kind === 'placeholder' ? 'goal_path_placeholder' : 'goal_path_unsized');
   });
 });
 
@@ -506,4 +519,3 @@ describe('Codex r2: the buddy\'s inputs', () => {
     expect(said.filter((x: string) => x.includes('pound for pound'))).toHaveLength(1);
   });
 });
-

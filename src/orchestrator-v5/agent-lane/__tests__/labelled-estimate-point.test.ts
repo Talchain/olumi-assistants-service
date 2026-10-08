@@ -4,6 +4,7 @@ import { narratorCountGuard, olumiEstimatesFeedingResult } from '../olumi-estima
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
 import * as rc4 from '../olumi-estimates-feeding-result.js';
+import { agentLicenceRecordOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 
 type Json = Record<string, any>;
 const graph = (): Json => ({ nodes: [
@@ -89,6 +90,30 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     const out = withScreenLinesOwed('Raise to £59: about 67% chance of meeting your goal, in this model.', lines);
     expect(out.text).toContain(wanted('Raise to £59', 67));
     expect(out.text).toContain(wanted('Keep £49', 43));
+    expect(out.text).not.toContain('Raise to £59: about 67% chance of meeting your goal, in this model.');
+    expect(out.text.match(/67% chance/g)).toHaveLength(1);
+  });
+  it('the Run stores RC4 attribution with its licence and reload reads the same count', () => {
+    const g = graph();
+    const run = withGoalChanceLicence({ option_comparison: [
+      { option_id: 'raise', probability_of_goal: 0.67 }, { option_id: 'hold', probability_of_goal: 0.43 },
+    ] }, g, 'mrr');
+    expect(agentLicenceRecordOf(run)?.olumi_estimate_link_count).toBe(1);
+    // A stored Run's attribution is producer-owned; the renderer cannot recalculate it on a later graph.
+    const changed = structuredClone(g); changed.edges[0].provenance = { magnitude: 'user_stated' };
+    expect(goalChanceScreenLinesForAgent(run, changed, true).map(l => l.chance)).toEqual([
+      wanted('Raise to £59', 67), wanted('Keep £49', 43),
+    ]);
+  });
+  it.each(['Raise to £59 has a 67% chance of meeting your goal.', 'This gives a 67% chance.',
+    'This gives a 68% chance.', 'This gives a 67 % chance.'])(
+    'Explain narration with a bare chance is removed even beside an already complete labelled point: %s', bare => {
+    const lines = goalChanceScreenLinesForAgent(result(), graph(), true);
+    const out = withScreenLinesOwed(`${bare}\n\n${lines.map(l => l.chance).join(' ')}`, lines);
+    expect(out.added).toBe(0);
+    expect(out.text).not.toContain(bare);
+    expect(out.text.match(/67% chance/g)).toHaveLength(1);
+    for (const line of lines) expect(out.text).toContain(line.chance);
   });
   it('RC4 producer, not a second count: the sentence reads exactly the producer’s link-size result', () => {
     const census = olumiEstimatesFeedingResult;

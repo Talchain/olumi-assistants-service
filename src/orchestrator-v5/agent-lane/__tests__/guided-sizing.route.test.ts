@@ -328,6 +328,24 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
       .toEqual(expectedPairs.map(([from, to]) => pressId(from!, to!)));
   });
 
+  it('GP review P2: forged ingress edge_id cannot redirect a chip encoded for another pair', async () => {
+    for (const edge of graph.edges) edge.id = `edge:${edge.from}:${edge.to}`;
+    const body = await run();
+    const press = wirePresses(body).find(p => p.id === pressId(...PAIRS[0]))!;
+    const unrelated = graph.edges.find((e: Json) => e.from === PAIRS[1][0] && e.to === PAIRS[1][1]);
+    modelBodies.length = 0;
+    await turn(press.message, { source: 'chip', chip: { id: press.id,
+      parameters: { from: PAIRS[0][0], to: PAIRS[0][1], edge_id: unrelated.id } } });
+    const agentBody = modelBodies.find(b => b.includes('"propose_link_effect"'))!;
+    const parsed = JSON.parse(agentBody);
+    const selected = parsed.input.map((m: Json) => Array.isArray(m.content) ? m.content.map((c: Json) => c.text).join(' ') : m.content)
+      .find((content: unknown) => typeof content === 'string' && content.includes('SELECTED ON THE CANVAS'));
+    expect(selected).toContain(PAIRS[0][0]);
+    expect(selected).toContain(PAIRS[0][1]);
+    expect(selected).not.toContain(unrelated.id);
+    expect(doorCalls).toHaveLength(0);
+  });
+
   it('a press binds its edge ids into canonical selection; labels do not select a different link', async () => {
     const body = await run();
     const press = body.suggested_actions.find((c: Json) => c.id === pressId(...PAIRS[0]));
@@ -455,6 +473,33 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
       expect(link.press).toEqual({ id: press.id, parameters: { from: link.from, to: link.to } });
       expect(press.parameters).toBeUndefined();
     }
+  });
+
+  it('GP review P1: the approval door keeps M inside the selected Run when an excluded option has two other links', async () => {
+    graph.nodes.push({ id: 'excluded', kind: 'option', label: 'Excluded option', interventions: { extra: { value: 2 } } },
+      { id: 'extra', kind: 'factor', label: 'Excluded factor', observed_state: { value: 1, unit: '£/month' } },
+      { id: 'extra2', kind: 'factor', label: 'Excluded factor 2', observed_state: { value: 1, unit: '£/month' } });
+    graph.edges.push({ from: 'excluded', to: 'extra', exists_probability: 1, effect_direction: 'positive', strength: { mean: 1, std: 0.01 } },
+      { from: 'extra', to: 'extra2', exists_probability: 1, effect_direction: 'positive', strength: { mean: 0.5, std: 0.125 }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } },
+      { from: 'extra2', to: 'mrr', exists_probability: 1, effect_direction: 'positive', strength: { mean: 0.5, std: 0.125 }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
+    const afterOne = await sizeThroughDoor('pro_plan_price', 'monthly_churn', 'Pro plan price', 'Monthly churn',
+      0.03, 'percentage points', '£/month', 'Every £1 per month increase in Pro plan price increases Monthly churn by 0.03 percentage points.');
+    expect(afterOne.assistant_text).toContain(PROGRESS);
+    expect(afterOne.assistant_text).not.toContain('4 more to go');
+    expect(afterOne.guided_sizing.remaining).toBe(2);
+    expect(afterOne.guided_sizing.links.some((l: Json) => l.from.startsWith('extra'))).toBe(false);
+  });
+
+  it('GP review P1: recorded same-label chip history closes only its exact directed edge', async () => {
+    for (const n of graph.nodes) if (PAIRS.some(([f, t]) => f === n.id || t === n.id)) n.label = 'Same label';
+    const first = await run();
+    const pressed = wirePresses(first)[0]!;
+    const opened = await turn(pressed.message, { source: 'chip', chip: { id: pressed.id } });
+    const openedRow = [...rows.values()].find(row => row.assistant_message === opened.assistant_text)!;
+    recent = [openedRow];
+    const next = await run();
+    expect(wirePresses(next).map(p => p.id)).toEqual(wirePresses(first).slice(1).map(p => p.id));
+    expect(next.guided_sizing.links.map((l: Json) => l.press.id)).toEqual(wirePresses(next).map(p => p.id));
   });
 
   it('AFTER TWO: the independent M=1 row has no progress line after two actual approval commits', async () => {

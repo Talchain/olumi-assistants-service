@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE as TARGET } from '../../../orchestrator/context/option-result-source.js';
 import {
+  convertingOlumiEstimate,
   targetBecause,
   targetTestabilityOf,
   untestableTargetParts,
@@ -25,6 +26,8 @@ import {
 type Rec = Record<string, any>;
 type Link = { from: string; to: string };
 
+// Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE
+// with a natural effect that converts into goal units." The stored captures remain byte-identical.
 // DL ruling, 7 October: the expected sentence is independent of the product constant.
 const BASELINE = 'Not shown. It needs nothing more of its own; it waits until the other options can be tested against your target, so all are shown on the same footing.';
 const read = (path: string): Rec => JSON.parse(readFileSync(new URL(`./fixtures/${path}.json`, import.meta.url), 'utf8'));
@@ -49,11 +52,7 @@ const ends = (links: readonly Rec[]): Link[] => links.map(({ from, to }) => ({ f
 const sameLink = (a: Link, b: Link): boolean => a.from === b.from && a.to === b.to;
 const unsizedLinks = (verdict: Extract<TargetTestability, { kind: 'not_testable' }>): Link[] =>
   verdict.failures.filter(f => f.case === 'c').flatMap(f => f.links ?? (f.link === undefined ? [] : [f.link]));
-const nodeLabel = (graph: Rec, id: string): string => {
-  const matches = graph.nodes.filter((n: Rec) => n.id === id);
-  expect(matches.map((n: Rec) => n.id)).toEqual([id]);
-  return matches[0].label;
-};
+
 
 // Adapt the private withToday/poundsInto builders in admission/__tests__/target-testability.test.ts:
 // the same user-stated baseline and natural-effect conventions, with only the nodes these controls need.
@@ -87,9 +86,9 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
 
     const out = warning(scopeTargetNotTestableWithRanges(envelope, served.graph));
     expect(out.option_ids).toEqual(['carry_on_as_now']);
-    expect(Object.keys(out.per_option)).toEqual(['carry_on_as_now']);
-    expect(out.per_option.carry_on_as_now.message).toBe(BASELINE);
-    expect(out.per_option.carry_on_as_now.message).not.toContain('Loyalty app deployment');
+    expect(targetTestabilityOf(served.graph, envelope.identity_evaluations).kind).toBe('testable');
+    expect(out.per_option).toBeUndefined();
+    expect(out.say).toBe('');
     expect(out.message).toBe(input.message);
   });
 
@@ -100,53 +99,33 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     const failing = unsizedLinks(verdict);
     const path = ends(optionPathsOf(graph, ['loyalty_app'], envelope.identity_evaluations).get('loyalty_app') ?? []);
     const onPath = failing.filter(link => path.some(own => sameLink(own, link)));
-    expect(onPath[0]).toEqual({ from: 'loyalty_app_gross_profit_uplift', to: 'monthly_profit' });
-    expect(failing).toContainEqual({ from: 'fourth_shop_net_profit_contribution', to: 'monthly_profit' });
-    const ownNodes = new Set(path.flatMap(link => [link.from, link.to]));
-    const offPathOnlyIds = [...new Set(failing.filter(link => !path.some(own => sameLink(own, link)))
-      .flatMap(link => [link.from, link.to]))].filter(id => !ownNodes.has(id));
-    const offPathOnly = offPathOnlyIds.map(id => ({ id, label: nodeLabel(graph, id) }));
-    expect(offPathOnly).toContainEqual({ id: 'fourth_shop_net_profit_contribution', label: 'Fourth-shop net-profit contribution' });
-    expect(nodeLabel(graph, onPath[0]!.from)).toBe('Loyalty-app gross-profit uplift');
-
-    // PRECONDITION (the served defect): the Run-wide message counts EVERY unsized link on the Run (2 named + 9 more = 11),
-    // not loyalty_app's 3; that whole-Run reason is what the panel put beside each option.
-    expect(failing).toHaveLength(11);
-    expect(onPath).toHaveLength(3);
+    const estimates = graph.edges.filter((edge: Rec) => path.some(link => link.from === edge.from && link.to === edge.to)
+      && edge.provenance?.magnitude?.startsWith('olumi_'));
+    expect(estimates).toHaveLength(3);
+    expect(estimates.every((edge: Rec) => convertingOlumiEstimate(edge, graph))).toBe(true);
+    expect(onPath).toEqual([]);
+    // The untouched capture records the old 11-link block; only its real placeholder still blocks now.
     expect(input.message).toContain('and 9 more.');
-
+    expect(failing).toEqual([{ from: 'fourth_shop_fit_out_spend', to: 'monthly_profit' }]);
     const out = warning(scopeTargetNotTestableWithRanges(envelope, graph));
     expect(out.option_ids).toEqual(['loyalty_app', 'carry_on_as_now']);
     expect(Object.keys(out.per_option)).toEqual(out.option_ids);
     expect(out.per_option.carry_on_as_now.message).toBe(BASELINE);
-    expect(out.per_option.loyalty_app.message.startsWith("Not shown. It can't yet be tested against your target (")).toBe(true);
-    expect(out.per_option.loyalty_app.message).toContain(nodeLabel(graph, onPath[0]!.from));
-    // Its own count: 2 named + 1 more = its 3 on-path links.
-    expect(out.per_option.loyalty_app.message).toContain('and 1 more.');
-    for (const { id, label } of offPathOnly) expect(out.per_option.loyalty_app.message, `off-path node ${id}`).not.toContain(label);
+    expect(out.per_option.loyalty_app.message).toBe(BASELINE);
+    expect(out.say).toBe('');
     expect(out.message).toBe(input.message);
   });
 
   it('R3 s4b unseen-2: launch_loyalty_app names Loyalty app active, never fourth-shop nodes', () => {
     const { graph, envelope } = capture('unseen-2');
-    const verdict = notTestable(graph, envelope.identity_evaluations);
-    const path = ends(optionPathsOf(graph, ['launch_loyalty_app'], envelope.identity_evaluations).get('launch_loyalty_app') ?? []);
-    const failing = unsizedLinks(verdict);
-    expect(failing.filter(link => path.some(own => sameLink(own, link)))).toEqual([
-      { from: 'loyalty_app_active', to: 'incremental_monthly_profit_from_loyalty_app' },
-    ]);
-    expect(nodeLabel(graph, 'loyalty_app_active')).toBe('Loyalty app active');
+    expect(targetTestabilityOf(graph, envelope.identity_evaluations)).toEqual({ kind: 'testable', goal_id: 'monthly_profit' });
+    const estimate = graph.edges.find((edge: Rec) => edge.from === 'loyalty_app_active'
+      && edge.to === 'incremental_monthly_profit_from_loyalty_app');
+    expect(convertingOlumiEstimate(estimate, graph)).toBe(true);
     const out = warning(scopeTargetNotTestableWithRanges(envelope, graph));
     expect(out.option_ids).toEqual(['carry_on_as_now', 'launch_loyalty_app']);
-    expect(Object.keys(out.per_option)).toEqual(out.option_ids);
-    expect(out.per_option.carry_on_as_now.message).toBe(BASELINE);
-    expect(out.per_option.launch_loyalty_app.message).toContain('Loyalty app active');
-    expect(out.per_option.launch_loyalty_app.message).not.toContain('Fourth shop');
-    expect(out.per_option.launch_loyalty_app.message).not.toContain('Fourth-shop');
-    for (const id of ['fourth_shop_active', 'fourth_shop_fit_out', 'monthly_profit_lost_to_fourth_shop_underperformance',
-      'fourth_shop_monthly_operating_contribution']) {
-      expect(out.per_option.launch_loyalty_app.message, `off-path node ${id}`).not.toContain(nodeLabel(graph, id));
-    }
+    expect(out.per_option).toBeUndefined();
+    expect(out.say).toBe('');
     expect(out.message).toBe(warning(envelope).message);
   });
 
@@ -170,7 +149,8 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(Object.keys(recorded.per_option)).toEqual(recorded.option_ids);
     expect(recorded.per_option).toEqual(perOptionTargetReasonsForRun(graph, verdict, recorded.option_ids, evaluations));
     expect(recorded.per_option.carry_on_as_now.message).toBe(BASELINE);
-    expect(recorded.per_option.loyalty_app.message).toContain('Loyalty-app gross-profit uplift');
+    expect(recorded.per_option.loyalty_app.message).toBe(BASELINE);
+    expect(recorded.say).not.toContain('Loyalty-app gross-profit uplift');
     expect(Object.keys(goalChanceFactsForAgent(produced, graph, true).goal_chance_range_display ?? {})).toEqual([]);
     const scoped = scopeTargetNotTestableWithRanges(produced, graph);
     expect(scoped).toBe(produced);
@@ -214,6 +194,17 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(out.per_option.status_quo.message).toBe(out.per_option.option_a.message);
   });
 
+  it.each(['olumi_placeholder', 'olumi_estimate'])('amendment (A) CONTRAST: %s without a converting natural effect still blocks its own option', (magnitude) => {
+    const graph = controlGraph();
+    const edge = graph.edges.find((link: Rec) => link.from === 'factor' && link.to === 'goal');
+    edge.provenance = { source: 'cee', magnitude };
+    expect(convertingOlumiEstimate(edge, graph)).toBe(false);
+    const verdict = notTestable(graph);
+    expect(unsizedLinks(verdict)).toEqual([{ from: 'factor', to: 'goal' }]);
+    const out = warning(withholdGoalFiguresForUntestableTarget(controlEnvelope(['option_a']), graph), 'goal');
+    expect(out.per_option.option_a.message).toBe("Not shown. It can't yet be tested against your target (£24,000), because it needs a size for the link from Sales to Monthly profit. Roughly how much Monthly profit in £ does a change in Sales bring?");
+  });
+
   it('R6 fallback: no named-link count fits 388 characters, so the own-reason fallback is exact', () => {
     const graph = controlGraph();
     const longLabel = `Sales ${'very long label '.repeat(40)}`.trim();
@@ -239,7 +230,8 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
   it('R8 Agent view (Codex r1 P2): the panel prose never reaches the model; the projection is exactly the pre-S6 one', () => {
     const served = read('s-e-goals/b9-unseen1-df15c8c-readback').j;
     const scoped = scopeTargetNotTestableWithRanges(served.analysis_result.enrichment, served.graph) as Rec;
-    expect(warning(scoped).per_option.carry_on_as_now.message).toBe(BASELINE);
+    expect(warning(scoped).per_option).toBeUndefined();
+    expect(warning(scoped).say).toBe('');
     const block = { ...served.analysis_result, enrichment: scoped };
     const withoutPanel = structuredClone(block);
     delete warning(withoutPanel.enrichment).per_option;

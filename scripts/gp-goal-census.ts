@@ -1,6 +1,6 @@
 /**
- * Offline GUIDED PATH round-5 census. No network, model, or database calls.
- * Run: node --import tsx scripts/gp-goal-census.ts
+ * Offline GUIDED PATH census. No network, model, or database calls.
+ * Run: node --import tsx scripts/gp-goal-census.ts --base <baseline> --head <reviewed HEAD>
  *
  * Replays the actual pinned and working-tree target verdicts and goal-chance
  * licences. Graph-only and already-stripped Run records remain explicit;
@@ -13,11 +13,25 @@ import { loadavg, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// Rebased pre-r4: holds the current staging context constant while replaying
-// the Science §(i) amendment against its immediate predecessor.
-const BASE = '2768e2c4af279bc603e37874b3c9fac4f7dfe1f5';
-const EXPECTED_HEAD = 'de40ae3bed7fe39966b7ebb57dc5521d25803916';
 const ROOT = resolve(process.cwd());
+const args = process.argv.slice(2);
+const values = new Map<string, string>();
+let checkIdentityOnly = false;
+for (let i = 0; i < args.length; i++) {
+  const key = args[i]!;
+  if (key === '--check-identity') { checkIdentityOnly = true; continue; }
+  if (!['--base', '--head'].includes(key) || values.has(key) || !args[i + 1] || args[i + 1]!.startsWith('--')) {
+    throw new Error('Usage: gp-goal-census.ts --base <baseline> --head <reviewed HEAD> [--check-identity]');
+  }
+  values.set(key, args[++i]!);
+}
+if (!values.has('--base') || !values.has('--head')) {
+  throw new Error('Both --base and --head are required; the census has no pinned defaults.');
+}
+const commitOf = (value: string): string => execFileSync('git', ['rev-parse', '--verify', `${value}^{commit}`],
+  { cwd: ROOT, encoding: 'utf8' }).trim();
+const BASE = commitOf(values.get('--base')!);
+const EXPECTED_HEAD = commitOf(values.get('--head')!);
 const OUT = join(ROOT, 'GP-CENSUS.md');
 const RAW = join(ROOT, 'GP-CENSUS.json');
 const roots = [ROOT, '/private/tmp/accel-p44/goalreach', '/Users/paulslee/Documents/GitHub/output'];
@@ -105,6 +119,19 @@ console.log(`Load gate: ${load.toFixed(2)} < 25`);
 if (load >= 25) throw new Error('Load gate failed; census not run.');
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
 if (head !== EXPECTED_HEAD) throw new Error(`Expected HEAD ${EXPECTED_HEAD}, got ${head}`);
+console.log(`Census identities: ${BASE} → ${head} (working tree).`);
+if (checkIdentityOnly) process.exit(0);
+const sourceTreeSha256 = (): string => {
+  const sourceFiles = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'src', 'scripts', 'tools'],
+    { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(Boolean).sort();
+  const digest = createHash('sha256');
+  for (const file of sourceFiles) {
+    digest.update(file + '\0');
+    digest.update(readFileSync(join(ROOT, file)));
+    digest.update('\0');
+  }
+  return digest.digest('hex');
+};
 const documents: Document[] = [];
 const coverage: Rec[] = [];
 const parseErrors: Rec[] = [];
@@ -160,6 +187,8 @@ for (const root of roots) {
   console.log(`Scanned ${root}: ${parsed}/${selected} selected files (${inventory.length} JSON/JSONL files inventoried).`);
 }
 
+// Capture the actual replayed tree after inventory, including untracked source, and verify it did not change in replay.
+const workingTreeSourceSha256 = sourceTreeSha256();
 const snapshot = mkdtempSync(join(tmpdir(), 'gp-census-baseline-'));
 try {
   const archive = join(snapshot, 'baseline.tar');
@@ -168,7 +197,7 @@ try {
   symlinkSync(join(ROOT, 'node_modules'), join(snapshot, 'node_modules'), 'dir');
   const importAt = (base: string, path: string): Promise<Rec> => import(pathToFileURL(join(base, path)).href);
   const modules = async (base: string): Promise<Rec> => {
-    const [target, licence, certainty, seam, guidance, estimates, optionSources, goalGate, unread, screen, parts, graphHashes, goalKind, goalDirection] = await Promise.all([
+    const [target, licence, certainty, seam, guidance, estimates, optionSources, goalGate, unread, screen, parts, graphHashes, goalKind, goalDirection, held, attribution] = await Promise.all([
       importAt(base, 'src/orchestrator-v5/admission/target-testability.ts'),
       importAt(base, 'src/orchestrator-v5/goal-target/goal-chance-licence.ts'),
       importAt(base, 'src/orchestrator-v5/agent-lane/goal-certainty.ts'),
@@ -183,9 +212,12 @@ try {
       importAt(base, 'src/orchestrator-v5/context/graph-hash.ts'),
       importAt(base, 'src/orchestrator-v5/goal-target/goal-kind.ts'),
       importAt(base, 'src/orchestrator-v5/goal-target/goal-direction.ts'),
+      importAt(base, 'src/orchestrator-v5/goal-target/held-user-links.ts'),
+      existsSync(join(base, 'src/orchestrator-v5/agent-lane/goal-chance-estimate-attribution.ts'))
+        ? importAt(base, 'src/orchestrator-v5/agent-lane/goal-chance-estimate-attribution.ts') : Promise.resolve({}),
     ]);
     return { ...target, ...licence, ...certainty, ...seam, ...guidance, ...estimates, ...optionSources, ...goalGate, ...unread,
-      ...screen, ...parts, ...graphHashes, ...goalKind, ...goalDirection };
+      ...screen, ...parts, ...graphHashes, ...goalKind, ...goalDirection, ...held, ...attribution };
   };
   const [before, after] = await Promise.all([modules(snapshot), modules(ROOT)]);
   const allGraphs = documents.flatMap(d => d.graphs);
@@ -306,9 +338,11 @@ try {
     const analysed = m.asAnalysed(graph);
     const signals = m.assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph: analysed,
       analysisState: undefined, analysisResult: run, identityEvaluations: evaluations, leaderLicensed: false });
-    const k = m.olumiEstimatesFeedingResult({ goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'] }).links.length;
     const rows = m.readOptionResultSources(envelope).find((s: Rec[]) => s.length > 0) ?? [];
     const ids: string[] = [...new Set<string>(rows.map((r: Rec) => r.option_id ?? r.id).filter((x: unknown): x is string => typeof x === 'string'))];
+    const k = typeof m.goalChanceEstimateLinkCount === 'function' ? m.goalChanceEstimateLinkCount(graph, ids.length > 0 ? ids : undefined, goalId)
+      : m.olumiEstimatesFeedingResult({ goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'],
+        ...(typeof m.validatedDefinitionForGraph === 'function' ? { validatedDefinitionForLink: m.validatedDefinitionForGraph(analysed) } : {}) }).links.length;
     const hasChance = rows.some((r: Rec) => typeof r.probability_of_goal === 'number');
     let gated = envelope;
     // Honour every unrelated captured withhold: a target relaxation cannot resurrect another gate's figure.
@@ -384,8 +418,10 @@ try {
   const kWords = (counts: Rec): string => Object.entries(counts).sort((a, b) => Number(a[0]) - Number(b[0])).map(([k, n]) => `${k}:${n}`).join(', ') || '—';
   const warnings = [parseErrors.length > 0 ? `${parseErrors.length} files failed JSON parsing; see GP-CENSUS.json.` : null,
     unmatchedRuns.length > 0 ? `${unmatchedRuns.length} stored Run records had no unambiguous identity-bound graph; see GP-CENSUS.json.` : null].filter(Boolean);
+  if (sourceTreeSha256() !== workingTreeSourceSha256) throw new Error('Working-tree source changed during replay; rerun census.');
   const lines = [
-    '# GUIDED PATH round-5 offline census', '', `Baseline: \`${BASE}\`. Working-tree HEAD: \`${head}\`.`,
+    '# GUIDED PATH offline census', '', `Baseline: \`${BASE}\`. Working-tree HEAD: \`${head}\`.`,
+    `Working-tree source SHA-256: \`${workingTreeSourceSha256}\` (including untracked source; unchanged through replay).`,
     `Generated ${new Date().toISOString()}; load gate ${load.toFixed(2)} < 25. No network, LLM, or database access.`, '',
     `Status: **${regression ? 'STOP — shown→withheld regression' : unlabelledFinalPoints.length > 0 ? 'STOP — shown estimate point has no labelled sentence' : warnings.length > 0 ? 'INCOMPLETE — coverage gaps listed below' : 'PASS — no shown→withheld regression'}**.`, '',
     '| Goal direction | Total | Withheld→shown | Shown→withheld | Unchanged | Licence unavailable | k distribution (k:cases) |',
@@ -401,7 +437,7 @@ try {
     'Output selects every local JSON/JSONL/SSE file containing analysis_result, plus graph files needed for exact Run binding. Repo and goalreach scan every JSON/JSONL/SSE fixture/capture; dependency/build/cache trees are excluded. Embedded JSON, concatenated JSON and raw/embedded SSE JSON bodies are extracted. Executable TypeScript fixture builders are not stored JSON fixtures.',
     'Runs pair to their graph in the same captured document, by exact captured/recomputed graph hash, or by the named stored -cur.plot-body/-graph fixture pairing. Option identities must agree. Hash-equivalent graph variants must agree on both actual replays. Ambiguous or missing pairs are reported, never matched by labels or guessed from directory proximity.',
     'Licence replay pins the original authoritative option-result source before replacing owned target/licence warnings, uses stored probabilities only, applies the actual placeholder/product/target seams and chance licence, and preserves unrelated captured withholds. Empty stripped current sources never fall back to historical result copies. A removed chance cannot be recovered without a raw stored Run: those cases are licence unavailable, never counted as proven shown or unchanged.',
-    "k is olumiEstimatesFeedingResult({goalPathFactors, goalPathLinks}).links.length, fed by assembleGuidanceSignals. Values, accepted estimates, off-path links and placeholders never enter k.",
+    "k comes solely from RC4's olumiEstimatesFeedingResult, fed by assembleGuidanceSignals. Current replay uses the same scored-option attribution helper and graph-bound validatedDefinition reader as the stored licence. Values, accepted estimates, off-path links, validated definitions and placeholders never enter current k.",
     `Existing valid range-only cases: ${rangeCoverage.total}; unchanged ${rangeCoverage.unchanged}; changed ${rangeCoverage.changed}. They remain point-licence unavailable, rather than being called point withholds.`,
     `Shown estimate points missing the actual labelled sentence: ${unlabelledFinalPoints.length} in all final shown cases; ${unlabelledNewPoints.length} newly shown. Point option IDs come from the actual licence; specialised chance words and unrelated range sentences are preserved.`,
     `Unrelated auxiliary JSON parse errors: ${auxiliaryParseErrors.length} (for example commented tsconfig; excluded from capture coverage gaps).`,
@@ -412,7 +448,7 @@ try {
     'At most 10 changed-verdict examples are printed here; the complete ledger is in GP-CENSUS.json.',
     '', `Raw evidence: \`${basename(RAW)}\`.`,
   ];
-  writeFileSync(RAW, JSON.stringify({ baseline: BASE, head, load, coverage, table, parseErrors, auxiliaryParseErrors, unmatchedRuns, unlabelledFinalPoints, unlabelledNewPoints, rangeCoverage, cases: detail }, null, 2) + '\n');
+  writeFileSync(RAW, JSON.stringify({ baseline: BASE, head, working_tree_source_sha256: workingTreeSourceSha256, load, coverage, table, parseErrors, auxiliaryParseErrors, unmatchedRuns, unlabelledFinalPoints, unlabelledNewPoints, rangeCoverage, cases: detail }, null, 2) + '\n');
   writeFileSync(OUT, lines.join('\n') + '\n');
   console.log(lines.slice(0, 29).join('\n'));
   if (regression) throw new Error('STOP: shown→withheld or pass→withheld regression.');

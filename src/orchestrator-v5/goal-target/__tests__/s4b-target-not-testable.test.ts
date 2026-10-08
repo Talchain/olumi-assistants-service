@@ -5,12 +5,14 @@ import { scopeTargetNotTestableWithRanges } from '../scope-target-not-testable.j
 import { GOAL_CHANCE_RANGE } from '../goal-chance-range.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { decisionReviewFor } from '../../agent-lane/decision-review-press.js';
-import { targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
+import { convertingOlumiEstimate, targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE as TARGET } from '../../../orchestrator/context/option-result-source.js';
 import { goalChanceLineOwed, goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../../agent-lane/withheld-leader-fail-closed.js';
 
+// Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE
+// with a natural effect that converts into goal units." Contrasts below keep refused conversion and placeholders blocked.
 type Rec = Record<string, any>;
 type Wire = Parameters<typeof enforceAgentLaneLeaderClaimsAtWire>[0];
 const read = (name: string): Rec => JSON.parse(readFileSync(new URL(`./fixtures/s4b/${name}.json`, import.meta.url), 'utf8'));
@@ -55,12 +57,13 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
 
   it(`${name}: say names only W’s options with a failing link, keeping their links and ask (RED at base)`, () => {
     const say: string = warning(scoped())!.say;
-    expect(say).toBe(expectedSay);
+    // The captured estimates now convert: their old case-(c) ask must be absent.
+    expect(say).toBe('');
     expect(!say.includes('any option')).toBeTruthy();
     expect(!say.includes('—')).toBeTruthy();
     for (const id of rangeIds) expect(!say.includes(`‘${labels.get(id)}’`)).toBeTruthy();
     expect(say).not.toContain(`‘${labels.get(baselineId)}’`);
-    expect(say.endsWith(question)).toBeTruthy();
+    expect(say).not.toContain(question);
   });
 
   it(`${name}: panel message stays byte-identical to the base producer`, () => {
@@ -84,25 +87,24 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
 
   it(`${name}: narration and actual wire leader gate keep scoped say (RED at base)`, () => {
     const resultBlock = { ...block, enrichment: scoped() };
-    const goalChance = goalChanceWithheldForAgent(resultBlock, graph)!;
-    expect(goalChance.say.includes(expectedSay)).toBeTruthy();
-    expect(!goalChance.say.includes('any option')).toBeTruthy();
-    expect(goalChance.say.startsWith('This run shows some options’ chances only as a range.')).toBeTruthy();
-    expect(!goalChance.say.includes('each option')).toBeTruthy();
+    const goalChance = goalChanceWithheldForAgent(resultBlock, graph);
+    expect(goalChance?.say ?? '').not.toContain(expectedSay);
+    expect(goalChance?.say ?? '').not.toContain('any option');
     const review = decisionReviewFor('s4b-review', { graph, analysisResult: resultBlock, analysisState: wire.analysis_state, graphHash: block.computed_against_hash });
-    expect(review.reply.includes(expectedSay)).toBeTruthy();
-    expect(!review.reply.includes('any option')).toBeTruthy();
+    expect(review.reply).not.toContain(expectedSay);
+    expect(review.reply).not.toContain('any option');
     const owed = goalChanceLineOwed([{ ran: true, goal_chance: goalChance }], 'Your results are ready.');
-    expect(owed).toBe(goalChance.say);
+    expect(owed).toBe(goalChance?.say ?? null);
+    const protectedSay = goalChance?.say ?? review.reply;
     const projected = enforceAgentLaneLeaderClaimsAtWire({
-      ...wire, blocks: [resultBlock], assistant_text: `${goalChance.say}\n\n${labels.get(rangeIds[0]!)} is the best option.`,
+      ...wire, blocks: [resultBlock], assistant_text: `${protectedSay}\n\n${labels.get(rangeIds[0]!)} is the best option.`,
       analysis_state: { ...wire.analysis_state, run_state: { kind: 'complete_current' },
         leader_claim: { permitted: false, withheld_reason: 'goal_path_unsized' } },
     } as Wire, { requestId: `s4b-${name}`, exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
       separationEstablished: false, leaderClaimWithheldReason: 'goal_path_unsized', graph,
-      analysisReady: undefined, protectedGoalChanceSay: goalChance.say });
-    expect(projected.response.assistant_text!.includes(expectedSay)).toBeTruthy();
-    expect(!projected.response.assistant_text!.includes('any option')).toBeTruthy();
+      analysisReady: undefined, protectedGoalChanceSay: protectedSay });
+    expect(projected.response.assistant_text!).not.toContain(expectedSay);
+    expect(projected.response.assistant_text!).not.toContain('any option');
     expect(!projected.response.assistant_text!.includes('is the best option')).toBeTruthy();
   });
 
@@ -133,8 +135,7 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     }] };
     const out = scopeTargetNotTestableWithRanges(points, graph);
     expect(warning(out)!.option_ids).toEqual([remaining[1]]);
-    if (remaining[1] === baselineId) expect(warning(out)!.say).toBe('');
-    else expect(warning(out)!.say.includes(`how likely ‘${labels.get(remaining[1]!)}’ is to`)).toBeTruthy();
+    expect(warning(out)!.say).toBe('');
     expect(!warning(out)!.say.includes(`‘${labels.get(remaining[0]!)}’`)).toBeTruthy();
     const allPoints = { ...points, inference_warnings: warnings(points).map(w => w.code === GOAL_CHANCE_LICENSED ? {
       ...w, pct_by_option: Object.fromEntries(remaining.map(id => [id, 45])), withheld_option_ids: undefined,
@@ -169,7 +170,7 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
       ? { ...w, option_ids: [linkedIds[0]] } : w) };
     const out = scopeTargetNotTestableWithRanges(narrow, graph);
     expect(warning(out)!.option_ids).toEqual([linkedIds[0]]);
-    expect(warning(out)!.say).toContain(`how likely ‘${labels.get(linkedIds[0]!)}’ is to`);
+    expect(warning(out)!.say).toBe('');
     expect(warning(out)!.say).not.toContain(`‘${labels.get(baselineId)}’`);
     const empty = { ...envelope, inference_warnings: warnings(envelope).map(w => w.code === TARGET
       ? { ...w, option_ids: rangeIds } : w) };
@@ -199,11 +200,10 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
       ? { ...n, interventions: { [otherLink.from]: 1 } } : n) };
     const out = scopeTargetNotTestableWithRanges(envelope, movedGraph);
     const say: string = warning(out)!.say;
-    expect(say).toContain(expectedSay);
-    expect(say).toContain(`how likely ‘${labels.get(baselineId)}’ is to`);
-    expect(say).toContain(movedGraph.nodes.find((n: Rec) => n.id === otherLink.from).label);
-    expect(say.split("I can't yet say how likely").length).toBe(3);
-    expect(say.split('?').length).toBe(3);
+    const movedEdge = movedGraph.edges.find((edge: Rec) => edge.from === otherLink.from && edge.to === otherLink.to);
+    expect(convertingOlumiEstimate(movedEdge, movedGraph)).toBe(true);
+    expect(say).toBe('');
+    expect(say).not.toContain(expectedSay);
   });
 
   it(`${name}: a shared failing link stays on W’s path and the ask follows the first retained link`, () => {
@@ -213,9 +213,33 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
       Object.keys(graph.nodes.find((o: Rec) => o.id === id)?.interventions ?? {}).length > 0)
       ? { ...n, interventions: { ...n.interventions, [rangedLink.from]: { value: 1 } } } : n) };
     const out = scopeTargetNotTestableWithRanges(envelope, sharedGraph);
-    expect(warning(out)!.say).toContain(graph.nodes.find((n: Rec) => n.id === rangedLink.from).label);
-    const first = warning(out)!.first_ask;
-    if (first !== undefined) expect(warning(out)!.say).toContain(graph.nodes.find((n: Rec) => n.id === first.from).label);
+    const sharedEdge = sharedGraph.edges.find((edge: Rec) => edge.from === rangedLink.from && edge.to === rangedLink.to);
+    expect(convertingOlumiEstimate(sharedEdge, sharedGraph)).toBe(true);
+    expect(warning(out)!.say).toBe('');
+    expect(warning(out)!.first_ask).toBeUndefined();
+  });
+
+  it.each(['placeholder', 'non-converting estimate'])(`${name}: amendment (A) CONTRAST: %s still keeps W's complete link reason and ask`, (kind) => {
+    const refused = structuredClone(graph);
+    let changed = 0;
+    const ownPath = new Set((name === 'unseen-1'
+      ? [['loyalty_app_gross_profit_uplift', 'monthly_profit'], ['loyalty_app_operating_cost', 'monthly_profit'],
+        ['loyalty_app_incremental_sales', 'loyalty_app_gross_profit_uplift']]
+      : [['loyalty_app_active', 'incremental_monthly_profit_from_loyalty_app']]).map(ends => JSON.stringify(ends)));
+    for (const edge of refused.edges) if (ownPath.has(JSON.stringify([edge.from, edge.to]))) {
+      expect(convertingOlumiEstimate(edge, graph)).toBe(true);
+      changed += 1;
+      if (kind === 'placeholder') edge.provenance.magnitude = 'olumi_placeholder';
+      else delete edge.provenance.natural_effect;
+      expect(convertingOlumiEstimate(edge, refused)).toBe(false);
+    }
+    expect(changed).toBe(name === 'unseen-1' ? 3 : 1);
+    const out = scopeTargetNotTestableWithRanges(envelope, refused);
+    expect(warning(out)!.say).toBe(expectedSay);
+    expect(warning(out)!.say.endsWith(question)).toBe(true);
+    expect(warning(out)!.per_option[linkedIds[0]!].message).toContain(name === 'unseen-1'
+      ? 'Loyalty-app gross-profit uplift' : 'Loyalty app active');
+    expect(warning(out)!.first_ask).toBeDefined();
   });
 
   it(`${name}: pure, idempotent, figures and other warnings unchanged`, () => {

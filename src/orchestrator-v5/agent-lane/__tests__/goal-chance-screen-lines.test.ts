@@ -70,15 +70,15 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
     expect(screenFor('unseen-b4-1')).toHaveLength(2);
   });
 
-  it('served points: B5 unchanged; prod cut-6 retains its figures/order and gains the RC4 estimate label', () => {
+  it('served points: B5 and prod cut-6 stay byte-identical; RC4 excludes the validated arithmetic definition', () => {
     expect(linesOf(B5_T1B).map(whole)).toEqual(screenFor('t1b-b5-1'));
     expect(screenFor('t1b-b5-1')).toHaveLength(3);
     const prod = linesOf(PROD);
-    expect(PROD_SCREEN.startsWith(prod.map(whole).join(' ').replaceAll(
-      ", using Olumi's estimates for 1 link (see Check estimates)", ''))).toBe(true);
+    expect(PROD_SCREEN.startsWith(prod.map(whole).join(' '))).toBe(true);
     for (const line of prod) {
-      expect(line.olumi_estimate_link_count).toBe(1);
-      expect(line.chance).toContain(", using Olumi's estimates for 1 link (see Check estimates).");
+      // Science §(f), r6: validatedDefinition is arithmetic, not an estimated link size.
+      expect(line.olumi_estimate_link_count).toBeUndefined();
+      expect(line.chance).not.toContain('using Olumi');
     }
     expect(linesOf(PROD)).toHaveLength(3);
   });
@@ -140,11 +140,11 @@ describe('S4c: owed only when the reply does not give that option’s figure', (
     expect(out.text).toBe(B5_T1B.assistant_text.replace(`${T1B_LEAD}\n\n`, `${T1B_LEAD}\n\n${screenFor('t1b-b5-1').join(' ')}\n\n`));
   });
 
-  it('the served prod cut-6 unlabelled figures do not pay the labelled point, and narrator counts are removed', () => {
+  it('the served prod cut-6 has no estimated link sizes; its existing figure narration pays the unchanged point', () => {
     const narratorCount = ' Six underlying values were supplied by Olumi, not you; sensitivity has not established which assumption matters most.';
     expect(PROD.assistant_text).toContain(narratorCount);
     expect(withScreenLinesOwed(PROD.assistant_text, linesOf(PROD))).toEqual({
-      text: `${PROD.assistant_text.replace(narratorCount, '')}\n\n${linesOf(PROD).map(whole).join(' ')}`, added: 5,
+      text: PROD.assistant_text, added: 0,
     });
   });
 

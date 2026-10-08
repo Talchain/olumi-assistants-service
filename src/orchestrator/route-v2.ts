@@ -2143,6 +2143,18 @@ async function sendFinalised200(
   //      leader-free under BOTH readers, so it cannot introduce a claim for
   //      this scan to miss.
   // ═══════════════════════════════════════════════════════════════════════════
+  // Attach the identity-bound hook before the single scan of the bytes that ship.
+  if (egress.ok && !analysisAuthorityUnavailable && guidedSizingForWire !== undefined
+    && (guidedSizingForWire.progress_line === undefined || wireBody.assistant_text.includes(guidedSizingForWire.progress_line))) {
+    const offered = new Set(wireBody.suggested_actions.filter(action => guidedActionsForWire.has(action.id)).map(action => action.id));
+    const boundGuidedSizing = guidedSizingOnWire(guidedSizingForWire, wireBody.graph_hash);
+    if (boundGuidedSizing !== undefined && guidedSizingForWire.links.every(link => offered.has(link.press.id))) {
+      const augmented: import('@talchain/schemas/boundary').OlumiResponse & { guided_sizing: GuidedSizing } = {
+        ...wireBody, guided_sizing: boundGuidedSizing,
+      };
+      wireBody = finaliseV5Response(augmented, finaliserContext);
+    }
+  }
   guardLeadingOptionClaimsAtEgress(wireBody, {
     requestId,
     exitPath,
@@ -2192,17 +2204,6 @@ async function sendFinalised200(
       refusal_source: refusal.source,
       refusal_code: refusal.refusal_code,
     });
-  }
-  if (egress.ok && !analysisAuthorityUnavailable && guidedSizingForWire !== undefined
-    && (guidedSizingForWire.progress_line === undefined || wireBody.assistant_text.includes(guidedSizingForWire.progress_line))) {
-    const offered = new Set(wireBody.suggested_actions.filter(action => guidedActionsForWire.has(action.id)).map(action => action.id));
-    const boundGuidedSizing = guidedSizingOnWire(guidedSizingForWire, wireBody.graph_hash);
-    if (boundGuidedSizing !== undefined && guidedSizingForWire.links.every(link => offered.has(link.press.id))) {
-      const augmented: import('@talchain/schemas/boundary').OlumiResponse & { guided_sizing: GuidedSizing } = {
-        ...wireBody, guided_sizing: boundGuidedSizing,
-      };
-      wireBody = finaliseV5Response(augmented, finaliserContext);
-    }
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);

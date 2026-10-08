@@ -113,3 +113,17 @@ it('INSPECTOR DOOR M=1: second edit reads the new stored graph and emits no prog
   expect(response.assistant_text).not.toContain('more to go');
   expect(response.guided_sizing).toBeUndefined();
 });
+
+it('GP review P1: the inspector door keeps M inside the selected Run despite two excluded-option links', async () => {
+  graph.nodes.push({ id: 'excluded', kind: 'option', label: 'Excluded option', interventions: { extra: { value: 2 } } },
+    { id: 'extra', kind: 'factor', label: 'Excluded factor', observed_state: { value: 1, unit: '£/month' } },
+    { id: 'extra2', kind: 'factor', label: 'Excluded factor 2', observed_state: { value: 1, unit: '£/month' } });
+  graph.edges.push({ id: 'excluded-setting', from: 'excluded', to: 'extra', exists_probability: 1, effect_direction: 'positive', strength: { mean: 1, std: 0.01 } },
+    { id: 'extra-link-1', from: 'extra', to: 'extra2', exists_probability: 1, effect_direction: 'positive', strength: { mean: 0.5, std: 0.125 }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } },
+    { id: 'extra-link-2', from: 'extra2', to: 'mrr', exists_probability: 1, effect_direction: 'positive', strength: { mean: 0.5, std: 0.125 }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
+  const response = await size('monthly_churn', 'paying_pro_subscribers');
+  expect(response.assistant_text).toContain(PROGRESS);
+  expect(response.assistant_text).not.toContain('4 more to go');
+  expect(response.guided_sizing.remaining).toBe(2);
+  expect(response.guided_sizing.links.some((l: Json) => l.from.startsWith('extra'))).toBe(false);
+});

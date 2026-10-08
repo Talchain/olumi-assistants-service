@@ -43,8 +43,22 @@ describe('the upstream link question', () => {
     const g = JSON.parse(readFileSync(new URL('./fixtures/served-c5j4-r2-starter-tier-switch.json', import.meta.url), 'utf8')) as Json;
     const lever = g.nodes.find((n: Json) => n.id === 'starter_tier_launched');
     expect([lever.unit ?? null, lever.observed_state?.unit, lever.scale_frame ?? null]).toEqual([null, '0/1', null]);
-    const text = notTargetTestableSentence(g, targetTestabilityOf(g)) ?? '';
-    expect(text).toContain('Roughly how much does Starter subscribers change, in subscribers, with Starter tier launched?');
+    // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE with a natural
+    // effect that converts into goal units." Its 150 subscribers per switch estimate already converts: no size re-ask.
+    expect(targetTestabilityOf(g)).toMatchObject({ kind: 'testable' });
+    expect(notTargetTestableSentence(g, targetTestabilityOf(g))).toBeNull();
+  });
+
+  it.each(['placeholder', 'non-converting estimate'])('amendment (A) CONTRAST: a switch %s still blocks and asks about the switch', kind => {
+    const g = JSON.parse(readFileSync(new URL('./fixtures/served-c5j4-r2-starter-tier-switch.json', import.meta.url), 'utf8')) as Json;
+    const e = g.edges.find((x: Json) => x.from === 'starter_tier_launched' && x.to === 'starter_subscribers');
+    if (kind === 'placeholder') { e.provenance.magnitude = 'olumi_placeholder'; e.strength.defaulted = true; }
+    else delete e.provenance.natural_effect;
+    const v = targetTestabilityOf(g);
+    expect(v.kind).toBe('not_testable');
+    const text = notTargetTestableSentence(g, v) ?? '';
+    expect(text).toContain('a size for the link from Starter tier launched to Starter subscribers');
+    expect(text).toContain('Roughly how much does Starter subscribers change when Starter tier launched changes?');
     expect(text).not.toMatch(/rises by 1|0 \/ 1/);
   });
 });
