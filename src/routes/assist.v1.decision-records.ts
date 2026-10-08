@@ -348,7 +348,7 @@ export default async function route(
   // -------------------------------------------------------------------------
   // OUTCOME — write-once, and the first brier_component producer.
   // -------------------------------------------------------------------------
-  app.post(DECISION_RECORDS_OUTCOME_PATH, { config: { scenarioId: { derive: async req => { const id = (req.params as { record_id: string }).record_id; if (!UUID_RE.test(id)) return undefined; const record = await resolveStore().readRecordForOutcome(id); if (record) outcomeReads.set(req, record); return record?.scenario_id; }, readOwner: async req => outcomeReads.get(req)?.owner_user_id } } }, async (req, reply) => {
+  app.post(DECISION_RECORDS_OUTCOME_PATH, { config: { scenarioId: { derive: async req => { const id = (req.params as { record_id: string }).record_id; if (!UUID_RE.test(id)) return undefined; const record = await resolveStore().readRecordForOutcome(id); if (record) outcomeReads.set(req, record); return record?.scenario_id; }, rewriteDerived: (req, id) => { const record = outcomeReads.get(req); if (record) outcomeReads.set(req, { ...record, scenario_id: id }); }, readOwner: async req => outcomeReads.get(req)?.owner_user_id } } }, async (req, reply) => {
     const userId = req.scenarioAccess?.callerUserId ?? null;
     if (userId === null) return reply;
 

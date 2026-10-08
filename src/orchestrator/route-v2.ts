@@ -3015,6 +3015,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // and it grows no fence rows.
       return reply.code(pre.status).send(pre.error);
     }
+    if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
     // V5 TURN FENCE — ADMISSION (2.174 fix b). The request has passed auth,
     // B1 validation and the scenario upsert, so NOW it claims its place in
     // the scenario's start order. This is the single claim call site; it

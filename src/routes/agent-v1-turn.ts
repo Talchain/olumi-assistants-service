@@ -2035,7 +2035,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(422).send({ error: 'BAD_INPUT', detail: '`turn_id` must be a UUID when supplied.' });
     }
 
-    // Verified identity and scenario provisioning came from the ownership hook.
+    if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
+    // Verified identity and deferred scenario provisioning came from the ownership hook.
     const userId = req.scenarioAccess?.callerUserId ?? null;
 
     // A session is a correlation token: bound once, verified every time.

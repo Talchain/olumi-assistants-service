@@ -403,29 +403,6 @@ async function threadLiveHoldsThroughRegistration(input: {
   return scopeIssuesAfterWrite(result.threaded, input.graphForStore, input.scenarioId);
 }
 
-/** Existing ingress prerequisites for CREATE, using the same parsers as the handler.
- * The handler keeps its detailed refusal envelopes; this pure declaration prevents an invalid
- * import from creating an empty scenario before those refusals run. */
-function registrationInputAdmitsCreation(req: import('fastify').FastifyRequest): boolean {
-  if (!parseRequestExtensions(req.body, getRequestId(req)).ok) return false;
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  if (body.brief_text != null && typeof body.brief_text !== 'string') return false;
-  if (normaliseBriefText(body.brief_text).truncated) return false;
-  if (body.operation_id != null && (typeof body.operation_id !== 'string' || !UUID_PATTERN.test(body.operation_id))) return false;
-  if (body.expected_graph_hash != null && (typeof body.expected_graph_hash !== 'string' || body.expected_graph_hash.length === 0)) return false;
-  const identity = body.expected_graph_identity_hash;
-  if (identity !== null && identity !== undefined &&
-    !(typeof identity === 'string' && identity.length > 0) &&
-    !(typeof identity === 'object' && !Array.isArray(identity) && typeof (identity as { value?: unknown }).value === 'string' && ((identity as { value: string }).value.length > 0))) return false;
-  const graph = body.graph as { nodes?: unknown; edges?: unknown } | null | undefined;
-  if (!graph || Array.isArray(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) ||
-    graph.nodes.length === 0 || graph.nodes.length > GRAPH_MAX_NODES || graph.edges.length > GRAPH_MAX_EDGES) return false;
-  const normalised = normaliseGraphNodeKindField(graph);
-  if (!normalised.ok) return false;
-  const parsed = GraphStateIngressSchema.safeParse(normalised.graph);
-  return parsed.success && eventRiskIngressIssues(parsed.data.nodes as ReadonlyArray<Record<string, unknown>>).length === 0;
-}
-
 export default async function route(app: FastifyInstance) {
   // Tier DERIVED from RATE_BUCKET_REGISTRY. This is a WRITE — it is registered
   // in the `coach` tier, not `read`: `read` fails OPEN on limiter error
@@ -447,7 +424,7 @@ export default async function route(app: FastifyInstance) {
       // reason as the sibling read route: through the `/bff/cee/*` edge every
       // visitor arrives carrying the SAME injected assist key, so a key-derived
       // bucket would be one product-wide shared-fate throttle.
-      config: { scenarioId: { from: 'params', key: 'scenario_id', createIfMissing: registrationInputAdmitsCreation },
+      config: { scenarioId: { from: 'params', key: 'scenario_id' },
         rateLimit: {
           max: RATE_LIMIT_MAX,
           timeWindow: "1 minute",
@@ -725,6 +702,7 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
+      if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
       const store = getSessionStore();
 
       // ── 4. The trusted CAS base — the SERVER's bytes, never the request's ─

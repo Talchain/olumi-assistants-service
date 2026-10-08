@@ -13,7 +13,11 @@ export async function runPreflightThroughOwnership(
   const caller = getCallerContext(input as FastifyRequest);
   if (caller) app.addHook('onRequest', async request => { attachCallerContext(request, caller); });
   await installOwnershipHarness(app);
-  app.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async request => ({ preflight: await validate(request) }));
+  app.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (request, reply) => {
+    const preflight = await validate(request);
+    if (preflight.ok && request.scenarioAccess?.provisionIfMissing && !await request.scenarioAccess.provisionIfMissing()) return reply;
+    return { preflight };
+  });
   try {
     const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', headers: input.headers, payload: input.body as object });
     if (response.statusCode === 200) return response.json<{ preflight: PreFlightOutcome }>().preflight;

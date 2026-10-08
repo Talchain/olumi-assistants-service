@@ -68,6 +68,26 @@ export default async function route(
   const resolveStore = (): CollabStore =>
     deps?.store ?? resolveInjectedStore(app) ?? getCollabStore();
 
+  // Retain the checked round binding for this request, including canonical scenario id.
+  const roundReads = new WeakMap<FastifyRequest, NonNullable<Awaited<ReturnType<CollabStore['getRound']>>>>();
+  const deriveRound = async (req: FastifyRequest) => {
+    const round = await resolveStore().getRound(roundIdOf(req));
+    if (round) roundReads.set(req, { ...round });
+    return round?.scenario_id;
+  };
+  const rewriteRound = (req: FastifyRequest, scenarioId: string) => {
+    const round = roundReads.get(req);
+    if (round) roundReads.set(req, { ...round, scenario_id: scenarioId });
+  };
+  const checkedRoundStore = (req: FastifyRequest): CollabStore => {
+    const store = resolveStore();
+    return new Proxy(store, { get(target, key) {
+      if (key === 'getRound') return async (id: string) => { const round = roundReads.get(req); return round?.round_id === id ? round : target.getRound(id); };
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+  };
+
   // ── MINT ─────────────────────────────────────────────────────────────────
   for (const path of collabPaths('/rounds')) {
     app.post(path, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
@@ -135,10 +155,10 @@ export default async function route(
 
   // ── CLOSE ────────────────────────────────────────────────────────────────
   for (const path of collabPaths('/rounds/:round_id/close')) {
-    app.post(path, { config: { scenarioId: { derive: async req => (await resolveStore().getRound((req.params as { round_id: string }).round_id))?.scenario_id, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+    app.post(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
       const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         await closeRound(store, {
           round_id: roundIdOf(req),
@@ -157,10 +177,10 @@ export default async function route(
 
   // ── PREVIEW (pre-close: roster only, deliberately no beliefs) ────────────
   for (const path of collabPaths('/rounds/:round_id/preview')) {
-    app.get(path, { config: { scenarioId: { derive: async req => (await resolveStore().getRound((req.params as { round_id: string }).round_id))?.scenario_id, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+    app.get(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
       const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         const preview = await ownerPreview(store, {
           round_id: roundIdOf(req),
@@ -175,10 +195,10 @@ export default async function route(
 
   // ── REVEAL (owner view; refuses while the round is open, like everyone) ──
   for (const path of collabPaths('/rounds/:round_id/reveal')) {
-    app.get(path, { config: { scenarioId: { derive: async req => (await resolveStore().getRound((req.params as { round_id: string }).round_id))?.scenario_id, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+    app.get(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
       const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         const view = await assembleRevealView(store, {
           round_id: roundIdOf(req),
@@ -198,10 +218,10 @@ export default async function route(
   // second open-round check here that could drift and let this endpoint become
   // an early peek at a blind round.
   for (const path of collabPaths('/rounds/:round_id/disagreement')) {
-    app.get(path, { config: { scenarioId: { derive: async req => (await resolveStore().getRound((req.params as { round_id: string }).round_id))?.scenario_id, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
+    app.get(path, { config: { scenarioId: { derive: deriveRound, rewriteDerived: rewriteRound, readOwner: async (_req, id) => resolveStore().getScenarioOwnerUserId(id) } } }, async (req, reply) => {
       const userId = req.scenarioAccess?.callerUserId ?? null;
       if (userId === null) return reply;
-      const store = resolveStore();
+      const store = checkedRoundStore(req);
       try {
         const view = await assembleDisagreementView(store, {
           round_id: roundIdOf(req),
