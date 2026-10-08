@@ -37,9 +37,9 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 type Rec = Record<string, unknown>;
 const SCENARIO = 'a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r-a2' };
-const BRIEF_A = 'Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, '
+const BRIEF_A = 'Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn UNDER 4%, '
   + 'should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
-const BRIEF_AT_MOST = BRIEF_A.replace('under 4%', 'at most 4%');
+const BRIEF_AT_MOST = BRIEF_A.replace('UNDER 4%', 'at most 4%');
 
 /** The live 22 Sep builder capture (`fixtures/faithful.json`): `monthly churn < 4 %`, explicit — not authored here. */
 const captured = (JSON.parse(readFileSync(new URL('./fixtures/faithful.json', import.meta.url), 'utf8')) as { constraints: CandidateConstraint[] }).constraints;
