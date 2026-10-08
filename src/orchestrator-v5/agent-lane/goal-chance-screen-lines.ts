@@ -69,10 +69,10 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
  * so the route can type it as this finding's leading evidence. Never the canonical sentence (typed already).
  */
 export function chanceInOwnWords(sentence: string, l: GoalChanceScreenLine): boolean {
-  const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
-  const p = plain(sentence);
-  const at = p.indexOf(plain(l.label));
-  return sentence !== l.chance && at >= 0 && p.indexOf(plain(l.figure), at + plain(l.label).length) >= 0;
+  // EXACTLY "<label>: <figure>." (quotes/emphasis aside): the sentence IS this option's figure, never a share or a range
+  // that mentions it, never a longer label that starts with this one (Codex r on 297d1f1b, P1).
+  const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return sentence !== l.chance && plain(sentence).replace(/[.!]$/, '') === `${plain(l.label)}: ${plain(l.figure)}`;
 }
 
 /** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */
@@ -87,7 +87,7 @@ function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
 }
 
 /** A lead-in the Agent left with nothing under it ("For reaching at least £126,000 …, on current information:"). */
-const LEAD_IN = /\b(?:chances?|goal|target|reach(?:ing)?|meeting|current information)\b[^\n]{0,200}:$/i;
+export const LEAD_IN = /\b(?:chances?|goal|target|reach(?:ing)?|meeting|current information)\b[^\n]{0,200}:$/i;
 const LIST_START = /^\s*(?:[-*•]|\d{1,3}[.)])\s/;
 
 /**

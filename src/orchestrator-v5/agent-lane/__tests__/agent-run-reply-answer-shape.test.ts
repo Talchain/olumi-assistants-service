@@ -286,6 +286,18 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 
+  it('B15 own-words matcher (Codex on 297d1f1b P1): only "<label>: <figure>." — never a share, a longer label or a range', async () => {
+    const { chanceInOwnWords } = await import('../goal-chance-screen-lines.js');
+    hostRunFixture();
+    const l = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true)[0]!;
+    expect(chanceInOwnWords(`${l.label}: ${l.figure}.`, l), 'control: the own-words sentence').toBe(true);
+    expect(chanceInOwnWords(`**${l.label}**: ${l.figure}`, l), 'control: emphasis, no stop').toBe(true);
+    expect(chanceInOwnWords(`In this model, ${l.figure} of runs supported ‘${l.label}’.`, l)).toBe(false);
+    expect(chanceInOwnWords(`${l.label} with annual billing: ${l.figure}.`, l)).toBe(false);
+    expect(chanceInOwnWords(`${l.label}: between ${l.figure} and 60%.`, l)).toBe(false);
+    expect(chanceInOwnWords(l.chance, l), 'the canonical sentence is typed already').toBe(false);
+  });
+
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
     hostRunFixture();
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);

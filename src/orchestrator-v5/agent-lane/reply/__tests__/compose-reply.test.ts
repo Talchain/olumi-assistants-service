@@ -461,6 +461,17 @@ describe('B15: a present typed goal-chance finding is the headline, by identity'
     assertDerivation(text, c);
   });
 
+  it('R10 (Codex on 297d1f1b P2): another finding’s colon frame never joins the chance headline; a chance frame two paragraphs up never does either', () => {
+    const risk = 'Risks to assess for Raise prices 10%:';
+    const framed = [share, risk, chances[0]!, chances[1]!].join('\n');
+    expect(composeReplyShape({ text: framed, obligations }).shape?.headline).toBe(chances[0]);
+    const far = [share, servedLines[1]!, '', 'Something else entirely.', '', chances[0]!, chances[1]!].join('\n');
+    expect(composeReplyShape({ text: far, obligations }).shape?.headline).toBe(chances[0]);
+    // control: the chance frame directly before joins
+    const near = [share, servedLines[1]!, chances[0]!, chances[1]!].join('\n');
+    expect(composeReplyShape({ text: near, obligations }).shape?.headline).toBe(`${servedLines[1]}\n${chances[0]}`);
+  });
+
   it('R9 (DL #2783 reading order): no lead-in → the chance alone leads; a lead-in NOT ending in ":" never joins it', () => {
     const plainLead = [share, chances[0]!, chances[1]!].join('\n');
     expect(composeReplyShape({ text: plainLead, obligations }).shape?.headline).toBe(chances[0]);

@@ -41,6 +41,7 @@
  */
 import { z } from 'zod';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import { LEAD_IN } from '../goal-chance-screen-lines.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 
@@ -348,10 +349,11 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline' };
   // ⭐ B15 (DL #2783, composed texts 8 Oct): the Agent's lead-in to the chance lines ("For reaching at least £126,000 …, on
   // current information:") travels WITH the first chance finding, as the headline's opening line, so it still introduces
-  // the list and never ends the reply on a colon. Moved, never reworded; the line break keeps the sentence multiset.
+  // the list and never ends the reply on a colon. Moved, never reworded; the line break keeps the sentence multiset. Only a
+  // chance frame (`LEAD_IN`, the screen-lines rule) in the same or the paragraph just before, never another finding's frame.
   const prior = headline === goalChanceHeadline && headline.idx > 0 ? units[headline.idx - 1]! : undefined;
   const chanceLeadIn = prior !== undefined && prior.kind === 'sentence' && prior.obligation === undefined && eligible(prior)
-    && prior !== ask && /:["'”’)\]*]{0,4}$/.test(prior.text) ? prior : undefined;
+    && prior !== ask && prior.para >= headline.para - 1 && LEAD_IN.test(prior.text.trim()) ? prior : undefined;
   const headlineText = chanceLeadIn !== undefined ? `${chanceLeadIn.text}\n${headline.text}` : headline.text;
 
   const mustFace = [...otherObligations.filter((u) => u !== headline), ...(ask !== undefined && ask !== headline ? [ask] : [])];
