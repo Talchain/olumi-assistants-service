@@ -1,0 +1,10 @@
+Load gate: 10.189453125 < 25
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+
+ Test Files  2 passed (2)
+      Tests  18 passed (18)
+   Start at  15:55:39
+   Duration  2.40s (transform 1.31s, setup 128ms, import 1.93s, tests 126ms, environment 0ms)
+

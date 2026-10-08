@@ -51,7 +51,8 @@ type Clause = Span & { fragments: Span[] };
 type ProbabilityCandidate = { match: RegExpMatchArray; likelihood: boolean; clause: Clause; binding: Span };
 
 function isDecimalPoint(text: string, i: number): boolean {
-  return text[i] === '.' && /\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? '');
+  return text[i] === '.' && /\d/.test(text[i + 1] ?? '')
+    && (i === 0 || /[\d \t+\-−]/.test(text[i - 1] ?? ''));
 }
 
 /** Only the two dots in "e.g." / "i.e." are exempt; lone initials and "etc." / "vs." end clauses. */
@@ -89,6 +90,29 @@ function likelihoodClauses(text: string): Clause[] {
 /** Draft and card share the same decimal/abbreviation/clause boundary rules. */
 export function splitStatedLikelihoodClauses(text: string): string[] {
   return likelihoodClauses(text).map((clause) => text.slice(clause.start, clause.end));
+}
+
+/** Quotation scopes only: every written percent or unitless probability, never an admission authority. */
+export function splitEventRiskFigureSpans(text: string): Array<{ span: string; clause_text: string }> {
+  const figure = /(?<![\p{L}\p{N}.,+\-−])[+\-−]?(?:\d+(?:\.\d+)?[ \t]{0,8}(?:%|percent\b)|(?:0(?:\.\d+)?|1(?:\.0+)?|\.\d+)(?![\p{L}\p{N}.%]))/giu;
+  const spans: Array<{ span: string; clause_text: string }> = [];
+  for (const clause of likelihoodClauses(text)) {
+    const clauseText = text.slice(clause.start, clause.end);
+    const horizons = [...clauseText.matchAll(HORIZON)];
+    for (const match of clauseText.matchAll(figure)) {
+      // A horizon's "1 month" is a duration, not a unitless probability.
+      if (!/%|percent\b/i.test(match[0]) && horizons.some(h => match.index! >= h.index!
+        && match.index! < h.index! + h[0].length)) continue;
+      const absolute = match;
+      absolute.index = clause.start + match.index!;
+      const fragmentIndex = clause.fragments.findIndex(f => absolute.index! >= f.start && absolute.index! <= f.end);
+      const fragment = clause.fragments[fragmentIndex]!;
+      const start = isStandaloneLikelihoodFragment(text, fragment, absolute)
+        ? clause.fragments[Math.max(0, fragmentIndex - 1)]!.start : fragment.start;
+      spans.push({ span: text.slice(start, fragment.end), clause_text: clauseText });
+    }
+  }
+  return spans;
 }
 
 const SCAFFOLD_TOKEN = /[ \t,:]{1,24}|[a-z]{1,30}(?:['’][ds])?/iy;

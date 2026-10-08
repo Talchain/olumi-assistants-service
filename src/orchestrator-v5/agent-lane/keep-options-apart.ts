@@ -34,6 +34,7 @@
  * quantity cannot merge into another node one label later.
  */
 import { canonicalLabel, limitedOutcomeFrame, metricNamesLabel, type CandidateModel } from './admit-model.js';
+import { isDraftLikelihoodFactorLabel } from './olumi-event-risk-draft.js';
 
 /** Admission's OWN key (`assignIds` merges labels equal under it), so a clash or a collision cannot hide from this rule. */
 const canon = canonicalLabel;
@@ -144,7 +145,8 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
     to.set(canon(label), next);
     renamed.push({ option, kind, from: label, to: next });
   };
-  candidate.factors.forEach((f) => plan(f.label, 'factor'));
+  // Event admission removes and discloses these original drafted labels; do not disguise them as levels.
+  candidate.factors.filter(f => !isDraftLikelihoodFactorLabel(f.label)).forEach((f) => plan(f.label, 'factor'));
   candidate.risks.forEach((r) => plan(r.label, 'risk'));
   candidate.outcomes.forEach((o) => plan(o.label, 'outcome'));
   if (renamed.length === 0) return { model: candidate, renamed, ambiguous, setAside: [] };

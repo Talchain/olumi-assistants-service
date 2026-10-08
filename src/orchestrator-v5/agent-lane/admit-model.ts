@@ -71,6 +71,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss } from '../goal-target/event-by-date-model.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 import { prepareDraftEventRisks, finishDraftEventRisks, type DraftEventOccurrence } from './olumi-event-risk-draft.js';
+import { log } from '../../utils/telemetry.js';
 
 const MAX_ID = 100;
 
@@ -3019,6 +3020,10 @@ export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
 
 export function admitCandidateModel(...args: Parameters<typeof admitModelWithoutEventRisks>): AdmittedModel {
   const prepared = prepareDraftEventRisks(args[0], args[1] ?? {}, args[2] ?? '');
+  for (const { label, drafted_months, goal_months } of prepared.horizonMismatches) {
+    log.info({ event: 'cee.event_risk.horizon_mismatch', risk_node_id: slugId(label), drafted_months, goal_months },
+      'event risk: drafted horizon differs from the goal horizon; likelihood not used');
+  }
   const admitted = admitModelWithoutEventRisks(prepared.candidate, prepared.widened, args[2], args[3], args[4], args[5], args[6], args[7]);
   return finishDraftEventRisks(admitted, prepared);
 }

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+
+ Test Files  2 passed (2)
+      Tests  48 passed (48)
+   Start at  15:32:39
+   Duration  4.04s (transform 2.13s, setup 168ms, import 3.39s, tests 202ms, environment 0ms)
+

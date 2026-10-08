@@ -1,0 +1,40 @@
+MUTANT: c1-parser
+SOURCE: src/orchestrator-v5/boundary/request-extensions.ts
+REPLACE: graphState = withoutClientEventRiskBasisText(bounds.graph);
+WITH: graphState = bounds.graph;
+COMMAND: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run src/orchestrator-v5/__tests__/turn-executor-adopt-on-first-touch.test.ts --testNamePattern='r1 #4: request extension ingress' --maxWorkers=1 --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+{"level":"info","time":1791470133432,"pid":44893,"hostname":"Mac.net","event":"v5.routing_prompt_loaded","prompt_version":"v40","prompt_hash":"7774ece15ae5ed38","system_chars":23165,"msg":"V5 routing prompt loaded"}
+{"level":"info","time":1791470133520,"pid":44893,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":true,"request_id":"fix2-client-event-warrant","graph_present":true,"analysis_present":false,"user_id_present":false,"selected_elements_present":false}
+ ❯ src/orchestrator-v5/__tests__/turn-executor-adopt-on-first-touch.test.ts (17 tests | 1 failed | 16 skipped) 16ms
+     × r1 #4: request extension ingress strips invented basis before any first-touch or edit consumer 13ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 16 skipped (17)
+   Start at  15:35:24
+   Duration  9.22s (transform 6.98s, setup 151ms, import 8.90s, tests 16ms, environment 0ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/__tests__/turn-executor-adopt-on-first-touch.test.ts > FIX-2 C: first-touch client graph cannot author an Olumi event warrant > r1 #4: request extension ingress strips invented basis before any first-touch or edit consumer
+AssertionError: expected 'Invented reference class' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"Invented reference class"
+
+ ❯ src/orchestrator-v5/__tests__/turn-executor-adopt-on-first-touch.test.ts:205:41
+    203|     const risk = parsed.value.graphState?.nodes.find(n => n.id === 'ri…
+    204|     expect(risk?.event_risk).toEqual(graph.nodes.at(-1)?.event_risk);
+    205|     expect(risk?.event_risk_basis_text).toBeUndefined();
+       |                                         ^
+    206|     expect(graph.nodes.at(-1)?.event_risk_basis_text).toBe('Invented r…
+    207|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

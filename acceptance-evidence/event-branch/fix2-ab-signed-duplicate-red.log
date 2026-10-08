@@ -1,0 +1,99 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (23 tests | 4 failed | 19 skipped) 95ms
+     × a signed explicit +10% uses the existing reader for a risk-only user likelihood 55ms
+     × a refused signed percentage -10% never permits an Olumi occurrence 14ms
+     × a refused signed percentage −10% never permits an Olumi occurrence 21ms
+     × duplicate probability factors cannot call a hedged user figure Olumi-drafted 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > a signed explicit +10% uses the existing reader for a risk-only user likelihood
+AssertionError: expected { version: 1, …(2) } to match object { …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "horizon": {
+-     "months": 6,
++     "months": 12,
+    },
+    "occurrence": {
+-     "basis": "user",
+-     "p_high": 0.1,
+-     "p_low": 0.1,
++     "basis": "olumi",
++     "p_high": 0.9473684210526316,
++     "p_low": 0.8181818181818181,
+    },
+  }
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:37:37
+     35|   it('a signed explicit +10% uses the existing reader for a risk-only …
+     36|     const result = admit(draft(), 'The key developer has a +10% chance…
+     37|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     38|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     39|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > a refused signed percentage -10% never permits an Olumi occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > a refused signed percentage −10% never permits an Olumi occurrence
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:42:37
+     40|   it.each(['-10%', '−10%'])('a refused signed percentage %s never perm…
+     41|     const result = admit(draft(), `${LABEL}: probably ${figure} within…
+     42|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     43|     expect(result.loss.some(l => /You said/.test(l.reason))).toBe(true…
+     44|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > duplicate probability factors cannot call a hedged user figure Olumi-drafted
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:52:71
+     50|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     51|     expect(result.loss.some(l => /You said/.test(l.reason))).toBe(true…
+     52|     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).…
+       |                                                                       ^
+     53|   });
+     54|   it.each([true, false])('r1 #2 exact: another event explicit figure n…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 19 skipped (23)
+   Start at  15:39:00
+   Duration  2.14s (transform 1.46s, setup 149ms, import 1.76s, tests 95ms, environment 0ms)
+

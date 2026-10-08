@@ -1,0 +1,58 @@
+MUTANT: c8-persisted-first-guard
+SOURCE: src/orchestrator-v5/turn-executor.ts
+REPLACE: context.persistedGraph ?? clientGraphState,
+WITH: clientGraphState ?? context.persistedGraph,
+COMMAND: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run tests/unit/contracts/controlled-factor-authority.guard.test.ts --testNamePattern='repository scan|binds the selector once' --maxWorkers=1 --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ tests/unit/contracts/controlled-factor-authority.guard.test.ts (18 tests | 2 failed | 13 skipped) 189ms
+     × every production authority call site matches the reviewed allowlist 7ms
+     × binds the selector once and derives freshness/readiness from its graph 175ms
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 passed | 13 skipped (18)
+   Start at  15:36:26
+   Duration  1.03s (transform 121ms, setup 125ms, import 571ms, tests 189ms, environment 0ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/unit/contracts/controlled-factor-authority.guard.test.ts > repository scan (the gate) > every production authority call site matches the reviewed allowlist
+AssertionError: orchestrator-v5/turn-executor.ts:9093 — authority argument `clientGraphState ?? context.persistedGraph` is not an allowlisted persisted-first form for this file. Allowed: `context.persistedGraph ?? clientGraphState` | `contextGraphForReasoning`.: expected [ Array(1) ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/unit/contracts/controlled-factor-authority.guard.test.ts:263:61
+    261|
+    262|   it('every production authority call site matches the reviewed allowl…
+    263|     expect(result.violations, result.violations.join('\n')).toHaveLeng…
+       |                                                             ^
+    264|   });
+    265|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/unit/contracts/controlled-factor-authority.guard.test.ts > single-snapshot authority rule > binds the selector once and derives freshness/readiness from its graph
+AssertionError: all non-ContextPack projections must remain persisted-first: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/unit/contracts/controlled-factor-authority.guard.test.ts:361:7
+    359|         .every((site) => site.argText === 'context.persistedGraph ?? c…
+    360|       'all non-ContextPack projections must remain persisted-first',
+    361|     ).toBe(true);
+       |       ^
+    362|
+    363|     const assemblyIdx = structural.indexOf(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+

@@ -100,11 +100,11 @@ describe('Science event branch admission, 8 October', () => {
     expect(result.loss.map(l => l.reason)).toContain(`You said ‘${quote}’ for ‘${LABEL}’; it isn't used as its likelihood yet.`);
     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).toBe(false);
   });
-  it.each(['15%', '110%', '10.5%'])('a different brief number %s is case (c), not (b)', figure => {
+  it.each(['15%', '110%', '10.5%'])('any brief figure %s about this event is case (b), regardless of the draft', figure => {
     const result = admit(probability(candidate()), `${LABEL}: probably ${figure} within 6 months.`);
     expect(risk(result).event_risk).toBeUndefined();
-    expect(result.loss.map(l => l.reason)).toContain(`Olumi had drafted ‘${LABEL} probability’ = 10% without a basis, so it isn't used.`);
-    expect(result.loss.some(l => /You said/.test(l.reason))).toBe(false);
+    expect(result.loss.map(l => l.reason)).toContain(`You said ‘${LABEL}: probably ${figure} within 6 months’ for ‘${LABEL}’; it isn't used as its likelihood yet.`);
+    expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).toBe(false);
   });
   it('an unrelated matching percentage cannot be attributed to the risk', () => {
     const result = admit(probability(candidate()), 'Revenue may fall 10%. Key developer departure is a risk.');

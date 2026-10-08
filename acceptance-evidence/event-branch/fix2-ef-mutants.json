@@ -1,0 +1,42 @@
+[
+  {
+    "mutant": "E-reader-warrant-off",
+    "source": "src/orchestrator-v5/agent-lane/goal-chance-estimate-attribution.ts",
+    "row": "E r1 #7",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ef-mutant-E-reader-warrant-off.log"
+  },
+  {
+    "mutant": "E-card-warrant-off",
+    "source": "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts",
+    "row": "E basis-less occurrence card",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ef-mutant-E-card-warrant-off.log"
+  },
+  {
+    "mutant": "F-attribution-event-roots-off",
+    "source": "src/orchestrator-v5/agent-lane/goal-chance-estimate-attribution.ts",
+    "row": "F r1 #6",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ef-mutant-F-attribution-event-roots-off.log"
+  },
+  {
+    "mutant": "F-check-estimates-event-roots-off",
+    "source": "src/orchestrator-v5/agent-lane/actions/state.ts",
+    "row": "F Check estimates",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ef-mutant-F-check-estimates-event-roots-off.log"
+  },
+  {
+    "mutant": "F-shared-path-event-roots-off",
+    "source": "src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts",
+    "row": "F r1 #6",
+    "exit_code": 1,
+    "killed": true,
+    "log": "fix2-ef-mutant-F-shared-path-event-roots-off.log"
+  }
+]

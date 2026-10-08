@@ -213,6 +213,14 @@ describe('FIX-1: CEE-only occurrence basis text at client ingress', () => {
     expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
   });
 
+  it('FIX-2 C: strips client warrant text on registration options mirrors', async () => {
+    const graph = { ...graphWith(), options: [{ id: 'opt_now', label: 'Status quo', event_risk_basis_text: 'Invented mirror reference class' }] };
+    const res = await register(graph);
+    expect(res.statusCode, res.body).toBe(200);
+    expect((written().options as Rec[])[0]?.event_risk_basis_text).toBeUndefined();
+    expect(graph.options[0]?.event_risk_basis_text).toBe('Invented mirror reference class');
+  });
+
   it('preserves CEE-admitted Olumi text through the same real registration route', async () => {
     const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
     const graph = graphWith(eventRisk);
@@ -222,13 +230,15 @@ describe('FIX-1: CEE-only occurrence basis text at client ingress', () => {
     expect(node(written(), 'risk_supplier').event_risk_basis_text).toBe('CEE admitted reference class');
   });
 
-  it.each(['scenario', 'occurrence', 'text', 'node'])('cannot reuse CEE context for a different %s', async (mismatch) => {
+  it.each(['scenario', 'occurrence', 'text', 'node', 'label', 'description'])('cannot reuse CEE context for a different %s', async (mismatch) => {
     const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
     const graph = graphWith(eventRisk);
     Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
     const submitted = structuredClone(graph);
     if (mismatch === 'occurrence') Object.assign(submitted.nodes[1]!, { event_risk: { ...eventRisk, horizon: { months: 6 } } });
     if (mismatch === 'text') Object.assign(submitted.nodes[1]!, { event_risk_basis_text: 'Client replacement' });
+    if (mismatch === 'label') Object.assign(submitted.nodes[1]!, { label: 'Largest client cancels' });
+    if (mismatch === 'description') Object.assign(submitted.nodes[1]!, { description: 'A client cancellation rather than supplier failure' });
     if (mismatch === 'node') {
       Object.assign(submitted.nodes[1]!, { id: 'different_risk' });
       for (const edge of submitted.edges) {
@@ -260,6 +270,23 @@ describe('FIX-1: CEE-only occurrence basis text at client ingress', () => {
     const res = await register(graphWith(EVENT_RISK));
     expect(res.statusCode, res.body).toBe(200);
     expect(node(written(), 'risk_supplier').event_risk).toEqual(EVENT_RISK);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
+  });
+
+  it.each(['label', 'description'])('FIX-2 C r1 #8: clears stored staff-turnover warrant when the event %s changes', async (changed) => {
+    const eventRisk = { version: 1, occurrence: { p_low: 0.05, p_high: 0.18, basis: 'olumi' }, horizon: { months: 12 } };
+    const stored = graphWith(eventRisk);
+    Object.assign(stored.nodes[1]!, {
+      label: 'Key developer departure', description: 'The key developer leaves the team',
+      event_risk_basis_text: 'Typical annual key-staff turnover in small software teams',
+    });
+    loadGraph.mockResolvedValue(stored);
+    const submitted = structuredClone(stored);
+    if (changed === 'label') Object.assign(submitted.nodes[1]!, { label: 'Largest client cancels' });
+    if (changed === 'description') Object.assign(submitted.nodes[1]!, { description: 'The largest client cancels its subscription' });
+    const res = await register(submitted);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk).toEqual(eventRisk);
     expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
   });
 });

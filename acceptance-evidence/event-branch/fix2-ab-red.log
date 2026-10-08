@@ -1,0 +1,250 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (18 tests | 16 failed) 132ms
+     × r1 #1 exact: lexical leave/departure binds a risk-only user 10% / six months over drafted 90% / twelve 69ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true 20ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false 5ms
+     × any refused user figure 15% blocks a different drafted factor and occurrence 4ms
+     × any refused user figure 110% blocks a different drafted factor and occurrence 2ms
+     × any refused user figure 10.5% blocks a different drafted factor and occurrence 2ms
+     × any refused user figure 0.15 blocks a different drafted factor and occurrence 2ms
+     × any refused user figure .15 blocks a different drafted factor and occurrence 2ms
+     × reads each event/figure separately when both risks are modelled 3ms
+     × reuses cancellation lexical equivalence for risk-only user likelihood 5ms
+     × ambiguous event name binding under-claims 3ms
+     × r1 #3 exact: option/factor same probability label cannot become a continuous probability level 1ms
+     × token probability in the middle survives no label gate 2ms
+     × token likelihood in the middle survives no label gate 2ms
+     × token chance in the middle survives no label gate 1ms
+     × token odds in the middle survives no label gate 2ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #1 exact: lexical leave/departure binds a risk-only user 10% / six months over drafted 90% / twelve
+AssertionError: expected { version: 1, …(2) } to match object { …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "horizon": {
+-     "months": 6,
++     "months": 12,
+    },
+    "occurrence": {
+-     "basis": "user",
+-     "p_high": 0.1,
+-     "p_low": 0.1,
++     "basis": "olumi",
++     "p_high": 0.9473684210526316,
++     "p_low": 0.8181818181818181,
+    },
+  }
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:32:37
+     30|   it('r1 #1 exact: lexical leave/departure binds a risk-only user 10% …
+     31|     const result = admit(draft(), 'The key developer has a 10% chance …
+     32|     expect(risk(result).event_risk).toMatchObject({ occurrence: { p_lo…
+       |                                     ^
+     33|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     34|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:39:37
+     37|     const withDraft = { ...c, risks: [{ ...c.risks[0]!, occurrence: { …
+     38|     const result = admit(withDraft, 'Key developer departure: probably…
+     39|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     40|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     41|     expect(result.loss.some(l => /You said.*probably 10% within 6 mont…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:41:92
+     39|     expect(risk(result).event_risk).toBeUndefined();
+     40|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     41|     expect(result.loss.some(l => /You said.*probably 10% within 6 mont…
+       |                                                                                            ^
+     42|     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).…
+     43|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 15% blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 110% blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 10.5% blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure 0.15 blocks a different drafted factor and occurrence
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > any refused user figure .15 blocks a different drafted factor and occurrence
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:46:37
+     44|   it.each(['15%', '110%', '10.5%', '0.15', '.15'])('any refused user f…
+     45|     const result = admit(factor(draft()), `${LABEL}: probably ${figure…
+     46|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     47|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+     48|     expect(result.loss.some(l => /You said/.test(l.reason))).toBe(true…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > reads each event/figure separately when both risks are modelled
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.9473684210526316,
+    "p_low": 0.8181818181818181,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:57:37
+     55|       links: [...c.links, { ...c.links[0]!, from: supplier }] },
+     56|       `${LABEL}: probably 10% within 6 months, Supplier outage has a 2…
+     57|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     58|     expect(risk(result, supplier).event_risk).toMatchObject({ occurren…
+     59|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > reuses cancellation lexical equivalence for risk-only user likelihood
+AssertionError: expected 'olumi' to be 'user' // Object.is equality
+
+Expected: "user"
+Received: "olumi"
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:65:62
+     63|     const result = admit({ ...c, risks: [{ ...c.risks[0]!, label }], l…
+     64|       'The largest client has a 10% chance it cancels within 6 months.…
+     65|     expect(risk(result, label).event_risk?.occurrence.basis).toBe('use…
+       |                                                              ^
+     66|   });
+     67|   it('ambiguous event name binding under-claims', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > ambiguous event name binding under-claims
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:71:96
+     69|     const result = admit({ ...c, risks: [...c.risks, { ...c.risks[0]!,…
+     70|       'Key developer departure has a 10% chance within 6 months.');
+     71|     expect(result.nodes.filter(n => n.kind === 'risk').every(n => n.ev…
+       |                                                                                                ^
+     72|   });
+     73|   it('no figure about the event leaves Olumi admission intact', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > r1 #3 exact: option/factor same probability label cannot become a continuous probability level
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:85:78
+     83|     const c = factor(draft(false), label);
+     84|     const apart = keepOptionsAndQuantitiesApart({ ...c, options: [{ la…
+     85|     expect(apart.renamed.some(r => r.kind === 'factor' && r.from === l…
+       |                                                                              ^
+     86|     const result = admit(apart.model);
+     87|     expect(result.nodes.some(n => n.kind === 'factor' && /probability/…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/16]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token probability in the middle survives no label gate
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token likelihood in the middle survives no label gate
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token chance in the middle survives no label gate
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class B: drafted likelihood word token anywhere is removed before separation > token odds in the middle survives no label gate
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:93:57
+     91|   it.each(['probability', 'likelihood', 'chance', 'odds'])('token %s i…
+     92|     const result = admit(factor(draft(false), `${LABEL} ${word} level`…
+     93|     expect(result.nodes.some(n => n.kind === 'factor')).toBe(false);
+       |                                                         ^
+     94|     expect(result.loss.some(l => /isn't used/.test(l.reason))).toBe(tr…
+     95|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/16]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  16 failed | 2 passed (18)
+   Start at  15:23:14
+   Duration  3.02s (transform 2.07s, setup 166ms, import 2.52s, tests 132ms, environment 0ms)
+

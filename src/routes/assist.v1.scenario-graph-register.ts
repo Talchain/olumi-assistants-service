@@ -143,7 +143,7 @@ import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
 import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
 import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
 import { readReliesOnRisk } from "../orchestrator-v5/routing/relies-on-risk.js";
-import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
+import { parseRequestExtensions, withoutClientEventRiskBasisText } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
 import { eventRiskIngressIssues, readOlumiEventRiskBasisText } from "../schemas/event-risk.js";
 import { eventRiskConstructionBasisTextFor } from "../orchestrator-v5/agent-lane/event-risk-construction-context.js";
@@ -218,16 +218,17 @@ function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | un
 
 class PreconditionStampApprovalRequiredError extends Error {}
 
-/** Client bytes cannot author CEE's warrant; unchanged stored occurrences retain their own warrant. */
+/** Client bytes cannot author CEE's warrant; the same stored event and occurrence retain their own warrant. */
 function withServerEventRiskBasisText(graph: GraphStateIngress, stored: unknown, scenarioId: string): GraphStateIngress {
   const prior = isEdgeRecord(stored) && Array.isArray(stored.nodes) ? stored.nodes.filter(isEdgeRecord) : [];
-  return { ...graph, nodes: graph.nodes.map((node) => {
+  return { ...withoutClientEventRiskBasisText(graph), nodes: graph.nodes.map((node) => {
     const { event_risk_basis_text: _clientBasis, ...withoutClientBasis } = node;
     const constructionText = eventRiskConstructionBasisTextFor(scenarioId, node);
     if (constructionText !== undefined) return { ...withoutClientBasis, event_risk_basis_text: constructionText };
     const previous = prior.find((entry) => entry.id === node.id);
     const storedText = previous === undefined ? undefined : readOlumiEventRiskBasisText(previous);
-    if (node.kind === 'risk' && storedText !== undefined && isDeepStrictEqual(previous!.event_risk, node.event_risk)) {
+    if (node.kind === 'risk' && storedText !== undefined && previous!.label === node.label
+      && previous!.description === node.description && isDeepStrictEqual(previous!.event_risk, node.event_risk)) {
       return { ...withoutClientBasis, event_risk_basis_text: storedText };
     }
     return withoutClientBasis;

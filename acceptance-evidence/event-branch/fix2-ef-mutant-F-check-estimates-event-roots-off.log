@@ -1,0 +1,35 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts (11 tests | 1 failed | 10 skipped) 47ms
+     × F Check estimates lists the independent event impact from the same census 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > F Check estimates lists the independent event impact from the same census
+AssertionError: expected [ 'price->goal' ] to deeply equal [ 'price->goal', 'dev->goal' ]
+
+- Expected
++ Received
+
+  [
+    "price->goal",
+-   "dev->goal",
+  ]
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:83:62
+     81|     const facts = factsFor(model());
+     82|     expect(facts.runBound).toBe(true);
+     83|     expect(facts.olumiEstimates?.links.map(item => item.id)).toEqual([…
+       |                                                              ^
+     84|     expect(facts.olumiEstimates).toMatchObject({ count: 3 });
+     85|     const bar = actionBarOf(facts);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  15:25:56
+   Duration  18.33s (transform 13.96s, setup 286ms, import 17.79s, tests 47ms, environment 0ms)
+

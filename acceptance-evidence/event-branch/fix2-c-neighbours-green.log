@@ -1,0 +1,17 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+{"level":"info","time":1791470109108,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":true,"request_id":"test-req-identity","graph_present":true,"analysis_present":false,"user_id_present":false,"selected_elements_present":false}
+{"level":"info","time":1791470109113,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":true,"request_id":"test-req-identity","graph_present":true,"analysis_present":false,"user_id_present":false,"selected_elements_present":false}
+{"level":"info","time":1791470109115,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":true,"request_id":"test-req-identity","graph_present":true,"analysis_present":false,"user_id_present":false,"selected_elements_present":false}
+{"level":"info","time":1791470109116,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":true,"request_id":"test-req-identity","graph_present":true,"analysis_present":false,"user_id_present":false,"selected_elements_present":false}
+{"level":"info","time":1791470109118,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":true,"request_id":"test-req-identity","graph_present":true,"analysis_present":false,"user_id_present":false,"selected_elements_present":false}
+{"level":"info","time":1791470109119,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":false,"request_id":"test-req-identity","field":"graph_state","reason":"numeric_bounds"}
+{"level":"info","time":1791470109120,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":false,"request_id":"test-req-identity","field":"graph_state","reason":"numeric_bounds"}
+{"level":"info","time":1791470109121,"pid":44587,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":false,"request_id":"test-req-identity","field":"graph_state","reason":"numeric_bounds"}
+
+ Test Files  2 passed (2)
+      Tests  27 passed (27)
+   Start at  15:35:06
+   Duration  3.10s (transform 1.22s, setup 187ms, import 2.24s, tests 388ms, environment 0ms)
+

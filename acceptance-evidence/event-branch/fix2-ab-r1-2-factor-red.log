@@ -1,0 +1,68 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts (25 tests | 4 failed | 21 skipped) 75ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true, probability factor=false 53ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false, probability factor=false 15ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true, probability factor=true 2ms
+     × r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false, probability factor=true 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true, probability factor=false
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=true, probability factor=true
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:58:37
+     56|     const withDraft = { ...c, risks: [{ ...c.risks[0]!, occurrence: { …
+     57|     const result = admit(withFactor ? factor(withDraft) : withDraft, '…
+     58|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     59|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     60|     expect(result.loss.some(l => /You said.*probably 10% within 6 mont…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false, probability factor=false
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts > FIX2 Class A: every named event figure prevents Olumi authorship > r1 #2 exact: another event explicit figure never hides this hedge, drafted basis=false, probability factor=true
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-admission.test.ts:60:92
+     58|     expect(risk(result).event_risk).toBeUndefined();
+     59|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     60|     expect(result.loss.some(l => /You said.*probably 10% within 6 mont…
+       |                                                                                            ^
+     61|     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).…
+     62|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 21 skipped (25)
+   Start at  15:47:44
+   Duration  1.95s (transform 1.29s, setup 114ms, import 1.63s, tests 75ms, environment 0ms)
+

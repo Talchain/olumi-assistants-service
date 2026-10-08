@@ -1,0 +1,7 @@
+{
+  "mutant": "no admission log",
+  "exit_code": 1,
+  "killed_by_expected_assertion": true,
+  "source_restored": true,
+  "restored_source_sha256": "b17eb572af143f48769e17effee39755764954f18b035a35b14ef553efd9a341"
+}

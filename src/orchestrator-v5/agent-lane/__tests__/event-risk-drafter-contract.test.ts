@@ -13,7 +13,7 @@ const riskSchema = (strict = false): ItemSchema => {
 };
 const occurrence = { p_low_pct: 5, p_high_pct: 18, horizon_months: 12, basis_text: 'Typical annual key-staff turnover in small software teams.' };
 const risk = { label: 'Key developer departure', provenance: 'ai_proposed' };
-const exactInstruction = "A RISK THAT EITHER HAPPENS OR DOES NOT (a discrete event, such as a key person leaving, a client cancelling or a release slipping) carries its likelihood ON THE RISK: give `occurrence` with a low and a high percentage over the goal's horizon in months (or the period you mean) and a one-line basis from a reference class, and size its impact on the link to what it threatens, in that quantity's own units. Never draw that likelihood as a separate factor such as '… probability'.";
+const exactInstruction = "A RISK THAT EITHER HAPPENS OR DOES NOT (a discrete event, such as a key person leaving, a client cancelling or a release slipping) carries its likelihood ON THE RISK: give `occurrence` with a low and a high percentage over the goal's horizon in months (if the goal states no horizon, the period you mean) and a one-line basis from a reference class, and size its impact on the link to what it threatens, in that quantity's own units. Never draw that likelihood as a separate factor such as '… probability'.";
 const userFloor = 'A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named, even when that takes the model past 6 outcomes and risks. ';
 
 describe('discrete event drafter contract', () => {

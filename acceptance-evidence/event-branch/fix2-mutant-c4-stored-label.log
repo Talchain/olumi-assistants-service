@@ -1,0 +1,38 @@
+MUTANT: c4-stored-label
+SOURCE: src/routes/assist.v1.scenario-graph-register.ts
+REPLACE: node.kind === 'risk' && storedText !== undefined && previous!.label === node.label
+WITH: node.kind === 'risk' && storedText !== undefined
+COMMAND: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts --testNamePattern='FIX-2 C r1 #8.*label changes' --maxWorkers=1 --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts (31 tests | 1 failed | 30 skipped) 97ms
+     × FIX-2 C r1 #8: clears stored staff-turnover warrant when the event label changes 94ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 skipped (31)
+   Start at  15:35:52
+   Duration  7.60s (transform 5.50s, setup 142ms, import 7.21s, tests 97ms, environment 0ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts > FIX-1: CEE-only occurrence basis text at client ingress > FIX-2 C r1 #8: clears stored staff-turnover warrant when the event label changes
+AssertionError: expected 'Typical annual key-staff turnover in …' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"Typical annual key-staff turnover in small software teams"
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts:290:68
+    288|     expect(res.statusCode, res.body).toBe(200);
+    289|     expect(node(written(), 'risk_supplier').event_risk).toEqual(eventR…
+    290|     expect(node(written(), 'risk_supplier').event_risk_basis_text).toB…
+       |                                                                    ^
+    291|   });
+    292| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

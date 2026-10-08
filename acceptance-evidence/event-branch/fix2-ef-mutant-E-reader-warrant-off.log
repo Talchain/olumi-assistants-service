@@ -1,0 +1,37 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts (11 tests | 3 failed | 8 skipped) 16ms
+     × E r1 #7: root Olumi occurrence with basis undefined earns no likelihood or attribution 10ms
+     × E r1 #7: root Olumi occurrence with basis "" earns no likelihood or attribution 2ms
+     × E r1 #7: root Olumi occurrence with basis "   " earns no likelihood or attribution 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E r1 #7: root Olumi occurrence with basis undefined earns no likelihood or attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E r1 #7: root Olumi occurrence with basis "" earns no likelihood or attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E r1 #7: root Olumi occurrence with basis "   " earns no likelihood or attribution
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:51:62
+     49|     const graph = model();
+     50|     graph.nodes.find(n => n.id === 'dev')!.event_risk_basis_text = tex…
+     51|     expect(goalChanceEstimateLikelihoodCount(graph, 'goal')).toBe(0);
+       |                                                              ^
+     52|     expect(goalChanceEstimateLikelihoods(graph, 'goal')).toEqual([]);
+     53|     expect(goalChanceLicenceOf(envelope, graph, 'goal')).not.toHavePro…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 8 skipped (11)
+   Start at  15:25:12
+   Duration  13.78s (transform 10.46s, setup 203ms, import 13.36s, tests 16ms, environment 0ms)
+

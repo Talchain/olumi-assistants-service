@@ -1,0 +1,27 @@
+Load gate: 10.00830078125 < 25
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts (4 tests | 1 failed) 65ms
+     × r1 #5: a three-month estimate stays a placeholder beside a stated twelve-month goal 48ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts > FIX-2 D: the goal horizon governs Olumi event occurrences > r1 #5: a three-month estimate stays a placeholder beside a stated twelve-month goal
+AssertionError: expected "LOG" to be called 1 times, but got 0 times
+ ❯ src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts:40:22
+     38|     }));
+     39|     expect(result.loss.some(entry => entry.field_path.endsWith('.event…
+     40|     expect(log.info).toHaveBeenCalledTimes(1);
+       |                      ^
+     41|     expect(log.info).toHaveBeenCalledWith({
+     42|       event: 'cee.event_risk.horizon_mismatch', risk_node_id: 'key_dev…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  15:54:13
+   Duration  2.48s (transform 1.70s, setup 127ms, import 2.13s, tests 65ms, environment 0ms)
+

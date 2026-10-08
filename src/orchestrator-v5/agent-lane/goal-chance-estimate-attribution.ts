@@ -20,6 +20,7 @@ export function goalChanceEstimateLinkCount(graph: unknown, optionIds?: readonly
   const analysed = asAnalysed({ ...stored, nodes,
     edges: Array.isArray(stored.edges) ? stored.edges.filter(e => !omitted.has(rec(e)?.from) && !omitted.has(rec(e)?.to)) : stored.edges });
   const signals = assembleGuidanceSignals({ request: 'run_result', offeredSpecific: [], graph: analysed,
+    goalPathEventRootIds: goalChanceEstimateLikelihoods(analysed, goalId).map(l => l.id),
     analysisState: undefined, analysisResult: undefined, leaderLicensed: false });
   return olumiEstimatesFeedingResult({ validatedDefinitionForLink: validatedDefinitionForGraph(analysed),
     goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'] }).links.length;
@@ -27,7 +28,7 @@ export function goalChanceEstimateLinkCount(graph: unknown, optionIds?: readonly
 
 /**
  * Event occurrence is its own estimate kind, never a relationship. Independent root events still feed every option's
- * result when their impact reaches the scored goal, even though they are outside the option-lever paths RC4 sizes.
+ * result when their impact reaches the scored goal. Their roots also extend RC4's existing relationship path census.
  * Use the same analysed graph, so a kept-out risk or impact does not earn an attribution on this Run.
  */
 export function goalChanceEstimateLikelihoodCount(graph: unknown, goalId?: unknown): number {
@@ -66,6 +67,8 @@ export function goalChanceEstimateLikelihoods(graph: unknown, goalId?: unknown):
     if (n.kind !== 'risk' || !reachesGoal.has(n.id)) return [];
     const parsed = EventRiskV1.safeParse(n.event_risk);
     if (!parsed.success || parsed.data.occurrence.basis !== 'olumi') return [];
+    const basisText = readOlumiEventRiskBasisText(n);
+    if (basisText === undefined) return [];
     // v1 allows declared prevention by root factors; an undeclared driver/cause cannot carry an occurrence.
     const preventers = new Set(parsed.data.mitigations?.map(m => m.factor_id) ?? []);
     if ((incoming.get(n.id) ?? []).some(from => !preventers.has(String(from))
@@ -75,6 +78,6 @@ export function goalChanceEstimateLikelihoods(graph: unknown, goalId?: unknown):
         return kind !== 'option' && kind !== 'decision';
       }))) return [];
     return [{ id: String(n.id), label: typeof n.label === 'string' ? n.label : String(n.id),
-      words: eventRiskCardLine(parsed.data, readOlumiEventRiskBasisText(n)) }];
+      words: eventRiskCardLine(parsed.data, basisText) }];
   });
 }

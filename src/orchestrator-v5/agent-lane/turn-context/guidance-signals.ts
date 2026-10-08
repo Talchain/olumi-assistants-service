@@ -93,6 +93,8 @@ export interface GuidanceSignalInputs {
   readonly optionParticipation?: unknown;
   /** This Run's identity evaluations, as `placeholderGoalPaths` reads them. */
   readonly identityEvaluations?: ReadonlyArray<unknown>;
+  /** Counted, warranted event roots supplied by the occurrence reader; their impacts feed every retained option. */
+  readonly goalPathEventRootIds?: readonly string[];
   /** The persisted guidance record's entries (`agent-guidance-snapshot.ts`). */
   readonly guidance?: Readonly<Record<string, unknown>>;
   readonly explicitRequest?: string | null;
@@ -258,7 +260,7 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
   let sameLever = false;
   try { sameLever = sameLeverInComparison(nodes, nonSq, sq); } catch { sameLever = false; }
 
-  // Goal paths: every link on a directed simple path from an option's lever factor to the goal; distance by reverse BFS.
+  // Goal paths: option levers and the caller's counted event roots use the same bounded walk; distance by reverse BFS.
   const out = new Map<string, Rec[]>();
   const into = new Map<string, string[]>();
   for (const e of edges) {
@@ -276,22 +278,29 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
   }
   const linkOptions = new Map<string, Set<string>>();
   const MAX_PATH_STEPS = 50_000;
-  for (const o of options) {
-    const levers = Object.keys(rec(o.interventions) ?? {});
-    for (const start of levers) {
-      if (goalId === undefined || !dist.has(start)) continue;
-      let steps = 0;
-      const walk = (u: string, seen: Set<string>, stack: string[]): void => {
-        if (++steps > MAX_PATH_STEPS) return;
-        if (u === goalId) { for (const k of stack) (linkOptions.get(k) ?? linkOptions.set(k, new Set()).get(k)!).add(o.id as string); return; }
-        for (const e of out.get(u) ?? []) {
-          const v = e.to as string;
-          if (seen.has(v) || !dist.has(v)) continue;
-          seen.add(v); walk(v, seen, [...stack, `${u}->${v}`]); seen.delete(v);
+  const roots = options.flatMap(o => Object.keys(rec(o.interventions) ?? {})
+    .map(start => ({ start, optionIds: [o.id as string] })));
+  roots.push(...(i.goalPathEventRootIds ?? []).filter(id => byId.get(id)?.kind === 'risk')
+    .map(start => ({ start, optionIds: options.map(o => o.id as string) })));
+  for (const { start, optionIds } of roots) {
+    if (goalId === undefined || !dist.has(start)) continue;
+    let steps = 0;
+    const walk = (u: string, seen: Set<string>, stack: string[]): void => {
+      if (++steps > MAX_PATH_STEPS) return;
+      if (u === goalId) {
+        for (const k of stack) {
+          const opts = linkOptions.get(k) ?? linkOptions.set(k, new Set()).get(k)!;
+          for (const optionId of optionIds) opts.add(optionId);
         }
-      };
-      walk(start, new Set([start]), []);
-    }
+        return;
+      }
+      for (const e of out.get(u) ?? []) {
+        const v = e.to as string;
+        if (seen.has(v) || !dist.has(v)) continue;
+        seen.add(v); walk(v, seen, [...stack, `${u}->${v}`]); seen.delete(v);
+      }
+    };
+    walk(start, new Set([start]), []);
   }
   const links: GoalPathLink[] = [];
   const factors = new Map<string, GoalPathFactor>();

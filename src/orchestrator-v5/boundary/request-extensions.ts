@@ -136,6 +136,20 @@ export const AnalysisStateIngressSchema = z
 export type GraphStateIngress = z.infer<typeof GraphStateIngressSchema>;
 export type AnalysisStateIngress = z.infer<typeof AnalysisStateIngressSchema>;
 
+/** Client graphs may carry occurrences, but only CEE may author their readable warrants. */
+export function withoutClientEventRiskBasisText(graph: GraphStateIngress): GraphStateIngress {
+  const nodes = graph.nodes.map((node) => {
+    const { event_risk_basis_text: _clientBasis, ...withoutClientBasis } = node;
+    return withoutClientBasis;
+  });
+  const options = graph.options?.map((row) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+    const { event_risk_basis_text: _clientBasis, ...withoutClientBasis } = row as Record<string, unknown>;
+    return withoutClientBasis;
+  });
+  return { ...graph, nodes, ...(options === undefined ? {} : { options }) };
+}
+
 /**
  * UUID shape for user_id. Zod's `.uuid()` accepts both v4 and the Supabase-
  * issued variant formats. Absence is allowed and callers MUST treat `null`
@@ -424,7 +438,7 @@ export function parseRequestExtensions(
         },
       };
     }
-    graphState = bounds.graph;
+    graphState = withoutClientEventRiskBasisText(bounds.graph);
   }
 
   let analysisState: AnalysisStateIngress | null = null;

@@ -1,0 +1,111 @@
+Mutant: horizon-mismatch-disclosure-off
+Command: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts --maxWorkers=1 --no-file-parallelism --configLoader=runner -t "r1 #5" < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts (4 tests | 1 failed | 3 skipped) 49ms
+     × r1 #5: a three-month estimate stays a placeholder beside a stated twelve-month goal 47ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts > FIX-2 D: the goal horizon governs Olumi event occurrences > r1 #5: a three-month estimate stays a placeholder beside a stated twelve-month goal
+AssertionError: expected [ { …(7) }, { …(7) }, { …(7) }, …(4) ] to deep equally contain ObjectContaining{…}
+
+- Expected:
+ObjectContaining {
+  "after": null,
+  "before": 3,
+  "field_path": "nodes[Key developer departure].event_risk",
+  "reason": StringMatching /drafted occurrence is for 3 months.*goal's horizon is 12 months/,
+}
+
++ Received:
+[
+  {
+    "after": null,
+    "before": 12,
+    "code": "RESOLVE_BELIEF_PRECEDENCE",
+    "field_path": "nodes[revenue].horizon_months",
+    "layer": "cee",
+    "reason": "The goal is stated with a 12-month horizon, and GraphV3 has nowhere to put it. The projection therefore expresses a threshold with no deadline: \"reach it\" and \"reach it within a year\" become the same goal. The horizon survives only in this record and in the rich model.",
+    "severity": "warn",
+  },
+  {
+    "after": null,
+    "before": ">=",
+    "code": "RESOLVE_BELIEF_PRECEDENCE",
+    "field_path": "nodes[revenue].goal_operator",
+    "layer": "cee",
+    "reason": "The goal direction (\">=\") is not carried by `goal_threshold`, which is a bare number. A consumer cannot tell a floor from a ceiling from the projection alone.",
+    "severity": "warn",
+  },
+  {
+    "after": 0.05,
+    "before": null,
+    "code": "CLAMP_STD_MINIMUM",
+    "field_path": "edges[key_developer_departure::revenue].strength.std",
+    "layer": "cee",
+    "reason": "Nobody stated how uncertain this strength is. Olumi uses half its size as the spread. It is not a measurement of anyone's confidence.",
+    "severity": "info",
+  },
+  {
+    "after": -0.1,
+    "before": null,
+    "code": "APPLY_SIGN_FROM_DIRECTION",
+    "field_path": "edges[key_developer_departure::revenue].strength.mean",
+    "layer": "cee",
+    "reason": "Direction was authored but no size Olumi could use. Applied Olumi's placeholder, sized to keep the target within its range across the options, as an ANALYSIS PROJECTION, marked `defaulted`. This is not a measurement and must never be presented as user- or evidence-authored.",
+    "severity": "warn",
+  },
+  {
+    "after": 0.8,
+    "before": null,
+    "code": "DEFAULT_EXISTS_PROBABILITY",
+    "field_path": "edges[key_developer_departure::revenue].exists_probability",
+    "layer": "cee",
+    "reason": "Nobody stated how likely this link is to exist. Applied the canonical default. A defaulted value and an elicited value are the same number, so the ledger is the only place the difference survives.",
+    "severity": "info",
+  },
+  {
+    "after": -0.1,
+    "before": null,
+    "code": "NORMALISE_STRENGTH_RANGE",
+    "field_path": "edges[key_developer_departure::revenue].magnitude_question",
+    "layer": "cee",
+    "reason": "Olumi estimated that raising \"Key developer departure\" by 1 event lowers \"Revenue\" by 1000 GBP/month, but that could not be read on the ranges the two are measured on, so a placeholder sized to keep \"Revenue\" within its range stands in for it. How much does \"Key developer departure\" change \"Revenue\"?",
+    "severity": "warn",
+  },
+  {
+    "after": {
+      "estimate": "raising \"Key developer departure\" by 1 event lowers \"Revenue\" by 1000 GBP/month",
+      "from": "key_developer_departure",
+      "to": "revenue",
+    },
+    "before": {
+      "effect_amount": -1000,
+      "effect_per_source_change": 1,
+    },
+    "code": "NORMALISE_STRENGTH_RANGE",
+    "field_path": "edges[key_developer_departure::revenue].set_aside_estimate",
+    "layer": "cee",
+    "reason": "Olumi's guess, set aside: NOT in the model: raising \"Key developer departure\" by 1 event lowers \"Revenue\" by 1000 GBP/month. The link carries a placeholder strength instead, so no result rests on this figure; never say the model is built on it.",
+    "severity": "warn",
+  },
+]
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/fix2-event-risk-horizon.test.ts:31:25
+     29|     expect(risk.event_risk).toBeUndefined();
+     30|     expect(risk.event_risk_basis_text).toBeUndefined();
+     31|     expect(result.loss).toContainEqual(expect.objectContaining({
+       |                         ^
+     32|       field_path: `nodes[${LABEL}].event_risk`, before: 3, after: null,
+     33|       reason: expect.stringMatching(/drafted occurrence is for 3 month…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  15:31:55
+   Duration  2.32s (transform 1.64s, setup 140ms, import 1.99s, tests 49ms, environment 0ms)
+

@@ -1,0 +1,120 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts (11 tests | 9 failed) 78ms
+     × E r1 #7: root Olumi occurrence with basis undefined earns no likelihood or attribution 10ms
+     × E r1 #7: root Olumi occurrence with basis "" earns no likelihood or attribution 2ms
+     × E r1 #7: root Olumi occurrence with basis "   " earns no likelihood or attribution 1ms
+     × E basis-less occurrence card undefined is a placeholder without Olumi attribution 2ms
+     × E basis-less occurrence card "" is a placeholder without Olumi attribution 1ms
+     × E basis-less occurrence card "   " is a placeholder without Olumi attribution 1ms
+     × F r1 #6: price → MRR and independent developer departure → MRR are 2 relationships, 1 likelihood 8ms
+     × F Check estimates lists the independent event impact from the same census 33ms
+     × F event and lever paths share links without counting a shared downstream relationship twice 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E r1 #7: root Olumi occurrence with basis undefined earns no likelihood or attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E r1 #7: root Olumi occurrence with basis "" earns no likelihood or attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E r1 #7: root Olumi occurrence with basis "   " earns no likelihood or attribution
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:51:62
+     49|     const graph = model();
+     50|     graph.nodes.find(n => n.id === 'dev')!.event_risk_basis_text = tex…
+     51|     expect(goalChanceEstimateLikelihoodCount(graph, 'goal')).toBe(0);
+       |                                                              ^
+     52|     expect(goalChanceEstimateLikelihoods(graph, 'goal')).toEqual([]);
+     53|     expect(goalChanceLicenceOf(envelope, graph, 'goal')).not.toHavePro…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E basis-less occurrence card undefined is a placeholder without Olumi attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E basis-less occurrence card "" is a placeholder without Olumi attribution
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > E basis-less occurrence card "   " is a placeholder without Olumi attribution
+AssertionError: expected 'May happen: about 5–18% within 12 mon…' not to contain 'Olumi\'s estimate'
+
+Expected: "Olumi's estimate"
+Received: "May happen: about 5–18% within 12 months (Olumi's estimate)."
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:59:22
+     57|   it.each([undefined, '', '   '])('E basis-less occurrence card %j is …
+     58|     const line = eventRiskCardLine(event, text);
+     59|     expect(line).not.toContain("Olumi's estimate");
+       |                      ^
+     60|     expect(line).not.toContain('5–18%');
+     61|     expect(line).toContain('basis');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > F r1 #6: price → MRR and independent developer departure → MRR are 2 relationships, 1 likelihood
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:72:75
+     70|   it('F r1 #6: price → MRR and independent developer departure → MRR a…
+     71|     const graph = model();
+     72|     expect(goalChanceEstimateLinkCount(graph, ['raise', 'keep'], 'goal…
+       |                                                                           ^
+     73|     expect(goalChanceLicenceOf(envelope, graph, 'goal')).toMatchObject…
+     74|       olumi_estimate_link_count: 2, olumi_estimate_likelihood_count: 1,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > F Check estimates lists the independent event impact from the same census
+AssertionError: expected [ 'price->goal' ] to deeply equal [ 'price->goal', 'dev->goal' ]
+
+- Expected
++ Received
+
+  [
+    "price->goal",
+-   "dev->goal",
+  ]
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:83:62
+     81|     const facts = factsFor(model());
+     82|     expect(facts.runBound).toBe(true);
+     83|     expect(facts.olumiEstimates?.links.map(item => item.id)).toEqual([…
+       |                                                              ^
+     84|     expect(facts.olumiEstimates).toMatchObject({ count: 3 });
+     85|     const bar = actionBarOf(facts);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts > FIX2 E/F: warranted occurrences and their impact relationship census > F event and lever paths share links without counting a shared downstream relationship twice
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-risk-fix2-attribution.test.ts:110:75
+    108|     const graph = model();
+    109|     graph.edges[1] = { ...graph.edges[1], to: 'price' };
+    110|     expect(goalChanceEstimateLinkCount(graph, ['raise', 'keep'], 'goal…
+       |                                                                           ^
+    111|     expect(factsFor(graph).olumiEstimates?.links.map(item => item.id))…
+    112|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 2 passed (11)
+   Start at  15:21:21
+   Duration  15.44s (transform 11.79s, setup 411ms, import 14.74s, tests 78ms, environment 0ms)
+

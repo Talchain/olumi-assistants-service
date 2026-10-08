@@ -85,7 +85,8 @@ export function eventRiskLikelihoodWords(block: EventRiskV1T): string {
 export function eventRiskCardLine(block: EventRiskV1T, basisText?: string): string {
   if (block.occurrence.basis === 'olumi') {
     const basis = basisText?.trim();
-    return `May happen: ${eventRiskLikelihoodWords(block)} (Olumi's estimate${basis ? `, based on ${basis}` : ''}).`;
+    if (!basis) return 'May happen; its likelihood still needs a basis.';
+    return `May happen: ${eventRiskLikelihoodWords(block)} (Olumi's estimate, based on ${basis}).`;
   }
   if (block.occurrence.basis === 'reference') return `May happen: ${eventRiskLikelihoodWords(block)} (reference figure).`;
   return `It may happen: ${eventRiskLikelihoodWords(block)}, as you said.`;

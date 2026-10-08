@@ -220,9 +220,11 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
         identityReading = { goalLabel: label(card.outcome_id), a: label(card.factor_ids[0]), b: label(card.factor_ids[1]) };
       }
     }
+    const likelihoods = goalChanceEstimateLikelihoods(read.graph, goal?.id);
     const signals = assembleGuidanceSignals({
       request: 'turn', offeredSpecific: [], graph: read.graph, analysisState: read.analysisState, analysisResult: read.analysisResult,
       optionParticipation: read.optionParticipation,
+      goalPathEventRootIds: likelihoods.map(l => l.id),
       identityEvaluations: [...(read.identityEvaluated ?? [])].sort().map((node_id) => ({ node_id, evaluated: true })),
       guidance: read.guidance ?? {}, explicitRequest: null,
       leaderLicensed: guidanceLeaderLicensed(leaderLicenceFromState(read.analysisState, read.analysisReady)),
@@ -239,7 +241,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
         validatedDefinitionForLink: validatedDefinitionForGraph(read.graph),
         goalPathFactors: signals['model.goal_path_factors'],
         goalPathLinks: signals['model.goal_path_links'],
-        goalPathLikelihoods: goalChanceEstimateLikelihoods(read.graph, goal?.id),
+        goalPathLikelihoods: likelihoods,
         optionSettings: optionSettingsOf(read, signals['model.goal_path_factors']),
         driverIds: [],
       }),

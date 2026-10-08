@@ -1,0 +1,38 @@
+MUTANT: c3-register-mirror
+SOURCE: src/routes/assist.v1.scenario-graph-register.ts
+REPLACE: return { ...withoutClientEventRiskBasisText(graph), nodes: graph.nodes.map((node) => {
+WITH: return { ...graph, nodes: graph.nodes.map((node) => {
+COMMAND: node -e "process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)" && node_modules/.bin/vitest run src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts --testNamePattern='FIX-2 C: strips client warrant text on registration options mirrors' --maxWorkers=1 --configLoader=runner < /dev/null
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts (31 tests | 1 failed | 30 skipped) 109ms
+     × FIX-2 C: strips client warrant text on registration options mirrors 106ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 skipped (31)
+   Start at  15:35:44
+   Duration  7.26s (transform 5.29s, setup 137ms, import 6.88s, tests 109ms, environment 0ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts > FIX-1: CEE-only occurrence basis text at client ingress > FIX-2 C: strips client warrant text on registration options mirrors
+AssertionError: expected 'Invented mirror reference class' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"Invented mirror reference class"
+
+ ❯ src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts:220:68
+    218|     const res = await register(graph);
+    219|     expect(res.statusCode, res.body).toBe(200);
+    220|     expect((written().options as Rec[])[0]?.event_risk_basis_text).toB…
+       |                                                                    ^
+    221|     expect(graph.options[0]?.event_risk_basis_text).toBe('Invented mir…
+    222|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
