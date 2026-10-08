@@ -451,10 +451,10 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
             && SAID_AGAIN_AFTER.test(containerKey.slice(0, containerKey.length - groups[found]!.key.length))
             // Negation read on the WORDS AS WRITTEN (the key drops apostrophes: "isn't" → "isnt"; Codex r7).
             && !NEGATED_BEFORE_REASON.test(groups[idx]!.first.text)
-            // The contained sentence must be a WHOLE typed obligation (Olumi's own words, its role moves to the
-            // container whole; Codex r2/r3 on #2801). The container may be the narrator's or the Explain composer's
-            // ("No single option can be put forward yet, because <the withheld reason>.": Codex r6, Paul's served text).
-            && groupTyped(found) && wholeWhereTyped(found)
+            // BOTH sentences are Olumi's own typed words (the route types the gate's "No single option … because <why>."
+            // by identity: Codex r6), the contained one a WHOLE obligation (its role moves whole: r2/r3). An untyped
+            // frame — hypothetical, conditional, reported — never absorbs a typed finding (Codex r8).
+            && groupTyped(found) && groupTyped(idx) && wholeWhereTyped(found)
             && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
         }
       }

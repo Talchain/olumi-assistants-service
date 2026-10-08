@@ -478,12 +478,26 @@ describe('RC6 said once', () => {
   it.each([
     ['explain_00_24_38', served.explain_00_24_38],
     ['explain_00_30_46', served.explain_00_30_46],
-  ])('P1 %s when the closing is NOT typed (Codex r6: the route types only coHold.why, no period): the standalone copy still goes', (_id, text) => {
-    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: served.withhold_sentence.replace(/\.$/, '') }] });
+  ])('P1 %s with the route’s IDENTITY typing of the gate’s closing (noLeaderBecauseSentences; Codex r6/r8): the standalone copy goes', async (_id, text) => {
+    const { noLeaderBecauseSentences } = await import('../../withheld-leader-fail-closed.js');
+    const why = served.withhold_sentence.replace(/\.$/, '');
+    const [closing] = noLeaderBecauseSentences({ why });
+    expect(closing, 'the gate’s own words are the served bullet').toBe(served.no_leader_with_reason);
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: why }, { role: 'withheld_reason', text: closing! }] });
     expect(count(c.text, served.withhold_sentence)).toBe(1);
     expect(c.measure!.said_once_dropped).toEqual([served.withhold_sentence]);
-    expect(c.reason).not.toBe('invariant_failed');
+    // control: with the closing untyped, nothing is contained away (an untyped frame never absorbs a typed finding)
+    const untyped = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: why }] });
+    expect(untyped.measure?.said_once_dropped ?? []).toEqual([]);
   });
+  it('Codex r8 P1: a hypothetical frame never absorbs a typed fact', () => {
+    const fact = 'The sources of this comparison’s factor starting values are unavailable.';
+    const text = [fact, context, 'If that were true, we would need to pause because the sources of this comparison’s factor starting values are unavailable.'].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: fact }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(c.text).toContain(fact);
+  });
+
   it.each([['markdown with a period', '## Option A.', '## Option B.'], ['bold with a period', '**Option A.**', '**Option B.**'], ['sentence above a list', 'Option A.', 'Option B.']])(
     'repeated %s headings stay (Codex r7): a finding is never re-parented', (_form, a, b) => {
       const text = [a, '- Revenue may dip in month one.', b, '- Churn may rise above 4%.', a, '- Cash runs short in month three.', context].join('\n');
