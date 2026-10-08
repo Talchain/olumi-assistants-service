@@ -159,9 +159,11 @@ import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licenc
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './selected-run-figures.js';
+import { projectCanonicalAnalysisView, type CanonicalAnalysisView } from './canonical-analysis-view.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
+  readonly canonical_analysis_view: CanonicalAnalysisView;
   /** Missing secondary captures for this persisted Run; omitted on the successful path. */
   readonly run_recording?: RunRecordingMarker;
   /** Internal opt-in for the Agent review press; never forwarded by the graph route. */
@@ -254,12 +256,15 @@ export function identityRunUseWire(facts: readonly unknown[]): IdentityRunUseWir
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
+  canonical_analysis_view: projectCanonicalAnalysisView({}),
   current_read: projectCurrentRead({ analysisState: null }),
   analysis_state: null,
   analysis_result: null,
 });
 
 export interface ReadScenarioAnalysisParams {
+  /** From the same scenario SELECT as graph; no revision-at-Run is inferred. */
+  readonly revision?: number;
   /** Read the selected Run's stored questions internally, without widening transport enrichment. */
   readonly includeFactorEnrichments?: true;
   /** An open scope issue restricts claims without rewriting the saved Run or its freshness. */
@@ -284,12 +289,15 @@ export interface ReadScenarioAnalysisParams {
 export async function readScenarioAnalysis(
   params: ReadScenarioAnalysisParams,
 ): Promise<ScenarioAnalysisRead> {
+  const notAnswered = (): ScenarioAnalysisRead => ({
+    ...NOT_ANSWERED, canonical_analysis_view: projectCanonicalAnalysisView({ revision: params.revision }),
+  });
   try {
     // A scenario with no graph has nothing for a hash to anchor to, so the
     // freshness derivation could only ever return `unknown /
     // current_graph_hash_unavailable`. Saying "not answered" is the same
     // information without spending a store read on it.
-    if (params.graph === null || params.graph === undefined) return NOT_ANSWERED;
+    if (params.graph === null || params.graph === undefined) return notAnswered();
 
     // ⭐ CS-AN-2 — THE FRESHNESS HASH IS THE CANONICAL ONE, THE HASH THE RUN
     // STAMPED. `loadScenarioSnapshotForRunAnalysis` hands run_analysis
@@ -636,6 +644,11 @@ export async function readScenarioAnalysis(
       graphHash,
     ) as AnalysisReadyPayload;
     return {
+      canonical_analysis_view: projectCanonicalAnalysisView({
+        revision: params.revision, graph: params.graph,
+        runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
+        derivation, analysisState, analysisReady, currentResult: boundResult,
+      }),
       ...(recording === undefined ? {} : { run_recording: recording }),
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
@@ -706,6 +719,6 @@ export async function readScenarioAnalysis(
       },
       'Scenario graph read — analysis composition failed; graph still served without it',
     );
-    return NOT_ANSWERED;
+    return notAnswered();
   }
 }

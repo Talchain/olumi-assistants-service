@@ -15,6 +15,8 @@ type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** B5 T1b on 3fce64f: three point lines on the `each` licence, leader withheld (near tie); the gate deleted the chat's copy. */
 const READ_T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
+// Exact B2 was not captured in this tree; the constructed fixture records its source and alterations.
+const RANGE_WINS_B2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-range-wins.json', import.meta.url), 'utf8')) as Json;
 let READ: Json = READ_B3;
 const VIEW = {
   view: 'Before comparing, size how strongly running a fourth shop changes its monthly operating profit.',
@@ -254,6 +256,27 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
     expect(b._agent.tool_calls.map((c) => c.name)).toContain('run_analysis');
     expect(count(b.assistant_text, SCREEN[0]!), b.assistant_text).toBe(1);
+  });
+
+  it.each(['live', 'replay'] as const)('RANGE WINS B2 %s: the assistant says the range without the contradictory guided sentence', async mode => {
+    READ = structuredClone(READ_B3);
+    READ.graph = structuredClone(RANGE_WINS_B2.graph);
+    analysisResult = structuredClone(RANGE_WINS_B2.run);
+    const body = await turn(run('The analysis ran.'), 'Run it');
+    const assertB2 = (text: string): void => {
+      expect(text).toContain('‘Launch starter tier’: between about 5% and 37% chance of meeting your goal, in this model.');
+      expect(text).not.toContain("The chance isn't shown yet");
+    };
+    assertB2(body.assistant_text);
+    if (mode === 'replay') {
+      const saved = [...rows.values()].find(r => r.assistant_message === body.assistant_text)!;
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message: 'Run it', turn_id: saved.turn_id,
+      } });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()._agent.replayed).toBe(true);
+      assertB2(response.json().assistant_text);
+    }
   });
 
   it('a Run reply that already says the line keeps ONE copy (the leader gate and egress leave it)', async () => {

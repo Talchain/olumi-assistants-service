@@ -1,0 +1,134 @@
+{
+  "provenance": "Constructed exact B2 regression. No captured 5–37% Starter tier price → Starter subscribers Run exists in this tree. Range carrier shape based on served w9b/B.json (CEE 86ccaf3); numerical bounds and graph are constructed, not served evidence. The downstream Olumi band retains the no-invitation case.",
+  "graph": {
+    "nodes": [
+      {
+        "id": "starter",
+        "kind": "option",
+        "label": "Launch starter tier",
+        "interventions": {
+          "price": 0.7
+        }
+      },
+      {
+        "id": "price",
+        "kind": "factor",
+        "label": "Starter tier price",
+        "observed_state": {
+          "value": 0.5,
+          "raw_value": 50,
+          "unit": "£",
+          "cap": 100
+        }
+      },
+      {
+        "id": "subscribers",
+        "kind": "factor",
+        "label": "Starter subscribers",
+        "observed_state": {
+          "value": 0.5,
+          "raw_value": 500,
+          "unit": "subscribers",
+          "cap": 1000
+        }
+      },
+      {
+        "id": "goal",
+        "kind": "goal",
+        "label": "Monthly recurring revenue",
+        "goal_direction": ">=",
+        "goal_threshold": 0.8,
+        "goal_threshold_raw": 80000,
+        "goal_threshold_unit": "£/month",
+        "goal_threshold_frame": "level",
+        "observed_state": {
+          "value": 0.5,
+          "baseline": 0.5,
+          "raw_value": 50000,
+          "unit": "£/month",
+          "cap": 100000
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "starter",
+        "to": "price",
+        "strength": {
+          "mean": 1,
+          "std": 0.01
+        }
+      },
+      {
+        "from": "price",
+        "to": "subscribers",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.125
+        },
+        "provenance": {
+          "magnitude": "olumi_placeholder"
+        }
+      },
+      {
+        "from": "subscribers",
+        "to": "goal",
+        "strength": {
+          "mean": 0.5,
+          "std": 0.125
+        },
+        "provenance": {
+          "magnitude": "olumi_estimate"
+        }
+      }
+    ]
+  },
+  "run": {
+    "input_snapshot": {
+      "goal_node_id": "goal"
+    },
+    "enrichment": {
+      "option_comparison": [
+        {
+          "option_id": "starter",
+          "status": "computed"
+        }
+      ],
+      "inference_warnings": [
+        {
+          "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+          "message": "Not shown. This link still needs a size. Set it to see a range for your goal.",
+          "option_ids": [
+            "starter"
+          ],
+          "acceptable_links": [
+            {
+              "from": "price",
+              "to": "subscribers"
+            }
+          ]
+        },
+        {
+          "code": "GOAL_CHANCE_RANGE",
+          "message": "Some options' chances are shown as a range: a link on the way to your goal isn't sized in the model yet.",
+          "severity": "info",
+          "option_ids": [
+            "starter"
+          ],
+          "range_by_option": {
+            "starter": {
+              "to": "subscribers",
+              "from": "price",
+              "kind": "link_strength",
+              "among": "unsized_links",
+              "low_pct": 5,
+              "high_pct": 37,
+              "low_rounding": "whole",
+              "high_rounding": "whole"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

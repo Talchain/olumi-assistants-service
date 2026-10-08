@@ -28,6 +28,25 @@ export const RECONCILIATION_TOLERANCE = 0.05;
 
 const stated = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0;
 
+/** An accumulation's first part is S₀: today's stock, never the stock projected at the deadline. */
+export function accumulationStockFor(node: Record<string, unknown>, byId: ReadonlyMap<string, Record<string, unknown>>): Record<string, unknown> | null {
+  const identity = node.nonlinear_identity;
+  if (identity === null || typeof identity !== 'object' || Array.isArray(identity)) return null;
+  const carrier = identity as Record<string, unknown>;
+  const ids = carrier.factor_ids;
+  if (carrier.operation !== 'accumulation' || !Array.isArray(ids) || ids.length !== 3
+    || !ids.every((id) => typeof id === 'string') || new Set(ids).size !== 3 || ids.some((id) => id === node.id)) return null;
+  return byId.get(ids[0] as string) ?? null;
+}
+
+/** The candidate equivalent, before the accumulation carrier is written by late admission. */
+function reconciliationFactor(candidate: CandidateModel, label: string) {
+  const accumulation = (candidate.identities ?? []).find((i) => i.outcome === label && i.operation === 'accumulation');
+  if (accumulation !== undefined && accumulation.factors.length !== 3) return undefined;
+  const today = accumulation !== undefined ? accumulation.factors[0] : label;
+  return candidate.factors.find((f) => f.label === today);
+}
+
 
 /**
  * ⛔ AIQ 5886846493 + 5886967509 (HARD): (money per <unit> per period) × (count of that <unit>) = money per period, in the
@@ -120,6 +139,9 @@ function reconcilingParts(candidate: CandidateModel, brief: string) {
   if ((candidate.identities ?? []).some((i) => i.outcome === metric)) return null;
   const options = new Set(candidate.options.map((opt) => opt.label));
   const all = [...new Set(candidate.links.filter((l) => l.to === metric).map((l) => l.from))].filter((s) => !options.has(s));
+  // An accumulation parent is S_N, not a user-stated level today. Its goal product must be declared, never minted
+  // from a projected factor's own figure; late accumulation admission refuses a carrier with no admitted goal product.
+  if (all.some((s) => (candidate.identities ?? []).some((i) => i.outcome === s && i.operation === 'accumulation'))) return null;
   // ⛔ A THIRD PARENT THE PRODUCT WILL RE-POINT DOES NOT HIDE THE READING (R3 5903882132, guest `73192fdf`; DL 5903903027):
   // 1 in 5 constructor drafts declare no product and link churn straight into MRR beside price and subscribers — no card,
   // and Run 1 stated an additive "£59 → ~£76.8k, 0%". The extra parent must be exactly what `product-goal-extra-parent.ts`
@@ -334,7 +356,7 @@ function goalCarrierReading(candidate: CandidateModel, i: Identity): boolean {
   if (goal.baseline_known !== true || goal.baseline_provenance !== 'explicit' || !stated(o)) return false;
   const levels: number[] = [];
   for (const label of i.factors) {
-    const f = candidate.factors.find((x) => x.label === label);
+    const f = reconciliationFactor(candidate, label);
     if (f === undefined || f.baseline_known !== true || f.provenance !== 'explicit' || !stated(f.baseline_value)) return false;
     levels.push(f.baseline_value);
   }
