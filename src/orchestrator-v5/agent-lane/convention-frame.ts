@@ -181,11 +181,10 @@ export interface RescuedLink { readonly from: string; readonly to: string; reado
  * end of a link is either TODAY's frame or the formula's `convention` frame; nothing in between is ever tried.
  *  1. For each sized link that is not representable today (β = r × source frame ÷ target frame > 1), take the first of
  *     [the source's formula frame, the target's, both] that makes it representable.
- *  2. NO HARM: with every chosen frame in place, a frame is dropped wherever a link that was representable today stops
- *     being so, or a link whose other end has no known frame would read a larger β (a wider source, a narrower target).
- *     Repeated until nothing changes; it only ever removes, so it ends.
- * Only a SEED link (one carrying its basis) can call for a rescue; every link is protected, and a frame that would newly
- * rescue a non-seed link is dropped too. Returns the factors re-framed and the links representable only because of them.
+ *  2. NO HARM, checked per choice (#2848 r2): a choice is taken only if, with every frame chosen so far, no link that was
+ *     representable today stops being so, no link without a basis is newly rescued, and no link whose other end has no
+ *     known frame reads a larger β (a wider source, a narrower target). A harmful choice falls through to the next one.
+ * Only a SEED link (one carrying its basis) can call for a rescue; every link is protected. Returns the factors re-framed and the links representable only because of them.
  */
 export function rescueConventionFrames(
   links: readonly SizedLinkReach[],
@@ -200,37 +199,37 @@ export function rescueConventionFrames(
     const beta = convertLinkEffect(l.amount, l.per, b, a);
     return beta === null ? undefined : Math.abs(beta);
   };
+  /** Does re-framing exactly `set` harm any link? (NO HARM, over every sized link, seed or not.) */
+  const harms = (set: ReadonlySet<string>): boolean => {
+    const at = (x: string): number | undefined => (set.has(x) ? convention.get(x) : today(x));
+    return links.some((l) => {
+      const touched = [l.from, l.to].filter((e) => set.has(e));
+      if (touched.length === 0) return false;
+      const was = beta(l, today); const now = beta(l, at);
+      // #2848 buddy r1 #3: a link that is NOT a seed (no basis) must not be newly rescued as a side effect either.
+      if (was !== undefined) return (was <= 1 && (now === undefined || now > 1)) || (!l.seed && was > 1 && now !== undefined && now <= 1);
+      // The other end has no known frame: the re-framed end must not raise β (a source may only narrow, a target only widen).
+      return touched.some((e) => {
+        const before = today(e); const after = convention.get(e);
+        if (!ok(before) || !ok(after)) return true;
+        return e === l.from ? after > before : after < before;
+      });
+    });
+  };
+  // #2848 buddy r2 #3: each seed takes the FIRST of [source, target, both] that rescues it AND keeps the whole set
+  // harm-free; a harmful choice falls through to the next one instead of costing the seed its rescue.
   const applied = new Set<string>();
   for (const l of links) {
     const was = beta(l, today);
     if (!l.seed || was === undefined || was <= 1) continue;
     for (const ends of [[l.from], [l.to], [l.from, l.to]]) {
       if (!ends.every((e) => convention.has(e))) continue;
-      const b = beta(l, (x) => (ends.includes(x) ? convention.get(x) : today(x)));
-      if (b !== undefined && b <= 1) { ends.forEach((e) => applied.add(e)); break; }
+      const trial = new Set([...applied, ...ends]);
+      const b = beta(l, (x) => (trial.has(x) ? convention.get(x) : today(x)));
+      if (b !== undefined && b <= 1 && !harms(trial)) { ends.forEach((e) => applied.add(e)); break; }
     }
   }
   const final = (x: string): number | undefined => (applied.has(x) ? convention.get(x) : today(x));
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const l of links) {
-      const touched = [l.from, l.to].filter((e) => applied.has(e));
-      if (touched.length === 0) continue;
-      const was = beta(l, today); const now = beta(l, final);
-      let harmed: boolean;
-      // #2848 buddy r1 #3: a link that is NOT a seed (no basis) must not be newly rescued as a side effect either.
-      if (was !== undefined) harmed = (was <= 1 && (now === undefined || now > 1)) || (!l.seed && was > 1 && now !== undefined && now <= 1);
-      else {
-        // The other end has no known frame: the re-framed end must not raise β (a source may only narrow, a target only widen).
-        harmed = touched.some((e) => {
-          const before = today(e); const after = convention.get(e);
-          if (!ok(before) || !ok(after)) return true;
-          return e === l.from ? after > before : after < before;
-        });
-      }
-      if (harmed) { touched.forEach((e) => applied.delete(e)); changed = true; }
-    }
-  }
   const rescued: RescuedLink[] = [];
   for (const l of links) {
     const was = beta(l, today); const now = beta(l, final);

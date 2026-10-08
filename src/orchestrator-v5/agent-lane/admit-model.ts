@@ -3272,6 +3272,11 @@ function admitOnce(
   }
   const unitOfLabel = (label: string): string | undefined =>
     [...model.factors, ...model.outcomes, ...model.risks].find((n) => canonicalLabel(n.label) === canonicalLabel(label))?.unit ?? undefined;
+  // #2848 buddy r2 #1: sizing, sign resolution and the basis carrier are all keyed by the endpoint PAIR, so a pair drawn
+  // twice cannot say which size a rescue (or a dropped basis) belongs to. Such a pair never seeds; it is still protected.
+  const pairKey = (l: { from: string; to: string }) => `${canonicalLabel(l.from)}::${canonicalLabel(l.to)}`;
+  const pairCount = new Map<string, number>();
+  for (const l of model.links) pairCount.set(pairKey(l), (pairCount.get(pairKey(l)) ?? 0) + 1);
   const sizedLinks = model.links.flatMap((l) => (typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
     && Number.isFinite(l.effect_amount) && Number.isFinite(l.effect_per_source_change) && l.effect_amount !== 0 && l.effect_per_source_change !== 0
     && (l.direction === 'positive' || l.direction === 'negative')
@@ -3279,7 +3284,7 @@ function admitOnce(
     && !(isFlowUnit(unitOfLabel(l.from)) && !isFlowUnit(unitOfLabel(l.to)))
     ? [{ from: l.from, to: l.to, amount: l.effect_amount, per: l.effect_per_source_change,
       // Science's condition 3: only a size carrying its §(p) basis may SEED a rescue; every size is protected (no harm).
-      seed: hasBasis(l.basis) && Math.sign(l.effect_amount / l.effect_per_source_change) === (l.direction === 'positive' ? 1 : -1) }] : []));
+      seed: pairCount.get(pairKey(l)) === 1 && hasBasis(l.basis) && Math.sign(l.effect_amount / l.effect_per_source_change) === (l.direction === 'positive' ? 1 : -1) }] : []));
   // Today's frame of a link end: a factor's drafted range, or an outcome's or risk's (the goal's is not known here, so a
   // link into it can be rescued only by narrowing its source).
   const rangeOf = (label: string): number | undefined => {

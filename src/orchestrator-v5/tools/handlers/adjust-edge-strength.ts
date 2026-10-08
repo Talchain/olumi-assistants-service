@@ -552,7 +552,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           // confirm writes above, with Olumi's band): the user's settled view, so the magnitude contract never re-sizes
           // the band they just agreed to (`sizedByOlumi`; Canonical seam check 5874263009, DL 5874274221).
           // A real write: the clamp marker spoke for the OLD stored size, so it goes with it (CODEX 5925312387).
-          const { natural_effect: _oldNaturalEffect, clamped_from: _oldClamp, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
+          // #2848 buddy r2 #2: Olumi's `basis` justified the OLD size, so it goes with `natural_effect` (this branch is a real write).
+          const { natural_effect: _oldNaturalEffect, clamped_from: _oldClamp, basis: _oldBasis, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
           const reviewed: Record<string, unknown> = {
             // L4: the same rule as the review branch above — an adopted band on a placeholder sizes it.
             ...sizedByApproval(keptProvenance, edge),

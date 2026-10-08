@@ -394,6 +394,23 @@ describe('§(u)(b) an OLUMI-drafted size takes its sign from the drawn direction
     expect(frameOf(ok, 'Monthly churn')).toBe(13);
   });
 
+  it('#2848 r2 #1: a link pair drawn TWICE never seeds a rescue (sizing and the basis are keyed by the pair)', () => {
+    const twice = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, amount: 3, basis: 'b1' }, { ...CHURN_TO_SUBS, basis: 'b2' }]));
+    expect(frameOf(twice, 'Monthly churn')).toBe(100);
+    expect(JSON.stringify(twice.nodes)).not.toContain('frame_source');
+    // CONTROL: the same −24 link drawn once is rescued.
+    expect(frameOf(admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, basis: 'b2' }])), 'Monthly churn')).toBe(13);
+  });
+
+  it('#2848 r2 #3: a choice that would harm another link falls through to the next end, not to no rescue', () => {
+    const today = (x: string) => ({ price: 200, subs: 2000, accts: 2000 } as Record<string, number>)[x];
+    // price's 98 would also rescue accts (no basis) = harm; subs' own formula 2600 rescues subs alone (β 1.2 → 0.92).
+    const r = rescueConventionFrames([{ from: 'price', to: 'subs', amount: -12, per: 1, seed: true }, { from: 'price', to: 'accts', amount: -12, per: 1, seed: false }],
+      today, new Map([['price', 98], ['subs', 2600], ['accts', 2600]]));
+    expect(r.applied).toEqual(['subs']);
+    expect(r.rescued).toEqual([{ from: 'price', to: 'subs', reframed: ['subs'], frames: { to: 2600 } }]);
+  });
+
   it('#2848 r1 #2: a size whose sign AGREES with its direction but whose basis is set aside never seeds a rescue; a sign-matching one with a basis does', () => {
     const today = (x: string) => ({ a: 200, b: 15 } as Record<string, number>)[x];
     expect(rescueConventionFrames([{ from: 'a', to: 'b', amount: 0.15, per: 1, seed: false }], today, new Map([['a', 98]])).applied).toEqual([]);

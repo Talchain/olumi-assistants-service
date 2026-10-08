@@ -220,6 +220,16 @@ describe('⭐ F1 — the writer refuses for EVERY caller (the legacy NL path rea
     expect(stored.provenance).not.toHaveProperty('basis');
   });
 
+  it('#2848 r2 #2: an APPROVED Olumi band moves the size, so Olumi’s old `basis` goes with the old size', async () => {
+    const graph = heldGraph(0.62, 'olumi_estimate');
+    (edgeIn(graph).provenance as Record<string, unknown>).basis = 'bigger deals need more support';
+    const outcome = await createAdjustEdgeStrengthHandler()({ ...invocation(graph, 0.55), edgeStrengthAdoptedEstimateAuthority: { band: 'strong' } } as HandlerInvocation);
+    const stored = edgeIn(outcome.mutated_graph);
+    expect(stored.strength.mean).toBe(0.55);
+    expect((stored.provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ band: 'strong' });
+    expect(stored.provenance).not.toHaveProperty('basis');
+  });
+
   it('with the user’s replace authority it writes, drops the quote with the figure, and says what it replaced', async () => {
     const outcome = await createAdjustEdgeStrengthHandler()(invocation(heldGraph(0.62), 0.3, true));
     const stored = edgeIn(outcome.mutated_graph);
