@@ -2,7 +2,7 @@
  * The ONE copy: P20 factor ranges and Canvas typed ranges import it.
  * Coverage follows the QUESTION that produced the range: the middle half, or
  * the range the person would be surprised to see the value fall outside.
- * Science 393023 (7 Oct): held-user-links.ts RANGE_90_WIDTH_Z (329 / 100) is
+ * Science 393023 (7 Oct): held-user-links.ts RANGE_90_WIDTH_Z (a rounded 90% constant) is
  * NOT migrated here; changing d5's served hold is out of package.
  */
 
