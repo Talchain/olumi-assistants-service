@@ -308,6 +308,23 @@ describe('GOAL-REACH 3b set_current_level through the real doors', () => {
       expect(forced.mock.results.map(r => r.value)).toContain(CURRENT_LEVEL_TOOL);
     } finally { forced.mockRestore(); }
   });
+  it('DL CHANGES_REQUIRED (#2816): an EXPLICIT Run reply says the carried reason\'s §(g) sentence, by identity; CONTROL: no reason → not said', async () => {
+    const SENTENCE = "Olumi can't show the chance of reaching your MRR target in this Run because of a fault on Olumi's side. The rest of this Run's results still stand.";
+    const run = async () => {
+      turnSerial += 1;
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario,
+        turn_id: `aaaaaaa1-aaaa-4aaa-8aaa-${String(turnSerial).padStart(12, '0')}`, message: 'Run analysis.', source: 'chip',
+        chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
+      expect(response.statusCode, response.body).toBe(200);
+      const body = response.json();
+      expect(body._diagnostic_trace?.fast_path).toBe('run');
+      return String(body.assistant_text);
+    };
+    setThresholdRefused('non_finite_conversion_input');
+    expect(await run()).toContain(SENTENCE);
+    setWithheld();
+    expect(await run()).not.toContain("because of a fault on Olumi's side");
+  });
   it('Codex r1 P1-3: while a held change waits (the identity card), a set_current_level press persists NO ask', async () => {
     setThresholdRefused('missing_goal_baseline');
     const card = await press('act:confirm_reading', 'Check how Olumi works out the goal.');

@@ -261,8 +261,8 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
   // GOAL-REACH 3b: PLoT #444 carries ISL's reason; with it, the cause is SAID, per Science §(g). Without it (a pre-#444
   // payload), the lines below are unchanged.
-  const carried = thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment);
-  if (carried !== null) return thresholdReasonSentence(carried, goal, graph);
+  const reasonLine = thresholdReasonLine(graph, analysisResult);
+  if (reasonLine !== null) return reasonLine;
   const label = goal.label ?? goal.id;
   // R&C B1 (#2071): ISL mints this code for seven reasons, and "no current figure" is only one of them. The cause is said
   // ONLY when the graph itself shows it — the goal carries no current figure at all; otherwise the target is named with
@@ -276,6 +276,21 @@ export function goalNotCheckedLine(graph: unknown, analysisResult: unknown): str
   return hasCurrent
     ? `Your ${label} ${target} was not checked in this analysis.`
     : `Your ${label} ${target} is not checked yet: the model has no current ${label} figure to measure it against.`;
+}
+
+/**
+ * GOAL-REACH 3b: the ONE producer of the carried-reason sentence, for every reply that speaks of a Run's result: the build
+ * turn's goal line (`goalNotCheckedLine`), an explicit Run's typed owed lines, and that Run's replay (DL CHANGES_REQUIRED
+ * on #2816: an explicit Run never said it). `null` without a carried reason (pre-#444) or a stated target amount.
+ */
+export function thresholdReasonLine(graph: unknown, analysisResult: unknown): string | null {
+  const carried = thresholdReasonOf((analysisResult as { enrichment?: unknown } | null | undefined)?.enrichment);
+  if (carried === null) return null;
+  const goal = (((graph as { nodes?: unknown } | null)?.nodes ?? []) as Node[]).find((n) => n.kind === 'goal');
+  const raw = goal?.goal_threshold_raw;
+  const unit = typeof goal?.goal_threshold_unit === 'string' ? goal.goal_threshold_unit.trim() : '';
+  if (goal === undefined || typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
+  return thresholdReasonSentence(carried, goal, graph);
 }
 
 /** Science §(g) (AIQ final): every reason's sentence ends with this, since only the goal chance was refused. */
