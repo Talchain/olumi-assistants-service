@@ -214,7 +214,7 @@ import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.j
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
 import { scopeTargetNotTestableWithRanges } from '../../goal-target/scope-target-not-testable.js';
-import { perOptionTargetReasonsForRun } from '../../goal-target/target-testability-per-option.js';
+import { optionPathsOf, perOptionTargetReasons, scopedFailuresFor, scopedTargetSpeech } from '../../goal-target/target-testability-per-option.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
@@ -2109,7 +2109,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
-    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test has no goal chance for ANY option.
+    // Gate A, Science §(aa): only options with their own target failures lose their goal chances; goal-level failures are every option's.
     // ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8): only the claims against the target go; the leader and the shares stay,
     // as on a run with no target. Runs after every earlier withhold, and withholds whatever options STILL show a goal
     // figure: (S) is per option, so "something was withheld" never means "every chance is gone" (AIQ's executed run: m1 +
@@ -3841,8 +3841,9 @@ function goalFigureOptions(envelope: unknown): { scored: string[]; shown: string
 
 /**
  * ⛔ DR ROW 4 IN THE RUN (AIQ #2371 5914730220 / 5915342964): when the goal's target can't be tested
- * (`targetVerdictWithholdsTargetClaims`), every option that STILL shows a goal figure after the earlier withholds has its
- * claims AGAINST THE TARGET withheld under `GOAL_FIGURES_TARGET_NOT_TESTABLE`. ⛔ RT-10 B′ R2 (Science #87 5999608477; DL
+ * (`targetVerdictWithholdsTargetClaims`), options with their own scoped failures lose their remaining claims against it
+ * under `GOAL_FIGURES_TARGET_NOT_TESTABLE`. Gate A preserves clean linear siblings; typed product interactions and
+ * derived-baseline feeds remain dependencies. ⛔ RT-10 B′ R2 (Science #87 5999608477; DL
  * e8 CONFIRMED): the shares, the leader and the brief STAY (`keepOrdering`), exactly as on a run with no target. Options an earlier withhold already took keep
  * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
  */
@@ -3869,28 +3870,42 @@ export function withholdGoalFiguresForChanceGoal<E>(response: E, graph: unknown)
 
 export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown, goalId?: unknown): E {
   const { scored, shown } = goalFigureOptions(response);
-  // A run that shows no goal figure and was withheld by nothing still names no leader and no share under `exploratory`
-  // (the whole-run arm); a run an earlier withhold already emptied keeps that withhold's reason alone.
-  const ids = shown.length > 0 ? shown : runWithheldGoalFigures(response as Record<string, unknown>) ? [] : scored;
-  if (ids.length === 0) return response;
+  // With no goal figures and no earlier withhold, retain the existing scored-option fallback, now scoped per option.
+  // A run an earlier withhold already emptied keeps that withhold's reason alone.
+  const candidates = shown.length > 0 ? shown : runWithheldGoalFigures(response as Record<string, unknown>) ? [] : scored;
+  if (candidates.length === 0) return response;
   // THIS Run's identity evaluations, as (S) reads them: an inferred product the Run evaluated is exact (Science d5, #2644).
   const evaluations = (response as Record<string, unknown>).identity_evaluations;
   const verdict = targetTestabilityOf(graph, Array.isArray(evaluations) ? evaluations : undefined, goalId);
+  if (verdict.kind !== 'not_testable') return response;
+  const warnings = (response as Record<string, unknown>).inference_warnings;
+  const paths = optionPathsOf(graph, candidates, Array.isArray(evaluations) ? evaluations : undefined, verdict.goal_id,
+    Array.isArray(warnings) ? warnings : undefined);
+  const labelOf = (id: string): string | undefined => {
+    const node = readGraphNodesForCostAsk(graph).find(n => n.id === id);
+    return typeof node?.label === 'string' ? node.label : undefined;
+  };
+  const ids = candidates.filter(id => scopedFailuresFor(verdict.failures, paths.get(id) ?? [], labelOf).length > 0);
+  if (ids.length === 0) return response;
   const warning = targetNotTestableWarning(graph, verdict, ids, GOAL_FIGURES_TARGET_NOT_TESTABLE);
   // ⭐ F1b [R1] (contract §2; L2(a) "option outcome distributions always show when computed"): when every failure is
   // about how the TARGET is stated (P2 off scale, P3 comparator, P4 unit), the goal has today's level and every path size
   // is sound, so each option's outcome is in the goal's own units: only the claims AGAINST the target go. No today's
   // level (P1: a normalised scale) or a path resting on a guess (P5) still withholds the outcome.
-  const keepOutcome = verdict.kind === 'not_testable' && verdict.failures.length > 0
+  const keepOutcome = verdict.failures.length > 0
     && verdict.failures.every((f) => OUTCOME_SAFE_PRECONDITIONS.has(f.precondition));
   if (warning === null) return response;
   // DL [R1] condition: each kept figure carries its sizing label — the options resting on Olumi's accepted estimates.
   const accepted = keepOutcome ? optionsRestingOnAcceptedOlumiSizes(graph, ids) : [];
   // ⭐ S-E GOALS S6 (DL 0fd71f routing, 7 Oct): each option's OWN reason, by option id, for the per-option panel; the
   // Run-wide `message` stays for the whole-run box. The scoping seam (`scope-target-not-testable.ts`) rewrites it with the same functions.
-  const perOption = perOptionTargetReasonsForRun(graph, verdict, ids, Array.isArray(evaluations) ? evaluations : undefined);
+  const perOption = perOptionTargetReasons(graph, verdict, paths, ids);
+  const speech = ids.length < scored.length && verdict.failures.every(f => f.case === 'c')
+    ? scopedTargetSpeech(graph, verdict, paths, ids, GOAL_FIGURES_TARGET_NOT_TESTABLE) : undefined;
+  const { say: _say, first_ask: _ask, ...unspoken } = warning;
   const recorded = {
-    ...warning,
+    ...(speech === undefined ? warning : unspoken),
+    ...speech,
     ...(accepted.length > 0 ? { rests_on_accepted_olumi: accepted } : {}),
     ...(Object.keys(perOption).length > 0 ? { per_option: perOption } : {}),
   };

@@ -6,6 +6,33 @@
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+export const GOAL_LEVEL_FROM_IDENTITY_INPUTS = 'GOAL_LEVEL_FROM_IDENTITY_INPUTS';
+
+/** The existing product-carrier reader, shared with admission's structural sign checks. */
+export function readProductIdentityCarrier(n: Rec): {
+  readonly operation: 'product'; readonly factor_ids: readonly string[]; readonly stated_in_brief: boolean;
+} | null {
+  const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+  if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
+  if (!Array.isArray(c.factor_ids) || c.factor_ids.length < 2 || !c.factor_ids.every((f) => typeof f === 'string' && f !== '')) return null;
+  return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
+}
+
+/** This Run derived the selected goal's baseline from identity inputs, identified only by typed carriers. */
+export function goalBaselineFromIdentityInputs(
+  nodes: readonly Rec[], goalId: unknown, identityEvaluations?: readonly unknown[], inferenceWarnings?: readonly unknown[],
+): boolean {
+  if ((identityEvaluations ?? []).some(e => isRec(e) && e.node_id === goalId && e.level_source === 'identity_inputs'
+    && evaluatedIdentityCarriers(nodes, [e]).has(goalId))) return true;
+  return (inferenceWarnings ?? []).some(w => {
+    if (!isRec(w) || w.code !== GOAL_LEVEL_FROM_IDENTITY_INPUTS) return false;
+    if (w.node_id !== undefined) return w.node_id === goalId;
+    if (w.field !== undefined) return w.field === `nodes[${String(goalId)}].nonlinear_identity`;
+    // The existing warning reader falls back to the goal when no id is carried. Ambiguous goals attest nothing.
+    return nodes.filter(n => n.kind === 'goal').length === 1 && nodes.some(n => n.kind === 'goal' && n.id === goalId);
+  });
+}
+
 /**
  * The identity carriers THIS Run evaluated, as the graph declares them. An evaluation names its node, and ISL's also says
  * the operation and operand set it worked out; when it does, they must be the graph's own (an evaluation of another

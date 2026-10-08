@@ -17,7 +17,6 @@ import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { scopeTargetNotTestableWithRanges } from '../scope-target-not-testable.js';
 import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import {
-  BASELINE_WAITS_FOR_OTHERS,
   OWN_REASON_FALLBACK,
   optionPathsOf,
   perOptionTargetReasons,
@@ -29,8 +28,6 @@ type Link = { from: string; to: string };
 
 // Science §(i) amendment (A): "case (c) stops blocking on a link whose size is an Olumi ESTIMATE
 // with a natural effect that converts into goal units." The stored captures remain byte-identical.
-// DL ruling, 7 October: the expected sentence is independent of the product constant.
-const BASELINE = 'Not shown. It needs nothing more of its own; it waits until the other options can be tested against your target, so all are shown on the same footing.';
 const read = (path: string): Rec => JSON.parse(readFileSync(new URL(`./fixtures/${path}.json`, import.meta.url), 'utf8'));
 const capture = (name: 'unseen-1' | 'unseen-2'): { graph: Rec; envelope: Rec } => {
   const blocks = read(`s4b/${name}-run`).blocks.filter((b: Rec) => b.type === 'analysis_result');
@@ -77,13 +74,12 @@ const controlEnvelope = (optionIds: string[]): Rec => ({
 });
 
 describe('S-E GOALS S6: each option owns its target-testability reason', () => {
-  it('R1 B9 served: carry_on_as_now waits, and the Run-wide message stays byte-identical', () => {
+  it('R1 B9 historical: a currently testable verdict has no per-option reason; its stored message stays byte-identical', () => {
     // Served staging CEE df15c8c, captured by the Science lane, PR #2749 (sci/s2l-target-not-testable).
     const served = read('s-e-goals/b9-unseen1-df15c8c-readback').j;
     const envelope = served.analysis_result.enrichment;
     const input = warning(envelope);
     expect(input.message).toContain('Loyalty app deployment');
-    expect(BASELINE_WAITS_FOR_OTHERS).toBe(BASELINE.slice('Not shown. '.length));
 
     const out = warning(scopeTargetNotTestableWithRanges(envelope, served.graph));
     expect(out.option_ids).toEqual(['carry_on_as_now']);
@@ -93,7 +89,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(out.message).toBe(input.message);
   });
 
-  it('R2 s4b unseen-1: loyalty_app names its own failing link; carry_on_as_now waits', () => {
+  it('R2 s4b unseen-1: clean loyalty_app and carry_on_as_now have no target withhold beside the fourth-shop range', () => {
     const { graph, envelope } = capture('unseen-1');
     const input = warning(envelope);
     const verdict = notTestable(graph, envelope.identity_evaluations);
@@ -108,13 +104,9 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     // The untouched capture records the old 11-link block; only its real placeholder still blocks now.
     expect(input.message).toContain('and 9 more.');
     expect(failing).toEqual([{ from: 'fourth_shop_fit_out_spend', to: 'monthly_profit' }]);
-    const out = warning(scopeTargetNotTestableWithRanges(envelope, graph));
-    expect(out.option_ids).toEqual(['loyalty_app', 'carry_on_as_now']);
-    expect(Object.keys(out.per_option)).toEqual(out.option_ids);
-    expect(out.per_option.carry_on_as_now.message).toBe(BASELINE);
-    expect(out.per_option.loyalty_app.message).toBe(BASELINE);
-    expect(out.say).toBe('');
-    expect(out.message).toBe(input.message);
+    const out = scopeTargetNotTestableWithRanges(envelope, graph);
+    expect(out.inference_warnings.filter((w: Rec) => w.code === TARGET)).toEqual([]);
+    expect(JSON.stringify(out)).not.toContain('needs nothing more of its own');
   });
 
   it('R3 s4b unseen-2: launch_loyalty_app names Loyalty app active, never fourth-shop nodes', () => {
@@ -130,7 +122,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(out.message).toBe(warning(envelope).message);
   });
 
-  it('R4 producer without ranges: records per_option before the untouched scoping seam', () => {
+  it('R4 producer without ranges: clean arms retain their chances despite fourth-shop failures', () => {
     const { graph, envelope } = capture('unseen-1');
     // Derive from unseen-1: remove TNT and every range/licence record. Retain the separate placeholder withhold;
     // expose a goal figure for loyalty_app and carry_on_as_now so this gate owns exactly those two options.
@@ -145,17 +137,14 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     const evaluations = noRanges.identity_evaluations;
     const verdict = notTestable(graph, evaluations);
     const produced = withholdGoalFiguresForUntestableTarget(noRanges, graph);
-    const recorded = warning(produced);
-    expect(recorded.option_ids).toEqual(['loyalty_app', 'carry_on_as_now']);
-    expect(Object.keys(recorded.per_option)).toEqual(recorded.option_ids);
-    expect(recorded.per_option).toEqual(perOptionTargetReasonsForRun(graph, verdict, recorded.option_ids, evaluations));
-    expect(recorded.per_option.carry_on_as_now.message).toBe(BASELINE);
-    expect(recorded.per_option.loyalty_app.message).toBe(BASELINE);
-    expect(recorded.say).not.toContain('Loyalty-app gross-profit uplift');
+    expect(produced).toBe(noRanges);
+    expect(produced.inference_warnings.filter((w: Rec) => w.code === TARGET)).toEqual([]);
+    expect(perOptionTargetReasonsForRun(graph, verdict, ['loyalty_app', 'carry_on_as_now'], evaluations)).toEqual({});
+    expect(produced.option_comparison.filter((r: Rec) => ['loyalty_app', 'carry_on_as_now'].includes(r.option_id))
+      .map((r: Rec) => r.probability_of_goal)).toEqual([0.5, 0.5]);
     expect(Object.keys(goalChanceFactsForAgent(produced, graph, true).goal_chance_range_display ?? {})).toEqual([]);
     const scoped = scopeTargetNotTestableWithRanges(produced, graph);
     expect(scoped).toBe(produced);
-    expect(warning(scoped).per_option).toBe(recorded.per_option);
   });
 
   it('R5(a) single option: its unsized factor-to-goal link is also the Run-wide reason', () => {
@@ -171,7 +160,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(Object.keys(out.per_option)).toEqual(['option_a']);
     expect(out.message).toContain('a size for the link from Sales to Monthly profit');
     expect(out.per_option.option_a.message).toContain('a size for the link from Sales to Monthly profit');
-    expect(out.per_option.option_a.message).not.toBe(BASELINE);
+    expect(out.per_option.option_a.message).not.toContain('needs nothing more of its own');
   });
 
   it("R5(b) goal-level failure: status_quo also needs today's level", () => {
@@ -189,7 +178,7 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(out.option_ids).toEqual(['option_a', 'status_quo']);
     expect(Object.keys(out.per_option)).toEqual(out.option_ids);
     for (const id of ['option_a', 'status_quo']) {
-      expect(out.per_option[id].message, id).not.toBe(BASELINE);
+      expect(out.per_option[id].message, id).not.toContain('needs nothing more of its own');
       expect(out.per_option[id].message, id).toContain("today's level of Monthly profit");
     }
     expect(out.per_option.status_quo.message).toBe(out.per_option.option_a.message);

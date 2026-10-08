@@ -25,7 +25,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_PROBABILITY_UNUSABLE } from '../../../../orchestrator/context/option-result-source.js';
 import { log } from '../../../../utils/telemetry.js';
 
 const producer = vi.hoisted(() => ({ mode: 'real' as 'real' | 'throw' | 'invalid' }));
@@ -47,9 +47,8 @@ const DIR = 'tests/fixtures/cross-service/b5-per-limit';
 const input = JSON.parse(readFileSync(`${DIR}/17d1cd3a.graph.json`, 'utf8')) as { graph: Json; brief_text: string };
 const clone0 = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 /**
- * …with NO stated target, so DECISION-REPRESENTATION row 4 (#2371) has no subject: Paul's 17d1 MRR target can't be tested
- * yet (placeholders on the goal's path), and row 4 then withholds EVERY option's chance, the status quo's earned 0 too
- * (AIQ #2371 5915342964: nothing left showing). These rows pin where the Run stores its certainty, not row 4. Only the
+ * …with NO stated target, so DECISION-REPRESENTATION row 4 (#2371) has no subject. These rows pin where the Run stores
+ * its certainty. Gate A no longer withholds a clean baseline due to another option's placeholder path. Only the
  * goal's raw target and its own limit row go (the C46 specs' shared pattern).
  */
 function withoutTarget<G>(graph: G): G {
@@ -106,12 +105,11 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('DR row 4 on the SERVED graph (target stated, not testable): the earned 0 is withheld too', () => {
-  it('⛔ exploratory (DR row 4) withholds every option\'s goal chance, including an earned 0 (PTL P2; AIQ 5914730220, 5916664644)', async () => {
+describe('Gate A on the SERVED graph: a baseline does not inherit the price options\' failures', () => {
+  it('keeps the separate missing-direction gate as the baseline\'s own cause', async () => {
     const result = await storedRun(plotResponse, SERVED_GRAPH);
-    expect(result.goal_certainty ?? []).toEqual([]);
-    // The words (AIQ 5916664644): the status quo is withheld under the run's own TARGET_NOT_TESTABLE reason, never a
-    // placeholder-path reason it does not have; the price options keep (S)'s own reason.
+    expect(result.goal_certainty).toEqual([]);
+    // This capture holds no goal direction: that separate gate owns the baseline. The price options keep (S)'s reason.
     const warnings: Json[] = [];
     const walk = (v: unknown): void => {
       if (Array.isArray(v)) { v.forEach(walk); return; }
@@ -122,7 +120,8 @@ describe('DR row 4 on the SERVED graph (target stated, not testable): the earned
     };
     walk(result);
     const byCode = (code: string) => new Set(warnings.filter((w) => w.code === code).flatMap((w) => w.option_ids as string[]));
-    expect(byCode(GOAL_FIGURES_TARGET_NOT_TESTABLE).has(OPTIONS[0])).toBe(true);
+    expect(byCode(GOAL_FIGURES_TARGET_NOT_TESTABLE).has(OPTIONS[0])).toBe(false);
+    expect(byCode(GOAL_FIGURES_PROBABILITY_UNUSABLE).has(OPTIONS[0])).toBe(true);
     expect(byCode(GOAL_FIGURES_PLACEHOLDER_PATH).has(OPTIONS[0])).toBe(false);
     expect([...byCode(GOAL_FIGURES_PLACEHOLDER_PATH)].sort()).toEqual([OPTIONS[2], OPTIONS[1]].sort());
   });

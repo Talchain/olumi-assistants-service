@@ -1,0 +1,43 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+{"level":"info","time":1791473920248,"pid":46144,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791473920326,"pid":46144,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791473920366,"pid":46144,"hostname":"Mac.net","event":"agent_lane.withheld_leader_ranking_dropped","request_id":"s4b-unseen-1","exit_path":"agent_lane_v1","dropped_sentences":1,"withheld_reason":"goal_path_unsized","no_result_run":false,"original_length":298,"projected_length":423,"msg":"agent-lane: the leader is withheld, so ranking sentences were dropped from the reply"}
+{"level":"info","time":1791473920391,"pid":46144,"hostname":"Mac.net","event":"v5.egress.leading_option_claim_neutralised_at_wire","request_id":"s4b-unseen-1","exit_path":"agent_lane_v1","edited_fields":"blocks","mode":"surgical","original_length":0,"projected_length":0}
+{"level":"info","time":1791473920625,"pid":46144,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791473920726,"pid":46144,"hostname":"Mac.net","event":"cee.analysis_ready.built","optionCount":4,"status":"ready","userQuestionCount":0,"goalNodeId":"monthly_profit","readyOptionsCount":4,"optionsNeedingEncoding":0,"optionsNeedingMapping":0,"declinedFallbackCount":0,"blockerCount":0}
+{"level":"info","time":1791473920866,"pid":46144,"hostname":"Mac.net","event":"agent_lane.withheld_leader_ranking_dropped","request_id":"s4b-unseen-2","exit_path":"agent_lane_v1","dropped_sentences":1,"withheld_reason":"goal_path_unsized","no_result_run":false,"original_length":313,"projected_length":428,"msg":"agent-lane: the leader is withheld, so ranking sentences were dropped from the reply"}
+{"level":"info","time":1791473920887,"pid":46144,"hostname":"Mac.net","event":"v5.egress.leading_option_claim_neutralised_at_wire","request_id":"s4b-unseen-2","exit_path":"agent_lane_v1","edited_fields":"blocks","mode":"surgical","original_length":0,"projected_length":0}
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (12 tests | 1 failed) 105ms
+     × the Agent target-only note keeps the partial option scope and permits clean options' licences 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > the Agent target-only note keeps the partial option scope and permits clean options' licences
+AssertionError: expected undefined to deeply equal [ 'starter' ]
+
+- Expected:
+[
+  "starter",
+]
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:165:30
+    163|     const out = withholdGoalFiguresForUntestableTarget(envelope(), g, …
+    164|     const agent = goalChanceWithheldForAgent({ enrichment: out }, g, u…
+    165|     expect(agent.option_ids).toEqual(['starter']);
+       |                              ^
+    166|     expect(agent.note).not.toContain('EVERY option');
+    167|     expect(agent.note).toContain('Other options');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 56 passed (57)
+   Start at  16:38:34
+   Duration  8.21s (transform 4.21s, setup 179ms, import 6.72s, tests 1.00s, environment 0ms)
+
