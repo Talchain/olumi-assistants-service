@@ -1,0 +1,38 @@
+[
+  {
+    "input": "whitespace",
+    "characters": 20000,
+    "reader": "readStatedEventRisk",
+    "samples": 30,
+    "min_ms": 0.13854200000002947,
+    "median_ms": 0.1466250000000855,
+    "max_ms": 0.6956670000000713
+  },
+  {
+    "input": "whitespace",
+    "characters": 20000,
+    "reader": "readStatedLikelihoodWithoutWindow",
+    "samples": 30,
+    "min_ms": 0.12116599999990285,
+    "median_ms": 0.13208299999996598,
+    "max_ms": 0.24974999999994907
+  },
+  {
+    "input": "by-percent",
+    "characters": 20000,
+    "reader": "readStatedEventRisk",
+    "samples": 30,
+    "min_ms": 1.2402090000000499,
+    "median_ms": 1.6248339999999644,
+    "max_ms": 2.6992910000000165
+  },
+  {
+    "input": "by-percent",
+    "characters": 20000,
+    "reader": "readStatedLikelihoodWithoutWindow",
+    "samples": 30,
+    "min_ms": 1.2316250000000082,
+    "median_ms": 1.2978749999999764,
+    "max_ms": 3.254666000000043
+  }
+]

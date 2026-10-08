@@ -1,0 +1,56 @@
+{
+  "original_source_sha256": "09ff2113e24c5337ecb309cc2ab16c105d1025af05a55ce69f949b6191425319",
+  "restored_source_sha256": "09ff2113e24c5337ecb309cc2ab16c105d1025af05a55ce69f949b6191425319",
+  "mutants": [
+    {
+      "mutant": "classification-disabled",
+      "test_name_pattern": "impact-pct-(must-not-read|door|must-still-read-(served-|chance|one-in|bare-event|put-it-at|verb-event|percent-risk-of))",
+      "source_sha256": "ff3e7a62e83dcf936a6dddad3c3683f3ffde5c187a9116d5c9fe205c2b233c00",
+      "exit_code": 1,
+      "failure_rows": [
+        "impact-pct-door-'impact': the user card and committed risk preserve the meaning of the percentage",
+        "impact-pct-door-'uncued-shorthand': the user card and committed risk preserve the meaning of the percentage",
+        "impact-pct-must-not-read-served-cloud-cost",
+        "impact-pct-must-not-read-served-target-noun",
+        "impact-pct-must-not-read-served-target-by",
+        "impact-pct-must-not-read-served-churn-magnitude",
+        "impact-pct-must-not-read-defect-cut",
+        "impact-pct-must-not-read-defect-lower",
+        "impact-pct-must-not-read-verb-object",
+        "impact-pct-must-not-read-cue-is-impact",
+        "impact-pct-must-not-read-cue-other-sentence",
+        "impact-pct-must-not-read-defect-drop",
+        "impact-pct-must-not-read-plural-drops",
+        "impact-pct-must-not-read-singular-reduction",
+        "impact-pct-must-not-read-plural-reductions",
+        "impact-pct-must-not-read-fronted",
+        "impact-pct-must-not-read-predicative",
+        "impact-pct-must-not-read-cue-in-another-clause",
+        "impact-pct-must-not-read-noun-hit",
+        "impact-pct-must-not-read-by-about",
+        "impact-pct-must-not-read-by-range",
+        "impact-pct-must-not-read-share",
+        "impact-pct-must-not-read-uncued",
+        "impact-pct-must-not-read-uncued-range",
+        "impact-pct-must-not-read-cued-share-mrr",
+        "impact-pct-must-not-read-monthly-churn-rate",
+        "impact-pct-must-not-read-yearly-churn-rate",
+        "impact-pct-must-not-read-weak-risk-of"
+      ],
+      "likelihood_control_failures": [],
+      "summary": "Test Files  2 failed (2)\n      Tests  28 failed | 10 passed | 297 skipped (335)"
+    },
+    {
+      "mutant": "impact-attachment-veto-disabled",
+      "test_name_pattern": "impact-pct-(must-not-read|door|must-still-read-(served-|chance|one-in|bare-event|put-it-at|verb-event|percent-risk-of))",
+      "source_sha256": "c8e3f878902d76c61873ad73a2f9e76a3a3d2baec3f6e3368f3a2a2b98e26d24",
+      "exit_code": 1,
+      "failure_rows": [
+        "impact-pct-must-not-read-cue-is-impact",
+        "impact-pct-must-not-read-cued-share-mrr"
+      ],
+      "likelihood_control_failures": [],
+      "summary": "Test Files  1 failed | 1 passed (2)\n      Tests  2 failed | 36 passed | 297 skipped (335)"
+    }
+  ]
+}

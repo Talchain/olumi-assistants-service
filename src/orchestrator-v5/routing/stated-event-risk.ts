@@ -20,14 +20,75 @@ const HORIZON = new RegExp(
   String.raw`\b(?:within|in|over|during)${GAP}(?:(?:the${GAP})?(?:next|coming|following)${GAP})?(\d{1,6}(?:\.\d{1,6})?|a|an|one)?${SPACE}(months?|years?|weeks?)\b`, 'gi',
 );
 
-const LIKELIHOOD_CUE = /\b(?:chances?|likely|likelihood|probabl[ey]|probability|odds|maybe|perhaps|possibly)\b/i;
+const LIKELIHOOD_CUE = /\b(?:chances?|likely|likelihood|probabl[ey]|probability|odds|maybe|perhaps|possibly|i(?:['’]d| would)[ \t]{1,8}put[ \t]{1,8}it[ \t]{1,8}at)\b/i;
+const IMPACT_BY = /\bby[ \t]{1,8}(?:(?:about|around|roughly|approximately|at least|at most|up to|more than|less than)[ \t]{1,8})?$/i;
+const IMPACT_AFTER = /^[ \t]{0,8}(?:(?:ARR|MRR|revenue|sales|cost|price|monthly|annual)[ \t]{1,8})?(?:drops?|falls?|declines?|cuts?|reductions?|increases?|rises?|loss(?:es)?|hits?|growth|lower|higher|more|less|fewer|churn|conversion|margin|adoption|of[ \t]{1,8}(?:ARR|MRR|revenue|sales|costs?|profit|customers?|investment|budget))\b/i;
+const IMPACT_VERB = /\b(?:cuts?|cutting|reduce[ds]?|reducing|lowers?|lowered|lowering|raises?|raised|raising|increase[ds]?|increasing|drops?|dropped|dropping|falls?|fell|falling|lose[st]?|lost|losing|shrinks?|shrank|shrinking|grows?|grew|growing|decrease[ds]?|decreasing)\b[^%,;.!?\n]{0,120}$/i;
+const DIRECT_LIKELIHOOD_AFTER = /^[ \t]{0,8}(?:chances?|probability|likelihood|odds|risk[ \t]{1,8}of)\b/i;
+const DIRECT_LIKELIHOOD_BEFORE = /\b(?:chances?|probability|likelihood|odds)[ \t]{1,8}(?:(?:of|is|at|about)[ \t]{1,8}){0,2}$/i;
+const BARE_EVENT = /\b(?:might|could)[ \t]{1,8}happen[ \t]{0,8}$/i;
+
+type ProbabilityCandidate = { match: RegExpMatchArray; likelihood: boolean };
+type Fragment = { start: number; end: number; likelihood: boolean };
+
+function isDecimalPoint(text: string, i: number): boolean {
+  return text[i] === '.' && /\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? '');
+}
+
+/** Comma/sentence fragments, once per input. Decimal points stay in their numeric token. */
+function likelihoodFragments(text: string): Fragment[] {
+  const fragments: Fragment[] = [];
+  let start = 0;
+  for (let i = 0; i <= text.length; i += 1) {
+    const ch = text[i];
+    const decimal = isDecimalPoint(text, i);
+    if (i !== text.length && (ch === undefined || !',.;!?\n'.includes(ch) || decimal)) continue;
+    fragments.push({ start, end: i, likelihood: LIKELIHOOD_CUE.test(text.slice(start, i)) });
+    start = i + 1;
+  }
+  return fragments;
+}
+
+/**
+ * Impact attachment wins over a cue. Bound each attachment check to 160 characters, and compute clause cues
+ * once: repeated "by 10% " in one long clause must not repeatedly scan the rest of the input.
+ * Keep uncued, non-impact figures until uniqueness is checked: "1 in 5 chance or 30%" is still ambiguous.
+ */
+function statedProbabilityCandidates(userText: string): ProbabilityCandidate[] {
+  const matches = [...userText.matchAll(PROBABILITY)];
+  if (matches.length === 0) return [];
+  const fragments = likelihoodFragments(userText);
+  const candidates: ProbabilityCandidate[] = [];
+  let fragmentIndex = 0;
+  for (const match of matches) {
+    const index = match.index!;
+    while (fragmentIndex < fragments.length - 1 && index > fragments[fragmentIndex]!.end) fragmentIndex += 1;
+    const fragment = fragments[fragmentIndex]!;
+    if (!/%|percent\b/i.test(match[0])) {
+      candidates.push({ match, likelihood: true }); // The existing one-in matcher requires its own cue.
+      continue;
+    }
+    const before = userText.slice(Math.max(fragment.start, index - 160), index);
+    const after = userText.slice(index + match[0].length, Math.min(fragment.end, index + match[0].length + 160));
+    const directLikelihood = DIRECT_LIKELIHOOD_AFTER.test(after) || DIRECT_LIKELIHOOD_BEFORE.test(before);
+    if (IMPACT_BY.test(before) || IMPACT_AFTER.test(after) || (!directLikelihood && IMPACT_VERB.test(before))) continue;
+    const previous = fragments[fragmentIndex - 1];
+    const bareEvent = previous !== undefined && userText[previous.end] === ','
+      && before.trim() === '' && BARE_EVENT.test(userText.slice(Math.max(previous.start, previous.end - 160), previous.end));
+    candidates.push({ match, likelihood: fragment.likelihood || bareEvent || directLikelihood });
+  }
+  return candidates;
+}
+
+function statedProbabilities(userText: string): RegExpMatchArray[] {
+  const candidates = statedProbabilityCandidates(userText);
+  return candidates.length === 1 && candidates[0]!.likelihood ? [candidates[0]!.match] : [];
+}
 
 /** A likelihood (one probability, a likelihood word, not an impact "by 20%") stated without a time window. */
 export function readStatedLikelihoodWithoutWindow(userText: string): boolean {
   if (typeof userText !== 'string') return false;
-  const probabilities = [...userText.matchAll(PROBABILITY)];
-  if (probabilities.length !== 1 || [...userText.matchAll(HORIZON)].length !== 0 || !LIKELIHOOD_CUE.test(userText)) return false;
-  return !/\bby[ \t]{1,8}$/i.test(userText.slice(Math.max(0, probabilities[0]!.index! - 12), probabilities[0]!.index!));
+  return statedProbabilities(userText).length === 1 && [...userText.matchAll(HORIZON)].length === 0;
 }
 
 type LabelTrie = { children: Map<string, LabelTrie>; word?: string };
@@ -71,13 +132,22 @@ export function isFactorNamedByUser(label: string, userText: string): boolean {
 
 export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1T; quote: string } | undefined {
   if (typeof userText !== 'string') return undefined;
-  const probabilities = [...userText.matchAll(PROBABILITY)];
-  const horizons = [...userText.matchAll(HORIZON)];
+  const probabilities = statedProbabilities(userText);
+  // A bare "in year" from "cost in year one" was never a supported window; it must not hide a real window.
+  const horizons = [...userText.matchAll(HORIZON)].filter((h) => h[1] !== undefined || /\b(?:next|coming|following)\b/i.test(h[0]));
   if (probabilities.length !== 1 || horizons.length !== 1) return undefined;
   const probability = probabilities[0]!;
   const horizon = horizons[0]!;
   // One span cannot be both the likelihood and the window ("1 in 5 months").
   if (probability.index! < horizon.index! + horizon[0].length && horizon.index! < probability.index! + probability[0].length) return undefined;
+  // Do not attach a separate goal's window to a newly disambiguated likelihood. A following "It may happen"
+  // sentence is the existing explicit continuation; otherwise occurrence and window must share a sentence.
+  const probabilityFirst = probability.index! < horizon.index!;
+  const gap = probabilityFirst ? userText.slice(probability.index! + probability[0].length, horizon.index!)
+    : userText.slice(horizon.index! + horizon[0].length, probability.index!);
+  const sentenceBoundary = [...gap.matchAll(/[.!?\n]/g)].some((m) => !isDecimalPoint(gap, m.index!));
+  if (sentenceBoundary && !(probabilityFirst
+    && /^[ \t]{0,8}[.!?][ \t]{0,8}it[ \t]{1,8}(?:may|might|could)[ \t]{1,8}happen[ \t]{0,8}$/i.test(gap))) return undefined;
   let pLow: number;
   let pHigh: number;
   if (!/%|percent\b/i.test(probability[0])) {

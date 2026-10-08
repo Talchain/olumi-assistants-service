@@ -1,0 +1,487 @@
+[
+ {
+  "id": "corpus-002",
+  "message": "Add a risk: our biggest client might cancel their contract, maybe 15 - 25% in the next 3 months. If they cancel, on-time delivery of client projects would drop.",
+  "label": "LIKELIHOOD",
+  "reason": "maybe range estimates client-event likelihood",
+  "expectedOccurrence": {
+   "p_low": 0.15,
+   "p_high": 0.25
+  },
+  "expectedHorizonMonths": 3
+ },
+ {
+  "id": "corpus-005",
+  "message": "Add a risk: our largest client might cancel their contract, maybe 20 - 40% in the next 6 months. If they cancel, monthly revenue would drop.",
+  "label": "LIKELIHOOD",
+  "reason": "maybe range estimates client-event likelihood",
+  "expectedOccurrence": {
+   "p_low": 0.2,
+   "p_high": 0.4
+  },
+  "expectedHorizonMonths": 6
+ },
+ {
+  "id": "corpus-014",
+  "message": "Draft a model for this brief: We are considering whether to raise the price of our Pro plan from £49 to £59 per month. Our goal is to reach £20,000 MRR within 12 months while keeping monthly churn below 4%. Keep £49, raise to £54, or raise to £59 are the options.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-016",
+  "message": "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-017",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn unde 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-018",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10% (it is 4% today), should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-019",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-020",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release, or keep £49 as it is?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-021",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release? We estimate each £10 price rise adds about 1 percentage point to monthly churn.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-022",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-023",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 7%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-028",
+  "message": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release, while keeping monthly churn under 4% and reaching £20k MRR within 12 months.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-031",
+  "message": "No, I mean the updates relating to the risk of 7% churn over 3 months, meaning that we end up with a cash flow problem.",
+  "label": "OTHER",
+  "reason": "7% is the churn rate being feared"
+ },
+ {
+  "id": "corpus-033",
+  "message": "Our B2B marketplace connects 500 suppliers with 2,000 buyers. We're deciding whether to invest £400k in AI-powered supplier matching that improves match quality, which increases buyer satisfaction, which attracts more buyers, which attracts more suppliers, which improves match quality further. The alternative is investing £400k in a manual curation team of 8 people who hand-pick supplier recommendations. Current GMV is £15M annually with 2.5% take rate. We need to reach £25M GMV within 18 months. Supplier churn is 20% annually and buyer acquisition cost is £850.",
+  "label": "OTHER",
+  "reason": "take rate and churn are business metrics"
+ },
+ {
+  "id": "corpus-036",
+  "message": "Our family-run logistics firm (120 drivers, £18m turnover, thin 4% margins) has to respond to the city's new clean-air zone within a year. We see three routes: replacing a third of the diesel fleet with electric vans now (about £2.1m capex, grants might cover 20%, but charging infrastructure at the depot is another £300k and our ops director doubts the range figures); paying the daily charges and passing costs to customers (roughly £190k a year, but two big contracts have clauses letting them exit if prices rise more than 5%); or subcontracting inner-city deliveries to a green courier (quotes ",
+  "label": "IMPACT",
+  "reason": "contract price-rise threshold is an impact magnitude"
+ },
+ {
+  "id": "corpus-037",
+  "message": "Our goal is to raise on-time delivery of client projects to at least 84% within 6 months; today it is 80%. We're deciding between hiring two contractors or keeping things as they are. Two contractors would raise our delivery capacity, and more delivery capacity raises on-time delivery.",
+  "label": "OTHER",
+  "reason": "delivery percentages are current and target levels"
+ },
+ {
+  "id": "corpus-038",
+  "message": "Our goal is to reach £20k MRR within 12 months while keeping monthly churn under 4%. Should we raise the Pro plan price from £49 to £59 alongside the AI feature release, hold at £49, or go to £54?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-039",
+  "message": "Our lease expires in 3 months and we must choose between two offices. Office A is in the city centre, 2,000 sq ft at £55 per sq ft, 5-minute walk from the train station, but no parking. Office B is in a business park, 3,500 sq ft at £28 per sq ft, free parking for 40 cars, but 30 minutes from public transport. We have 45 employees, 60% commute by train and 40% drive. Team collaboration is our top priority.",
+  "label": "OTHER",
+  "reason": "commuting percentages are population shares"
+ },
+ {
+  "id": "corpus-040",
+  "message": "Our monthly cloud bill is currently £45,000. We need to cut it by 15% within 6 months. Should we move our steady workloads to reserved instances, or renegotiate our contract with the current provider?",
+  "label": "IMPACT",
+  "reason": "cloud-bill cut is an impact magnitude"
+ },
+ {
+  "id": "corpus-041",
+  "message": "Our monthly cloud bill is currently £45,000. We need to cut it by 15% within 6 months without hurting service reliability. The options are: move steady workloads to reserved instances, shift batch jobs to spot instances, or renegotiate our enterprise discount with the provider.",
+  "label": "IMPACT",
+  "reason": "cloud-bill cut is an impact magnitude"
+ },
+ {
+  "id": "corpus-044",
+  "message": "Our Pro plan is free today: the Pro price is £0 per subscriber per month. We're deciding whether to keep Pro free or start charging £59 per subscriber per month. We have 1,000 paying Pro subscribers today (a count of subscribers). Pro MRR, in £ per month, equals the Pro price in £ per subscriber per month times the number of paying Pro subscribers. Total MRR is Pro MRR plus £75k per month of other MRR. Success means growing total MRR to £100k per month within 12 months. Monthly churn must stay under 4%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-048",
+  "message": "Our SaaS platform has three pricing tiers: Basic (£19/mo, 60% of users), Pro (£49/mo, 30%), Enterprise (£149/mo, 10%). We're considering three changes: Option A raises all tiers by 15% (to £22, £56, £171). Option B raises only Enterprise by 30% to £194 while keeping Basic and Pro unchanged. Option C raises Basic and Pro by 10% (to £21, £54) while dropping Enterprise by 5% to £142. We have 5,000 total customers and need to increase MRR from £215k to £250k within 6 months without pushing churn above 5%.",
+  "label": "IMPACT",
+  "reason": "tier price changes are impacts"
+ },
+ {
+  "id": "corpus-050",
+  "message": "Our support team costs £45,000 a month. We need to cut our monthly cloud bill by 15% within 6 months. Should we move our steady workloads to reserved instances, or renegotiate our contract with the current provider?",
+  "label": "IMPACT",
+  "reason": "cloud-bill cut is an impact magnitude"
+ },
+ {
+  "id": "corpus-051",
+  "message": "Our support team handles 12,000 tickets a month with 30 agents. Median first response is 9 hours, and customers who wait more than a day churn at 4% a month against 1.5% for everyone else. We are choosing between hiring 10 more agents at £38k each a year, buying an AI triage tool for £120k a year that the vendor says deflects 35% of tickets, or doing nothing. Our goal is to get monthly churn below 2% within 9 months. Our head of support thinks the tool will deflect only 15% of tickets, not 35%.",
+  "label": "IMPACT",
+  "reason": "ticket deflection is an operational impact"
+ },
+ {
+  "id": "corpus-055",
+  "message": "Should we enter the German market next year via a local distributor, our own sales office, or an acquisition of a small local reseller? We are a UK industrial-sensors firm with £8 million revenue. A Munich office would cost about £600,000 in year one and give us full control of the brand, but hiring is slow and we have no local network. The distributor route costs almost nothing up front but surrenders roughly 35% margin and risks weak commitment — our Nordic distributor generated only a fifth of its forecast. Acquiring the reseller we know would cost around £1.5 million and bring 12 experienc",
+  "label": "IMPACT",
+  "reason": "surrendered margin is an impact magnitude"
+ },
+ {
+  "id": "corpus-056",
+  "message": "Should we increase the Pro plan price from £49 to £59? We want to maximise annual recurring revenue over the next 12 months without pushing churn above 5%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-058",
+  "message": "Should we move our 40-person support team to a four-day week? Customer response times are currently 2 hours on average and staff turnover is 18% a year. The goal is to cut turnover below 10% within a year without response times rising above 4 hours.",
+  "label": "OTHER",
+  "reason": "turnover percentages are current and target rates"
+ },
+ {
+  "id": "corpus-059",
+  "message": "Should we move to a cheaper cloud provider to reach £100k MRR within 12 months [currently £75k], while keeping monthly downtime from rising more than 10% above today?",
+  "label": "IMPACT",
+  "reason": "relative downtime increase is an impact magnitude"
+ },
+ {
+  "id": "corpus-061",
+  "message": "Should we open a second warehouse in Manchester at a cost of 1.2 million pounds, or expand the existing Leeds site by 40 percent for 700,000 pounds? We need to cut delivery times from 4 days to 2 days within 18 months.",
+  "label": "IMPACT",
+  "reason": "warehouse expansion is an impact magnitude"
+ },
+ {
+  "id": "corpus-062",
+  "message": "Should we raise a £3m seed round now or bootstrap for another year? We have 9 months of runway, £40k monthly revenue growing 6% a month, and two investors interested. The goal is to reach £1m annual recurring revenue within 18 months while keeping founder ownership above 60%.",
+  "label": "IMPACT",
+  "reason": "monthly revenue growth is an impact magnitude"
+ },
+ {
+  "id": "corpus-063",
+  "message": "Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. Monthly churn must stay below 5%, and we want MRR above £85k within a year.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-064",
+  "message": "Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £85k MRR. Monthly churn must stay below 5%, and we want MRR above £85k within a year.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-066",
+  "message": "Should we raise the Pro plan price from £49 to £59 per month? Goal: £20k MRR within 12 months, keeping monthly churn under 10%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-069",
+  "message": "Should we switch our cloud provider from AWS to GCP? Our AWS workload spend is £45,000 per month today. Monthly cloud cost savings, in £ per month, equal the GCP workload share times the GCP unit-cost saving times our AWS workload spend. GCP's unit cost is 25% lower than AWS. The options are: remain on AWS (0% of workloads on GCP), migrate fully to GCP (100% of workloads on GCP), or a phased GCP migration (50% of workloads on GCP). Success means monthly cloud cost savings of at least £6,000 per month within 12 months.",
+  "label": "IMPACT",
+  "reason": "unit-cost difference is an impact magnitude"
+ },
+ {
+  "id": "corpus-070",
+  "message": "Should we switch our cloud provider from AWS to GCP? Our monthly cloud spend is £45,000 today, all on AWS. Monthly cloud cost savings, in £ per month, equal the GCP workload share times the GCP unit-cost saving times our AWS workload spend, and our monthly spend is £45,000 minus those savings. GCP's unit cost is about 25% lower than AWS. The options are: remain on AWS, migrate fully to GCP (all workloads on GCP), or a phased GCP migration (half the workloads on GCP). Success means cutting our monthly cloud spend to £38,000 or less within 12 months.",
+  "label": "IMPACT",
+  "reason": "unit-cost difference is an impact magnitude"
+ },
+ {
+  "id": "corpus-078",
+  "message": "There's a risk a competitor cuts its prices in response. I'd put it at about 15–25% within 3 months. Add it to the model.",
+  "label": "LIKELIHOOD",
+  "reason": "put it at range estimates competitor-event likelihood",
+  "expectedOccurrence": {
+   "p_low": 0.15,
+   "p_high": 0.25
+  },
+  "expectedHorizonMonths": 3
+ },
+ {
+  "id": "corpus-079",
+  "message": "There's a risk a key contractor walks off in response to the heavy workload. I'd put it at about 15–25% within 3 months. Add it.",
+  "label": "LIKELIHOOD",
+  "reason": "put it at range estimates contractor-event likelihood",
+  "expectedOccurrence": {
+   "p_low": 0.15,
+   "p_high": 0.25
+  },
+  "expectedHorizonMonths": 3
+ },
+ {
+  "id": "corpus-085",
+  "message": "We are a 25-person software consultancy with annual gross profit of £1.1m. We are choosing between three options: hire 3 senior consultants at £95k each, launch a fixed-price security audit product at £8k per audit aiming for 40 audits a year, or raise our day rate from £900 to £1,000. Our goal is to grow annual gross profit above £1.4m within 12 months. Each senior consultant should bill about 150 days a year. We think raising the day rate by about 10% would cost us around 5% of our billable days.",
+  "label": "IMPACT",
+  "reason": "day-rate rise and billable-day loss are impacts"
+ },
+ {
+  "id": "corpus-088",
+  "message": "We are a 40-person B2B SaaS company. Our enterprise renewal rate has fallen from 91% to 78% over the last two quarters. We think it is either the onboarding experience or that our main competitor has cut list price by 30%. We have £1.2m of runway and about 9 months. I can fund one of three things: rebuild onboarding (roughly £180k, 4 months), cut our price to match (costs us about £340k of ARR), or hire two enterprise CSMs (£150k a year, ramp of 3 months). The board wants a decision in 3 weeks. Do not let gross margin drop below 72%.",
+  "label": "IMPACT",
+  "reason": "renewal-rate decline and price cut are impacts"
+ },
+ {
+  "id": "corpus-096",
+  "message": "We are a B2B SaaS company deciding whether to move our mid-market tier from monthly billing to annual billing. We want to lift net revenue retention from 104% to 115% within 12 months. The options are: annual-only, annual with a monthly opt-out, or leave billing as it is.",
+  "label": "IMPACT",
+  "reason": "NRR lift is an impact on a business metric"
+ },
+ {
+  "id": "corpus-097",
+  "message": "We are a B2B SaaS company deciding whether to move our support function to a follow-the-sun model with a new team in Singapore, keep everything in London and hire more there, or outsource tier-1 to a specialist partner. A good outcome is first-response time under 2 hours for 90% of tickets within 9 months, without raising cost per ticket. I am unsure how much attrition we would see in London, and how quickly a Singapore team would reach quality parity.",
+  "label": "OTHER",
+  "reason": "ticket coverage percentage is a service target"
+ },
+ {
+  "id": "corpus-100",
+  "message": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds",
+  "label": "IMPACT",
+  "reason": "price rise and its revenue effect are impacts"
+ },
+ {
+  "id": "corpus-101",
+  "message": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £150,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds",
+  "label": "IMPACT",
+  "reason": "price rise and its revenue effect are impacts"
+ },
+ {
+  "id": "corpus-102",
+  "message": "We are a B2B software company with £120k monthly recurring revenue. Should we raise prices by 10%, launch a cheaper starter tier at £49 a month, or keep pricing as it is? Goal: reach £150k monthly recurring revenue within 9 months. Risks: churn from the price rise, and support load from the starter tier.",
+  "label": "IMPACT",
+  "reason": "price rise is an impact magnitude"
+ },
+ {
+  "id": "corpus-103",
+  "message": "We are a B2B software company with £120k monthly recurring revenue. Should we raise prices by 10%, launch a cheaper starter tier, or keep pricing as it is? Goal: reach £150k monthly recurring revenue within 9 months. Risks: churn from the price rise, and support load from the starter tier.",
+  "label": "IMPACT",
+  "reason": "price rise is an impact magnitude"
+ },
+ {
+  "id": "corpus-106",
+  "message": "We are a UK B2B SaaS business doing about 2.4 million pounds of ARR. We need to decide whether to move upmarket into enterprise or double down on self-serve SMB over the next 12 months. Moving upmarket means hiring 4 enterprise account executives at roughly 95,000 pounds each fully loaded, and our sales cycle would stretch from 3 weeks to about 5 months. Our net revenue retention is currently 104%. The hard limit is that we cannot let our cash runway drop below 9 months - the board will not approve anything that breaches that.",
+  "label": "OTHER",
+  "reason": "NRR percentage is a business-metric level"
+ },
+ {
+  "id": "corpus-108",
+  "message": "We are a UK B2B SaaS deciding whether to move upmarket to enterprise or double down on SMB. Our goal is to grow annual recurring revenue by 25% within 12 months. Revenue is flat and churn is rising.",
+  "label": "IMPACT",
+  "reason": "ARR growth target is an impact magnitude"
+ },
+ {
+  "id": "corpus-109",
+  "message": "We are a UK B2B SaaS deciding whether to move upmarket to enterprise or double down on SMB. Our goal is to grow annual recurring revenue by 25% within 12 months while keeping gross churn below 8%. Revenue is flat and churn is rising.",
+  "label": "IMPACT",
+  "reason": "ARR growth target is an impact magnitude"
+ },
+ {
+  "id": "corpus-116",
+  "message": "We are a UK regional bakery group choosing which single capital project to fund this year. The options are a second production oven line, an automated packing cell, refrigerated delivery vans, a new retail concession, or an energy-efficiency retrofit. The goal is to raise operating profit by at least 8 percent within 18 months. Keep the model deliberately simple: contracted costs, energy tariffs and labour rates are known constants. The one important uncertainty is next year average wholesale flour price, now 340 pounds per tonne and plausibly between 250 and 520. Use sensible defaults for any",
+  "label": "IMPACT",
+  "reason": "operating-profit increase is an impact magnitude"
+ },
+ {
+  "id": "corpus-117",
+  "message": "We are a UK regional bakery group choosing which single capital project to fund this year. The options are a second production oven line, an automated packing cell, refrigerated delivery vans, a new retail concession, or an energy-efficiency retrofit. The goal is to raise operating profit by at least 8 percent within 18 months. Keep the model deliberately simple: contracted costs, energy tariffs and labour rates are known constants. The one important uncertainty is next year's average wholesale flour price, now 340 pounds per tonne and plausibly between 250 and 520. Use sensible defaults for a",
+  "label": "IMPACT",
+  "reason": "operating-profit increase is an impact magnitude"
+ },
+ {
+  "id": "corpus-118",
+  "message": "We are deciding whether to raise our Pro plan price from £49 to £59 per month at the next release, keep it at £49, or phase the increase over two quarters. The goal is to grow MRR over the next 12 months while keeping monthly churn at or below 4%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-128",
+  "message": "We need to cut our monthly cloud bill by 15% within 6 months. Should we move our steady workloads to reserved instances, or renegotiate our contract with the current provider?",
+  "label": "IMPACT",
+  "reason": "cloud-bill cut is an impact magnitude"
+ },
+ {
+  "id": "corpus-131",
+  "message": "We need to grow MRR from £80k to £100k within 12 months without pushing monthly churn above 4%. Options: raise the Pro plan price from £49 to £59, launch an AI add-on at £15/month, or do nothing. We have about 1,500 paying subscribers and churn is currently 3.7% a month.",
+  "label": "OTHER",
+  "reason": "current and ceiling churn rates are metrics"
+ },
+ {
+  "id": "corpus-133",
+  "message": "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Monthly churn is 3% today. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-134",
+  "message": "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-135",
+  "message": "We're a 12-person B2B SaaS at £8k MRR with 120 customers. Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release? Trial-to-paid conversion is 12% today. We have £200k of runway and must keep at least six months of runway at all times.",
+  "label": "OTHER",
+  "reason": "churn ceiling and conversion rate are metrics"
+ },
+ {
+  "id": "corpus-136",
+  "message": "We're a 200-person logistics company deciding whether to build our own last-mile delivery fleet or partner with third-party couriers. If we build, we need to choose between electric vans (£45k each, 20 needed) or diesel vans (£30k each, 20 needed). If we partner, we're choosing between exclusive contracts with one courier at £8 per delivery or non-exclusive contracts with three couriers at £10 per delivery. Current delivery volume is 3,000 per day at £12 average revenue per delivery. We need to reduce our cost-per-delivery below £7 within 12 months while maintaining our 98% on-time rate. The t",
+  "label": "OTHER",
+  "reason": "on-time percentage is a business-metric level"
+ },
+ {
+  "id": "corpus-139",
+  "message": "We're a 40-person B2B SaaS company doing about £3.2m ARR, growing 15% a year, which is slower than we'd like. The board wants a plan by end of quarter. We're weighing three moves: expanding into the German market (probably £400k up front for localisation, sales hires and compliance — our CEO thinks it could add £800k ARR within 18 months but our head of sales thinks that's optimistic); doubling down on UK mid-market with a partner channel (cheaper, maybe £150k, but partners take a 25% cut and we've never run a channel before); or building the analytics add-on customers keep asking for (two qua",
+  "label": "IMPACT",
+  "reason": "ARR growth and partner revenue cut are impacts"
+ },
+ {
+  "id": "corpus-140",
+  "message": "We're a 50-person B2B SaaS company doing £3M ARR. We need to decide how to expand our product into the mid-market segment within 12 months.\nGoal: Reach 200 mid-market customers with a net revenue retention rate above 110%.\nOptions we're considering:\n1. Build a dedicated mid-market product tier with enterprise features (SSO, audit logs, custom roles)\n2. Partner with 3-4 system integrators who already serve mid-market clients\n3. Acquire a smaller competitor that already has mid-market traction\nKey factors we think matter:\n* Engineering capacity — we have 20 engineers, 8 of whom are senior\n* Sale",
+  "label": "OTHER",
+  "reason": "NRR percentage is a target business-metric level"
+ },
+ {
+  "id": "corpus-144",
+  "message": "We're a B2B SaaS company deciding whether to raise our Pro plan price from £49 to £59 a month, keep it, or add an annual discount. Our goal is to grow monthly recurring revenue within 12 months, while keeping monthly churn under 4%. Our current monthly churn is 4%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-145",
+  "message": "We're a B2B SaaS company. Our Pro plan is £49 per month with 1,500 paying subscribers and £75k MRR. Should we raise the Pro price to £59 or keep it at £49? We want to reach £90k MRR within 12 months without monthly churn going above 5%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-147",
+  "message": "We're a UK B2B SaaS at about £14m ARR, growing 22%, but annual churn has crept up to 11% and our three biggest customers are 31% of revenue. The board wants a plan by Q1. Three things are on the table: push into US mid-market with a new sales team, roughly £2.5m; or go deep on the existing UK base and finally build the integrations our top accounts keep asking for, maybe £800k but slower; or acquire a smaller competitor with a complementary product, we've had informal talks, likely £6-9m. Honestly I'm worried we'll pick the US because it sounds exciting and we're not being straight with oursel",
+  "label": "IMPACT",
+  "reason": "ARR growth is an impact magnitude"
+ },
+ {
+  "id": "corpus-149",
+  "message": "We're a UK fintech startup deciding how to expand internationally. Our options are entering Germany (large market, heavy regulation), Brazil (high growth, currency risk), or Japan (stable, high barrier to entry). We need to achieve 15% revenue growth within 18 months while keeping total expansion costs below £2M. Our current team is 35 people with no international experience. We also need to decide whether to hire locally or relocate existing staff.",
+  "label": "IMPACT",
+  "reason": "revenue growth target is an impact magnitude"
+ },
+ {
+  "id": "corpus-150",
+  "message": "We're considering three changes: Option A raises all tiers by 15% (to £22, £56, £171). Option B raises only Enterprise by 30% to £194 while keeping Basic and Pro unchanged. Option C raises Basic and Pro by 10% (to £21, £54) while dropping Enterprise by 5% to £142. We have 5,000 total customers and need to increase MRR from £215k to £250k within 6 months without pushing churn above 5%.",
+  "label": "IMPACT",
+  "reason": "tier price changes are impacts"
+ },
+ {
+  "id": "corpus-152",
+  "message": "We're deciding whether to raise our Pro plan price from £49 to £59 per month. The options are to keep the price at £49 or raise it to £59. Success means growing MRR from £75k to £100k within 12 months. Monthly churn is 3% today. Monthly churn must not rise by more than 1 percentage point from today.",
+  "label": "OTHER",
+  "reason": "3% is the current monthly churn rate"
+ },
+ {
+  "id": "corpus-153",
+  "message": "We're deciding whether to raise our Pro plan price from £49 to £59 per month. The options are to keep the price at £49 or raise it to £59. Success means growing MRR from £75k to £80k within 12 months. Monthly churn is 3% today. Monthly churn must stay below 10%.",
+  "label": "OTHER",
+  "reason": "current and ceiling churn rates are metrics"
+ },
+ {
+  "id": "corpus-154",
+  "message": "We run a 12-person software consultancy. Should we hire two more developers now, or keep the team as it is and subcontract overflow work? Our goal is to grow monthly revenue from about £110,000 today to at least £150,000 within 9 months. There is about a 30% chance that our largest client, who is 40% of our revenue, cuts their contract this year. Each new hire would cost about £5,500 a month, and subcontractors cost about £600 a day.",
+  "label": "LIKELIHOOD",
+  "reason": "chance estimates contract-loss likelihood this year",
+  "expectedOccurrence": {
+   "p_low": 0.3,
+   "p_high": 0.3
+  },
+  "mixed": true,
+  "mixedKind": "OTHER",
+  "judgement": "40% is revenue share; this year belongs to the 30% event likelihood. Within 9 months belongs to the revenue goal; do not use it as the event horizon.",
+  "expectedReaderEventRisk": null,
+  "unsupportedWindowText": "this year"
+ },
+ {
+  "id": "corpus-155",
+  "message": "We run a 12-person specialty coffee roastery in Bristol. Our lease ends in 4 months. Options: renew at 30% higher rent, relocate to a cheaper unit 3 miles out, or buy a small freehold unit. Goal: maximise three-year net profit. Risks: losing walk-in trade, relocation disruption, cash reserves.",
+  "label": "IMPACT",
+  "reason": "higher rent is an impact magnitude"
+ },
+ {
+  "id": "corpus-156",
+  "message": "We run a 12-person specialty coffee roastery in Bristol. Wholesale to cafes is about 70% of our revenue but the margins are thin, and one single account is a quarter of that. I have around 80k I could invest. I am trying to decide between opening our own retail shop, pushing a direct-to-consumer subscription, or just doubling down on wholesale and hiring another sales rep. I care most about profit in 2 years but I do not want to bet the company.",
+  "label": "OTHER",
+  "reason": "wholesale percentage is a revenue share"
+ },
+ {
+  "id": "corpus-157",
+  "message": "We run a 12-person specialty coffee roastery in Bristol. Wholesale to cafes is about 70% of our revenue but the margins are thin, and one single account is a quarter of that. I have around 80k I could invest. I'm trying to decide between opening our own retail shop, pushing a direct-to-consumer subscription, or just doubling down on wholesale and hiring another sales rep. I care most about profit in 2 years but I don't want to bet the company.",
+  "label": "OTHER",
+  "reason": "wholesale percentage is a revenue share"
+ },
+ {
+  "id": "corpus-160",
+  "message": "We run a 40-person SaaS company. Monthly churn is about 3%. We are deciding whether to raise the Pro price from £49 to £59, or keep £49. Goal: grow monthly recurring revenue by 10% within a year. Please build the model.",
+  "label": "IMPACT",
+  "reason": "MRR growth target is an impact magnitude"
+ },
+ {
+  "id": "corpus-163",
+  "message": "We run a B2B SaaS product. Pro is £49/month and we have about 300 paying customers. We're deciding between raising Pro to £59, adding a new £89 Enterprise tier, or keeping pricing as it is. Goal: reach £20k MRR within 12 months. Hard limit: monthly churn must stay under 4%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-164",
+  "message": "We run a chain of 14 independent bakeries across Leeds and York. Wholesale flour costs rose 18% this year and our gross margin fell from 62% to 54%. We are weighing three options: (A) raise bread prices by 8% in every shop; (B) close our two weakest shops, which lose about £40k a year each, and consolidate baking in a central kitchen that would cost £250k to fit out; or (C) launch a wholesale subscription for local cafés, targeting 60 cafés at £300 a month. Our goal is to get gross margin back above 60% within 12 months without cutting staff hours. We think an 8% price rise would cut footfall ",
+  "label": "IMPACT",
+  "reason": "flour-cost and price rises are impact magnitudes"
+ },
+ {
+  "id": "corpus-168",
+  "message": "We sell a Pro plan at £49 per month. Should we raise it to £59 with the next feature release? I want monthly recurring revenue up by £20k within 12 months, and monthly churn must stay under 4%.",
+  "label": "OTHER",
+  "reason": "churn percentage is a business-metric constraint"
+ },
+ {
+  "id": "corpus-169",
+  "message": "Yes, add option '50/50 feature development and additional advertising', with 'Development allocation' at 50 percent of incremental investment and 'Incremental investment spend' at 30000 GBP over 6 months, link 'Should we develop new features…' to '50/50 feature development and additional advertising', link '50/50 feature development and additional advertising' to 'Development allocation' and link '50/50 feature development and additional advertising' to 'Incremental investment spend'.",
+  "label": "OTHER",
+  "reason": "development percentage is a budget allocation"
+ },
+ {
+  "id": "corpus-170",
+  "message": "Yes, add option '50/50 feature development and advertising', with 'Budget spend' at 30000 GBP over 6 months, 'Advertising budget share' at 50% and 'Pro plan price' at 59 GBP per month, link 'Should we develop new features…' to '50/50 feature development and advertising', link '50/50 feature development and advertising' to 'Budget spend', link '50/50 feature development and advertising' to 'Advertising budget share', link '50/50 feature development and advertising' to 'New feature release' and link '50/50 feature development and advertising' to 'Pro plan price'.",
+  "label": "OTHER",
+  "reason": "advertising percentage is a budget allocation"
+ }
+]

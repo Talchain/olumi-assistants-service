@@ -160,8 +160,14 @@ describe('event_risk.v1 slice 2c', () => {
 
   it('2c-decimal-sentence: decimal probability survives sentence splitting', () => {
     const input = graph();
+    const result = holdStatedEventRisks(input.nodes, input.edges, 'Our key developer leaves: maybe 12.5% within 6 months.');
+    expect(dev(result).event_risk).toEqual(readStatedEventRisk('maybe 12.5% within 6 months')!.event_risk);
+  });
+
+  it('2c-bare-percent-refused: an uncued "<event>: N% within M months" holds no likelihood (impact-% lease: fail closed)', () => {
+    const input = graph();
     const result = holdStatedEventRisks(input.nodes, input.edges, 'Our key developer leaves: 12.5% within 6 months.');
-    expect(dev(result).event_risk).toEqual(readStatedEventRisk('12.5% within 6 months')!.event_risk);
+    expect(dev(result).event_risk).toBeUndefined();
   });
 
   it('2c-REACHABILITY-positive: buildModelFromBrief holds the block and discloses the loss sentence', async () => {

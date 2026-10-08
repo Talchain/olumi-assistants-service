@@ -1,0 +1,136 @@
+{
+  "source_file": "/Users/paulslee/Documents/GitHub/output/dl-0df0e1/inflight/accel/status/evidence/impact-pct/corpus-served-169.json",
+  "source_sha256": "0a09fd733335dfc7708b61ce49df866e8e0f64bd71178ba7b0fcafacf8c23486",
+  "row_count": 170,
+  "labels_sha256": "68ed4e636debad2f6b4934bc5bac224162f21c48255896d880b366f5817a5555",
+  "label_policy": "Independent semantic labels: LIKELIHOOD states an event probability; IMPACT quantifies a metric change; OTHER states a rate, level, share or constraint. Mixed rows retain LIKELIHOOD with their probability as gold.",
+  "label_counts": {
+    "LIKELIHOOD": 10,
+    "IMPACT": 74,
+    "OTHER": 86,
+    "AMBIGUOUS": 0
+  },
+  "baseline_to_selected_cells": {
+    "LIKELIHOOD": {
+      "base_fired_new_fired": 7,
+      "base_fired_new_dropped": 0,
+      "base_dropped_new_fired": 1,
+      "base_dropped_new_dropped": 2
+    },
+    "IMPACT": {
+      "base_fired_new_fired": 0,
+      "base_fired_new_dropped": 27,
+      "base_dropped_new_fired": 0,
+      "base_dropped_new_dropped": 47
+    },
+    "OTHER": {
+      "base_fired_new_fired": 0,
+      "base_fired_new_dropped": 57,
+      "base_dropped_new_fired": 0,
+      "base_dropped_new_dropped": 29
+    },
+    "AMBIGUOUS": {
+      "base_fired_new_fired": 0,
+      "base_fired_new_dropped": 0,
+      "base_dropped_new_fired": 0,
+      "base_dropped_new_dropped": 0
+    }
+  },
+  "mixed_rows": [
+    {
+      "id": "corpus-087",
+      "kind": "IMPACT",
+      "judgement": "20 percent annual revenue growth is an impact; 30 percent is the event likelihood."
+    },
+    {
+      "id": "corpus-154",
+      "kind": "OTHER",
+      "judgement": "40% is revenue share; this year belongs to the 30% event likelihood. Within 9 months belongs to the revenue goal; do not use it as the event horizon."
+    }
+  ],
+  "intentional_fail_closed_rows": [
+    {
+      "id": "corpus-154",
+      "judgement": "40% is revenue share; this year belongs to the 30% event likelihood. Within 9 months belongs to the revenue goal; do not use it as the event horizon."
+    },
+    {
+      "id": "corpus-165",
+      "judgement": "The goal and risk both state six months; the exact-one-window reader may fail closed on the two windows."
+    }
+  ],
+  "candidate_transform": {
+    "selected_gate": "return candidates.length === 1 && candidates[0]!.likelihood ? [candidates[0]!.match] : [];",
+    "impact_only_gate": "return candidates.length === 1 ? [candidates[0]!.match] : [];"
+  },
+  "designs": [
+    {
+      "design": "base_unqualified_percentage",
+      "source_sha256": "e91db9f6c4b47b4b7d28cbdd2b2d8cc3ac108a31348ab790ceadedb484c0c453",
+      "likelihood_correct_figure": 7,
+      "likelihood_correct_figure_and_horizon": 7,
+      "likelihood_wrong_figure": 0,
+      "likelihood_wrong_horizon": 0,
+      "likelihood_refused": 3,
+      "impact_fired": 27,
+      "impact_dropped": 47,
+      "other_fired": 57,
+      "other_dropped": 29,
+      "ambiguous_fired": 0,
+      "ambiguous_dropped": 0,
+      "baseline_correct_likelihood_preserved": 7,
+      "baseline_correct_likelihood_lost": 0,
+      "baseline_nonlikelihood_fire_dropped": 0,
+      "baseline_nonlikelihood_fire_retained": 84,
+      "intentional_likelihood_fail_closed": 2,
+      "intentional_likelihood_wrongly_fired": 0,
+      "supported_likelihood_correct": 7,
+      "supported_likelihood_refused": 1
+    },
+    {
+      "design": "impact_blocklist_only",
+      "source_sha256": "0de21892425603e0aac70a5479bdcb8d344607136c2b16350671145ad98035de",
+      "likelihood_correct_figure": 8,
+      "likelihood_correct_figure_and_horizon": 8,
+      "likelihood_wrong_figure": 0,
+      "likelihood_wrong_horizon": 0,
+      "likelihood_refused": 2,
+      "impact_fired": 8,
+      "impact_dropped": 66,
+      "other_fired": 41,
+      "other_dropped": 45,
+      "ambiguous_fired": 0,
+      "ambiguous_dropped": 0,
+      "baseline_correct_likelihood_preserved": 7,
+      "baseline_correct_likelihood_lost": 0,
+      "baseline_nonlikelihood_fire_dropped": 43,
+      "baseline_nonlikelihood_fire_retained": 41,
+      "intentional_likelihood_fail_closed": 2,
+      "intentional_likelihood_wrongly_fired": 0,
+      "supported_likelihood_correct": 8,
+      "supported_likelihood_refused": 0
+    },
+    {
+      "design": "impact_precedence_and_likelihood_allowlist",
+      "source_sha256": "09ff2113e24c5337ecb309cc2ab16c105d1025af05a55ce69f949b6191425319",
+      "likelihood_correct_figure": 8,
+      "likelihood_correct_figure_and_horizon": 8,
+      "likelihood_wrong_figure": 0,
+      "likelihood_wrong_horizon": 0,
+      "likelihood_refused": 2,
+      "impact_fired": 0,
+      "impact_dropped": 74,
+      "other_fired": 0,
+      "other_dropped": 86,
+      "ambiguous_fired": 0,
+      "ambiguous_dropped": 0,
+      "baseline_correct_likelihood_preserved": 7,
+      "baseline_correct_likelihood_lost": 0,
+      "baseline_nonlikelihood_fire_dropped": 84,
+      "baseline_nonlikelihood_fire_retained": 0,
+      "intentional_likelihood_fail_closed": 2,
+      "intentional_likelihood_wrongly_fired": 0,
+      "supported_likelihood_correct": 8,
+      "supported_likelihood_refused": 0
+    }
+  ]
+}
