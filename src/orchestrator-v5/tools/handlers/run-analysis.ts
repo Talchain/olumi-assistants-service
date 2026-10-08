@@ -57,9 +57,7 @@ import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURE
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
-import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
-import { boundRunLeaderClaim } from '../../model-management/version-result-binding.js';
-import { projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
+import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import type {
@@ -3099,20 +3097,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     };
 
     // The completed Run's final cells own every horizon form, after all withholds, licences and range scoping.
-    // Reuse the pinned bound-Run state reader and public-block gates; this producer never re-derives freshness.
+    // Use the response's public-block builder; its projection owns the claim gate, not the cell reader.
+    // This is the Run just produced here: no historical binding or freshness selection is needed.
     const horizonGraph = snapshot.rawPersistedGraph ?? snapshot.graph;
     const horizonResult = buildAnalysisResultBlock(factCandidate);
-    const horizonBound = graphHashAtRun === null ? null : boundRunLeaderClaim({
-      fact: factCandidate,
-      identity: { scenario_id: args.scenario_id, graph_hash_at_run: graphHashAtRun, computed_at: runComputedAt, run_id: runId },
-    }, { graph: horizonGraph, scenario_id: args.scenario_id });
-    const horizonState = horizonBound?.state ?? null;
-    const currentHorizonResult = horizonState === null ? null
-      : projectAnalysisBlocksForRunBinding([horizonResult], horizonState)[0] ?? null;
-    const chanceCells = projectCanonicalAnalysisView({
-      graph: horizonGraph, runFact: factCandidate, analysisState: horizonState,
-      analysisReady: horizonBound?.readiness, currentResult: currentHorizonResult,
-    }).options.map(option => option.cell);
+    const chanceCells = projectCanonicalAnalysisCells(horizonResult, horizonGraph, factCandidate.result.goal_certainty)
+      .map(option => option.cell);
     factCandidate.result.enrichment = withShortHorizonBesideChance(
       withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells), horizonGraph, chanceCells);
 

@@ -98,6 +98,61 @@ export interface CanonicalAnalysisViewInput {
 }
 
 /**
+ * Read cells from an already gated public result. The caller owns currentness;
+ * this reader never selects a Run or derives freshness. Stored certainty only
+ * supplies the existing withheld face, never a cell's kind or figure licence.
+ */
+export function projectCanonicalAnalysisCells(
+  currentResult: OlumiResponse['blocks'][number] | null | undefined,
+  graph: unknown,
+  goalCertainty?: unknown,
+): readonly { readonly option_id: string; readonly cell: CanonicalAnalysisCell }[] {
+  const current = currentResult?.type === 'analysis_result';
+  const result = current ? currentResult : null;
+  const facts = goalChanceFactsForAgent(result, graph, current);
+  const faces = goalChanceCellFacesForAgent(result, graph, current);
+  const identityMessage = goalIdentityWithheldMessage(result);
+  const certainty = new Map((current ? readStoredGoalCertainty(goalCertainty) : undefined)
+    ?.filter(decision => decision.earned === false).map(decision => [decision.option_id, decision.say]) ?? []);
+  const licence = goalChanceLicenceForAgent(result);
+  const nodes = rec(graph)?.nodes;
+  const labels = new Map((Array.isArray(nodes) ? nodes : []).flatMap(node => {
+    const row = rec(node);
+    return typeof row?.id === 'string' && typeof row.label === 'string' && row.label.trim() !== ''
+      ? [[row.id, row.label] as const] : [];
+  }));
+  const compared = rec(rec(result)?.enrichment)?.option_comparison;
+  // The roster belongs to the served Run, not today's graph or a refused attempt.
+  const optionIds = [...new Set([
+    ...(Array.isArray(compared) ? compared.flatMap(row => {
+      const id = rec(row)?.option_id;
+      return typeof id === 'string' && id.trim() !== '' ? [id] : [];
+    }) : []),
+    ...(facts.goal_chance_licence?.option_ids ?? []),
+    ...Object.keys(facts.goal_chance_range_display ?? {}),
+  ])];
+  return optionIds.map(option_id => {
+    const range = Object.hasOwn(facts.goal_chance_range_display ?? {}, option_id)
+      ? facts.goal_chance_range_display?.[option_id] : undefined;
+    const display = Object.hasOwn(facts.goal_chance_display ?? {}, option_id)
+      ? facts.goal_chance_display?.[option_id] : undefined;
+    const reasons = goalChanceWithheldReasonsForAgent(result, option_id);
+    const recordedLabel = licence?.option_labels_by_option?.[option_id];
+    const label = typeof recordedLabel === 'string' && recordedLabel.trim() !== '' ? recordedLabel : labels.get(option_id);
+    // MOVED c6 licence line: DGAI analysis-hero/goalChanceCopy.ts:135, same commit.
+    const licenceLine = licence?.withheld_option_ids?.includes(option_id) && label !== undefined
+      ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
+    // DGAI RunView:125 precedence, applied only to the existing withheld cell.
+    const withheldFace = identityMessage ?? certainty.get(option_id) ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
+    const face = faces.get(option_id);
+    const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
+      : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
+        : reasons.length > 0 ? { kind: 'withheld', reasons, face: withheldFace } : { kind: 'none' };
+    return { option_id, cell };
+  });
+}
+
+/**
  * One additive view of the existing read. No calculation, fact selection or
  * second licence policy: all cells/drivers use the same readers as the Agent.
  * Stale identity survives, but existing currentness gates still own figures.
@@ -109,31 +164,10 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
     && input.currentResult?.type === 'analysis_result';
   const result = current ? input.currentResult : null;
   const facts = goalChanceFactsForAgent(result, input.graph, current);
-  const faces = goalChanceCellFacesForAgent(result, input.graph, current);
-  const identityMessage = goalIdentityWithheldMessage(result);
-  const certainty = new Map((current ? readStoredGoalCertainty(fact?.result.goal_certainty) : undefined)
-    ?.filter(decision => decision.earned === false).map(decision => [decision.option_id, decision.say]) ?? []);
-  const licence = goalChanceLicenceForAgent(result);
-  const nodes = rec(input.graph)?.nodes;
-  const labels = new Map((Array.isArray(nodes) ? nodes : []).flatMap(node => {
-    const row = rec(node);
-    return typeof row?.id === 'string' && typeof row.label === 'string' && row.label.trim() !== ''
-      ? [[row.id, row.label] as const] : [];
-  }));
   const drivers = new Map(goalChanceDriversForAgent(result, input.graph).map(row => [row.option_id, row.driver]));
   const availability = goalChanceDriverAvailabilityForAgent(result);
   const driverStatus = new Map(availability?.options.map(row => [row.option_id, row]) ?? []);
-  const enrichment = rec(rec(result)?.enrichment);
-  const compared = enrichment?.option_comparison;
-  // The roster belongs to the served Run, not today's graph or a refused attempt.
-  const optionIds = [...new Set([
-    ...(Array.isArray(compared) ? compared.flatMap(row => {
-      const id = rec(row)?.option_id;
-      return typeof id === 'string' && id.trim() !== '' ? [id] : [];
-    }) : []),
-    ...(facts.goal_chance_licence?.option_ids ?? []),
-    ...Object.keys(facts.goal_chance_range_display ?? {}),
-  ])];
+  const cells = projectCanonicalAnalysisCells(result, input.graph, fact?.result.goal_certainty);
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
     ...(fact !== null && freshness === 'stale' ? { face_when_stale: RUN_AGAIN_FOR_CHANCE } : {}),
@@ -150,23 +184,7 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
       limitation: 'Hash equality cannot detect brief, framing or stage changes.',
     },
     leader_licence: leaderLicenceFromState(input.analysisState, input.analysisReady),
-    options: optionIds.map(option_id => {
-      const range = Object.hasOwn(facts.goal_chance_range_display ?? {}, option_id)
-        ? facts.goal_chance_range_display?.[option_id] : undefined;
-      const display = Object.hasOwn(facts.goal_chance_display ?? {}, option_id)
-        ? facts.goal_chance_display?.[option_id] : undefined;
-      const reasons = goalChanceWithheldReasonsForAgent(result, option_id);
-      const recordedLabel = licence?.option_labels_by_option?.[option_id];
-      const label = typeof recordedLabel === 'string' && recordedLabel.trim() !== '' ? recordedLabel : labels.get(option_id);
-      // MOVED c6 licence line: DGAI analysis-hero/goalChanceCopy.ts:135, same commit.
-      const licenceLine = licence?.withheld_option_ids?.includes(option_id) && label !== undefined
-        ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
-      // DGAI RunView:125 precedence, applied only to the existing withheld cell.
-      const withheldFace = identityMessage ?? certainty.get(option_id) ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
-      const face = faces.get(option_id);
-      const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
-        : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
-          : reasons.length > 0 ? { kind: 'withheld', reasons, face: withheldFace } : { kind: 'none' };
+    options: cells.map(({ option_id, cell }) => {
       const driver = cell.kind === 'figure' ? drivers.get(option_id) : undefined;
       const status = driverStatus.get(option_id);
       const detail = facts.goal_chance_driver_display?.[option_id];
