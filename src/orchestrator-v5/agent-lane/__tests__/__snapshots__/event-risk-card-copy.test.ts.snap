@@ -66,6 +66,7 @@ Link 'Key developer might leave' to 'weekly bookings'",
         "exists_probability": 0.8,
         "from": "risk_dev",
         "provenance": {
+          "magnitude": "olumi_placeholder",
           "source": "cee_hypothesis",
         },
         "strength": {

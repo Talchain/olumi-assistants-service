@@ -26,7 +26,7 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
-import { goalChanceDriverAvailabilityForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
+import { goalChanceDriverAvailabilityForAgent, goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, runHasGoalChanceLicenceRecord } from '../goal-target/goal-chance-range-agent.js';
 import { robustnessComputed } from './goal-chance-driver-egress.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
@@ -293,12 +293,14 @@ function optionRowsForAgent(
       renamed = true;
     }
     const chancePermitted = legacyWithheld !== undefined ? !legacyWithheld : id !== undefined && Object.hasOwn(displays, id);
-    if (!chancePermitted && 'probability_of_goal' in next) {
+    const projectedChance = chancePermitted && id !== undefined && typeof next.probability_of_goal === 'number'
+      ? goalChancePointForAgent(next.probability_of_goal, displays[id], shown.get(id)) : undefined;
+    if ((!chancePermitted || projectedChance === undefined) && 'probability_of_goal' in next) {
       const { probability_of_goal: _withheld, ...others } = next;
       next = others;
     }
-    if (chancePermitted && id !== undefined && typeof next.probability_of_goal === 'number') {
-      next = { ...next, probability_of_goal: shown.get(id) ?? next.probability_of_goal };
+    if (projectedChance !== undefined) {
+      next = { ...next, probability_of_goal: projectedChance };
     }
     // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —
     // no ruled Agent sentence exists, and free prose about a "main driver" passes no guard. It reads the licence record only.

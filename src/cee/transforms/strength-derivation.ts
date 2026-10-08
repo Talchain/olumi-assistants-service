@@ -15,6 +15,8 @@ export interface ProvenanceObject {
   source: string;
   quote?: string;
   location?: string;
+  /** Only the placeholder tag is carried to V3 (Science 393023 LICENCE (b)): a default door marks the size nobody chose. */
+  magnitude?: string;
 }
 
 /**

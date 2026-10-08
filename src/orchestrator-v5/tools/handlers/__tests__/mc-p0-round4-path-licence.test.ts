@@ -69,14 +69,24 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
       const r = await run(g);
       const warnings = r.enrichment?.inference_warnings ?? [];
       const warning = warnings.find((w: R) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH);
-      expect(paths).toEqual([]); expect(r.leading_option_id).toBe(idsOf(g)[0]); expect(warning).toBeUndefined();
+      // Science 393023 LICENCE (a)/(b), 7 Oct: d1/d3 untagged door constants are unsized paths; d2 stays sized.
+      const expectedLinks = d === 1 ? [{ from: 'starter_support_cost', to: 'mrr_lost_to_starter_support_burden' }]
+        : [{ from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' },
+          { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' }];
+      expect(paths).toEqual(d === 2 ? [] : [{ option_id: 'launch_starter_tier', links: expectedLinks }]);
+      // Science 393023 LICENCE (a)/(b), 7 Oct: an unsized compared path withholds the leader, independent of target.
+      expect(r.leading_option_id).toBe(d === 2 ? idsOf(g)[0] : null);
+      // Science 393023 LICENCE (a)/(b), 7 Oct: d1/d3 now record the exact placeholder links.
+      if (d === 2) expect(warning).toBeUndefined();
+      else expect(warning.links).toEqual(expectedLinks);
       const legacy = warnings.find((w: R) => w.code === 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK');
-      if (d === 2) expect(legacy).toBeUndefined();
-      else {
-        const expected = d === 1 ? { from: 'starter_support_cost', to: 'mrr_lost_to_starter_support_burden' } : { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' };
-        expect(legacy.links).toContainEqual(expected);
-        if (d === 1) expect(legacy.message).toContain('Starter support cost');
-        expect(r.summary).toContain(legacy.message);
+      // Science 393023 LICENCE (a)/(b), 7 Oct: door constants no longer produce legacy disclosure.
+      expect(legacy).toBeUndefined();
+      if (d !== 2) {
+        // Science 393023 LICENCE (a)/(b), 7 Oct: preserve the endpoint-name check on the new warning.
+        if (d === 1) expect(warning.message).toContain('Starter support cost');
+        // Science 393023 LICENCE (a)/(b), 7 Oct: without a leader, the existing generic summary replaces legacy prose.
+        expect(r.summary.startsWith('Ran analysis on your current scenario.')).toBe(true);
       }
       measurements.push({ draw: d, tag, leading_option_id: r.leading_option_id, paths, warnings, result: r }); outputs.push(r.leading_option_id);
     }
@@ -88,8 +98,16 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
     expect(edge.provenance.magnitude).toBe('olumi_estimate'); expect(edge.provenance.natural_effect).toBeDefined();
     expect(licence(g, idsOf(g))).toEqual([]); expect((await run(g)).leading_option_id).toBe(idsOf(g)[0]);
   });
-  it('placeholder-only meaning stays unchanged for approval/coaching on the stored d1/d3', () => {
-    for (const d of [1, 3]) { const g = graph(d); expect(certainty.placeholderGoalPaths(g, idsOf(g))).toEqual([]); expect(licence(g, idsOf(g))).toEqual([]); }
+  it('approval/coaching and licence walks agree on stored d1/d2/d3', () => {
+    for (const d of [1, 2, 3]) {
+      const g = graph(d);
+      // Science 393023 LICENCE (a)/(b), 7 Oct: d1/d3 empty → the same door links as the handler row; d2 remains empty.
+      const links = d === 1 ? [{ from: 'starter_support_cost', to: 'mrr_lost_to_starter_support_burden' }]
+        : [{ from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' }, { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' }];
+      const expected = d === 2 ? [] : [{ option_id: 'launch_starter_tier', links }];
+      expect(certainty.placeholderGoalPaths(g, idsOf(g)).map(p => ({ ...p, links: [...p.links].sort((a, b) => a.from.localeCompare(b.from)) }))).toEqual(expected);
+      expect(licence(g, idsOf(g))).toEqual(expected);
+    }
   });
   it('P5 and the licence import the SAME exported walk and both call it (no copied walker)', () => {
     const p5 = target as any, leader = certainty as any;

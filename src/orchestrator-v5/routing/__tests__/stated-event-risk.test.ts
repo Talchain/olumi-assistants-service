@@ -121,32 +121,36 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     ['one-in-long-denominator', (n: number) => `1 in ${'9'.repeat(n)} within 6 months`],
     ['one-in-cue-matches', (n: number) => '1 in 5 chance '.repeat(Math.ceil(n / 14)).slice(0, n)],
     ['one-in-preceding-cue-matches', (n: number) => 'probability of 1 in 5 '.repeat(Math.ceil(n / 22)).slice(0, n)],
-  // Calibrated batches (scalingRatio): single-call min-of-5 read 8.18× on CI for near-matches (7 Oct). Linear ≈ 4×, quadratic ≈ 16×.
-  ])('2a-LINEAR TIME-%s: 5k to 20k, min of 7 calibrated batches, ratio < 8', (_id, make) => {
-    const [small, large] = [make(5000), make(20000)];
+  // Calibrated batches (scalingRatio): single-call min-of-5 read 8.18× on CI for near-matches (7 Oct).
+  ])('2a-LINEAR TIME-%s: 5k to 40k, min of 7 calibrated batches, ratio < 22', (_id, make) => {
+    const [small, large] = [make(5000), make(40000)];
     const m = scalingRatio(() => readStatedEventRisk(small), () => readStatedEventRisk(large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 
-  it('said-door-factor-named-LINEAR TIME: 5k to 20k, ratio < 8', () => {
+  it('said-door-factor-named-LINEAR TIME: 5k to 40k, ratio < 22', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
     const make = (n: number) => 'prices '.repeat(Math.ceil(n / 7)).slice(0, n);
-    const [small, large] = [make(5000), make(20000)];
+    const [small, large] = [make(5000), make(40000)];
     const m = scalingRatio(() => isFactorNamedByUser('Price rise', small), () => isFactorNamedByUser('Price rise', large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 
-  it('said-door-factor-named-LINEAR TIME many label lengths (Codex r2): 5k to 20k, ratio < 8', () => {
+  it('said-door-factor-named-LINEAR TIME many label lengths (Codex r2): 5k to 40k, ratio < 22', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
     const label = Array.from({ length: 96 }, (_, i) => 'a'.repeat(i + 3)).join(' ');
     const make = (n: number) => `${'a'.repeat(199)} `.repeat(Math.ceil(n / 200)).slice(0, n);
-    const [small, large] = [make(5000), make(20000)];
+    const [small, large] = [make(5000), make(40000)];
     const m = scalingRatio(() => isFactorNamedByUser(label, small), () => isFactorNamedByUser(label, large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 
-  it('said-door-likelihood-without-window-LINEAR TIME: 5k to 20k, ratio < 8', () => {
+  it('said-door-likelihood-without-window-LINEAR TIME: 5k to 40k, ratio < 22', () => {
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
     const make = (n: number) => '1 in 5 '.repeat(Math.ceil(n / 7)).slice(0, n);
-    const [small, large] = [make(5000), make(20000)];
+    const [small, large] = [make(5000), make(40000)];
     const m = scalingRatio(() => readStatedLikelihoodWithoutWindow(small), () => readStatedLikelihoodWithoutWindow(large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });

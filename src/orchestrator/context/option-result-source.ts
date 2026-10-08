@@ -102,6 +102,8 @@ export const GOAL_FIGURES_OPTIONS_IDENTICAL = 'GOAL_FIGURES_OPTIONS_IDENTICAL';
  * options it names, each with its typed cause; the ordering and the outcome stay (the target claims only).
  */
 export const GOAL_FIGURES_PROBABILITY_UNUSABLE = 'GOAL_FIGURES_PROBABILITY_UNUSABLE';
+/** S2a: the normal approximation is outside its licence, per option. */
+export const GOAL_FIGURES_SHARE_APPROXIMATION = 'GOAL_FIGURES_SHARE_APPROXIMATION';
 
 /**
  * ⛔ S-E GOALS (Science ruling 7 Oct §2, P0): the goal is measured as the CHANCE of an event ("% likelihood of on-time
@@ -119,6 +121,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
+  GOAL_FIGURES_SHARE_APPROXIMATION,
   GOAL_FIGURES_CHANCE_AS_GOAL,
 ]);
 

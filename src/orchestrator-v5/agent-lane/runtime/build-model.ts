@@ -1,3 +1,5 @@
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate } from '../../goal-target/event-by-date-model.js';
+import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
@@ -171,6 +173,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
      * flag is how this estate gets silent defaults.
      */
     goal: obj({
+      kind: { anyOf: [{ type: 'string', enum: ['event_by_date'] }, { type: 'null' }] },
+      deliverable: { anyOf: [{ type: 'string', maxLength: 100 }, { type: 'null' }] },
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       target_stated: { type: 'boolean' },
       value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
@@ -243,6 +247,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // Current Staffing" was not a readiness idiom, so the turn blocked). The drafter
       // DECLARES the current-state option; admission reads this first. Strict output
       // requires every key, so "optional" is `null`.
+      added_capacity: { anyOf: [{ type: 'null' }, obj({
+        monthly_share_pct: { type: 'number', minimum: 0, maximum: 100 },
+        lead_months_low: { type: 'number', minimum: 0 },
+        lead_months_high: { type: 'number', minimum: 0 },
+      }, ['monthly_share_pct', 'lead_months_low', 'lead_months_high'])] },
       is_status_quo: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
         'true ONLY for the one option that keeps things as they are now (the current state or status quo), whatever it is called. null for every other option. Never true on more than one option.' },
     }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo']) },
@@ -311,6 +320,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 }
 
 export const BUILD_INSTRUCTIONS = [
+  'For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. Ask for the date first, then how long today’s team takes, then when new people start. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
@@ -436,6 +446,13 @@ export const BUILD_INSTRUCTIONS = [
   'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
   'Output only the schema.',
 ].join(' ');
+
+/** Only a brief attested by the deterministic reader may delegate its empty event forecast to admission. */
+export function buildInstructionsForBrief(brief: string): string {
+  return briefAttestsEventByDate(brief)
+    ? `${BUILD_INSTRUCTIONS} The deterministic reader attests an event by a date. The event-share parts replace ordinary causal goal links. When no stated facts belong in these collections, leave its factors, risks, outcomes, links and identities empty for this slice. Keep every stated limit, factor, risk, option setting and link; admission will disclose any link the deadline forecast cannot use.`
+    : BUILD_INSTRUCTIONS;
+}
 
 export type CallStructuredModel = (req: {
   model: string; instructions: string; input: string;
@@ -1464,6 +1481,7 @@ export async function buildModelFromBrief(
   observeConstruction?: (t: ConstructionTrace) => void,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
+  const buildInstructions = buildInstructionsForBrief(brief);
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
   // at output_tokens 6000 exactly and the refusal carried a SyntaxError). Same user words (`construction_failed`).
@@ -1471,7 +1489,7 @@ export async function buildModelFromBrief(
   try {
     const out = await callStructured({
       model: budget.model,
-      instructions: BUILD_INSTRUCTIONS,
+      instructions: buildInstructions,
       input: firstConstructInput(brief),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
@@ -1489,6 +1507,14 @@ export async function buildModelFromBrief(
     }
     // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
     candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
+    if (candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
+      candidate = { ...candidate, goal: { ...candidate.goal, kind: null } };
+    }
+    if (candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
+      && candidate.factors.length === 0 && candidate.risks.length === 0 && candidate.outcomes.length === 0 && candidate.links.length === 0) {
+      return { ok: false, mutated: false, refusal: 'construction_needs_redraft',
+        detail: 'That draft has no usable model for this brief. Ask me to draft it again with the factors and links that explain the outcome.' };
+    }
   } catch (err) {
     if (cutOff !== undefined) {
       return { ok: false, mutated: false, refusal: 'construction_failed', incomplete_reason: cutOff, detail: `incomplete: ${cutOff}` };
@@ -1673,10 +1699,10 @@ export async function buildModelFromBrief(
         // (construction-size-retry-edits-first-draft.test.ts). An OVERSIZED draft with construction issues gets
         // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
         instructions: asked.length === 0 && needsSizeRetry
-          ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
+          ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
           : needsSizeRetry
-            ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
-            : `${BUILD_INSTRUCTIONS}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+            ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
+            : `${buildInstructions}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: asked.length > 0
           ? `${brief}\n\nConstruction issues: ${JSON.stringify(asked)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(firstCandidate)}`
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
@@ -2023,7 +2049,9 @@ export async function buildModelFromBrief(
   // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
   // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
   // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
-  if (statedGoal.horizon.status === 'unresolved') {
+  if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
+    openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
+  } else if (statedGoal.horizon.status === 'unresolved') {
     const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
     openQuestions.unshift(deadlineHeld
       ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
@@ -2252,6 +2280,7 @@ export async function buildModelFromBrief(
     // strategic additions in `unknowns`, and on the common path (a first pass already
     // within budget — 3 of 3 live benchmark runs) nothing else ever showed them.
     ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
+    ...(draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null ? { displayed_next_question: chanceGoalDeadlineAsk(candidate.goal.deliverable!) } : {}),
     // Condition 2's typed twin of its sentence in `open_questions`, above.
     ...(levelAsks.length > 0 ? { level_asks: levelAsks } : {}),
     // B1/B2 (review 5822711266), machine-readable beside the sentences below.
@@ -2335,7 +2364,7 @@ export async function buildModelFromBrief(
         // other way from it (Desk 6b #2644 Q3, `stated-size-binding.ts`): said, with what to check.
         // `stated_sign`: the user's sentence not recorded on a link drawn the other way from it (DL #2644 pilot): said.
         // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
-        .filter((l) => /\.(event_risk|horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

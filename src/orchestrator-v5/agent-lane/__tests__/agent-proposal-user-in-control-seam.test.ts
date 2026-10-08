@@ -251,6 +251,38 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(r.assistant_text).toContain('You set "Hours" to 12 hours; Olumi\'s estimate was 10 hours.');
     expect(r.assistant_text).toContain('Left as Olumi\'s estimate: "Cost" (£200).');
   }, 120_000);
+  // ⛔ P03 served blocker (8 Oct, scenario 072cc1d0): after a Run the frame projection leaves Olumi's links as
+  // `{ source: 'cee_hypothesis', mean_projected: true }` (no magnitude). Approving one sizes it (`sizedByApproval`), and the
+  // confirm guard refused that as a non-provenance change, so the whole card was not_applied, edited or not.
+  const projectLinks = () => {
+    const g = graphNow() as unknown as { edges: Record<string, unknown>[] };
+    for (const e of g.edges) if (e.to === 'goal_x' && (e.from === 'fac_hours' || e.from === 'fac_cost')) {
+      e.provenance = { source: 'cee_hypothesis', mean_projected: true }; e.strength = { mean: e.from === 'fac_cost' ? -0.3 : 0.3, std: 0.125 }; // the proposed band (moderate): a confirm
+      e.exists_probability = 0.8; e.defaulted = true;
+    }
+    graphOf.set(SCENARIO, projectGraphForPersistence(g as never));
+  };
+  it('A6-projected RED: plain approval of Olumi\'s projected-mean links records them as accepted estimates in one commit', async () => {
+    seed(); projectLinks(); const b = await links(); const p = shown(b);
+    const before = graphNow().edges.filter(x => x.to === 'goal_x').map(x => [x.from, x.strength]);
+    const r = await turn(press(p));
+    expect(r._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    for (const id of ['fac_hours', 'fac_cost']) {
+      const e = graphNow().edges.find(x => x.from === id && x.to === 'goal_x')!;
+      expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
+      expect(e.provenance).not.toHaveProperty('mean_projected');
+    }
+    expect(graphNow().edges.filter(x => x.to === 'goal_x').map(x => [x.from, x.strength])).toEqual(before);
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+  }, 120_000);
+  it('A6-projected edits RED: one edited projected link is the user\'s, the untouched one is Olumi\'s accepted estimate', async () => {
+    seed(); projectLinks(); const b = await links();
+    await submit(b, [{ field_id: 'link_strength:fac_hours::goal_x', band: 'very_strong' }]);
+    const e = (id: string) => graphNow().edges.find(x => x.from === id && x.to === 'goal_x')!;
+    expect(e('fac_hours').provenance).toMatchObject({ source: 'user_specified' });
+    expect(e('fac_cost').provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+  }, 120_000);
   it('A6 RED: projected Olumi bands, one edited user link and one untouched estimate with receipts', async () => {
     seed(); const b = await links(); const p = shown(b);
     expect(p.fields).toHaveLength(2);
