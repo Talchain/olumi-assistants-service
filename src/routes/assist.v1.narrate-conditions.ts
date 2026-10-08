@@ -25,7 +25,7 @@ export default async function route(app: FastifyInstance) {
   );
   const FEATURE_VERSION = "narrate-conditions-1.0.0";
 
-  app.post("/assist/v1/narrate-conditions", async (req, reply) => {
+  app.post("/assist/v1/narrate-conditions", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from '../../utils/ownership-route-harness.js';
 /**
  * Structural invariant: every dispatch branch in route-v2.ts runs the
  * shared pre-flight (`preflightEnsureScenario` → `ensureScenarioExists`)
@@ -34,6 +35,8 @@ const ensureScenarioExistsSpy = vi.fn(async (_scenarioId: string, userId: string
   user_id: userId,
 }));
 
+const getScenarioOwnerSpy = vi.fn(async () => null);
+
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
@@ -43,6 +46,8 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    scenarioExists: async () => true,
+    getScenarioOwner: getScenarioOwnerSpy,
     ensureScenarioExists: ensureScenarioExistsSpy,
   }),
   resetSessionStoreForTests: () => {},
@@ -149,7 +154,7 @@ function happyOlumiResponse(stage: 'frame' | 'analyse' | 'decide') {
   };
 }
 
-describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per branch', () => {
+describe('route-v2 pre-flight invariant — read-only ownership admission runs once per branch', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -164,6 +169,7 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
     app.addHook('onRequest', async (req) => {
       attachCallerContext(req, { keyId: 'preflight-invariant-suite', hmacAuth: true });
     });
+    await installOwnershipHarness(app);
     await ceeOrchestratorRouteV2(app);
     await app.ready();
   });
@@ -174,6 +180,7 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
 
   beforeEach(() => {
     ensureScenarioExistsSpy.mockClear();
+    getScenarioOwnerSpy.mockClear();
     appendMock.mockClear();
     dispatchDraftGraphSpy.mockReset();
     dispatchEditGraphSpy.mockReset();
@@ -197,8 +204,10 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, USER_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
   });
 
   it('chip_click run_analysis branch: pre-flight runs exactly once', async () => {
@@ -223,8 +232,10 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, USER_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
   });
 
   it('draft_graph branch: pre-flight runs exactly once', async () => {
@@ -247,8 +258,10 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, USER_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
   });
 
   it('edit_graph branch: pre-flight runs exactly once', async () => {
@@ -278,8 +291,10 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, USER_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
   });
 
   it('TurnExecutor fallthrough branch: pre-flight runs exactly once', async () => {
@@ -308,11 +323,13 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, USER_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
   });
 
-  it('null user_id (guest mode): pre-flight still calls ensureScenarioExists with null', async () => {
+  it('null user_id (guest mode): read-only admission retains the anonymous caller', async () => {
     // Guest mode (VITE_AUTH_MODE=guest) sends no user_id. scenarios.user_id is
     // now nullable, so the RPC is still called and creates the row with user_id
     // = NULL. The ownership check is skipped (no auth identity to compare).
@@ -336,8 +353,10 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
+    expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(res.headers["x-ownership-caller"]).toBe('');
   });
 
   it('order invariant: pre-flight runs BEFORE dispatch (draft_graph case)', async () => {
@@ -364,9 +383,10 @@ describe('route-v2 pre-flight invariant — ensureScenarioExists runs once per b
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
     expect(dispatchDraftGraphSpy).toHaveBeenCalledTimes(1);
-    const preflightOrder = ensureScenarioExistsSpy.mock.invocationCallOrder[0];
+    const preflightOrder = getScenarioOwnerSpy.mock.invocationCallOrder[0];
     const dispatchOrder = dispatchDraftGraphSpy.mock.invocationCallOrder[0];
     expect(preflightOrder).toBeLessThan(dispatchOrder);
   });

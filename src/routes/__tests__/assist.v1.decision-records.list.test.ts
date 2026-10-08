@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ⭐ DECIDE & REVIEW S1 (MG lease #85 5948537951; DL conditions): the decision-record READ-BACK.
  *
@@ -13,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   forgeUserToken,
   makeEs256Key,
-  startJwksFixture,
+  // JWKS network transport is replaced locally below; ES256 verification remains real.
   type JwksFixture,
 } from '../../utils/__tests__/helpers/supabase-jwks-fixture.js';
 
@@ -69,6 +70,7 @@ function makeStore(owner: string | null | undefined | Error, page = { records: [
 }
 async function buildApp(store: StorePort): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  await installOwnershipHarness(app);
   await route.default(app, { store });
   await app.ready();
   return app;
@@ -264,3 +266,13 @@ describe('S1 adapter: only the user\'s OWN commits, filtered IN the query', () =
     expect(body.truncated).toBe(true);
   });
 });
+
+const fixtureKeys = vi.hoisted(() => ({ keys: [] as import('jose').JWK[] }));
+vi.mock('jose', async load => {
+  const actual = await load<typeof import('jose')>();
+  return { ...actual, createRemoteJWKSet: () => actual.createLocalJWKSet({ keys: fixtureKeys.keys }) };
+});
+async function startJwksFixture(keys: import('jose').JWK[]): Promise<JwksFixture> {
+  fixtureKeys.keys = keys;
+  return { base: 'https://owniso.invalid', issuer: 'https://owniso.invalid/auth/v1', close: async () => {} } as JwksFixture;
+}

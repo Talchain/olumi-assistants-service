@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * Stop-route hardening (ROADMAP 2.174 fix a; Codex round-2 P1).
  *
@@ -65,11 +66,11 @@ let storeHasExistenceCheck = true;
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () =>
     storeHasExistenceCheck
-      ? { markTurnStopped, scenarioExists, ensureScenarioExists, turnFenceRowExists }
-      : { markTurnStopped, ensureScenarioExists, turnFenceRowExists },
+      ? { markTurnStopped, scenarioExists, getScenarioOwner: async () => null, ensureScenarioExists, turnFenceRowExists }
+      : { markTurnStopped, getScenarioOwner: async () => null, ensureScenarioExists, turnFenceRowExists },
 }));
 
-const { recordExplicitTurnStop } = await import("../turn-stop.js");
+const { recordExplicitTurnStop: recordStopHandler } = await import("../turn-stop.js");
 const { proxyV5TurnRoute, TURN_STOP_RATE_LIMIT_MAX } = await import(
   "../proxy-v5-turn.js"
 );
@@ -77,6 +78,17 @@ const { proxyV5TurnRoute, TURN_STOP_RATE_LIMIT_MAX } = await import(
 /** 2.236 — the handler takes the REQUEST now (identity lives in the headers). */
 function req(body: unknown, headers: Record<string, string> = {}): FastifyRequest {
   return { body, headers } as unknown as FastifyRequest;
+}
+
+async function recordExplicitTurnStop(input: FastifyRequest, requestId: string) {
+  const app = Fastify({ logger: false }); await installOwnershipHarness(app);
+  app.post('/orchestrate/v2/turn/stop', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (request, reply) => {
+    const result = await recordStopHandler(request, requestId); return reply.code(result.status).send(result.body);
+  });
+  try {
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn/stop', headers: { ...input.headers, 'x-request-id': requestId }, payload: input.body as object });
+    return { status: response.statusCode, body: response.json() };
+  } finally { await app.close(); }
 }
 
 beforeEach(() => {
@@ -183,6 +195,7 @@ describe("POST /proxy/v5/turn/stop — rate-limited per IP", () => {
       max: 10_000,
       timeWindow: "1 minute",
     });
+    await installOwnershipHarness(app);
     await proxyV5TurnRoute(app);
     await app.ready();
     return app;

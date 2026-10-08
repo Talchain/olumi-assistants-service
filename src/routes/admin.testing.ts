@@ -1091,7 +1091,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
    * Test a specific prompt version with an actual LLM call.
    * Separate from production traffic with dedicated rate limiting.
    */
-  app.post('/admin/v1/test-prompt-llm', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/admin/v1/test-prompt-llm', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const requestId = getRequestId(request);
     const startTime = Date.now();
 
@@ -1572,7 +1572,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
    * - source: 'registry' | 'provider' - Where the model comes from
    * - in_registry: boolean - Whether the model is in our registry (for provider models)
    */
-  app.get('/admin/v1/test-prompt-llm/models', async (
+  app.get('/admin/v1/test-prompt-llm/models', { config: { scenarioId: 'none' } }, async (
     request: FastifyRequest<{ Querystring: { include_provider_models?: string } }>,
     reply: FastifyReply
   ) => {
@@ -1712,7 +1712,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
    * For OpenAI: Fetches from the models API
    * For Anthropic: Uses curated list (no public API)
    */
-  app.get('/admin/v1/available-models/:provider', async (
+  app.get('/admin/v1/available-models/:provider', { config: { scenarioId: 'none' } }, async (
     request: FastifyRequest<{ Params: { provider: string } }>,
     reply: FastifyReply
   ) => {
@@ -1749,7 +1749,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
    *
    * Get summary of model errors for deprecation detection.
    */
-  app.get('/admin/v1/model-errors', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/model-errors', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const summary = getModelErrorSummary();

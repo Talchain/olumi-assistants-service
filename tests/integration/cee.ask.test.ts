@@ -1,6 +1,23 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { build } from "../../src/server.js";
+import * as sessionCache from "../../src/services/session-cache.js";
+import * as redis from "../../src/platform/redis.js";
+
+const SCENARIO_ID = "11111111-1111-4111-8111-111111111111";
+const scenarioPorts = vi.hoisted(() => ({
+  readExistingScenario: vi.fn(async (id: string) => id === "11111111-1111-4111-8111-111111111111"
+    ? { userId: null, graph: null, briefText: null, analysisInvalidatedAt: null } : null),
+  readRecent: vi.fn(async () => []),
+  append: vi.fn(async () => ({ id: "ask-test-row" })),
+  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+}));
+vi.mock("../../src/orchestrator-v5/session/index.js", async importOriginal => {
+  const original = await importOriginal<typeof import("../../src/orchestrator-v5/session/index.js")>();
+  const { createMockSessionStore } = await import("../utils/mock-session-store.js");
+  const store = createMockSessionStore(scenarioPorts);
+  return { ...original, getSessionStore: () => store };
+});
 
 describe("POST /assist/v1/ask", () => {
   let app: FastifyInstance;
@@ -26,7 +43,7 @@ describe("POST /assist/v1/ask", () => {
   // Helper to create a minimal valid request
   const createValidRequest = (overrides = {}) => ({
     request_id: "550e8400-e29b-41d4-a716-446655440000",
-    scenario_id: "test-scenario-1",
+    scenario_id: SCENARIO_ID,
     graph_schema_version: "2.2",
     brief: "We need to decide on a cloud provider for our new SaaS platform. Key factors include cost, reliability, and developer experience.",
     message: "Why is cost important for this decision?",
@@ -187,6 +204,27 @@ describe("POST /assist/v1/ask", () => {
       expect(body.attribution.timestamp).toBeDefined();
       expect(body.attribution.assistant_response_hash).toBeDefined();
     });
+  });
+
+  it("non-canonicalisable scenario_id refuses with exact family bytes before any Redis/session read or write", async () => {
+    const retrieve = vi.spyOn(sessionCache, "retrieveSession");
+    const append = vi.spyOn(sessionCache, "appendTurn");
+    const store = vi.spyOn(sessionCache, "storeSession");
+    const getRedis = vi.spyOn(redis, "getRedis");
+    for (const port of Object.values(scenarioPorts)) port.mockClear();
+    try {
+      const response = await app.inject({
+        method: "POST", url: "/assist/v1/ask",
+        headers: { ...authHeaders, "X-Request-Id": "malformed-scenario-row" },
+        payload: createValidRequest({ scenario_id: "test-scenario-1" }),
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.payload).toBe(JSON.stringify({ schema: "error.v1", code: "NOT_FOUND",
+        message: "No readable graph for that scenario.", request_id: "malformed-scenario-row" }));
+      expect(retrieve).not.toHaveBeenCalled(); expect(append).not.toHaveBeenCalled();
+      expect(store).not.toHaveBeenCalled(); expect(getRedis).not.toHaveBeenCalled();
+      for (const port of Object.values(scenarioPorts)) expect(port).not.toHaveBeenCalled();
+    } finally { retrieve.mockRestore(); append.mockRestore(); store.mockRestore(); getRedis.mockRestore(); }
   });
 
   describe("validation errors", () => {
@@ -529,7 +567,7 @@ describe("POST /assist/v1/ask", () => {
         },
         payload: {
           // Missing required fields to trigger validation error
-          scenario_id: "test",
+          scenario_id: SCENARIO_ID,
         },
       });
 

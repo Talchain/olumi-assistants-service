@@ -179,7 +179,7 @@ const ASK_RATE_LIMIT_RPM = 30; // Requests per minute per key
 const FEATURE_VERSION = "ask-v1.0.0";
 
 export default async function route(app: FastifyInstance) {
-  app.post("/assist/v1/ask", async (req: FastifyRequest, reply: FastifyReply) => {
+  app.post("/assist/v1/ask", { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (req: FastifyRequest, reply: FastifyReply) => {
     const start = Date.now();
 
     // Resolve request ID from header first (before body validation)
