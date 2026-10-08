@@ -576,7 +576,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // user's (Review Desk; Codex buddy r1): `reasoning` would be read as the stated reason for a user-set link, a stale
   // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition. MC P0: a user size
   // clears `mean_projected` (Olumi's projected-mean record) together with the mean/magnitude change, so the hash moves.
-  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, mean_projected: _projectedMean, ...keptProvenance } = provenance;
+  const { reasoning: _olumisWhy, basis: _olumisBasis, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, mean_projected: _projectedMean, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words
@@ -607,7 +607,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (gaugeEdge !== undefined) {
     // The gauge: sized, never the user's (MIXED), never a placeholder or a projected mean, never Olumi's old size or why.
     const kept = isRec(gaugeEdge.provenance) ? gaugeEdge.provenance : {};
-    const { reasoning: _gaugeWhy, natural_effect: _gaugeSize, clamped_from: _gaugeClamp, definitional: _gaugeDefinition,
+    const { reasoning: _gaugeWhy, basis: _gaugeBasis, natural_effect: _gaugeSize, clamped_from: _gaugeClamp, definitional: _gaugeDefinition,
       mean_projected: _gaugeProjected, ...keptGauge } = kept;
     gaugeEdge.strength = { ...(isRec(gaugeEdge.strength) ? gaugeEdge.strength : {}), mean: gaugeSign };
     gaugeEdge.effect_direction = gaugeSign < 0 ? 'negative' : 'positive';

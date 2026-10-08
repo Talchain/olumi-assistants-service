@@ -64,6 +64,22 @@ function makeProposal(params: {
 }
 
 describe('set_factor_value handler', () => {
+  it('#2848: a write that changes the cap clears `frame_source: olumi_convention`; a write on the same cap keeps it', async () => {
+    const run = async (cap: number) => {
+      const graph = buildD1Fixture();
+      const budget = graph.nodes.find((n) => n.id === 'f-budget')!;
+      budget.observed_state = { ...budget.observed_state!, frame_source: 'olumi_convention' } as never;
+      const outcome = await createSetFactorValueHandler()(buildInvocation(graph,
+        makeProposal({ entityId: 'f-budget', value: { value: 60000, unit: '£', cap }, operator: 'set' })));
+      return (outcome.mutated_graph as GraphV3T).nodes.find((n) => n.id === 'f-budget')!.observed_state as Record<string, unknown>;
+    };
+    const widened = await run(200000);
+    expect(widened.cap).toBe(200000);
+    expect(widened).not.toHaveProperty('frame_source');
+    // CONTROL: the convention's own cap, unchanged, keeps the marker.
+    expect(await run(100000)).toMatchObject({ cap: 100000, frame_source: 'olumi_convention' });
+  });
+
   it('sets a percentage value with structured input on a capped factor', async () => {
     const handler = createSetFactorValueHandler();
     const graph = buildD1Fixture();
