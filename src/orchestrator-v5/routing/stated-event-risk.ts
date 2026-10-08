@@ -23,47 +23,27 @@ export function readStatedLikelihoodWithoutWindow(userText: string): boolean {
   return [...userText.matchAll(PROBABILITY)].length === 1 && [...userText.matchAll(HORIZON)].length === 0;
 }
 
-type FactorWordTrie = { children: Map<string, FactorWordTrie>; word?: string };
-const WORD_CHARACTER = /[\p{L}\p{N}_]/u;
+const WORD_RUN = /[\p{L}\p{N}_]+/gu;
 
-/** Match label words at user-word starts in one pass; classify only one Unicode code point at a time. */
+/**
+ * Did the user's own words name this factor? Label and user text are split into the SAME word runs (letters, digits,
+ * underscore). Every label word of 3+ characters must start a user word ("price" names "prices"); a label made only of
+ * shorter words ("AI") needs each as a whole user word. One pass over the user text, then set lookups.
+ */
 export function isFactorNamedByUser(label: string, userText: string): boolean {
   if (typeof label !== 'string' || typeof userText !== 'string') return false;
-  const missing = new Set(label.toLowerCase().match(/\p{L}{3,}/gu) ?? []);
-  if (missing.size === 0) return false;
-  const root: FactorWordTrie = { children: new Map() };
-  for (const word of missing) {
-    let node = root;
-    for (const letter of word) {
-      let child = node.children.get(letter);
-      if (child === undefined) {
-        child = { children: new Map() };
-        node.children.set(letter, child);
-      }
-      node = child;
-    }
-    node.word = word;
+  const labelWords = [...new Set(label.toLowerCase().match(WORD_RUN) ?? [])];
+  const long = labelWords.filter((w) => w.length >= 3);
+  const wanted = long.length > 0 ? long : labelWords;
+  if (wanted.length === 0) return false;
+  const exact = long.length === 0;
+  const lengths = new Set(wanted.map((w) => w.length));
+  const seen = new Set<string>();
+  for (const [word] of userText.toLowerCase().matchAll(WORD_RUN)) {
+    if (exact) { seen.add(word); continue; }
+    for (const n of lengths) if (word.length >= n) seen.add(word.slice(0, n));
   }
-  const text = userText.toLowerCase();
-  let inWord = false;
-  let node: FactorWordTrie | undefined;
-  for (const character of text) {
-    if (!WORD_CHARACTER.test(character)) {
-      inWord = false;
-      node = undefined;
-      continue;
-    }
-    if (!inWord) {
-      inWord = true;
-      node = root;
-    }
-    node = node?.children.get(character);
-    if (node?.word !== undefined) {
-      missing.delete(node.word);
-      if (missing.size === 0) return true;
-    }
-  }
-  return false;
+  return wanted.every((w) => seen.has(w));
 }
 
 export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1T; quote: string } | undefined {
@@ -73,6 +53,8 @@ export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1
   if (probabilities.length !== 1 || horizons.length !== 1) return undefined;
   const probability = probabilities[0]!;
   const horizon = horizons[0]!;
+  // One span cannot be both the likelihood and the window ("1 in 5 months").
+  if (probability.index! < horizon.index! + horizon[0].length && horizon.index! < probability.index! + probability[0].length) return undefined;
   let pLow: number;
   let pHigh: number;
   if (/^(?:1|one)[ \t]{1,8}in[ \t]{1,8}/i.test(probability[0])) {
@@ -80,8 +62,11 @@ export function readStatedEventRisk(userText: string): { event_risk: EventRiskV1
     // bounded token and suffix; the NUMBER cap must not turn a long/decimal denominator into odds.
     const odds = /^(?:1|one)[ \t]{1,8}in[ \t]{1,8}(\d{1,4})$/i.exec(probability[0]);
     const end = probability.index! + probability[0].length;
-    const suffix = userText.slice(end, end + 2);
-    if (odds === null || /^[\p{L}\p{N}_%]|^[.,]\p{N}/u.test(suffix)) return undefined;
+    const suffix = userText.slice(end, end + 16);
+    const before = userText.slice(Math.max(0, probability.index! - 1), probability.index!);
+    // Refuse a denominator that continues ("1 in 2 million", "1 in 5–10", "1 in 5 to 10") or odds read off an amount ("£1 in 5").
+    if (odds === null || /^[\p{L}\p{N}_%]|^[.,]\p{N}|^[ \t]{0,8}(?:[-–]|(?:to|or|and|million|thousand|billion|hundred|k|m|mn|bn)\b)/iu.test(suffix)
+      || /\p{Sc}/u.test(before)) return undefined;
     const denominator = Number(odds[1]);
     if (denominator < 2 || denominator > 1000) return undefined;
     pLow = pHigh = Math.round(10000 / denominator) / 10000;
