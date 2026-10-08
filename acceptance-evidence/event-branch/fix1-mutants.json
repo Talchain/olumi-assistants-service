@@ -1,0 +1,23 @@
+[
+  {
+    "name": "interim-applies-occurrence",
+    "test_pattern": "a user hedge also withholds",
+    "exit_code": 1,
+    "killed_by_assertion": true,
+    "evidence": "fix1-mutant-interim-applies-occurrence.log"
+  },
+  {
+    "name": "interim-misattributed-to-olumi",
+    "test_pattern": "5b50b4c8 hedge",
+    "exit_code": 1,
+    "killed_by_assertion": true,
+    "evidence": "fix1-mutant-interim-misattributed-to-olumi.log"
+  },
+  {
+    "name": "chance-clause-always-on",
+    "test_pattern": "5b50b4c8 hedge",
+    "exit_code": 1,
+    "killed_by_assertion": true,
+    "evidence": "fix1-mutant-chance-clause-always-on.log"
+  }
+]

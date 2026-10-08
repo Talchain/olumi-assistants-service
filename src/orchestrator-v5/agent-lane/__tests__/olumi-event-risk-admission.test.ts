@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { holdStatedEventRisks } from '../stated-event-risk-draft.js';
+import { goalChanceEstimateLikelihoods } from '../goal-chance-estimate-attribution.js';
 
 const BASIS = 'Typical annual key-staff turnover in small software teams.';
 const LABEL = 'Key developer departure';
@@ -64,12 +66,69 @@ describe('Science event branch admission, 8 October', () => {
     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe(false);
     expect(result.edges.every(e => result.nodes.some(n => n.id === e.from))).toBe(true);
     expect(result.loss.some(l => /converted/i.test(l.reason))).toBe(true);
+    expect(result.loss.some(l => /You said/.test(l.reason))).toBe(false);
+    expect(risk(result).event_risk_basis_text).toBeUndefined();
   });
-  it('5b50b4c8 hedge drops with the author-resolved exact disclosure', () => {
+  it('5b50b4c8 hedge drops with the exact interim sentence and no auto-apply', () => {
     const result = admit(probability(candidate()), 'Key developer departure: probably 10% within 6 months.');
     expect(risk(result).event_risk).toBeUndefined();
     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe(false);
-    expect(result.loss.map(l => l.reason)).toContain("Olumi had drafted ‘Key developer departure probability’ = 10% without a basis, so it isn't used.");
+    expect(result.loss.map(l => l.reason)).toContain("You said ‘Key developer departure: probably 10% within 6 months’ for ‘Key developer departure’; it isn't used as its likelihood yet.");
+    expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).toBe(false);
+    expect(result.loss.some(l => /so the chance doesn't include this risk yet/.test(l.reason))).toBe(false);
+  });
+  it('a user hedge also withholds a drafted Olumi occurrence with a reference basis', () => {
+    const result = admit(candidate(), 'Key developer departure: probably 10% within 6 months.');
+    expect(risk(result).event_risk).toBeUndefined();
+    expect(risk(result).event_risk_basis_text).toBeUndefined();
+    expect(result.loss.map(l => l.reason)).toContain("You said ‘Key developer departure: probably 10% within 6 months’ for ‘Key developer departure’; it isn't used as its likelihood yet.");
+    expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).toBe(false);
+  });
+  it('slices the user clause verbatim including hedge, case and internal spacing', () => {
+    const quote = 'KEY developer departure:  probably 10% within 6 months';
+    const brief = `Revenue can grow 20%. ${quote}. We could mitigate it.`;
+    const result = admit(probability(candidate()), brief);
+    expect(brief.includes(quote)).toBe(true);
+    expect(result.loss.map(l => l.reason)).toContain(`You said ‘${quote}’ for ‘${LABEL}’; it isn't used as its likelihood yet.`);
+  });
+  it.each([false, true])('repeating a refused user hedge cannot become Olumi case (c), occurrence=%s', occurrence => {
+    const quote = `${LABEL}: probably 10% within 6 months`;
+    const result = admit(occurrence ? candidate() : probability(candidate()), `${quote}. ${quote}.`);
+    expect(risk(result).event_risk).toBeUndefined();
+    expect(result.loss.map(l => l.reason)).toContain(`You said ‘${quote}’ for ‘${LABEL}’; it isn't used as its likelihood yet.`);
+    expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).toBe(false);
+  });
+  it.each(['15%', '110%', '10.5%'])('a different brief number %s is case (c), not (b)', figure => {
+    const result = admit(probability(candidate()), `${LABEL}: probably ${figure} within 6 months.`);
+    expect(risk(result).event_risk).toBeUndefined();
+    expect(result.loss.map(l => l.reason)).toContain(`Olumi had drafted ‘${LABEL} probability’ = 10% without a basis, so it isn't used.`);
+    expect(result.loss.some(l => /You said/.test(l.reason))).toBe(false);
+  });
+  it('an unrelated matching percentage cannot be attributed to the risk', () => {
+    const result = admit(probability(candidate()), 'Revenue may fall 10%. Key developer departure is a risk.');
+    expect(result.loss.some(l => /You said/.test(l.reason))).toBe(false);
+    expect(risk(result).event_risk).toBeUndefined();
+  });
+  it('an orphan sidecar is dropped during admission', () => {
+    const c = probability(candidate());
+    (c.risks[0] as any).event_risk_basis_text = 'Forged orphan reference';
+    expect(risk(admit(c)).event_risk_basis_text).toBeUndefined();
+  });
+  it.each(['missing', 'invalid', 'user', 'non-risk'])('a %s occurrence never displays orphan basis text', state => {
+    const node: any = { id: 'risk', kind: state === 'non-risk' ? 'factor' : 'risk', label: LABEL,
+      event_risk_basis_text: 'Forged orphan reference', event_risk: {
+        version: 1, occurrence: { p_low: 0.1, p_high: 0.2, basis: state === 'user' ? 'user' : 'olumi' }, horizon: { months: 6 },
+      } };
+    if (state === 'missing') delete node.event_risk;
+    if (state === 'invalid') node.event_risk.occurrence.p_low = 0.9;
+    expect(goalChanceEstimateLikelihoods({ nodes: [node, { id: 'goal', kind: 'goal' }],
+      edges: [{ from: 'risk', to: 'goal', strength: { mean: -1, std: 0.5 } }] }, 'goal')).toEqual([]);
+  });
+  it('the later shared user hold clears an existing Olumi sidecar', () => {
+    const node = risk(admit(candidate()));
+    const held = holdStatedEventRisks([node], [], 'Key developer departure: a 10% chance within 6 months.');
+    expect(held.nodes[0]!.event_risk?.occurrence.basis).toBe('user');
+    expect(held.nodes[0]!.event_risk_basis_text).toBeUndefined();
   });
   it('a probability absent from the brief with no basis is dropped and disclosed', () => {
     const result = admit(probability(candidate()), 'A key developer could leave.');
@@ -94,6 +153,15 @@ describe('Science event branch admission, 8 October', () => {
   it('a probability suffix with trailing whitespace is still refused', () => {
     const result = admit(probability(candidate(), `${LABEL} probability `));
     expect(result.nodes.some(n => /probability$/i.test(n.label.trim()))).toBe(false);
+  });
+  it.each([null, Number.NaN])('a probability factor with missing or nonfinite value %s is never kept', value => {
+    const result = admit(probability(candidate(), `${LABEL} probability`, value as number));
+    expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe(false);
+    expect(result.loss.some(l => /likelihood belongs on an event risk/.test(l.reason))).toBe(true);
+  });
+  it('an out-of-range unitless probability factor is never kept', () => {
+    const result = admit(probability(candidate(), `${LABEL} probability`, 2, null as any));
+    expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe(false);
   });
   it('invalid probability percentages never survive as continuous factors', () => {
     const result = admit(probability(candidate(), `${LABEL} probability`, 110));

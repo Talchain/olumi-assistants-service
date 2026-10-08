@@ -68,6 +68,8 @@ describe('event branch through construction, registration body and strict graph 
     const { graph, out, risk } = await build(draft(false, true), 'Key developer departure: probably 10% within 6 months.');
     expect(risk.event_risk).toBeUndefined();
     expect(graph.nodes.some(n => /probability$/i.test(n.label))).toBe(false);
-    expect(out.event_risk_disclosures).toContain(`Olumi had drafted ‘${LABEL} probability’ = 10% without a basis, so it isn't used.`);
+    expect(out.event_risk_disclosures).toContain(`You said ‘Key developer departure: probably 10% within 6 months’ for ‘${LABEL}’; it isn't used as its likelihood yet.`);
+    expect(JSON.stringify(out.event_risk_disclosures)).not.toContain('Olumi had drafted');
+    expect(JSON.stringify(out.event_risk_disclosures)).not.toContain("so the chance doesn't include this risk yet");
   });
 });

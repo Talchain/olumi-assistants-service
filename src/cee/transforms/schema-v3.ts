@@ -71,6 +71,7 @@ import {
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
 import { isPlaceholderLink } from '../magnitude/link-sizing.js';
+import { EventRiskV1, readOlumiEventRiskBasisText } from '../../schemas/event-risk.js';
 
 // ============================================================================
 // V3 Types
@@ -688,6 +689,14 @@ export function transformNodeToV3(
   // extractionType, and uncertainty_drivers from data to node level when stripping
   // data.value from external factors. Pick them up here so they reach the V3 output.
   const anyNode = node as any;
+  // Occurrence and its readable warrant cross this field-by-field projection together.
+  // Orphan, malformed, user and reference sidecars never acquire a display claim.
+  const eventRisk = EventRiskV1.safeParse(anyNode.event_risk);
+  if (v3Node.kind === 'risk' && eventRisk.success) {
+    v3Node.event_risk = eventRisk.data;
+    const basisText = readOlumiEventRiskBasisText({ ...anyNode, kind: v3Node.kind });
+    if (basisText !== undefined) v3Node.event_risk_basis_text = basisText;
+  }
   if (anyNode.factor_type !== undefined && v3Node.factor_type === undefined) {
     v3Node.factor_type = anyNode.factor_type;
   }

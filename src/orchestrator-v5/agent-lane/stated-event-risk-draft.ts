@@ -7,7 +7,7 @@ const words = (text: string): string[] => [...text.toLowerCase().matchAll(WORD)]
   .map((m) => m[0].replace(/s$/, ''));
 
 export function holdStatedEventRisks<
-  N extends { readonly id: string; readonly kind?: unknown; readonly label?: unknown },
+  N extends { readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly event_risk_basis_text?: unknown },
   E extends { readonly from: string; readonly to: string },
 >(nodes: readonly N[], edges: readonly E[], brief: string): {
   nodes: readonly (N & { event_risk?: EventRiskV1T })[];
@@ -51,7 +51,11 @@ export function holdStatedEventRisks<
   }
   if (held.length === 0) return { nodes, edges, held, refused };
   return {
-    nodes: nodes.map((node) => blocks.has(node.id) ? { ...node, event_risk: blocks.get(node.id)! } : node),
+    nodes: nodes.map((node) => {
+      if (!blocks.has(node.id)) return node;
+      const { event_risk_basis_text: _olumiBasis, ...rest } = node;
+      return { ...rest, event_risk: blocks.get(node.id)! } as N & { event_risk: EventRiskV1T };
+    }),
     // Science Q7: occurrence is the uncertainty; impact existence is 1. Its size,
     // defaulted marker and provenance remain Olumi's unsized placeholder.
     edges: edges.map((edge) => blocks.has(edge.from) ? { ...edge, exists_probability: 1 } : edge),

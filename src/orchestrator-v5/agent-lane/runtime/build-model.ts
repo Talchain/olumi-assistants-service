@@ -37,6 +37,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
  */
 
 import { createHash } from 'node:crypto';
+import { runWithEventRiskConstruction } from '../event-risk-construction-context.js';
 import { verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
@@ -2200,12 +2201,12 @@ export async function buildModelFromBrief(
    * committed, now meets `GRAPH_STALE` rather than a replayed receipt. It is recovered below exactly as the
    * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
    */
-  const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
+  const reg = await runWithEventRiskConstruction(scenarioId, graph, () => dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
     graph,
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
     expected_graph_identity_hash: null,
-  });
+  }));
   const regCode = (reg.json.details as { code?: unknown } | undefined)?.code;
   if (reg.status === 409 && regCode === 'GRAPH_STALE') {
     const prior = await findConstructionVersion(dispatch, scenarioId, brief);

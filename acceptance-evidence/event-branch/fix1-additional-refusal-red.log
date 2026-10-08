@@ -1,0 +1,101 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (44 tests | 5 failed | 39 skipped) 78ms
+     × repeating a refused user hedge cannot become Olumi case (c), occurrence=false 54ms
+     × repeating a refused user hedge cannot become Olumi case (c), occurrence=true 15ms
+     × a probability factor with missing or nonfinite value null is never kept 3ms
+     × a probability factor with missing or nonfinite value NaN is never kept 2ms
+     × an out-of-range unitless probability factor is never kept 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > repeating a refused user hedge cannot become Olumi case (c), occurrence=false
+AssertionError: expected [ …(8) ] to include 'You said ‘Key developer departure: pr…'
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:98:44
+     96|     const result = admit(occurrence ? candidate() : probability(candid…
+     97|     expect(risk(result).event_risk).toBeUndefined();
+     98|     expect(result.loss.map(l => l.reason)).toContain(`You said ‘${quot…
+       |                                            ^
+     99|     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).…
+    100|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > repeating a refused user hedge cannot become Olumi case (c), occurrence=true
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:97:37
+     95|     const quote = `${LABEL}: probably 10% within 6 months`;
+     96|     const result = admit(occurrence ? candidate() : probability(candid…
+     97|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     98|     expect(result.loss.map(l => l.reason)).toContain(`You said ‘${quot…
+     99|     expect(result.loss.some(l => /Olumi had drafted/.test(l.reason))).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a probability factor with missing or nonfinite value null is never kept
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a probability factor with missing or nonfinite value NaN is never kept
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:159:67
+    157|   it.each([null, Number.NaN])('a probability factor with missing or no…
+    158|     const result = admit(probability(candidate(), `${LABEL} probabilit…
+    159|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+       |                                                                   ^
+    160|     expect(result.loss.some(l => /likelihood belongs on an event risk/…
+    161|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > an out-of-range unitless probability factor is never kept
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:164:67
+    162|   it('an out-of-range unitless probability factor is never kept', () =…
+    163|     const result = admit(probability(candidate(), `${LABEL} probabilit…
+    164|     expect(result.nodes.some(n => /probability$/i.test(n.label))).toBe…
+       |                                                                   ^
+    165|   });
+    166|   it('invalid probability percentages never survive as continuous fact…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 39 skipped (44)
+   Start at  14:44:39
+   Duration  2.35s (transform 1.50s, setup 105ms, import 2.03s, tests 78ms, environment 0ms)
+

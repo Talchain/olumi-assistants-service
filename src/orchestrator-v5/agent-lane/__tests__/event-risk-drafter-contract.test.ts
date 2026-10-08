@@ -58,6 +58,10 @@ describe('discrete event drafter contract', () => {
     const carrier = schema.properties.risks.items.properties.occurrence as { description?: string } | undefined;
     expect(carrier?.description).toMatch(/discrete.*event/i);
     expect(schema.properties.outcomes.items.properties).not.toHaveProperty('occurrence');
-    expect(schema.properties.links.items.properties).not.toHaveProperty('occurrence');
+    const linkProperties = schema.properties.links.items.properties;
+    // P44 may add its own link basis: protect only this branch's occurrence fields.
+    expect(Object.keys(linkProperties).filter(name => /occurrence|likelihood|probab/i.test(name))).toEqual([]);
+    // The probe must inspect the actual drafter link item, not an empty fallback.
+    expect(linkProperties).toHaveProperty('effect_amount');
   });
 });

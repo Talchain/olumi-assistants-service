@@ -658,7 +658,7 @@ export const NodeV3 = z.object({
    * (`eventRiskIngressIssues`) refuses it (422). Absent ⇒ today's risk node, byte-identically.
    */
   event_risk: EventRiskV1.optional().catch(undefined),
-  /** Readable warrant for an Olumi occurrence; the strict event_risk.v1 wire block has no warrant field. */
+  /** CEE-owned readable warrant; readOlumiEventRiskBasisText ignores it without a valid Olumi occurrence on a risk. */
   event_risk_basis_text: z.string().trim().min(1).optional().catch(undefined),
   /**
    * RC3 (a′): server-authored identity of the option whose precondition this risk describes.

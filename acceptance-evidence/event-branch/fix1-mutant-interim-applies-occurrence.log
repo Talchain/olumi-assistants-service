@@ -1,0 +1,46 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (44 tests | 1 failed | 43 skipped) 74ms
+     × a user hedge also withholds a drafted Olumi occurrence with a reference basis 72ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a user hedge also withholds a drafted Olumi occurrence with a reference basis
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:82:37
+     80|   it('a user hedge also withholds a drafted Olumi occurrence with a re…
+     81|     const result = admit(candidate(), 'Key developer departure: probab…
+     82|     expect(risk(result).event_risk).toBeUndefined();
+       |                                     ^
+     83|     expect(risk(result).event_risk_basis_text).toBeUndefined();
+     84|     expect(result.loss.map(l => l.reason)).toContain("You said ‘Key de…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 43 skipped (44)
+   Start at  14:45:18
+   Duration  2.65s (transform 1.76s, setup 109ms, import 2.34s, tests 74ms, environment 0ms)
+

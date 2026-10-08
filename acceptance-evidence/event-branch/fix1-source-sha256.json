@@ -1,0 +1,22 @@
+{
+  "base_commit": "5b095286bac99763119009304fa9cfbc8f2da812",
+  "source_files": {
+    "src/cee/transforms/__tests__/event-risk-basis-text-egress.test.ts": "11576724e3aa33ea5276daf993ebd33bb8bdb0c8a28349f77af036dd0f2c32a5",
+    "src/cee/transforms/schema-v3.ts": "193539ea5cad2a562ce8f10ec27da0be26cc92365d8dd4f529e8e35969798a99",
+    "src/orchestrator-v5/agent-lane/__tests__/event-branch-construction.test.ts": "bac8c0031cc8c49de61fcdcab50df2ad25bd1b0fdf70ca4a83edaadeb17085e8",
+    "src/orchestrator-v5/agent-lane/__tests__/event-risk-drafter-contract.test.ts": "eeb8c0068334cc3a98fae202a154539bf7df03b06e5559ddaafb229879b1de0a",
+    "src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts": "bb6e2b5a934c5b282b7a37b70841423710bdb613f32c9a9daaf9e79716b24a9f",
+    "src/orchestrator-v5/agent-lane/event-risk-construction-context.ts": "a67684b9737307bf63e9447561e9fbd954567559cb09d769e0ccb0bad438c621",
+    "src/orchestrator-v5/agent-lane/goal-chance-estimate-attribution.ts": "6ffd64ac57d0b6647cea17e8f8e13d460514444e67177aa959a7abf28cab5ed3",
+    "src/orchestrator-v5/agent-lane/olumi-event-risk-draft.ts": "4926e440085423b7f73e23d243528ad8d61b54b2c7a5c779b658fb2bd70aab94",
+    "src/orchestrator-v5/agent-lane/runtime/build-model.ts": "bedc10804a1b4861c986f103baf066534a745ca737a8d98068f957fadb0e5ef7",
+    "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "23ec8e52c8e22608efedc7bd6321e5930496ac0aaa3d462fa5131f68ee0a7859",
+    "src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts": "6c16ac45f14bd5f320a37b9875a1855fc38a99ed79a19230516ff18afac76931",
+    "src/orchestrator-v5/graph-management/field-safety.ts": "e6711a243b03085c64430b90e9a80abd6f8be25d1c043510ef01d90ae0aefb25",
+    "src/routes/__tests__/assist.v1.scenario-graph-register.event-risk.test.ts": "1a9172277f843e47bdbe1a8f11f7de67ab972d52b6d35f7df7908539f806c951",
+    "src/routes/assist.v1.scenario-graph-register.ts": "444b173d537ecb2e03558aa8186e205f084f4d53eaa3617cf47c375261b24db5",
+    "src/schemas/cee-v3.ts": "7f35cf12a8e42b3f2f8e348a41de402e43c88f75e1befe8449ac6e5ab65a2709",
+    "src/schemas/event-risk.ts": "ac44666aa2d5df27fc94617b805b4540683a47a819802a385d60824a80688317",
+    "src/schemas/value-warrant-guard.ts": "46bfdf95b18672df0e6f9d95dcc6cce6bd6d32c616695a9be5eda5afc38e13d5"
+  }
+}

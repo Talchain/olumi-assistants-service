@@ -39,11 +39,15 @@ export function prepareDraftEventRisks(input: CandidateModel, widened: WidenerAd
   const removed = new Set<string>();
   const probability = new Map<number, { label: string; value: number }>();
   for (const f of input.factors) {
-    if (!PROBABILITY_END.test(f.label) || typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value)) continue;
+    if (!PROBABILITY_END.test(f.label)) continue;
+    removed.add(key(f.label));
+    if (typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value)) {
+      loss.push({ field_path: `factors[${f.label}].event_risk`, before: f.baseline_value, after: null,
+        reason: `Olumi had proposed ‘${f.label}’ as a factor, so it isn't used. Its likelihood belongs on an event risk.`, severity: 'warn' } as RepairEntry);
+      continue;
+    }
     const percent = typeof f.unit === 'string' && /%|\bpercent(?:age)?\b/i.test(f.unit);
     const value = percent ? f.baseline_value : f.baseline_value * 100;
-    if (!percent && (value < 0 || value > 100)) continue;
-    removed.add(key(f.label));
     if (value < 0 || value > 100) {
       loss.push({ field_path: `factors[${f.label}].event_risk`, before: value, after: null,
         reason: `Olumi had drafted ‘${f.label}’ = ${value}%, outside the probability range 0–100%, so it isn't used.`, severity: 'warn' } as RepairEntry);
@@ -80,9 +84,29 @@ export function prepareDraftEventRisks(input: CandidateModel, widened: WidenerAd
   const incoming = new Set(eventLinks.map(l => key(l.to)));
   const held = holdStatedEventRisks(riskNodes, eventLinks.map(l => ({ from: l.from,
     to: riskNodes.find(r => key(r.label) === key(l.to))?.id ?? l.to })), brief);
-  const clauses = splitStatedLikelihoodClauses(brief).flatMap(c => {
+  const briefClauses = splitStatedLikelihoodClauses(brief);
+  const clauses = briefClauses.flatMap(c => {
     const s = readStatedEventRiskWithBindingSpan(c); return s ? [s] : [];
   });
+  // This is quotation, NOT another likelihood reader: only the existing reader may admit a user occurrence.
+  // Keep the complete risk-naming clause sliced by that reader's boundaries, including hedges and spacing.
+  const refusedUserSpan = (i: number, values: readonly number[]): string | undefined => {
+    const names = eventWords(candidate.risks[i]!.label);
+    const matches = briefClauses.filter(clause => {
+      if (readStatedEventRiskWithBindingSpan(clause) !== undefined) return false;
+      const named = new Set(eventWords(clause));
+      if (names.length === 0 || !names.every(w => named.has(w))
+        || candidate.risks.filter(other => {
+          const words = eventWords(other.label);
+          return words.length > 0 && words.every(w => named.has(w));
+        }).length !== 1) return false;
+      // Exact written percentage tokens, not substrings (15%, 110%, 10.5% cannot stand for drafted 10%).
+      return [...clause.matchAll(/(?<![\p{L}\p{N}.,+\-−])(\d+(?:\.\d+)?)%/gu)]
+        .some(m => values.some(value => m[1] === String(value)));
+    });
+    // Repetition still belongs to the user. This path cannot apply a figure, so one exact span suffices.
+    return matches[0]?.trim();
+  };
   const risks = candidate.risks.map((r, i) => {
     const conversion = probability.get(i);
     // Existing user door/hold authority always wins. Read the same explicit-word reader for conversion.
@@ -98,9 +122,18 @@ export function prepareDraftEventRisks(input: CandidateModel, widened: WidenerAd
       });
       if (statements.length === 1) user = statements[0]!.event_risk;
     }
-    const olumi = !incoming.has(key(r.label)) ? admitOlumiOccurrence(r.occurrence) : undefined;
+    const quoted = !user ? refusedUserSpan(i, [
+      ...(conversion ? [conversion.value] : []),
+      ...(r.occurrence ? [r.occurrence.p_low_pct, r.occurrence.p_high_pct] : []),
+    ]) : undefined;
+    // DL (C): a refused user figure must neither be applied nor attributed to Olumi, even beside a draft basis.
+    const olumi = !quoted && !incoming.has(key(r.label)) ? admitOlumiOccurrence(r.occurrence) : undefined;
     const occurrence = user ?? olumi;
-    if (conversion) {
+    if (quoted) {
+      loss.push({ field_path: conversion ? `factors[${conversion.label}].event_risk` : `nodes[${r.label}].event_risk`,
+        before: quoted, after: null, severity: 'warn',
+        reason: `You said ‘${quoted}’ for ‘${r.label}’; it isn't used as its likelihood yet.` } as RepairEntry);
+    } else if (conversion) {
       const conflicting = !user && olumi && r.occurrence
         && Math.abs((r.occurrence.p_low_pct + r.occurrence.p_high_pct) / 2 - conversion.value) > 1e-9;
       loss.push({ field_path: `factors[${conversion.label}].event_risk`, before: conversion.value,

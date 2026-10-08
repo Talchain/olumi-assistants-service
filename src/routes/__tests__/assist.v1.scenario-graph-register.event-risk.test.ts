@@ -53,6 +53,7 @@ import { projectGraphForPersistence } from '../../orchestrator-v5/persisted-grap
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { eventRiskIngressIssues } from '../../schemas/event-risk.js';
 import { sentDigest } from '../../orchestrator-v5/tools/handlers/run-input-snapshot.js';
+import { eventRiskConstructionBasisTextFor, runWithEventRiskConstruction } from '../../orchestrator-v5/agent-lane/event-risk-construction-context.js';
 
 type Rec = Record<string, unknown>;
 const EVENT_RISK = {
@@ -163,5 +164,102 @@ describe('event_risk.v1 — the write door refuses what it cannot carry (422 EVE
   it('CONTROL: a valid block and a graph with none both pass the door', () => {
     expect(eventRiskIngressIssues(graphWith(EVENT_RISK).nodes as Rec[])).toEqual([]);
     expect(eventRiskIngressIssues(graphWith().nodes as Rec[])).toEqual([]);
+  });
+});
+
+describe('FIX-1: CEE-only occurrence basis text at client ingress', () => {
+  it('snapshots the admitted occurrence so callback mutation cannot change the grant', async () => {
+    const eventRisk = { ...EVENT_RISK, horizon: { ...EVENT_RISK.horizon }, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    await runWithEventRiskConstruction(SCENARIO, graph, async () => {
+      expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBe('CEE admitted reference class');
+      eventRisk.horizon.months = 6;
+      expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBeUndefined();
+    });
+    expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBeUndefined();
+  });
+
+  it('closes the construction grant even for async work inherited before completion', async () => {
+    const graph = graphWith({ ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } });
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    let inherited!: Promise<string | undefined>;
+    await runWithEventRiskConstruction(SCENARIO, graph, async () => {
+      inherited = gate.then(() => eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!));
+      expect(eventRiskConstructionBasisTextFor(SCENARIO, graph.nodes[1]!)).toBe('CEE admitted reference class');
+    });
+    resume();
+    expect(await inherited).toBeUndefined();
+  });
+
+  it.each(['user', 'olumi'])('strips client-supplied sidecar even beside a valid %s occurrence', async (basis) => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'Client supplied fabricated basis' });
+    const res = await register(graph);
+    expect(res.statusCode, res.body).toBe(200);
+    const risk = node(written(), 'risk_supplier');
+    expect(risk.event_risk).toEqual(eventRisk);
+    expect(risk.event_risk_basis_text).toBeUndefined();
+  });
+
+  it('strips an orphan client sidecar before it can be stored or displayed', async () => {
+    const graph = graphWith();
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'Client supplied orphan basis' });
+    const res = await register(graph);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
+  });
+
+  it('preserves CEE-admitted Olumi text through the same real registration route', async () => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    const res = await runWithEventRiskConstruction(SCENARIO, graph, () => register(graph));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBe('CEE admitted reference class');
+  });
+
+  it.each(['scenario', 'occurrence', 'text', 'node'])('cannot reuse CEE context for a different %s', async (mismatch) => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const graph = graphWith(eventRisk);
+    Object.assign(graph.nodes[1]!, { event_risk_basis_text: 'CEE admitted reference class' });
+    const submitted = structuredClone(graph);
+    if (mismatch === 'occurrence') Object.assign(submitted.nodes[1]!, { event_risk: { ...eventRisk, horizon: { months: 6 } } });
+    if (mismatch === 'text') Object.assign(submitted.nodes[1]!, { event_risk_basis_text: 'Client replacement' });
+    if (mismatch === 'node') {
+      Object.assign(submitted.nodes[1]!, { id: 'different_risk' });
+      for (const edge of submitted.edges) {
+        if (edge.from === 'risk_supplier') edge.from = 'different_risk';
+        if (edge.to === 'risk_supplier') edge.to = 'different_risk';
+      }
+    }
+    const res = await runWithEventRiskConstruction(mismatch === 'scenario' ? 'another-scenario' : SCENARIO, graph, () => register(submitted));
+    expect(res.statusCode, res.body).toBe(200);
+    expect((written().nodes as Rec[]).find((n) => n.kind === 'risk')?.event_risk_basis_text).toBeUndefined();
+  });
+
+  it.each(['omitted', 'replaced'])('retains trusted stored basis for an unchanged Olumi occurrence when client text is %s', async (state) => {
+    const eventRisk = { ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } };
+    const stored = graphWith(eventRisk);
+    Object.assign(stored.nodes[1]!, { event_risk_basis_text: 'Stored CEE reference class' });
+    loadGraph.mockResolvedValue(stored);
+    const submitted = graphWith(eventRisk);
+    if (state === 'replaced') Object.assign(submitted.nodes[1]!, { event_risk_basis_text: 'Client replacement' });
+    const res = await register(submitted);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBe('Stored CEE reference class');
+  });
+
+  it('clears stored Olumi text when the occurrence is converted to the user basis', async () => {
+    const stored = graphWith({ ...EVENT_RISK, occurrence: { ...EVENT_RISK.occurrence, basis: 'olumi' } });
+    Object.assign(stored.nodes[1]!, { event_risk_basis_text: 'Stored CEE reference class' });
+    loadGraph.mockResolvedValue(stored);
+    const res = await register(graphWith(EVENT_RISK));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(node(written(), 'risk_supplier').event_risk).toEqual(EVENT_RISK);
+    expect(node(written(), 'risk_supplier').event_risk_basis_text).toBeUndefined();
   });
 });

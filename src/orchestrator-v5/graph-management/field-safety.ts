@@ -255,6 +255,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
 export const PIPELINE_OWNED_ROOTS: ReadonlySet<string> = new Set([
   // event_risk.v1 slice 2a: only CEE's validated hold stamp may author this block.
   'event_risk',
+  // The readable warrant is the same CEE-authored class as its occurrence.
+  'event_risk_basis_text',
   ...CEE_ANALYSIS_OWNED_ROOTS,
   ...provenanceOwnedSegments(),
 ]);

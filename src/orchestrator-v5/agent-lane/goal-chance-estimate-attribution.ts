@@ -1,5 +1,5 @@
 import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
-import { EventRiskV1 } from '../../schemas/event-risk.js';
+import { EventRiskV1, readOlumiEventRiskBasisText } from '../../schemas/event-risk.js';
 import { validatedDefinitionForGraph } from '../goal-target/held-user-links.js';
 import { assembleGuidanceSignals, guidanceModelReadable } from './turn-context/guidance-signals.js';
 import { olumiEstimatesFeedingResult, type LikelihoodEstimate } from './olumi-estimates-feeding-result.js';
@@ -75,6 +75,6 @@ export function goalChanceEstimateLikelihoods(graph: unknown, goalId?: unknown):
         return kind !== 'option' && kind !== 'decision';
       }))) return [];
     return [{ id: String(n.id), label: typeof n.label === 'string' ? n.label : String(n.id),
-      words: eventRiskCardLine(parsed.data, typeof n.event_risk_basis_text === 'string' ? n.event_risk_basis_text : undefined) }];
+      words: eventRiskCardLine(parsed.data, readOlumiEventRiskBasisText(n)) }];
   });
 }

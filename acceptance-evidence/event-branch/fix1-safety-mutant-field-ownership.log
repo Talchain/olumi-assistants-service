@@ -1,0 +1,35 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts (86 tests | 1 failed | 85 skipped) 8ms
+     × FIX-1: edit_graph/patch cannot author an Olumi occurrence basis sidecar 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts > event_risk.v1 slice 2a — field safety > FIX-1: edit_graph/patch cannot author an Olumi occurrence basis sidecar
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts:398:63
+    396|
+    397|   it('FIX-1: edit_graph/patch cannot author an Olumi occurrence basis …
+    398|     expect(PIPELINE_OWNED_ROOTS.has('event_risk_basis_text')).toBe(tru…
+       |                                                               ^
+    399|     expect(nodeUpdate('event_risk_basis_text', 'A fabricated reference…
+    400|     expect(nodeUpdate('observed_state', { value: 0.3, event_risk_basis…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 85 skipped (86)
+   Start at  14:42:46
+   Duration  1.42s (transform 978ms, setup 113ms, import 1.18s, tests 8ms, environment 0ms)
+
