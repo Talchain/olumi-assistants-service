@@ -321,14 +321,14 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
   });
   it('the change card and approval receipt display the complete percent unit', async () => {
     const g = model(); g.nodes[2].observed_state.unit = '%/month';
-    g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 5,
+    g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 8,
       unit: '%/month', value_frame: 'level', provenance: 'explicit', label: 'Churn' }];
     const text = 'churn above 6% a month we lose money';
     const w = world(g); const r = await w.propose(text);
-    expect(r.public_label).toBe('Change the limit on "Churn" from at most 5% a month to at most 6% a month');
+    expect(r.public_label).toBe('Change the limit on "Churn" from at most 8% a month to at most 6% a month');
     expect(w.chips(r)[0]?.detail).toBe(r.public_label); expect(w.writes).toHaveLength(0);
     expect(await w.approve(r, 'Yes, change that limit.')).toMatchObject({ applied: true,
-      follow_up: 'The limit on "Churn" is now at most 6% a month (it was 5% a month), as you stated it.' });
+      follow_up: 'The limit on "Churn" is now at most 6% a month (it was 8% a month), as you stated it.' });
     expect(w.graph().goal_constraints[0]).toMatchObject({ value: 6, unit: '%/month', source_quote: text });
   });
   it.each(['annual churn above 6% we lose money', 'churn a year above 6% we lose money'])('a period before the percent stays in its own frame: %s', text => {
@@ -371,13 +371,13 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     expect(w.writes).toHaveLength(1); expect(JSON.stringify(w.graph())).toBe(saved);
   });
 
-  it.each([undefined, '<'])('existing ceiling (strict stamp %s) uses change door, held/new card, one inclusive row and quote', async strict => {
-    const g = model(); g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 5,
-      unit: '%', value_frame: 'level', provenance: 'explicit', label: 'Churn', source_quote: 'Keep churn below 5%',
+  it.each([undefined, '<'])('existing looser ceiling (strict stamp %s) uses change door, held/new card, one inclusive row and quote', async strict => {
+    const g = model(); g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 8,
+      unit: '%', value_frame: 'level', provenance: 'explicit', label: 'Churn', source_quote: 'Keep churn below 8%',
       ...(strict === undefined ? {} : { operator_as_stated: strict }) }];
     const w = world(g); const r = await w.propose();
     expect(r).toMatchObject({ ok: true, mutated: false,
-      public_label: `Change the limit on "Churn" from ${strict === '<' ? 'less than' : 'at most'} 5% to at most 6%` });
+      public_label: `Change the limit on "Churn" from ${strict === '<' ? 'less than' : 'at most'} 8% to at most 6%` });
     expect(w.proposals.get(r.proposal_id as string)?.operations[0]).toMatchObject({ op: 'set_limit', path: CHURN });
     expect(w.chips(r)[0]?.label).toBe('Change this limit'); expect(w.writes).toHaveLength(0);
     expect(await w.approve(r, 'Yes, change that limit.')).toMatchObject({ ok: true, applied: true });
@@ -394,12 +394,14 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 5,
       unit: '%/year', value_frame: 'level', provenance: 'explicit', label: 'Churn' }];
     const w = world(g); const r = await w.propose('monthly churn above 6% we lose money');
-    expect(r.ok).toBe(false); expect(w.chips(r)).toEqual([]); expect(w.writes).toHaveLength(0);
+    expect(r).toMatchObject({ ok: false, refusal: 'limit_unit_mismatch',
+      detail: 'The loss threshold and the held limit are in different units. Nothing was prepared; ask for the limit in its own units.' });
+    expect(w.chips(r)).toEqual([]); expect(w.writes).toHaveLength(0);
     expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(0);
   });
   it.each([['percent', '%'], ['%', 'percent']])('percent aliases are compatible: node %s, existing row %s', async (nodeUnit, rowUnit) => {
     const g = model(); g.nodes[2].observed_state.unit = nodeUnit;
-    g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 5,
+    g.goal_constraints = [{ constraint_id: 'held-churn', node_id: CHURN, operator: '<=', value: 8,
       unit: rowUnit, value_frame: 'level', provenance: 'explicit', label: 'Churn' }];
     const w = world(g); const r = await w.propose();
     expect(r).toMatchObject({ ok: true, mutated: false }); expect(w.writes).toHaveLength(0);
@@ -425,13 +427,13 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     expect(w.writes).toHaveLength(0);
   });
   it('direct change door admits the unique percentage loss threshold, keeping the quote and inclusive reading', async () => {
-    const g = model(); g.goal_constraints = [{ constraint_id: 'held-direct', node_id: CHURN, operator: '<=', value: 5,
+    const g = model(); g.goal_constraints = [{ constraint_id: 'held-direct', node_id: CHURN, operator: '<=', value: 8,
       unit: '%', value_frame: 'level', provenance: 'explicit', label: 'Churn' }];
     const w = world(g);
     const r = await dispatchTool('propose_limit_change', JSON.stringify({ limit_label: 'Churn', operator: '<=',
       new_value: 6, unit: '%', rationale: MODEL_ONLY }), ctx(MODEL_ONLY), w.caps);
     expect(r).toMatchObject({ ok: true, mutated: false,
-      public_label: 'Change the limit on "Churn" from at most 5% to at most 6%' });
+      public_label: 'Change the limit on "Churn" from at most 8% to at most 6%' });
     expect(w.proposals.get(r.proposal_id as string)?.operations[0]).toMatchObject({ op: 'set_limit', path: CHURN,
       value: { operator: '<=', raw_value: 6, source_quote: MODEL_ONLY } });
     expect(w.writes).toHaveLength(0);
