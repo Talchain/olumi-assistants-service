@@ -326,8 +326,10 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
       cursor = end - lineAt;
       // Neither a drop candidate nor a containment witness may touch the questions toggle.
       if (protectedAt !== -1 && start < protectedEnd && end > protectedAt) continue;
-      // A heading ("Option A:") frames what follows it: removing a repeat would re-parent findings (Codex r4 on #2801).
-      if (/:["'”’)\]*_]{0,4}$/.test(sentence.trim())) continue;
+      // Only a finished sentence (ending . ! ?) is a finding that can be said twice. Anything else — a heading or label in
+      // any form ("Option A", "## Option A", "**Option A**", "Option A:") — frames what follows it, and removing a repeat
+      // would re-parent findings under another heading (Codex r4/r5 on #2801).
+      if (!/[.!?]["'”’)\]*_`]{0,4}$/.test(sentence.trim())) continue;
       const span = { text: sentence, start, end };
       spans.push(span);
       lineSpans.push(span);

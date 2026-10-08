@@ -468,14 +468,15 @@ describe('RC6 said once', () => {
     everySentenceExceptReportedKept(text, c);
   });
 
-  it('repeated headings stay (Codex r4): a finding is never re-parented under another option', () => {
-    const text = ['Option A:', '- Revenue may dip in month one.', 'Option B:', '- Churn may rise above 4%.', 'Option A:', '- Cash runs short in month three.', context].join('\n');
-    const c = composeReplyShape({ text });
-    expect(c.measure!.said_once_dropped).toEqual([]);
-    expect(count(c.text, 'Option A:')).toBe(2);
-    const cash = c.text.indexOf('Cash runs short');
-    expect(c.text.lastIndexOf('Option A:', cash)).toBeGreaterThan(c.text.lastIndexOf('Option B:', cash));
-  });
+  it.each([['colon', 'Option A:', 'Option B:'], ['plain', 'Option A', 'Option B'], ['markdown', '## Option A', '## Option B'], ['bold', '**Option A**', '**Option B**']])(
+    'repeated %s headings stay (Codex r4/r5): a finding is never re-parented under another option', (_form, a, b) => {
+      const text = [a, '- Revenue may dip in month one.', b, '- Churn may rise above 4%.', a, '- Cash runs short in month three.', context].join('\n');
+      const c = composeReplyShape({ text });
+      expect(c.measure!.said_once_dropped).toEqual([]);
+      expect(count(c.text, a)).toBe(2);
+      const cash = c.text.indexOf('Cash runs short');
+      expect(c.text.lastIndexOf(a, cash)).toBeGreaterThan(c.text.lastIndexOf(b, cash));
+    });
 
   it.each([
     ['explain_00_24_38', served.explain_00_24_38, 'What is ‘Monthly churn rate’ today?'],
