@@ -4,6 +4,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { identityConflictsWithScope } from './goal-scope.js';
 import { proposeProductIdentity, todaysLevelFor } from './identity-proposal.js';
+import { identityPartsWithoutLevel } from '../system-events/identity-confirm-edit.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { periodIn, readCount, readMoney, readMoneyTotal, sameUnit } from './same-unit.js';
 import { sayFigure, sayFigureAsWritten } from './say-figure.js';
@@ -41,10 +42,6 @@ function levelFor(graph: unknown, node: Rec): Level | null {
   const today = typeof node.id === 'string' ? todaysLevelFor(graph, node.id) : null;
   if (today !== null) return { node, raw: today.raw, unit: today.unit };
   const os = isRec(node.observed_state) ? node.observed_state : undefined;
-  // ⛔ #2851 (DL ruling 2): a part's level is the user's figure or none. Olumi's basis-less figure is a missing level,
-  // the card's own rule (`identityPartsWithoutLevel`), so no implied goal level is computed from it.
-  const owner = classifyValueSource(os?.source);
-  if (owner !== 'user_stated' && owner !== 'user_ratified') return null;
   if (os?.raw_value !== undefined) {
     const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -102,6 +99,9 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   if (aNode === undefined || bNode === undefined) return null;
   const a = levelFor(graph, aNode); const b = levelFor(graph, bNode);
   if (a === null || b === null) return null;
+  // ⛔ #2851 (DL ruling 2, identity PARTS only): a product part's level is the user's figure or none, the card's own rule
+  // (`identityPartsWithoutLevel`); Olumi's basis-less figure is a missing level, so no implied goal level comes from it.
+  if (identityPartsWithoutLevel(graph, [aId, bId]).length > 0) return null;
   const label = words(node.label);
   if (label === null || words(aNode.label) === null || words(bNode.label) === null) return null;
   // ⛔ A percentage is a rate of change or a share, never a count of the goal's units (buddy r2 P1): fail closed.

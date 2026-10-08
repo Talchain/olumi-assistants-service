@@ -368,7 +368,9 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
 export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
   // ⛔ #2851 buddy r2 P1: a held identity card is projected (carried on a turn, served on reload) only while it is still
   // offerable on THIS graph; otherwise its Yes would be refused, which is confirm-then-refuse again (B1 9f32a4b4).
-  if ((agentProposalOf(pa)?.operations ?? []).some((o) => o.op === 'confirm_identity') && !identityCardOfferable(graph)) return undefined;
+  // Only on a graph actually read: callers that project a record without one (`proposalRecord(h, undefined)`) are unchanged.
+  if (isRec(graph) && Array.isArray(graph.nodes)
+    && (agentProposalOf(pa)?.operations ?? []).some((o) => o.op === 'confirm_identity') && !identityCardOfferable(graph)) return undefined;
   return productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
 }
 

@@ -119,6 +119,8 @@ describe('no Yes over a part with no level (stored 828d87ac)', () => {
         { scenario_id: 'sc', emitted_at_iso: new Date().toISOString() });
     };
     expect(proposalRecord(held(inferred), inferred)).toBeUndefined();
+    // Callers that project without a graph (route :2748, :4139) are unchanged: CI r2 caught the gate firing on `undefined`.
+    expect(proposalRecord(held(inferred), undefined)).toBeDefined();
     const users = { ...inferred, nodes: inferred.nodes.map((n: Rec) => (n.id === 'pro_paying_subscribers'
       ? { ...n, observed_state: { unit: 'subscribers', value: 0.15, raw_value: 300, source: 'user_override' } } : n)) };
     expect(proposalRecord(held(users), users)).toBeDefined();

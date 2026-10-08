@@ -155,8 +155,11 @@ export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: re
     const usersLevel = typeof os?.value === 'number' && Number.isFinite(os.value) && (owner === 'user_stated' || owner === 'user_ratified');
     // Today's level read through the user's figure counts only where the part has NO value of its own: that is the only
     // case `todaysWrite` writes it (#2851 buddy r1 P1-2: an Olumi value with no raw figure passed here and was kept).
+    // An EXACT copy of that figure is the user's figure too (AIQ 5906371639, served bdc4ff54: Olumi's 1,500 copied from the
+    // user's 1,500 'Current paying subscribers'); any other value of its own is not (buddy r1 P1-2).
     const ownValue = typeof os?.value === 'number' && Number.isFinite(os.value);
-    if (usersLevel || (!ownValue && todaysLevelFor(persistedGraph, id) !== null)) continue;
+    const today = todaysLevelFor(persistedGraph, id);
+    if (usersLevel || (today !== null && (!ownValue || os?.raw_value === today.raw))) continue;
     out.push({ id, label: typeof part.label === 'string' && part.label.trim() !== '' ? part.label.trim() : id, kind: String(part.kind) });
   }
   return out;

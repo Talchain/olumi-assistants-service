@@ -63,7 +63,11 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   });
 
   it('RED (the served graph itself, 053159Z/01): the break-even the wire carried, now with totals per month and the target line', () => {
-    const wire = JSON.parse(readFileSync(new URL('./fixtures/served-per-subscriber-price-263dbd5.json', import.meta.url), 'utf8')) as { nodes: unknown[]; edges: unknown[] };
+    const wire = JSON.parse(readFileSync(new URL('./fixtures/served-per-subscriber-price-263dbd5.json', import.meta.url), 'utf8')) as { nodes: Record<string, any>[]; edges: unknown[] };
+    // #2851 RE-PIN (class: the served count 200 was Olumi's, `cee_inference`): Olumi's part figure gives no break-even
+    // (DL ruling 2), so this row's purpose (units and the target line) is kept on the USER's 200.
+    expect(breakEvenFor(wire)).toBeNull();
+    wire.nodes.find((n) => n.id === 'pro_paying_subscribers')!.observed_state.source = 'user_override';
     const be = breakEvenFor(wire)!;
     // PRECONDITION: this is the served shape — the wire's `_agent.break_even` carried this unit and today's figure.
     expect(be).toMatchObject({ unit: 'GBP/subscriber/month', baseline_price: 49, baseline_volume: 200, baseline_goal: 9_800 });
@@ -73,9 +77,11 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     expect(said).toContain('£20,000/month needs 339 at £59/subscriber/month');
   });
 
-  it('CONTRAST (the other served run, 053639Z/01, price GBP/month): the paragraph is byte-identical to what the wire carried', () => {
+  // #2851 RE-PIN (class: the served paragraph was arithmetic on Olumi's basis-less 250, `cee_inference`): exactly what
+  // DL ruling 2 forbids, so the served shape now says no break-even at all.
+  it('CONTRAST (the other served run, 053639Z/01, price GBP/month): on Olumi\'s 250 there is no break-even paragraph at all', () => {
     const f = JSON.parse(readFileSync(new URL('./fixtures/served-per-month-price-263dbd5.json', import.meta.url), 'utf8')) as { served_paragraph: string; nodes: unknown[]; edges: unknown[] };
-    expect(breakEvenLine(breakEvenFor(f)!)).toBe(f.served_paragraph);
+    expect(breakEvenFor(f)).toBeNull();
   });
 
   it('RED (MG B1): a numbered period stays — "GBP per subscriber per 12 months" gives a readable total, not "GBP months"', () => {
