@@ -675,6 +675,7 @@ export const NodeV3 = z.object({
           .refine((ids) => new Set(ids).size === 3, 'three distinct ids'),
         horizon_months: z.number().int().min(1).max(120),
         rate_scale: z.number().gt(0).lte(1),
+        rate_sigma_log: z.tuple([z.number().finite().min(0), z.number().finite().min(0)]).optional(),
         stated_in_brief: z.boolean(),
       }).strict(),
     ])
