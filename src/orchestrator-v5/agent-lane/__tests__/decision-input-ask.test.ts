@@ -192,7 +192,9 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
   });
 
   it('the levels ask at rest ("One level is not set yet: …?") also counts → no goal ask', () => {
-    const resting = textAtRest(withWriteOutcome('The model is a sketch.', 'The model was saved. One level is not set yet: what does "Angel pilot" set Hours to?'));
+    const resting = textAtRest(withWriteOutcome('The model is a sketch.', 'One level is not set yet: what does "Angel pilot" set Hours to?'));
+    expect(resting).toContain('One level is not set yet:');
+    expect(resting).not.toMatch(/\bsaved\b/i);
     expect(decisionInputAsk(graphWith(FX.goal_after_build), { ...base, restingText: resting })).toBeNull();
   });
 
@@ -261,34 +263,40 @@ describe('A7 is folded on the reply the user SEES — after the leader gate (R3 
     expect(SV.goal.goal_horizon_months).toBe(2);
   });
 
+  // Derive current P50 copy without changing the historical wire fixture.
+  const currentText = SV.served_assistant_text.replace('The model was saved. ', '');
+  const currentStatus = SV.status_text.replace('The model was saved. ', '');
+
   it('RED (served): A7 returns once, at rest, before the status line — and nothing else moves', () => {
-    const out = withA7AfterGate(SV.served_assistant_text, g, turnCtx, SV.status_text);
+    const out = withA7AfterGate(currentText, g, turnCtx, currentStatus);
     expect(out.split(A7).length - 1).toBe(1);
     expect(textAtRest(out)).toContain(A7);
-    expect(out.indexOf(A7)).toBeLessThan(out.indexOf('The model was saved.'));
-    expect(out.replace(`\n\n${A7}`, '')).toBe(SV.served_assistant_text);
+    expect(out).not.toMatch(/model was saved|I saved the model/i);
+    expect(out).toContain('Questions this model does not answer yet:');
+    expect(out.indexOf(A7)).toBeLessThan(out.indexOf('Questions this model does not answer yet:'));
+    expect(out.replace(`\n\n${A7}`, '')).toBe(currentText);
     expect(words(textAtRest(out)) + 8).toBeLessThanOrEqual(160);
   });
 
   it('CONTROL: still over the bound after the gate → unchanged (A7 stays behind the toggle)', () => {
-    const long = `${'word '.repeat(40)}${SV.served_assistant_text}`;
-    expect(withA7AfterGate(long, g, turnCtx, SV.status_text)).toBe(long);
+    const long = `${'word '.repeat(40)}${currentText}`;
+    expect(withA7AfterGate(long, g, turnCtx, currentStatus)).toBe(long);
   });
 
   it('CONTROL: A7 already said, no horizon, a duration limit, or a turn that neither built nor ran → unchanged', () => {
-    const said = SV.served_assistant_text.replace('\n\nThe model was saved.', `\n\n${A7}\n\nThe model was saved.`);
-    expect(withA7AfterGate(said, g, turnCtx, SV.status_text)).toBe(said);
+    const said = currentText.replace(currentStatus, `${A7}\n\n${currentStatus}`);
+    expect(withA7AfterGate(said, g, turnCtx, currentStatus)).toBe(said);
     const { goal_horizon_months: _h, ...noHorizon } = SV.goal;
-    expect(withA7AfterGate(SV.served_assistant_text, { nodes: [noHorizon], edges: [] }, turnCtx, SV.status_text)).toBe(SV.served_assistant_text);
+    expect(withA7AfterGate(currentText, { nodes: [noHorizon], edges: [] }, turnCtx, currentStatus)).toBe(currentText);
     const limited = { ...g, goal_constraints: [{ unit: 'months', operator: '<=', value: 2 }] };
-    expect(withA7AfterGate(SV.served_assistant_text, limited, turnCtx, SV.status_text)).toBe(SV.served_assistant_text);
-    expect(withA7AfterGate(SV.served_assistant_text, g, { ...turnCtx, builtOrRan: false }, SV.status_text)).toBe(SV.served_assistant_text);
+    expect(withA7AfterGate(currentText, limited, turnCtx, currentStatus)).toBe(currentText);
+    expect(withA7AfterGate(currentText, g, { ...turnCtx, builtOrRan: false }, currentStatus)).toBe(currentText);
   });
 
   it('the ask was said → A7 goes right before it (where it was composed); no status found and no ask → unchanged', () => {
-    const t = `Model words.\n\n${ASK}\n\nThe model was saved.`;
-    expect(withA7AfterGate(t, g, turnCtx, 'The model was saved.')).toBe(`Model words.\n\n${A7}\n\n${ASK}\n\nThe model was saved.`);
-    expect(withA7AfterGate('Model words.', g, turnCtx, 'The model was saved.')).toBe('Model words.');
+    const t = `Model words.\n\n${ASK}\n\nQuestions this model does not answer yet: What matters next?`;
+    expect(withA7AfterGate(t, g, turnCtx, 'Questions this model does not answer yet: What matters next?')).toBe(`Model words.\n\n${A7}\n\n${ASK}\n\nQuestions this model does not answer yet: What matters next?`);
+    expect(withA7AfterGate('Model words.', g, turnCtx, 'Questions this model does not answer yet: What matters next?')).toBe('Model words.');
   });
 
   it('route source pin: AFTER the leader gate and every later prose rewrite (break-even), BEFORE the shape and the answer row', () => {

@@ -56,24 +56,26 @@ function chipsFor(store: ProposalStore, turn: { name: string; result: ToolResult
 
 const BUILT: ToolResult = { ok: true, mutated: true, model_version: { version_number: 1 } };
 const OLD_LINE = 'The model was saved as version 1.';
-const NEW_LINE = 'I saved the model I drafted as version 1. Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.';
+const NEW_LINE = 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.';
 
-/* ── 1. TRUTH: the build's save line ── */
-describe('the build line says what was saved and what was not', () => {
-  it('RED: build + a starting point awaiting approval in the SAME turn → the saved model, and the figures NOT recorded', () => {
+/* ── 1. TRUTH: the build's approval line ── */
+describe('the build line says what approval changes', () => {
+  it('RED: build + a starting point awaiting approval in the SAME turn → the figures stay estimates until adopted', () => {
     const n = narrateWriteOutcome('These are starting assumptions, not measurements. Shall I record them?',
       [{ name: 'build_model_from_brief' }, { name: 'propose_starting_point' }],
       [BUILT, { ok: true, mutated: false, proposal_id: 'prop_aaaaaa' }]);
     expect(n.status).toBe(NEW_LINE);
+    expect(n.status).not.toMatch(/\bsaved\b/i);
     expect(n.status).not.toContain(OLD_LINE);
   });
 
-  it('RED: with NO returned version, the line claims no version and still says the figures are not recorded', () => {
-    // Independent review 5832147341: "as version N" only on an actual returned version — never invented.
+  it('RED: with NO returned version, the line still says what approval changes', () => {
+    // P50: build versions belong to the save indicator, with or without a returned version.
     const n = narrateWriteOutcome('These are starting assumptions, not measurements. Shall I record them?',
       [{ name: 'build_model_from_brief' }, { name: 'propose_starting_point' }],
       [{ ok: true, mutated: true }, { ok: true, mutated: false, proposal_id: 'prop_bbbbbb' }]);
-    expect(n.status).toBe('I saved the model I drafted. Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.');
+    expect(n.status).toBe(NEW_LINE);
+    expect(n.status).not.toMatch(/\bsaved\b/i);
     // MG sweep 5851155478 (b): never the old claim that nothing is recorded — Olumi's estimates already are.
     expect(n.status).not.toContain('not recorded until you approve');
     expect(n.status).not.toMatch(/version/);
@@ -84,6 +86,7 @@ describe('the build line says what was saved and what was not', () => {
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_option_interventions' }], [built, { ok: true, mutated: false, proposal_id: 'prop_bbbbbb' }]);
     // AIQ 5923232439: the held-fixed fact comes BEFORE the questions marker (so the UI's split keeps it at rest), and its
     // ask joins the questions behind the toggle.
+    expect(n.status).not.toMatch(/\bsaved\b/i);
     expect(n.status).toBe(`${NEW_LINE} To keep it readable, I left out: Office space. Ask me to add any of them back.`
       + ' Held fixed (no option changes it): Recruitment fee.'
       + ' Questions this model does not answer yet: Who covers holidays? Should one of the options change Recruitment fee?');
@@ -94,25 +97,29 @@ describe('the build line says what was saved and what was not', () => {
       [BUILT, { ok: true, mutated: false, proposal_id: 'prop_cccccc' }, { ok: false, mutated: false, refusal: 'withheld_on_chip_turn' }]);
     // The withheld call keeps its own (pre-existing) refusal line after the build's.
     expect(n.status!.startsWith(`${NEW_LINE} `), String(n.status)).toBe(true);
+    expect(n.status).not.toMatch(/model was saved|I saved the model/i);
   });
 
   it('RED: a link proposed after the build is named as a change, not as figures', () => {
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_model_change' }], [BUILT, { ok: true, mutated: false, proposal_id: 'prop_dddddd' }]);
-    expect(n.status).toBe('I saved the model I drafted as version 1. What I proposed above is not made until you approve it.');
+    expect(n.status).toBe('What I proposed above is not made until you approve it.');
+    expect(n.status).not.toMatch(/\bsaved\b/i);
   });
 
-  it('CONTRAST: a build with NO pending proposal keeps today’s line', () => {
-    expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [BUILT]).status).toBe(OLD_LINE);
+  it('CONTRAST: a build with NO pending proposal has no status', () => {
+    expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [BUILT]).status).toBeNull();
+    expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ...BUILT, open_questions: ['Who covers holidays?'] }]).status)
+      .toBe('Questions this model does not answer yet: Who covers holidays?');
   });
 
-  it('CONTRAST: a refused proposal, a proposal made BEFORE the build (stale), and one approved in the same turn → today’s line', () => {
+  it('CONTRAST: a refused or stale proposal adds no build status; an approval keeps its own receipt', () => {
     expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_starting_point' }],
-      [BUILT, { ok: false, mutated: false, refusal: 'incomplete_starting_point' }]).status).toBe(OLD_LINE);
+      [BUILT, { ok: false, mutated: false, refusal: 'incomplete_starting_point' }]).status).toBeNull();
     expect(narrateWriteOutcome('', [{ name: 'propose_starting_point' }, { name: 'build_model_from_brief' }],
-      [{ ok: true, mutated: false, proposal_id: 'prop_eeeeee' }, BUILT]).status).toBe(OLD_LINE);
+      [{ ok: true, mutated: false, proposal_id: 'prop_eeeeee' }, BUILT]).status).toBeNull();
     const consumed = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_assumptions' }, { name: 'authorise_change' }],
       [BUILT, { ok: true, mutated: false, proposal_id: 'prop_ffffff' }, { ok: true, mutated: true, applied: true, proposal_id: 'prop_ffffff', receipts: [{ version: 2 }] }]).status;
-    expect(consumed).toBe(`${OLD_LINE} Saved as version 2.`);
+    expect(consumed).toBe('Saved as version 2.');
   });
 });
 
@@ -337,6 +344,7 @@ describe('the real route: build + proposal in one turn', () => {
     expect(pid).toMatch(/^prop_[0-9a-f]{32}$/);
     expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Save £50,000 for Hire PA', message: 'Yes, use those.' });
     expect(b.assistant_text).toContain(NEW_LINE);
+    expect(b.assistant_text).not.toMatch(/model was saved|I saved the model/i);
     expect(b.assistant_text).not.toContain(OLD_LINE);
   });
 
@@ -354,6 +362,7 @@ describe('the real route: build + proposal in one turn', () => {
     expect(pid, JSON.stringify(b._agent.tool_calls)).toBeDefined();
     expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Use these 2 starting figures', message: 'Yes, use those.' });
     expect(b.assistant_text).toContain(NEW_LINE);
+    expect(b.assistant_text).not.toMatch(/model was saved|I saved the model/i);
   });
 
   it('FALLBACK: a figure the composer cannot show exactly keeps today’s label (id and message unchanged)', async () => {
@@ -367,10 +376,12 @@ describe('the real route: build + proposal in one turn', () => {
     expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Use as starting option levels', message: 'Yes, use those.' });
   });
 
-  it('CONTRAST: a build with nothing proposed keeps today’s line and offers no approve chip', async () => {
+  it('CONTRAST: a build with nothing proposed omits the saved sentence and offers no approve chip', async () => {
     script = [callTool('build_model_from_brief', { brief: BRIEF }), say('I have drafted the model.')];
     const b = await turn();
-    expect(b.assistant_text).toContain(OLD_LINE);
+    expect(b.assistant_text).not.toContain(OLD_LINE);
+    expect(b.assistant_text).not.toContain('I saved the model');
+    expect(b.assistant_text).toContain('I have drafted the model.');
     expect(b.assistant_text).not.toContain('not recorded until you approve');
     expect(b.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:'))).toBe(false);
   });
