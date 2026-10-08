@@ -27,6 +27,13 @@ import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
+/** The figure just typed for an asked product part, carried inside its one confirmation. */
+export interface IdentityPartLevel {
+  readonly part_id: string;
+  readonly raw_value: number;
+  readonly unit: string;
+}
+
 export interface IdentityProposal {
   readonly outcome_id: string;
   readonly operation: 'product';
@@ -34,6 +41,7 @@ export interface IdentityProposal {
   readonly factor_ids: readonly [string, string];
   /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
+  readonly part_levels?: readonly IdentityPartLevel[];
 }
 
 /** The approved-card door's limit on the displayed words (Canonical #2292). */
@@ -160,7 +168,7 @@ const NOT_A_COUNT_WORDS = new Set(['revenue', 'income', 'sale', 'price', 'cost',
   // subscribers" is ONE count (DL pre-read).
   'plus', 'minus', 'times', 'vs', 'versus', 'excluding', 'excl', 'both', 'either', 'between']);
 const singularWord = (w: string): string => w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.endsWith('ses') ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
-function labelCountUnit(n: Rec): string | undefined {
+export function labelCountUnit(n: Rec): string | undefined {
   if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
   // The drafter names a count AT A TIME ("Paying subscribers at month 12", "12-month paying subscribers", "Month-12 Pro
   // paying subscribers", truncated "… at month…": 34 of 55 stored outcome operands, staging all-time, 8 Oct). A time POINT

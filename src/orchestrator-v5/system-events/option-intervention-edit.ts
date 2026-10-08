@@ -586,6 +586,7 @@ export interface ApprovedIdentityConfirm {
   readonly factor_ids: readonly string[];
   /** The card's displayed sentence, bound into `reading_token`. */
   readonly words: string;
+  readonly part_levels?: readonly import('../agent-lane/identity-proposal.js').IdentityPartLevel[];
   /** `identityConfirmReadingToken` of the reading the approval card SHOWED; the writer refuses a write it does not match. */
   readonly reading_token: string;
 }
@@ -1043,10 +1044,11 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyIdentityConfirmEdit({ persistedGraph: before, outcome_id: identityConfirm.outcome_id,
       factor_ids: identityConfirm.factor_ids, words: identityConfirm.words, reading_token: identityConfirm.reading_token,
+      part_levels: identityConfirm.part_levels,
       expected_graph_hash: input.expectedGraphHash });
     if (written.kind === 'refused') return { kind: 'refused', reason: `identity_${written.reason}` };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id)) {
+    if (!isEditableGraph(graph) || !identityConfirmPostimageIsScoped(before, graph, identityConfirm.outcome_id, identityConfirm.part_levels)) {
       return { kind: 'refused', reason: 'identity_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);

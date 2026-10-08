@@ -45,7 +45,10 @@ describe('canonical analysis view — one stored Run and the existing licences',
     const view = await project(args);
     const expected = goalChanceFactsForAgent(args.currentResult, args.graph, true);
     expect(expected.goal_chance_display).toEqual({ raise_prices_10: 'about 47%', launch_49_starter_tier: 'about 52%', keep_pricing_as_it_is: 'less than 1%' });
-    for (const [id, display] of Object.entries(expected.goal_chance_display!)) expect(cell(view, id)).toEqual({ kind: 'figure', display });
+    const labels = new Map(saved.graph.nodes.map((node: Json) => [node.id, node.label]));
+    for (const [id, display] of Object.entries(expected.goal_chance_display!)) expect(cell(view, id)).toEqual({
+      kind: 'figure', display, face: `‘${labels.get(id)}’: ${display} chance of meeting your goal, in this model.`,
+    });
     expect(view.leader_licence).toBe('withheld');
     expect(view).not.toHaveProperty('win_probabilities');
     expect(JSON.stringify(args)).toBe(before);
@@ -67,15 +70,16 @@ describe('canonical analysis view — one stored Run and the existing licences',
 
   it('DATA-WITHHELD: one scoped option carries its exact recorded reason and the other keeps its figure', async () => {
     const view = await project(input({ graph, currentResult: result([licence, warning]) }));
-    expect(cell(view, 'raise')).toEqual({ kind: 'withheld', reasons: [{ code: warning.code, message: warning.message }] });
-    expect(cell(view, 'keep')).toEqual({ kind: 'figure', display: 'about 63%' });
+    expect(cell(view, 'raise')).toEqual({ kind: 'withheld', reasons: [{ code: warning.code, message: warning.message }], face: warning.message });
+    expect(cell(view, 'keep')).toEqual({ kind: 'figure', display: 'about 63%', face: 'about 63% chance of meeting your goal, in this model.' });
   });
 
   it('DATA-REASON-ABSENT: a licence-only withhold remains withheld with its cause explicitly not recorded', async () => {
     const held = { ...licence, withheld_option_ids: ['raise'] };
     const view = await project(input({ graph, currentResult: result([held]) }));
-    expect(cell(view, 'raise')).toEqual({ kind: 'withheld', reasons: [{ code: 'reason_not_recorded', message: null }] });
-    expect(cell(view, 'keep')).toEqual({ kind: 'figure', display: 'about 63%' });
+    expect(cell(view, 'raise')).toEqual({ kind: 'withheld', reasons: [{ code: 'reason_not_recorded', message: null }],
+      face: 'Olumi can’t yet say its chance of meeting your goal, in this model.' });
+    expect(cell(view, 'keep')).toEqual({ kind: 'figure', display: 'about 63%', face: 'about 63% chance of meeting your goal, in this model.' });
   });
 
   it('DATA-RANGE: an existing licensed range takes precedence over its compatible point withhold', async () => {
