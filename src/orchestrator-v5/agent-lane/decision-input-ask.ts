@@ -1,3 +1,4 @@
+import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-model.js';
 /**
  * ⭐ OLUMI ASKS FOR THE DECISION INPUT IT LACKS (DL #75 5923918068: R3's dry run D1 "no ask for the minimum amount" + A7
  * "the deadline neither asked nor scored"; lease 5923944336).
@@ -170,6 +171,7 @@ const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
  * never disagree. `null` when there is no single goal, no held deadline, or a duration limit scores it.
  */
 export function untestedHorizonLine(graph: unknown): string | null {
+  if (goalKindOf(graph) === 'share_by_date') return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const within = withinMonths(goal);
@@ -202,6 +204,8 @@ export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown): E {
 
 /** The one ask writer, before display scrubbing or turn eligibility. */
 function rawDecisionInputAsk(graph: unknown): string | null {
+  const part = draftedTeamPartOf(graph);
+  if (part !== null) return goalDeadlineOf(part.goal) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return null;
@@ -251,6 +255,8 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */
 export function isDecisionInputAsk(line: string): boolean {
+  if (line === 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?') return true;
+  if (line.startsWith('How long would ') && line.endsWith(' take with the team you have now?')) return true;
   return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith('What should this model help you explore?');
 }
 

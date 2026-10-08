@@ -24,6 +24,7 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
 import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.js';
 
 /** R3's preconditions (#77 5912916965). */
@@ -215,14 +216,17 @@ export function targetTestabilityOf(
   const goalId = goal.id as string;
   const stated = statedGoalTargetOf(graph, goal);
   if (stated === null) return { kind: 'no_target', goal_id: goalId };
-  const levelFrame = (stated.frame ?? 'level') === 'level';
+  // S2a's forecast is sent in delta only after the pure-sum attestation.
+  const share = shareByDateGoalOf(input);
+  const effectiveFrame = share?.goal.id === goalId ? 'delta' : stated.frame;
+  const levelFrame = (effectiveFrame ?? 'level') === 'level';
 
   const failures: TargetTestabilityFailure[] = [];
   const today = isRec(goal.observed_state) ? goal.observed_state : undefined;
   // P1 — today's level where the frame requires it (`limitNeedsTodaysLevel`), as science reads it
   // (`observed_state.baseline`, the schema-v3 goal limb's condition). Never derived from the target.
   const hasToday = today !== undefined && finite(today.baseline);
-  if (limitNeedsTodaysLevel(stated.frame) && !hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
+  if (limitNeedsTodaysLevel(effectiveFrame) && !hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
   // P2 — a level target normalises strictly inside (0, 1) (ISL clips at the edges). Change frames normalise elsewhere.
   if (levelFrame && finite(goal.goal_threshold) && !(goal.goal_threshold > 0 && goal.goal_threshold < 1)) {
     failures.push({ precondition: 'P2', case: 'd', code: 'threshold_off_scale' });

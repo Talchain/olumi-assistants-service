@@ -60,6 +60,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
+  propose_team_time: { label: 'Yes', message: 'Yes' },
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
@@ -258,12 +259,12 @@ export function approvalChipsFor(
   }
   // ⭐ S-E GOALS: the deadline card asks "Is your deadline 7 April 2027 (6 months from today)?" — the STORED card's words ride
   // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
-  if (tool === 'propose_goal_deadline') {
+  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time') {
     const source = labelSourceFor?.(proposalId);
     const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
       && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
-      DEADLINE_CHANGE_CHIP];
+      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' } : DEADLINE_CHANGE_CHIP];
   }
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);

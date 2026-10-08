@@ -19,6 +19,7 @@ import {
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_WITHHELD_CODES,
+  GOAL_FIGURES_SHARE_APPROXIMATION,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
 } from '../../orchestrator/context/option-result-source.js';
 
@@ -41,6 +42,11 @@ export interface GoalChanceWithheld {
 // AIQ 5887096626: the one register ("reaches the target in N% of model runs", 5885116642).
 const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
 export const RANGE_OPENING = 'This run shows some options’ chances only as a range.';
+/** S2a removes only the scoped points; the other options keep their licences. */
+export const SHARE_APPROXIMATION_NOTE =
+  'This run withheld a single chance figure for the options in `option_ids`. Never state or estimate those points. '
+  + 'Those options’ licensed ranges may be said as written. Other options’ licensed points and ranges may also be said '
+  + 'as written, subject to the run’s other withhold rules. Say `say` once, as written, when you describe the run.';
 /** PLoT's words open "Not shown." — right beside a missing figure, not in a reply; the reason after it is kept verbatim. */
 const UI_OPENING = /^Not shown\.\s*/;
 
@@ -175,6 +181,25 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
     const words = typeof chance.message === 'string' ? chance.message.trim() : '';
     const ids = (key: string): string[] => (Array.isArray(chance[key]) ? (chance[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? opening : words, node_ids: ids('node_ids'), note: CHANCE_AS_GOAL_NOTE, option_ids: ids('option_ids') };
+  }
+  // Keep S2a's explanation and option scope. In a mixed withhold, each other
+  // cause retains its own permission rules and the run-wide ones still win.
+  const share = warnings.filter(w => w.code === GOAL_FIGURES_SHARE_APPROXIMATION);
+  if (share.length > 0) {
+    const words = [...new Set(share.map(w => typeof w.message === 'string' ? w.message.trim() : '').filter(s => s !== ''))].join(' ');
+    const scoped = share.every(w => Array.isArray(w.option_ids) && w.option_ids.length > 0
+      && w.option_ids.every(id => typeof id === 'string' && id.trim() !== ''));
+    const ids = [...new Set(share.flatMap(w => Array.isArray(w.option_ids) ? w.option_ids : []))]
+      .filter((id): id is string => typeof id === 'string');
+    const base: GoalChanceWithheld = { withheld: true, say: words || opening, node_ids: [],
+      note: scoped ? SHARE_APPROXIMATION_NOTE : GOAL_CHANCE_WITHHELD_NOTE,
+      ...(scoped ? { option_ids: ids } : {}) };
+    const others = warnings.filter(w => w.code !== GOAL_FIGURES_SHARE_APPROXIMATION);
+    if (others.length === 0) return base;
+    const other = goalChanceFromWarnings(others, opening);
+    return { ...other, say: `${other.say} ${base.say}`, note: `${other.note} ${base.note}`,
+      ...(other.option_ids !== undefined && base.option_ids !== undefined
+        ? { option_ids: [...new Set([...other.option_ids, ...base.option_ids])] } : { option_ids: undefined }) };
   }
   // (S) speaks alone: CEE writes it only on a run PLoT did not already withhold (`run-analysis.ts`).
   if (warnings.every((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {

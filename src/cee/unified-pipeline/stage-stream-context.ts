@@ -73,6 +73,7 @@ interface StageStreamObservations {
 interface StageStreamContext {
   readonly emit: PipelineStageEmitter;
   readonly observed: StageStreamObservations;
+  readonly startedAt: number;
 }
 
 const stageStreamStore = new AsyncLocalStorage<StageStreamContext>();
@@ -96,12 +97,13 @@ export function runWithStageStream<T>(
   emit: PipelineStageEmitter,
   fn: () => Promise<T>,
 ): Promise<T> {
+  const startedAt = Date.now();
   const observed: StageStreamObservations = { graphReadyEmitted: false };
   const recording: PipelineStageEmitter = (event) => {
     if (event.kind === 'GRAPH_READY') observed.graphReadyEmitted = true;
     emit(event);
   };
-  return stageStreamStore.run({ emit: recording, observed }, fn);
+  return stageStreamStore.run({ emit: recording, observed, startedAt }, fn);
 }
 
 /**
@@ -128,4 +130,19 @@ export function graphPreviewEmitted(): boolean {
  */
 export function currentStageEmitter(): PipelineStageEmitter | undefined {
   return stageStreamStore.getStore()?.emit;
+}
+
+/** ⭐ P44 S2 — elapsed time from this streamed turn's start; absent when buffered. */
+export function stageElapsedMs(): number | undefined {
+  const store = stageStreamStore.getStore();
+  return store === undefined ? undefined : Date.now() - store.startedAt;
+}
+
+/** ⭐ P44 S2 — real agent dispatches reuse PROGRESS with empty labels. */
+export function emitAgentPhase(phase: 'first_analysis' | 'writing'): void {
+  const emit = currentStageEmitter();
+  if (emit === undefined) return;
+  try {
+    emit({ kind: 'PROGRESS', labels: [], phase, elapsed_ms: stageElapsedMs() ?? 0 });
+  } catch { /* ⛔ P44 S2 — an observer never costs the turn. */ }
 }

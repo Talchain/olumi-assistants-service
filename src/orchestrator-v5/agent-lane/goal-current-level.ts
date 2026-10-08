@@ -53,6 +53,7 @@
  *     on a `scale_frame`; the apply below retires it exactly as the target writer does, so the user's own sizes into the
  *     goal are re-derived onto the level's frame, never left on a frame the goal no longer has.
  */
+import { isEventShareForecast } from '../goal-target/event-by-date-model.js';
 import { goalKindOf } from '../goal-target/goal-kind.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
@@ -739,6 +740,10 @@ export async function proposeGoalCurrentLevel(
 
   // ⛔ S-E GOALS (Science ruling 7 Oct §2; D-06): a goal measured as a CHANCE has no level to record: that chance is what
   // Olumi works out. Refused by name, before anything else is read.
+  if (isEventShareForecast(g.raw)) {
+    return refuse('goal_measures_a_forecast',
+      'This goal measures the forecast share finished by its deadline, so today’s completion percentage is not its current level. Nothing was prepared. Type the soonest and latest times with your current team, for example "6–10 months".');
+  }
   if (goalKindOf(goal) === 'chance_of_event') {
     return refuse('goal_measures_a_chance',
       `"${goal.label}" is measured as a chance of an event, which Olumi works out, so it has no level to record. Nothing was prepared. `

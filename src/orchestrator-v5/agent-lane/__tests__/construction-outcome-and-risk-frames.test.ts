@@ -201,6 +201,11 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     const back = structuredClone(sent[0]!);
     for (const k of ['risks', 'outcomes']) items(back, k).required = ['label', 'provenance'];
     items(back, 'links').required = items(back, 'links').required.filter((k) => k !== 'definitional');
+    // S-E GOALS S2b: the event-by-date keys are optional in the contract (recorded candidates predate them) and required
+    // when sent (strict output), exactly as `definitional` is.
+    const goal = (back.properties as Record<string, { required: string[] }>).goal!;
+    goal.required = goal.required.filter((k) => k !== 'kind' && k !== 'deliverable');
+    items(back, 'options').required = items(back, 'options').required.filter((k) => k !== 'added_capacity');
     expect(JSON.stringify(back)).toBe(JSON.stringify(contract));
   });
 
