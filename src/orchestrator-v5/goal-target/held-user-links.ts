@@ -248,6 +248,13 @@ export function heldLinkOf(e: unknown, ends: LinkEnds): LinkHold | null {
   return { reason: 'route_once', std: isRec(e.strength) && finite(e.strength.std) ? e.strength.std : undefined };
 }
 
+/** The existence the wire sends. With no ends, read an already-projected wire edge without applying a hold again. */
+export function effectiveLinkExistenceProbability(e: unknown, ends?: LinkEnds): number | undefined {
+  if (ends !== undefined && heldLinkOf(e, ends) !== null) return 1;
+  return isRec(e) && finite(e.exists_probability) && e.exists_probability >= 0 && e.exists_probability <= 1
+    ? e.exists_probability : undefined;
+}
+
 /**
  * HISTORY ONLY (`graph-hash.ts` 'pre_definition'): the hold as #2643 + #2653 computed it before the validated rule — the
  * user's links only, their definitional flag held unvalidated. A model version or Run recorded then is still that one.
@@ -294,10 +301,11 @@ export function withHeldUserLinks<G>(graph: G): G {
   g.edges = (g.edges as Rec[]).map((copy, i) => {
     const held = holds[i] as LinkHold | null;
     if (held === null) return copy;
+    const exists_probability = effectiveLinkExistenceProbability(edges[i], endsOf(edges[i]));
     // Rule R changes only existence: the copy's strength (mean, std, absent or not) is the persisted one, byte for byte.
     // Built from the CLONE, never the persisted edge, so no nested object of the persisted graph is shared with the Run's.
-    if (held.reason === 'route_once') return { ...copy, exists_probability: 1 };
-    return { ...copy, exists_probability: 1, strength: { ...(isRec(copy.strength) ? copy.strength : {}), std: held.std } };
+    if (held.reason === 'route_once') return { ...copy, exists_probability };
+    return { ...copy, exists_probability, strength: { ...(isRec(copy.strength) ? copy.strength : {}), std: held.std } };
   });
   return g as G;
 }

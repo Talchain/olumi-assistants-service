@@ -66,9 +66,9 @@ describe('F5 D1: Paul\'s "aiming to double that" is a target card — a decision
 
   it('RED (the DL\'s row): "cut costs to £34k over the next year" — `over` reads a direction against the Agent\'s at most → a decision, never a dead end', async () => {
     const turn = 'We need to cut costs to £34k over the next year.';
-    expect(comparatorTheUserWrote(turn), 'precondition: the literal reading is at least (the old `over`)').toBe('at_least');
+    expect(comparatorTheUserWrote(turn), 'precondition: the literal reading preserves the strict `over`').toBe('above');
     const p = await propose(turn, [], { constraint_type: 'at_most', value: 34000 });
-    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'above', alternative: 'at_most' } }));
   });
 
   it('CONTROL: the user\'s own literal words carry it — no decision is offered, the card is theirs', async () => {
