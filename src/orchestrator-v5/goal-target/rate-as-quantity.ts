@@ -8,9 +8,11 @@
  *  1. an explicit per-period marker → quantity; other denominators and "rate" require no event in this segment.
  *     "per month" wins even over an event; "a month" after an event is a duration unless a quantity directly precedes it.
  *  2. a population noun (churn, conversion, retention, default, click-through, open, response, return, attrition) → quantity;
+ *     a specified singular member with no plural population is one entity, never a population.
  *  3. a one-off event or decision (win, launch, deal, approval, hire, contract, deadline, "on time", "by <date>",
  *     "succeed", "happen") → chance;
  *  4. otherwise → chance (fail-closed, #2742's behaviour).
+ * "Risk" names a chance only as "risk of …" / "risk that …". Hyphens separate tokens, so "risk-adjusted" does not.
  * Words are scanned linearly, with no regular expressions. Text over 400 characters is not read (rule 4).
  */
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
@@ -30,7 +32,15 @@ const POPULATION_IF_SUBJECT = new Set([
   'responds', 'responded', 'return', 'returns', 'returned', 'returning',
 ]);
 const CHANCE = new Set(['probability', 'probabilities', 'chance', 'chances', 'likelihood', 'likelihoods', 'odds']);
-const MEMBER_WORDS = new Set([...MEMBERS, 'subscriber', 'subscribers', 'borrower', 'borrowers', 'recipient', 'recipients', 'buyer', 'buyers']);
+const MEMBER_WORDS = new Set([...MEMBERS, 'account', 'accounts', 'client', 'clients', 'subscriber', 'subscribers',
+  'borrower', 'borrowers', 'recipient', 'recipients', 'buyer', 'buyers']);
+/** A specifying modifier identifies one singular member; a plural population in the segment vetoes this reading. */
+const SPECIFYING_MODIFIER = new Set(['key', 'major', 'biggest', 'largest', 'top', 'named']);
+const singularMember = (w: string): boolean => MEMBER_WORDS.has(w) && !w.endsWith('s');
+/** DL: only "risk of <event>" / "risk that <clause>" names a chance; compound risk metrics do not. */
+export const riskChanceWord = (ws: readonly string[], i: number): boolean => ws[i] === 'risk'
+  && (ws[i + 1] === 'of' || ws[i + 1] === 'that');
+const chanceWordAt = (ws: readonly string[], i: number): boolean => CHANCE.has(ws[i] ?? '') || riskChanceWord(ws, i);
 /** Rule 3's one-off events and decisions. */
 const EVENT = new Set([
   'win', 'wins', 'winning', 'won', 'launch', 'launches', 'launching', 'launched', 'deal', 'approval', 'approved', 'hire',
@@ -58,7 +68,7 @@ const CLAUSE_START = new Set(['that', 'if', 'whether', 'when']);
  * One linear scan, within the same bounded segment as all other rules.
  */
 function eventClause(ws: readonly string[]): boolean {
-  const chance = ws.findIndex((w) => CHANCE.has(w) && w !== 'chances');
+  const chance = ws.findIndex((w, i) => chanceWordAt(ws, i) && w !== 'chances');
   if (chance < 0) return false;
   let nominal = false; let subject = false; let personal = false;
   for (let i = chance + 1; i < ws.length; i++) {
@@ -105,9 +115,13 @@ const populationWord = (w: string): boolean => POPULATION.has(w) || POPULATION_I
 
 /** A population word must head the measured subject, never modify "target", "tender", "deposit", etc. */
 function populationSubject(ws: readonly string[]): boolean {
-  const chance = ws.findIndex((w) => CHANCE.has(w));
+  const chance = ws.findIndex((_w, i) => chanceWordAt(ws, i));
   const start = chance < 0 ? 0 : chance + (ws[chance + 1] === 'of' ? 2 : 1);
-  let clause = false; let memberAt = -1; let firstWord = -1; let definite = false;
+  // P1-C's single-member guard also applies before a chance head ("key account retention probability").
+  // The modifier belongs to this member, never to an earlier unrelated noun ("key issue customer retention").
+  const specifiedMember = !ws.some((w) => MEMBER_WORDS.has(w) && w.endsWith('s'))
+    && ws.some((w, i) => singularMember(w) && SPECIFYING_MODIFIER.has(ws[i - 1] ?? ''));
+  let clause = specifiedMember; let memberAt = -1; let firstWord = -1; let definite = false;
   for (let i = 0; i < ws.length; i++) {
     const w = ws[i]!;
     // A noun immediately before the chance measure heads it ("churn probability").
@@ -124,7 +138,7 @@ function populationSubject(ws: readonly string[]): boolean {
       if (populationWord(w) && tail && subject && !clause) return true;
       // A definite/possessive singular member names one entity ("our biggest customer"), not a population.
       if (DETERMINER.has(w)) definite = w !== 'a' && w !== 'an';
-      if (MEMBER_WORDS.has(w)) { if (definite && !w.endsWith('s')) clause = true; else memberAt = i; }
+      if (MEMBER_WORDS.has(w)) { if (definite && singularMember(w)) clause = true; else memberAt = i; }
       else if (!DETERMINER.has(w)) {
         if (CLAUSE_SUBJECT.has(w) || EVENT.has(w) || w === '|' || w === 'by' || w === 'on'
           || (chance >= 0 && (w === 'to' || w === 'and' || memberAt >= 0
@@ -143,14 +157,17 @@ function perMarker(ws: readonly string[], population: boolean, clause: boolean):
   };
   const event = clause || oneOffEvent(ws);
   const denominator = (i: number): boolean => nounAfter(i) && (isPeriod(ws[i]) || !event);
-  const quantityBefore = (w: string | undefined): boolean => w !== undefined
-    && (w === '%' || (w[0]! >= '0' && w[0]! <= '9') || CHANCE.has(w) || populationWord(w));
+  const quantityBefore = (i: number): boolean => {
+    const w = ws[i];
+    return w !== undefined
+      && (w === '%' || (w[0]! >= '0' && w[0]! <= '9') || chanceWordAt(ws, i) || populationWord(w));
+  };
   return ws.some((w, i) => ((w === 'rate' || w === 'rates') && !event)
-    || (isPeriodWord(w) && (population || CHANCE.has(ws[i + 1] ?? '') || (CHANCE.has(ws[i - 1] ?? '') && i + 1 === ws.length)))
+    || (isPeriodWord(w) && (population || chanceWordAt(ws, i + 1) || (chanceWordAt(ws, i - 1) && i + 1 === ws.length)))
     || (w === 'per' && denominator(i + 1))
     || (w === 'for' && ws[i + 1] === 'each' && denominator(i + 2))
     || ((w === 'each' || w === 'every') && denominator(i + 1) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
-    || ((w === 'a' || w === 'an') && isPeriod(ws[i + 1]) && (!event || quantityBefore(ws[i - 1])) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
+    || ((w === 'a' || w === 'an') && isPeriod(ws[i + 1]) && (!event || quantityBefore(i - 1)) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
     || (w === '%' && ws[i + 1] === 'of' && MEMBERS.has(ws[i + 2] ?? '')));
 }
 
@@ -161,7 +178,7 @@ function oneOffEvent(ws: readonly string[]): boolean {
   return ws.some((w, i) => (EVENT.has(w) && ws[i + 1] !== 'rate' && ws[i + 1] !== 'rates')
     || (w === 'on' && ws[i + 1] === 'time') || (w === 'ontime')
     || (w === 'by' && ws[i + 1] !== undefined)
-    || (CHANCE.has(w) && w !== 'chances' && (CLAUSE_SUBJECT.has(ws[i + 1] ?? '') || DETERMINER.has(ws[i + 1] ?? '')
+    || (chanceWordAt(ws, i) && w !== 'chances' && (CLAUSE_SUBJECT.has(ws[i + 1] ?? '') || DETERMINER.has(ws[i + 1] ?? '')
       || (ws[i + 1] === 'of' && ws[i + 2]?.endsWith('ing')))));
 }
 

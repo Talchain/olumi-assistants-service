@@ -38,6 +38,7 @@ const chanceGoals = <T extends readonly (readonly [string, string])[]>(rows: T):
 const REVIEW_CHANCE_ROWS = [
   ['T01', 'Probability of on-time delivery', '%'],
   ['T02', 'Chance we hit the Q3 launch', '%'],
+  ['T05', 'Risk of a data breach this year', '%'], // DL: a one-off event with a window; the invariant is the spec.
   ['T11', 'Probability of on-time launch per current plan', '%'],
   ['T12', 'Q3 launch', '% probability of on-time launch per current plan'],
   ['T13', 'Probability of hitting every milestone', '%'],
@@ -58,6 +59,7 @@ const REVIEW_CHANCE_ROWS = [
   ['T33', 'Probability the hire works out', '%'],
   ['U01', 'Probability our biggest customer churns', 'probability (%)'],
   ['U02', 'Probability the Acme lead converts', 'probability (%)'],
+  ['U03', 'Key account retention', 'probability (%)'], // DL: a specified singular member, never a population.
   ['U04', 'Probability the launch is delayed more than a month', 'probability (%)'],
   ['U05', 'Probability the launch is delayed more than a month', '%'],
   ['U06', 'Chance the migration takes a year', 'probability (%)'],
@@ -66,6 +68,8 @@ const REVIEW_CHANCE_ROWS = [
   ['U15', 'Probability the Q3 launch slips', 'probability (%)'],
   ['U16', 'Ship by Q3', '% chance the launch slips a quarter'],
   ['U17', 'Ship by Q3', '% probability of shipping a quarter late'],
+  ['RISK01', 'risk that we lose the contract', '%'],
+  ['RISK02', 'risk of losing Acme this quarter', '%'],
 ] as const;
 
 describe('independent review: user-terms safety', () => {
@@ -91,7 +95,6 @@ describe('independent review: user-terms safety', () => {
     ['T29', 'Monthly churn rate', '%'],
     ['T34', 'Monthly churn', 'probability (%)'],
     ['T35', 'Probability the Acme deal closes', '% per quarter'],
-    ['U03', 'Key account retention', 'probability (%)'], // Ruled level: population retention (rule 2).
     ['U08', 'Monthly probability of hitting target', '%'],
     ['U09', 'Probability a visitor converts', '%'],
     ['U10', 'Win rate', 'probability (%)'], // DL P2-D: nominal rate head, no one-off event.
@@ -108,9 +111,54 @@ describe('independent review: user-terms safety', () => {
   ] as const)('%s AMBIGUOUS, fail-safe CHANCE: %s measured in %s', (_id, label, unit) => {
     expect(goalKindOf({ label, goal_threshold_unit: unit })).toBe('chance_of_event');
   });
-  it('T05 pre-existing vocabulary gap: Risk of a data breach this year measured in %', () => {
-    // Reviewer Expected=chance, but BASE and HEAD read level: "risk" is outside CHANCE_WORD and this fix's scope.
-    expect(goalKindOf({ label: 'Risk of a data breach this year', goal_threshold_unit: '%' })).toBe('level');
+  it.each(['Risk score', 'Risk-adjusted return', 'Risk appetite (%)', 'Credit risk exposure'])(
+    'MUST-NOT: the compound metric %s measured in %% stays a level', (label) => {
+      expect(goalKindOf({ label, goal_threshold_unit: '%' })).toBe('level');
+      // These metrics do not name population probabilities. An explicit chance unit still fails closed;
+      // this is not a chance reading licensed by the word "risk" in the label.
+      expect(goalKindOf({ label, goal_threshold_unit: 'probability (%)' })).toBe('chance_of_event');
+    });
+  it.each(['Major customer retention', 'Biggest customer churn', 'Largest user conversion', 'Top account retention',
+    'Named client retention', 'Key account retention probability'])(
+    'a specifying modifier makes a singular member one entity: %s', (label) => {
+      expect(readRateAsQuantity(label).kind).toBe('chance');
+      expect(goalKindOf({ label, goal_threshold_unit: 'probability (%)' })).toBe('chance_of_event');
+    });
+  it.each(['Key accounts retention', 'Named clients retention', 'Key account and other customers churn',
+    'Key issue customer retention'])(
+    'a plural population or an unrelated modifier keeps the population reading: %s', (label) => {
+      expect(readRateAsQuantity(label)).toEqual({ kind: 'quantity', rule: 2 });
+      expect(goalKindOf({ label, goal_threshold_unit: 'probability (%)' })).toBe('level');
+    });
+  it('risk forms use the same ordered rate reader: a period wins, a population stays a quantity', () => {
+    expect(goalKindOf({ label: 'Risk of a data breach per year', goal_threshold_unit: '%' })).toBe('level');
+    expect(goalKindOf({ label: 'Risk of customer churn', goal_threshold_unit: '%' })).toBe('level');
+    for (const label of ['risk that we lose the contract', 'risk of losing Acme this quarter']) {
+      expect(readRateAsQuantity(label)).toEqual({ kind: 'chance', rule: 3 });
+    }
+  });
+  it('U03 remains an ask and never licenses a target or current-level proposal', async () => {
+    const goal = { id: 'g', kind: 'goal', label: 'Key account retention', goal_threshold_unit: 'probability (%)' };
+    const graph = { goal_node_id: 'g', nodes: [goal], edges: [] };
+    const facts = actionFactsOf({ scenarioId: 'p17-u03', graph, analysisReady: { status: 'ready', may_run: true } });
+    const bar = actionBarOf(facts);
+    expect(bar.priority.map(o => o.action_id)).toContain('set_deadline');
+    expect(bar.priority.map(o => o.action_id)).not.toContain('set_goal');
+    const ask = decisionInputLines(graph, { builtOrRan: true, awaitingApproval: false, restingText: '', questionsToggle: false });
+    expect(ask.join(' ')).toContain('What is the deadline');
+    const dispatch: InternalDispatch = async (path) => {
+      if (!path.endsWith('/graph')) throw new Error(`Unexpected write: ${path}`);
+      return { status: 200, json: { graph, graph_hash: 'p17-u03' } };
+    };
+    const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full');
+    const text = 'Key account retention is 80% today and should reach 90%.';
+    const ctx = { scenario_id: 'p17-u03', authenticated_user_id: null, request_id: 'p17', user_text: text, user_turn_text: text };
+    const before = JSON.stringify(graph);
+    const target = await caps.proposeGoalTarget!(ctx, { constraint_type: 'at_least', value: 90, unit: '%', rationale: text });
+    expect(target).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'goal_measures_a_chance' }));
+    const level = await caps.proposeGoalCurrentLevel!(ctx, { goal_label: goal.label, value: 80, unit: '%', user_stated: true });
+    expect(level).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'goal_measures_a_chance' }));
+    expect(JSON.stringify(graph)).toBe(before);
   });
   it('a generic singular and possessive plural still describe population rates', () => {
     for (const label of ['Probability a customer churns', 'Probability our customers churn',

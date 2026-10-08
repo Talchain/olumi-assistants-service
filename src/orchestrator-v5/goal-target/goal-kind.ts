@@ -14,12 +14,13 @@
  *    recognised only with the graph, since a node cannot attest its incoming links.
  *
  * Chance words are read whole and bounded in the unit, and also in the label when the stored unit is a bare percent.
+ * "Risk" in that label names a chance only when followed by "of" or "that", never in a compound risk metric.
  * Science (b)'s rate reader decides whether that segment names a population quantity or a one-off chance: must-fire
  * "% likelihood of on-time launch", "On-time feature-launch probability" in "%"; must-not-fire "% of launch done",
  * "% of customers", "churn %", "Monthly churn probability" in "%".
  */
 
-import { readRateAsQuantity } from './rate-as-quantity.js';
+import { readRateAsQuantity, riskChanceWord } from './rate-as-quantity.js';
 import { shareKind } from '../../utils/unit-alphabet.js';
 import { readPercentUnit, readUnitParts, words } from '../agent-lane/same-unit.js';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
@@ -151,7 +152,7 @@ export function goalKindOf(goal: unknown, graph?: unknown): GoalKind {
   const unit = goalUnitOf(goal);
   const label = typeof goal.label === 'string' ? goal.label.slice(0, 401) : '';
   if (chanceUnits.length === 0 && unit !== undefined && shareKind(unit) === 'percent'
-    && label.split(/[^a-z]+/i).some((w) => CHANCE_WORD.test(w))
+    && label.toLowerCase().split(/[^a-z]+/i).some((w, i, ws) => CHANCE_WORD.test(w) || riskChanceWord(ws, i))
     && readRateAsQuantity(label).kind === 'chance') {
     return 'chance_of_event';
   }
