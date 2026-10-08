@@ -113,6 +113,43 @@
       "enabled": true,
       "why_now": "See the Olumi estimates feeding this result.",
       "offer_key": "dd3b10d47a3e0c30"
+    },
+    {
+      "action_id": "bias_check",
+      "label": "Bias check",
+      "icon": "ScanSearch",
+      "group": "method",
+      "press_id": "act:bias_check",
+      "user_line": "Where could a common reasoning pattern bite in this model?",
+      "enabled": true,
+      "why_now": "See where common reasoning patterns could bite in this model.",
+      "offer_key": "be8ad22b38ea78b0"
     }
-  ]
+  ],
+  "bias_risk": {
+    "v": 1,
+    "items": [
+      {
+        "claim_id": "DSK-B-007",
+        "name": "Narrow framing",
+        "why": "These options all work through the same lever, which can hide better routes.",
+        "action_id": "more_options",
+        "press_id": "agent-next-widen",
+        "offer_key": "238eb45e85c31ecf"
+      },
+      {
+        "claim_id": "DSK-B-001",
+        "name": "Anchoring",
+        "why": "Olumi’s starting figure for ‘Migration preparation effort’ could pull later estimates towards it.",
+        "action_id": "bias_anchoring",
+        "press_id": "act:bias_anchoring",
+        "offer_key": "be2a321235e1a126",
+        "science": {
+          "claim_id": "DSK-B-001",
+          "claim_title": "Anchoring and insufficient adjustment",
+          "evidence_strength": "strong"
+        }
+      }
+    ]
+  }
 }

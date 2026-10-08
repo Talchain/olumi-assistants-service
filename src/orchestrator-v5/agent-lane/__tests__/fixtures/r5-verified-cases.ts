@@ -12,6 +12,7 @@ import { verifiedOptionSetting } from '../../verified-option-setting.js';
 import { creditStatedFactorLevels } from '../../stated-by-user.js';
 import { buildCandidateSchema, buildModelFromBrief, carryFindingsAcrossRetry, prepareProvisionalCandidate, strictForTheDrafter, withCountInterventionRanges } from '../../runtime/build-model.js';
 import type { InternalDispatch } from '../../runtime/agent-capabilities.js';
+import { beforeDoorTag } from '../licence-test-graphs.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 
 export const fixture = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -163,7 +164,7 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), true);
     const p = prepare(raw, brief); const a = admitted(p.candidate, brief);
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
-    assert.equal(digest(JSON.stringify({ p, a })), baseline[c.file]);
+    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(a) })), baseline[c.file]);
   },
 })));
 export const registrationRows: Row[] = probes.filter(p => p.id.startsWith('B-')).map(p => ({

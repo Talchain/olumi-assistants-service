@@ -1,3 +1,6 @@
+import { applyTeamShareEdit, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../goal-target/team-share-write.js';
+import { withApprovedShareByDateWrite } from '../goal-target/share-by-date-carrier.js';
+import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
 import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
@@ -91,6 +94,7 @@ import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './id
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { goalDeadlineOf } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -718,7 +722,8 @@ async function applyApprovedLinkStrengths(
     // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
     const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
       { provenance?: { source?: unknown; reviewed_by_user?: { intent?: unknown; at?: unknown } }; defaulted?: unknown } | undefined;
-    if (l.adopted && stored?.provenance?.source === 'user_specified' && stored.defaulted !== true) return refuse('link_became_users_own', i);
+    if (l.adopted && linkSizing(stored) === 'user'
+      && drawnLinkAdoptionFor(ctx.scenarioId, l.from, l.to, l.magnitude, stored) === undefined) return refuse('link_became_users_own', i);
     // …and a link the user REVIEWED since the proposal (a canvas confirm writes only that stamp) is their settled view.
     const review = stored?.provenance?.reviewed_by_user;
     const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
@@ -849,6 +854,7 @@ export type OptionInterventionBatchExecutionInput =
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card, the goal's `goal_horizon` only: ONE append, alone (never with anything else). */
     readonly goalHorizon?: ApprovedGoalHorizon;
+    readonly teamTime?: ApprovedTeamTime;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
@@ -876,7 +882,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     return { kind: 'refused', reason: 'option_gap_without_level_anchor' };
   }
   if (optionGaps.length > 0 && ((input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined
-    || input.goalHorizon !== undefined)) {
+    || input.goalHorizon !== undefined || input.teamTime !== undefined)) {
     return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
   }
   let before: unknown;
@@ -905,7 +911,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon,
+    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon, teamTime: _callerTeamTime,
     lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
@@ -1077,7 +1083,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     // A retry of a write that landed: the date is already held, so the batch is a verified no-op (`unchanged` below).
     if (written.kind === 'unchanged') return { kind: 'unchanged' };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id)
+    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date)
       || goalDeadlineOf(graph.nodes.find((n) => n.id === goalHorizon.goal_id)) !== goalHorizon.deadline) {
       return { kind: 'refused', reason: 'deadline_scope_mismatch' };
     }
@@ -1088,8 +1094,26 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     valueConfirmations = [written.confirmation];
   }
+  const teamTime = input.teamTime;
+  if (teamTime !== undefined) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || linkEffects.length > 0
+      || identityConfirm !== undefined || goalHorizon !== undefined || (expectedLinks?.length ?? 0) > 0) return { kind: 'refused', reason: 'team_time_not_alone' };
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    const written = applyTeamShareEdit(before, teamTime, input.expectedGraphHash);
+    if (written.kind !== 'mutated') return written;
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !teamSharePostimageIsScoped(before, graph, teamTime.team_id)) return { kind: 'refused', reason: 'team_time_scope_mismatch' };
+    levelBase = graph;
+    const teamHash = computeAnalysisAffectingGraphHash(graph);
+    if (!teamHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBaseHash = teamHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
   const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
-    + (goalHorizon !== undefined ? 1 : 0);
+    + (goalHorizon !== undefined ? 1 : 0) + (teamTime !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
@@ -1164,13 +1188,17 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     blocks: [], suggested_actions: [], insights: [], stage_indicator: input.stage };
   let committed: Awaited<ReturnType<typeof commitDirectAnswer>>;
   try {
-    committed = await commitDirectAnswer(response, {
+    const commit = () => commitDirectAnswer(response, {
       scenario_id: input.scenarioId, turn_id: input.turnId, request_hash: input.requestHash,
       turn_class: 'direct_answer', handler_id: null, llm_calls_used: 0, duration_ms: 0,
       handler_facts: plan.handlerFacts as never, graph: plan.graph, contentGraph: plan.graph,
       baseGraphForInvariants: before, ...computeExpectedGraphCasHashes(before),
       graph_hash: plan.analysisGraphHash, priorPendingActions: holds.threaded,
     }, store);
+    // Scope was verified at the specialised write door above; the generic invariant
+    // guard still compares the real CAS base and final projection exactly.
+    committed = await (teamTime !== undefined || goalHorizon !== undefined
+      ? withApprovedShareByDateWrite(before, plan.graph, commit) : commit());
   } catch (err) {
     // The fence refuses BEFORE the write (nothing saved): the in-process door's wrapper names the verdict.
     if (input.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;

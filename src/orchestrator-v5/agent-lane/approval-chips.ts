@@ -61,6 +61,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
   // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
+  propose_team_time: { label: 'Yes', message: 'Yes' },
   propose_new_limit: { label: 'Yes', message: 'Yes, record that limit.' },
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
@@ -95,6 +96,9 @@ export const ONE_CHANGE_PER_APPROVAL_DETAIL =
   + 'have answered. Never ask them to approve both.';
 
 /** Whether a tool leaves a proposal awaiting the user's yes — the approve chip's own list. */
+/** P44 S1: `authorise_change` refused on a narrating call (`agent-loop.ts`); the held change stays offered. */
+export const NOT_ON_NARRATION = 'not_on_narration';
+
 export const isProposingTool = (name: string): boolean => APPROVE[name] !== undefined;
 
 /**
@@ -130,7 +134,7 @@ export const AMEND_CHIP: SuggestedAction = {
  * authorisation's identity is unknown: never a guess about which proposal it consumed.
  */
 export function proposalsAwaitingApproval(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
 ): ReadonlyMap<string, string> {
   /**
    * A turn that authorised something consumes THOSE proposals only: one that approved A and proposed
@@ -143,7 +147,8 @@ export function proposalsAwaitingApproval(
    * (Codex #1806 5807933515: propose B on H0, then approve A → H1, offered a chip that could not
    * commit). So only a proposal made AFTER the turn's last model change is still offerable.
    */
-  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
+  // An approval refused on a narrating call (`NOT_ON_NARRATION`, P44 S1) never reached the store: it consumes nothing.
+  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change' && c.refusal !== NOT_ON_NARRATION);
   if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return new Map();
   const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
   // A change the Agent withdrew this turn is neither offered nor carried (`WITHDRAW_PROPOSAL`).
@@ -163,7 +168,7 @@ export interface ApprovalLabelSource {
 }
 
 export function approvalChipsFor(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
   labelSourceFor?: (proposalId: string) => ApprovalLabelSource | undefined,
 ): SuggestedAction[] {
   const offered = proposalsAwaitingApproval(toolCalls);
@@ -210,6 +215,11 @@ export function approvalChipsFor(
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
   }
+  if (tool === 'propose_model_change' && stored?.proposal_id === proposalId && stored.operations.length === 1
+    && stored.operations[0]?.op === 'add_edge' && (stored.operations[0].value as { author?: unknown }).author === 'model_proposed') {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Approve', message: approve.message, detail: stored.public_label }, AMEND_CHIP,
+      { id: `agent-decline-drawn-link:${proposalId}`, label: 'Decline', message: 'Decline this suggested link.' }];
+  }
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {
@@ -225,7 +235,8 @@ export function approvalChipsFor(
   if (tool === 'propose_identity') {
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
-      : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+      : [{ id: approvalChipIdFor(proposalId), label: words.startsWith('Olumi reads ‘') ? "Yes, that's how" : approve.label,
+        message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {
@@ -264,12 +275,12 @@ export function approvalChipsFor(
       ...(value.reserve === undefined ? [] : [{ id: approvalChipIdFor(proposalId) + ':reserve', label: value.reserve.label,
         message: value.reserve.message, detail: value.reserve.detail }])];
   }
-  if (tool === 'propose_goal_deadline') {
+  if (tool === 'propose_goal_deadline' || tool === 'propose_team_time') {
     const source = labelSourceFor?.(proposalId);
     const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
       && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
-      DEADLINE_CHANGE_CHIP];
+      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' } : DEADLINE_CHANGE_CHIP];
   }
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
@@ -279,7 +290,8 @@ export function approvalChipsFor(
 /**
  * ⭐ A LINK-STRENGTH APPROVAL SAYS WHAT IT RECORDS (CODEX_CLI_OVERFLOW P1 + DL ruling on #2481; ONE projection, shared
  * with #2480's card): the button alone read "Record these links", so the band and whose estimate it is were hidden. The
- * STORED proposal's own card — each link, its band and "Olumi's estimate" or "your estimate", as `proposeLinkStrengths`
+ * STORED proposal's own card — each link, its band and whose estimate it is, including a first estimate for a link
+ * nobody had sized, as `proposeLinkStrengths`
  * minted it — rides in `detail`. Identity: the store's proposal for THIS chip's id, every operation a link strength.
  * Never the Agent's prose. Used live and on a replay, which rebuilds the chip from the same stored proposal.
  */
@@ -306,6 +318,9 @@ function directionChoiceFor(tool: string, source: ApprovalLabelSource | undefine
 
 /** The stored basis of a keep proposal (`proposeAssumptions` `keep: true`) — the authority the keep button binds to. */
 export const KEEP_PROPOSAL_BASIS = 'Olumi\u2019s current estimates, unchanged, for the user to accept';
+export const isKeepProposal = (proposal: StructuredProposal): boolean =>
+  proposal.provenance.basis === KEEP_PROPOSAL_BASIS || proposal.provenance.original_basis === KEEP_PROPOSAL_BASIS;
+
 
 /**
  * The keep button, ONLY when the STORED proposal is a keep (its basis) and the proposer's own result for that same id
@@ -315,7 +330,7 @@ function keepCardFor(tool: string, source: ApprovalLabelSource | undefined): { l
   const proposal = source?.proposal;
   const result = source?.result;
   if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  if (proposal.provenance.basis !== KEEP_PROPOSAL_BASIS || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
+  if (!isKeepProposal(proposal) || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
   const n = proposal.operations.length;
   return n === 1
     ? { label: 'Keep Olumi\u2019s estimate', message: 'Yes, keep Olumi\u2019s estimate.', detail: proposal.public_label }

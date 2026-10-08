@@ -62,6 +62,7 @@ const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
 const AT = '2026-10-07T12:00:00.000Z';
 const READY = { status: 'ready', may_run: true };
 const PARTICIPATION = [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }];
+const PROSPECT = { from: 'enterprise_prospect_signing_likelihood', to: 'quarterly_revenue' };
 const FIXTURES = new URL('../../orchestrator-v5/agent-lane/actions/__tests__/fixtures/', import.meta.url);
 const hashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as never)!;
 
@@ -82,6 +83,20 @@ function setState(state: State, graph: unknown = state === 'licensed' ? D3.graph
       analysis_result: result, current_read: { analysis_ready: ready, result }, analysis_constraint_verdict_state: null,
       ...(state === 'licensed' ? {} : { analysis_option_participation: PARTICIPATION }) };
   port.readExistingScenario.mockResolvedValue({ userId: OWNER, graph: source.graph, briefText: 'Which sprint plan?', analysisInvalidatedAt: null });
+}
+
+// The existing pre-mortem door can hold a SIZED link; Strengthen's S1 picker only selects placeholders.
+// This is a synthetic, independently sized control on a clone, never a re-recording of the served fixture.
+function setSizedPremortemState(graph: unknown = D1.graph): void {
+  const g = structuredClone(graph) as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  const edge = g.edges.find(e => e.from === PROSPECT.from && e.to === PROSPECT.to)!;
+  edge.strength = { mean: 0.5, std: 0.1 };
+  edge.provenance = { ...(edge.provenance as Record<string, unknown>), magnitude: 'olumi_estimate' };
+  delete edge.defaulted;
+  setState('licensed', g);
+  const result = { ...(source.analysis.analysis_result as Record<string, unknown>), leading_option_id: 'ai_reporting_module_sprint' };
+  source.analysis = { ...source.analysis, analysis_result: result,
+    current_read: { ...(source.analysis.current_read as Record<string, unknown>), result } };
 }
 
 let serial = 0;
@@ -155,8 +170,9 @@ afterEach(async () => {
   for (const p of agentProposals.outstanding(scenario, OWNER)) agentProposals.discard(p.proposal_id);
 });
 
-type Offer = { action_id: string; press_id: string; enabled: boolean; offer_key: string; label: string; disabled_reason?: string; why_now?: string };
-type Bar = { v: number; state_key: string; revision: { graph_hash: string | null; run_key: string | null }; priority: Offer[]; standard: Offer[]; more: Offer[] };
+type Offer = { action_id: string; press_id: string; enabled: boolean; offer_key: string; label: string; user_line: string; disabled_reason?: string; why_now?: string };
+type Bar = { v: number; state_key: string; revision: { graph_hash: string | null; run_key: string | null }; priority: Offer[]; standard: Offer[]; more: Offer[];
+  bias_risk?: { v: 1; items: { claim_id: string; press_id: string; offer_key: string }[] } };
 type Body = { assistant_text: string; suggested_actions: { id: string; label: string; message: string }[]; action_bar?: Bar;
   _action?: Record<string, unknown>; _agent?: { tool_calls?: { name: string; proposal_id?: string }[] }; _diagnostic_trace?: { fast_path?: string } };
 let turnSerial = 0;
@@ -254,18 +270,48 @@ describe('a press is re-derived on the current state (amendment 6)', () => {
 });
 
 describe('the same offer pressed twice prepares ONE card (amendment 6)', () => {
-  it('RED: Strengthen twice under the same offer_key → one held proposal; the second press re-offers it with no tool call', async () => {
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: Strengthen twice held one placeholder card -> Strengthen twice asks for the same unsized link, with zero proposals or model calls.
+  it('Strengthen twice under the same offer_key → the placeholder size ask, zero held proposals and zero model calls', async () => {
     setState('withheld');
     const bar = (await turn({ message: 'Where are we?' })).action_bar!;
     const offer = offersOf(bar).find((o) => o.action_id === 'strengthen')!;
+    const edge = (source.graph as typeof D1.graph).edges.find(e => e.from === PROSPECT.from && e.to === PROSPECT.to)!;
+    expect(edge).toMatchObject({ ...PROSPECT, strength: { mean: 0.5, std: 0.125 }, defaulted: true });
+    modelCalls = 0;
+    const first = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
+    const second = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
+    expect(first.assistant_text).toBe('The comparison rests on a link nobody has sized yet.\n\nHow much does "Quarterly revenue" change when "Enterprise prospect signing likelihood" goes up by one percentage point?');
+    expect(second.assistant_text).toBe(first.assistant_text);
+    for (const b of [first, second]) {
+      expect(b._agent?.tool_calls ?? []).toEqual([]);
+      expect(b.suggested_actions.some(a => a.id.startsWith('agent-approve-proposal:'))).toBe(false);
+      expect(b._action).toMatchObject({ action_id: 'strengthen', offer_key: offer.offer_key, outcome: 'ran' });
+    }
+    expect(agentProposals.outstanding(scenario, OWNER)).toEqual([]);
+    expect((table[0]!.pending_actions as PendingAction[]).some(pa => pa.action.kind === 'apply_proposed_change')).toBe(false);
+    expect(modelCalls).toBe(0);
+  });
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: Strengthen supplied the held card for offer_key dedupe -> a pre-mortem on a SIZED prospect -> revenue link preserves one held card and the same-key re-offer claim.
+  it('RED: Pre-mortem twice under the same offer_key → one sized-link proposal; the second press re-offers it with no tool or model call', async () => {
+    setSizedPremortemState();
+    const bar = (await turn({ message: 'Where are we?' })).action_bar!;
+    const offer = offersOf(bar).find((o) => o.action_id === 'pre_mortem')!;
     const first = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
     expect(first._agent?.tool_calls?.map((c) => c.name)).toEqual(['propose_link_strengths']);
     const approve = first.suggested_actions.find((a) => a.id.startsWith('agent-approve-proposal:'))!;
+    expect(agentProposals.get(agentProposals.outstanding(scenario, OWNER)[0]!.proposal_id)!.operations).toEqual([
+      expect.objectContaining({ op: 'set_link_strength', path: `${PROSPECT.from}::${PROSPECT.to}` }),
+    ]);
+    const callsBeforeSecond = modelCalls;
     const second = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
     expect(second._agent?.tool_calls ?? []).toEqual([]);
-    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal']);
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+    // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: Strengthen's held card had three controls -> pre-mortem preserves their order and adds its existing Talk it through exit.
+    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal',
+      `agent-decline-proposal:${approve.id.slice('agent-approve-proposal:'.length)}`, 'agent-talk-it-through']);
     expect(agentProposals.outstanding(scenario, OWNER).length).toBe(1);
-    expect(second._action).toMatchObject({ outcome: 'ran', reason: 'already_waiting' });
+    expect(second._action).toMatchObject({ action_id: 'pre_mortem', offer_key: offer.offer_key, outcome: 'ran', reason: 'already_waiting' });
+    expect(modelCalls).toBe(callsBeforeSecond);
   });
 });
 
@@ -312,6 +358,39 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     const after = (await reload()).action_bar!;
     expect(after.state_key).not.toBe(before.state_key);
   });
+  it('P45: the bias-risk row rides the live bar and reloads byte-identical; every item presses an enabled offer on that same bar', async () => {
+    setState('licensed'); coldStore();
+    const live = (await turn({ message: 'Where are we?' })).action_bar!;
+    expect(live.bias_risk?.items.map(i => i.claim_id)).toEqual(['DSK-B-007', 'DSK-B-001']);
+    const offers = [...live.priority, ...live.standard, ...live.more];
+    for (const item of live.bias_risk!.items) {
+      expect(offers.find(o => o.offer_key === item.offer_key && o.press_id === item.press_id && o.enabled), item.claim_id).toBeDefined();
+    }
+    const again = (await reload()).action_bar!;
+    expect(JSON.stringify(again.bias_risk)).toBe(JSON.stringify(live.bias_risk));
+  });
+  it('P45 slice 3 RED: licensed bias_check press lists both model items, zero model calls, ran receipt, and identical reload bar', async () => {
+    setState('licensed');
+    const b = await press('act:bias_check');
+    expect(modelCalls).toBe(0);
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(b._action).toMatchObject({ action_id: 'bias_check', outcome: 'ran' });
+    expect(b._action?.science).toBeUndefined();
+    expect(b.assistant_text.startsWith('Checked: Narrow framing, Anchoring.')).toBe(true);
+    expect(b.assistant_text).toContain("Narrow framing: where the pattern could bite: ‘Phased GCP migration’, ‘Switch to GCP’. One test: press ‘More options’.");
+    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘Migration preparation effort’. One test: press ‘Anchoring’.");
+    const claim = resolveDskClaimProvenance('DSK-B-001')!;
+    expect(b.assistant_text).toContain(`Decision-science claim: ${claim.claim_title} · ${claim.evidence_strength} evidence`);
+    expect(b.assistant_text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);
+    const offers = offersOf(b.action_bar!);
+    expect(b.suggested_actions).toEqual(['more_options', 'bias_anchoring'].map(action_id => {
+      const offer = offers.find(o => o.action_id === action_id)!;
+      expect(offer.enabled, action_id).toBe(true);
+      return { id: offer.press_id, label: offer.label, message: offer.user_line };
+    }));
+    coldStore();
+    expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(b.action_bar));
+  });
   it('the three captured bars are the committed fixtures DGAI binds to (pre-Run, withheld Run, licensed Run)', async () => {
     scenario = '6f1e2d3c-4b5a-4e6d-9c7b-00000000f1c5';
     for (const [state, name] of [['pre_run', 'pre-run'], ['withheld', 'withheld-run'], ['licensed', 'licensed-run']] as const) {
@@ -320,7 +399,14 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
       expect(bar.revision.graph_hash, name).toBe(hashOf(source.graph));
       const file = new URL(`action-bar-v1-${name}.json`, FIXTURES);
       if (process.env.CAPTURE_ACTION_BAR_FIXTURES === '1') writeFileSync(file, `${JSON.stringify(bar, null, 2)}\n`);
-      expect(bar, name).toEqual(JSON.parse(readFileSync(file, 'utf8')));
+      const expected = JSON.parse(readFileSync(file, 'utf8'));
+      // Science 393023 LICENCE (a)/(b), 7 Oct: licensed D3 no Strengthen → enabled Strengthen for workload/savings; every other field stays pinned.
+      if (name === 'licensed-run') expected.standard.splice(2, 0, {
+        action_id: 'strengthen', label: 'Strengthen', icon: 'ShieldCheck', group: 'review',
+        press_id: 'agent-next-strengthen', user_line: 'What would most strengthen this model?', enabled: true,
+        why_now: 'A link on your goal’s path has no size yet.', offer_key: '82c52ea28c022f3b',
+      });
+      expect(bar, name).toEqual(expected);
     }
   });
 });
@@ -352,11 +438,15 @@ describe('S-B slice 2a through the real routes', () => {
     g.nodes = g.nodes.filter(n => n.kind !== 'goal'); setState('pre_run', g);
     expect((await reload()).action_bar!.priority.map(o => o.action_id)).toEqual(['frame_brief']);
   });
-  it('a durable pending approval yields on live and reload; a stale Run also yields, a current Run restores priority', async () => {
-    setState('withheld', paulGraph());
-    const card = await press('agent-next-strengthen');
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: a Strengthen placeholder card made standing gaps yield -> an existing pre-mortem SIZED-link card preserves durable pending-approval yielding on live and reload.
+  it('a durable pre-mortem approval yields on live and reload; a stale Run also yields, a current Run restores priority', async () => {
+    setSizedPremortemState(paulGraph());
+    const card = await press('agent-next-pre-mortem');
     const latest = table[0]!.pending_actions as PendingAction[];
     expect(latest.some(pa => pa.action.kind === 'apply_proposed_change'), 'the answer row carries its approval').toBe(true);
+    expect(agentProposals.get(agentProposals.outstanding(scenario, OWNER)[0]!.proposal_id)!.operations).toEqual([
+      expect.objectContaining({ op: 'set_link_strength', path: `${PROSPECT.from}::${PROSPECT.to}` }),
+    ]);
     expect(card.action_bar!.priority.map(o => o.action_id)).not.toContain('set_deadline');
     expect(card.action_bar!.more.find(o => o.action_id === 'set_deadline')).toMatchObject({ enabled: true });
     coldStore();
@@ -371,11 +461,17 @@ describe('S-B slice 2a through the real routes', () => {
     setState('withheld', paulGraph());
     expect((await reload()).action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
   });
+  // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived: a Strengthen placeholder card exercised a dropped approval carrier -> a pre-mortem SIZED-link proposal preserves the persisted-carrier check instead of vacuously passing on an ask-only press.
   it('the live bar reads the PERSISTED approval carrier, like the reload (Codex r1 P1-1 on #2766)', async () => {
-    setState('withheld', paulGraph());
+    setSizedPremortemState(paulGraph());
     // The persistence floor (or a concurrent decline) leaves no approval on the row this turn writes.
     port.append.mockImplementation((w: SessionTurnWrite) => realStore.append({ ...w, pending_actions: [] }));
-    const card = await press('agent-next-strengthen');
+    const card = await press('agent-next-pre-mortem');
+    expect(card._agent?.tool_calls?.map(c => c.name)).toEqual(['propose_link_strengths']);
+    expect(agentProposals.get(agentProposals.outstanding(scenario, OWNER)[0]!.proposal_id)!.operations).toEqual([
+      expect.objectContaining({ op: 'set_link_strength', path: `${PROSPECT.from}::${PROSPECT.to}` }),
+    ]);
+    expect(table[0]!.pending_actions).toEqual([]);
     expect(card.action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
     coldStore();
     expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(card.action_bar));
@@ -440,20 +536,30 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     expect(b.assistant_text).toBe(expected);
     expect(b.assistant_text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
     expect(b.suggested_actions).toEqual([]);
-    expect(b._action?.science).toBeUndefined(); // two options + current Run: canonicalStageOf reads decide
+    // Two options + current Run: canonicalStageOf reads decide, a compared Run; DSK-B-001 applies there (Science 393023 decide→evaluate).
+    expect(b._action?.science).toEqual(id === 'bias_anchoring' ? resolveDskClaimProvenance('DSK-B-001') : undefined);
+    expect(JSON.stringify(b._action).match(/DSK-B-001/g)?.length ?? 0).toBe(id === 'bias_anchoring' ? 1 : 0);
     for (const action_id of ['bias_anchoring', 'check_estimates']) expect(b.action_bar!.more.find(o => o.action_id === action_id)).toMatchObject({ enabled: true });
     coldStore();
     expect((await reload()).action_bar).toEqual(b.action_bar);
   });
-  it('anchoring frame badge uses the canonical reader on a stale Run; no readable stage yields no badge', async () => {
-    setState('stale', estimateGraph());
+  it('anchoring needs a bound Run: stale and pre-Run presses say so (no badge, no offer); a current Run at the frame stage carries the badge', async () => {
+    for (const state of ['stale', 'pre_run'] as const) {
+      setState(state, estimateGraph());
+      const b = await press('act:bias_anchoring');
+      expect(b._action, state).toMatchObject({ outcome: 'cant_yet', reason: 'needs_current_analysis' });
+      expect(b._action?.science, state).toBeUndefined();
+      expect(offersOf(b.action_bar!).some(o => o.action_id === 'bias_anchoring'), state).toBe(false);
+    }
+    // A current Run on a one-option model reads the frame stage (canonical reader): the one badge rides.
+    const g = estimateGraph(); g.nodes = g.nodes.filter(n => n.id !== 'b');
+    setState('withheld', g);
+    const result = { ...(source.analysis.analysis_result as object), enrichment: { inference_warnings: [estimateLicence({ a: 'far' })] } };
+    source.analysis = { ...source.analysis, analysis_result: result, current_read: { analysis_ready: READY, result } };
     const frame = await press('act:bias_anchoring');
+    expect(frame._action).toMatchObject({ outcome: 'ran' });
     expect(frame._action?.science).toEqual(resolveDskClaimProvenance('DSK-B-001'));
     expect(JSON.stringify(frame._action).match(/DSK-B-001/g)).toHaveLength(1);
-    setState('pre_run', estimateGraph());
-    const noStage = await press('act:bias_anchoring');
-    expect(noStage._action).toMatchObject({ outcome: 'ran' });
-    expect(noStage._action?.science).toBeUndefined();
     expect(modelCalls).toBe(0);
   });
   it('stale anchoring offer after all eligible factors became user figures: exact no-trigger reply, cant_yet, no model calls', async () => {

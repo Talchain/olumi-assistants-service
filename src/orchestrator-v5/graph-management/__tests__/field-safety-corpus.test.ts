@@ -83,6 +83,7 @@ function addNode(screened: Record<string, unknown>) {
 const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
   // event_risk.v1 slice 2a: pipeline-owned occurrence.
   'event_risk',
+  'relies_on', // RC3: server-authored precondition stamp.
   // src/schemas/cee-v3.ts — NodeV3
   'provenance',
   'extractiontype',
@@ -177,6 +178,7 @@ const SIX_SMUGGLE_NAMES = [
   'proposed_by',
   'option_status',
   'analysis_participation',
+  'relies_on',
 ] as const;
 
 describe('corpus B — the six (now eight) smuggle names, hand-written', () => {

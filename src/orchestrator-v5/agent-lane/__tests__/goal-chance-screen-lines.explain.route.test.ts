@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type AnswerShape } from '../../routing/answer-shape.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 
 type Json = Record<string, any>;
@@ -21,6 +22,7 @@ const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-rea
 const SCREEN = (JSON.parse(readFileSync(new URL('./fixtures/waveB-screen-chance-lines-20261007.json', import.meta.url), 'utf8')) as { line: string; source: string }[])
   .filter((s) => s.source.includes('/t1b-b5-1/')).map((s) => s.line);
 const LEAD = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
+const SIZE_QUESTION = 'How sure are you of that size?';
 const SCENARIO = '5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a';
 const count = (text: string, s: string): number => text.split(s).length - 1;
 
@@ -83,7 +85,7 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     expect(chip, r.body).toBeDefined();
     return { scenario_id: SCENARIO, agent_session_id: first._agent.session_id, turn_id: randomUUID(), message: RUN_EXPLANATION_MESSAGE, chip: { id: chip.id } };
   };
-  const press = async (payload: Record<string, unknown>): Promise<{ assistant_text: string; _diagnostic_trace: { fast_path: string } }> => {
+  const press = async (payload: Record<string, unknown>): Promise<{ assistant_text: string; _answer_shape?: AnswerShape; _diagnostic_trace: { fast_path: string } }> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
     expect(r.statusCode, r.body).toBe(200);
     return r.json();
@@ -93,14 +95,26 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     expect(READ.analysis_state.run_state.kind).toBe('complete_current');
     expect(READ.analysis_state.leader_claim.permitted).toBe(false);
     expect(SCREEN).toHaveLength(3);
+    expect(count(SCREEN[0]!, SIZE_QUESTION)).toBe(1);
+    expect(count(SCREEN[1]!, SIZE_QUESTION)).toBe(1);
   });
 
   it('RED at base: the narrator writes the screen’s lines, the leader gate deletes them, and the Explain reply still says each once, under its lead-in', async () => {
     narrator = `No single option can be put forward: the comparison is a near tie.\n\n${LEAD}\n\n${SCREEN.join(' ')}`;
     const b = await press(await runThenExplainPayload());
     expect(b._diagnostic_trace.fast_path).toBe('explain');
-    for (const line of SCREEN) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
-    expect(b.assistant_text.indexOf(LEAD)).toBeLessThan(b.assistant_text.indexOf(SCREEN[0]!));
+    // RC6: the repeated question stays with the first typed chance+depends unit; only its later copy is dropped.
+    const saidOnceLines = SCREEN.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
+    for (const line of saidOnceLines) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
+    expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
+    // B15 (#2783, DL): the lead-in opens the headline, directly followed by the first screen chance finding.
+    expect(b.assistant_text.startsWith(`${LEAD}\n${SCREEN[0]!}`), b.assistant_text).toBe(true);
+    expect(b._answer_shape, 'RC6 re-binds the second unit instead of shipping obligation_unlocated whole').toBeDefined();
+    expect(b._answer_shape!.headline, 'the first unit and its question still lead, unchanged').toBe(`${LEAD}\n${SCREEN[0]!}`);
+    expect(b._answer_shape!.bullets).toContain(saidOnceLines[1]!);
+    expect(b._answer_shape!.bullets.join(' ')).not.toContain(SIZE_QUESTION);
+    expect(count(b.assistant_text, LEAD)).toBe(1);
+    expect(b.assistant_text.trimEnd().endsWith(':'), 'never ends on a colon').toBe(false);
   });
 
   it('a narrator that gives each figure in its own words gets nothing added (never two wordings)', async () => {

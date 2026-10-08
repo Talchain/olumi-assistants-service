@@ -118,6 +118,31 @@ import {
 } from './persisted-graph-invariants.js';
 import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
 import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
+import { preconditionRiskLinkViolations } from '../orchestrator/graph-structure-validator.js';
+import type { GraphV3T } from '../schemas/cee-v3.js';
+
+/** A semantic representation refusal; its label-based reason is safe for the authorised writer's reply. */
+export class PreconditionRiskLinkWriteError extends Error {
+  readonly code = 'PRECONDITION_RISK_LINKED' as const;
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'PreconditionRiskLinkWriteError';
+  }
+}
+
+/** All whole-graph writers use the same rule as edit/apply, including a restore's return leg. Never repairs. */
+export function assertNoPreconditionRiskLinks(graph: unknown): void {
+  if (graph === null || typeof graph !== 'object' || Array.isArray(graph)) return;
+  const raw = graph as { nodes?: unknown; edges?: unknown };
+  if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return;
+  // The floor accepts unknown graph supersets. Select object members for this narrow structural check;
+  // schema/referential checks retain their existing authority and the saved graph is never modified.
+  const record = (value: unknown): boolean => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const violation = preconditionRiskLinkViolations({
+    nodes: raw.nodes.filter(record), edges: raw.edges.filter(record),
+  } as Pick<GraphV3T, 'nodes' | 'edges'>)[0];
+  if (violation !== undefined) throw new PreconditionRiskLinkWriteError(violation.detail);
+}
 
 export interface CheckedGraphAppendParams {
   /** The write, already projected and hashed by the caller. */
@@ -181,7 +206,13 @@ export interface CheckedGraphAppendParams {
    * S-D.1b compares the identity of this read inside the conditional append RPC,
    * then rereads and repeats this reconciliation on contention (three attempts).
    */
-  readonly heldProposals?: { readonly isHeld: (pending: PendingAction) => boolean; readonly seenByThisRequest: ReadonlySet<string> };
+  readonly heldProposals?: {
+    readonly isHeld: (pending: PendingAction) => boolean;
+    readonly seenByThisRequest: ReadonlySet<string>;
+    readonly offeredChipIds?: ReadonlySet<string>;
+    /** Re-project the answer sidecar and say capacity lapses from this final pending read, before the append. */
+    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[]) => SessionTurnWrite;
+  };
 }
 
 /**
@@ -252,6 +283,9 @@ export function assertNoIntroducedGraphViolations(
   params: GraphInvariantAssertionParams,
 ): void {
   const { graph, identity, writesGraph, source } = params;
+
+  // RC3 is an absolute representation rule, independent of baseline absorption or GM mode.
+  if (writesGraph) assertNoPreconditionRiskLinks(graph);
 
   const persistedInvariants = checkPersistedGraphInvariants(graph, {
     baseGraph: params.baseGraphForInvariants,
@@ -365,18 +399,29 @@ export async function appendCheckedGraphWrite(
         ...(params.heldProposals !== undefined ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
       if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
       let supplied = write.pending_actions ?? [];
+      // Per attempt: what did not fit is said from THIS read's reconciliation only (S-D slice 2 x S-D.1b).
+      const heldOverCap: PendingAction[] = [];
       if (params.heldProposals !== undefined) {
         const { isHeld, seenByThisRequest } = params.heldProposals;
         const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
-        const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id));
+        const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
         const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
         if (kept.length !== supplied.length || arrived.length > 0) {
           const merged = [...kept, ...arrived];
+          const arriving = new Set(arrived.map(p => p.chip_id));
+          // A concurrently arriving offer keeps its room alongside this answer's offer. Other holds remain oldest first.
+          const priority = (p: PendingAction): number => p.action.kind === 'reconcile_goal_scope' ? 0
+            : isHeld(p) && params.heldProposals?.offeredChipIds?.has(p.chip_id) ? 1
+              : arriving.has(p.chip_id) ? 2 : isHeld(p) ? 3 : 4;
+          merged.sort((a, b) => priority(a) - priority(b) || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
           if (merged.length > PENDING_ACTIONS_PER_TURN_CAP) {
+            heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(isHeld));
             log.warn({ scenario_id: write.scenario_id, source, dropped: merged.slice(PENDING_ACTIONS_PER_TURN_CAP).map((p) => p.chip_id) },
               '[persist] held proposal another request added does not fit the row; the lowest-priority items are not carried');
           }
-          supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+          supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP).sort((a, b) =>
+            Number(b.action.kind === 'reconcile_goal_scope') - Number(a.action.kind === 'reconcile_goal_scope')
+            || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
           write = { ...write, pending_actions: supplied };
         }
       }
@@ -384,7 +429,12 @@ export async function appendCheckedGraphWrite(
         && !params.withdrawnGoalScopeChipIds?.includes(p.chip_id)
         && !supplied.some(n => n.chip_id === p.chip_id))
         .flatMap(p => { const kept = refreshScopePending(p, writesGraph ? write.graph : params.baseGraphForInvariants); return kept ? [kept] : []; });
-      if (missing.length > 0) write = { ...write, pending_actions: [...missing, ...supplied].slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
+      if (missing.length > 0) {
+        const merged = [...missing, ...supplied];
+        if (params.heldProposals !== undefined) heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(params.heldProposals.isHeld));
+        write = { ...write, pending_actions: merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
+      }
+      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
     }
     if (writesGraph) assertNoScopedIdentityConflict(write.graph);
 

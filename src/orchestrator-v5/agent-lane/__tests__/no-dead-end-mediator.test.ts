@@ -138,6 +138,48 @@ describe('THE ONE READER: mediatorReadings', () => {
     g.edges.push({ ...structuredClone(edge(g, 'budget', 'cost')), from: 'staff' });
     expect(mediatorReadings(g).has('cost')).toBe(false);
   });
+
+  // Science 393023 LICENCE ruling 3, re-derived: strain→MRR user_specified + mean_projected, no magnitude/defaulted,
+  // is nobody's size: no gauge/no answerable ask → the existing gauge reading. A real user-sized mean remains held.
+  it('R7 RED: a user-drawn projected onward link permits the gauge without claiming its size is the user\'s', () => {
+    const g = gaugeGraph();
+    const onward = edge(g, 'strain', 'mrr');
+    onward.strength = { mean: -0.5, std: 0.125 };
+    onward.provenance = { source: 'user_specified', mean_projected: true };
+    delete onward.defaulted;
+    expect(onward).toMatchObject({ from: 'strain', to: 'mrr', strength: { mean: -0.5, std: 0.125 } });
+    expect(linkSizing(onward)).toBe('placeholder');
+    expect(mediatorReadings(g).get('strain')).toEqual({ via: 'gauge', unit: '£/month', scale_frame: 200000, child: 'mrr' });
+    const userSized = structuredClone(g);
+    delete edge(userSized, 'strain', 'mrr').provenance.mean_projected;
+    expect(linkSizing(edge(userSized, 'strain', 'mrr'))).toBe('user');
+    expect(mediatorReadings(userSized).has('strain'), 'CONTROL: a true user size is never gauged').toBe(false);
+  });
+
+  // Science 393023 LICENCE ruling 3, re-derived: a parent source user_specified outranks an old olumi_estimate tag.
+  // "Olumi measures Support cost ... from its own estimate" / sized_parents → no Olumi parent-unit claim.
+  it('R7 RED: a genuinely user-sized parent is never read as an Olumi estimate by its older magnitude tag', () => {
+    const userSized = sizedParentGraph();
+    edge(userSized, 'budget', 'cost').provenance.source = 'user_specified';
+    expect(linkSizing(edge(userSized, 'budget', 'cost'))).toBe('user');
+    expect(mediatorReadings(userSized).get('cost')?.via).not.toBe('sized_parents');
+    expect(mediatorReadings(sizedParentGraph()).get('cost'), 'CONTROL: an actual Olumi-sized parent still supplies its unit')
+      .toEqual({ via: 'sized_parents', unit: '£/month', child: 'mrr', parents: ['budget'] });
+  });
+
+  // Science 393023 LICENCE ruling 3, re-derived: a stored gauge with mean_projected beside olumi_estimate is still
+  // a placeholder: "intact stored gauge" → no gauge reading. The unchanged exact ±1 control remains valid.
+  it('R7 RED: a projected stored gauge cannot claim it has an intact Olumi-sized onward link', () => {
+    const g = gaugeGraph();
+    const onward = edge(g, 'strain', 'mrr');
+    onward.strength.mean = -1;
+    onward.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate', sized_by_identity: { op: 'gauge' } };
+    delete onward.defaulted;
+    expect(mediatorReadings(g).get('strain'), 'CONTROL: the actual stored gauge remains intact').toMatchObject({ via: 'gauge', stored: true });
+    onward.provenance.mean_projected = true;
+    expect(linkSizing(onward)).toBe('placeholder');
+    expect(mediatorReadings(g).has('strain')).toBe(false);
+  });
 });
 
 describe('THE WRITER: (C) sized in the parent\'s unit; (B) one end-to-end answer writes the gauge with it', () => {

@@ -23,6 +23,7 @@
  * a bidirected link, or one touching a node kept out of the calculation, is not in the route structure at all. An event
  * risk's OCCURRENCE is never a route's doubt for this rule (occurrence is not existence): only drawn link existence covers.
  */
+import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { sameUnit } from '../agent-lane/same-unit.js';
@@ -69,6 +70,10 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
  */
 export interface LinkEnds {
   readonly fromLabel: string | undefined;
+  readonly fromId?: string;
+  readonly fromKind?: string;
+  readonly toKind?: string;
+  readonly toId?: string;
   readonly toLabel: string | undefined;
   readonly fromUnit: string | undefined;
   readonly toUnit: string | undefined;
@@ -138,6 +143,9 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const structural = (e: Rec): boolean => typeof e.from === 'string' && typeof e.to === 'string'
     && participating.has(e.from) && participating.has(e.to) && e.edge_type !== 'bidirected';
   const baseEnds = (e: Rec): LinkEnds => ({
+    // S-E GOALS S2b: the actual endpoint ids and kinds, so a minted share_by_date carrier binds to real nodes.
+    fromId: text(byId.get(e.from)?.id), toId: text(byId.get(e.to)?.id),
+    fromKind: text(byId.get(e.from)?.kind), toKind: text(byId.get(e.to)?.kind),
     fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label),
     fromUnit: unitOf(e.from), toUnit: unitOf(e.to), routeOnce: false,
     ...(fixedSources.get(e.to)?.has(e.from) ? { fixedByIsl: true } : {}),
@@ -183,6 +191,10 @@ export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefi
   const u = currentDefinitionalCarrier(e);
   if (u === undefined) return undefined;
   if (ends.toUnit === undefined || !sameUnit(ends.toUnit, u) || (ends.fromUnit !== undefined && !sameUnit(ends.fromUnit, u))) return undefined;
+  // Admission's durable, endpoint-bound team definition survives renaming.
+  const carrier = isRec(e) && isRec(e.provenance) ? e.provenance.share_by_date : undefined;
+  if (carrier !== undefined) return isRec(carrier) && u === `% of ${carrier.deliverable}`
+    && eventShareEndpointMatches(e, { id: ends.fromId, kind: ends.fromKind }, { id: ends.toId, kind: ends.toKind }) ? u : undefined;
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
 }
 

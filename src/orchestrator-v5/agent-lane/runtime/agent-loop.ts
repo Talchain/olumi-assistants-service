@@ -4,7 +4,8 @@
  * The Agent owns conversation, reasoning, context and tool choice. This module
  * owns none of those: it carries messages, executes the tools the Agent chooses
  * inside the request's authenticated context, and returns the text the Agent
- * produced. It never composes an answer of its own.
+ * produced, or the caller's composed reply. If narration fails after a hold,
+ * it answers from that known held result so the user can still review it.
  *
  * ⭐ MEASURED PROTOCOL FACTS, not assumptions:
  *   · A reasoning model's `function_call` must be replayed WITH its preceding
@@ -20,9 +21,11 @@
 import { randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
-import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
+import { composeRecoveredProposalReply } from '../proposal-reply.js';
+import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
+import { emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import {
   eligibleTools,
   type CanonicalContextPacket,
@@ -40,6 +43,12 @@ export interface ModelCallRequest {
   readonly deadline_ms?: number;
   /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
   readonly purpose?: 'prewarm';
+  /**
+   * P44 S1: this call only states a proposal the previous hop already held (`hopOnlyHeldProposals`), so the route may
+   * send it at the model's banked `narrate` effort (`narrateEffortFor`), with `NARRATE_LABEL_LINE` last in its input. Never sent to
+   * the provider; absent ⇒ as before.
+   */
+  readonly reasoning_role?: 'narrate';
 }
 
 export interface ModelCallResponse {
@@ -223,6 +232,37 @@ export interface AgentTurnResult {
 }
 
 const DEFAULT_MAX_HOPS = 6;
+
+/**
+ * ⭐ P44 S1 — THE CALL AFTER A HELD PROPOSAL ONLY SAYS WHAT THE RESULT HOLDS (DL 58e392 GO, 7 Oct). True when every call of
+ * the hop just made was a proposing tool that held its change (`ok`, not `mutated`, with a `proposal_id`). The next call
+ * then states it and asks for the yes; its decision was the hop before. Measured on the served narration bytes
+ * (prompt 8c743f05, tools ae038f5f), 2 cases × 2 reps per arm: Sol high median 6.7 s vs low 3.1 s, truth rows 8/8 both
+ * (not claimed added, what it threatens, drivers, placeholder, asks, no id; the double-count warning kept 2/2 at low).
+ */
+/**
+ * The one line a narrating call adds at the END of its input (after the cached prefix), never handed on into history.
+ * Without it, low and medium effort named the held risk by paraphrase ("the onboarding-delay risk") 0/2 each; with it, the
+ * exact quoted label 4/4 at low, every other truth row held (DL 58e392 ruling: the user's model labels are quoted exactly).
+ */
+export const NARRATE_LABEL_LINE = 'Name the change you proposed by its exact label, in quotes.';
+const NARRATE_ITEM = { role: 'developer', content: [{ type: 'input_text', text: NARRATE_LABEL_LINE }] } as const;
+
+/**
+ * The refusal an approval gets on a narrating call (Codex buddy r1 P1 / r2 P2 on #2781; DL 58e392 ruling B). The lowered
+ * call keeps its tools (same cached prefix) so it can still withdraw and correct what it just held (measured at low: the
+ * wrong "very strong" withdrawn 2/2, and the next hop, at the budget's own effort, re-proposed "strong" 2/2). It may not
+ * approve: an approval is the user's, and is never decided at the lowered effort.
+ */
+export { NOT_ON_NARRATION };
+const AUTHORISE_TOOL = 'authorise_change';
+
+export function hopOnlyHeldProposals(calls: readonly { name: string }[], results: readonly ToolResult[]): boolean {
+  return calls.length > 0 && calls.length === results.length && calls.every((c, i) => {
+    const r = results[i] as { ok?: unknown; mutated?: unknown; proposal_id?: unknown } | undefined;
+    return isProposingTool(c.name) && r?.ok === true && r.mutated === false && typeof r.proposal_id === 'string' && r.proposal_id !== '';
+  });
+}
 
 // Diagnostic content is deliberately narrower than the tool schema: never
 // copy basis, rationale, quotes, messages, credentials or arbitrary properties.
@@ -429,11 +469,46 @@ export async function runAgentTurn(
     };
   };
 
+  let narrateNext = false;
+  let previousHopBuilt = false;
+  let writingEmitted = false;
+  let lastHeldCall: { name: string; args: unknown; result: ToolResult } | undefined;
+  /**
+   * ⛔ A NARRATION FAILURE NEVER LOSES A HELD CHANGE (Codex #2781 r3 / DL 6049608420, P1).
+   * The previous hop already prepared it: recover from its LAST held call and exact result, never from partial
+   * provider output. Keep the tool record intact so the normal reply still offers that proposal's approve card.
+   */
+  const recoverNarration = (err: unknown, hopsTaken: number): AgentTurnResult => {
+    const held = lastHeldCall!; // `narrateNext` is true only after a hop whose every call held a proposal.
+    const composed = input.composeReply?.(held.name, held.args, held.result);
+    // ⛔ P44 (a) / Codex #2781 r5: failed conversational gates must not hide the held result's disclosures.
+    // Preserve the user-figure honesty gate; an absent runtime message is treated as ''.
+    const recoveredReply = typeof composed === 'string' && composed.trim() !== '' ? composed
+      : composeRecoveredProposalReply(held.name, held.args, held.result, input.message ?? '');
+    const label = held.result.public_label;
+    const text = typeof recoveredReply === 'string' && recoveredReply.trim() !== '' ? recoveredReply
+      : typeof label === 'string' && label.trim() !== ''
+        ? `I have prepared this change: ${label}. Nothing is changed until you approve it.`
+        : 'I have prepared a change for you to review. Nothing is changed until you approve it.';
+    items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+    log.warn({ hop: hopsTaken, err: String(err) }, 'agent-lane: narration failed — answering from the held proposal');
+    return {
+      assistant_text: text,
+      items: handedOn(),
+      tool_calls: toolCalls,
+      tool_results: toolResults,
+      mutated,
+      hops: hopsTaken,
+      stopped_reason: 'answered',
+      timing: ((t) => { emitTiming(t); return t; })(timingAt(hopsTaken)),
+    };
+  };
   for (let hop = 0; hop < maxHops; hop++) {
     const providerStartedAt = now();
     // Eligibility, not the raw catalogue. `eligibleTools` starts from
     // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
     // and a context packet can never widen the surface.
+    const narrateHop = narrateNext;
     const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
       .filter((t) => !withheld.has(t.name));
     const hostCall = hop === 0 && input.hostFirstCall !== undefined && offered.some((t) => t.name === input.hostFirstCall!.name)
@@ -442,10 +517,11 @@ export async function runAgentTurn(
       ? input.firstCallTool : undefined;
     const request: ModelCallRequest = {
       instructions: input.instructions,
-      input: items,
+      input: narrateNext ? [...items, NARRATE_ITEM] : items,
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
+      ...(narrateNext ? { reasoning_role: 'narrate' as const } : {}),
     };
     if (hostCall !== undefined) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
@@ -453,10 +529,27 @@ export async function runAgentTurn(
     } else {
       providerCalls += 1;
     }
-    const resp: ModelCallResponse = hostCall !== undefined
-      ? { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] }
-      : await callModel(request);
+    let resp: ModelCallResponse;
+    try {
+      if (hostCall !== undefined) {
+        resp = { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] };
+      } else {
+        // ⭐ P44 S2 — only the real reply call after the previous hop's successful, unreplayed build.
+        if (hop > 0 && previousHopBuilt && !writingEmitted) {
+          emitAgentPhase('writing');
+          writingEmitted = true;
+        }
+        resp = await callModel(request);
+      }
+    } catch (err: unknown) {
+      if (!narrateHop) throw err;
+      providerMs += Math.max(0, now() - providerStartedAt);
+      return recoverNarration(err, hop);
+    }
     if (hostCall === undefined) providerMs += Math.max(0, now() - providerStartedAt);
+    if (narrateHop && answerIsIncomplete(resp)) {
+      return recoverNarration(new Error(`narration incomplete: ${resp.incomplete_reason ?? 'unknown'}`), hop);
+    }
     const out = resp.output ?? [];
     /**
      * ⛔ EVERY CALL IN THE OUTPUT, NOT THE FIRST ONE.
@@ -513,6 +606,7 @@ export async function runAgentTurn(
     // The whole output array first — the reasoning item must accompany the
     // calls — then one output per call, in the order they were made.
     items.push(...out);
+    const hopResultsFrom = toolResults.length;
     for (const call of calls) {
       const toolStartedAt = now();
       toolCallCount += 1;
@@ -521,6 +615,14 @@ export async function runAgentTurn(
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
+          }
+        // ⛔ The narrating call may not approve the change THIS turn just held for the user's yes (Codex #2781 r1 P1; DL
+        // ruling B). One an earlier turn showed and the user approved stays approvable on any hop.
+        : narrateHop && String(call.name) === AUTHORISE_TOOL
+          && proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+        ? {
+            ok: false, mutated: false, refusal: NOT_ON_NARRATION,
+            detail: 'The change you just prepared is waiting for the user’s yes. Show it and ask; nothing was approved or changed.',
           }
         // ⛔ One approval carries one change: a second proposal while this turn's first awaits the user's yes is
         // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
@@ -599,6 +701,20 @@ export async function runAgentTurn(
         // identity and no producer prose reach it. The route keeps the raw result in `toolResults`.
         output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
       });
+    }
+    const hopResults = toolResults.slice(hopResultsFrom);
+    // ⛔ P44 S2 — align each call with its own result; refused and replayed builds cannot announce writing.
+    previousHopBuilt = calls.some((call, index) => {
+      const result = hopResults[index];
+      return call.name === 'build_model_from_brief' && result?.ok === true && result.mutated === true && result.replayed !== true;
+    });
+    narrateNext = hopOnlyHeldProposals(calls.map((c) => ({ name: String(c.name) })), hopResults);
+    lastHeldCall = undefined;
+    if (narrateNext) {
+      const call = calls.at(-1)!;
+      let args: unknown;
+      try { args = JSON.parse(String(call.arguments ?? '{}')); } catch { args = undefined; }
+      lastHeldCall = { name: String(call.name), args, result: toolResults.at(-1)! };
     }
     // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
     if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {

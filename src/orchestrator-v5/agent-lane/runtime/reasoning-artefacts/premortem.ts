@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { validateAnalysisRunFactIdentity } from '../../../context/analysis-interpretation-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { extractAnalysedOptionIds } from '../../../context/option-identity.js';
-import { methodTurnForReadback, planPickChipId, type RunMethodTurn } from '../../method-turn/method-turn.js';
+import { methodTurnForReadback, planPickChipId, serverStoryParts, storyParts, type RunMethodTurn } from '../../method-turn/method-turn.js';
 import { assembleGuidanceSignals } from '../../turn-context/guidance-signals.js';
 import { binding, contentHash, dependency, provenance } from './common.js';
 
@@ -41,13 +41,22 @@ const riskRequestSchema = z.object({
   direction,
   grounding_ids: z.array(id),
 }).strict();
+/**
+ * v2 (P02, 7 Oct): every row carries its Mitigate line and who wrote it; a story about a risk ALREADY in the model
+ * names it by id (`on_map`: Inspect, never Add); only a new risk carries `risk_request` (Add). A server-built row
+ * (the story Olumi wrote when the draft's was refused) carries neither: it proposes no model text.
+ */
 export const PremortemWorksheetV1Schema = z.object({
-  kind: z.literal('premortem'), version: z.literal(1), scenario_id: id, turn_id: id,
+  kind: z.literal('premortem'), version: z.literal(2), scenario_id: id, turn_id: id,
   run: runSchema, binding: bindingSchema,
   rows: z.array(z.object({
     row_id: id, option_id: id, option_label: text,
+    // Required on every numbered story (the server owns 'Mitigate:'); the optional outside row may omit it.
     failure_way: text, early_warning: text, mitigation: text.optional(),
-    grounding: groundingSchema, provenance: z.literal('olumi_hypothesis'), risk_request: riskRequestSchema,
+    grounding: groundingSchema, provenance: z.literal('olumi_hypothesis'),
+    source: z.enum(['olumi_drafted', 'server_built']),
+    risk_request: riskRequestSchema.optional(),
+    on_map: z.object({ node_id: id, label: text }).strict().optional(),
   }).strict()).min(1).max(4),
   coverage: z.array(z.object({ option_id: id, option_label: text, status: z.enum(['stress_tested', 'not_stress_tested']) }).strict()),
   blindspot_question: text.refine(s => s.endsWith('?')),
@@ -57,7 +66,9 @@ export const PremortemWorksheetV1Schema = z.object({
   if (new Set(w.rows.map(r => r.row_id)).size !== w.rows.length || new Set(w.coverage.map(c => c.option_id)).size !== w.coverage.length) issue();
   for (const r of w.rows) {
     const ids = r.grounding.kind === 'not_in_model' ? [] : r.grounding.ids;
-    if (new Set(ids).size !== ids.length || JSON.stringify(ids) !== JSON.stringify(r.risk_request.grounding_ids)) issue();
+    if (new Set(ids).size !== ids.length || (r.risk_request !== undefined && JSON.stringify(ids) !== JSON.stringify(r.risk_request.grounding_ids))) issue();
+    if (r.risk_request !== undefined && (r.on_map !== undefined || r.source === 'server_built')) issue();
+    if (r.mitigation === undefined && r.grounding.kind !== 'not_in_model') issue();
     if (!w.coverage.some(c => c.option_id === r.option_id && c.option_label === r.option_label && c.status === 'stress_tested')) issue();
   }
   for (const c of w.coverage) if ((c.status === 'stress_tested') !== w.rows.some(r => r.option_id === c.option_id)) issue();
@@ -86,22 +97,6 @@ const labelPattern = (label: string, flags = 'u') => {
 };
 const contains = (s: string, label: string) => labelPattern(label).test(fold(s));
 
-/**
- * A story's three parts: before the first "Watch for:", between it and the next "Mitigate:", and after that; each part
- * trimmed and non-empty, markers optionally bolded (served a2-2, 7 Oct). Linear marker search: the earlier lazy
- * `^([\s\S]+?)\s*Watch for:` regex took 3.1 s on a story with 20k spaces after its marker.
- */
-function storyParts(story: string): [string, string, string, string] | null {
-  const watch = /(?:\*\*)?Watch for:(?:\*\*)?/u.exec(story);
-  if (!watch) return null;
-  const afterWatch = watch.index + watch[0].length;
-  const mitigate = /(?:\*\*)?Mitigate:(?:\*\*)?/u.exec(story.slice(afterWatch));
-  if (!mitigate) return null;
-  const parts = [story.slice(0, watch.index), story.slice(afterWatch, afterWatch + mitigate.index), story.slice(afterWatch + mitigate.index + mitigate[0].length)]
-    .map(part => part.trim());
-  return parts.every(part => part !== '') ? [story, parts[0], parts[1], parts[2]] : null;
-}
-
 /** Ban Olumi-authored wording only; exact final-graph labels retain the user's words. */
 export function authoredBanAfterMasking(field: string, nodeLabels: readonly string[]): boolean {
   const labels = [...new Set(nodeLabels.map(fold).filter(Boolean))].sort((a, b) => b.length - a.length);
@@ -127,6 +122,7 @@ export function premortemProducerDirective(turn: RunMethodTurn, graph: unknown):
     `Eligible grounding: ${JSON.stringify(turn.context.supplied_items.filter(i => i.kind === 'factor' || i.kind === 'link' || i.kind === 'risk').map(({ id, kind, labels }) => ({ id, kind, labels })))}.`,
     `Risk destinations (goal/outcome only): ${JSON.stringify(nodes.filter(n => n.kind === 'goal' || n.kind === 'outcome').map(n => ({ id: n.id, label: n.label })))}.`,
     'Risk label names one new risk, copied verbatim as a short phrase from failure_way. Direction says whether it raises or lowers the destination, as an Olumi hypothesis for the user to challenge. No invented ids.',
+    'A story about a risk already in the model grounds on it: grounding {kind:"risk",ids:[that risk id]}, and risk.label is that risk\'s exact label. It is never proposed again as new.',
     'No most likely, best, winner, recommend, leads, ahead, beats, probability, likelihood, chance, odds or percentages in your authored words. Copy supplied node labels exactly, even when those labels contain these words or percentages.',
   ].join('\n');
 }
@@ -171,6 +167,20 @@ export interface PremortemWorksheetDiagnostics {
   stories: number;
   /** Validated rows before the all-or-nothing emission gate, including an optional outside row. */
   rows: number;
+}
+
+/**
+ * ⭐ P02 (DL 8 Oct; joined witness jw-j1): the worksheet stands only when the user SEES the method reply unchanged. Egress may
+ * add WHOLE paragraphs before or after it (the provisional admission, USER_STATED_PARAMETERS_NOT_MATERIAL, is prepended on
+ * every quantified_provisional Run), but never edit, split or glue onto it. Byte equality lost every provisional Run's
+ * worksheet; this keeps the same fail-closed bar for any edit.
+ */
+export function methodReplySurvives(methodReply: string, finalText: string): boolean {
+  if (methodReply.trim() === '') return false;
+  const at = finalText.indexOf(methodReply);
+  if (at < 0) return false;
+  const before = finalText.slice(0, at), after = finalText.slice(at + methodReply.length);
+  return (before === '' || /\n\n$/u.test(before)) && (after === '' || /^\n\n/u.test(after) || /^\s*$/u.test(after));
 }
 
 /** Total, fail-closed emission boundary. Never mint a Run stamp from the current graph alone. */
@@ -225,14 +235,17 @@ export function premortemWorksheetDiagnosticsFor(input: {
     const rows: PremortemWorksheetV1['rows'] = [];
     const seen = new Set<string>();
     const representedStories = new Set<number>();
+    const rowStory = new Map<string, number>();
     for (const raw of input.candidates) {
       // Even malformed candidates expose only validated ids and indices, never their prose.
       const metadata = rec(raw);
       const parsedId = id.safeParse(metadata?.option_id);
       const storyIndex = typeof metadata?.story_index === 'number' && Number.isInteger(metadata.story_index)
         && metadata.story_index >= 1 && metadata.story_index <= 3 ? metadata.story_index : null;
+      // A model-written string survives only when it IS one of the model's option ids (#2740 Codex P2-1).
+      const knownOption = parsedId.success && nodes.some(n => n.kind === 'option' && n.id === parsedId.data);
       const drop = (reason: PremortemDropReason) => diagnostics.dropped.push({
-        story_index: storyIndex, option_id: parsedId.success ? parsedId.data : null, reason,
+        story_index: storyIndex, option_id: knownOption ? parsedId.data : null, reason,
       });
       const parsed = candidateSchema.safeParse(raw);
       if (!parsed.success) { drop('schema'); continue; }
@@ -250,11 +263,22 @@ export function premortemWorksheetDiagnosticsFor(input: {
         eligible = scoped.context.supplied_items;
       }
       if (!option || (turn.context.plan !== null && c.option_id !== turn.context.plan.option_id)) { drop('plan_mismatch'); continue; }
+      // A story resting on a risk already in the model names that risk (A2-ELIG draw 2: its label equalled an existing
+      // risk's and the whole worksheet was withheld). Any other existing label is still not a new risk.
+      const sameLabel = nodes.filter(n => typeof n.label === 'string' && fold(n.label) === fold(c.risk.label));
+      const existingRiskId = c.grounding.kind === 'risk' ? c.grounding.ids[0]
+        : sameLabel.length === 1 && sameLabel[0].kind === 'risk' ? String(sameLabel[0].id) : undefined;
+      const existingRisk = existingRiskId === undefined ? undefined : uniqueNode(existingRiskId, 'risk');
+      if (existingRiskId !== undefined && !existingRisk) { drop('risk_label'); continue; }
       const destination = uniqueNode(c.risk.affected_node_id);
-      if (!destination || (destination.kind !== 'goal' && destination.kind !== 'outcome')) { drop('destination'); continue; }
-      if (!contains(c.failure_way, c.risk.label) || nodes.some(n => typeof n.label === 'string' && fold(n.label) === fold(c.risk.label))) { drop('risk_label'); continue; }
+      if (!existingRisk) {
+        if (!destination || (destination.kind !== 'goal' && destination.kind !== 'outcome')) { drop('destination'); continue; }
+        if (!contains(c.failure_way, c.risk.label) || sameLabel.length > 0) { drop('risk_label'); continue; }
+      }
       let grounding: PremortemWorksheetV1['rows'][number]['grounding'];
+      let mitigation = c.mitigation;
       if (c.grounding.kind === 'not_in_model') {
+        if (existingRisk) { drop('risk_label'); continue; } // an outside story is, by definition, not on the map
         if (c.story_index !== null || c.failure_way.includes('?') || fold(c.failure_way) === fold(blindspot)
           || rows.some(r => r.grounding.kind === 'not_in_model')) { drop('outside_invalid'); continue; }
         grounding = { kind: 'not_in_model', label: PREMORTEM_COPY.outside };
@@ -262,7 +286,8 @@ export function premortemWorksheetDiagnosticsFor(input: {
         if (c.story_index === null) { drop('story_missing'); continue; }
         const story = stories[c.story_index - 1];
         const parts = story ? storyParts(story) : null;
-        if (!parts || parts[1].trim() !== c.failure_way || parts[2].trim() !== c.early_warning || (c.mitigation !== undefined && parts[3].trim() !== c.mitigation)) { drop(story ? 'story_parts_mismatch' : 'story_missing'); continue; }
+        if (!parts || parts[0] !== c.failure_way || parts[1] !== c.early_warning || (c.mitigation !== undefined && parts[2] !== c.mitigation)) { drop(story ? 'story_parts_mismatch' : 'story_missing'); continue; }
+        mitigation = parts[2];
         const namedOptions = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string' && contains(story, n.label));
         if (namedOptions.some(n => n.id !== c.option_id) || (turn.context.plan === null && namedOptions.length !== 1)) { drop('named_options'); continue; }
         if (new Set(c.grounding.ids).size !== c.grounding.ids.length) { drop('dup_ids'); continue; }
@@ -278,26 +303,81 @@ export function premortemWorksheetDiagnosticsFor(input: {
         if (supplied.some(i => !i || (i.kind === 'factor' || i.kind === 'risk' ? uniqueNode(i.id)?.label !== i.labels[0]
           : i.id.split('->').some((end, index) => uniqueNode(end)?.label !== i.labels[index])))) { drop('final_label_drift'); continue; }
         grounding = { kind: c.grounding.kind, ids: c.grounding.ids, labels: [...new Set(supplied.flatMap(i => i?.labels ?? []))] };
+        // An existing risk is named only when THIS story names it and it is on THIS option's own path (buddy r1 P1).
+        if (existingRisk && (!contains(story, String(existingRisk.label))
+          || !eligible.some(i => i.kind === 'risk' && i.id === existingRisk.id))) { drop('risk_label'); continue; }
       }
       const key = `${c.option_id}:${c.story_index ?? 'outside'}`;
       if (seen.has(key)) { drop('duplicate_key'); continue; }
       seen.add(key);
       const groundingIds = grounding.kind === 'not_in_model' ? [] : grounding.ids;
-      const message = `Prepare one risk called ${JSON.stringify(c.risk.label)}: ${c.failure_way} It would ${c.risk.direction === 'negative' ? 'lower' : 'raise'} ${JSON.stringify(destination.label)}. Early warning: ${c.early_warning} Olumi hypothesis — for you to challenge. Show the proposed change for approval.`;
+      const message = existingRisk || !destination ? undefined
+        : `Prepare one risk called ${JSON.stringify(c.risk.label)}: ${c.failure_way} It would ${c.risk.direction === 'negative' ? 'lower' : 'raise'} ${JSON.stringify(destination.label)}. Early warning: ${c.early_warning} Olumi hypothesis — for you to challenge. Show the proposed change for approval.`;
       // Schemas own shape and length; only this boundary has every final node label.
-      if ([c.failure_way, c.early_warning, c.mitigation, c.risk.label, message]
+      if ([c.failure_way, c.early_warning, mitigation, existingRisk ? undefined : c.risk.label, message]
         .some(field => field !== undefined && authoredBanAfterMasking(field, nodeLabels))) { drop('authored_ban'); continue; }
       const row: PremortemWorksheetV1['rows'][number] = {
         row_id: `pm_${contentHash({ scenarioId, run, key, candidate: c }).slice(0, 24)}`,
         option_id: c.option_id, option_label: String(option.label), failure_way: c.failure_way, early_warning: c.early_warning,
-        ...(c.mitigation !== undefined ? { mitigation: c.mitigation } : {}), grounding,
-        provenance: provenance('olumi_hypothesis') as 'olumi_hypothesis',
-        risk_request: { chip_id: 'agent-next-suggest-risks', message, affected_node_id: c.risk.affected_node_id, direction: c.risk.direction, grounding_ids: groundingIds },
+        ...(mitigation !== undefined ? { mitigation } : {}), grounding, provenance: provenance('olumi_hypothesis') as 'olumi_hypothesis', source: 'olumi_drafted',
+        ...(existingRisk ? { on_map: { node_id: String(existingRisk.id), label: String(existingRisk.label) } }
+          : { risk_request: { chip_id: 'agent-next-suggest-risks' as const, message: message!, affected_node_id: c.risk.affected_node_id, direction: c.risk.direction, grounding_ids: groundingIds } }),
       };
-      if (!riskRequestSchema.safeParse(row.risk_request).success) { drop('risk_request_schema'); continue; }
+      if (row.risk_request !== undefined && !riskRequestSchema.safeParse(row.risk_request).success) { drop('risk_request_schema'); continue; }
       rows.push(row);
-      if (c.story_index !== null) representedStories.add(c.story_index);
+      if (c.story_index !== null) { representedStories.add(c.story_index); rowStory.set(row.row_id, c.story_index); }
     }
+    // P02: settle replaced a refused story with the server's own story for one supplied item. It is recognised by its
+    // exact parts, only among the stories no candidate holds, and its row is built from typed state alone (no model
+    // text, so no Add). A candidate that described the replaced story is not on the wire, so its drop is not kept.
+    const serverBuilt = new Map<number, RunMethodTurn['context']['supplied_items'][number]>();
+    stories.forEach((story, index) => {
+      if (representedStories.has(index + 1)) return;
+      const parts = storyParts(story);
+      const item = parts === null ? undefined : turn.context.supplied_items.find(i =>
+        JSON.stringify(serverStoryParts(i, turn.context)) === JSON.stringify(parts));
+      if (item !== undefined) serverBuilt.set(index + 1, item);
+    });
+    diagnostics.dropped = diagnostics.dropped.filter(d => d.story_index === null || !serverBuilt.has(d.story_index));
+    for (const [storyIndex, item] of serverBuilt) {
+      const parts = storyParts(stories[storyIndex - 1]);
+      if (parts === null || item.kind === 'limit') continue;
+      // One option, by id: the plan, else the lever's own option, else the one own option whose goal path holds it.
+      const optionIds = turn.context.plan !== null ? [turn.context.plan.option_id]
+        // A lever names its options by label; each own option's label is unique (uniqueNode), so the id is recovered exactly.
+        : item.lever_option_labels !== undefined
+          // Fail closed: one ambiguous label and the row binds to no option (buddy r1 P2).
+          ? ((found) => found.every(f => f.length === 1) ? found.map(f => String(f[0].id)) : [])(item.lever_option_labels
+            .map(label => nodes.filter(n => typeof n.label === 'string' && fold(n.label) === fold(label))))
+          : (signals?.['model.non_sq_option_ids'] ?? []).filter(o => onOptionPath(o, item));
+      const optionId = optionIds.length === 1 ? optionIds[0] : undefined;
+      const option = optionId === undefined ? undefined : uniqueNode(optionId, 'option');
+      if (optionId === undefined || !option) continue;
+      if (decision && (!signals?.['model.non_sq_option_ids'].includes(optionId) || !runOptionIds?.includes(optionId) || !onOptionPath(optionId, item))) continue;
+      const namedOptions = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string' && contains(stories[storyIndex - 1], n.label));
+      if (namedOptions.some(n => n.id !== optionId)) continue;
+      const node = item.kind === 'link' ? undefined : uniqueNode(item.id, item.kind);
+      const valid = item.kind === 'link'
+        ? edges.filter(e => `${String(e.from)}->${String(e.to)}` === item.id).length === 1
+          && item.id.split('->').every((end, index) => uniqueNode(end)?.label === item.labels[index])
+        : node?.label === item.labels[0];
+      if (!valid || parts.some(field => authoredBanAfterMasking(field, nodeLabels))) continue;
+      const key = `${optionId}:${storyIndex}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        row_id: `pm_${contentHash({ scenarioId, run, key, server_item: item.id }).slice(0, 24)}`,
+        option_id: optionId, option_label: String(option.label), failure_way: parts[0], early_warning: parts[1], mitigation: parts[2],
+        grounding: { kind: item.kind, ids: [item.id], labels: [...item.labels] },
+        provenance: provenance('olumi_hypothesis') as 'olumi_hypothesis', source: 'server_built',
+        ...(item.kind === 'risk' && node ? { on_map: { node_id: item.id, label: String(node.label) } } : {}),
+      });
+      representedStories.add(storyIndex);
+      rowStory.set(rows[rows.length - 1].row_id, storyIndex);
+    }
+    // Rows in story order, the outside row last: the worksheet reads as the chat does.
+    const order = (r: PremortemWorksheetV1['rows'][number]) => rowStory.get(r.row_id) ?? 99;
+    rows.sort((a, b) => order(a) - order(b));
     diagnostics.rows = rows.length;
     // An optional outside row cannot stand in for a numbered story. Extra invalid candidates
     // do not withhold a worksheet when every story still has a validated row.
@@ -308,7 +388,7 @@ export function premortemWorksheetDiagnosticsFor(input: {
     }
     if (stories.some((_, index) => !representedStories.has(index + 1))) return diagnostics;
     const envelope = {
-      kind: 'premortem', version: 1, scenario_id: scenarioId, turn_id: input.turnId, run,
+      kind: 'premortem', version: 2, scenario_id: scenarioId, turn_id: input.turnId, run,
       binding: binding(scenarioId, run.graph_hash_at_run, [dependency('map_structure', 'whole_graph', final.graph), dependency('analysis', 'run', run)]),
       rows, coverage: nodes.filter(n => n.kind === 'option').map(n => ({ option_id: n.id, option_label: n.label, status: rows.some(r => r.option_id === n.id) ? 'stress_tested' : 'not_stress_tested' })),
       blindspot_question: blindspot,

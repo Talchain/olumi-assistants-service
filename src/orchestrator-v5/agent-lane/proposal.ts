@@ -115,7 +115,8 @@ export interface ProposalOperation {
      * is outside the analysis hash), the words, and the day it was counted from. Written only through the atomic level
      * door's `goal_horizon` member (`commitOptionLevels`), alone, as `NodeV3.goal_horizon.deadline`.
      */
-    | 'set_goal_deadline';
+    | 'set_goal_deadline'
+    | 'set_team_time';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;
@@ -137,7 +138,7 @@ export interface StructuredProposal {
   readonly base_graph_identity_hash: string;
   readonly operations: readonly ProposalOperation[];
   /** Who authored the change being proposed — never the user, for an AI proposal. */
-  readonly provenance: { readonly authored_by: 'model_proposed' | 'user_stated'; readonly basis?: string };
+  readonly provenance: { readonly authored_by: 'model_proposed' | 'user_stated'; readonly basis?: string; readonly original_basis?: string };
   readonly validation: ProposalValidation;
   /** What the user was actually shown. Stored so the receipt can quote it. */
   readonly public_label: string;
@@ -192,7 +193,7 @@ export function computeProposalId(c: ProposalContent): string {
     c.user_id,
     c.base_graph_identity_hash,
     c.operations.map((o) => [o.op, o.path, o.value === undefined ? null : o.value]),
-    [c.provenance.authored_by, c.provenance.basis ?? null],
+    [c.provenance.authored_by, c.provenance.basis ?? null, ...(c.provenance.original_basis === undefined ? [] : [c.provenance.original_basis])],
     [c.validation.admitted, c.validation.loss_count, [...c.validation.refusals].sort()],
     c.public_label,
     // Appended only when present, so every proposal without a reading keeps the id it always had.
@@ -232,6 +233,8 @@ export interface ReceiptSummary {
 export interface PartialProgress {
   /** The canonical revision this proposal's own partial write left. */
   readonly revision: string;
+  /** Expected bytes retained before read-back; retry must verify them before the revision gate. */
+  readonly expected_postimage?: unknown;
   /** The operation paths confirmed landed from readback. */
   readonly landed: readonly string[];
   readonly receipts: readonly ReceiptSummary[];
@@ -296,10 +299,17 @@ export class ProposalStore {
     return this.items.get(id);
   }
 
+  /** Applied state survives the carrier: it is the authority for an idempotent card re-press. */
+  isApplied(id: string): boolean {
+    return this.applied.has(id);
+  }
+
   markApplied(id: string, receipts: readonly ReceiptSummary[] = []): void {
     this.applied.set(id, receipts);
     this.partial.delete(id);
   }
+
+  partialProgressOf(id: string): PartialProgress | undefined { return this.partial.get(id); }
 
   /** Record what THIS proposal's own write landed, and the canonical revision that left. */
   markPartial(id: string, progress: PartialProgress): void {

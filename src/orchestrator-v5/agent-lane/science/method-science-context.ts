@@ -76,6 +76,8 @@ export interface MethodScienceSignals {
   readonly 'run.leader_licensed': boolean;
   readonly 'run.leader_option_id'?: string | null;
   readonly 'model.goal_label'?: string | null;
+  /** The goal's approved horizon (`goal_horizon`: a deadline or N months), as the signals carry it. */
+  readonly 'model.goal_horizon'?: unknown;
   readonly 'model.status_quo_option_id': string | null;
   readonly 'model.non_sq_option_ids': readonly string[];
   readonly 'model.option_labels': Readonly<Record<string, string>>;
@@ -169,6 +171,11 @@ export interface MethodScienceContext {
   /** Unlicensed decision stories; absent on the original W9 licensed-leader control. */
   readonly decision_story_only?: true;
   readonly goal_label: string | null;
+  /**
+   * The goal's approved horizon, present only when the model holds one: never an assumed "a year" (P02, 7 Oct).
+   * A deadline is the ISO date the user approved; months is the stated count.
+   */
+  readonly horizon?: GoalHorizon;
   readonly current_option_labels: readonly string[];
   readonly supplied_items: readonly SuppliedItem[];
   /**
@@ -179,6 +186,19 @@ export interface MethodScienceContext {
 }
 
 export type PlanBasis = 'licensed_leader' | 'user_selected';
+
+export type GoalHorizon = { readonly deadline: string } | { readonly months: number };
+
+/** The `GoalHorizonSchema` union (schemas graph.ts), read defensively: anything else is no horizon. */
+export function goalHorizonOf(v: unknown): GoalHorizon | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
+  const r = v as Record<string, unknown>;
+  if (typeof r.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(r.deadline) && Number.isFinite(Date.parse(`${r.deadline}T00:00:00Z`))) {
+    return { deadline: r.deadline };
+  }
+  if (typeof r.months === 'number' && Number.isInteger(r.months) && r.months >= 1 && r.months <= 120) return { months: r.months };
+  return null;
+}
 
 /** Which DSK protocol names each method's exercise (the same pairing as `INTENT_PROTOCOL_ID`, plus the pre-mortem). */
 const METHOD_PROTOCOL_ID: Readonly<Record<ScienceMethod, string>> = {
@@ -451,6 +471,7 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
   // Unlicensed decision stories never offer an approval. Preserve the original W9 licensed-leader control.
   if (decision && !s['run.leader_licensed']) items = items.map(item => ({ ...item, card: null }));
   const { citation, reason } = adjudicate(input, plan, items);
+  const horizon = input.method === 'pre_mortem' ? goalHorizonOf(s['model.goal_horizon']) : null;
   return {
     method: input.method,
     dsk: citation,
@@ -459,6 +480,8 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
     ...(decision ? { decision_level: true } : {}),
     ...(decision && !s['run.leader_licensed'] ? { decision_story_only: true as const } : {}),
     goal_label: typeof s['model.goal_label'] === 'string' ? s['model.goal_label'] : null,
+    // Present only when the model holds one, so a horizon-less context is byte-identical to before.
+    ...(horizon !== null ? { horizon } : {}),
     current_option_labels: Object.values(s['model.option_labels']),
     supplied_items: items,
     supplied_figures: [],

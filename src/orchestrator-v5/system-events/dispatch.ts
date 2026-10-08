@@ -1,3 +1,4 @@
+import type { ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
@@ -2923,13 +2924,14 @@ export async function dispatchOptionLevelsBatch(
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card (the goal's `goal_horizon` only): ONE commit, alone. */
     readonly goalHorizon?: ApprovedGoalHorizon;
+    readonly teamTime?: ApprovedTeamTime;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
     readonly fenceRefusalReachesCaller?: boolean;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
-  const eventKind = batch.goalHorizon !== undefined ? 'goal_horizon_edit'
+  const eventKind = batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
     : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
     : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
@@ -2990,7 +2992,7 @@ export async function dispatchOptionLevelsBatch(
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
-    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
@@ -3004,7 +3006,8 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}),
       ...(batch.linkEffects !== undefined && batch.linkEffects.length > 0 ? { linkEffects: batch.linkEffects, lastRunIdentityUse } : {}),
       ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
-      ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}) }, getSessionStore());
+      ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}),
+      ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -3324,7 +3327,8 @@ export type CommitOptionLevelsInput = {
    * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
-  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null };
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string };
+  readonly team_time?: ApprovedTeamTime;
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
@@ -3383,6 +3387,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { link_effects: input.link_effects } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
+      ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
@@ -3413,8 +3418,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token } } : {}),
+    ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
-      expected_deadline: input.goal_horizon.expected_deadline } } : {}),
+      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) return { status: 'stale' };
   if (r.commitSkippedReason === 'refused_no_write') {
@@ -3469,6 +3475,8 @@ export type HoldAddRiskInput = {
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
   readonly risk: { readonly id?: string; readonly label: string };
+  /** RC3: server-owned option identity from the widen press, never from model arguments. */
+  readonly relies_on?: { readonly option_id: string };
   /** event_risk.v1 slice 2a: CEE-held user words, outside producer operations. */
   readonly user_event_risk?: { readonly event_risk: EventRiskV1T; readonly quote: string };
   /** Each link names ONE end: `from_id` (a factor driving the risk) or `to_id` (the goal or an outcome it threatens). */
@@ -3524,6 +3532,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
 
   const outcome = dispatchAddRiskTransaction({
     params: { risk: input.risk, links: input.links },
+    ...(input.relies_on !== undefined ? { reliesOn: input.relies_on } : {}),
     ...(input.user_event_risk !== undefined ? { userEventRisk: input.user_event_risk } : {}),
     currentGraph: persistedGraph,
     currentGraphHash: currentHash,
@@ -3545,6 +3554,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash,
+    ...(input.relies_on !== undefined ? { relies_on: input.relies_on } : {}),
     ...(input.user_event_risk !== undefined ? { user_event_risk: input.user_event_risk } : {}) })).digest('hex').slice(0, 32)}`;
   try {
     await commitDirectAnswer(response, {

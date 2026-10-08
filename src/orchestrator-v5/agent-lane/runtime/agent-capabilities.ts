@@ -1,3 +1,6 @@
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 /**
  * Agent lane — the capabilities, each delegating to an existing Olumi path.
@@ -15,7 +18,10 @@ import { readNewLimit, limitFigure, hasLimitQuantity, limitApprovalWords, NO_LIM
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
-import { readStatedEventRisk, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
+import { HELD_RISK_CAUSE_NOTE, HELD_RISK_WINDOW_NOTE } from '../held-risk-notes.js';
+import { parseDrawnLinkPress } from '../drawn-link-press.js';
+import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -49,7 +55,7 @@ import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitRea
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
-import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
+import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
@@ -166,6 +172,9 @@ import { createProposal, ProposalStore, type ProposalInterpretation, type Propos
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
+import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
+import type { PatchOperation } from '../../../orchestrator/types.js';
+import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -173,7 +182,7 @@ import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandStd, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
@@ -191,7 +200,7 @@ import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
+import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -200,7 +209,7 @@ import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
-import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -215,6 +224,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { productHoldRecord } from '../proposal-object/record.js';
 import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
+import { PLAIN_APPROVAL_SUPERSEDED } from '../proposal-object/reply.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -230,7 +240,7 @@ import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { approvalSizes, isAcceptedOlumiSize, linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { approvalSizes, isAcceptedOlumiSize, linkSizing, sizedByApproval, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
@@ -849,9 +859,19 @@ function valuesNotSaved(
   });
 }
 
+/** S-D: snapshot the existing declared domain on the typed op, never invent a scale at Submit. */
+function storedFactorDomain(raw: unknown): { cap?: number; declared_scale?: unknown } {
+  if (!raw || typeof raw !== 'object') return {};
+  const os = raw as { cap?: unknown; declared_scale?: unknown };
+  return { ...(typeof os.cap === 'number' ? { cap: os.cap } : {}), ...(os.declared_scale !== undefined ? { declared_scale: os.declared_scale } : {}) };
+}
 function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
-  if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
   const own = ((op.value ?? {}) as { authored_by?: unknown }).authored_by;
+  // ⭐ S-D slice 2: an approve-with-edits proposal (`basis: 'edited_from:<id>'`, `amend.ts`) keeps EACH value's own
+  // author: only the values the user edited are theirs; every value they left stays Olumi's estimate. Every other
+  // proposal keeps the original precedence unchanged (a proposal the user authored whole claims all its values).
+  if ((proposal.provenance.basis ?? '').startsWith('edited_from:') && (own === 'user_stated' || own === 'model_proposed')) return own;
+  if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
   return own === 'user_stated' ? 'user_stated' : 'model_proposed';
 }
 
@@ -954,6 +974,8 @@ interface GraphRead {
     analysis_participation?: unknown;
     /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
     option_status?: unknown;
+    /** RC3: persisted server-authored option precondition. Inclusion is resolved over the whole graph. */
+    relies_on?: unknown;
     goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
@@ -969,6 +991,7 @@ interface GraphRead {
     from: string;
     to: string;
     origin?: unknown;
+    edge_type?: unknown;
     /** Whose link it is and how strong: read by the model context (C33) and the link-strength proposal and its write check. */
     provenance?: unknown;
     strength?: unknown;
@@ -1195,6 +1218,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           // them made the Agent reconstruct from the prompt what canonical state
           // already knew.
           const os = (n.observed_state ?? {}) as Record<string, unknown>;
+          const precondition = n.kind === 'risk' ? readReliesOnRisk(n.relies_on) : undefined;
           const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
           const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
           // Value provenance is a DIFFERENT fact from entity provenance: who put
@@ -1218,6 +1242,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             label: n.label,
             ...(n.description !== undefined ? { full_label: n.description } : {}),
             kind: n.kind,
+            ...(precondition === undefined ? {} : { relies_on: precondition }),
             // A value only when one is actually stored. Absence is reported as
             // unknown rather than as a zero.
             value: num(os.value) ? os.value : null,
@@ -1260,6 +1285,14 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
+  const preconditions = preconditionRiskIds(g.nodes, g.edges, limitNodeIdsOf(g.raw));
+  const leftOut = g.nodes.filter((n) => preconditions.has(n.id)).flatMap((risk) => {
+    const stamp = readReliesOnRisk(risk.relies_on);
+    if (stamp === undefined) return [];
+    return [{ id: risk.id, label: risk.label, relies_on: stamp,
+      reason: reliesOnRiskLine(risk.label, labelOf.get(stamp.option_id)!),
+      use: "Kept for discussion. Never a driver, sensitivity or worth-checking row, and never cite it as a reason for a goal chance: the Run leaves it out." }];
+  });
   const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
     const trio = pickGoalThresholdTrio(n as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
     const frame = (n as { goal_threshold_frame?: unknown }).goal_threshold_frame;
@@ -1272,7 +1305,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
-      ...(goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
+      ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
+        : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
@@ -1352,7 +1386,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
-      ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
+      // Science 393023 LICENCE ruling 3: a placeholder has no current band, so none is projected for the Agent to name.
+      ...(linkSizing(e) !== 'placeholder' && st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(countedOnce ? { exists_probability: 1, counted_once: true }
         : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
@@ -1369,6 +1404,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
     links,
+    ...(leftOut.length === 0 ? {} : { left_out_of_run: leftOut }),
     readiness: readinessViewOf(g.raw),
     ...(earlierAnalysisOf(g.analysis_state, g.analysis_ready) ?? {}),
   };
@@ -1656,12 +1692,14 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     const chancePermitted = legacyRun
       ? current && goalChance === undefined && permissions.leader_may_be_named === true
       : goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
+    const projectedChance = chancePermitted && typeof row?.probability_of_goal === 'number'
+      ? goalChancePointForAgent(row.probability_of_goal, goalChanceDisplay?.[id], shownChance.get(id)) : undefined;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
-      ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
-        ? { probability_of_goal: shownChance.get(id) ?? row.probability_of_goal } : {}),
+      ...(projectedChance !== undefined && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
+        ? { probability_of_goal: projectedChance } : {}),
       ...(decision !== undefined && !Object.hasOwn(goalFacts.goal_chance_range_display ?? {}, id) ? { goal_certainty: decision } : {}),
     }];
   }) : [];
@@ -2010,6 +2048,12 @@ export function createAgentCapabilities(
      */
     readonly readLeaderStanding?: (scenarioId: string) => Promise<LeaderStanding | null>;
     /**
+     * Whether a search control quoting this query would survive the final egress gate, read by the ROUTE from its own
+     * readback through the gate's own chip rule (`controlSurvivesLeaderGate`). Absent ⇒ every sendable query is accepted.
+     * Throwing ⇒ the dispatcher refuses the offer (fail closed): a control that may not arrive is never promised.
+     */
+    readonly researchControlShowable?: (scenarioId: string, query: string) => Promise<boolean>;
+    /**
      * ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door, reached in-process (`holdAddRiskInProcess`):
      * ONE `gmh_` hold pinned to the base hash, confirmed by the product's own held resume. Absent ⇒ unavailable.
      */
@@ -2213,7 +2257,7 @@ export function createAgentCapabilities(
         detail: 'That change is no longer waiting (it expired, or the model changed since it was offered), so nothing was applied. Offer to prepare it again.' };
     }
     const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
-    if (ctx.typed_approval_words !== copy.message) {
+    if (ctx.proposal_edits === undefined && ctx.typed_approval_words !== copy.message) {
       return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
         detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
     }
@@ -2231,19 +2275,33 @@ export function createAgentCapabilities(
       if (edits.proposal_id !== ref || edits.revision !== hold.id || edits.graph_hash !== hold.preconditions.graph_hash
         || edits.graph_hash !== before.graph_hash) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
       }
       const record = productHoldRecord(hold, before);
       if (record !== undefined && record.digest !== edits.digest) {
         return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
-          detail: 'Nothing changed. What this change shows has changed since these values were set.' };
+          detail: edits.fields.length === 0 ? PLAIN_APPROVAL_SUPERSEDED
+            : 'Nothing changed. What this change shows has changed since these values were set.' };
       }
-      const amended = record === undefined ? undefined : amendHeldOperations(record, edits.fields);
-      if (amended === undefined || !amended.ok) {
+      if (record === undefined) {
         return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
           detail: 'Nothing changed. Those values do not belong to this waiting change.' };
       }
-      userEdits = amended.userEdits;
+      // Check the card binding before its words: a replaced card can also have a newer approval message.
+      if (ctx.typed_approval_words !== copy.message) {
+        return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
+          detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
+      }
+      // Empty fields bind the displayed card only; they generate no amendments or edit receipts.
+      if (edits.fields.length > 0) {
+        const amended = amendHeldOperations(record, edits.fields);
+        if (!amended.ok) {
+          return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
+            detail: 'Nothing changed. Those values do not belong to this waiting change.' };
+        }
+        userEdits = amended.userEdits;
+      }
     }
     const r = await dispatch('/orchestrate/v2/turn', {
       kind: 'message',
@@ -2289,6 +2347,9 @@ export function createAgentCapabilities(
     const verified = applied && after !== null && typeof r.json.graph_hash === 'string' && r.json.graph_hash === after.graph_hash
       && after.graph_hash !== before.graph_hash && !stillHeld && holdsAll(after);
     if (!verified) {
+      if (!applied && edits?.fields.length === 0 && r.json.assistant_text === PLAIN_APPROVAL_SUPERSEDED) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref, detail: PLAIN_APPROVAL_SUPERSEDED };
+      }
       return applied
         ? { ok: false, mutated: true, refusal: 'not_verified', proposal_id: ref,
           detail: 'The change was saved, but the model changed again straight afterwards, so what it now holds could not be confirmed. Read the model again before saying what it holds.' }
@@ -2701,7 +2762,7 @@ export function createAgentCapabilities(
       // A keep (its stored basis) records the user's acceptance of Olumi's unchanged figure: the receipt says that, never
       // "starting values" (served 5a2290c, guest 02440e60: "Saved 1 of 1 starting values.").
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length,
-        ...(parent.provenance.basis === KEEP_PROPOSAL_BASIS ? { kept: true } : {}),
+        ...(isKeepProposal(parent) ? { kept: true } : {}),
         ...(valuesLanded ? {} : { ...(stopReason !== undefined ? { reason: stopReason } : {}), not_saved: valuesNotSaved(valueOps, parent, readAfterRefusal, labelOf) }) }] : []),
       ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
@@ -3008,6 +3069,40 @@ export function createAgentCapabilities(
     };
   };
 
+  /** The approved current-team duration goes through the single atomic team-time writer. */
+  const applyTeamTime = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!, a = op.value as ApprovedTeamTime;
+    if (op.path !== a.team_id || opts.commitOptionLevels === undefined) return { ok: false, mutated: false, applied: false, refusal: 'unavailable' };
+    const part = draftedTeamPartOf(approvedRead.raw);
+    if (part === null || part.team.id !== a.team_id || part.goal.id !== a.goal_id || goalDeadlineOf(part.goal) !== a.deadline) {
+      return { ok: false, mutated: false, applied: false, refusal: 'superseded' };
+    }
+    const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: approvedRead.graph_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#team-time`), links: [], levels: [], team_time: a });
+    if (res.status === 'unconfirmed') {
+      const reread = await readGraph(ctx.scenario_id), held = draftedTeamPartOf(reread?.raw);
+      if (reread !== null && held !== null
+        && teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), reread.raw)
+        && teamSharePostimageIsScoped(approvedRead.raw, reread.raw, a.team_id)) {
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [a.team_id], receipts: [] });
+      }
+      return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed' };
+    }
+    if (res.status !== 'committed') return { ok: false, mutated: false, applied: false, refusal: res.status };
+    const check = await readGraph(ctx.scenario_id);
+    const held = draftedTeamPartOf(check?.raw);
+    if (held === null || !teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), check?.raw)) {
+      return { ok: false, mutated: true, applied: false, refusal: 'not_verified' };
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    proposals.markApplied(parent.proposal_id, receipts);
+    return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      observed_state: held.team.observed_state,
+      ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
+  };
+
   /**
    * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
    * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
@@ -3048,9 +3143,24 @@ export function createAgentCapabilities(
       turn_id: authorisationTurnId(`${parent.proposal_id}#deadline`),
       links: [],
       levels: [],
-      goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null },
+      goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
+        ...(draftedTeamPartOf(approvedRead.raw) !== null ? { reference_date: (op.value as { reference?: string }).reference } : {}) },
     });
+    // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
+    if ((res.status === 'committed' || res.status === 'unconfirmed') && draftedTeamPartOf(approvedRead.raw) !== null) {
+      const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline,
+        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference });
+      const postimage = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : undefined;
+      if (postimage !== undefined) proposals.markPartial(parent.proposal_id, {
+        revision: computeAnalysisAffectingGraphHash(postimage as never)!, landed: [op.path], receipts: [], expected_postimage: postimage,
+      });
+    }
     if (res.status === 'unconfirmed') {
+      const reread = await readGraph(ctx.scenario_id);
+      if (reread !== null && goalDeadlineOf(reread.nodes.find(n => n.id === op.path)) === v.deadline
+        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
+      }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
         detail: 'This deadline was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
     }
@@ -3069,8 +3179,8 @@ export function createAgentCapabilities(
     }
     proposals.markApplied(parent.proposal_id, receipts);
     return {
-      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
-      follow_up: `Your deadline for "${String(goal.label)}" is now ${date}.`,
+      ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
+      follow_up: `Your deadline for "${String(check?.nodes.find(n => n.id === op.path)?.label ?? goal.label)}" is now ${date}.`,
     };
   };
 
@@ -3091,8 +3201,10 @@ export function createAgentCapabilities(
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     const links = parent.operations.map((o) => {
       const [from, to] = o.path.split('::');
-      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown }; band?: unknown; author?: unknown };
-      return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band, author: v.author };
+      const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown };
+        band?: unknown; author?: unknown; sizing_after_approval?: unknown };
+      return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band,
+        author: v.author, sizingAfterApproval: v.sizing_after_approval };
     });
     const readable = links.every((l) => l.from !== '' && l.to !== '' && typeof l.magnitude === 'number' && (l.intent === 'set' || l.intent === 'confirm_current')
       && isInfluenceBand(l.band) && typeof l.expected?.mean === 'number' && (l.expected.effect_direction === 'positive' || l.expected.effect_direction === 'negative')
@@ -3132,20 +3244,24 @@ export function createAgentCapabilities(
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
-    const holds = check !== null && sent.every((l) => {
+    const holds = check !== null && sent.every((l, index) => {
       const e = check.edges.find((x) => x.from === l.from && x.to === l.to) as { strength?: unknown; provenance?: unknown } | undefined;
       const mean = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
       const want = l.expected.effect_direction === 'negative' ? -l.magnitude : l.magnitude;
       const prov = (e?.provenance ?? {}) as { source?: unknown; magnitude?: unknown };
       // Whose, as approved: a band the user named that MOVED the link is theirs; a band they named that it already sat in,
       // and Olumi's band they agreed to, are REVIEW (`reviewed_by_user`, R11) — never the user's stamp on Olumi's figure.
-      const usersOwn = prov.source === 'user_specified' && (e as { defaulted?: unknown } | undefined)?.defaulted !== true;
+      const usersOwn = linkSizing(e) === 'user';
       const reviewed = (prov as { reviewed_by_user?: { intent?: unknown } }).reviewed_by_user?.intent === 'confirm';
-      const stamped = l.author === 'user_specified' && l.intent === 'set' ? prov.source === 'user_specified'
+      const stamped = l.author === 'user_specified' && l.intent === 'set' ? usersOwn
         : l.author === 'user_specified' ? reviewed : reviewed && !usersOwn;
+      const approvedPlaceholderMove = l.author === 'model_proposed' && l.intent === 'set'
+        && links[index]?.sizingAfterApproval === 'placeholder' && linkSizing(e) === 'placeholder';
       return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && stamped
-        // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-        && !approvalSizes(e);
+        // B1: confirm_current records a review of the stored mean, even when nobody has sized it yet.
+        // A user set must read back as sized. A model move predicted by the canonical adoption writer to remain a
+        // placeholder proves only its changed prior and review; review never earns sizing or authorship by itself.
+        && (l.intent === 'confirm_current' || approvedPlaceholderMove || !approvalSizes(e));
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -3161,15 +3277,22 @@ export function createAgentCapabilities(
      */
     const storedSizing = (l: { from: string; to: string }) => linkSizing(check!.edges.find((x) => x.from === l.from && x.to === l.to));
     const quotedLabel = (id: string): string => quoteLabelForUser(labelOf(id));
-    const parts = sent.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
+    const parts = sent.map((l) => storedSizing(l) === 'placeholder'
+      ? `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} ${l.intent === 'confirm_current'
+        ? 'reviewed, kept as it is' : 'changed; it isn\u2019t sized in the model yet'}`
+      : `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
     const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
     // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
-    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate', 'placeholder'].includes(storedSizing(l))).length;
+    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate'].includes(storedSizing(l))).length;
+    const reviewsOnly = sent.every((l) => l.intent === 'confirm_current' && storedSizing(l) === 'placeholder');
+    const placeholderChangesOnly = sent.every((l) => l.intent === 'set' && storedSizing(l) === 'placeholder');
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `Recorded ${sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
+      follow_up: `Recorded ${reviewsOnly ? (sent.length === 1 ? 'your review of this link' : `your reviews of these ${sent.length} links`)
+        : placeholderChangesOnly ? (sent.length === 1 ? 'the change to this link' : `the changes to these ${sent.length} links`)
+        : sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
         + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
         + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
@@ -3520,13 +3643,15 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), direction: current },
+        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: linkBandWord(currentBand) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? (keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
+              ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
+              : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
@@ -3821,7 +3946,15 @@ export function createAgentCapabilities(
       if (g === null) {
         return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
       }
-      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => scopeIssueBlocks(p.action))) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
+      const pendingNow = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+      if (pendingNow.some(p => scopeIssueBlocks(p.action))) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
+      // ⛔ ONE held-change predicate at ISSUANCE, for every door (the Agent's tool call, a Run's hint, the re-offer and the bar
+      // press): an identity card is never issued while another held change waits for its yes (GOAL-REACH, DL #2802 P1:
+      // path-only supersession would discard it before either is decided). The identity card itself does not block its re-offer.
+      if (heldChangeBlocksIdentity(pendingNow)) {
+        return { ok: false, mutated: false, refusal: 'held_change_waiting',
+          detail: 'A suggested change is waiting for your yes. Approve it, or change something first. Nothing was offered.' };
+      }
       const card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
@@ -3879,7 +4012,8 @@ export function createAgentCapabilities(
       const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
-      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; sizedBefore: LinkSizing };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean;
+        was: InfluenceBand; sizedBefore: LinkSizing; sizedAfterApproval: LinkSizing };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -3941,6 +4075,11 @@ export function createAgentCapabilities(
         // The link's review stamp as proposed (#2257's `reviewed_by_user`): the writer refuses the set if it moved since.
         const review = (edge.provenance as { reviewed_by_user?: { intent?: unknown; at?: unknown } } | undefined)?.reviewed_by_user;
         const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
+        // B1: preview the canonical review writer, then read it with THE predicate. Some contradictory projected
+        // records must remain unsized after review; their card must not promise an estimate that review cannot store.
+        const provenance = isPlainRecord(edge.provenance) ? edge.provenance : {};
+        const sizedAfterApproval = linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance,
+          reviewed_by_user: { intent: 'confirm' } }, edge) });
         /**
          * ⭐ F1 (#87 6006627551; DL lease c6): a band that MOVES a link holding the user's own figure would drop it — for
          * the user's band and Olumi's estimate alike (a brief figure is `brief_extraction` + `user_stated`, so the
@@ -3959,20 +4098,19 @@ export function createAgentCapabilities(
           const keeps = currentBand === band;
           // #2473 CR (CODEX_CLI_OVERFLOW 5937437431): the user's OWN strength, named in the band it already sits in, is
           // "already" — nothing to approve. Any other kept link is a review whose figure the writer holds byte-equal.
-          if (keeps && (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
-            && (edge as { defaulted?: unknown }).defaulted !== true) {
+          if (keeps && linkSizing(edge) === 'user') {
             already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`);
             continue;
           }
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand,
+            sizedBefore: linkSizing(edge), sizedAfterApproval });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
-        const usersOwn = (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
-          && (edge as { defaulted?: unknown }).defaulted !== true;
+        const usersOwn = linkSizing(edge) === 'user';
         if (usersOwn) {
           if (currentBand === band) { already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`); continue; }
           return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${linkBandWord(currentBand)}), and an estimate never replaces it. `
@@ -3987,8 +4125,11 @@ export function createAgentCapabilities(
         const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
         if (keeps && !approvalSizes(edge) && isAcceptedOlumiSize(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
-        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
+        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
+          expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed',
+          sizing_after_approval: sizedAfterApproval } });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand,
+          sizedBefore: linkSizing(edge), sizedAfterApproval });
       }
       if (ops.length === 0) {
         if (heldFigures.length > 0 && definitional.length === 0) {
@@ -4003,18 +4144,29 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'nothing_to_change', already,
           detail: 'Every link already holds what was asked, so nothing was prepared. Say so plainly.' };
       }
-      const whose = (x: Shown): string => x.yours
+      const remainsPlaceholder = (x: Shown): boolean => (x.keeps || !x.yours) && x.sizedAfterApproval === 'placeholder';
+      const reviewKeepsPlaceholder = (x: Shown): boolean => x.keeps && remainsPlaceholder(x);
+      const sourceRemainsUnmarked = (x: Shown): boolean => (x.keeps || !x.yours) && x.sizedAfterApproval === 'unmarked';
+      const reviewOnlyWhose = 'review only; nobody has sized this link';
+      const placeholderChangeWhose = 'placeholder prior changed; nobody has sized this link';
+      const whose = (x: Shown): string => sourceRemainsUnmarked(x) ? 'source of its size not recorded'
+        : reviewKeepsPlaceholder(x) ? reviewOnlyWhose : x.yours
         ? (x.keeps ? 'reviewed by you, kept as it is' : 'your estimate')
-        : 'Olumi\u2019s estimate';
+        : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
       /**
        * Whose figure each link holds AFTER the approval (M1 Accept receipt, Codex pre-review P2): naming the band a link
        * already sits in is review (R11), never authorship — the writer keeps who sized it, so a kept link is the user's
-       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its two literals are a typed contract
+       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its literals are a typed contract
        * (`proposal-reply.ts` `LINK_WHOSE`, fail-closed on any other).
        */
-      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' =>
-        x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours' : 'Olumi\u2019s estimate';
-      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user').length;
+      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' | 'Olumi\u2019s first estimate for a link nobody had sized'
+        | typeof reviewOnlyWhose | typeof placeholderChangeWhose | undefined =>
+        sourceRemainsUnmarked(x) ? undefined : remainsPlaceholder(x) ? (x.keeps ? reviewOnlyWhose : placeholderChangeWhose)
+          : x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours'
+          : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
+      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user' && !reviewKeepsPlaceholder(x)).length;
+      const reviewOnlyLinks = shown.filter(reviewKeepsPlaceholder);
+      const unsizedChanges = shown.filter(x => !x.keeps && remainsPlaceholder(x));
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4022,11 +4174,18 @@ export function createAgentCapabilities(
         operations: ops,
         provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}: `
-          + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
+        public_label: `${reviewOnlyLinks.length === shown.length
+          ? `Review ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          : unsizedChanges.length === shown.length ? `Change ${shown.length === 1 ? 'this link' : `these ${shown.length} links`}`
+          : `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}`}: `
+          + shown.map((x) => reviewKeepsPlaceholder(x)
+            ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet (kept as it is)`
+            : remainsPlaceholder(x) ? `"${x.from}" \u2192 "${x.to}", whose strength nobody has set yet`
+            : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
       });
       proposals.put(proposal);
-      const olumis = shown.filter((x) => !x.yours).length;
+      const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;
+      const firstEstimates = shown.filter((x) => whoseFigure(x) === 'Olumi\u2019s first estimate for a link nobody had sized');
       // A link Olumi had ALREADY estimated is re-sized, not sized: the Agent says so, never "your placeholders" (R3 DEFECT 2).
       const reEstimated = shown.filter((x) => !x.yours && !x.keeps && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted'));
       return {
@@ -4034,8 +4193,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), sizing: x.sizedBefore },
-          becomes: { band: linkBandWord(x.band) }, whose: whoseFigure(x), keeps_current_strength: x.keeps })),
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { ...(x.sizedBefore === 'placeholder' ? {} : { band: linkBandWord(x.was) }), sizing: x.sizedBefore },
+          becomes: remainsPlaceholder(x) ? { sizing: 'placeholder' } : { band: linkBandWord(x.band) },
+          whose: whoseFigure(x), keeps_current_strength: x.keeps,
+          ...(x.keeps || !x.yours ? { sizing_after_approval: x.sizedAfterApproval } : {}) })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
@@ -4044,6 +4205,19 @@ export function createAgentCapabilities(
           + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
+            : '')
+          + (firstEstimates.length > 0
+            ? 'For links nobody had sized, this offers Olumi\u2019s first estimate: approving records it as Olumi\u2019s, never as the user\u2019s own. '
+              + (firstEstimates.some((x) => x.keeps) ? 'Where the strength is kept as it is, approving records only the user\u2019s review, never authorship. ' : '')
+            : '')
+          + (reviewOnlyLinks.length > 0
+            ? 'These links aren\u2019t sized in the model yet: approving records only the user\u2019s review and keeps their stored strength. Never call their strengths the user\u2019s own or Olumi\u2019s estimates. '
+            : '')
+          + (unsizedChanges.length > 0
+            ? 'These changes move the stored placeholder strength, but the links still aren\u2019t sized in the model yet. Say that explicitly: approving changes the stored figure and records review, never an estimate or the user\u2019s authorship. '
+            : '')
+          + (shown.some(sourceRemainsUnmarked)
+            ? 'For links whose sizing stays unmarked, who set the strength is not recorded. Never call that strength the user\u2019s own, a placeholder or Olumi\u2019s estimate. '
             : '')
           + (keptNotTheirs > 0
             ? `${keptNotTheirs === shown.length ? 'Every link here' : `${keptNotTheirs} of these links`} already sits in the band the user named, so approving records only their review: its strength is kept exactly as it is and is never the user\u2019s own (\`whose\`). `
@@ -4173,6 +4347,10 @@ export function createAgentCapabilities(
       const goal = goals[0]!;
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
+      if (isEventShareForecast(g.raw)) {
+        return { ok: false, mutated: false, refusal: 'goal_measures_a_forecast',
+          detail: 'This goal measures the forecast share finished by its deadline. Its full-deliverable target stays held. Type the soonest and latest times with your current team, for example "6–10 months".' };
+      }
       if (goalKindOf(goal) === 'chance_of_event') {
         return { ok: false, mutated: false, refusal: 'goal_measures_a_chance',
           detail: `The goal "${goal.label}" is measured as a chance of an event, which Olumi works out, so it takes no target figure. Nothing was prepared. `
@@ -4300,6 +4478,41 @@ export function createAgentCapabilities(
       };
     },
 
+    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
+    async proposeTeamTime(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const stated = readTeamTime(ctx.user_turn_text);
+      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
+        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
+          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineOf(part.goal);
+      if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
+        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+      const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()) };
+      if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
+        detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
+      if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
+        return { ok: false, mutated: false, refusal: 'already_held',
+          detail: a.low_months === a.high_months ? 'Your most likely time is already held. Type the soonest and latest times with your current team, for example "6–10 months".'
+            : 'That team-time range is already held. To change it, type the new soonest and latest times, for example "6–9 months".' };
+      }
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
+        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === 'set_team_time')) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
+        base_revision: g.graph_hash, team_time: a };
+    },
+
     /**
      * ⭐ S-E GOALS — THE USER'S DEADLINE, AS A DATE, PROPOSED IN THE TURN THEY STATE IT (Science ruling 7 Oct §3; Paul's prod
      * test item 6: "the six-month deadline isn't encoded in the goal yet", and nothing was proposed). The Agent quotes the
@@ -4402,6 +4615,16 @@ export function createAgentCapabilities(
       if (g.edges.some((e) => e.from === from.id && e.to === to.id)) {
         return { ok: false, mutated: false, refusal: 'already_present', detail: 'That link is already in the model.' };
       }
+      const bound = ctx.drawn_link;
+      const parsed = parseDrawnLinkPress(bound?.press_id);
+      const drawn = bound !== undefined && parsed !== null && parsed.from === bound.from && parsed.to === bound.to
+        && bound.from === from.id && bound.to === to.id;
+      if (bound !== undefined && !drawn) return { ok: false, mutated: false, refusal: 'drawn_pair_mismatch' };
+      const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
+      if ((drawn || args.reason !== undefined) && (reason.length === 0 || reason.length > 140 || /[\p{N}\r\n<>*_`{}\u005b\u005d\u2014]/u.test(args.reason ?? ''))) {
+        return { ok: false, mutated: false, refusal: 'invalid_reason' };
+      }
+      if (args.direction !== 'positive' && args.direction !== 'negative') return { ok: false, mutated: false, refusal: 'invalid_direction' };
       /**
        * ⛔ A NEW LINK CARRIES ONLY THE BAND THE USER TYPED THIS TURN (Delivery Lead #70 5845493088, agreed by Canonical
        * 5845487856: "The Agent proposes a link only with the band the user typed THIS turn … With no band it asks 'how
@@ -4417,7 +4640,9 @@ export function createAgentCapabilities(
       const band = isInfluenceBand(args?.strength) ? args.strength : undefined;
       // …or the user described it in their own words, and approves Olumi's reading of them (`bandGrounding`, slice C3).
       const grounding = band === undefined ? null : bandGrounding(band, args?.from_words, ctx.user_turn_text);
-      if (band === undefined || grounding === null) {
+      // The host-bound drawn pair is the sole exception: Olumi's band is approved as its own estimate,
+      // then authored model_proposed through the level door. Every ordinary turn still needs the user's words.
+      if (band === undefined || (!drawn && grounding === null)) {
         const ask = 'ask them "how strong is that effect: slight, moderate, strong or very strong?" and never offer a band as theirs.';
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
           detail: band === undefined
@@ -4427,9 +4652,9 @@ export function createAgentCapabilities(
               + `it would be recorded as their estimate. Instead, ${ask}` };
       }
       const magnitude = bandMidpoint(band);
-      const interpretation = grounding.kind === 'reading' ? grounding.interpretation : undefined;
+      const interpretation = !drawn && grounding?.kind === 'reading' ? grounding.interpretation : undefined;
       const operations: ProposalOperation[] = [
-        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude } },
+        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude, ...(drawn ? { band, author: 'model_proposed', reason, press_id: bound!.press_id } : {}) } },
       ];
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -4438,7 +4663,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${linkBandWord(band)}${interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`}, your own estimate`,
+        public_label: drawn ? `Olumi’s estimate: ‘${from.label}’ ${args.direction === 'positive' ? 'helps' : 'hurts'} ‘${to.label}’, ${CANVAS_BAND_WORD[band]}. ${reason}` : `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${linkBandWord(band)}${interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`}, your own estimate`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
@@ -4449,7 +4674,7 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, direction: args.direction, band },
         ...(interpretation === undefined ? {} : { interpretation }),
-        note: `${interpretation === undefined ? '' : readingNote(interpretation)}Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and ask them to approve it before calling authorise_change. ${BAND_WORDS_ONLY}`,
+        note: drawn ? 'Nothing has changed. Show the estimate and its reason, then ask the user to approve, change or decline it.' : `${interpretation === undefined ? '' : readingNote(interpretation)}Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and ask them to approve it before calling authorise_change. ${BAND_WORDS_ONLY}`,
       };
     },
 
@@ -4519,7 +4744,10 @@ export function createAgentCapabilities(
       for (const given of input) {
         let a = given;
         const requested = String(a?.factor_label ?? '');
-        const res = resolveNamed(g, requested, writable);
+        const identified = a?.factor_id !== undefined ? g.nodes.find(n => n.id === a.factor_id) : undefined;
+        const res = a?.factor_id === undefined ? resolveNamed(g, requested, writable)
+          : identified === undefined ? { kind: 'none' as const }
+            : { kind: writable(identified) ? 'one' as const : 'other' as const, node: identified };
         if (res.kind === 'none') { unresolved.push(requested); continue; }
         // ⛔ Two writable factors answer to this name: no op for it, and the Agent asks.
         if (res.kind === 'ambiguous') {
@@ -4692,7 +4920,8 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed' },
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed',
+          ...storedFactorDomain(g.nodes.find(n => n.id === a.id)?.observed_state) },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
@@ -5381,6 +5610,10 @@ export function createAgentCapabilities(
       }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const recovery = proposals.partialProgressOf(args.proposal_id);
+      if (recovery?.expected_postimage !== undefined && !isDeepStrictEqual(recovery.expected_postimage, before.raw)) {
+        return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: args.proposal_id };
+      }
       const decision = proposals.authorise({
         proposal_id: args.proposal_id,
         scenario_id: ctx.scenario_id,
@@ -5522,10 +5755,10 @@ export function createAgentCapabilities(
           const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
           const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
           const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
-          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : p?.source === 'user_specified';
+          const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : linkSizing(x) === 'user';
           return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
-            // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-            && !approvalSizes(x);
+            // B1: a same-band confirm reviews the unchanged mean; it may still be an unsized placeholder.
+            && (v.intent === 'confirm_current' || !approvalSizes(x));
         };
         /**
          * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of
@@ -5834,6 +6067,7 @@ export function createAgentCapabilities(
       // door is wired here, nothing is written and the Agent says so — never a strength-only or register fallback.
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'set_team_time') return applyTeamTime(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
@@ -6971,6 +7205,10 @@ export function createAgentCapabilities(
        * reached. What this change does is make that boundary MEASURABLE rather
        * than masked by an identity that never repeats.
        */
+      const drawnValue = op.value as { band?: unknown; author?: unknown; press_id?: unknown };
+      const drawnBand = drawnValue.author === 'model_proposed' && isInfluenceBand(drawnValue.band)
+        && parseDrawnLinkPress(drawnValue.press_id)?.from === fromId && parseDrawnLinkPress(drawnValue.press_id)?.to === toId ? drawnValue.band : undefined;
+      if (drawnBand !== undefined && opts.commitOptionLevels === undefined) return { ok: false, mutated: false, applied: false, refusal: 'not_applied', detail: 'Olumi could not record the accepted estimate. Nothing changed.' };
       const operationId = authorisationTurnId(decision.proposal.proposal_id);
       const res = await dispatch('/orchestrate/v2/turn', {
         kind: 'system_event',
@@ -7028,6 +7266,40 @@ export function createAgentCapabilities(
       }
       const edgeReceipt = receiptSummaryOf(res.json);
       const edgeReceipts = edgeReceipt.summary !== null ? [edgeReceipt.summary] : [];
+      if (drawnBand !== undefined) {
+        const added = after!.edges.find(e => e.from === fromId && e.to === toId);
+        let estimate: CommitOptionLevelsResult;
+        try {
+          estimate = await withDrawnLinkAdoption({ scenarioId: ctx.scenario_id, from: fromId!, to: toId!,
+            magnitude: usersStrength!, band: drawnBand, edge: added }, () => opts.commitOptionLevels!({
+            scenario_id: ctx.scenario_id, base_graph_hash: after!.graph_hash,
+            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#drawn-strength`), links: [], levels: [],
+            link_strengths: [{ from: fromId!, to: toId!, magnitude: usersStrength!, intent: 'set',
+              expected: { mean: direction === 'negative' ? -usersStrength! : usersStrength!, effect_direction: direction, reviewed_at: null },
+              band: drawnBand, author: 'model_proposed' }],
+          }));
+        } catch {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
+            detail: 'The link was added, but recording its accepted Olumi estimate could not be confirmed. Check the saved model before continuing.' };
+        }
+        const checked = await readGraph(ctx.scenario_id);
+        const edge = checked?.edges.find(e => e.from === fromId && e.to === toId);
+        const strength = edge?.strength as { mean?: unknown; std?: unknown } | undefined;
+        const provenance = edge?.provenance as { source?: unknown; magnitude?: unknown; reviewed_by_user?: { intent?: unknown; band?: unknown; at?: unknown } } | undefined;
+        const verified = estimate.status === 'committed' && strength?.mean === (direction === 'negative' ? -usersStrength! : usersStrength)
+          && strength?.std === edgeBandStd(drawnBand) && edge?.effect_direction === direction
+          && provenance?.source === 'cee_hypothesis' && provenance.magnitude === 'olumi_estimate'
+          && provenance.reviewed_by_user?.intent === 'confirm' && provenance.reviewed_by_user.band === drawnBand
+          && typeof provenance.reviewed_by_user.at === 'string' && Number.isFinite(Date.parse(provenance.reviewed_by_user.at));
+        if (!verified) return { ok: false, mutated: true, applied: false, refusal: checked === null ? 'not_confirmed' : 'not_verified',
+          proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
+          detail: 'The link was added, but Olumi could not confirm its strength as the accepted Olumi estimate. Check the saved model before continuing.' };
+        if (estimate.status === 'committed' && estimate.receipt !== null) edgeReceipts.push({ ...estimate.receipt, source_turn_id: estimate.receipt.source_turn_id ?? '' });
+        proposals.markApplied(decision.proposal.proposal_id, edgeReceipts);
+        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
+          revision_before: before.graph_hash, revision_after: checked!.graph_hash,
+          follow_up: `${decision.proposal.public_label} Recorded as Olumi’s estimate, accepted.` };
+      }
       proposals.markApplied(decision.proposal.proposal_id, edgeReceipts);
       return {
         ok: true, mutated: true, applied: true,
@@ -8002,12 +8274,20 @@ export function createAgentCapabilities(
       }
       const affects = Array.isArray(args?.affects) ? args.affects : [];
       const causedBy = Array.isArray(args?.caused_by) ? args.caused_by : [];
-      if (affects.length === 0) {
+      const precondition = ctx.widen_relies_on === undefined ? undefined : readReliesOnRisk(ctx.widen_relies_on);
+      if (ctx.widen_relies_on !== undefined && (precondition === undefined || affects.length !== 0 || causedBy.length !== 0)) {
+        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'Nothing was prepared: this option precondition must have no links.' };
+      }
+      if (affects.length === 0 && precondition === undefined) {
         return { ok: false, mutated: false, refusal: 'no_affects',
           detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const preconditionOption = precondition === undefined ? undefined : g.nodes.find((n) => n.id === precondition.option_id && n.kind === 'option');
+      if (precondition !== undefined && preconditionOption === undefined) {
+        return { ok: false, mutated: false, refusal: 'invalid_precondition', detail: 'The option this risk relies on is no longer in the model. Nothing was prepared.' };
+      }
       if (g.nodes.some((n) => norm(n.label) === norm(label))) {
         return { ok: false, mutated: false, refusal: 'risk_exists',
           detail: `The model already has something called "${label}", so nothing was prepared. Describe it from the model instead of adding it again.` };
@@ -8038,7 +8318,19 @@ export function createAgentCapabilities(
         }
         links.push({ to_id: res.node.id, effect_direction: dir });
       }
-      for (const c of causedBy as { factor_label?: unknown; direction?: unknown }[]) {
+      // Only the user's turn may author the likelihood or name its drivers.
+      const userText = ctx.user_turn_text ?? ctx.user_text ?? '';
+      const stated = precondition === undefined ? readStatedEventRisk(userText) : undefined;
+      const driverLabels = stated === undefined ? [] : causedBy.map((c) => {
+        const asked = String(c?.factor_label ?? '');
+        const resolved = resolveNamed(g, asked, (node) => node.kind === 'factor');
+        return resolved.kind === 'one' ? resolved.node.label : asked;
+      });
+      const droppedDrivers = stated !== undefined && causedBy.length > 0
+        && !driverLabels.some((driver) => isFactorNamedByUser(driver, userText)) ? driverLabels : [];
+      const riskCauses = droppedDrivers.length > 0 ? [] : causedBy;
+      const eventRisk = riskCauses.length === 0 ? stated : undefined;
+      for (const c of riskCauses as { factor_label?: unknown; direction?: unknown }[]) {
         const asked = String(c?.factor_label ?? '');
         const dir = direction(c?.direction);
         const res = resolveNamed(g, asked, (n) => n.kind === 'factor');
@@ -8057,7 +8349,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
       }
       // The door's own builder, run here purely: a spec it would refuse is never sent.
-      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never });
+      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never }, precondition);
       if (!built.matched) {
         const why = built.reason === 'kind_pair_not_allowed'
           ? ` ${RISK_LINKS_RULE}`
@@ -8068,9 +8360,6 @@ export function createAgentCapabilities(
           detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const riskId = built.proposal.riskId;
-      // event_risk.v1 slice 2a: whole_request is a boolean; only trusted turn words author a figure.
-      const stated = readStatedEventRisk(ctx.user_turn_text ?? ctx.user_text ?? '');
-      const eventRisk = causedBy.length === 0 ? stated : undefined;
       const res = await opts.holdAddRisk({
         scenario_id: ctx.scenario_id,
         // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
@@ -8078,6 +8367,7 @@ export function createAgentCapabilities(
         base_graph_hash: g.graph_hash,
         risk: { id: riskId, label },
         links,
+        ...(precondition === undefined ? {} : { relies_on: precondition }),
         ...(eventRisk !== undefined ? { user_event_risk: eventRisk } : {}),
       });
       if (res.status === 'stale') {
@@ -8092,6 +8382,9 @@ export function createAgentCapabilities(
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
           heldOk = (eventRisk === undefined || (hold !== undefined && isDeepStrictEqual((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_EVENT_RISK_KEY], { risk_id: riskId, ...eventRisk })))
             && ops.some((o) => o.op === 'add_node' && o.path === riskId)
+            && (precondition === undefined || (reliesOnRefereeOperations(ops as PatchOperation[], g) !== undefined
+              && ops.some((o) => o.op === 'add_node' && o.path === riskId
+                && isDeepStrictEqual((o.value as Record<string, unknown>)?.relies_on, precondition))))
             && built.proposal.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`));
         } catch {
           heldOk = false;
@@ -8114,14 +8407,20 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         risk: {
           label,
+          ...(precondition === undefined ? {} : { relies_on: { option_id: precondition.option_id, option_label: preconditionOption!.label } }),
           ...(eventRisk !== undefined ? { likelihood: { p_low_pct: eventRisk.event_risk.occurrence.p_low * 100, p_high_pct: eventRisk.event_risk.occurrence.p_high * 100, horizon_months: eventRisk.event_risk.horizon.months, basis: 'user', quote: eventRisk.quote } } : {}),
           threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
           how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
         },
-        note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
+        ...(droppedDrivers.length > 0 ? { dropped_drivers: droppedDrivers } : {}),
+        note: precondition !== undefined
+          ? "Nothing has changed yet. This risk stays on the model with no links. The Run leaves it out because it cannot yet apply the risk to that option alone; that option's chance does not include it yet."
+          : 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
-          + (stated !== undefined && causedBy.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : ''),
+          + (stated !== undefined && riskCauses.length > 0 ? ' ' + HELD_RISK_CAUSE_NOTE : '')
+          + (droppedDrivers.length > 0 ? ` I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.` : '')
+          + (stated === undefined && readStatedLikelihoodWithoutWindow(userText) ? ' ' + HELD_RISK_WINDOW_NOTE : ''),
       };
     },
 
@@ -8489,6 +8788,13 @@ export function createAgentCapabilities(
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 
+    /**
+     * Whether a search control quoting this query would reach the user: the route's read of the final egress gate's own
+     * chip rule. The dispatcher refuses the offer when this throws (`dispatchTool`, fail closed).
+     */
+    ...(opts.researchControlShowable !== undefined ? {
+      researchControlShowable: (ctx: AgentToolContext, query: string): Promise<boolean> => opts.researchControlShowable!(ctx.scenario_id, query),
+    } : {}),
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470). Read-only, and never a claim about the analysis:
      * it is accepted only while the current analysis WITHHOLDS its leader, and the route renders it after the leader

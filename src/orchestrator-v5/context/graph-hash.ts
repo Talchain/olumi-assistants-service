@@ -17,6 +17,7 @@ import { goalScopeAnalysisMeaning } from '../../schemas/goal-scope.js';
  */
 
 import { createHash } from 'node:crypto';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analysis-ready-helper.js';
@@ -364,6 +365,11 @@ function projectNode(raw: unknown): NodeProjection {
     if (key !== 'id' && r[key] !== undefined) out[key] = r[key];
   }
 
+  // RC3 a′ is CEE-local until the shared vocabulary catches up. This identity changes readiness and Run inclusion,
+  // so removing/rebinding it must invalidate the old analysis; absent/malformed stamps preserve legacy hashes.
+  const reliesOn = NodeV3.shape.relies_on.safeParse(r.relies_on);
+  if (reliesOn.success && reliesOn.data !== undefined) out.relies_on = reliesOn.data;
+
   const observed = projectObservedState(r.observed_state);
   if (observed !== undefined && Object.keys(observed).length > 0) {
     out.observed_state = observed;
@@ -423,6 +429,7 @@ function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
       const ne = pickDefined((p.natural_effect as Record<string, unknown>), VOCABULARY.edge.provenance_natural_effect_fields);
       if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
     }
+    if (Object.hasOwn(p, 'share_by_date')) provenance.share_by_date = p.share_by_date;
     if (Object.keys(provenance).length > 0) out.provenance = provenance;
   }
 

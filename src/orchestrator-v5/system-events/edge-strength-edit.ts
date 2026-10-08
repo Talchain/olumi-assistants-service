@@ -8,7 +8,8 @@
  * compare-and-swap remain owned by `dispatch.ts` → `commitDirectAnswer`.
  */
 
-import { approvalSizes, ESTIMATE_MAGNITUDE } from '../../cee/magnitude/link-sizing.js';
+import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
+import { approvalSizes, ESTIMATE_MAGNITUDE, linkSizing, sizedByApproval, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import type {
   OlumiResponse,
   SystemEventTurnPayload,
@@ -36,7 +37,6 @@ import type { ProposalAction } from '../routing/types.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { formatEdgeStrengthConfirmed } from '../tools/handlers/d1-shared/format-confirmation.js';
-import { linkSizing, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import {
   getDefaultRegistry,
   resolveHandler,
@@ -202,6 +202,10 @@ export function reviewIntentOf(provenance: unknown): unknown {
     : undefined;
 }
 
+/** The projection carrier, compared and carried OPAQUELY (R8-2: only `link-sizing.ts` reads its meaning). */
+const PROJECTION_CARRIER = 'mean_projected';
+const carrierOf = (p: object): Record<string, unknown> => Object.fromEntries(Object.entries(p).filter(([key]) => key === PROJECTION_CARRIER));
+
 /**
  * Full-graph confirmation guard. ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the
  * DL): a confirm never stamps the user's authorship, so it may not change who authored anything. The only permitted
@@ -212,8 +216,10 @@ export function reviewIntentOf(provenance: unknown): unknown {
  * - when `statedBand` is given (the user named the band the link already sits in: the Agent's confirm, or the canvas
  *   pill's 0.60.0 `band` on a `confirm_current`), that band in the review record. The strength itself — mean AND std —
  *   never moves on any confirm (#2473 CR, CODEX_CLI_OVERFLOW 5937437431; it once took the band's spread).
+ * - L4: exactly `sizedByApproval`'s magnitude/carrier transition for an eligible placeholder. A projected user-drawn
+ *   link keeps both: losing its projection carrier would wrongly read the review as user authorship.
  * ⛔ Everything else is KEPT, and a change to any of it fails: `provenance.source` (so a confirm that stamps
- * `user_specified` — the bypass R11 closes — is refused), `magnitude`, `natural_effect`, `reasoning`,
+ * `user_specified` — the bypass R11 closes — is refused), any other magnitude/carrier change, `natural_effect`, `reasoning`,
  * `provenance_display`, and the edge's `defaulted` / `exists_defaulted` / `std_defaulted` flags. (Before R11 this
  * guard REQUIRED the `user_specified` / `user_set` stamp and admitted the removal of `defaulted` and of Olumi's sizing
  * and reasoning: Canvas #70 5848798561, A6c, A6e, A6f.) Every other byte of persisted JSON — including
@@ -267,9 +273,18 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
     // ⭐ L4 (DL 5929790081): the ONE other provenance change a confirm may make — a placeholder becomes Olumi's estimate,
     // now accepted (`sizedByApproval`). Exactly that transition, checked, then restored for the byte comparison below.
     if (afterProvenance.magnitude !== beforeProvenance.magnitude) {
-      if (!(approvalSizes(rawBeforeEdge) && afterProvenance.magnitude === ESTIMATE_MAGNITUDE)) return false;
+      const approved = sizedByApproval(beforeProvenance, rawBeforeEdge);
+      if (!(approvalSizes(rawBeforeEdge) && afterProvenance.magnitude === ESTIMATE_MAGNITUDE
+        && afterProvenance.magnitude === approved.magnitude
+        && isDeepStrictEqual(carrierOf(afterProvenance), carrierOf(approved)))) return false;
       if ('magnitude' in beforeProvenance) afterProvenance.magnitude = beforeProvenance.magnitude;
       else delete afterProvenance.magnitude;
+      // P03 #2797 + R7: the approved transition drops a projected mean's marker (`sizedByApproval`); only here, and only
+      // exactly as checked above. R7: a non-user projected placeholder's canonical magnitude transition also removes its old projection carrier.
+      // Admit exactly that paired transition, then restore it for the full-graph check; carrier deletion alone refuses.
+      // Carried opaquely, as `link-sizing.ts` does (R8-2: only link-sizing READS the marker).
+      for (const key of Object.keys(afterProvenance)) if (key === PROJECTION_CARRIER) delete afterProvenance[key];
+      Object.assign(afterProvenance, structuredClone(carrierOf(beforeProvenance)));
     }
     if ('reviewed_by_user' in beforeProvenance) {
       afterProvenance.reviewed_by_user = structuredClone(beforeProvenance.reviewed_by_user);
@@ -545,6 +560,7 @@ export async function applyEdgeStrengthEdit(
   // the explicit confirmation intent grants that provenance-only write.
   if (
     !replacesUserFigure &&
+    drawnLinkAdoptionFor(payload.scenario_id, event.from, event.to, event.magnitude, targetEdge) === undefined &&
     event.intent === 'set' &&
     target.mean === targetEdge.strength.mean &&
     target.effectDirection === targetEdge.effect_direction

@@ -22,14 +22,19 @@ import { createHash } from 'node:crypto';
 
 import type { StrengthBand } from '@talchain/schemas/boundary';
 
-import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
+import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../../session/pending-action.js';
+import { conversationAsSeen } from '../../session/conversation-as-seen.js';
 import { GM_HELD_HANDLER_ID, buildGmHeldPublicCopy } from '../../handlers/edit-graph-referee-gate.js';
 import { describeChangeset } from '../../handlers/describe-changeset.js';
 import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMember } from '../../routing/add-option-transaction.js';
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember } from '../../routing/add-factor-transaction.js';
-import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
+import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
+import type { InfluenceBand } from '../../format/influence-bands.js';
+import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../routing/stated-event-risk.js';
+import { eventRiskCardLine } from '../stated-event-risk-draft.js';
+import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
-import type { ProposalOperation } from '../proposal.js';
+import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 
 /** The approve chip id prefix (`approval-chips.ts` APPROVE_PREFIX), restated here only to build the card's id. */
@@ -38,18 +43,19 @@ const APPROVE_PREFIX = 'agent-approve-proposal:';
 export const DECLINE_PREFIX = 'agent-decline-proposal:';
 export const declineChipIdFor = (proposalId: string): string => `${DECLINE_PREFIX}${proposalId}`;
 const GMH_RE = /^gmh_[0-9a-f]{12}$/;
+const PROP_RE = /^prop_[0-9a-f]{32}$/;
 /** The held proposal a typed decline press names, or undefined. */
 export function declinedProposalOf(chipId: unknown): string | undefined {
   if (typeof chipId !== 'string' || !chipId.startsWith(DECLINE_PREFIX)) return undefined;
   const id = chipId.slice(DECLINE_PREFIX.length);
-  return GMH_RE.test(id) ? id : undefined;
+  return GMH_RE.test(id) || PROP_RE.test(id) ? id : undefined;
 }
 
 export const STRENGTH_BANDS: readonly StrengthBand[] = ['slight', 'moderate', 'strong', 'very_strong'];
 
 /** Whose a value is NOW, read from the held op's own provenance. */
 export type ValueSource = 'placeholder' | 'estimate' | 'yours';
-export type FieldKind = 'link_strength';
+export type FieldKind = 'link_strength' | 'factor_value';
 
 /**
  * ⛔ ONE EXHAUSTIVE CLASSIFIER over every op either dialect can hold (the product's patch ops + the Agent's proposal
@@ -64,12 +70,13 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   update_node: 'slice_2', // a factor value (S2)
   remove_node: 'none',
   remove_edge: 'none',
-  set_factor_value: 'slice_2',
+  set_factor_value: 'factor_value',
   set_option_intervention: 'slice_2',
-  set_link_strength: 'slice_2', // the Agent dialect's link band (S2)
+  set_link_strength: 'link_strength', // the Agent dialect's link band (S2)
   set_link_effect: 'none', // the user's own verbatim figures: shown, never re-authored
   set_goal_target: 'slice_3',
   set_limit: 'slice_3',
+  set_team_time: 'slice_3',
   add_limit: 'slice_3',
   set_goal_deadline: 'slice_3', // the goal's date (`goal_horizon.deadline`, new on staging 7 Oct): with goal target and limits (S3, S-E)
   confirm_identity: 'none',
@@ -77,9 +84,9 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   adopt_olumi_option: 'slice_3',
 };
 
-export interface ProposalField {
+export interface LinkStrengthField {
   readonly field_id: string;
-  readonly kind: FieldKind;
+  readonly kind: 'link_strength';
   readonly from_id: string;
   readonly to_id: string;
   readonly from_label: string;
@@ -91,6 +98,21 @@ export interface ProposalField {
   readonly editable: boolean;
 }
 
+/** Native figure and its stored domain. Units are read-only. No quantity is normalised by this projection. */
+export interface FactorValueField {
+  readonly field_id: string;
+  readonly kind: 'factor_value';
+  readonly node_id: string;
+  readonly label: string;
+  readonly unit: string;
+  readonly cap?: number;
+  readonly declared_scale?: unknown;
+  readonly current: { readonly value: number; readonly unit: string; readonly source: 'estimate' | 'yours' | 'from_brief' };
+  readonly filled_missing: boolean;
+  readonly editable: boolean;
+}
+export type ProposalField = LinkStrengthField | FactorValueField;
+
 export interface MissingDatum {
   readonly node_id: string;
   readonly label: string;
@@ -101,13 +123,14 @@ export interface MissingDatum {
 export interface CardAction { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string }
 
 /** ⭐ THE ONE PROPOSAL OBJECT — a read model over the persisted carrier. */
-export interface ProposalRecord {
+export interface ProposalRecord<F extends ProposalField = ProposalField> {
   readonly proposal_id: string;
   /**
    * The exact stored revision of this proposal (the carrier's own id). Edits name it, and the door applies them ONLY to
    * that revision, so two panels can never approve each other's values (Codex P0 on the design).
    */
   readonly revision: string;
+  /** Carrier time for bounded issuance lookup only; excluded from the displayed digest and wire. */
   /**
    * What the panel SHOWED, bound: the card's words, every field (its ends, their labels, direction, value and whose it
    * is) and the missing data, hashed. Edits name it and the door re-derives it from the stored hold on the stored model,
@@ -115,18 +138,26 @@ export interface ProposalRecord {
    * (Codex r1 P1 on #2743: a renamed factor took the user's value under a name they never saw).
    */
   readonly digest: string;
-  readonly dialect: 'product_hold';
+  readonly dialect: 'product_hold' | 'agent';
   readonly base_graph_hash: string;
   readonly approve_action: CardAction;
   readonly decline_action: CardAction;
   readonly operations: readonly HeldOp[];
-  readonly fields: readonly ProposalField[];
+  readonly fields: readonly F[];
   readonly missing: readonly MissingDatum[];
 }
 
 export type HeldOp = { readonly op: string; readonly path: string; readonly value?: unknown };
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Digest only the envelope projection; sort nested keys so JSONB key order cannot invalidate a displayed panel. */
+function projectionDigest(projection: unknown): string {
+  return createHash('sha256').update(JSON.stringify(projection, (_key, value: unknown) => {
+    if (!isRec(value)) return value;
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]));
+  })).digest('hex').slice(0, 32);
+}
 
 /** True iff `pa` is a product hold (`gmh_`, `graph_management_held_v1`). */
 export function isProductHold(pa: PendingAction): boolean {
@@ -165,7 +196,7 @@ function labelResolver(ops: readonly HeldOp[], graph: unknown): (id: string) => 
 }
 
 /** A held link's strength field, or undefined when the op carries no readable strength. */
-function linkField(o: HeldOp, labelOf: (id: string) => string | undefined): ProposalField | undefined {
+function linkField(o: HeldOp, labelOf: (id: string) => string | undefined): LinkStrengthField | undefined {
   if (!isRec(o.value)) return undefined;
   const ends = endsOf(o.path);
   if (ends === undefined) return undefined;
@@ -207,6 +238,8 @@ function missingOf(pa: PendingAction, ops: readonly HeldOp[]): MissingDatum[] {
     if (o.op !== 'add_node' || !isRec(o.value)) continue;
     const { id, label, kind } = o.value as { id?: unknown; label?: unknown; kind?: unknown };
     if (typeof id !== 'string' || typeof label !== 'string' || (kind !== 'risk' && kind !== 'factor')) continue;
+    // A held precondition has no Run level to resolve: the card discloses its option-bound omission below.
+    if (kind === 'risk' && readReliesOnRisk((o.value as Rec).relies_on) !== undefined) continue;
     const observed = (o.value as Rec)['observed_state'];
     if (isRec(observed) && typeof observed['value'] === 'number') continue;
     if (recorded.has(id)) continue;
@@ -228,6 +261,16 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
     const copy = buildGmHeldPublicCopy(changeset?.subject ?? null, changeset?.items);
     if (copy.label === label && copy.message === message) detail = copy.detail;
   } catch { detail = undefined; }
+  // The member reader validates the occurrence with EventRiskV1 before any copy is added.
+  const eventRisk = readUserEventRiskMember(patch[GM_HELD_USER_EVENT_RISK_KEY]);
+  if (eventRisk !== undefined) {
+    const line = eventRiskCardLine(eventRisk.event_risk);
+    detail = detail !== undefined ? `${detail}\n${line}` : line;
+  }
+  // This reader rebuilds card detail on reload; the dispatch-only detail would otherwise disappear.
+  for (const line of heldReliesOnRiskLines(ops as PatchOperation[], graph)) {
+    detail = detail !== undefined ? `${detail}\n${line}` : line;
+  }
   return { id: `${APPROVE_PREFIX}${pa.chip_id}`, label, message, ...(detail !== undefined ? { detail } : {}) };
 }
 
@@ -235,7 +278,7 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
  * The ONE proposal object for a held product proposal, read against `graph` (the model it is pinned to, or the model
  * it was just re-pinned to). Undefined for anything that is not a live product hold, or whose card words are missing.
  */
-export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: number = Date.now()): ProposalRecord | undefined {
+export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: number = Date.now()): ProposalRecord<LinkStrengthField> | undefined {
   if (!isProductHold(pa) || isPendingActionExpired(pa, nowMs)) return undefined;
   const pin = pa.preconditions.graph_hash;
   if (typeof pin !== 'string' || pin === '') return undefined;
@@ -246,18 +289,15 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
   const approve = approveActionOf(pa, ops, graph);
   if (approve === undefined) return undefined;
   const labelOf = labelResolver(ops, graph);
-  const fields: ProposalField[] = [];
+  const fields: LinkStrengthField[] = [];
   for (const o of ops) {
     if (FIELD_CLASS_BY_OP[o.op as keyof typeof FIELD_CLASS_BY_OP] !== 'link_strength') continue;
     const f = linkField(o, labelOf);
     if (f !== undefined) fields.push(f);
   }
   const missing = missingOf(pa, ops);
-  const digest = createHash('sha256').update(JSON.stringify({
-    p: pa.chip_id, r: pa.id, g: pin, m: approve.message,
-    f: fields.map((f) => [f.field_id, f.from_id, f.to_id, f.from_label, f.to_label, f.direction, f.current.band, f.current.source, f.editable]),
-    x: missing.map((m) => [m.node_id, m.label, m.kind, m.what]),
-  })).digest('hex').slice(0, 32);
+  const digest = projectionDigest({ p: pa.chip_id, r: pa.id, g: pin, approve,
+    decline: { id: declineChipIdFor(pa.chip_id), label: 'Not now', message: 'Not now.' }, fields, missing });
   return {
     proposal_id: pa.chip_id,
     revision: pa.id,
@@ -272,8 +312,66 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
   };
 }
 
+/** Integrity and carrier identity are checked before a typed Agent payload is projected. */
+export function agentProposalOf(pa: PendingAction): StructuredProposal | undefined {
+  if (pa.action.kind !== 'apply_proposed_change') return undefined;
+  const p = pa.action.inline_patch['agent_proposal'] as StructuredProposal | undefined;
+  if (!p || typeof p.proposal_id !== 'string' || !PROP_RE.test(p.proposal_id)
+    || pa.chip_id !== `${APPROVE_PREFIX}${p.proposal_id}` || p.scenario_id !== pa.scenario_id
+    || p.base_graph_identity_hash !== pa.preconditions.graph_hash) return undefined;
+  try { return computeProposalId(p) === p.proposal_id ? p : undefined; } catch { return undefined; }
+}
+export const isHeldProposal = (pa: PendingAction): boolean => isProductHold(pa) || agentProposalOf(pa) !== undefined;
+export const heldProposalId = (pa: PendingAction): string => agentProposalOf(pa)?.proposal_id ?? pa.chip_id;
+
+export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
+  const p = agentProposalOf(pa);
+  if (!p || isPendingActionExpired(pa, nowMs)) return undefined;
+  const action = pa.action as Extract<PendingAction['action'], { kind: 'apply_proposed_change' }>;
+  if (!action.public_label || !action.public_message) return undefined;
+  const detail = action.inline_patch['approve_detail'];
+  const approve: CardAction = { id: pa.chip_id, label: action.public_label, message: action.public_message,
+    ...(typeof detail === 'string' ? { detail } : {}) };
+  const nodes = isRec(graph) && Array.isArray(graph['nodes']) ? graph['nodes'].filter(isRec) : [];
+  const labelOf = (id: string): string => String(nodes.find(n => n['id'] === id)?.['label'] ?? id);
+  const fields: ProposalField[] = [];
+  for (const o of p.operations) {
+    if (!isRec(o.value)) continue;
+    const v = o.value;
+    if (o.op === 'set_factor_value' && typeof v['value'] === 'number' && Number.isFinite(v['value']) && typeof v['unit'] === 'string') {
+      const node = nodes.find(n => n['id'] === o.path);
+      const os = isRec(node?.['observed_state']) ? node['observed_state'] : {};
+      // No brief provenance is inferred from words, a basis, or approval. A1/A2 store no R5v2 verified brief marker.
+      const source = v['authored_by'] === 'user_stated' ? 'yours' : 'estimate';
+      fields.push({ field_id: `factor_value:${o.path}`, kind: 'factor_value', node_id: o.path, label: labelOf(o.path),
+        unit: v['unit'], ...(typeof v['cap'] === 'number' ? { cap: v['cap'] } : {}),
+        ...(v['declared_scale'] !== undefined ? { declared_scale: v['declared_scale'] } : {}),
+        current: { value: v['value'], unit: v['unit'], source }, filled_missing: typeof os['value'] !== 'number', editable: source !== 'yours' });
+    } else if (o.op === 'set_link_strength' && typeof v['band'] === 'string' && Object.hasOwn(EDGE_STRENGTH_MIDPOINTS, v['band'])) {
+      const [from, to] = o.path.split('::');
+      if (!from || !to) continue;
+      const expected = isRec(v['expected']) ? v['expected'] : {};
+      const yours = v['author'] === 'user_stated' && v['intent'] !== 'confirm_current';
+      fields.push({ field_id: linkFieldId(o.path), kind: 'link_strength', from_id: from, to_id: to,
+        from_label: labelOf(from), to_label: labelOf(to), direction: expected['effect_direction'] === 'negative' ? 'negative' : 'positive',
+        current: { band: strengthBandFromEdgeBand(v['band'] as InfluenceBand), source: yours ? 'yours' : 'estimate' },
+        allowed_bands: STRENGTH_BANDS, editable: !yours });
+    }
+  }
+  const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
+  const digest = projectionDigest({ p: p.proposal_id, r: pa.id, g: p.base_graph_identity_hash, approve, decline, fields, missing: [] });
+  return { proposal_id: p.proposal_id, revision: pa.id, digest, dialect: 'agent', base_graph_hash: p.base_graph_identity_hash,
+    approve_action: approve, decline_action: decline, operations: p.operations, fields, missing: [] };
+}
+/** One envelope, with a reader for each stored dialect. */
+export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
+  return productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
+}
+
 /** What the change is, in the user's words: "the risk 'X'", "the option 'X'", "the factors 'X' and 'Y'". */
-export function heldChangeName(pa: PendingAction): string | undefined {
+export function heldChangeLabel(pa: PendingAction): string | undefined {
+  const agent = agentProposalOf(pa);
+  if (agent !== undefined) return agent.public_label;
   const nodes = heldOperationsOf(pa).filter((o) => o.op === 'add_node' && isRec(o.value))
     .map((o) => o.value as { kind?: unknown; label?: unknown })
     .filter((v): v is { kind: string; label: string } => typeof v.kind === 'string' && typeof v.label === 'string' && v.label.trim() !== '');
@@ -285,6 +383,110 @@ export function heldChangeName(pa: PendingAction): string | undefined {
   return `the ${kindWord}s ${sameKind.map((v) => `'${v.label}'`).slice(0, -1).join(', ')} and '${sameKind.at(-1)!.label}'`;
 }
 
+/** The whole subject of a lapse sentence, for either held dialect. */
+export function heldChangeName(pa: PendingAction): string | undefined {
+  const name = heldChangeLabel(pa);
+  if (name === undefined) return undefined;
+  return agentProposalOf(pa) !== undefined ? `The held change "${name.replace(/\.$/, '')}"` : `The held change to add ${name}`;
+}
+
+/** The existing conversation rows needed to locate the answer that first carried a held revision. */
+export interface ProposalIssuingRow {
+  readonly turn_id: string;
+  readonly created_at?: string;
+  readonly request_hash?: string | null;
+  readonly user_message?: string | null;
+  readonly assistant_message?: string | null;
+  readonly pending_actions?: readonly unknown[];
+}
+
+/** PostgreSQL and ISO instants, padded to UTC microseconds. Date only shifts whole seconds; it never orders fractions. */
+function proposalRowTimestamp(value: string | undefined, shiftSeconds = 0): string | undefined {
+  const parts = value?.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/);
+  if (parts === undefined || parts === null) return undefined;
+  const localTime = `${parts[1]}T${parts[2]}`;
+  const localSeconds = Date.parse(`${localTime}Z`);
+  if (!Number.isFinite(localSeconds) || new Date(localSeconds).toISOString().slice(0, 19) !== localTime) return undefined;
+  const zone = parts[4]!.length === 3 ? `${parts[4]}:00` : parts[4]!;
+  const wholeSeconds = Date.parse(`${localTime}${zone}`);
+  if (!Number.isFinite(wholeSeconds)) return undefined;
+  return `${new Date(wholeSeconds + shiftSeconds * 1000).toISOString().slice(0, 19)}.${(parts[3] ?? '').padEnd(6, '0')}Z`;
+}
+
+/**
+ * P53: use only the loaded window. The earliest public answer at/after emission (allowing 2 s app/DB clock skew)
+ * is the ONE candidate for a revision. It must carry that revision and its chronological predecessor must not:
+ * at most two exact-row reads, never scan onward. Without a predecessor, only a complete raw window proves issuance.
+ * Tied timestamps, a hold predating this window and unverifiable rows stay unknown. Claim markers and conversation
+ * the user did not see never issue cards. Neither graph nor stored conversation changes.
+ */
+/** Each record's revision with the emission time of the held action that carries it; a record without one is skipped. */
+export function proposalIssuances(records: readonly ProposalRecord[], pending: readonly PendingAction[]): readonly ProposalIssuance[] {
+  return records.flatMap((r) => {
+    const pa = pending.find((p) => p.id === r.revision);
+    return pa === undefined ? [] : [{ revision: r.revision, emitted_at_iso: pa.emitted_at_iso }];
+  });
+}
+
+/** What locating an issuing answer needs; deliberately NOT part of the record (its shape and digest stay as shown). */
+export interface ProposalIssuance { readonly revision: string; readonly emitted_at_iso: string }
+
+export async function issuedTurnIdsForProposalRecords(
+  records: readonly ProposalIssuance[],
+  rows: readonly ProposalIssuingRow[],
+  windowSize: number,
+  readCommittedTurn?: (turnId: string) => Promise<{ readonly pending_actions?: readonly unknown[] } | null>,
+): Promise<ReadonlyMap<string, string>> {
+  const issued = new Map<string, string>();
+  if (records.length === 0) return issued;
+  const datedRows = rows.flatMap(row => {
+    const at = proposalRowTimestamp(row.created_at);
+    return at === undefined ? [] : [at];
+  });
+  if (datedRows.length === 0) return issued;
+  const windowStart = datedRows.sort()[0]!;
+  const earliestEmission = proposalRowTimestamp(windowStart, -2)!;
+  const chronological = [...conversationAsSeen(rows)].reverse()
+    .filter(row => !row.turn_id.endsWith(':claim')
+      && (typeof row.user_message === 'string' || typeof row.assistant_message === 'string'))
+    .map(row => ({ row, at: proposalRowTimestamp(row.created_at) }));
+  // An undated public row makes its place in the carry run unverifiable.
+  if (chronological.some(row => row.at === undefined)) return issued;
+  chronological.sort((a, b) => {
+    const at = a.at!; const bt = b.at!;
+    return (at < bt ? -1 : at > bt ? 1 : 0) || a.row.turn_id.localeCompare(b.row.turn_id);
+  });
+  const timestampCounts = new Map<string, number>();
+  for (const { at } of chronological) {
+    if (at !== undefined) timestampCounts.set(at, (timestampCounts.get(at) ?? 0) + 1);
+  }
+  const carriesRevision = async (row: ProposalIssuingRow, revision: string): Promise<boolean | undefined> => {
+    let pendingActions = row.pending_actions;
+    if (pendingActions === undefined) {
+      try { pendingActions = (await readCommittedTurn?.(row.turn_id))?.pending_actions; }
+      catch { return undefined; }
+    }
+    if (pendingActions === undefined) return undefined;
+    return pendingActions.some(raw => parsePendingAction(raw)?.id === revision);
+  };
+  for (const record of records) {
+    const emittedAt = proposalRowTimestamp(record.emitted_at_iso);
+    if (emittedAt === undefined || emittedAt < earliestEmission) continue;
+    const cutoff = proposalRowTimestamp(emittedAt, -2)!;
+    const index = chronological.findIndex(candidate => candidate.at !== undefined && candidate.at >= cutoff);
+    const candidate = chronological[index];
+    if (candidate === undefined || timestampCounts.get(candidate.at!) !== 1) continue;
+    const predecessor = chronological[index - 1];
+    if (predecessor !== undefined && timestampCounts.get(predecessor.at!) !== 1) continue;
+    if (await carriesRevision(candidate.row, record.revision) !== true) continue;
+    if (predecessor === undefined) {
+      if (!(rows.length < windowSize)) continue;
+    } else if (await carriesRevision(predecessor.row, record.revision) !== false) continue;
+    issued.set(record.revision, candidate.row.turn_id);
+  }
+  return issued;
+}
+
 /** ⭐ THE WIRE (design §4): `_proposal_fields` on a turn, `proposal_fields` on the graph read. Absent when none is held. */
 export interface ProposalFieldsWire {
   readonly version: 1;
@@ -293,6 +495,7 @@ export interface ProposalFieldsWire {
     readonly proposal_id: string;
     readonly revision: string;
     readonly digest: string;
+    readonly issued_turn_id: string | null;
     readonly approve_action: CardAction;
     readonly decline_action: CardAction;
     readonly fields: readonly ProposalField[];
@@ -301,7 +504,11 @@ export interface ProposalFieldsWire {
 }
 
 /** Only records pinned to `graphHash` are projected: the values shown are the values on the model the user sees. */
-export function proposalFieldsWire(records: readonly ProposalRecord[], graphHash: string | undefined): ProposalFieldsWire | undefined {
+export function proposalFieldsWire(
+  records: readonly ProposalRecord[],
+  graphHash: string | undefined,
+  issuedTurnIds: ReadonlyMap<string, string> = new Map(),
+): ProposalFieldsWire | undefined {
   if (graphHash === undefined || graphHash === '') return undefined;
   const pinned = records.filter((r) => r.base_graph_hash === graphHash);
   if (pinned.length === 0) return undefined;
@@ -310,6 +517,8 @@ export function proposalFieldsWire(records: readonly ProposalRecord[], graphHash
     graph_hash: graphHash,
     proposals: pinned.map((r) => ({
       proposal_id: r.proposal_id, revision: r.revision, digest: r.digest, approve_action: r.approve_action, decline_action: r.decline_action,
+      // Wire-only context: issuing a card never changes the digest of what that card showed.
+      issued_turn_id: issuedTurnIds.get(r.revision) ?? null,
       fields: r.fields, missing: r.missing,
     })),
   };
