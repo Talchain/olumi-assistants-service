@@ -12,7 +12,7 @@ import type { IdentityProposal } from '../identity-proposal.js';
 
 type Json = Record<string, any>;
 type Proposer = (graph: unknown) => IdentityProposal | null;
-type Mutation = 'drop_condition_3' | 'drop_condition_4' | 'drop_stored_branch';
+type Mutation = 'drop_condition_3' | 'drop_condition_4' | 'drop_stored_branch' | 'drop_listed_addends';
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/goal-reach-paul-graph-632b92b9.json', import.meta.url), 'utf8')) as Json;
 const sourcePath = fileURLToPath(new URL('../identity-proposal.ts', import.meta.url));
 const source = () => readFileSync(sourcePath, 'utf8');
@@ -35,6 +35,9 @@ function mutate(value: string, mutation: Mutation): string {
   }
   // These narrow anchors remove only the newly added stored-reading guards,
   // leaving the old goal/carrier branches and their reconciliation untouched.
+  if (mutation === 'drop_listed_addends') {
+    return replaceOnce(value, 'if (listed !== undefined && !(Array.isArray(listed) && listed.length === 0)) return null;', '');
+  }
   if (mutation === 'drop_condition_3') {
     return replaceOnce(value,
       "if (readMoneyTotal(goalUnit, goalLabel) === null || unitsCompose(goalUnit, goalLabel, level(a), level(b)).kind === 'no') return null;", '');
@@ -76,6 +79,12 @@ function row1(propose: Proposer): void {
   expect(card, 'row 1: Paul stored reading is reachable').not.toBeNull();
   expect(card?.factor_ids).toEqual(['pro_plan_price', 'pro_paying_subscribers']);
   expect(card?.words).toBe('Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’, less ‘MRR lost to price-driven churn’. Is that how you work it out?');
+}
+
+function rowListedAddends(propose: Proposer): void {
+  const g = graph();
+  node(g, 'mrr').nonlinear_identity.addends = ['mrr_lost_to_price_driven_churn'];
+  expect(propose(g), 'listed addends: ISL adds the signed value, so no card until build 2').toBeNull();
 }
 
 function row3(propose: Proposer): void {
@@ -134,6 +143,12 @@ describe('GOAL-REACH mutants (in-memory source transformations)', () => {
     row4(await compiledProposer());
     const mutant = await compiledProposer('drop_condition_4');
     killed('drop condition 4 → row 4 RED', () => row4(mutant));
+  });
+
+  it('drop the listed-addends withhold → listed-addends row RED', async () => {
+    rowListedAddends(await compiledProposer());
+    const mutant = await compiledProposer('drop_listed_addends');
+    killed('drop listed-addends withhold → listed-addends row RED', () => rowListedAddends(mutant));
   });
 
   it('drop stored branch → rows 1 and 2 RED', async () => {

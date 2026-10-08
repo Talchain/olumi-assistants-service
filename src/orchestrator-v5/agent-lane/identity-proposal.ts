@@ -104,6 +104,9 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
   // Condition 1: exactly one valid stored reading over two distinct existing factors.
   if (goalId === undefined || goalLabel === undefined || ids === null || ids.length !== 2 || ids[0] === ids[1]
     || goal.analysis_participation === 'retained_excluded' || identityConflictsWithScope(goal)) return null;
+  // DL (8 Oct): ISL adds a LISTED addend's signed value, which the edge-sign words below cannot state; no card until build 2.
+  const listed = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity.addends : undefined;
+  if (listed !== undefined && !(Array.isArray(listed) && listed.length === 0)) return null;
   const byId = new Map(nodes.flatMap(n => typeof n.id === 'string' ? [[n.id, n] as const] : []));
   const parts = ids.map(id => byId.get(id));
   if (parts.some(n => n === undefined || n.kind !== 'factor' || n.analysis_participation === 'retained_excluded')) return null;

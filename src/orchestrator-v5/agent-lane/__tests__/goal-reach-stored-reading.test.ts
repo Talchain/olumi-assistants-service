@@ -188,6 +188,13 @@ describe('GOAL-REACH build 1 stored reading', () => {
     const noAddend = graph(g => { g.edges = g.edges.filter(e => !(e.from === 'mrr_lost_to_price_driven_churn' && e.to === 'mrr')); });
     expect(proposeProductIdentity(noAddend)!.words).not.toContain('less');
   });
+  it('DL (8 Oct): LISTED nonlinear_identity.addends (ISL adds the signed value) → no card until build 2; control: no/empty addends keeps the edge-sign words', () => {
+    expect(node(PAUL, 'mrr').nonlinear_identity.addends).toBeUndefined(); // Paul's churn is a separate definitional parent, not a listed addend
+    expect(proposeProductIdentity(graph(g => { node(g, 'mrr').nonlinear_identity.addends = ['mrr_lost_to_price_driven_churn']; }))).toBeNull();
+    expect(proposeProductIdentity(graph(g => { node(g, 'mrr').nonlinear_identity.addends = 'mrr_lost_to_price_driven_churn'; }))).toBeNull();
+    expect(proposeProductIdentity(graph(g => { node(g, 'mrr').nonlinear_identity.addends = []; }))?.words).toBe(WORDS);
+    expect(proposeProductIdentity(PAUL)?.words).toBe(WORDS);
+  });
   it('Science §(e) add. 2: the same risk WITHOUT definitional provenance (or user-authored) vetoes', () => {
     expect(proposeProductIdentity(graph(g => { const e = g.edges.find(e => e.from === 'mrr_lost_to_price_driven_churn' && e.to === 'mrr')!; e.provenance = { source: 'cee_hypothesis' }; }))).toBeNull();
     expect(proposeProductIdentity(graph(g => { node(g, 'mrr_lost_to_price_driven_churn').provenance = 'from_brief'; }))).toBeNull();
