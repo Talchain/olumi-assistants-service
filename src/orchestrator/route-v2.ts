@@ -2975,7 +2975,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
   // NOT fenced by turnFencePreHandler: a stop request is not a turn and must
   // never claim a generation of its own.
   // ══════════════════════════════════════════════════════════════════════════
-  app.post('/orchestrate/v2/turn/stop', async (req, reply) => {
+  app.post('/orchestrate/v2/turn/stop', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (req, reply) => {
     const requestId =
       (typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : null) ??
       randomUUID();
@@ -2991,7 +2991,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
   // every graph-writing lane is covered by construction. See
   // turn-fence-prehandler.ts (why a hook, why callback style) and turn-fence.ts
   // (the defect, and the arrival enumeration).
-  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', { preHandler: turnFencePreHandler }, async (req, reply) => {
+  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } },  preHandler: turnFencePreHandler }, async (req, reply) => {
     // V5 diagnostic trace (Phase A) — route-handler wall-clock baseline.
     // Threaded into `sendFinalised200` via `ctx.requestStartedAt` so the
     // minimal-trace builder can compute `total_duration_ms` from a

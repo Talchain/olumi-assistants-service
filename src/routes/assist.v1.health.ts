@@ -10,7 +10,7 @@ import { DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIM
 import { arePromptsReady, getCriticalPromptCoverage } from "../prompts/readiness.js";
 
 export default async function route(app: FastifyInstance) {
-  app.get("/assist/v1/health", async (_req, reply) => {
+  app.get("/assist/v1/health", { config: { scenarioId: 'none' } }, async (_req, reply) => {
     const adapter = getAdapter();
 
     const ceeConfig = {

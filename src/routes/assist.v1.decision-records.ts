@@ -92,8 +92,6 @@ import {
   computeBrierComponent,
   isDecisionOutcomeResult,
 } from '../orchestrator-v5/decision-records/scoring.js';
-import { verifySupabaseUserJwt } from '../utils/supabase-user-jwt.js';
-import type { SupabaseUserJwtRefusalReason } from '../utils/supabase-user-jwt.js';
 import { getRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 
@@ -195,56 +193,6 @@ function refuse(
   return reply.code(status).send(body);
 }
 
-/** Map the JWT util's stable failure taxonomy onto the 401 envelope. */
-function jwtRefusalCode(reason: SupabaseUserJwtRefusalReason): string {
-  return reason;
-}
-
-/**
- * Verify the caller's Supabase access token. ALWAYS-ON — never consults
- * `CEE_REQUIRE_USER_JWT`. Returns the user id, or sends the 401 and returns
- * null.
- *
- * The `aud` guard inside `verifySupabaseUserJwt` is load-bearing here: the
- * project's anon and service_role API keys are themselves HS256 JWTs on the
- * SAME shared secret, and only the `authenticated` audience separates a real
- * user token from them.
- */
-async function requireUser(
-  req: FastifyRequest,
-  reply: FastifyReply,
-): Promise<string | null> {
-  const header = req.headers.authorization;
-  const token =
-    typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
-      ? header.slice(7).trim()
-      : '';
-  if (token === '') {
-    refuse(
-      reply,
-      req,
-      401,
-      'sign_in_required',
-      'Decision records are personal: sign in and retry with your access token.',
-    );
-    return null;
-  }
-  const result = await verifySupabaseUserJwt(token);
-  if (!result.ok) {
-    refuse(
-      reply,
-      req,
-      401,
-      jwtRefusalCode(result.reason),
-      result.reason === 'expired_token'
-        ? 'Your session has expired. Sign in again and retry.'
-        : 'That token could not be verified.',
-    );
-    return null;
-  }
-  return result.userId;
-}
-
 function asRecord(x: unknown): Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x)
     ? (x as Record<string, unknown>)
@@ -269,8 +217,8 @@ export default async function route(
   // -------------------------------------------------------------------------
   // COMMIT — the user's own decision + their own confidence.
   // -------------------------------------------------------------------------
-  app.post(DECISION_RECORDS_COMMIT_PATH, async (req, reply) => {
-    const userId = await requireUser(req, reply);
+  app.post(DECISION_RECORDS_COMMIT_PATH, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (_req, id) => resolveStore().readScenarioOwner(id) } } }, async (req, reply) => {
+    const userId = req.scenarioAccess?.callerUserId ?? null;
     if (userId === null) return reply;
 
     const body = asRecord(req.body);
@@ -287,7 +235,7 @@ export default async function route(
     // SECURITY DEFINER and derives owner_user_id from scenarios.user_id
     // without ever consulting the caller. The caller check is therefore ours
     // to make, and it must happen before the write, not after it.
-    const owner = await store.readScenarioOwner(scenarioId);
+    const owner = req.scenarioAccess?.ownerUserId;
     if (owner === undefined) {
       return refuse(reply, req, 404, 'scenario_not_found', 'No such scenario.');
     }
@@ -301,9 +249,6 @@ export default async function route(
         'DR001',
         'Decision records require sign-in: this scenario has no owner.',
       );
-    }
-    if (owner !== userId) {
-      return refuse(reply, req, 403, 'not_scenario_owner', 'This scenario belongs to someone else.');
     }
 
     // THE ANCHOR IS OURS TO DERIVE, NOT THE CLIENT'S TO SUPPLY — see
@@ -402,8 +347,8 @@ export default async function route(
   // -------------------------------------------------------------------------
   // OUTCOME — write-once, and the first brier_component producer.
   // -------------------------------------------------------------------------
-  app.post(DECISION_RECORDS_OUTCOME_PATH, async (req, reply) => {
-    const userId = await requireUser(req, reply);
+  app.post(DECISION_RECORDS_OUTCOME_PATH, { config: { scenarioId: { derive: async req => { const id = (req.params as { record_id: string }).record_id; if (!UUID_RE.test(id)) return undefined; return (await resolveStore().readRecordForOutcome(id))?.scenario_id; }, readOwner: async (_req, id) => resolveStore().readScenarioOwner(id) } } }, async (req, reply) => {
+    const userId = req.scenarioAccess?.callerUserId ?? null;
     if (userId === null) return reply;
 
     const params = asRecord(req.params);
@@ -436,12 +381,6 @@ export default async function route(
     if (record === null) {
       return refuse(reply, req, 404, 'DR404', 'No such decision record.');
     }
-    if (record.owner_user_id !== userId) {
-      // 404-not-403 is deliberate here in one respect only: we still refuse
-      // BEFORE any RPC. The code is explicit so the UI can distinguish.
-      return refuse(reply, req, 403, 'not_record_owner', 'This record belongs to someone else.');
-    }
-
     // ⭐ THE FIRST brier_component PRODUCER. Omitted — never 0, never null —
     // when the record staked no confidence or the result is `abandoned`.
     const brierComponent = computeBrierComponent(record.confidence, result);
@@ -499,8 +438,8 @@ export default async function route(
   // -------------------------------------------------------------------------
   // LIST — the read-back of the user's OWN decisions on one scenario.
   // -------------------------------------------------------------------------
-  app.post(DECISION_RECORDS_LIST_PATH, async (req, reply) => {
-    const userId = await requireUser(req, reply);
+  app.post(DECISION_RECORDS_LIST_PATH, { config: { scenarioId: { from: 'body', key: 'scenario_id', readOwner: async (_req, id) => resolveStore().readScenarioOwner(id) } } }, async (req, reply) => {
+    const userId = req.scenarioAccess?.callerUserId ?? null;
     if (userId === null) return reply;
 
     const rawScenarioId = readString(asRecord(req.body), 'scenario_id').trim();
@@ -520,13 +459,8 @@ export default async function route(
     // answer these exact bytes, so the route never says whether a scenario exists
     // or whose it is. Only the guest refusal (DR001) is distinct, as on /commit.
     const notFound = () => refuse(reply, req, 404, 'scenario_not_found', 'No such scenario.');
-    let owner: string | null | undefined;
-    try {
-      owner = await store.readScenarioOwner(scenarioId);
-    } catch {
-      return notFound();
-    }
-    if (owner === undefined || (owner !== null && owner !== userId)) return notFound();
+    const owner = req.scenarioAccess?.ownerUserId;
+    if (owner === undefined) return notFound();
     if (owner === null) {
       return refuse(reply, req, 403, 'DR001', 'Decision records require sign-in: this scenario has no owner.');
     }

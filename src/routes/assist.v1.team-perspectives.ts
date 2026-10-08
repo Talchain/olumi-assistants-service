@@ -82,7 +82,7 @@ export default async function route(app: FastifyInstance) {
   const FEATURE_VERSION =
     config.cee.teamPerspectivesFeatureVersion || "team-perspectives-1.0.0";
 
-  app.post("/assist/v1/team-perspectives", async (req, reply) => {
+  app.post("/assist/v1/team-perspectives", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

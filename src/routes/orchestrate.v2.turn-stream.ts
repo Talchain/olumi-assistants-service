@@ -128,7 +128,7 @@ export function buildInternalTurnHeaders(
 export default async function route(app: FastifyInstance) {
   const FEATURE_VERSION = "streamed-turn-1.0.0";
 
-  app.post(STREAMED_TURN_ROUTE, async (req, reply) => {
+  app.post(STREAMED_TURN_ROUTE, { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (req, reply) => {
     const requestId = getRequestId(req) ?? randomUUID();
 
     // Forward the RAW body bytes when the auth plugin captured them

@@ -2362,81 +2362,16 @@ async function fetchPriorFacts(
   }
 }
 
-/**
- * V5 ingress pre-flight: ensure the scenarios row exists, creating it on-
- * demand. Replaces the 2026-04-20 existence-only check (dbd59c9e) which
- * rejected valid traffic when the UI's INSERT race-landed after the first
- * V5 turn.
- *
- * Lives alongside buildTurnContext because this file is the declared
- * session-layer integration point (per the state-write invariant at
- * scripts/validate-state-write-invariant.sh — only session/, commit.ts,
- * and build-turn-context.ts are allowed to import the SessionStore).
- *
- * Behaviour matrix:
- *
- * Ownership is keyed on the STORED owner (the RPC's authoritative user_id),
- * never on whether the caller happened to supply one — that distinction is
- * what closes the IDOR-class hole (a caller omitting user_id must NOT skip
- * the check on an owned scenario).
- *
- *   Stored owner NON-null (an owned scenario):
- *     - Caller == owner → `{ ok: true }`.
- *     - Caller is a DIFFERENT user → cross-tenant attempt;
- *       `{ ok: false, reason: 'scenario_owned_by_other_user' }`, route 422.
- *     - Caller ABSENT (no user_id) → IDOR fail-closed;
- *       `{ ok: false, reason: 'scenario_requires_authenticated_owner' }`,
- *       route 422. An anonymous caller is not the owner.
- *
- *   Stored owner NULL (a guest scenario — VITE_AUTH_MODE=guest):
- *     - Any caller (anonymous or identified) → `{ ok: true }`. There is no
- *       ownership concept for an unowned scenario.
- *       ⚠ This openness is a deliberate product decision AND a real
- *       disclosure/mutation surface: anyone holding a guest scenario's UUID
- *       can read its conversation and append turns to it. It is NOT closed
- *       here because nothing on the guest wire distinguishes the legitimate
- *       guest from any other caller — the guest journey carries no cookie,
- *       no token and no header. Closing it needs a client-side credential
- *       (a UI change), not a CEE change. Do not re-describe this as "a
- *       product feature, not a leak": it is both, and the second half is
- *       what an earlier version of this comment taught readers to skip.
- *
- *   Store NOT CONFIGURED (`getSessionStore()` throws — no Supabase in this
- *   environment), any caller:
- *     - Skipped, turn proceeds (`{ ok: true, skipped }`). There is no
- *       persistence here, therefore no stored owner to protect.
- *
- *   Scenario row ABSENT (checked read-only, BEFORE the upsert):
- *     - No turn was ever admitted on it → CREATE, turn proceeds. This is the
- *       first-turn race the upsert exists for and it is preserved exactly.
- *     - A turn WAS once admitted on it → the scenario existed and its row is
- *       gone: `{ ok: false, reason: 'scenario_deleted' }`, route 422.
- *     See the block at the check itself for why absence alone cannot decide
- *     this and where the surviving evidence comes from.
- *
- *   Ownership RPC FAILS against a CONFIGURED store, any caller:
- *     - Fail CLOSED (`{ ok: false, reason: 'scenario_ownership_unverifiable' }`,
- *       route 422). We asked who owns this scenario and could not find out;
- *       proceeding would grant access we cannot justify.
- *       This previously failed OPEN, on the stated grounds that
- *       "`append_turn_atomic` is the last line of defence". That premise is
- *       false for ownership: append_turn_atomic (v1/v2/v3) reads `user_id`
- *       FROM the scenarios row to denormalise it onto the turn and never
- *       compares it to any caller identity — it guards scenario EXISTENCE,
- *       not ownership. So the open path removed the ownership check with
- *       nothing behind it, and did so exactly when the DB was unhealthy.
- *
- * ⚠ Caller-ownership check is PoC-grade only. See ensureScenarioExists
- * on SessionStore and the migration file header for the production-
- * upgrade path (JWT-scoped client + auth.uid()).
- */
+/** CREATE/deleted-scenario fencing, called only by the HTTP ownership hook.
+ * Returns the authoritative stored owner from the existing upsert; this is not
+ * permission. The hook applies scenarioAccessDecision to that owner.
+ * Unknown scenarios still create; an absent row with a surviving admitted-turn
+ * fence still refuses as scenario_deleted. Store/upsert failures still refuse. */
 export type PreflightResult =
-  | { readonly ok: true; readonly skipped?: boolean }
+  | { readonly ok: true; readonly skipped?: boolean; readonly ownerUserId?: string | null }
   | {
       readonly ok: false;
       readonly reason:
-        | 'scenario_owned_by_other_user'
-        | 'scenario_requires_authenticated_owner'
         /** The store is configured but could not tell us who owns the row. */
         | 'scenario_ownership_unverifiable'
         /**
@@ -2602,44 +2537,9 @@ export async function preflightEnsureScenario(
     return { ok: false, reason: 'scenario_ownership_unverifiable' };
   }
 
-  // Ownership is enforced ONLY when the scenario has a stored owner. A null
-  // stored owner means a guest (unowned) scenario, which by design any caller
-  // may act on — that carve-out is a product feature (VITE_AUTH_MODE=guest),
-  // NOT the either-null skip that opened the IDOR hole below.
-  if (authoritativeUserId !== null) {
-    if (userId === null) {
-      // IDOR fail-closed: the scenario has a non-null owner but the caller
-      // presented NO identity. The previous `userId !== null &&` guard skipped
-      // the whole check here, so any request that simply omitted user_id could
-      // act on any owned scenario. Refuse — an anonymous caller is not the
-      // owner. (The JWT-derivation half — making identity un-spoofable on
-      // browser paths — is tracked separately in user-identity.ts.)
-      log.warn(
-        {
-          request_id: requestId,
-          scenario_id: scenarioId,
-          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
-        },
-        'V5 pre-flight: anonymous caller (no user_id) on an owned scenario — refusing turn (fail closed)',
-      );
-      return { ok: false, reason: 'scenario_requires_authenticated_owner' };
-    }
-
-    if (authoritativeUserId !== userId) {
-      log.warn(
-        {
-          request_id: requestId,
-          scenario_id: scenarioId,
-          caller_user_id_prefix: userId.slice(0, 8),
-          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
-        },
-        'V5 pre-flight: scenario owned by a different user — rejecting turn as cross-tenant attempt',
-      );
-      return { ok: false, reason: 'scenario_owned_by_other_user' };
-    }
-  }
-
-  return { ok: true };
+  // HTTP ownership is decided once by plugins/scenario-ownership.ts.
+  // Return the authoritative upsert owner; CREATE and deleted-fence handling stay here.
+  return { ok: true, ownerUserId: authoritativeUserId };
 }
 
 /**

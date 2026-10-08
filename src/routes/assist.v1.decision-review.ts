@@ -322,7 +322,7 @@ export default async function route(app: FastifyInstance) {
   const RATE_LIMIT_RPM = config.cee.decisionReviewRateLimitRpm;
   const FEATURE_VERSION = "decision-review-2.0.0";
 
-  app.post("/assist/v1/decision-review", async (req, reply) => {
+  app.post("/assist/v1/decision-review", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

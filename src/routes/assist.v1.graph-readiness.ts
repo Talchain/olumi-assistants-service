@@ -229,7 +229,7 @@ export default async function route(app: FastifyInstance) {
   const RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_GRAPH_READINESS_RATE_LIMIT_RPM");
   const FEATURE_VERSION = "graph-readiness-1.0.0";
 
-  app.post("/assist/v1/graph-readiness", async (req, reply) => {
+  app.post("/assist/v1/graph-readiness", { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

@@ -35,7 +35,7 @@ export async function adminLLMOutputRoutes(app: FastifyInstance): Promise<void> 
    *
    * Returns 404 if the output is not found or has expired (TTL: 1 hour).
    */
-  app.get('/admin/v1/llm-output/:request_id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/llm-output/:request_id', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const params = RequestIdParamsSchema.safeParse(request.params);
@@ -73,7 +73,7 @@ export async function adminLLMOutputRoutes(app: FastifyInstance): Promise<void> 
    *
    * Get diagnostics about the LLM output store.
    */
-  app.get('/admin/v1/llm-output-stats', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/llm-output-stats', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     return reply.status(200).send({

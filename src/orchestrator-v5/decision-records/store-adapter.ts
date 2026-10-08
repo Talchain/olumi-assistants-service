@@ -255,6 +255,7 @@ export interface RecordDecisionOutcomeWrite {
  */
 export interface DecisionRecordOwnerRead {
   readonly record_id: string;
+  readonly scenario_id: string;
   readonly owner_user_id: string | null;
   /** `prediction.confidence` when present, finite and in [0,1]; else undefined. */
   readonly confidence: number | undefined;
@@ -627,7 +628,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   async readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null> {
     const { data, error } = await this.client
       .from('decision_records')
-      .select('record_id, owner_user_id, prediction, outcome')
+      .select('record_id, scenario_id, owner_user_id, prediction, outcome')
       .eq('record_id', recordId)
       .limit(1);
     if (error) {
@@ -639,7 +640,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
     const rows = (data ?? []) as Array<Record<string, unknown>>;
     const row = rows[0];
     if (!row) return null;
-    if (typeof row.record_id !== 'string' || row.record_id.length === 0) return null;
+    if (typeof row.record_id !== 'string' || row.record_id.length === 0 || typeof row.scenario_id !== 'string' || row.scenario_id.length === 0) return null;
     const prediction = isPlainObject(row.prediction) ? row.prediction : {};
     const rawConfidence = prediction.confidence;
     // The SAME usability bound the contract and the RPC enforce ([0,1],
@@ -654,6 +655,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
         : undefined;
     return {
       record_id: row.record_id,
+      scenario_id: row.scenario_id,
       owner_user_id:
         typeof row.owner_user_id === 'string' && row.owner_user_id.length > 0
           ? row.owner_user_id

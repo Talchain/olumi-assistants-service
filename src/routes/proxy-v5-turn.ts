@@ -386,7 +386,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   // DEFAULT_ALLOWED_HEADERS and the cors registration's exposedHeaders.
 
   // ---- POST (proxy) ----
-  app.post("/proxy/v5/turn", async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post("/proxy/v5/turn", { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const startTime = Date.now();
     const requestId =
       (request.headers["x-request-id"] as string) ?? crypto.randomUUID();
@@ -675,7 +675,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // running draft — and 4× tighter than the global 120 rpm an abuser
     // otherwise gets for tombstone spray. The /orchestrate sibling stays on
     // the global limit: it is service-key gated at ingress.
-    config: {
+    config: { scenarioId: { from: 'body', key: 'scenario_id' },
       rateLimit: {
         max: TURN_STOP_RATE_LIMIT_MAX,
         timeWindow: TURN_STOP_RATE_LIMIT_WINDOW,
