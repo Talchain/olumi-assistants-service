@@ -4,11 +4,12 @@ import type { CallStructuredModel } from './build-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { log } from '../../../utils/telemetry.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
-import { applyDisconfirm, doorFactorOf, existingLevers, riskGate, risksTurnFromSignals,
+import { applyDisconfirm, doorFactorOf, existingLevers, sameLevers, riskGate, risksTurnFromSignals,
   widenGate, widenOptionsOf, widenTurnFromSignals, RISK_METHOD, type Graph, type RunWidenTurn } from '../method-turn/widen-turn.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { budgetFor } from '../model-budgets.js';
 import { doorLevelOf, estimateLevelPersists } from './agent-capabilities.js';
+import { readIsBaseline } from '../../../cee/baseline-identity.js';
 
 type AdmissionArgs = Parameters<typeof admitCandidateModel>;
 interface FinalGraph {
@@ -38,6 +39,54 @@ export interface WidenDraftResult {
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
+
+export interface DraftDiagnosis {
+  risks: null | 'too_few' | 'no_counter_case';
+  options: null | 'no_distinct_lever';
+}
+
+export const DRAFT_WIDENING_PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
+
+/** Diagnose only typed identities, attachments and directed paths on the final un-widened graph. */
+export function diagnoseDraft(graph: unknown): DraftDiagnosis {
+  const raw = rec(graph);
+  const g: Graph = { nodes: Array.isArray(raw?.nodes) ? raw.nodes.map(rec).filter((n): n is Rec => n !== undefined) : [],
+    edges: Array.isArray(raw?.edges) ? raw.edges.map(rec).filter((e): e is Rec => e !== undefined) : [] };
+  const options = g.nodes.filter(n => n.kind === 'option' && typeof n.id === 'string');
+  const isBaseline = (n: Rec): boolean => readIsBaseline({ is_baseline: n.is_baseline === true,
+    data: { is_baseline: rec(n.data)?.is_baseline === true } }) === true
+    || n.is_status_quo === true || rec(n.data)?.is_status_quo === true;
+  const baselines = options.filter(isBaseline);
+  const sq = baselines.length === 1 ? baselines[0]!.id as string : null;
+  const active = options.filter(n => !isBaseline(n)).sort((a, b) => (a.id as string).localeCompare(b.id as string));
+  const activeIds = new Set(active.map(n => n.id as string));
+  const levers = active.map(n => existingLevers(g, n.id as string, sq));
+  const same = levers.every((lever, i) => levers.slice(i + 1).every(other => sameLevers(lever, other)));
+  const risks = g.nodes.filter(n => n.kind === 'risk');
+  if (risks.length < 2) return { risks: 'too_few', options: active.length <= 1 || same ? 'no_distinct_lever' : null };
+
+  const reached = new Set(levers.flatMap(lever => [...lever.keys()]));
+  const outgoing = new Map<string, string[]>();
+  for (const edge of g.edges) if (typeof edge.from === 'string' && typeof edge.to === 'string') {
+    const targets = outgoing.get(edge.from) ?? [];
+    targets.push(edge.to);
+    outgoing.set(edge.from, targets);
+  }
+  const queue = [...reached];
+  for (let i = 0; i < queue.length; i++) for (const target of outgoing.get(queue[i]!) ?? []) if (!reached.has(target)) {
+    reached.add(target);
+    queue.push(target);
+  }
+  const hasCounterCase = risks.some(risk => {
+    const reliesOn = rec(risk.relies_on);
+    return (typeof risk.id === 'string' && reached.has(risk.id))
+      || [rec(rec(risk.draft_widening)?.hits)?.id, rec(reliesOn?.hits)?.id, reliesOn?.option_id]
+        .some(hit => typeof hit === 'string' && activeIds.has(hit));
+  });
+  return { risks: hasCounterCase ? null : 'no_counter_case',
+    options: active.length <= 1 || same ? 'no_distinct_lever' : null };
+}
+
 const forbiddenWideningWords = /\b(better|best|improv\w*|complete\w*|you missed|winner|recommend\w*)\b/i;
 const hasForbiddenWideningWords = (text: unknown): boolean => typeof text === 'string' && forbiddenWideningWords.test(text);
 const objectSchema = (properties: Rec): Rec => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
@@ -113,7 +162,7 @@ function optionLevelsUnchanged(turn: RunWidenTurn, options: CandidateModel['opti
   });
 }
 
-/** Two parallel generators stay inside the drafter's deadline; failed passes cost only their own suggestions. */
+/** Only diagnosed deficiencies run generators, inside the drafter's deadline; failed passes cost their own suggestions. */
 export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResult | null> {
   const clock = input.clock ?? Date.now;
   const started = clock();
@@ -121,23 +170,28 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
   let counts: WidenCounts = { options: 0, risks: 0 };
   let outcome = 'error';
   let partial = false;
+  let diagnosis: DraftDiagnosis | undefined;
   let finished = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    const graph = { nodes: input.admitted.nodes, edges: input.admitted.edges,
+      ...(input.admitted.goal_constraints.length > 0 ? { goal_constraints: input.admitted.goal_constraints } : {}) };
+    const finalBefore = input.finalGraph?.(input.admitted);
+    diagnosis = diagnoseDraft(finalBefore ?? graph);
+    if (diagnosis.risks === null && diagnosis.options === null) { outcome = 'sufficient'; return null; }
     // Registration, readbacks and narration retain the tail already reserved beyond this absolute deadline.
     const cap = Math.min(20_000, (input.deadlineAt ?? Infinity) - started);
     if (cap < 5_000) { outcome = 'no_budget'; return null; }
     const timeoutMs = Math.min(cap, input.timeoutMs ?? 20_000);
-    const graph = { nodes: input.admitted.nodes, edges: input.admitted.edges,
-      ...(input.admitted.goal_constraints.length > 0 ? { goal_constraints: input.admitted.goal_constraints } : {}) };
     const signals = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [],
       graph, analysisState: undefined, analysisResult: undefined, leaderLicensed: false });
-    const risksTurn = risksTurnFromSignals(signals, graph, input.brief);
-    const optionsTurn = widenTurnFromSignals(signals, graph);
-    if (risksTurn.kind !== 'run_risks' || optionsTurn.kind !== 'run') {
+    const risksTurn = diagnosis.risks === null ? null : risksTurnFromSignals(signals, graph, input.brief);
+    const optionsTurn = diagnosis.options === null ? null : widenTurnFromSignals(signals, graph);
+    const riskPass = risksTurn?.kind === 'run_risks' ? risksTurn : null;
+    const optionPass = optionsTurn?.kind === 'run' ? optionsTurn : null;
+    if (riskPass === null && optionPass === null) {
       outcome = 'unavailable'; return null;
     }
-    const finalBefore = input.finalGraph?.(input.admitted);
     const budget = budgetFor('gpt-5.6-terra', 'widening');
     const call = async (instructions: string, schema: Rec): Promise<unknown> => {
       calls += 1;
@@ -149,7 +203,8 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
     };
     const work = async (): Promise<WidenDraftResult | null> => {
       const [riskReply, optionReply] = await Promise.allSettled([
-        call(risksTurn.directive, RISKS_SCHEMA), call(optionsTurn.directive, OPTIONS_SCHEMA),
+        riskPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${riskPass.directive}`, RISKS_SCHEMA),
+        optionPass === null ? Promise.resolve(undefined) : call(`${DRAFT_WIDENING_PREAMBLE}\n${optionPass.directive}`, OPTIONS_SCHEMA),
       ]);
       if (finished) return null;
       const riskArgs = riskReply.status === 'fulfilled' ? riskReply.value : undefined;
@@ -160,9 +215,10 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
         const risk = rec(item);
         return ![risk?.label, risk?.relies_on, risk?.watch_for].some(hasForbiddenWideningWords);
       }) : rawRisks;
-      const risks = applyDisconfirm(risksTurn, { ...riskGate(risksTurn, candidates), candidates }).kept.slice(0, 3);
-      const options = optionCandidates(optionsTurn, optionArgs, new Set(signals['model.goal_path_factor_ids']));
-      partial = (risks.length === 0) !== (options.length === 0);
+      const risks = riskPass === null ? [] : applyDisconfirm(riskPass, { ...riskGate(riskPass, candidates), candidates }).kept.slice(0, 3);
+      const options = optionPass === null ? [] : optionCandidates(optionPass, optionArgs, new Set(signals['model.goal_path_factor_ids']));
+      partial = (risks.length > 0 || options.length > 0) && ((diagnosis!.risks !== null && risks.length === 0)
+        || (diagnosis!.options !== null && options.length === 0));
       if (risks.length === 0 && options.length === 0) { outcome = 'empty_gate'; return null; }
       const oldIds = new Set(input.admitted.nodes.map(n => n.id));
       const admit = (keptRisks: typeof risks, keptOptions: typeof options): WidenDraftResult | null => {
@@ -181,7 +237,7 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
             if (!finalExistingUnchanged(finalBefore, finalAfter)) { outcome = 'existing_changed'; return null; }
             if (!GraphV3.safeParse(finalAfter).success) { outcome = 'graph_invalid'; return null; }
           }
-          if (!optionLevelsUnchanged(optionsTurn, keptOptions, admitted)) { outcome = 'level_changed'; return null; }
+          if (optionPass !== null && !optionLevelsUnchanged(optionPass, keptOptions, admitted)) { outcome = 'level_changed'; return null; }
           if (!GraphV3.safeParse({ nodes: admitted.nodes, edges: admitted.edges,
             ...(admitted.goal_constraints.length > 0 ? { goal_constraints: admitted.goal_constraints } : {}) }).success) {
             outcome = 'graph_invalid'; return null;
@@ -221,7 +277,7 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
   } finally {
     finished = true;
     if (timer !== undefined) clearTimeout(timer);
-    log.info({ calls, ms: clock() - started, counts, outcome, enrichment_incomplete: outcome !== 'widened',
+    log.info({ diagnosis, calls, ms: outcome === 'sufficient' ? 0 : clock() - started, counts, outcome, enrichment_incomplete: outcome !== 'widened',
       ...(partial ? { partial: true } : {}) }, 'agent_draft_widen');
   }
 }

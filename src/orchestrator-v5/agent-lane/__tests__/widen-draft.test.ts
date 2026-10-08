@@ -1,6 +1,7 @@
-/** P05b automatic draft widening: parallel passes, conservative merge, inert risks and exact fallback. */
+/** P05b automatic draft validation: selective bounded repair, inert risks and exact fallback. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import * as admission from '../admit-model.js';
 import type { AdmittedModel, CandidateModel } from '../admit-model.js';
 import * as widening from '../runtime/widen-draft.js';
@@ -21,6 +22,9 @@ type Rec = Record<string, any>;
 const BRIEF = 'We want to deliver 20 features in six months. I propose Hire a Tech Lead. Today we have 0 Developer hires, 0 Tech lead hires, and 0 Contractor hours. Developer hires can range up to 10 people; Tech lead hires up to 10 people; Contractor hours up to 100 hours. Background demand is 10 enquiries, up to 100 enquiries.';
 const SCENARIO = '99999999-9999-4999-8999-999999999999';
 const RATIONALE = 'RATIONALE MUST NEVER REACH ANY USER VISIBLE GRAPH FIELD';
+const PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
+const WIDEN_TURN_SHA256 = '378292bd12aec3a4392ace8ede96e672a8170e0255472a2e8e2eb96ee30e4a67';
+const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
 const ADMIT = admission.admitCandidateModel;
 const factor = (label: string, unit = 'people', baseline = 0, max = 10): CandidateModel['factors'][number] => ({
   label, role: 'observable', baseline_known: true, baseline_value: baseline, unit, provenance: 'explicit', plausible_max: max,
@@ -29,7 +33,7 @@ const opt = (label: string, factorLabel: string, value: number, unit = 'people',
   label, provenance, changes: [], is_status_quo: false,
   interventions: [{ factor_label: factorLabel, value, unit, provenance: 'ai_proposed' }],
 });
-function candidate({ risks = 2, sameLever = false, nonSq = 3 }: { risks?: number; sameLever?: boolean; nonSq?: number } = {}): CandidateModel {
+function candidate({ risks = 2, sameLever = false, nonSq = 3, counterCase = false }: { risks?: number; sameLever?: boolean; nonSq?: number; counterCase?: boolean } = {}): CandidateModel {
   const options = sameLever
     ? [opt('Hire a Tech Lead', 'Developer hires', 2), opt('Grow engineering team', 'Developer hires', 3, 'people', 'inferred'), opt('Recruit more developers', 'Developer hires', 4, 'people', 'inferred')]
     : [opt('Hire a Tech Lead', 'Tech lead hires', 1), opt('Hire Two Developers', 'Developer hires', 2, 'people', 'inferred'), opt('Use contractors', 'Contractor hours', 20, 'hours', 'inferred')];
@@ -38,10 +42,14 @@ function candidate({ risks = 2, sameLever = false, nonSq = 3 }: { risks?: number
     constraints: [],
     options: [{ label: 'Carry on as now', provenance: 'explicit', changes: [], interventions: [], is_status_quo: true }, ...options.slice(0, nonSq)],
     factors: [factor('Developer hires'), factor('Tech lead hires'), factor('Contractor hours', 'hours', 0, 100), { ...factor('Background demand', 'enquiries', 10, 100), role: 'external' }],
-    risks: Array.from({ length: risks }, (_, i) => ({ label: i === 0 ? 'Supplier interruption' : 'Customer delay', provenance: 'explicit' })),
+    risks: Array.from({ length: risks }, (_, i) => ({ label: i === 0 ? 'Supplier interruption' : 'Customer delay', provenance: 'explicit', ...(counterCase ? { unit: 'features', plausible_max: 100 } : {}) })),
     outcomes: [{ label: 'Feature delivery capacity', provenance: 'inferred', unit: 'features', plausible_max: 100 }],
     links: ['Developer hires', 'Tech lead hires', 'Contractor hours'].map((from) => ({ from, to: 'Feature delivery capacity', direction: 'positive', provenance: 'inferred' })).concat([
       { from: 'Feature delivery capacity', to: 'Features delivered', direction: 'positive', provenance: 'inferred' },
+      ...(counterCase && risks > 0 ? [
+        { from: 'Developer hires', to: 'Supplier interruption', direction: 'positive', provenance: 'inferred' },
+        { from: 'Supplier interruption', to: 'Feature delivery capacity', direction: 'negative', provenance: 'inferred' },
+      ] : []),
     ]),
   };
 }
@@ -50,9 +58,9 @@ const fixture = (args: Parameters<typeof candidate>[0] = {}) => {
   return { candidate: c, admitted: ADMIT(c, {}, BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000 };
 };
 const riskSuggestions = (sameLever = false) => [
-  { label: 'Recruitment delay', category: 'timing', hits_id: 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'filling both developer roles quickly', watch_for: 'offers remain unaccepted' },
-  { label: 'Coordination drag', category: 'people', mechanism: 'drives', hits_id: 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'new developers joining without slowing the team', watch_for: 'senior time spent on onboarding' },
-  { label: 'Supplier disruption', category: 'external', mechanism: 'drives', hits_id: 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'tools remaining available during onboarding', watch_for: 'tool outages during delivery' },
+  { label: 'Recruitment delay', category: 'timing', hits_id: sameLever ? 'grow_engineering_team' : 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'filling both developer roles quickly', watch_for: 'offers remain unaccepted' },
+  { label: 'Coordination drag', category: 'people', mechanism: 'drives', hits_id: sameLever ? 'grow_engineering_team' : 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'new developers joining without slowing the team', watch_for: 'senior time spent on onboarding' },
+  { label: 'Supplier disruption', category: 'external', mechanism: 'drives', hits_id: sameLever ? 'grow_engineering_team' : 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'tools remaining available during onboarding', watch_for: 'tool outages during delivery' },
   { label: 'Wrong bottleneck', category: 'dependency', hits_id: 'hire_a_tech_lead', through_id: sameLever ? 'developer_hires' : 'tech_lead_hires', through_direction: 'positive', affects_id: 'features_delivered', direction: 'negative', relies_on: 'a Tech Lead removing the main delivery blocker', watch_for: 'delays persist after the lead starts' },
 ];
 const level = (value: number, unit = 'people', basis = 'A bounded pilot for the team to test') => ({ value, unit, estimate: true, basis });
@@ -61,9 +69,12 @@ const optionsArgs = () => ({ options: [
   { label: 'Try a contractor pilot', acts_on: [{ factor_label: 'Developer hires', direction: 'positive', level: level(1) }, { factor_label: 'Contractor hours', direction: 'positive', level: level(10, 'hours') }], rationale: RATIONALE },
 ] });
 const isRisks = (req: Parameters<CallStructuredModel>[0]) => req.instructions.includes('suggest risks they have not considered');
-const isOptions = (req: Parameters<CallStructuredModel>[0]) => req.instructions.startsWith('METHOD TURN:') && req.instructions.includes('propose_new_option');
-function generator(risks: unknown = riskSuggestions(), options: unknown = optionsArgs()) {
-  return vi.fn<CallStructuredModel>(async (req) => ({ text: JSON.stringify(isRisks(req) ? { risk_suggestions: risks } : options) }));
+const isOptions = (req: Parameters<CallStructuredModel>[0]) => req.instructions.includes('METHOD TURN:') && req.instructions.includes('propose_new_option');
+function generator(risks?: unknown, options: unknown = optionsArgs()) {
+  return vi.fn<CallStructuredModel>(async (req) => {
+    const sameLever = (JSON.parse(req.input).graph.nodes as Rec[]).some(n => n.id === 'grow_engineering_team');
+    return { text: JSON.stringify(isRisks(req) ? { risk_suggestions: risks ?? riskSuggestions(sameLever) } : options) };
+  });
 }
 const addedNodes = (before: AdmittedModel, after: AdmittedModel, kind: string): Rec[] => {
   const ids = new Set(before.nodes.map((n) => n.id));
@@ -90,32 +101,160 @@ function builder(c: CandidateModel, pass: CallStructuredModel, brief = BRIEF, de
 }
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllEnvs(); drafterRaw.resetDrafterRawStoreForTests(); });
 
-describe('P05b automatic widening, rows bound to graph identity', () => {
-  it('aw-rich: a rich draft still runs both passes and every existing node and edge stays byte-identical', async () => {
-    const input = fixture();
-    const bytes = JSON.stringify(input);
-    const callStructured = generator();
-    const out = await widening.widenDraft({ ...input, callStructured });
-    expect(out).not.toBeNull();
-    expect(callStructured).toHaveBeenCalledTimes(2);
-    expect(out!.calls).toBe(2);
-    expect(out).not.toHaveProperty('triggered');
-    expect(out!.counts).toEqual({ options: 2, risks: 3 });
-    expectOriginalIdentity(input.admitted, out!.admitted);
-    expect(JSON.stringify(input)).toBe(bytes);
+const validationGraph = (): Rec => ({
+  nodes: [
+    { id: 'goal', kind: 'goal', label: 'Success' },
+    { id: 'lever_a', kind: 'factor', label: 'First lever', observed_state: { value: 0 } },
+    { id: 'lever_b', kind: 'factor', label: 'Second lever', observed_state: { value: 0 } },
+    { id: 'baseline_lever', kind: 'factor', label: 'Baseline factor', observed_state: { value: 0 } },
+    { id: 'bridge', kind: 'outcome', label: 'Intermediate exposure' },
+    { id: 'option_a', kind: 'option', label: 'First option', interventions: { lever_a: { value: 1 } } },
+    { id: 'option_b', kind: 'option', label: 'Second option', interventions: { lever_b: { value: 1 } } },
+    { id: 'baseline', kind: 'option', label: 'An arbitrary baseline label', is_baseline: true, interventions: { baseline_lever: { value: 1 } } },
+    { id: 'risk_a', kind: 'risk', label: 'First concern' },
+    { id: 'risk_b', kind: 'risk', label: 'Second concern' },
+  ],
+  edges: [{ from: 'lever_a', to: 'bridge' }, { from: 'bridge', to: 'risk_a' }],
+});
+
+describe('P05b pure typed draft diagnosis', () => {
+  it('dv-typed: renaming every label preserves sufficient, risk-deficient and option-deficient diagnoses', () => {
+    const rich = validationGraph();
+    const noCounter = { ...rich, edges: [] };
+    const sameLever = { ...rich, nodes: rich.nodes.map((n: Rec) => n.id === 'option_b' ? { ...n, interventions: { lever_a: { value: 2 } } } : n) };
+    const tooFew = { ...rich, nodes: rich.nodes.filter((n: Rec) => n.id !== 'risk_b') };
+    for (const graph of [rich, noCounter, sameLever, tooFew]) {
+      const bytes = JSON.stringify(graph);
+      const before = widening.diagnoseDraft(graph);
+      const renamed = { ...graph, nodes: graph.nodes.map((n: Rec) => ({ ...n, label: 'Carry on as now', description: 'No action and no risks' })) };
+      expect(widening.diagnoseDraft(renamed)).toEqual(before);
+      expect(JSON.stringify(graph)).toBe(bytes);
+    }
+    expect(widening.diagnoseDraft(rich)).toEqual({ risks: null, options: null });
+    expect(widening.diagnoseDraft(noCounter)).toEqual({ risks: 'no_counter_case', options: null });
+    expect(widening.diagnoseDraft(sameLever)).toEqual({ risks: null, options: 'no_distinct_lever' });
+    expect(widening.diagnoseDraft(tooFew)).toEqual({ risks: 'too_few', options: null });
   });
 
-  it('aw-risks-only: both calls, empty options still ship at most three zero-edge risks with retained attachments', async () => {
+  it('dv-directed-counter: intervention targets reach risks through directed paths, including cycles, but reversed paths do not', () => {
+    const graph = validationGraph();
+    expect(widening.diagnoseDraft(graph).risks).toBeNull();
+    expect(widening.diagnoseDraft({ ...graph, edges: [...graph.edges, { from: 'bridge', to: 'lever_a' }] }).risks).toBeNull();
+    expect(widening.diagnoseDraft({ ...graph, edges: [{ from: 'risk_a', to: 'bridge' }, { from: 'bridge', to: 'lever_a' }] }).risks).toBe('no_counter_case');
+    // Existing lever fallback remains typed: an option-to-factor edge supplies an unknown move.
+    const edgeLever = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === 'option_a' ? { ...n, interventions: undefined } : n), edges: [...graph.edges, { from: 'option_a', to: 'lever_a' }] };
+    expect(widening.diagnoseDraft(edgeLever).risks).toBeNull();
+  });
+
+  it.each(['relies_on_option_id', 'relies_on_hits', 'draft_widening'] as const)(
+    'dv-attachment-%s: typed risk attachment can bear on an active option without graph edges', (shape) => {
+      const graph = validationGraph();
+      const attachment = shape === 'relies_on_option_id' ? { relies_on: { option_id: 'option_a' } }
+        : shape === 'relies_on_hits' ? { relies_on: { hits: { id: 'option_a' } } }
+        : { draft_widening: { provenance: 'ai_suggested_widen', hits: { id: 'option_a', kind: 'option' } } };
+      const attached = { ...graph, edges: [], nodes: graph.nodes.map((n: Rec) => n.id === 'risk_a' ? { ...n, ...attachment } : n) };
+      expect(widening.diagnoseDraft(attached)).toEqual({ risks: null, options: null });
+      expect(widening.diagnoseDraft({ ...attached, nodes: attached.nodes.map((n: Rec) => n.id === 'option_a' ? { ...n, is_baseline: true } : n) }).risks).toBe('no_counter_case');
+    });
+
+  it('dv-active-only: baseline and typed status quo risks do not count as an active-option counter-case', () => {
+    const graph = validationGraph();
+    const baselineOnly = { ...graph, edges: [{ from: 'baseline_lever', to: 'risk_a' }] };
+    expect(widening.diagnoseDraft(baselineOnly)).toEqual({ risks: 'no_counter_case', options: null });
+    const nestedBaseline = { ...baselineOnly, nodes: baselineOnly.nodes.map((n: Rec) => n.id === 'baseline' ? { ...n, is_baseline: undefined, data: { is_baseline: true } } : n) };
+    expect(widening.diagnoseDraft(nestedBaseline)).toEqual({ risks: 'no_counter_case', options: null });
+    const statusQuo = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === 'option_a' ? { ...n, is_status_quo: true } : n) };
+    expect(widening.diagnoseDraft(statusQuo)).toEqual({ risks: 'no_counter_case', options: 'no_distinct_lever' });
+  });
+
+  it('dv-distinctness: one active option is deficient; opposite directions are distinct and differing magnitudes alone are not', () => {
+    const graph = validationGraph();
+    const single = { ...graph, nodes: graph.nodes.filter((n: Rec) => n.id !== 'option_b') };
+    expect(widening.diagnoseDraft(single).options).toBe('no_distinct_lever');
+    const neither = { ...single, nodes: single.nodes.filter((n: Rec) => n.id !== 'option_a') };
+    expect(widening.diagnoseDraft(neither)).toEqual({ risks: 'no_counter_case', options: 'no_distinct_lever' });
+    const sameFactor = (value: number) => ({ ...graph, nodes: graph.nodes.map((n: Rec) => n.id === 'option_b' ? { ...n, interventions: { lever_a: { value } } } : n) });
+    expect(widening.diagnoseDraft(sameFactor(2)).options).toBe('no_distinct_lever');
+    expect(widening.diagnoseDraft(sameFactor(-1)).options).toBeNull();
+  });
+
+  it('dv-B1-fixture: the captured B1 has one risk and two distinct active levers, so only the risks call runs', async () => {
+    const bytes = JSON.stringify(B1_GRAPH);
+    expect(widening.diagnoseDraft(B1_GRAPH)).toEqual({ risks: 'too_few', options: null });
+    expect(JSON.stringify(B1_GRAPH)).toBe(bytes);
     const input = fixture({ risks: 1 });
-    const callStructured = generator(riskSuggestions(), { options: [] });
+    const admitted = { ...input.admitted, nodes: B1_GRAPH.nodes, edges: B1_GRAPH.edges, goal_constraints: [] };
+    const callStructured = generator([], { options: [] });
+    expect(await widening.widenDraft({ ...input, admitted, callStructured })).toBeNull();
+    expect(callStructured).toHaveBeenCalledTimes(1);
+    expect(isRisks(callStructured.mock.calls[0]![0])).toBe(true);
+    expect(JSON.stringify(B1_GRAPH)).toBe(bytes);
+  });
+});
+
+describe('P05b automatic widening, rows bound to graph identity', () => {
+  it('dv-rich: a sufficient draft makes zero calls and ships byte-identical with zero widening latency', async () => {
+    const input = fixture({ counterCase: true });
+    const graph = graphOf(input.admitted);
+    const graphBytes = JSON.stringify(graph);
+    const bytes = JSON.stringify(input);
+    const events = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const callStructured = generator();
+    expect(widening.diagnoseDraft(graph)).toEqual({ risks: null, options: null });
+    expect(await widening.widenDraft({ ...input, clock: () => 42, callStructured })).toBeNull();
+    expect(callStructured).toHaveBeenCalledTimes(0);
+    expect(JSON.stringify(graph)).toBe(graphBytes);
+    expect(JSON.stringify(input)).toBe(bytes);
+    const event = events.mock.calls.find(([, message]) => message === 'agent_draft_widen')![0] as Rec;
+    expect(event).toMatchObject({ calls: 0, ms: 0, outcome: 'sufficient', diagnosis: { risks: null, options: null }, counts: { options: 0, risks: 0 } });
+  });
+
+  it('dv-final-graph: diagnosis follows the final un-widened graph after pure post-admission projection', async () => {
+    const input = fixture({ counterCase: true });
+    expect(widening.diagnoseDraft(graphOf(input.admitted))).toEqual({ risks: null, options: null });
+    const finalGraph = vi.fn((admitted: AdmittedModel) => ({ ...graphOf(admitted),
+      edges: admitted.edges.filter(e => !(e.from === 'developer_hires' && e.to === 'supplier_interruption')),
+    }));
+    const callStructured = generator();
+    const events = vi.spyOn(log, 'info').mockImplementation(() => {});
+    await widening.widenDraft({ ...input, finalGraph, callStructured });
+    expect(finalGraph).toHaveBeenCalled();
+    expect(finalGraph.mock.calls[0]![0]).toBe(input.admitted);
+    expect(callStructured).toHaveBeenCalledTimes(1);
+    expect(isRisks(callStructured.mock.calls[0]![0])).toBe(true);
+    expect(events.mock.calls.find(([, message]) => message === 'agent_draft_widen')![0]).toMatchObject({ diagnosis: { risks: 'no_counter_case', options: null } });
+  });
+
+  it('dv-no-counter: two unattached risks and distinct levers run only the risks pass', async () => {
+    const input = fixture();
+    const events = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const callStructured = generator();
+    expect(widening.diagnoseDraft(graphOf(input.admitted))).toEqual({ risks: 'no_counter_case', options: null });
     const out = await widening.widenDraft({ ...input, callStructured });
     expect(out).not.toBeNull();
-    expect(callStructured).toHaveBeenCalledTimes(2);
-    expect(out!.calls).toBe(2);
+    expect(callStructured).toHaveBeenCalledTimes(1);
+    expect(isRisks(callStructured.mock.calls[0]![0])).toBe(true);
+    expect(out!.calls).toBe(1);
+    expect(out!.counts).toEqual({ options: 0, risks: 3 });
+    expectOriginalIdentity(input.admitted, out!.admitted);
+    expect(events.mock.calls.find(([, message]) => message === 'agent_draft_widen')![0]).toMatchObject({ diagnosis: { risks: 'no_counter_case', options: null } });
+  });
+
+  it('dv-too-few-risks: one risk and distinct levers run only risks and retain zero-edge attachments', async () => {
+    const input = fixture({ risks: 1 });
+    const callStructured = generator(riskSuggestions(), { options: [] });
+    const events = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const out = await widening.widenDraft({ ...input, callStructured });
+    expect(out).not.toBeNull();
+    expect(callStructured).toHaveBeenCalledTimes(1);
+    expect(isRisks(callStructured.mock.calls[0]![0])).toBe(true);
+    expect(widening.diagnoseDraft(graphOf(input.admitted))).toEqual({ risks: 'too_few', options: null });
+    expect(out!.calls).toBe(1);
     expect(out).not.toHaveProperty('triggered');
     const added = addedNodes(input.admitted, out!.admitted, 'risk');
     expect(added).toHaveLength(3);
     expect(out!.counts).toEqual({ options: 0, risks: 3 });
+    expect(events.mock.calls.find(([, message]) => message === 'agent_draft_widen')![0]).not.toHaveProperty('partial');
     expect(added.some((n) => n.draft_widening.hits.id === 'hire_a_tech_lead')).toBe(true);
     for (const risk of added) {
       expect(['from_brief', 'ai_inferred', 'user_set']).toContain(risk.provenance);
@@ -173,13 +312,15 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(check({ ...added, draft_widening: { ...added.draft_widening, affects: { id: 'developer_hires', label: 'Developer hires', direction: 'negative' } } })).toBe(false);
   });
 
-  it('aw-options-only: both calls, empty risks still ship grounded estimates with basis and Olumi authorship', async () => {
-    const input = fixture({ sameLever: true });
+  it('dv-same-lever: a counter-case and same-lever options run only options with grounded estimates', async () => {
+    const input = fixture({ sameLever: true, counterCase: true });
     const callStructured = generator([]);
     const out = await widening.widenDraft({ ...input, callStructured });
     expect(out).not.toBeNull();
-    expect(callStructured).toHaveBeenCalledTimes(2);
-    expect(out!.calls).toBe(2);
+    expect(callStructured).toHaveBeenCalledTimes(1);
+    expect(isOptions(callStructured.mock.calls[0]![0])).toBe(true);
+    expect(widening.diagnoseDraft(graphOf(input.admitted))).toEqual({ risks: null, options: 'no_distinct_lever' });
+    expect(out!.calls).toBe(1);
     expect(out).not.toHaveProperty('triggered');
     const added = addedNodes(input.admitted, out!.admitted, 'option');
     expect(added).toHaveLength(2);
@@ -198,11 +339,11 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(GraphV3.safeParse(graphOf(out!.admitted)).success).toBe(true);
   });
 
-  it('aw-both: B1 one-risk/two-option draft starts both calls before either resolves', async () => {
-    const input = fixture({ risks: 1, nonSq: 2 });
+  it('dv-both: a one-risk, same-lever two-option draft starts both repairs before either resolves', async () => {
+    const input = fixture({ risks: 1, nonSq: 2, sameLever: true });
     const releases: (() => void)[] = [];
     const callStructured = vi.fn<CallStructuredModel>((req) => new Promise((resolve) => {
-      releases.push(() => resolve({ text: JSON.stringify(isRisks(req) ? { risk_suggestions: riskSuggestions() } : optionsArgs()) }));
+      releases.push(() => resolve({ text: JSON.stringify(isRisks(req) ? { risk_suggestions: riskSuggestions(true) } : optionsArgs()) }));
     }));
     const promise = widening.widenDraft({ ...input, callStructured });
     await Promise.resolve();
@@ -220,7 +361,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
 
   it.each(['risks', 'options'] as const)('aw-partial-%s-empty-or-invalid: the other pass ships after an empty, invalid or failed pass', async (dropped) => {
     for (const failure of ['empty', 'invalid', 'throw', 'incomplete'] as const) {
-      const input = fixture({ risks: 1, nonSq: 2 });
+      const input = fixture({ risks: 1, nonSq: 2, sameLever: true });
       const bytes = JSON.stringify(input);
       const events = vi.spyOn(log, 'info').mockImplementation(() => {});
       const callStructured = vi.fn<CallStructuredModel>(async (req) => {
@@ -229,7 +370,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
         if (failed && failure === 'invalid') return { text: 'not valid JSON' };
         if (failed && failure === 'incomplete') return { text: '', status: 'incomplete' };
         return { text: JSON.stringify(isRisks(req)
-          ? { risk_suggestions: failed ? [] : riskSuggestions() }
+          ? { risk_suggestions: failed ? [] : riskSuggestions(true) }
           : failed ? { options: [] } : optionsArgs()) };
       });
       const out = await widening.widenDraft({ ...input, callStructured });
@@ -246,7 +387,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
   });
 
   it.each(['risks', 'options'] as const)('aw-partial-readmit-%s-refused: retry admission with only the surviving pass', async (dropped) => {
-    const input = fixture({ risks: 1, nonSq: 2 });
+    const input = fixture({ risks: 1, nonSq: 2, sameLever: true });
     const events = vi.spyOn(log, 'info').mockImplementation(() => {});
     const spy = vi.spyOn(admission, 'admitCandidateModel').mockImplementation((c, ...rest) => {
       if (dropped === 'risks' ? c.risks.length > input.candidate.risks.length : c.options.length > input.candidate.options.length) {
@@ -268,8 +409,8 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(event).toMatchObject({ outcome: 'widened', partial: true, enrichment_incomplete: false });
   });
 
-  it('aw-all-empty: both calls still run, no additions return null and incomplete telemetry is explicit', async () => {
-    const input = fixture();
+  it('aw-all-empty: both diagnosed repairs run, no additions return null and incomplete telemetry is explicit', async () => {
+    const input = fixture({ risks: 1, sameLever: true });
     const bytes = JSON.stringify(input);
     const events = vi.spyOn(log, 'info').mockImplementation(() => {});
     const callStructured = generator([], { options: [] });
@@ -282,7 +423,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
   });
 
   it('aw-no-budget: less than five seconds before the construction deadline skips both calls byte-identically', async () => {
-    const input = fixture();
+    const input = fixture({ risks: 1, sameLever: true });
     const now = 1_800_000_000_000;
     input.deadlineAt = now + 4_999;
     const bytes = JSON.stringify(input);
@@ -300,7 +441,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     vi.useFakeTimers();
     const now = 1_800_000_000_000;
     vi.setSystemTime(now);
-    const input = fixture({ risks: 1, nonSq: 2 });
+    const input = fixture({ risks: 1, nonSq: 2, sameLever: true });
     input.deadlineAt = now + 6_000;
     let settled = false;
     let result: unknown;
@@ -320,7 +461,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
   });
 
   it('aw-at-deadline: the construction deadline itself leaves no widening budget or calls', async () => {
-    const input = fixture();
+    const input = fixture({ risks: 1, sameLever: true });
     const now = 1_800_000_000_000;
     input.deadlineAt = now;
     const bytes = JSON.stringify(input);
@@ -333,7 +474,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
   });
 
   it('aw-worked-deadline: a 125 second proxy and construction ending at 99.9 seconds skips widening', async () => {
-    const input = fixture();
+    const input = fixture({ risks: 1, sameLever: true });
     const started = 1_800_000_000_000;
     const now = started + 99_900;
     input.deadlineAt = constructionDeadline(started, 125_000);
@@ -377,13 +518,13 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
 
   it('aw-late-timeout: separate late risk and option responses leave admission, recording and persisted graph unchanged', async () => {
     vi.useFakeTimers();
-    const c = candidate({ risks: 1, nonSq: 2 });
+    const c = candidate({ risks: 1, nonSq: 2, sameLever: true });
     const bytes = JSON.stringify(c);
     const spy = vi.spyOn(admission, 'admitCandidateModel');
     const releases: Partial<Record<'risks' | 'options', () => void>> = {};
     const pass = vi.fn<CallStructuredModel>((req) => new Promise((resolve) => {
       const kind = isRisks(req) ? 'risks' : 'options';
-      releases[kind] = () => resolve({ text: JSON.stringify(kind === 'risks' ? { risk_suggestions: riskSuggestions() } : optionsArgs()) });
+      releases[kind] = () => resolve({ text: JSON.stringify(kind === 'risks' ? { risk_suggestions: riskSuggestions(true) } : optionsArgs()) });
     }));
     const run = builder(c, pass);
     await vi.advanceTimersByTimeAsync(20_000);
@@ -513,7 +654,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
       for (const field of ['option_label', 'basis', 'risk_label', 'relies_on', 'watch_for'] as const) {
         const input = fixture({ risks: 1, sameLever: true });
         const option = structuredClone(optionsArgs().options[0]!);
-        const risk = { ...riskSuggestions()[0]! };
+        const risk = { ...riskSuggestions(true)[0]! };
         if (field === 'option_label') option.label = `${word} hiring pilot`;
         else if (field === 'basis') for (const act of option.acts_on) act.level.basis = `${word} working pattern`;
         else if (field === 'risk_label') risk.label = `${word} recruitment delay`;
@@ -526,12 +667,12 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
 
   it.each(['label', 'basis', 'relies_on', 'watch_for'] as const)(
     'aw-no-label-exemption-%s: quoting an existing user label does not exempt widened copy from the word rule', async (field) => {
-      const c = candidate({ risks: 1 });
+      const c = candidate({ risks: 1, sameLever: true });
       c.options[1]!.label = 'Better hiring pilot';
       const brief = BRIEF.replace('Hire a Tech Lead', 'Better hiring pilot');
       const input = { candidate: c, admitted: ADMIT(c, {}, brief), brief, deadlineAt: Date.now() + 60_000 };
       const option = structuredClone(optionsArgs().options[0]!);
-      const risk = { ...riskSuggestions()[0]! };
+      const risk = { ...riskSuggestions(true)[0]! };
       if (field === 'label') option.label = 'Better hiring pilot with developers';
       else if (field === 'basis') for (const act of option.acts_on) act.level.basis = 'A trial beside Better hiring pilot';
       else risk[field] = 'Better hiring pilot taking effect';
@@ -546,8 +687,8 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(await widening.widenDraft({ ...input, callStructured: generator([], args) })).toBeNull();
   });
 
-  it('aw-directive-pin: each pass uses the existing route directive byte for byte and a bounded JSON schema', async () => {
-    const input = fixture({ risks: 1, nonSq: 2 });
+  it('dv-preamble: both passes start with the exact preamble and preserve every route directive byte', async () => {
+    const input = fixture({ risks: 1, nonSq: 2, sameLever: true });
     const s = assembleGuidanceSignals({ request: 'method', explicitRequest: 'RC-WIDEN', offeredSpecific: [], graph: graphOf(input.admitted), analysisState: undefined, analysisResult: undefined, optionParticipation: undefined, leaderLicensed: false });
     const risksTurn = risksTurnFromSignals(s, graphOf(input.admitted), BRIEF);
     const optionsTurn = widenTurnFromSignals(s, graphOf(input.admitted));
@@ -556,13 +697,17 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const callStructured = generator();
     await widening.widenDraft({ ...input, callStructured });
     const requests = callStructured.mock.calls.map(([req]) => req);
-    expect(requests.find(isRisks)!.instructions).toBe((risksTurn as Rec).directive);
-    expect(requests.find(isOptions)!.instructions).toBe((optionsTurn as Rec).directive);
+    expect(widening.DRAFT_WIDENING_PREAMBLE).toBe(PREAMBLE);
+    expect(requests).toHaveLength(2);
+    for (const req of requests) expect(req.instructions.split('\n')[0]).toBe(PREAMBLE);
+    expect(requests.find(isRisks)!.instructions).toBe(`${PREAMBLE}\n${(risksTurn as Rec).directive}`);
+    expect(requests.find(isOptions)!.instructions).toBe(`${PREAMBLE}\n${(optionsTurn as Rec).directive}`);
+    expect(createHash('sha256').update(readFileSync(new URL('../method-turn/widen-turn.ts', import.meta.url))).digest('hex')).toBe(WIDEN_TURN_SHA256);
     for (const req of requests) { expect(req.schema.type).toBe('object'); expect(req.max_output_tokens).toBeLessThanOrEqual(3000); }
   });
 
   it('aw-option-lever-classification: only a goal-path factor moved by no other option is a new lever', async () => {
-    const input = fixture({ risks: 1, nonSq: 2 });
+    const input = fixture({ risks: 1, nonSq: 2, sameLever: true });
     const out = await widening.widenDraft({ ...input, callStructured: generator() });
     expect(out).not.toBeNull();
     const added = addedNodes(input.admitted, out!.admitted, 'option');
@@ -570,7 +715,8 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const pilot = added.find((n) => n.id === 'try_a_contractor_pilot')!;
     expect(mix).toBeDefined();
     expect(pilot).toBeDefined();
-    const graph = graphOf(out!.admitted);
+    const admittedGraph = graphOf(out!.admitted);
+    const graph = { ...admittedGraph, nodes: [...admittedGraph.nodes, { id: 'existing_lead_option', kind: 'option', label: 'Existing lead option', interventions: { tech_lead_hires: { value: 0.1 } } }] };
     const bytes = JSON.stringify(graph);
     expect(widening.classifyWidenedOptions(graph)).toEqual({ [mix.id]: 'SAME_LEVER', [pilot.id]: 'NEW_LEVER' });
     expect(JSON.stringify(graph)).toBe(bytes);
@@ -583,7 +729,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
   });
 
   it('aw-schema-origin: NodeV3 keeps existing provenance values and strict optional widening metadata', async () => {
-    const input = fixture({ risks: 1, nonSq: 2 });
+    const input = fixture({ risks: 1, nonSq: 2, sameLever: true });
     const out = await widening.widenDraft({ ...input, callStructured: generator() });
     const graph = graphOf(out!.admitted);
     const addedRisk = addedNodes(input.admitted, out!.admitted, 'risk')[0]!;
@@ -597,8 +743,23 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
 });
 
 describe('P05b build seam and words', () => {
+  it('dv-build-rich: a sufficient draft persists byte-identically without any widening call', async () => {
+    const c = candidate({ counterCase: true });
+    vi.spyOn(widening, 'widenDraft').mockResolvedValueOnce(null);
+    const baseline = await builder(c, generator()).promise;
+    vi.restoreAllMocks();
+    expect(baseline.out.ok, JSON.stringify(baseline.out)).toBe(true);
+    expect(widening.diagnoseDraft(baseline.graph)).toEqual({ risks: null, options: null });
+    const pass = generator();
+    const actual = await builder(c, pass).promise;
+    expect(actual.out.ok, JSON.stringify(actual.out)).toBe(true);
+    expect(pass).toHaveBeenCalledTimes(0);
+    expect(actual.out).not.toHaveProperty('widened');
+    expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline.graph));
+  });
+
   it('aw-build-no-budget: zero widening calls and byte-identical persisted graph when the turn tail is exhausted', async () => {
-    const c = candidate({ risks: 1, nonSq: 2 });
+    const c = candidate({ risks: 1, nonSq: 2, sameLever: true });
     vi.spyOn(widening, 'widenDraft').mockResolvedValueOnce(null);
     const baseline = await builder(c, generator()).promise;
     vi.restoreAllMocks();
@@ -639,7 +800,7 @@ describe('P05b build seam and words', () => {
 
   it('aw-build-widened: counted options and risks reach registered GraphV3 and ToolResult', async () => {
     const pass = generator();
-    const actual = await builder(candidate({ risks: 1, nonSq: 2 }), pass).promise;
+    const actual = await builder(candidate({ risks: 1, nonSq: 2, sameLever: true }), pass).promise;
     expect(actual.out.ok, JSON.stringify(actual.out)).toBe(true);
     expect(pass).toHaveBeenCalledTimes(2);
     expect(actual.out.widened).toEqual({ options: expect.any(Number), risks: 3 });
@@ -668,7 +829,7 @@ describe('P05b build seam and words', () => {
       }
       return { status: 200, json: { graph: graph ?? { nodes: [], edges: [] }, versions: [] } };
     };
-    const c = candidate({ risks: 1, nonSq: 2 });
+    const c = candidate({ risks: 1, nonSq: 2, sameLever: true });
     const pass = generator();
     const callStructured: CallStructuredModel = async (req, deadlineAt) => isRisks(req) || isOptions(req)
       ? pass(req, deadlineAt) : { text: JSON.stringify(c) };
@@ -724,7 +885,7 @@ describe('P05b build seam and words', () => {
     const actual = await builder(c, pass, d.brief).promise;
     expect(actual.out.ok, JSON.stringify(actual.out)).toBe(true);
     expect(actual.out.withheld).toEqual(baseline.out.withheld);
-    if (actual.out.widened !== undefined) expect(actual.out.widened.risks).toBe(1);
+    if (actual.out.widened !== undefined) expect(actual.out.widened.risks).toBe(widening.diagnoseDraft(baseline.graph).risks === null ? 0 : 1);
     else expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline.graph));
     const newRiskIds = actual.graph!.nodes.filter((n: Rec) => n.kind === 'risk' && n.draft_widening?.provenance === 'ai_suggested_widen').map((n: Rec) => n.id);
     expect(newRiskIds).toHaveLength(actual.out.widened?.risks ?? 0);

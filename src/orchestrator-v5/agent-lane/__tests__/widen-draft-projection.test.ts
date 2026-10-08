@@ -37,7 +37,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
       let registered: unknown;
       const call = vi.fn<CallStructuredModel>(async request => ({ text: JSON.stringify(
         request.instructions.includes('suggest risks they have not considered') ? { risk_suggestions: risks }
-          : request.instructions.startsWith('METHOD TURN:') ? { options: [] } : candidate) }));
+          : request.instructions.includes('\nMETHOD TURN:') ? { options: [] } : candidate) }));
       const dispatch: InternalDispatch = async (path, body) => {
         if (path.endsWith('/graph/register')) {
           registered = structuredClone((body as { graph: unknown }).graph);
@@ -63,14 +63,14 @@ describe('P05b widening retains the level its existing options gate checked', ()
   });
 
   it('aw-signed-percent: admission cannot add today twice to an estimate on the admitted frame', async () => {
-    const brief = 'We want to deliver 20 features. Today price change is 0%. We can reduce price change by 15% or increase it by 10%. Pilot effort is currently 0 hours and can range up to 10 hours.';
+    const brief = 'We want to deliver 20 features. Today price change is 0%. We can reduce price change by 15% or reduce it by 10%. Pilot effort is currently 0 hours and can range up to 10 hours.';
     const candidate: CandidateModel = {
       goal: { metric: 'Features delivered', operator: '>=', value: 20, unit: 'features', horizon_months: null, provenance: 'explicit' },
       constraints: [],
       options: [
         { label: 'Carry on as now', provenance: 'explicit', is_status_quo: true, changes: [], interventions: [] },
         { label: 'Reduce price', provenance: 'explicit', interventions: [{ factor_label: 'Price change', value: -15, unit: '%', provenance: 'explicit' }] },
-        { label: 'Increase price', provenance: 'explicit', interventions: [{ factor_label: 'Price change', value: 10, unit: '%', provenance: 'explicit' }] },
+        { label: 'Reduce price less', provenance: 'explicit', interventions: [{ factor_label: 'Price change', value: -10, unit: '%', provenance: 'explicit' }] },
       ],
       factors: [
         { label: 'Price change', role: 'controllable', baseline_known: true, baseline_value: 0, unit: '%', provenance: 'explicit', plausible_max: 100 },
@@ -81,6 +81,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
       links: [
         { from: 'Price change', to: 'Features delivered', direction: 'positive', provenance: 'inferred' },
         { from: 'Pilot effort', to: 'Features delivered', direction: 'positive', provenance: 'inferred' },
+        { from: 'Price change', to: 'Supplier delay', direction: 'negative', provenance: 'inferred' },
       ],
     };
     const admitted = admitCandidateModel(candidate, {}, brief);
@@ -109,7 +110,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
     // Re-admitting the raw 90 to the pre-restatement candidate would make it 190/200.
     // Optional widening must close rather than silently reverse this checked move.
     expect(await widenDraft({ admitted, candidate, brief, deadlineAt: Date.now() + 60_000, callStructured })).toBeNull();
-    expect(callStructured).toHaveBeenCalledTimes(2);
+    expect(callStructured).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(admitted)).toBe(bytes);
   });
 
@@ -193,7 +194,7 @@ describe('P05b widening retains the level its existing options gate checked', ()
         : { options: [] }) }));
     const widened = await widenDraft({ admitted, candidate, brief, deadlineAt: Date.now() + 60_000, callStructured });
     expect(widened).not.toBeNull();
-    expect(callStructured).toHaveBeenCalledTimes(2);
+    expect(callStructured).toHaveBeenCalledTimes(1);
     expect(widened!.counts).toEqual({ options: 0, risks: 1 });
     const originalIds = new Set(admitted.nodes.map((node) => node.id));
     const addedRisks = widened!.admitted.nodes.filter((node) => node.kind === 'risk' && !originalIds.has(node.id));

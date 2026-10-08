@@ -44,7 +44,7 @@ function candidate(extraFactors: number) {
 }
 
 /** Feeds a sequence of candidates, one per structured call, and counts the calls. */
-const wideningFallback = (instructions: string) => instructions.startsWith('METHOD TURN:')
+const wideningFallback = (instructions: string) => instructions.includes('\nMETHOD TURN:')
   ? { text: JSON.stringify(instructions.includes('suggest risks') ? { risk_suggestions: [] } : { options: [] }) } : null;
 function structuredSequence(...payloads: readonly unknown[]) {
   const calls: string[] = [];
