@@ -187,7 +187,7 @@ export async function ownerPreview(
   store: CollabStore,
   args: { round_id: string; actor: CollabActor },
 ): Promise<OpenPacketLikePreview> {
-  const owner = requireOwnerActor(args.actor, 'Previewing a round');
+  requireOwnerActor(args.actor, 'Previewing a round');
 
   const round = await store.getRound(args.round_id);
   if (round === null) {

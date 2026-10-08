@@ -4,7 +4,7 @@ import type { FastifyRequest } from 'fastify';
 import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
 import { getOrGenerateRequestId } from '../utils/request-id.js';
-import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { log } from '../utils/telemetry.js';
 import { validateIngress } from '../validators/b1.js';
 import {
   parseRequestExtensions,

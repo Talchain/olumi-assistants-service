@@ -3,7 +3,7 @@
  * applies scenario ownership. Participant tokens grant nothing on these routes.
  * Services retain guest-mint, round-status and owner-panellist scientific restrictions. */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import { assembleDisagreementView } from '../collab/disagreement-read-model.js';
 import { mintParticipantToken } from '../collab/participant-tokens.js';

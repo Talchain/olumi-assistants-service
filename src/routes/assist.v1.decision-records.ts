@@ -213,6 +213,7 @@ export default async function route(
 ): Promise<void> {
   const resolveStore = (): DecisionRecordStorePort => deps?.store ?? getDecisionRecordStore();
   const nowFn = deps?.now ?? (() => new Date());
+  const outcomeReads = new WeakMap<FastifyRequest, NonNullable<Awaited<ReturnType<DecisionRecordStorePort['readRecordForOutcome']>>>>();
 
   // -------------------------------------------------------------------------
   // COMMIT — the user's own decision + their own confidence.
@@ -347,7 +348,7 @@ export default async function route(
   // -------------------------------------------------------------------------
   // OUTCOME — write-once, and the first brier_component producer.
   // -------------------------------------------------------------------------
-  app.post(DECISION_RECORDS_OUTCOME_PATH, { config: { scenarioId: { derive: async req => { const id = (req.params as { record_id: string }).record_id; if (!UUID_RE.test(id)) return undefined; return (await resolveStore().readRecordForOutcome(id))?.scenario_id; }, readOwner: async (_req, id) => resolveStore().readScenarioOwner(id) } } }, async (req, reply) => {
+  app.post(DECISION_RECORDS_OUTCOME_PATH, { config: { scenarioId: { derive: async req => { const id = (req.params as { record_id: string }).record_id; if (!UUID_RE.test(id)) return undefined; const record = await resolveStore().readRecordForOutcome(id); if (record) outcomeReads.set(req, record); return record?.scenario_id; }, readOwner: async req => outcomeReads.get(req)?.owner_user_id } } }, async (req, reply) => {
     const userId = req.scenarioAccess?.callerUserId ?? null;
     if (userId === null) return reply;
 
@@ -377,7 +378,7 @@ export default async function route(
       typeof rawNotes === 'string' && rawNotes.trim() !== '' ? rawNotes.trim() : undefined;
 
     const store = resolveStore();
-    const record = await store.readRecordForOutcome(recordId);
+    const record = outcomeReads.get(req) ?? null;
     if (record === null) {
       return refuse(reply, req, 404, 'DR404', 'No such decision record.');
     }

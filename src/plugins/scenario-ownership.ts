@@ -93,7 +93,9 @@ function refuse(req: FastifyRequest, reply: FastifyReply, scenarioId: string, re
       : envelope(reply, req, 403, 'not_record_owner', 'This record belongs to someone else.');
     return envelope(reply, req, 403, 'not_scenario_owner', 'This scenario belongs to someone else.');
   }
-  if (path.endsWith('/copy')) return envelope(reply, req, 404, 'scenario_not_copyable', 'There is no guest decision with that id to copy.');
+  if (path.endsWith('/copy')) return oracleFailed
+    ? envelope(reply, req, 503, 'copy_unavailable', 'Your decision could not be copied just now. Try again shortly.')
+    : envelope(reply, req, 404, 'scenario_not_copyable', 'There is no guest decision with that id to copy.');
   const versions = path.includes('/versions'); const register = path.endsWith('/graph/register');
   const message = oracleFailed ? (versions ? 'Versions could not be read right now.' : register ? 'The graph could not be registered right now.' : 'The graph could not be read right now.')
     : versions ? 'No readable versions for that scenario.' : register ? 'No registrable graph for that scenario.' : 'No readable graph for that scenario.';
@@ -192,6 +194,9 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
       return refuse(req, reply, scenarioId ?? '', 'scenario_ownership_unverifiable', true);
     }
     if (ownerUserId === undefined) return refuse(req, reply, scenarioId, 'scenario_not_found');
+    // Personal outcome writes require a durable record owner; a null record
+    // owner is not a guest scenario to be scored by any signed-in caller.
+    if (path.endsWith('/outcome') && ownerUserId === null) return refuse(req, reply, scenarioId, 'scenario_owned_by_other_user');
     let access = scenarioAccessDecision(ownerUserId, callerUserId);
     let memberRead = false;
     if (access !== 'allow' && declaration.viewerMemberRead && identity.mode === 'verified' && ownerUserId !== null) {

@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * Calibration R0 — the recording-seam ROUTES.
  *
@@ -21,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   forgeUserToken,
   makeEs256Key,
-  startJwksFixture,
+  // JWKS network transport is replaced locally below; ES256 verification remains real.
   type JwksFixture,
 } from '../../utils/__tests__/helpers/supabase-jwks-fixture.js';
 
@@ -111,6 +112,7 @@ interface FakeStoreState {
   anchor: { graphHashAtRun: string; computedAt: string | null } | null;
   record: {
     record_id: string;
+    scenario_id: string;
     owner_user_id: string | null;
     confidence: number | undefined;
     hasOutcome: boolean;
@@ -133,6 +135,7 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
     anchor: { graphHashAtRun: HASH_AT_RUN, computedAt: COMPUTED_AT },
     record: {
       record_id: RECORD_ID,
+      scenario_id: SCENARIO_ID,
       owner_user_id: OWNER_ID,
       confidence: 0.72,
       hasOutcome: false,
@@ -162,7 +165,7 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
     return state.outcomeResult;
   });
   const readScenarioOwner = vi.fn(async () => state.scenarioOwner);
-  const readRecordForOutcome = vi.fn(async () => state.record);
+  const readRecordForOutcome = vi.fn(async () => state.record ? { scenario_id: SCENARIO_ID, ...state.record } : null);
   const readNewestAnalysisAnchor = vi.fn(async () => state.anchor);
   const retrieveRecords = vi.fn(async () => ({ records: [], totalCount: 0 }));
 
@@ -180,6 +183,7 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
 
 async function buildApp(store: StorePort): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  await installOwnershipHarness(app);
   await decisionRecordsRoute(app, { store, now: () => NOW });
   await app.ready();
   return app;
@@ -1105,3 +1109,13 @@ describe('0.57.0 (f) — stored_text_fields confirms the durable texts, from the
     expect(res.json().stored_text_fields).toEqual([]);
   });
 });
+
+const fixtureKeys = vi.hoisted(() => ({ keys: [] as import('jose').JWK[] }));
+vi.mock('jose', async load => {
+  const actual = await load<typeof import('jose')>();
+  return { ...actual, createRemoteJWKSet: () => actual.createLocalJWKSet({ keys: fixtureKeys.keys }) };
+});
+async function startJwksFixture(keys: import('jose').JWK[]): Promise<JwksFixture> {
+  fixtureKeys.keys = keys;
+  return { base: 'https://owniso.invalid', issuer: 'https://owniso.invalid/auth/v1', close: async () => {} } as JwksFixture;
+}

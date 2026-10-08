@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * Model Management v1 — THE WIRING SLICE (versions list / save / restore).
  *
@@ -236,6 +237,7 @@ function summary(overrides: Record<string, unknown> = {}) {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioVersionsRoute(app);
   await app.ready();
   return app;
@@ -268,6 +270,7 @@ beforeEach(() => {
   resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   scenarioExists.mockResolvedValue(true);
   ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
   getScenarioOwner.mockResolvedValue(OWNER);
   loadGraph.mockResolvedValue(CURRENT_GRAPH);
   appendSpy.mockResolvedValue({ id: "row-1" });
@@ -520,10 +523,10 @@ describe("POST /versions — list", () => {
     await app.close();
   });
 
-  it("positive control for the upsert fence: an EXISTING owned scenario DOES reach the upsert-bearing pre-flight", async () => {
+  it("positive control for the upsert fence: an EXISTING owned scenario DOES reach the read-only owner oracle", async () => {
     const app = await buildApp();
     await post(app, "/versions", {});
-    expect(ensureScenarioExists).toHaveBeenCalled();
+    expect(getScenarioOwner).toHaveBeenCalledWith(SCENARIO);
     await app.close();
   });
 
@@ -764,6 +767,7 @@ describe("POST /versions/save — named save of the SERVER's current graph", () 
 
   it("maps the guest refusal (sign_in_required) to 401 SIGN_IN_REQUIRED", async () => {
     ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
     getScenarioOwner.mockResolvedValue(null);
     saveVersion.mockResolvedValue({
       status: "error",
@@ -1715,3 +1719,8 @@ describe("Semantic spine: approved scope survives the existing restore", () => {
     await app.close();
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

@@ -11,7 +11,7 @@ const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const SID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const RID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
-const state = vi.hoisted(() => ({ owner: null as string | null, member: false, memberThrows: false, absent: false, oracleThrows: false, entityAbsent: false, existenceThrows: false, members: vi.fn(), writes: vi.fn() }));
+const state = vi.hoisted(() => ({ owner: null as string | null, member: false, memberThrows: false, absent: false, oracleThrows: false, entityAbsent: false, existenceThrows: false, admitted: false, members: vi.fn(), writes: vi.fn() }));
 const session = vi.hoisted(() => ({
   readExistingScenario: vi.fn(async () => { if (state.oracleThrows || state.existenceThrows) throw new Error('reader down'); return state.absent ? null : { userId: state.owner, graph: null, briefText: null, analysisInvalidatedAt: null }; }),
   getScenarioOwner: vi.fn(async () => state.owner),
@@ -19,6 +19,7 @@ const session = vi.hoisted(() => ({
   turnFenceRowExists: vi.fn(async () => true),
   markTurnStopped: vi.fn(async () => ({ stopped: true, claimed: true, alreadyCommitted: false })),
   hasAdmittedTurns: vi.fn(async () => false),
+  scenarioHasAdmittedTurn: vi.fn(async () => state.admitted),
   readMostRecentPendingActions: vi.fn(async () => []),
   readRecent: vi.fn(async () => []),
   ensureScenarioExists: vi.fn(async (id: string, caller: string | null) => { state.writes(id, caller); if (state.absent) { state.owner = caller; state.absent = false; } return { user_id: state.owner }; }),
@@ -106,7 +107,7 @@ beforeAll(async () => {
   await mount(app); await app.ready();
 });
 afterAll(async () => { await app?.close(); await jwks?.close(); });
-beforeEach(() => { state.owner = A; state.member = false; state.memberThrows = false; state.absent = false; state.oracleThrows = false; state.entityAbsent = false; state.existenceThrows = false; session.markTurnStopped.mockClear(); state.members.mockClear(); state.writes.mockClear(); });
+beforeEach(() => { state.owner = A; state.member = false; state.memberThrows = false; state.absent = false; state.oracleThrows = false; state.entityAbsent = false; state.existenceThrows = false; state.admitted = false; session.markTurnStopped.mockClear(); state.members.mockClear(); state.writes.mockClear(); });
 
 describe('24 real registrations: ownership admission (terminal hook, business handlers excluded)', () => {
   for (const [method, path, refusal] of routes) {
@@ -261,4 +262,70 @@ it.each(['/orchestrate/v2/turn/stop', '/proxy/v5/turn/stop'])('Stop %s: non-UUID
       else expect(session.getScenarioOwner).toHaveBeenCalledWith(SID);
     }
   } finally { await real.close(); }
+});
+
+// ROUND 3: properties moved from the retired per-route ownership helper.
+it("moved preflight property: ALLOW: stored owner null + caller null (guest scenario, anonymous caller)", async () => {
+  state.owner = null;
+  const r = await request('/orchestrate/v2/turn', null);
+  expect(r.statusCode).toBe(200);
+  expect(state.writes).not.toHaveBeenCalled();
+  expect(r.headers['x-owniso-caller']).toBe('');
+ });
+it("moved preflight property: ALLOW: stored owner null + caller present (guest scenario, any caller)", async () => {
+  state.owner = null;
+  const r = await request('/orchestrate/v2/turn', tokenB);
+  expect(r.statusCode).toBe(200);
+  expect(state.writes).not.toHaveBeenCalled();
+  expect(r.headers['x-owniso-caller']).toBe(B);
+ });
+it("moved preflight property: ALLOW: stored owner present + caller is the owner", async () => {
+  state.owner = A;
+  const r = await request('/orchestrate/v2/turn', tokenA);
+  expect(r.statusCode).toBe(200);
+  expect(state.writes).not.toHaveBeenCalled();
+  expect(r.headers['x-owniso-caller']).toBe(A);
+ });
+it("moved preflight property: REFUSE: stored owner present + caller is a DIFFERENT user (cross-tenant)", async () => {
+  state.owner = A;
+  const r = await request('/orchestrate/v2/turn', tokenB);
+  expect(r.statusCode).toBe(422);
+  expect(state.writes).not.toHaveBeenCalled();
+  expect(r.payload).not.toContain('"admitted":true');
+  expect(r.json().details.reason).toBe('scenario_owned_by_other_user');
+ });
+it("moved preflight property: REFUSE (IDOR fail-closed): stored owner present + caller ABSENT (null)", async () => {
+  state.owner = A;
+  const r = await request('/orchestrate/v2/turn', null);
+  expect(r.statusCode).toBe(422);
+  expect(state.writes).not.toHaveBeenCalled();
+  expect(r.payload).not.toContain('"admitted":true');
+  expect(r.json().details.reason).toBe('scenario_requires_authenticated_owner');
+ });
+it("moved preflight property: POSITIVE CONTROL: a healthy oracle on a guest scenario is OPEN (ok:true)", async () => {
+  state.owner = null;
+  const r = await request('/orchestrate/v2/turn', null);
+  expect(r.statusCode).toBe(200);
+  expect(state.writes).not.toHaveBeenCalled();
+  expect(r.headers['x-owniso-caller']).toBe('');
+ });
+it("moved preflight property: POSITIVE CONTROL: the same probe reports ok:true for a store that DOES answer", async () => {
+  state.owner = null;
+  const r = await request('/orchestrate/v2/turn', null);
+  expect(r.statusCode).toBe(200);
+  expect(state.writes).not.toHaveBeenCalled();
+  expect(r.headers['x-owniso-caller']).toBe('');
+ });
+it("moved resurrection property: existing owned scenario still refuses anonymous caller", async () => {
+ const r = await request('/orchestrate/v2/turn', null);
+ expect(r.statusCode).toBe(422); expect(r.json().details.reason).toBe('scenario_requires_authenticated_owner'); expect(state.writes).not.toHaveBeenCalled();
+});
+it.each([() => tokenA, () => null])('deleted scenario refuses without CREATE and retains recovery copy', async token => {
+ state.absent = true; state.admitted = true;
+ const r = await request('/orchestrate/v2/turn', token(), 'POST', { kind: 'message', message: 'Explore this strategy', turn_class: 'frame', stage: 'frame', source: 'composer' });
+ const { SCENARIO_DELETED_RECOVERY_BODY } = await import('../orchestrator/route-v2-preflight.js');
+ expect(r.statusCode).toBe(422); expect(r.json().details).toEqual({ reason: 'scenario_deleted', scenario_id: SID, recovery: SCENARIO_DELETED_RECOVERY_BODY, recovery_suggestion: SCENARIO_DELETED_RECOVERY_BODY.suggestion }); expect(state.writes).not.toHaveBeenCalled();
+});
+it('copy ownership-reader outage retains exact copy_unavailable 503 bytes', async () => {
+ state.oracleThrows = true; const r = await request('/assist/v1/scenarios/:scenario_id/copy', tokenA); expect(r.statusCode).toBe(503); expect(normalise(r.payload)).toBe(JSON.stringify({ error: 'copy_unavailable', code: 'copy_unavailable', message: 'Your decision could not be copied just now. Try again shortly.', request_id: 'row' }));
 });

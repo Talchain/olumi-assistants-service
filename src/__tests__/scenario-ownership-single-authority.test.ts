@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import Fastify from 'fastify';
-import { describe, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() && e.name !== '__tests__' ? files(join(dir, e.name)) : e.isFile() && e.name.endsWith('.ts') && !e.name.includes('.test.') ? [join(dir, e.name)] : []);
