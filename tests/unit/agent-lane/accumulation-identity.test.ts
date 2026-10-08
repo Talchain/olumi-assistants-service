@@ -34,7 +34,40 @@ describe('admitAccumulationIdentities', () => {
   it('the written carrier survives NodeV3 (CEE #3 reader) byte-for-byte', () => {
     const r = admitAccumulationIdentities(nodes, edges, [decl()]);
     const written = withAccumulationCarriers(nodes, r.carriers).find((n) => n.id === 'subs12')!;
-    expect(NodeV3.parse(written).nonlinear_identity).toEqual((written as { nonlinear_identity: unknown }).nonlinear_identity);
+    expect(NodeV3.parse(written).nonlinear_identity).toEqual(r.carriers.get('subs12'));
+  });
+
+  const frames: [string, Parameters<typeof admitAccumulationIdentities>[0], number][] = [
+    ['twice the raw levels (250 and 20)', nodes, 1960], // 2 × (500 + 40 × 12)
+    ['caps before node frames or normalised values', nodes.map((n) => n.id === 'subs'
+      ? { ...n, scale_frame: 2000, observed_state: { value: 0.25, raw_value: 250, cap: 1000, unit: 'subscribers' } }
+      : n.id === 'adds' ? { ...n, scale_frame: 400, observed_state: { value: 0.1, raw_value: 20, cap: 200, unit: 'subscribers/month' } } : n), 6800],
+    ['node frames when caps are not positive, rounding each up', nodes.map((n) => n.id === 'subs'
+      ? { ...n, scale_frame: 1000.2, observed_state: { value: 250, cap: 0, unit: 'subscribers' } }
+      : n.id === 'adds' ? { ...n, scale_frame: 200.2, observed_state: { value: 20, cap: -1, unit: 'subscribers/month' } } : n), 6826],
+    ['raw levels when neither cap nor node frame is positive, rounding each up', nodes.map((n) => n.id === 'subs'
+      ? { ...n, scale_frame: 0, observed_state: { value: 0.25, raw_value: 250.2, cap: 0, unit: 'subscribers' } }
+      : n.id === 'adds' ? { ...n, scale_frame: -1, observed_state: { value: 0.1, raw_value: 20.2, cap: -1, unit: 'subscribers/month' } } : n), 1986],
+    ['a zero stock with positive inflow', nodes.map((n) => n.id === 'subs'
+      ? { ...n, observed_state: { value: 0, unit: 'subscribers' } } : n), 960],
+  ];
+  it.each(frames)('writes a positive carrier scale_frame from %s', (_why, input, expected) => {
+    const r = admitAccumulationIdentities(input, edges, [decl()]);
+    expect(r.loss).toEqual([]);
+    const written = withAccumulationCarriers(input, r.carriers).find((n) => n.id === 'subs12')!;
+    const read = NodeV3.parse(written);
+    expect(read.scale_frame).toBe(expected);
+    expect(read.nonlinear_identity?.operation).toBe('accumulation');
+    expect(read.observed_state).toBeUndefined();
+  });
+
+  it('keeps an existing positive scale_frame on the carrier unchanged', () => {
+    const framed = nodes.map((n) => n.id === 'subs12' ? { ...n, scale_frame: 1234.5 } : n);
+    const r = admitAccumulationIdentities(framed, edges, [decl()]);
+    expect(r.loss).toEqual([]);
+    const written = withAccumulationCarriers(framed, r.carriers).find((n) => n.id === 'subs12')!;
+    expect(NodeV3.parse(written).scale_frame).toBe(1234.5);
+    expect(NodeV3.parse(written).nonlinear_identity?.operation).toBe('accumulation');
   });
 
   it('no accumulation declared → nothing written, nodes byte-identical (products are not read here)', () => {
@@ -57,6 +90,10 @@ describe('admitAccumulationIdentities', () => {
     ['churn in % of today', [nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 100, unit: '% of today' } } : n)), edges, [decl()]], /percentage per month/],
     ['no level today', [nodes.map((n) => (n.id === 'adds' ? { ...n, observed_state: undefined } : n)), edges, [decl()]], /today's level of "New Pro subscribers per month"/],
     ['churn of 100% (read as the LEVEL: framed value 1, raw 100)', [nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 1, raw_value: 100, unit: '%' } } : n)), edges, [decl()]], /outside what/],
+    ['no positive frame computable', [nodes.map((n) => n.id === 'subs' || n.id === 'adds'
+      ? { ...n, observed_state: { ...n.observed_state, value: 0 } } : n), edges, [decl()]], /its range could not be worked out/],
+    ['a computed frame overflows', [nodes.map((n) => n.id === 'subs'
+      ? { ...n, observed_state: { value: Number.MAX_VALUE, unit: 'subscribers' } } : n), edges, [decl()]], /its range could not be worked out/],
     ['an outcome already carrying a product', [nodes.map((n) => (n.id === 'subs12' ? { ...n, nonlinear_identity: { operation: 'product', factor_ids: ['a', 'b'], stated_in_brief: false } } : n)), edges, [decl()]], /already worked out/],
   ];
   it.each(refusals)('refuses %s, says why, writes nothing', (_why, args, words) => {
@@ -65,11 +102,16 @@ describe('admitAccumulationIdentities', () => {
     expect(r.loss).toHaveLength(1);
     expect(r.loss[0]!.reason).toMatch(words);
     expect(r.loss[0]!.reason).toMatch(/nothing about it is assumed\.$/);
+    expect(withAccumulationCarriers(args[0], r.carriers)).toEqual(args[0]);
   });
 
   it('the carrier never depends on the churn frame: a framed 3% (cap 20 → value 0.15) is carried exactly as cap 100 is (ISL applies rate_scale to the level)', () => {
-    const cap20 = nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 0.15, raw_value: 3, unit: '%' } } : n));
-    expect(admitAccumulationIdentities(cap20, edges, [decl()]).carriers.get('subs12')).toEqual(
-      admitAccumulationIdentities(nodes, edges, [decl()]).carriers.get('subs12'));
+    const cap20 = nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 0.15, raw_value: 3, cap: 20, unit: '%' } } : n));
+    const cap100 = nodes.map((n) => (n.id === 'churn' ? { ...n, observed_state: { value: 0.03, raw_value: 3, cap: 100, unit: '%' } } : n));
+    const r20 = admitAccumulationIdentities(cap20, edges, [decl()]);
+    const r100 = admitAccumulationIdentities(cap100, edges, [decl()]);
+    expect(r20.carriers.get('subs12')).toEqual(r100.carriers.get('subs12'));
+    expect(withAccumulationCarriers(cap20, r20.carriers).find((n) => n.id === 'subs12')).toEqual(
+      withAccumulationCarriers(cap100, r100.carriers).find((n) => n.id === 'subs12'));
   });
 });

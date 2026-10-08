@@ -77,6 +77,10 @@ describe('the accumulation reaches the registered graph only on an attested dead
       factor_ids: [id('Pro subscribers'), id('Monthly churn'), id('New Pro subscribers per month')],
       horizon_months: 12, rate_scale: 0.01, stated_in_brief: false,
     });
+    // Registered and cold-read through GraphV3: stock cap 1000, inflow cap 200, horizon 12.
+    const carrierNode = nodes.find((n) => n.label === SUBS12)!;
+    expect(carrierNode.scale_frame).toBe(6800); // 2 × (1000 + 200 × 12)
+    expect(carrierNode.observed_state).toBeUndefined();
   });
 
   it('CONTRAST: the same declaration on a brief with no deadline is refused, said, and nothing is carried', async () => {
@@ -91,9 +95,16 @@ describe('the accumulation reaches the registered graph only on an attested dead
     expect(said(result)).not.toMatch(/worked out month by month/);
   });
 
+  it('an accumulation declared on the goal is refused, said, and nothing is carried', async () => {
+    const { nodes, result } = await build(BRIEF, candidate([{ ...ACC, outcome: 'Pro MRR' }]));
+    expect(carrierOn(nodes, 'Pro MRR')).toBeUndefined();
+    expect(carrierOn(nodes, SUBS12)).toBeUndefined();
+    expect(said(result)).toMatch(/the goal itself is never worked out this way/);
+  });
+
   // Bound at ADMISSION: its ledger is where the product checker's refusal lands (the build result does not echo it).
   it('the product checker no longer refuses an accumulation; CONTROL: an unknown operation still is', () => {
-    const refusedAs = (identities: unknown[]): string[] => (admitCandidateModel(candidate(identities), {}, BRIEF) as { loss: { field_path: string; reason: string }[] }).loss
+    const refusedAs = (identities: unknown[]): string[] => admitCandidateModel(candidate(identities), {}, BRIEF).loss
       .filter((l) => /nonlinear_identity_rejected$/.test(l.field_path)).map((l) => l.reason);
     expect(refusedAs([ACC]).filter((r) => /is not a relationship Olumi can check/.test(r))).toEqual([]);
     expect(refusedAs([{ ...ACC, operation: 'ratio' }]).filter((r) => /"ratio" is not a relationship Olumi can check/.test(r))).toHaveLength(1);

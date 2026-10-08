@@ -17,6 +17,7 @@
  *  · the rate is a percentage PER MONTH (`rate_scale` 0.01, applied by ISL to the LEVEL in user units, never the
  *    framed `observed_state.value`); any other period or unit is refused, never converted;
  *  · today's level of each input is known, the stock and inflow are not negative, and the rate is below 100%;
+ *  · the outcome has a positive frame, kept when already present or worked out from the stock and inflow ranges;
  *  · the outcome carries no other identity.
  * `stated_in_brief` is the declaration's own provenance (`explicit`), as for a product. Pure.
  */
@@ -36,7 +37,8 @@ type NodeLike = {
   readonly id: string;
   readonly kind?: unknown;
   readonly label?: unknown;
-  readonly observed_state?: { readonly value?: unknown; readonly raw_value?: unknown; readonly unit?: unknown } | undefined;
+  readonly observed_state?: { readonly value?: unknown; readonly raw_value?: unknown; readonly unit?: unknown; readonly cap?: unknown } | undefined;
+  readonly scale_frame?: unknown;
   readonly nonlinear_identity?: unknown;
   readonly goal_horizon_months?: unknown;
 };
@@ -61,6 +63,28 @@ function levelOf(n: NodeLike): number | undefined {
   const s = n.observed_state;
   const v = typeof s?.raw_value === 'number' ? s.raw_value : s?.value;
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function positiveFrame(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+/** An input's range in user units, never its normalised value when a raw level is present. */
+function frameOf(n: NodeLike): number | undefined {
+  const frame = positiveFrame(n.observed_state?.cap) ? n.observed_state.cap
+    : positiveFrame(n.scale_frame) ? n.scale_frame
+      : 2 * (levelOf(n) ?? NaN);
+  return Number.isFinite(frame) && frame >= 0 ? Math.ceil(frame) : undefined;
+}
+
+/** At zero churn the input ranges allow S₀ + inflow × T; leave twice that room on the derived node. */
+function accumulationFrame(outcome: NodeLike, stock: NodeLike, inflow: NodeLike, horizon: number): number | undefined {
+  if (positiveFrame(outcome.scale_frame)) return outcome.scale_frame;
+  const stockFrame = frameOf(stock);
+  const inflowFrame = frameOf(inflow);
+  if (stockFrame === undefined || inflowFrame === undefined) return undefined;
+  const frame = 2 * (stockFrame + inflowFrame * horizon);
+  return positiveFrame(frame) ? frame : undefined;
 }
 
 /**
@@ -132,6 +156,9 @@ export function admitAccumulationIdentities(
     if ((s0 as number) < 0 || (add as number) < 0 || (c as number) < 0 || (c as number) >= 100) {
       refuse('its levels today are outside what a count, a monthly rate and a monthly amount can be'); continue;
     }
+    if (accumulationFrame(outcome, stock, inflow, horizon) === undefined) {
+      refuse('its range could not be worked out'); continue;
+    }
     carriers.set(outcome.id, {
       operation: 'accumulation',
       factor_ids: [stock.id, rate.id, inflow.id],
@@ -144,13 +171,23 @@ export function admitAccumulationIdentities(
 }
 
 /** The nodes with each admitted carrier written on its outcome. Byte-identical when there is none. */
-export function withAccumulationCarriers<N extends { readonly id: string }>(
+export function withAccumulationCarriers<N extends NodeLike>(
   nodes: readonly N[],
   carriers: ReadonlyMap<string, AccumulationCarrier>,
 ): N[] {
   if (carriers.size === 0) return [...nodes];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
   return nodes.map((n) => {
     const carrier = carriers.get(n.id);
-    return carrier === undefined ? n : { ...n, nonlinear_identity: { ...carrier, factor_ids: [...carrier.factor_ids] } };
+    if (carrier === undefined) return n;
+    const stock = byId.get(carrier.factor_ids[0]);
+    const inflow = byId.get(carrier.factor_ids[2]);
+    if (stock === undefined || inflow === undefined) return n;
+    const frame = accumulationFrame(n, stock, inflow, carrier.horizon_months);
+    return frame === undefined ? n : {
+      ...n,
+      scale_frame: frame,
+      nonlinear_identity: { ...carrier, factor_ids: [...carrier.factor_ids] },
+    };
   });
 }
