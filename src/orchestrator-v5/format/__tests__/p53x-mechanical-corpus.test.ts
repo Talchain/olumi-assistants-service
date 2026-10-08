@@ -33,3 +33,10 @@ describe('P53x mechanical corpus: sized links keep byte-identical band words', (
   });
 });
 
+
+describe('P53x helper keeps the formatter usable-mean fallback (Codex #2819 r3 P2)', () => {
+  it('an Olumi-sized a→b with an unusable object mean and strength_mean 0.5 reads strong, as at the diff base', () => {
+    const edge = { from: 'a', to: 'b', provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, strength: { mean: 'bad' }, strength_mean: 0.5 };
+    expect(edgeStrengthWords(edge, 'relationship')).toBe('strong positive link');
+  });
+});

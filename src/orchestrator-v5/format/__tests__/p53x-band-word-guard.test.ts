@@ -157,9 +157,11 @@ function converterIndirections(file: string, text: string): string[] {
     if (ts.isVariableStatement(statement)) for (const d of statement.declarationList.declarations) if (ts.isIdentifier(d.name) && isConverter(d.name.text)) declared.add(d.name.text);
   }
   function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
-      && node.arguments[0] !== undefined && ts.isStringLiteral(node.arguments[0]) && declaringModule(node.arguments[0].text)) {
-      found.push(`${file}::dynamic-import::${node.arguments[0].text}`);
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] !== undefined) {
+      const arg = node.arguments[0];
+      // Codex #2819 r3 P2: a template or computed specifier cannot be resolved, so in a file that names a converter or
+      // its module (the prefilter) it is refused outright; a plain literal is refused only for a declaring module.
+      if (!ts.isStringLiteral(arg) || declaringModule(arg.text)) found.push(`${file}::dynamic-import::${arg.getText(source)}`);
     }
     if (ts.isIdentifier(node)) {
       const name = aliases.get(node.text) ?? node.text;
@@ -237,4 +239,9 @@ it('P53x AST firing control (Codex #2819 r2 P2): namespace re-export + computed 
   expect(converterIndirections('src/new-reader.ts', "import { EDGE_BAND_CUTS } from '../format/edge-strength-bands.js';\nexport const c = EDGE_BAND_CUTS;")).not.toHaveLength(0);
   // CONTROL: a frozen importer's named import of a non-converter is fine.
   expect(converterIndirections('src/orchestrator-v5/coaching/run-input-changes.ts', "import { edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';\nexport const x = 1;")).toEqual([]);
+});
+
+it('P53x AST firing control (Codex #2819 r3 P2): a template-literal dynamic import of the bands module is refused', () => {
+  expect(converterIndirections('src/new-reader.ts', "export const v = async (edge: any) => { const B: any = await import(`../format/edge-strength-bands.js`); const b = 'edgeBand' + 'FromMagnitude'; const w = 'CANVAS_' + 'BAND_WORD'; return B[w][B[b](Math.abs(edge.strength.mean))]; };")).not.toHaveLength(0);
+  expect(converterIndirections('src/new-reader.ts', "const m = 'x'; export const v = async () => import(m);")).not.toHaveLength(0);
 });
