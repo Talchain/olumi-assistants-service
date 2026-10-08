@@ -301,6 +301,37 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(chanceInOwnWords(`${l.label}: ${l.figure} chance of meeting your goal, in this model, if prices hold.`, l)).toBe(false);
   });
 
+  it('B15 own words + spread note (Codex r3 P1): the note is ONE unit with its chance — never on the face without it', async () => {
+    const { ownWordsLeadTexts, SPREAD } = { ...(await import('../goal-chance-screen-lines.js')), SPREAD: 'Its typical result falls short of your target: this chance comes from its wider spread, which also means it could fall further short.' };
+    const { composeReplyShape: compose, sentencesOf: split } = await import('../reply/compose-reply.js');
+    hostRunFixture();
+    const [a, c] = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    const raise = { ...a!, spread_note: SPREAD, chance: `${a!.chance} ${SPREAD}` };
+    const ownA = `**${raise.label}**: ${raise.figure} chance of meeting your goal, in this model.`;
+    const ownC = `**${c!.label}**: ${c!.figure} chance of meeting your goal, in this model.`;
+    const caveat = 'This result is fragile: a small change to one assumption could change it.';
+    const ask = 'Which assumption should we test first?';
+    const text = ['In this model, 71% of runs supported ‘Raise Pro to £59 at release’.', `${ownA} ${SPREAD}`, ownC, caveat, ask].join('\n\n');
+    const leadA = ownWordsLeadTexts(text, raise, split);
+    expect(leadA, 'the sentence WITH its note first, then the sentence').toEqual([`${ownA} ${SPREAD}`, ownA]);
+    const obligations = [
+      ...leadA.map((t) => ({ role: 'evidence' as const, text: t, lead: true as const })),
+      ...ownWordsLeadTexts(text, c!, split).map((t) => ({ role: 'evidence' as const, text: t, lead: true as const })),
+      { role: 'caveat' as const, text: caveat }, { role: 'ask' as const, text: ask },
+    ];
+    const shaped = compose({ text, obligations });
+    const face = [shaped.shape?.headline ?? shaped.text, ...(shaped.shape?.bullets ?? [])].join('\n');
+    expect(face.includes(ownA) ? face.includes(SPREAD) : true, 'wherever the chance faces, its spread note faces with it').toBe(true);
+    expect(face).toContain(ownA);
+    // discriminating control: typing the bare sentence alone (the r3 bug) leaves the note behind "More detail"
+    const bare = compose({ text, obligations: [obligations[1]!, ...obligations.slice(2)] });
+    const bareFace = [bare.shape?.headline ?? bare.text, ...(bare.shape?.bullets ?? [])].join('\n');
+    expect(bare.shape, 'control shapes').not.toBeNull();
+    expect(bareFace.includes(ownA) && !bareFace.includes(SPREAD), 'control reproduces the split').toBe(true);
+    // control: without the note sentence in the reply, only the sentence is lead
+    expect(ownWordsLeadTexts([ownA, ownC].join('\n'), raise, split)).toEqual([ownA]);
+  });
+
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
     hostRunFixture();
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);

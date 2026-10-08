@@ -78,6 +78,20 @@ export function chanceInOwnWords(sentence: string, l: GoalChanceScreenLine): boo
   return sentence !== l.chance && (said === own || said === `${own} ${plain(CHANCE_LABEL)}`);
 }
 
+/**
+ * The leading-evidence texts for this option's figure said in the narrator's own accepted words: the sentence, and — when
+ * the screen's spread note follows it (as `withScreenLinesOwed` places it) — the sentence WITH its note as ONE unit, so the
+ * qualifier can never be split from its chance (Codex r3 on #2783 ed3964a6, P1). [] when the canonical line is present.
+ */
+export function ownWordsLeadTexts(reply: string, l: GoalChanceScreenLine, sentencesOf: (row: string) => string[]): string[] {
+  if (reply.includes(l.chance)) return [];
+  const said = reply.split('\n').map((row) => row.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, ''))
+    .flatMap((row) => sentencesOf(row)).find((sentence) => chanceInOwnWords(sentence, l));
+  if (said === undefined) return [];
+  const withNote = l.spread_note !== undefined ? `${said} ${l.spread_note}` : undefined;
+  return withNote !== undefined && reply.includes(withNote) ? [withNote, said] : [said];
+}
+
 /** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */
 function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
   if (sameWordsIn(text, l.chance)) return true;
