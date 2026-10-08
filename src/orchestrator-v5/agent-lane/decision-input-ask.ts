@@ -22,6 +22,7 @@ import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
 import { reliesOnRiskLine } from '../routing/relies-on-risk.js';
 import { withoutProposalIds } from './display-ids.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { readMoneyTotal } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { chanceShownFor, type OptionChanceCell } from './chance-shown.js';
@@ -197,6 +198,23 @@ function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionC
   });
 }
 
+/**
+ * The goal is projected AT its own month (graph-only twin of the Run's `accumulationTestedAtGoalHorizon`, so chat and
+ * Run agree): the user's confirmed goal product binds a confirmed accumulation carrier whose horizon is the goal's
+ * held month. Then nothing about the horizon is owed: the model does project over time, to that deadline.
+ */
+function goalProjectedAtItsMonth(graph: unknown): boolean {
+  const goal = goalOf(graph);
+  if (goal === undefined || !Number.isInteger(goal.goal_horizon_months)) return false;
+  const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
+  if (product?.operation !== 'product' || product.stated_in_brief !== true) return false;
+  const nodes = recordOf(graph)?.nodes;
+  return Array.isArray(nodes) && product.factor_ids.some((id) => {
+    const carrier = NodeV3.shape.nonlinear_identity.safeParse(nodes.map(recordOf).find((n) => n?.id === id)?.nonlinear_identity).data;
+    return carrier?.operation === 'accumulation' && carrier.stated_in_brief === true && carrier.horizon_months === goal.goal_horizon_months;
+  });
+}
+
 /** The exact singular/plural prefixes identify the one horizon fact without interpreting narrator wording. */
 export const UNTESTED_HORIZON_PREFIXES = [
   "This chance uses the model's numbers as they are today",
@@ -207,6 +225,7 @@ const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 
 /** One horizon form for the reply and stored Run, from the same cells the UI reads. */
 export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): string | null {
+  if (goalProjectedAtItsMonth(graph)) return null;
   const shown = cells.filter(cell => cell.kind === 'figure' || cell.kind === 'range').length;
   if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1 });
   if (goalKindOf(graph) === 'share_by_date') return null;
@@ -233,7 +252,7 @@ export function statedTargetWords(graph: unknown): string | null {
  * whether any chance form is licensed. Event-by-date chances already model time and never owe this clause.
  */
 export function untestedHorizonLine(graph: unknown, opts?: { besideChance?: boolean; plural?: boolean }): string | null {
-  if (goalKindOf(graph) === 'share_by_date') return null;
+  if (goalKindOf(graph) === 'share_by_date' || goalProjectedAtItsMonth(graph)) return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const prefix = UNTESTED_HORIZON_PREFIXES[opts?.plural ? 1 : 0];
