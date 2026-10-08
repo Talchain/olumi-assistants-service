@@ -38,8 +38,19 @@ const IDENTITY_APPROVE_PREFIX = 'Yes — ';
 export const identityApproveMessage = (words: string): string => `${IDENTITY_APPROVE_PREFIX}${words}`;
 /** The card words an identity approval carries, or `undefined` for any other words. */
 export function readingOfIdentityApproval(message: unknown): string | undefined {
-  return typeof message === 'string' && message.startsWith(`${IDENTITY_APPROVE_PREFIX}Is “`)
-    ? message.slice(IDENTITY_APPROVE_PREFIX.length) : undefined;
+  if (typeof message !== 'string' || !message.startsWith(IDENTITY_APPROVE_PREFIX)) return undefined;
+  const words = message.slice(IDENTITY_APPROVE_PREFIX.length);
+  return words.startsWith('Is “') || (words.startsWith('Olumi reads ‘') && words.endsWith('’. Is that how you work it out?'))
+    ? words : undefined;
+}
+
+/** The held line when an issued card carries neither words nor a public label (COPY-SHAPE: never "undefined"). */
+export const IDENTITY_ISSUED_FALLBACK = 'I’ve prepared that confirmation for you to approve. Nothing changes until you approve it.';
+/** The reply text for a bar-issued identity card: its words, else its public label, else the fixed held line. */
+export function identityIssuedText(issued: { readonly card?: unknown; readonly public_label?: unknown }): string {
+  const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+  const words = typeof issued.card === 'object' && issued.card !== null ? (issued.card as { words?: unknown }).words : undefined;
+  return nonEmpty(words) ? words : nonEmpty(issued.public_label) ? issued.public_label : IDENTITY_ISSUED_FALLBACK;
 }
 
 /** What the Agent is told when a Run's stored model holds a reading to confirm. */

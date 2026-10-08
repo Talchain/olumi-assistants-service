@@ -23,7 +23,7 @@ import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { composeGoalTargetQuestion } from '../../goal-target/decide-goal-target-ask.js';
 import { parseStructuralChallengePress } from '../method-turn/structural-challenge-turn.js';
 
-export type ActionRoute = 'decision_review' | 'what_changes' | 'strengthen_s1' | 'method_turn' | 'widen_turn' | 'structural_challenge' | 'typed_reply';
+export type ActionRoute = 'decision_review' | 'what_changes' | 'strengthen_s1' | 'method_turn' | 'widen_turn' | 'structural_challenge' | 'typed_reply' | 'propose_identity';
 export interface ActionHandler {
   /** The existing typed route path that answers this press. */
   readonly route: ActionRoute;
@@ -31,6 +31,7 @@ export interface ActionHandler {
 }
 
 export const HANDLERS: Readonly<Record<ActionId, ActionHandler>> = {
+  confirm_reading: { route: 'propose_identity', gate: 'offer' },
   review: { route: 'decision_review', gate: 'offer' },
   what_changes: { route: 'what_changes', gate: 'own' },
   strengthen: { route: 'strengthen_s1', gate: 'offer' },
@@ -100,6 +101,7 @@ function otherOffers(bar: ActionBarV1, not: ActionId | null, max: number): Actio
 }
 
 const CANT_YET: Record<ActionId, string> = {
+  confirm_reading: 'I can’t confirm a reading yet',
   review: 'I can’t review this decision yet',
   what_changes: 'I can’t say what would change this yet',
   strengthen: 'I can’t strengthen the model yet',

@@ -130,6 +130,15 @@ function drafts(f: ActionFacts): Draft[] {
   const out: Draft[] = [];
   const needsRun = { enabled: false as const, disabled_reason: DISABLED.needs_current_analysis };
 
+  if (f.identityReading != null) {
+    const prefix = "Olumi can't show the chance until you check how it reads ‘";
+    const suffix = '’.';
+    const maxLabel = 90 - prefix.length - suffix.length;
+    const label = f.identityReading.goalLabel.length <= maxLabel ? f.identityReading.goalLabel
+      : `${f.identityReading.goalLabel.slice(0, maxLabel - 1)}…`;
+    out.push(draft(f, 'confirm_reading', { enabled: true, why_now: `${prefix}${label}${suffix}` }, 1));
+  }
+
   out.push(draft(f, 'review', f.runBound ? { enabled: true, why_now: WHY_NOW.review } : needsRun, GENERIC_TIER));
 
   const whatChanges = rc('RC-WHAT-CHANGES');
