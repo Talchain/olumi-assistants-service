@@ -24,6 +24,7 @@ import type { StrengthBand } from '@talchain/schemas/boundary';
 
 import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../../session/pending-action.js';
 import { conversationAsSeen } from '../../session/conversation-as-seen.js';
+import { identityCardOfferable } from '../../system-events/identity-confirm-edit.js';
 import { GM_HELD_HANDLER_ID, buildGmHeldPublicCopy } from '../../handlers/edit-graph-referee-gate.js';
 import { describeChangeset } from '../../handlers/describe-changeset.js';
 import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMember } from '../../routing/add-option-transaction.js';
@@ -365,6 +366,11 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
 }
 /** One envelope, with a reader for each stored dialect. */
 export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.now()): ProposalRecord | undefined {
+  // ⛔ #2851 buddy r2 P1: a held identity card is projected (carried on a turn, served on reload) only while it is still
+  // offerable on THIS graph; otherwise its Yes would be refused, which is confirm-then-refuse again (B1 9f32a4b4).
+  // Only on a graph actually read: callers that project a record without one (`proposalRecord(h, undefined)`) are unchanged.
+  if (isRec(graph) && Array.isArray(graph.nodes)
+    && (agentProposalOf(pa)?.operations ?? []).some((o) => o.op === 'confirm_identity') && !identityCardOfferable(graph)) return undefined;
   return productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
 }
 

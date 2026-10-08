@@ -29,7 +29,10 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { admitStoredProductDeclaration, type StoredProductDeclarationRefusal } from '../agent-lane/admit-model.js';
-import { todaysLevelFor } from '../agent-lane/identity-proposal.js';
+import { proposeProductIdentity, todaysLevelFor } from '../agent-lane/identity-proposal.js';
+import { identityConfirmBaseIsWritable } from './editable-graph.js';
+import { LEVEL_WRITER_KINDS } from '../coaching/identity-not-evaluated-ask.js';
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { plotResolvesFrame } from '../../cee/graph-readiness/identity-frames.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
@@ -90,6 +93,7 @@ export type IdentityConfirmRefusal =
   | 'carrier_conflict'
   | 'goal_scope_conflict'
   | 'already_carried'
+  | 'operand_level_missing'
   | Exclude<StoredProductDeclarationRefusal, 'invalid_graph'>;
 
 export type IdentityConfirmEditResult =
@@ -126,6 +130,68 @@ function todaysWrite(part: Rec, today: { raw: number; unit: string; source: stri
     out.observed_state = { value: today.raw / cap, raw_value: today.raw, unit: today.unit, source: today.source };
   }
   return out;
+}
+
+/**
+ * ⛔ NO YES OVER A PART WITH NO LEVEL (DL blocker, Paul's golden brief B1, scenario 828d87ac, 8 Oct): the card offered
+ * "Olumi reads ‘MRR’ as ‘Pro plan price’ × ‘Pro paying subscribers’" while ‘Pro paying subscribers’ (an outcome the drafter
+ * left level-less) had no figure; the Yes recorded it as the user's, and both Runs refused `identity_operand_missing` (ISL
+ * multiplies a product only over every part's level today). The parts this writer cannot give a level today: no level of
+ * their own, and none read through the user's figure on a levelled cause (`todaysLevelFor`, the level `todaysWrite` would
+ * write). ONE predicate for the writer and every door that offers the card, so the card is never offered where its Yes
+ * would be refused. By label, in factor order. Pure.
+ */
+export function identityPartsWithoutLevel(persistedGraph: unknown, factorIds: readonly string[]): { readonly id: string; readonly label: string; readonly kind: string }[] {
+  if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes)) return [];
+  const out: { id: string; label: string; kind: string }[] = [];
+  for (const id of new Set(factorIds)) {
+    const part = persistedGraph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
+    if (part === undefined) continue;
+    const os = isRec(part.observed_state) ? part.observed_state : undefined;
+    // ⛔ ONLY THE USER'S FIGURE IS A LEVEL HERE (DL correction, 8 Oct; Paul's 2 Oct brief §9 check 1: "With unknown
+    // subscribers, do not invent that result"; Science §(p): an Olumi estimate needs a basis). B1 9f32a4b4's 250 is the
+    // drafter's, with no basis (levels carry no basis field yet), so it is MISSING: the reading never computes from it.
+    const owner = classifyValueSource(os?.source);
+    const usersLevel = typeof os?.value === 'number' && Number.isFinite(os.value) && (owner === 'user_stated' || owner === 'user_ratified');
+    // Today's level read through the user's figure counts only where the part has NO value of its own: that is the only
+    // case `todaysWrite` writes it (#2851 buddy r1 P1-2: an Olumi value with no raw figure passed here and was kept).
+    // An EXACT copy of that figure is the user's figure too (AIQ 5906371639, served bdc4ff54: Olumi's 1,500 copied from the
+    // user's 1,500 'Current paying subscribers'); any other value of its own is not (buddy r1 P1-2).
+    const ownValue = typeof os?.value === 'number' && Number.isFinite(os.value);
+    const today = todaysLevelFor(persistedGraph, id);
+    if (usersLevel || (today !== null && (!ownValue || os?.raw_value === today.raw))) continue;
+    out.push({ id, label: typeof part.label === 'string' && part.label.trim() !== '' ? part.label.trim() : id, kind: String(part.kind) });
+  }
+  return out;
+}
+
+/**
+ * What is said INSTEAD of the card: the missing figures asked first, never approximated (the words of
+ * `composeIdentityNotEvaluatedAsk`'s `identity_operand_missing`). A part no control can record a level on
+ * (`LEVEL_WRITER_KINDS`: a factor only) is never asked for, since an answer could not be saved: the limit is said instead.
+ */
+export function identityPartLevelAsk(goalLabel: string, formula: readonly string[], missing: readonly { readonly label: string; readonly kind: string }[]): string {
+  const q = (l: string): string => `‘${l}’`;
+  const and = (xs: readonly string[]): string => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  const as = `${q(goalLabel)} as ${formula.map(q).join(' × ')}`;
+  const askable = missing.filter((m) => LEVEL_WRITER_KINDS.includes(m.kind));
+  if (askable.length === missing.length) {
+    const one = missing.length === 1;
+    return `To work out ${as}, I need ${and(missing.map((m) => q(m.label)))}: what ${one ? 'is it' : 'are they'} today?`;
+  }
+  const unsaid = missing.filter((m) => !LEVEL_WRITER_KINDS.includes(m.kind));
+  const one = unsaid.length === 1;
+  return `Olumi can’t work out ${as} yet: ${and(unsaid.map((m) => q(m.label)))} ${one ? 'has' : 'have'} no figure in the model, `
+    + `and Olumi can’t record one for ${one ? 'it' : 'them'} yet, so there is nothing for you to confirm.`;
+}
+
+/**
+ * Whether the STORED model holds a reading whose card may be offered: one to confirm, a base its writer can record, and
+ * every part with a level (`identityPartsWithoutLevel`). The re-offer's predicate (`readingWaiting`), the same as the Run hint's.
+ */
+export function identityCardOfferable(storedGraph: unknown): boolean {
+  const card = proposeProductIdentity(storedGraph);
+  return card !== null && identityConfirmBaseIsWritable(storedGraph) && identityPartsWithoutLevel(storedGraph, card.factor_ids).length === 0;
 }
 
 const refuse = (reason: IdentityConfirmRefusal, detail?: string): IdentityConfirmEditResult =>
@@ -168,6 +234,14 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   // ── THE CONSTRUCTION RULE, on the stored graph ─────────────────────────────────────────────────────────────────────
   const admitted = admitStoredProductDeclaration(params.persistedGraph, { outcome_id, factor_ids: distinct });
   if (!admitted.ok) return admitted.reason === 'invalid_graph' ? refuse('invalid_graph') : refuse(admitted.reason, admitted.detail);
+  const unlevelled = identityPartsWithoutLevel(params.persistedGraph, factorOrder);
+  if (unlevelled.length > 0) {
+    const labelOf = (id: string): string => {
+      const n = graph.nodes.find((x): x is Rec => isRec(x) && x.id === id);
+      return typeof n?.label === 'string' && n.label.trim() !== '' ? n.label.trim() : id;
+    };
+    return refuse('operand_level_missing', identityPartLevelAsk(labelOf(outcome_id), factorOrder.map(labelOf), unlevelled));
+  }
 
   const carrier = { operation: 'product' as const, factor_ids: factorOrder, stated_in_brief: true };
   outcome.nonlinear_identity = carrier;

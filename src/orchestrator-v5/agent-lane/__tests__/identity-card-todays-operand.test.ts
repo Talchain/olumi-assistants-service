@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { identityConfirmPostimageIsScoped } from '../../system-events/identity-confirm-edit.js';
+import { identityConfirmPostimageIsScoped, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { todaysFrameFor, todaysLevelFor } from '../identity-proposal.js';
 import { statedIdentityFrameGaps } from '../../../cee/graph-readiness/identity-frames.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -140,10 +140,20 @@ describe('m1: after the Yes, the Run is not blocked for want of a frame (served 
   it('R3 5907677185 GUARD: a cause range under 2× today\'s level (cap 1,600) could clip the later count → no range, today\'s ask stays', () => {
     const x = g((y) => { node(y, 'current_paying_subscribers').observed_state.cap = 1600; });
     expect(todaysFrameFor(x, 'paying_subscribers_at_12_months')).toBeNull();
-    const { after } = yes(x);
-    expect(node(after, 'paying_subscribers_at_12_months').scale_frame).toBeUndefined();
-    expect(node(after, 'paying_subscribers_at_12_months').observed_state).toBeUndefined();
-    expect(codes(after)).toContain('IDENTITY_FRAME_MISSING');
+    // #2851 RE-PIN (class: a part with no level): this used to write the Yes and leave the Run blocked
+    // (IDENTITY_FRAME_MISSING), confirm-then-refuse. The Yes is now refused before any write, and nothing changes.
+    const card = proposeProductIdentity(x)!;
+    const r = applyIdentityConfirmEdit({ persistedGraph: x, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+      expected_graph_hash: computeAnalysisAffectingGraphHash(x as never) ?? '', reading_token: identityConfirmReadingToken(card) });
+    expect(r.kind === 'refused' ? r.reason : r.kind).toBe('operand_level_missing');
+  });
+
+  // #2851 buddy r1 P1-2: today's level read through the user's 1,500 counts only where the part has NO value of its own;
+  // an Olumi value with no raw figure was counted and then KEPT by the writer (todaysWrite skips a numeric value).
+  it('#2851: an Olumi value on the month-12 part is a missing level even with the user\'s 1,500 cause; CONTROL: no value → today\'s level counts', () => {
+    const olumi = g((y) => { node(y, 'paying_subscribers_at_12_months').observed_state = { value: 0.01, unit: 'subscribers', source: 'cee_inference' }; });
+    expect(identityPartsWithoutLevel(olumi, ['pro_plan_price', 'paying_subscribers_at_12_months']).map((p) => p.id)).toEqual(['paying_subscribers_at_12_months']);
+    expect(identityPartsWithoutLevel(M1, ['pro_plan_price', 'paying_subscribers_at_12_months'])).toEqual([]);
   });
 
   it('CONTROL: m2 (every part already framed) — the Yes adds no range', () => {

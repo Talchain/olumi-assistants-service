@@ -11,11 +11,12 @@ import { actionFactsOf } from '../actions/state.js';
 import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
+import { identityCardOfferable, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 
 type Rec = Record<string, unknown>;
 type Graph = { nodes: Rec[]; edges: Rec[] };
 type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_actions: Rec[];
-  pending_actions: { action: Rec }[]; action_bar?: { priority: Rec[]; more: Rec[] };
+  pending_actions?: { action: Rec }[]; action_bar?: { priority: Rec[]; more: Rec[] };
   _agent: { tool_calls: { name: string; ok: boolean }[]; replayed?: boolean } };
 const FX = JSON.parse(readFileSync(new URL('./fixtures/one-reply-paul-pricing.json', import.meta.url), 'utf8')) as {
   brief: string; narrator: string; read: Rec & { graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec };
@@ -60,8 +61,8 @@ vi.mock('../runtime/build-model.js', async (original) => ({
   ...await original<Record<string, unknown>>(),
   buildModelFromBrief: async (scenarioId: string, _brief: unknown,
     dispatch: (path: string, body: unknown) => Promise<unknown>) => {
-    await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, { graph: structuredClone(FX.read.graph) });
-    return { ok: true, mutated: true, model_version: { version_number: 1 }, graph_hash: FX.read.graph_hash };
+    await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, { graph: structuredClone(currentRead.graph) });
+    return { ok: true, mutated: true, model_version: { version_number: 1 }, graph_hash: currentRead.graph_hash };
   },
 }));
 vi.mock('../../drafter-raw/index.js', () => ({
@@ -104,7 +105,7 @@ describe('ONE reply contract through the build route', () => {
       : { ...currentRead, graph: saved });
     app.post('/assist/v1/scenarios/:id/graph/register', async req => {
       saved = (req.body as { graph: Graph }).graph;
-      return { registered: true, graph_hash: FX.read.graph_hash, model_version: { version_number: 1 } };
+      return { registered: true, graph_hash: currentRead.graph_hash, model_version: { version_number: 1 } };
     });
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
       graph_hash: currentRead.graph_hash, blocks: [currentRead.analysis_result], analysis_state: currentRead.analysis_state,
@@ -116,6 +117,19 @@ describe('ONE reply contract through the build route', () => {
   beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); askedToBuild = false;
     narrator = process.env.ONE_REPLY_CAPTURE_BASE === '1' ? FX.narrator : `${FX.narrator}\n\n${GOAL_CHANCE_CAPTURE}`;
     currentRead = FX.read; lastComposeInput = undefined; info.mockClear(); });
+  // #2851 supersedes the captured draft's automatic-card premise: Olumi's basis-less 250 is not a user level.
+  // Keep the exact positive identity assertions on the same count explicitly ratified by the user; the original
+  // capture remains untouched and has its own no-card route control below.
+  const withUserRatifiedSubscribers = () => {
+    currentRead = structuredClone(FX.read);
+    (currentRead.graph.nodes.find(n => n.id === 'pro_paying_subscribers')!.observed_state as Rec).source = 'user_confirmed';
+    currentRead.graph_hash = computeAnalysisAffectingGraphHash(currentRead.graph as never)!.slice(0, 16);
+    currentRead.analysis_result.computed_against_hash = currentRead.graph_hash;
+    (currentRead.current_read as Rec).computed_against_hash = currentRead.graph_hash;
+    (currentRead.current_read as Rec).current_analysis_hash = currentRead.graph_hash;
+    expect(identityCardOfferable(currentRead.graph)).toBe(true);
+    expect(identityPartsWithoutLevel(currentRead.graph, ['pro_plan_price', 'pro_paying_subscribers'])).toEqual([]);
+  };
   async function buildTurn() {
     const turnId = randomUUID();
     lastBuildPayload = { kind: 'message', scenario_id: randomUUID(), turn_id: turnId, message: FX.brief };
@@ -200,14 +214,15 @@ describe('ONE reply contract through the build route', () => {
     expect(markerForDisclosure(note)).not.toContain('prop_deadbeef0123456789');
   });
 
-  it('R1 Paul: one concise face, typed-card question in detail, RC4 census, plain units', async () => {
+  it('R1 Paul, user-ratified count: one concise face, typed-card question in detail, RC4 census, plain units', async () => {
+    withUserRatifiedSubscribers();
     const body = await buildTurn();
     const shapeLog = info.mock.calls.map((call: unknown[]) => call[0] as Rec).find((e: Rec) => e.event === 'agent_lane.reply_shaped');
-    const facts = actionFactsOf({ scenarioId: randomUUID(), graph: FX.read.graph, graphHash: FX.read.graph_hash,
-      analysisState: FX.read.analysis_state, analysisResult: FX.read.analysis_result,
-      analysisReady: (FX.read.current_read as Rec)?.analysis_ready });
+    const facts = actionFactsOf({ scenarioId: randomUUID(), graph: currentRead.graph, graphHash: currentRead.graph_hash,
+      analysisState: currentRead.analysis_state, analysisResult: currentRead.analysis_result,
+      analysisReady: (currentRead.current_read as Rec)?.analysis_ready });
     expect(facts.olumiEstimates).not.toBeNull();
-    const wholeGraphAuthoredCount = deriveOlumiAuthoredValues(FX.read.graph).length;
+    const wholeGraphAuthoredCount = deriveOlumiAuthoredValues(currentRead.graph).length;
     expect(wholeGraphAuthoredCount, 'M3 control: whole-model authored figures differ from RC4 result census').not.toBe(facts.olumiEstimates!.count);
     if (process.env.ONE_REPLY_CAPTURE_BASE === '1') {
       expect(shapeLog).toMatchObject({ outcome: 'kept_whole', reason: 'proposal' });
@@ -233,7 +248,8 @@ describe('ONE reply contract through the build route', () => {
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
-  it('R1 producer control: the identity card owes no second goal-chance explanation', async () => {
+  it('R1 producer control, user-ratified count: the identity card owes no second goal-chance explanation', async () => {
+    withUserRatifiedSubscribers();
     narrator = FX.narrator;
     const body = await buildTurn();
     expect(body._answer_shape).toBeDefined();
@@ -241,6 +257,39 @@ describe('ONE reply contract through the build route', () => {
     expect(body.assistant_text).not.toContain('This run doesn’t yet show each option’s chance of reaching £20,000.');
     expect(body.suggested_actions).toContainEqual(expect.objectContaining({ label: "Yes, that's how" }));
     expect(words(face(body._answer_shape!))).toBeLessThanOrEqual(80);
+  });
+
+  it('R1 original capture: Olumi’s basis-less 250 offers no identity card or approval', async () => {
+    // The provider now narrates the draft without the captured, obsolete "confirm on the button" instruction.
+    narrator = FX.narrator.slice(0, FX.narrator.indexOf('\n\n“Olumi reads'));
+    const before = structuredClone(FX.read.graph);
+    expect(identityPartsWithoutLevel(before, ['pro_plan_price', 'pro_paying_subscribers'])).toEqual([
+      { id: 'pro_paying_subscribers', label: 'Pro paying subscribers', kind: 'factor' },
+    ]);
+    expect(identityCardOfferable(before)).toBe(false);
+    const body = await buildTurn();
+    const facts = actionFactsOf({ scenarioId: String(lastBuildPayload.scenario_id), graph: saved,
+      graphHash: currentRead.graph_hash, analysisState: currentRead.analysis_state, analysisResult: currentRead.analysis_result,
+      analysisReady: (currentRead.current_read as Rec)?.analysis_ready });
+    expect(facts.identityReading).toBeNull();
+    expect(body._agent.tool_calls.some(c => c.name === 'propose_identity')).toBe(false);
+    expect(body.suggested_actions).not.toContainEqual(expect.objectContaining({ label: "Yes, that's how" }));
+    expect(body.pending_actions ?? []).toEqual([]);
+    expect(rows.get(String(lastBuildPayload.turn_id))?.pending_actions).toEqual([]);
+    const approvalControls = [...body.suggested_actions, ...(body.pending_actions ?? []).map(p => p.action),
+      ...(body.action_bar?.priority ?? []), ...(body.action_bar?.more ?? [])];
+    expect(approvalControls.some(a => a.action_id === 'confirm_identity' || a.action_type === 'confirm_identity')).toBe(false);
+    expect(approvalControls.some(a => a.action_id === 'confirm_reading' && a.enabled === true)).toBe(false);
+    expect(body.assistant_text).not.toContain('Is that how you work it out?');
+    expect(body.assistant_text).not.toContain('Please confirm on the button.');
+    expect(count(body.assistant_text, GOAL_CHANCE_CAPTURE), 'without a card, the full chance explanation remains owed once').toBe(1);
+    expect(saved).toEqual(before);
+    expect(FX.read.graph).toEqual(before);
+    expect(saved.nodes.find(n => n.id === 'pro_paying_subscribers')!.observed_state).toMatchObject({
+      raw_value: 250, value: 0.125, source: 'cee_inference',
+    });
+    expect(words(face(body._answer_shape!))).toBeLessThanOrEqual(80);
+    await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
   it('R3 withheld Run: typed current-level marker on the face, full reason in detail, one next step', async () => {
