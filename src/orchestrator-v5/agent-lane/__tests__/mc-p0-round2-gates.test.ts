@@ -39,8 +39,11 @@ describe('MC P0 round 2 binding and DL gates', () => {
       expect(edgeStrengthProvenance(projected.edges[i]), id).toBe('ai_drafted');
     }
     const result = await runP0Graph(projected, brief);
-    expect(result.leading_option_id).toBe('raise_prices_10');
-    const warning = result.enrichment.inference_warnings.find((w: any) => w.code === 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK');
+    // Science 393023 LICENCE (a)/(b), 7 Oct: the support-chain door default withholds the comparison.
+    expect(result.leading_option_id).toBeNull();
+    // Science 393023 LICENCE (a)/(b), 7 Oct: the same endpoints now carry a placeholder-path warning.
+    const warning = result.enrichment.inference_warnings.find((w: any) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
+    expect(result.enrichment.inference_warnings.map((w: any) => w.code)).not.toContain('GOAL_FIGURES_OLUMI_SUPPLIED_LINK');
     expect(warning.node_ids).toEqual(expect.arrayContaining(['starter_support_cost', 'mrr_lost_to_starter_support_burden']));
     expect(warning.message).toContain('Starter support cost');
     expect(warning.message).toContain('MRR lost to starter support burden');

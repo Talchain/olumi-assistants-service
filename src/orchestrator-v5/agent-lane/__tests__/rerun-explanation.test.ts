@@ -14,6 +14,7 @@ import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN
 
 const LABELS: Record<string, string> = {
   quarterly_revenue: 'Quarterly revenue',
+  enterprise_prospect_signing_likelihood: 'Enterprise prospect signing likelihood',
   ai_reporting_module_sprint: 'AI Reporting Module Sprint',
   integration_bug_fix_sprint: 'Integration Bug Fix Sprint',
   split_sprint_capacity: 'Split Sprint Capacity',
@@ -95,7 +96,9 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
   });
 
   it('one sentence per link: a sizing (→ user) and a strength row on ONE link are one change', () => {
-    const own = { ...AI, after: { raw: 'user' } };
+    // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived:
+    // placeholder → user named the prior band → an explicitly sized prior still names both bands in one change.
+    const own = { ...AI, before: { raw: 'olumi_estimate' }, after: { raw: 'user' } };
     const band = { ...AI, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
     expect(plan({ ...UNWITHHELD, input_changes: [own, band] })!.changes).toEqual([
       'You gave your own estimate for how much Sprint capacity for AI reporting changes AI reporting module availability: moderate → strong.',
@@ -103,10 +106,44 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
   });
 
   it('the Accept is never folded away: sizing → olumi_accepted + a band move on ONE link keeps "You accepted"', () => {
+    // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived:
+    // placeholder → accepted named the prior band → an explicitly sized prior preserves the accepted band-move claim.
+    const sizedAccept = { ...AI, before: { raw: 'olumi_estimate' } };
     const band = { ...AI, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
-    expect(plan({ ...UNWITHHELD, input_changes: [AI, band] })!.changes).toEqual([
+    expect(plan({ ...UNWITHHELD, input_changes: [sizedAccept, band] })!.changes).toEqual([
       "You accepted Olumi's estimate for how much Sprint capacity for AI reporting changes AI reporting module availability: moderate → strong.",
     ]);
+  });
+
+  it('RED (Science 393023 LICENCE ruling 3): D1 placeholder → user keeps the recorded own estimate and slight, never names the prior as strong', () => {
+    const from = 'enterprise_prospect_signing_likelihood';
+    const to = 'quarterly_revenue';
+    const own = { ...accept(from, to), after: { raw: 'user' } };
+    const band = { ...accept(from, to), field: 'strength', before: { raw: 'strong' }, after: { raw: 'slight' } };
+    expect(own).toMatchObject({ entity_id: `${from}->${to}`, link: { from, to }, before: { raw: 'placeholder' }, after: { raw: 'user' } });
+    expect(band).toMatchObject({ entity_id: `${from}->${to}`, link: { from, to } });
+    const p = plan({ ...PAIRED, input_changes: [own, band] })!;
+    expect(p.changes).toEqual([
+      'You gave your own estimate for how much Enterprise prospect signing likelihood changes Quarterly revenue: slight.',
+    ]);
+    expect(p.codeLine).not.toContain('strong');
+    expect(p.codeLine).toContain('slight');
+    expect(p.instruction).toContain(p.codeLine);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it('CONTROL (Science 393023 LICENCE ruling 3): the same D1 link with a sized prior still names strong → slight', () => {
+    const from = 'enterprise_prospect_signing_likelihood';
+    const to = 'quarterly_revenue';
+    const own = { ...accept(from, to), before: { raw: 'olumi_estimate' }, after: { raw: 'user' } };
+    const band = { ...accept(from, to), field: 'strength', before: { raw: 'strong' }, after: { raw: 'slight' } };
+    expect(own).toMatchObject({ entity_id: `${from}->${to}`, link: { from, to }, before: { raw: 'olumi_estimate' }, after: { raw: 'user' } });
+    expect(band).toMatchObject({ entity_id: `${from}->${to}`, link: { from, to } });
+    const p = plan({ ...PAIRED, input_changes: [own, band] })!;
+    expect(p.changes).toEqual([
+      'You gave your own estimate for how much Enterprise prospect signing likelihood changes Quarterly revenue: strong → slight.',
+    ]);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
   // ⛔ CODEX CEE BUDDY CR 5940970957: four complete Accept rows with a C0 pair named three and then said "Nothing else changed".

@@ -119,7 +119,8 @@ describe('A4/A4b root: a £ goal with no target, no level and no frame is read o
   it('F5: Olumi\'s own £ size into the goal is sized exactly as before (no natural size, no magnitude author)', async () => {
     const olumi = edge(await build(draft()), 'qualified_angel_conversations');
     expect(olumi?.provenance?.natural_effect).toBeUndefined();
-    expect(olumi?.provenance?.magnitude).toBeUndefined();
+    // Science 393023 LICENCE (a)/(b), 7 Oct: the new frameless default carries the placeholder tag.
+    expect(olumi?.provenance?.magnitude).toBe('olumi_placeholder');
   });
 
   it('F5: a link the drafter CLAIMS is definitional but is not ±1 (−£0.5 per £1) is sized exactly as before', async () => {
@@ -217,7 +218,8 @@ describe('F4: a later target retires the normalising frame — path independent'
   it('RESIDUAL (pinned): Olumi\'s drafted estimate differs from a with-target build (placeholder vs olumi_estimate)', async () => {
     const a = await pathA();
     const b = await build(draft({ target: TARGET }), `${PAUL} We need to raise at least £1m.`);
-    expect(edge(a, 'qualified_angel_conversations')?.provenance?.magnitude).toBeUndefined();
+    // Science 393023 LICENCE (a)/(b), 7 Oct: the no-target build tags its new default as a placeholder.
+    expect(edge(a, 'qualified_angel_conversations')?.provenance?.magnitude).toBe('olumi_placeholder');
     expect(edge(b, 'qualified_angel_conversations')?.provenance?.magnitude).toBe('olumi_estimate');
   });
 

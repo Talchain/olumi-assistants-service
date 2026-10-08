@@ -60,6 +60,12 @@ import {
 type Rec = Record<string, any>;
 const FA027 = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';
 const fa027Graph = JSON.parse(readFileSync(new URL('../../../handlers/__tests__/fixtures/sci-deep-fa027cf5-graph.json', import.meta.url), 'utf8')) as Rec;
+// pre-ruling legacy class: a defaulted size that is not the door constant (Science 393023 LICENCE (a))
+const fa027Legacy = structuredClone(fa027Graph);
+for (const edge of fa027Legacy.edges) {
+  if (edge.defaulted === true && Math.abs(edge.strength.mean) === 0.5 && edge.strength.std === 0.125
+    && edge.provenance?.magnitude === undefined && edge.provenance?.natural_effect === undefined) edge.strength.std = 0.1;
+}
 const happy = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')) as Rec;
 const CUT = JSON.parse(readFileSync(new URL('./fixtures/served-cut-costs-altB-r0-1f9d769.json', import.meta.url), 'utf8')) as {
   _provenance: { brief_text: string }; graph: Rec; plot_body: Rec;
@@ -161,8 +167,26 @@ function shadowOf(r: { fact: Rec; shadows: Rec[] }): Rec {
 }
 
 describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
-  it('PRE (served graph + statistics, SYNTHETIC envelope): the Run stores AI Reporting Module Sprint as its leader and its constraint verdict entitles it', async () => {
+  it('LICENCE (a) door constant: as-served fa027 withholds the leader', async () => {
     const r = await runOnce(FA027, fa027Graph, plotDouble('served'));
+    // Science 393023 LICENCE (a)/(b), 7 Oct: fa027 door-default paths now withhold the leader.
+    expect(r.fact.result.leading_option_id).toBeNull();
+    expect(r.fact.result.constraint_verdict.may_name_leading_option).toBe(true);
+    // Science 393023 LICENCE (a)/(b), 7 Oct: placeholder paths replace legacy disclosure; the no-target record stays.
+    expect(warningCodes(r.fact)).toEqual(['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_NO_STATED_TARGET']);
+  });
+
+  it('LICENCE (a) door constant: shadow is withheld/goal_figures_withheld, CV still permits', async () => {
+    const e = shadowOf(await runOnce(FA027, fa027Graph, plotDouble('served')));
+    // Science 393023 LICENCE (a)/(b), 7 Oct: the same comparison now has an unsized goal path.
+    expect(e).toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: 'goal_figures_withheld', caveats: [],
+      admission_mode: 'comparative_leader', claim_reason: 'goal_path_unsized', failed_closed: false });
+    // Science 393023 LICENCE (a)/(b), 7 Oct: the constraint verdict still permits; the path licence withholds.
+    expect(e.disagreements).toEqual([{ site: 'CV', live: true, verdict: false }]);
+  });
+
+  it('PRE (served graph + statistics, SYNTHETIC envelope): the Run stores AI Reporting Module Sprint as its leader and its constraint verdict entitles it', async () => {
+    const r = await runOnce(FA027, fa027Legacy, plotDouble('served'));
     expect(r.fact.result.leading_option_id).toBe(LEADER);
     expect(r.fact.result.constraint_verdict.may_name_leading_option).toBe(true);
     // ⭐ RE-PINNED, D3 step 1 (DL 0df0e1 #87 6006078553, PL rec 5), merged with MC P0 (#2613): this served goal holds NO
@@ -172,7 +196,7 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
   });
 
   it('L1-b (SYNTHETIC envelope): a separated comparative_leader Run is `permitted`, names the stored leader, and every live site agrees', async () => {
-    const e = shadowOf(await runOnce(FA027, fa027Graph, plotDouble('served')));
+    const e = shadowOf(await runOnce(FA027, fa027Legacy, plotDouble('served')));
     expect(e).toMatchObject({ verdict: 'permitted', leader_option_id: LEADER, reason: null, caveats: [],
       admission_mode: 'comparative_leader', claim_reason: null, failed_closed: false });
     expect(e.disagreements).toEqual([]);
@@ -189,7 +213,7 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
   });
 
   it('L1-d (identical arms, SYNTHETIC pair): gate 1 v2 withholds → `withheld`/`options_do_not_separate`, never `permitted`', async () => {
-    const r = await runOnce(FA027, fa027Graph, plotDouble('pair_same'));
+    const r = await runOnce(FA027, fa027Legacy, plotDouble('pair_same'));
     expect(warningCodes(r.fact)).toContain(GOAL_FIGURES_OPTIONS_IDENTICAL);
     const e = shadowOf(r);
     expect(e).toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: 'options_do_not_separate' });
@@ -197,7 +221,7 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
   });
 
   it('L1-d (near tie, SYNTHETIC tie flag): `withheld`/`options_do_not_separate`; the stored leader and summary still name one', async () => {
-    const r = await runOnce(FA027, fa027Graph, plotDouble('near_tie'));
+    const r = await runOnce(FA027, fa027Legacy, plotDouble('near_tie'));
     expect(r.fact.result.leading_option_id).toBe(LEADER);
     const e = shadowOf(r);
     expect(e).toMatchObject({ verdict: 'withheld', reason: 'options_do_not_separate', claim_reason: WITHHELD_NEAR_TIE });

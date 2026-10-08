@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../../agent-lane/__tests__/licence-test-graphs.js';
 /**
  * ⛔ GATE 5 — A GOAL THE USER'S OWN FIGURES MAKE AS A PRODUCT HAS NO FIGURES FROM A RUN THAT DID NOT READ IT (DL #75
  * 5904272507; AIQ 5904262145 + 5904286130; P0 partner rows 5904282153).
@@ -247,9 +248,17 @@ describe('CONTROLS — figures kept where the user\'s figures make no unread pro
 
   it('CONTROL (signed-in MRR W3 520aab46, product confirmed): the cold read keeps 0.2469', async () => {
     expect(unreadGoalProduct(W3_SERVED.graph)).toBeNull();
-    const r = await runOn(W3_SERVED);
+    // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+    const r = await runOn({ ...W3_SERVED, graph: legacyDoorGraph(W3_SERVED.graph) });
     const env = r.enrichment ?? r;
     expect(env.inference_warnings.map((x: Json) => x.code)).not.toContain(GOAL_FIGURES_PRODUCT_NOT_READ);
     expect(JSON.stringify(env.option_comparison)).toContain('0.2469');
   });
+});
+
+it('Science 393023: as-served confirmed W3 product still read; 0.2469 → withheld for a placeholder path', async () => {
+  expect(unreadGoalProduct(W3_SERVED.graph)).toBeNull();
+  const r = await runOn(W3_SERVED);
+  expect(JSON.stringify(r.enrichment.option_comparison)).not.toContain('0.2469');
+  expect(r.enrichment.inference_warnings.some((w: Json) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')).toBe(true);
 });

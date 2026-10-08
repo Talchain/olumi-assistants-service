@@ -555,7 +555,7 @@ export function hypothesisEdgeValue(from: string, to: string, direction: 'positi
     exists_probability: DEFAULT_EXISTS_PROBABILITY,
     effect_direction: direction,
     defaulted: true,
-    provenance: { source: 'cee_hypothesis' as const },
+    provenance: { source: 'cee_hypothesis' as const, magnitude: 'olumi_placeholder' as const },
   };
 }
 
