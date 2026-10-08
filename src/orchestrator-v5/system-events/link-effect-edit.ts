@@ -460,6 +460,14 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const statedEnds = { source: String(nodes.find(n => n.id === from)?.label ?? from),
     target: String(nodes.find(n => n.id === to)?.label ?? to) };
   const statedScope = { quantities: nodes.map(n => String(n.label ?? n.id)), target_units: ownUnitsOf(nodes.find(n => n.id === to)!) };
+  // A first current triplet needs the same parser as a reply. Ordinary points also need a current unit witness;
+  // this marker contains current words and endpoint identity only, with no carried reading or numerical fields.
+  const hasCurrentBounds = boundedLinkEffectText(params.quote) !== undefined;
+  const ordinaryPoints = typeof effect.amount_unit === 'string' && /^(?:(?:percentage\s+)?points?|pp)$/i.test(effect.amount_unit.trim());
+  const currentClarification: LinkEffectClarificationReading | undefined = clarification
+    ?? (hasCurrentBounds || ordinaryPoints ? { current_turn: true, statement_classification: 'asserted',
+      node_id: to, from_id: from, to_id: to, from_label: statedEnds.source, to_label: statedEnds.target,
+      source_text: params.quote, quote: params.quote, answer: params.quote } : undefined);
   const shortAnswer = readLinkEffectClarificationAnswer(clarification, effect, params.quote, statedEnds, statedScope);
   if (!shortAnswer && linkEffectStatementClassification(params.quote, params.quote, statedEnds) !== 'asserted') return refuse('unit_mismatch');
   if (clarification !== undefined && !shortAnswer && linkEffectTheUserStated(params.quote, effect, statedEnds, statedScope) !== null) return refuse('unit_mismatch');
@@ -476,13 +484,16 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // Unit readings are identity content, outside the analysis hash: independently re-check eligibility against the
   // persisted node and its other sized links. A level or governing unit added since approval makes adoption stale.
   const unitReadings = params.unit_readings ?? [];
-  const currentAnswer = clarification === undefined ? undefined
-    : readLinkEffectCurrentAnswer(clarification, effect, params.quote, statedEnds, statedScope);
+  const currentAnswer = currentClarification === undefined ? undefined
+    : readLinkEffectCurrentAnswer(currentClarification, effect, params.quote, statedEnds, statedScope);
   // Bounds are writable only when all three figures were stated in this turn.
-  if (boundedLinkEffectText(params.quote) !== undefined && currentAnswer?.ok !== true) return refuse('unit_mismatch');
+  if (hasCurrentBounds && currentAnswer?.ok !== true) return refuse('unit_mismatch');
   if (clarification !== undefined && currentAnswer?.ok !== true) return refuse('unit_mismatch');
   const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote,
-    { link_selected: params.link_selected === true, clarification: params.clarification });
+    { link_selected: params.link_selected === true, clarification: currentClarification });
+  // Existing literal-percent Science readings (the user's typed zero or own denominator) still settle points.
+  if (clarification === undefined && ordinaryPoints && currentAnswer?.ok !== true
+    && !prepared.points_at_zero?.includes(to)) return refuse('unit_mismatch');
   if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)
     // A % at the user's own 0 is stored in points, exactly as its card said (Science F1); never as a bare %.
     || stableStringify(withPointsAtZero(effect, prepared.points_at_zero, from, to)) !== stableStringify(effect)) {

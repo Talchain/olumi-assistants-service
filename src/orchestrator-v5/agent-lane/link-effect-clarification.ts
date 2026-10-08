@@ -22,6 +22,11 @@ const records = (value: unknown): Rec[] => Array.isArray(value) ? value.map(reco
 const linkKey = (link: LinkEffectClarificationLink): string => JSON.stringify([link.from_id, link.to_id]);
 const isAsk = (pending: PendingAction | null): pending is LinkEffectClarificationPending => pending?.action.kind === 'elicit_link_effect_clarification';
 
+/** Legacy snapshots and their revised descendants share the original chip identity until materialised. */
+export function linkEffectClarificationLineage(pending: LinkEffectClarificationPending): string {
+  return pending.action.lineage_id ?? pending.chip_id;
+}
+
 /** A reading answer supplies units only, never any number in the stored statement. */
 export function linkEffectResolvedReading(answer: string): 'points' | 'relative' | undefined {
   const reply = answer.trim().replace(/^(?:I mean|I meant|it['’]?s|that['’]?s)\s+/i, '').replace(/[.!]$/, '').trim();
@@ -39,7 +44,8 @@ export function reviseLinkEffectClarification(
   if (!Number.isFinite(emittedMs)) throw new Error('Link-effect clarification revisions require an ISO timestamp.');
   const id = randomUUID();
   return { ...pending, id, chip_id: `agent-link-effect-clarification:${id}`,
-    emitted_at_iso: new Date(emittedMs).toISOString(), action };
+    emitted_at_iso: new Date(emittedMs).toISOString(),
+    action: { ...action, lineage_id: linkEffectClarificationLineage(pending) } };
 }
 
 /** A changed revision or a Run is not resolution; only the held link and its authorship decide. */
@@ -80,7 +86,8 @@ export function linkEffectClarificationOnRefusal(input: {
   const pending = parsePendingAction({
     id, scenario_id: input.scenarioId, chip_id: `agent-link-effect-clarification:${id}`,
     action: { kind: 'elicit_link_effect_clarification', ...input.action,
-      source_text: input.action.source_text ?? input.message },
+      // A capability may have selected a newer durable ask than the route's initial snapshot.
+      lineage_id: input.action.lineage_id ?? id, source_text: input.action.source_text ?? input.message },
     // A Run can change the hash; only the endpoints and question are carried.
     preconditions: { target_entity_ids: [input.action.from_id, input.action.to_id] },
     expires_at_turn_count: LINK_EFFECT_CLARIFICATION_TURN_TTL, emitted_at_iso: input.emittedAtIso,
@@ -92,9 +99,16 @@ export function linkEffectClarificationOnRefusal(input: {
 /** The outer answer owns the one carry step, including Run/Explain and refused answers. */
 export function linkEffectClarificationsForAnswerRow(input: {
   prior: readonly LinkEffectClarificationPending[]; next: readonly LinkEffectClarificationPending[];
-  consumedLinks: readonly LinkEffectClarificationLink[]; graph: unknown; graphHash: string | undefined; nowMs: number; typedByUser: boolean;
+  /** Production consumption names the ask lineage, so later independent asks on the same pair survive. */
+  consumedLineages?: readonly string[];
+  /** Legacy callers only; ignored when lineage consumption is supplied. */
+  consumedLinks?: readonly LinkEffectClarificationLink[];
+  graph: unknown; graphHash: string | undefined; nowMs: number; typedByUser: boolean;
 }): LinkEffectClarificationPending[] {
-  const consumed = new Set(input.consumedLinks.map(linkKey));
+  const consumed = new Set(input.consumedLineages ?? []);
+  const legacyConsumedLinks = new Set(input.consumedLineages === undefined ? (input.consumedLinks ?? []).map(linkKey) : []);
+  const wasConsumed = (ask: LinkEffectClarificationPending): boolean => consumed.has(linkEffectClarificationLineage(ask))
+    || legacyConsumedLinks.has(linkKey(ask.action));
   const held = record(input.graph);
   const graphKnown = Array.isArray(held?.nodes) && Array.isArray(held?.edges);
   // A failed read cannot confirm deletion or resolution. Retain the words without granting an answer licence.
@@ -105,7 +119,7 @@ export function linkEffectClarificationsForAnswerRow(input: {
   const carried: LinkEffectClarificationPending[] = [];
   for (const old of prior) {
     const key = linkKey(old.action);
-    if (consumed.has(key)) continue;
+    if (wasConsumed(old)) continue;
     const arriving = nextByLink.get(key);
     const replacement = arriving !== undefined && Date.parse(arriving.emitted_at_iso) > Date.parse(old.emitted_at_iso) ? arriving : undefined;
     if (arriving !== undefined && replacement === undefined) nextByLink.delete(key);
@@ -119,7 +133,7 @@ export function linkEffectClarificationsForAnswerRow(input: {
     }
     nextByLink.delete(key);
   }
-  for (const [key, fresh] of nextByLink) if (!consumed.has(key)) carried.push(fresh);
+  for (const fresh of nextByLink.values()) if (!wasConsumed(fresh)) carried.push(fresh);
   return carried;
 }
 

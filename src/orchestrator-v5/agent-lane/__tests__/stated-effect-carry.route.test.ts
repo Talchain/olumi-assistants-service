@@ -7,8 +7,22 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { explanationContext } from './fixtures/run-explanation-follow-up.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import { statedRangeSpread } from '../../stated-range-spread.js';
+import { deriveAnswerTextFromShape } from '../../routing/answer-shape.js';
 
 type Json = Record<string, any>;
+// Script only the mixed disclosure row at the runtime seam; the route, carry lifecycle and composer remain real.
+const replySeam = vi.hoisted(() => ({ result: undefined as Json | undefined, run: false }));
+vi.mock('../runtime/agent-loop.js', async original => {
+  const actual = await original<typeof import('../runtime/agent-loop.js')>();
+  return { ...actual, runAgentTurn: async (...args: Parameters<typeof actual.runAgentTurn>) => {
+    if (replySeam.result === undefined) return actual.runAgentTurn(...args);
+    if (!replySeam.run) return replySeam.result;
+    const ran = await args[1].runAnalysis(args[0].ctx, { reason: 'The user asked for this Run.' });
+    return { ...replySeam.result,
+      tool_calls: [...replySeam.result.tool_calls, { name: 'run_analysis', ok: ran.ok, mutated: false }],
+      tool_results: [...replySeam.result.tool_results, ran] };
+  } };
+});
 let SID = randomUUID();
 const PAUL = 'Our current churn is 4%, and we predict it will at least increase 1% with this price increase. If it goes above 6%, we start to lose money, which is a serious problem.';
 const PAUL_QUOTE = 'Our current churn is 4%, and we predict it will at least increase 1% with this price increase.';
@@ -75,12 +89,16 @@ function cafeGraph(): Json {
 
 let graph: Json;
 let runRead: Json | undefined;
+let runStatus = 200;
+let runHasResult = true;
+let beforeProviderReply: (() => void) | undefined;
 const pending = new Map<string, unknown[]>();
 const writes: SessionTurnWrite[] = [];
 const rows = new Map<string, Json>();
 const script: Json[] = [];
 const providerBodies: Json[] = [];
 const doorCalls: Json[] = [];
+const replyShapeLogs: Json[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, id: string) => rows.get(id) ?? null),
@@ -167,14 +185,26 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       providerBodies.push(body);
       if (String(init?.body ?? '').includes('"propose_link_effect"')) {
+        const hook = beforeProviderReply;
+        beforeProviderReply = undefined;
+        hook?.();
         return new Response(JSON.stringify(script.shift() ?? message('Those figures are noted.')), { status: 200 });
       }
       return new Response(JSON.stringify(message('Those figures are noted.')), { status: 200 });
     }));
+    const { log } = await import('../../../utils/telemetry.js');
+    vi.spyOn(log, 'info').mockImplementation((entry) => {
+      if (entry?.event === 'agent_lane.reply_shaped') replyShapeLogs.push(entry);
+    });
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: hash(), ...(runRead ?? {}) }));
-    app.post('/orchestrate/v2/turn', async () => {
+    app.post('/orchestrate/v2/turn', async (_req, reply) => {
+      if (runStatus !== 200) return reply.code(runStatus).send({ error: 'Run failed' });
+      if (!runHasResult) {
+        return { response_version: 2, assistant_text: 'The analysis did not produce a result.', suggested_actions: [],
+          insights: [], graph_hash: hash(), analysis_ready: { status: 'ready' }, blocks: [] };
+      }
       // The real Run answer carries strict prior pending actions; it does not consume an open ask.
       runRead = {
         analysis_state: { run_state: { kind: 'complete_current', computed_at: now() }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
@@ -189,8 +219,11 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     });
     await app.register(agentV1TurnRoute); await app.ready();
   }, 120_000);
-  beforeEach(() => { SID = randomUUID(); graph = saasGraph(); runRead = undefined; pending.clear(); writes.length = 0; rows.clear(); script.length = 0; providerBodies.length = 0; doorCalls.length = 0; });
-  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { SID = randomUUID(); graph = saasGraph(); runRead = undefined; runStatus = 200; runHasResult = true;
+    beforeProviderReply = undefined;
+    replySeam.result = undefined; replySeam.run = false; replyShapeLogs.length = 0;
+    pending.clear(); writes.length = 0; rows.clear(); script.length = 0; providerBodies.length = 0; doorCalls.length = 0; });
+  afterAll(async () => { await app.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   const turn = async (words: string, extra: Json = {}): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID,
       turn_id: randomUUID(), agent_session_id: `rc2-${randomUUID()}`, message: words, ...extra } });
@@ -536,6 +569,50 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     return structuredClone(ask);
   };
   const effectEdge = (): Json => graph.edges.find((e: Json) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
+  it.each([false, true])('RC2a-fix2 P1 selected lineage C arriving after snapshot A is consumed exactly (grouped=%s)', async grouped => {
+    const a = await resolvedFloor();
+    const c = structuredClone(a);
+    c.id = randomUUID();
+    c.chip_id = `agent-link-effect-clarification:${c.id}`;
+    c.emitted_at_iso = new Date(Date.now() + 1).toISOString();
+    const quote = PAUL_QUOTE.replace('1%', '3 points');
+    c.action = { ...c.action, lineage_id: c.id, quote, source_text: quote,
+      question: bestGuessAsk(quote, 'Pro plan price', 'Monthly churn'),
+      floor: { ...c.action.floor, value: 3, words: 'at least 3 points', source_quote: quote } };
+    beforeProviderReply = () => pending.set(SID, [c]);
+    const answer = 'Every £1 Pro plan price rise raises monthly churn by 2 points.';
+    const args = { ...PAUL_ARGS, amount: 2, amount_unit: 'percentage points', per_source_change: 1, quote: answer };
+    script.push(calls(['propose_link_effect', grouped ? { links: [args] } : args]), message('Review your current figure.'));
+    const body = await turn(answer);
+    expect(cards(body), JSON.stringify(body)).toHaveLength(1);
+    expect(body.assistant_text).toContain('Earlier you said ‘at least 3 points’; Olumi now uses your latest figures.');
+    expect(clarifications()).toEqual([]);
+    expect(doorCalls).toEqual([]);
+  });
+  it.each([false, true])('RC2a-fix2 P1 refused lineage C arriving after snapshot A keeps its lineage and lifetime (grouped=%s)', async grouped => {
+    const a = await resolvedFloor();
+    const c = structuredClone(a);
+    c.id = randomUUID();
+    c.chip_id = `agent-link-effect-clarification:${c.id}`;
+    c.emitted_at_iso = new Date(Date.parse(a.emitted_at_iso) + 1).toISOString();
+    c.expires_at_iso = new Date(Date.now() + 60_000).toISOString();
+    c.expires_at_turn_count = 2;
+    const quote = PAUL_QUOTE.replace('1%', '3%');
+    c.action = { ...c.action, lineage_id: c.id, quote, source_text: quote, resolved_reading: 'relative',
+      question: bestGuessAsk(quote, 'Pro plan price', 'Monthly churn') };
+    delete c.action.floor;
+    beforeProviderReply = () => pending.set(SID, [c]);
+    const args = { ...PAUL_ARGS, amount: 4, amount_unit: 'percentage points', per_source_change: 1, quote: '4' };
+    script.push(calls(['propose_link_effect', grouped ? { links: [args] } : args]), message('Please state your current figure.'));
+    const body = await turn('4');
+    expect(cards(body)).toEqual([]);
+    expect(clarifications()).toHaveLength(1);
+    expect(clarifications()[0]!.action.lineage_id).toBe(c.id);
+    expect(clarifications()[0]!.expires_at_iso).toBe(c.expires_at_iso);
+    expect(clarifications()[0]!.expires_at_turn_count).toBe(1);
+    expect(body.assistant_text.match(/\?/g)).toHaveLength(1);
+    expect(doorCalls).toEqual([]);
+  });
   const guessCard = async (answer: string, guess: number, extra: Json = {}): Promise<Json> => {
     providerBodies.length = 0;
     script.push(calls(['propose_link_effect', { ...PAUL_ARGS, amount: guess, amount_unit: 'percentage points',
@@ -692,10 +769,44 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     const held = await resolvedFloor();
     const body = await run();
     const disclosure = "Olumi's current figure for how much ‘Pro plan price’ affects ‘Monthly churn’ is below your ‘at least 1 point’, so this Run likely understates churn and may flatter the price rise.";
-    if (current < 1) expect(body.assistant_text).toContain(disclosure);
+    if (current < 1) {
+      const face = body._answer_shape === undefined ? body.assistant_text
+        : [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
+      expect(face).toContain(disclosure);
+    }
     else expect(body.assistant_text).not.toContain(disclosure);
     expect(answerWrite().assistantMessage).toBe(body.assistant_text);
     expect(clarifications()[0]!.action.floor).toEqual(held.action.floor);
+    expect(effectEdge()).toEqual(before);
+    expect(doorCalls).toEqual([]);
+  });
+
+  it.each([
+    [500, false, false],
+    [500, false, true],
+    [200, false, false],
+    [200, false, true],
+    [200, true, false],
+  ] as const)('RC2a-fix2 P2 Run floor warning requires this Run to return analysis (HTTP %s, result=%s, prior result=%s)', async (status, hasResult, priorResult) => {
+    await resolvedFloor();
+    const edge = effectEdge();
+    edge.strength.mean = 0.25;
+    edge.provenance.natural_effect.amount = 0.5;
+    edge.provenance.natural_effect.per_source_change = 1;
+    edge.provenance.natural_effect.strength_mean = edge.strength.mean;
+    const before = structuredClone(edge);
+    if (priorResult) {
+      runRead = {
+        analysis_state: { run_state: { kind: 'complete_current', computed_at: now() }, leader_claim: { permitted: false } },
+        analysis_result: { type: 'analysis_result', computed_against_hash: hash(), summary: 'An earlier result.' },
+      };
+    }
+    runStatus = status;
+    runHasResult = hasResult;
+    const body = await run();
+    if (status === 200 && hasResult) expect(body.assistant_text).toContain('this Run likely understates churn');
+    else expect(body.assistant_text).not.toContain('this Run likely understates churn');
+    expect(answerWrite().assistantMessage).toBe(body.assistant_text);
     expect(effectEdge()).toEqual(before);
     expect(doorCalls).toEqual([]);
   });
@@ -892,6 +1003,118 @@ describe('RC2a current-turn-only stated-effect carry, the real /agent/v1/turn do
     expect(body.assistant_text).not.toContain('was set aside because only three changes can wait at once');
     expect(doorCalls).toEqual([]);
     expect(writes.every(w => w.graph === undefined)).toBe(true);
+  });
+
+  it('COPY-SHAPE: an effect ask, two capacity lapses and two latest-figures receipts still shape through the real door', async () => {
+    graph = cafeGraph();
+    graph.edges.push({ from: 'prices', to: 'margin', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8,
+      effect_direction: 'positive', provenance: { source: 'cee_hypothesis' } });
+    const values = [['stock', 'Stock', 'items'], ['staff_hours', 'Staff hours', 'hours per week']] as const;
+    for (const [id, label, unit] of values) {
+      graph.nodes.push({ id, label, kind: 'factor', category: 'observable', observed_state: {
+        raw_value: 100, value: 0.1, cap: 1000, unit, source: 'brief_extraction' } });
+    }
+    for (const [_id, label, unit] of values) {
+      script.push(calls(['propose_assumptions', { assumptions: [{ factor_label: label, value: 101, unit,
+        basis: 'The figure the user supplied.', revise: true }] }]), message('Please review this value.'));
+      await turn(`Set ${label} to 101 ${unit}.`);
+    }
+    const holds = (pending.get(SID) ?? []).filter((p: any) => p.action?.inline_patch?.agent_proposal !== undefined);
+    expect(holds).toHaveLength(2);
+    const base = seedClarification(true);
+    const effects = [
+      { from_id: 'prices', to_id: 'margin', from_label: 'Prices', to_label: 'Gross margin',
+        quote: 'Each £1 rise in Prices increases Gross margin by 3%.', question: 'Is that three points or 3% relative?' },
+      { from_id: 'daily_visits', to_id: 'margin', from_label: 'Daily visits', to_label: 'Gross margin',
+        quote: 'Each 1% increase in Daily visits lifts Gross margin by 2%.', question: 'Is that two points or 2% relative?' },
+      { ...base.action },
+    ].map((action, i) => {
+      const id = randomUUID();
+      return { ...structuredClone(base), id, chip_id: `agent-link-effect-clarification:${id}`,
+        action: { ...base.action, ...action, source_text: action.quote },
+        emitted_at_iso: new Date(Date.now() - (3 - i) * 60_000).toISOString() };
+    });
+    pending.set(SID, [...holds, ...effects]);
+    const latest = ['at least 3 points', 'at least 2 points']
+      .map(words => `Earlier you said ‘${words}’; Olumi now uses your latest figures.`);
+    replySeam.result = { assistant_text: 'The model keeps your open statement. The team can review the remaining assumptions together and compare them with evidence before relying on this model.',
+      items: [], tool_calls: [{ name: 'propose_link_effect', ok: true, mutated: false }],
+      tool_results: [{ ok: true, mutated: false, link_effect_clarifications: [effects[2]!.action],
+        link_effect_latest_figure_disclosures: latest }], mutated: false, hops: 1, stopped_reason: 'answered', timing: {} };
+    const body = await turn('Keep the remaining effect question visible.');
+    expect(body._answer_shape).toBeDefined();
+    const shape = body._answer_shape;
+    const face = [shape.headline, ...shape.bullets].join('\n');
+    expect(shape.bullets).toHaveLength(3);
+    expect(face).toContain(CAFE_QUESTION);
+    for (const effect of effects.slice(0, 2)) {
+      const lapse = `I've set aside your earlier statement about how ‘${effect.action.from_label}’ affects ‘${effect.action.to_label}’; say it again whenever you want it in the model.`;
+      expect(face).toContain(lapse);
+      expect(body.assistant_text.split(lapse)).toHaveLength(2);
+    }
+    for (const line of latest) {
+      expect(shape.detail).toContain(line);
+      expect(body.assistant_text.split(line)).toHaveLength(2);
+    }
+    expect(replyShapeLogs.at(-1)).toMatchObject({ outcome: 'shaped', face_over_cap: false });
+    expect(deriveAnswerTextFromShape(shape)).toBe(body.assistant_text);
+    expect(answerWrite().assistantMessage).toBe(body.assistant_text);
+    expect(clarifications().map(p => p.action.quote)).toEqual([CAFE_QUOTE]);
+    expect(doorCalls).toEqual([]);
+  });
+
+  it('COPY-SHAPE: the same reply carries the Run floor warning, effect ask, two held lapses and two latest-figures receipts', async () => {
+    const floor = await resolvedFloor();
+    const values = [['stock', 'Stock', 'items'], ['staff_hours', 'Staff hours', 'hours per week']] as const;
+    for (const [id, label, unit] of values) {
+      graph.nodes.push({ id, label, kind: 'factor', category: 'observable', observed_state: {
+        raw_value: 100, value: 0.1, cap: 1000, unit, source: 'brief_extraction' } });
+    }
+    for (const [_id, label, unit] of values) {
+      script.push(calls(['propose_assumptions', { assumptions: [{ factor_label: label, value: 101, unit,
+        basis: 'The figure the user supplied.', revise: true }] }]), message('Please review this value.'));
+      await turn(`Set ${label} to 101 ${unit}.`);
+    }
+    const holds = (pending.get(SID) ?? []).filter((p: any) => p.action?.inline_patch?.agent_proposal !== undefined) as Json[];
+    expect(holds).toHaveLength(2);
+    for (const hold of holds) hold.expires_at_iso = new Date(Date.now() - 1000).toISOString();
+    pending.set(SID, [...holds, floor]);
+    const edge = effectEdge();
+    edge.strength.mean = 0.25;
+    edge.provenance.natural_effect.amount = 0.5;
+    edge.provenance.natural_effect.per_source_change = 1;
+    edge.provenance.natural_effect.strength_mean = edge.strength.mean;
+    const before = structuredClone(graph);
+    const latest = ['at least 3 points', 'at least 2 points']
+      .map(words => `Earlier you said ‘${words}’; Olumi now uses your latest figures.`);
+    replySeam.run = true;
+    replySeam.result = { assistant_text: 'The Run keeps the open assumption visible. The team can review the remaining assumptions together and compare them with evidence before relying on this model.',
+      items: [], tool_calls: [{ name: 'propose_link_effect', ok: true, mutated: false }],
+      tool_results: [{ ok: true, mutated: false, link_effect_clarifications: [floor.action],
+        link_effect_latest_figure_disclosures: latest }], mutated: false, hops: 1, stopped_reason: 'answered', timing: {} };
+    const body = await turn('Run the analysis with the latest figures.');
+    expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'run_analysis', ok: true }));
+    expect(body._answer_shape).toBeDefined();
+    const shape = body._answer_shape;
+    const face = [shape.headline, ...shape.bullets].join('\n');
+    const disclosure = "Olumi's current figure for how much ‘Pro plan price’ affects ‘Monthly churn’ is below your ‘at least 1 point’, so this Run likely understates churn and may flatter the price rise.";
+    expect(face).toContain(disclosure);
+    expect(face).toContain(SCIENCE_ASK);
+    const { heldChangeName } = await import('../proposal-object/record.js');
+    const { heldLapseSentence } = await import('../proposal-object/reply.js');
+    for (const hold of holds) {
+      const lapse = heldLapseSentence(heldChangeName(hold), 'idle');
+      expect(body.assistant_text.split(lapse)).toHaveLength(2);
+    }
+    for (const line of latest) {
+      expect(shape.detail).toContain(line);
+      expect(body.assistant_text.split(line)).toHaveLength(2);
+    }
+    expect(replyShapeLogs.at(-1)).toMatchObject({ outcome: 'shaped', face_over_cap: false });
+    expect(deriveAnswerTextFromShape(shape)).toBe(body.assistant_text);
+    expect(answerWrite().assistantMessage).toBe(body.assistant_text);
+    expect(graph).toEqual(before);
+    expect(doorCalls).toEqual([]);
   });
 
   const run = async (): Promise<Json> => {

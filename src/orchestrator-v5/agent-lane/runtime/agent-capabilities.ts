@@ -57,9 +57,9 @@ import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRe
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
-import { liveLinkEffectClarifications, linkEffectClarificationForReply, linkEffectBestGuessQuestion, linkEffectResolvedReading, type LinkEffectClarificationAction, type LinkEffectClarificationPending } from '../link-effect-clarification.js';
+import { liveLinkEffectClarifications, linkEffectClarificationLineage, linkEffectClarificationForReply, linkEffectBestGuessQuestion, linkEffectResolvedReading, type LinkEffectClarificationAction, type LinkEffectClarificationPending } from '../link-effect-clarification.js';
 import { linkEffectFloorFromStatement, linkEffectLatestFiguresDisclosure, type LinkEffectFloor } from '../link-effect-lower-bound.js';
-import { boundedLinkEffectText, findLinkEffectAmounts } from '../link-effect-figures.js';
+import { boundedLinkEffectText, findLinkEffectAmounts, findLinkEffectBounds } from '../link-effect-figures.js';
 
 /**
  * The durable operation identity for authorising a proposal.
@@ -3371,16 +3371,22 @@ export function createAgentCapabilities(
     }
   };
 
-  const effectReply = async (ctx: AgentToolContext, g: GraphRead, from: string, to: string, text: string) => {
+  const effectReply = async (ctx: AgentToolContext, g: GraphRead, from: string, to: string, text: string, quote: string) => {
     const asks = liveLinkEffectClarifications(await opts.readPendingActions?.(ctx.scenario_id) ?? [], ctx.scenario_id, g.raw);
+    const pair = asks.find(ask => ask.action.from_id === from && ask.action.to_id === to);
+    // A fully named current statement selects its own link's context, regardless of other open questions.
+    // Short replies still need the existing unambiguous reply gate.
+    if (pair !== undefined && quoteSpansIn(text, quote).length > 0 && linkEffectStatementNamesEndpoints(quote,
+      { source: pair.action.from_label, target: pair.action.to_label })) return pair;
     const ask = linkEffectClarificationForReply({ ok: true, entities: g.nodes,
       links: g.edges.map(edge => ({ ...edge, sizing: linkSizing(edge) })) }, asks, text);
     return ask !== null && ask.action.from_id === from && ask.action.to_id === to ? ask : null;
   };
   const effectClarification = (from: { id: string; label: string }, to: { id: string; label: string }, quote: string,
     question: string, refusal: string, floor?: LinkEffectFloor, sourceText = quote,
-    reading?: 'points' | 'relative'): LinkEffectClarificationAction => ({ kind: 'elicit_link_effect_clarification',
+    reading?: 'points' | 'relative', lineage?: string): LinkEffectClarificationAction => ({ kind: 'elicit_link_effect_clarification',
     source_text: sourceText,
+    ...(lineage === undefined ? {} : { lineage_id: lineage }),
     from_id: from.id, to_id: to.id, from_label: from.label, to_label: to.label, quote, question, refusal,
     ...(boundedLinkEffectText(quote) !== undefined ? { value_text: boundedLinkEffectText(quote) } : {}),
     ...(floor === undefined ? {} : { floor }), ...(reading === undefined ? {} : { resolved_reading: reading }) });
@@ -3391,10 +3397,15 @@ export function createAgentCapabilities(
       || reply.action.resolved_reading === undefined && !reply.action.question.includes('best single guess'));
   const currentAnswerReading = (reply: LinkEffectClarificationPending | null, from: string, to: string,
     quote: string, text: string, lower: unknown, upper: unknown, fromLabel: string, toLabel: string): LinkEffectClarificationReading | undefined => {
-    if (reply === null || quoteSpansIn(text, quote).length === 0 || readingOnlyReply(reply, text)) return undefined;
+    if (quoteSpansIn(text, quote).length === 0 || reply !== null && readingOnlyReply(reply, text)) return undefined;
+    if (reply === null) {
+      const bounds = findLinkEffectBounds(quote);
+      if (bounds.length !== 2 || bounds[0]!.direction !== 'lower' || bounds[1]!.direction !== 'upper'
+        || !linkEffectStatementNamesEndpoints(quote, { source: fromLabel, target: toLabel })) return undefined;
+    }
     return { current_turn: true, node_id: to, from_id: from, to_id: to, from_label: fromLabel, to_label: toLabel, quote, answer: quote,
       source_text: quote, statement_classification: 'asserted',
-      ...(reply.action.resolved_reading === undefined ? {} : { reading: reply.action.resolved_reading }),
+      ...(reply?.action.resolved_reading === undefined ? {} : { reading: reply.action.resolved_reading }),
       ...(typeof lower === 'number' ? { lower } : {}),
       ...(typeof upper === 'number' ? { upper } : {}) };
   };
@@ -3661,6 +3672,8 @@ export function createAgentCapabilities(
           quote: string; edge_token: string; clarification?: LinkEffectClarificationReading; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; mediator_readings?: readonly LinkEffectMediatorReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string; question?: string }[] = [];
         const clarifications: LinkEffectClarificationAction[] = [];
+        const clarificationSources = new Map<string, LinkEffectClarificationPending>();
+        const resolvedClarificationLineages = new Set<string>();
         const latestFiguresDisclosures: string[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
@@ -3678,7 +3691,9 @@ export function createAgentCapabilities(
               question ??= guessQuestion(refusalEnds!.from, refusalEnds!.to, contextQuote);
               detail = preserveReason ? `${detail} Then ask: "${question}"` : linkEffectUnitAskWords(question, refusalEnds!.from, refusalEnds!.to);
               clarifications.push(effectClarification(refusalEnds!.from, refusalEnds!.to, contextQuote, question, refusal,
-                floor, reply?.action.source_text ?? refusalSourceText, linkEffectResolvedReading(text) ?? reply?.action.resolved_reading));
+                floor, reply?.action.source_text ?? refusalSourceText, linkEffectResolvedReading(text) ?? reply?.action.resolved_reading,
+                reply === null ? undefined : linkEffectClarificationLineage(reply)));
+              if (reply !== null) clarificationSources.set(linkEffectClarificationLineage(reply), reply);
             }
             notPrepared.push({ from_label: fromLabel, to_label: toLabel, refusal, detail, ...(question === undefined ? {} : { question }) });
           };
@@ -3702,7 +3717,7 @@ export function createAgentCapabilities(
             continue;
           }
           refusalEnds = { from, to };
-          reply = await effectReply(ctx, g, from.id, to.id, text);
+          reply = await effectReply(ctx, g, from.id, to.id, text, entryQuote);
           if (!Number.isFinite(entryAmount) || !Number.isFinite(entryPer) || entryPer === 0 || entryAmountUnit === '' || entryPerUnit === '') {
             fail('unreadable_effect', 'Nothing was prepared: this effect needs the change in the target and the change in the source it is per, each with its unit.');
             continue;
@@ -3742,7 +3757,7 @@ export function createAgentCapabilities(
           if (classification !== 'asserted') { fail('not_the_users_statement', '', guessQuestion(from, to, reply?.action.quote ?? entryQuote)); continue; }
           if (answerReading !== undefined && !currentAnswer) {
             const answer = readLinkEffectCurrentAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope);
-            fail(answer.ok ? 'not_the_users_figure' : answer.refusal, '', guessQuestion(from, to, reply!.action.quote));
+            fail(answer.ok ? 'not_the_users_figure' : answer.refusal, '', guessQuestion(from, to, reply?.action.quote ?? entryQuote));
             continue;
           }
           const bound = boundedLinkEffectText(entryQuote);
@@ -3811,6 +3826,7 @@ export function createAgentCapabilities(
           const latestFiguresDisclosure = linkEffectLatestFiguresDisclosure(reply?.action.floor,
             readLinkEffectCurrentAnswer(answerReading, stated, entryQuote, { source: from.label, target: to.label }, statedScope), stated);
           if (latestFiguresDisclosure !== undefined) latestFiguresDisclosures.push(latestFiguresDisclosure);
+          if (reply !== null) resolvedClarificationLineages.add(linkEffectClarificationLineage(reply));
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
             ...unitReadings, ...labelReadings, ...clarification, ...(mediated.length > 0 ? { mediator_readings: mediated } : {}), ...consent,
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
@@ -3821,7 +3837,8 @@ export function createAgentCapabilities(
           return first === undefined
             ? { ok: false, mutated: false, refusal: 'unreadable_effect', detail: 'Nothing was prepared: no link carried a readable effect.' }
             : { ok: false, mutated: false, refusal: first.refusal, detail: first.detail, ...(first.question !== undefined ? { question: first.question } : {}), not_prepared: notPrepared,
-              ...(clarifications.length > 0 ? { link_effect_clarifications: clarifications } : {}) };
+              ...(clarifications.length > 0 ? { link_effect_clarifications: clarifications } : {}),
+              ...(clarificationSources.size > 0 ? { link_effect_clarification_sources: [...clarificationSources.values()] } : {}) };
         }
         const operations = prepared.map((item) => ({ op: 'set_link_effect' as const, path: `${item.from}::${item.to}`,
           value: { from: item.from, to: item.to, effect: item.effect, quote: item.said, edge_token: item.edge_token,
@@ -3836,8 +3853,10 @@ export function createAgentCapabilities(
         proposals.put(proposal);
         return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
           resolved_link_effects: prepared.map(item => ({ from_id: item.from, to_id: item.to })),
+          resolved_link_effect_lineages: [...resolvedClarificationLineages],
           ...(latestFiguresDisclosures.length > 0 ? { link_effect_latest_figure_disclosures: latestFiguresDisclosures } : {}),
           ...(clarifications.length > 0 ? { link_effect_clarifications: clarifications } : {}),
+          ...(clarificationSources.size > 0 ? { link_effect_clarification_sources: [...clarificationSources.values()] } : {}),
           links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said })),
           ...(notPrepared.length > 0 ? { not_prepared: notPrepared } : {}),
           note: 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
@@ -3866,7 +3885,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'unresolved_entity',
           detail: `No entity is labelled "${from === undefined ? args.from_label : args.to_label}". Read the state again and use a label exactly as it appears.` };
       }
-      const reply = await effectReply(ctx, g, from.id, to.id, text);
+      const reply = await effectReply(ctx, g, from.id, to.id, text, quote);
       const refusalWithAsk = (refusal: string, question: string, why?: string, floor = reply?.action.floor, reasonDetail?: string): ToolResult => {
         const contextQuote = reply?.action.quote ?? (quoteSpansIn(text, quote).length > 0 && linkEffectStatementNamesEndpoints(quote, { source: from.label, target: to.label }) ? quote : text);
         const canCarry = reply !== null || quoteSpansIn(text, contextQuote).length > 0
@@ -3874,7 +3893,9 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal, question, ...(why === undefined ? {} : { why }),
           detail: reasonDetail === undefined ? linkEffectUnitAskWords(question, from, to) : `${reasonDetail} Then ask: "${question}"`,
           ...(canCarry ? { link_effect_clarifications: [effectClarification(from, to, contextQuote, question, refusal, floor,
-            reply?.action.source_text ?? text, linkEffectResolvedReading(text) ?? reply?.action.resolved_reading)] } : {}) };
+            reply?.action.source_text ?? text, linkEffectResolvedReading(text) ?? reply?.action.resolved_reading,
+            reply === null ? undefined : linkEffectClarificationLineage(reply))] } : {}),
+          ...(canCarry && reply !== null ? { link_effect_clarification_sources: [reply] } : {}) };
       };
       if (!Number.isFinite(amount) || !Number.isFinite(per) || per === 0 || amountUnit === '' || perUnit === '') {
         return refusalWithAsk('unreadable_effect', guessQuestion(from, to, reply?.action.quote ?? text));
@@ -3913,7 +3934,7 @@ export function createAgentCapabilities(
       if (answerReading !== undefined && !currentAnswer) {
         const answer = readLinkEffectCurrentAnswer(answerReading, statedEffect, quote, statedEnds, statedScope);
         return refusalWithAsk(answer.ok ? 'not_the_users_figure' : answer.refusal,
-          guessQuestion(from, to, reply!.action.quote));
+          guessQuestion(from, to, reply?.action.quote ?? quote));
       }
       const bound = boundedLinkEffectText(quote);
       if (bound !== undefined && !currentAnswer) {
@@ -3992,6 +4013,7 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said },
         resolved_link_effects: [{ from_id: from.id, to_id: to.id }],
+        resolved_link_effect_lineages: reply === null ? [] : [linkEffectClarificationLineage(reply)],
         ...(latestFiguresDisclosure === undefined ? {} : { link_effect_latest_figure_disclosures: [latestFiguresDisclosure] }),
         note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',

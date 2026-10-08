@@ -1,4 +1,4 @@
-import { LINK_EFFECT_TOOL, reviseLinkEffectClarification, linkEffectAnswerFirstCall, linkEffectClarificationOnRefusal, linkEffectClarificationsForAnswerRow, liveLinkEffectClarifications, type LinkEffectClarificationPending, type LinkEffectClarificationAction } from '../orchestrator-v5/agent-lane/link-effect-clarification.js';
+import { LINK_EFFECT_TOOL, reviseLinkEffectClarification, linkEffectAnswerFirstCall, linkEffectClarificationLineage, linkEffectClarificationOnRefusal, linkEffectClarificationsForAnswerRow, liveLinkEffectClarifications, type LinkEffectClarificationPending, type LinkEffectClarificationAction } from '../orchestrator-v5/agent-lane/link-effect-clarification.js';
 import { linkEffectFloorDisclosures } from '../orchestrator-v5/agent-lane/link-effect-lower-bound.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -3938,26 +3938,45 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredProposal = offeredApprove !== undefined ? proposals.get(typedApprovalOf({ chip: { id: offeredApprove.id } }) as string) : undefined;
     const emittedAtIso = new Date().toISOString();
     const effectNext: LinkEffectClarificationPending[] = [];
-    const effectConsumed: { from_id: string; to_id: string }[] = [];
+    const effectSources: LinkEffectClarificationPending[] = [];
+    const effectObservedLineages: string[] = [];
+    const effectConsumedLineages: string[] = [];
     const effectLatestFigureLines: string[] = [];
     for (let i = 0; i < result.tool_calls.length; i++) {
       if (result.tool_calls[i]?.name !== LINK_EFFECT_TOOL) continue;
       const toolResult = result.tool_results[i] as { link_effect_clarifications?: LinkEffectClarificationAction[];
-        resolved_link_effects?: { from_id: string; to_id: string }[]; link_effect_latest_figure_disclosures?: string[] } | undefined;
+        link_effect_clarification_sources?: LinkEffectClarificationPending[];
+        resolved_link_effects?: { from_id: string; to_id: string }[]; resolved_link_effect_lineages?: string[];
+        link_effect_latest_figure_disclosures?: string[] } | undefined;
+      for (const source of toolResult?.link_effect_clarification_sources ?? []) {
+        const pending = parsePendingAction(source);
+        if (pending?.scenario_id === scenarioId && pending.action.kind === 'elicit_link_effect_clarification') {
+          effectSources.push(pending as LinkEffectClarificationPending);
+        }
+      }
       for (const action of toolResult?.link_effect_clarifications ?? []) {
-        const fresh = linkEffectClarificationOnRefusal({ action, message: [message, ...effectAsks.map(p => p.action.quote)].join('\n'),
+        if (action.lineage_id !== undefined) effectObservedLineages.push(action.lineage_id);
+        const fresh = linkEffectClarificationOnRefusal({ action,
+          message: [message, ...effectAsks.map(p => p.action.quote), ...effectSources.map(p => p.action.quote)].join('\n'),
           scenarioId, graph: readbackGraph, emittedAtIso });
         if (fresh !== null) {
-          const previous = effectAsks.find(p => p.action.from_id === action.from_id && p.action.to_id === action.to_id
-            && p.action.quote === action.quote);
+          const previous = [...effectSources, ...effectAsks].filter(p => p.action.from_id === action.from_id
+            && p.action.to_id === action.to_id && p.action.quote === action.quote
+            && (action.lineage_id === undefined || linkEffectClarificationLineage(p) === action.lineage_id))
+            .sort((a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso))[0];
           effectNext.push(previous === undefined ? fresh : reviseLinkEffectClarification(previous, fresh.action, emittedAtIso));
         }
       }
-      effectConsumed.push(...toolResult?.resolved_link_effects ?? []);
+      // The capability names the exact ask it read, which may be newer than this request's start snapshot.
+      // Legacy tool-result fixtures can settle only the snapshot asks, never newly armed questions.
+      effectConsumedLineages.push(...(toolResult?.resolved_link_effect_lineages ?? effectAsks
+        .filter(ask => toolResult?.resolved_link_effects?.some(link => link.from_id === ask.action.from_id && link.to_id === ask.action.to_id))
+        .map(linkEffectClarificationLineage)));
       if (result.tool_calls[i]?.ok) effectLatestFigureLines.push(...toolResult?.link_effect_latest_figure_disclosures ?? []);
     }
-    let carriedEffects = mode === 'full' ? linkEffectClarificationsForAnswerRow({ prior: effectAsks, next: effectNext,
-      consumedLinks: effectConsumed, graph: readbackGraph, graphHash, nowMs: Date.parse(emittedAtIso), typedByUser: typedByUser(body) }) : [];
+    const consumedEffectLineages = [...new Set(effectConsumedLineages)];
+    let carriedEffects = mode === 'full' ? linkEffectClarificationsForAnswerRow({ prior: [...effectAsks, ...effectSources], next: effectNext,
+      consumedLineages: consumedEffectLineages, graph: readbackGraph, graphHash, nowMs: Date.parse(emittedAtIso), typedByUser: typedByUser(body) }) : [];
     const effectLapseLines: string[] = [];
     // AIQ: words pending
     const effectLapseSentence = (action: LinkEffectClarificationAction): string => `I've set aside your earlier statement about how ‘${action.from_label}’ affects ‘${action.to_label}’; say it again whenever you want it in the model.`;
@@ -4534,7 +4553,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (effectLapseLines.length > 0) {
       wireBody = { ...wireBody, assistant_text: withB3LinesAtRest(String(wireBody.assistant_text ?? ''), effectLapseLines) };
     }
-    const effectFloorLines = [...(ranAnalysisThisTurn ? linkEffectFloorDisclosures(readbackGraph, carriedEffects) : []),
+    // A requested or failed Run, even beside an earlier readback result, has no new analysis to qualify.
+    const completedAnalysisThisTurn = lastRun?.status === 200
+      && lastRun.blocks?.some(block => (block as { type?: unknown } | null)?.type === 'analysis_result') === true;
+    const effectRunFloorLines = completedAnalysisThisTurn ? linkEffectFloorDisclosures(readbackGraph, carriedEffects) : [];
+    const effectFloorLines = [...effectRunFloorLines,
       ...new Set(effectLatestFigureLines)];
     if (effectFloorLines.length > 0) {
       wireBody = { ...wireBody, assistant_text: withB3LinesAtRest(String(wireBody.assistant_text ?? ''), effectFloorLines) };
@@ -4572,7 +4595,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? coHold?.subjects : undefined;
       const obligations: FaceObligation[] = [
         ...effectLapseLines.map((text) => ({ role: 'caveat' as const, text })),
-        ...effectFloorLines.map((text) => ({ role: 'caveat' as const, text })),
+        ...effectRunFloorLines.map((text) => ({ role: 'caveat' as const, text })),
+        ...effectLatestFigureLines.map((text) => ({ role: 'host' as const, text })),
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
         ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
         ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
@@ -4720,7 +4744,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
           // ⭐ S-D: held proposals are reconciled again against the latest row just before the append: one another request
           // declined meanwhile is never resurrected, and one another request minted meanwhile is never erased.
-          heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set([...heldSeenThisTurn, ...effectAsks.map(p => p.chip_id)]),
+          heldProposals: { isHeld: isHeldProposal, seenByThisRequest: new Set([...heldSeenThisTurn,
+            ...effectAsks.map(linkEffectClarificationLineage), ...effectSources.map(linkEffectClarificationLineage),
+            ...effectObservedLineages, ...consumedEffectLineages]),
             offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
             onReconciled: (write, overCap, overCapClarifications) => {
               heldRecords = (write.pending_actions ?? []).flatMap(p => {

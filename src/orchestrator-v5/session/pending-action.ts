@@ -277,6 +277,8 @@ export type PendingActionAction =
   | {
       /** A refused statement and its open question. Context only; its quote never licenses a size. */
       readonly kind: 'elicit_link_effect_clarification';
+      /** Stable identity of the first ask, preserved when its question or reading changes. Absent on legacy rows. */
+      readonly lineage_id?: string;
       /** Legacy metadata is retained as context, never as figure authority. */
       readonly statement_classification?: 'asserted';
       readonly source_text?: string;
@@ -1574,6 +1576,7 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (!bounded(a.from_id, 200) || !bounded(a.to_id, 200)
       || !bounded(a.from_label, 500) || !bounded(a.to_label, 500)
       || !bounded(a.quote, 8000) || !bounded(a.question, 2000) || !bounded(a.refusal, 100)) return null;
+    if (a.lineage_id !== undefined && !bounded(a.lineage_id, 200)) return null;
     if (a.statement_classification !== undefined && a.statement_classification !== 'asserted') return null;
     if (a.source_text !== undefined && !bounded(a.source_text, 8000)) return null;
     if (a.value_text !== undefined && !bounded(a.value_text, 2000)) return null;

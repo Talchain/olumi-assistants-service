@@ -108,7 +108,7 @@
  *   narrower claim than one storage generation.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { liveLinkEffectClarifications } from './agent-lane/link-effect-clarification.js';
+import { linkEffectClarificationLineage, liveLinkEffectClarifications, type LinkEffectClarificationPending } from './agent-lane/link-effect-clarification.js';
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
@@ -119,6 +119,7 @@ import {
 } from './persisted-graph-invariants.js';
 import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
 import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
+import { isAgentAnswerRow } from './session/conversation-as-seen.js';
 
 export interface CheckedGraphAppendParams {
   /** The write, already projected and hashed by the caller. */
@@ -174,8 +175,8 @@ export interface CheckedGraphAppendParams {
   readonly withdrawnGoalScopeChipIds?: readonly string[];
   /**
    * Clarifications this ordinary/inner turn saw before dispatch. Unlike its own newly minted asks, these carriers
-   * may survive only while the latest row still carries that revision. Inner Run commits take this reconciliation
-   * and the same latest-row check as the outer answer without opting into held-card lifecycle handling.
+   * are lineage ids and may survive only while the latest row still carries that lineage. Inner Run commits reconcile
+   * against that row without entering the conditional RPC, whose authority is limited to final non-graph Agent answers.
    */
   readonly clarificationSeenByThisRequest?: ReadonlySet<string>;
   /**
@@ -185,7 +186,7 @@ export interface CheckedGraphAppendParams {
    * (a supplied held item is kept only while the latest row still holds it) nor erase one another request minted
    * meanwhile (a held item on the latest row that this request never saw is carried). The same arrival obligation
    * applies to live link-effect clarifications. `seenByThisRequest`: every held item and clarification this request
-   * handled, so the ones it settled itself (approved, declined, resolved, lapsed: each said) are never re-added.
+   * handled (held chip ids; clarification lineage ids), so the ones it settled itself are never re-added.
    * S-D.1b compares the identity of this read inside the conditional append RPC,
    * then rereads and repeats this reconciliation on contention (three attempts).
    */
@@ -369,6 +370,13 @@ export async function appendCheckedGraphWrite(
 ): Promise<SessionAppendOutcome> {
   const { store, writesGraph, source } = params;
   const reconcileClarifications = params.heldProposals !== undefined || params.clarificationSeenByThisRequest !== undefined;
+  // The production conditional RPC has no graph, handler, fence or version authority. A latest-row reconciliation
+  // must not select that RPC for an inner Run/draft/edit commit just because its clarification seen-set is present.
+  const requestWrite = params.write;
+  const canConditionallyAppend = reconcileClarifications && !writesGraph && requestWrite.graph == null
+    && requestWrite.modelVersion === undefined && requestWrite.briefText == null && requestWrite.coaching_state == null
+    && requestWrite.turn_class === 'direct_answer' && requestWrite.handler_id === null && requestWrite.response_emitted
+    && !requestWrite.turn_id.endsWith(':claim') && isAgentAnswerRow(requestWrite);
   for (let attempt = 0; ; attempt += 1) {
     // Always reconcile the ORIGINAL request against each fresh row. Reusing the
     // previous attempt would retain obsolete scope issues or permanently drop holds.
@@ -378,7 +386,7 @@ export async function appendCheckedGraphWrite(
     // Only this sidecar is extended here; graph bytes and both hashes remain exactly as prepared.
     if (typeof store.readMostRecentPendingActions === 'function') {
       const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict',
-        ...(reconcileClarifications ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
+        ...(canConditionallyAppend ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
       if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
       let supplied = write.pending_actions ?? [];
       // Per attempt: what did not fit is said from THIS read's reconciliation only (S-D slice 2 x S-D.1b).
@@ -408,11 +416,13 @@ export async function appendCheckedGraphWrite(
       if (reconcileClarifications) {
         const isHeld = params.heldProposals?.isHeld ?? (() => false);
         const seenByThisRequest = params.heldProposals?.seenByThisRequest ?? params.clarificationSeenByThisRequest!;
+        const identity = (p: PendingAction): string => p.action.kind === 'elicit_link_effect_clarification'
+          ? linkEffectClarificationLineage(p as LinkEffectClarificationPending) : p.chip_id;
         const onLatest = new Set(prior.filter(p => isHeld(p) || p.action.kind === 'elicit_link_effect_clarification')
-          .map(p => p.chip_id));
+          .map(identity));
         // Seen questions obey the same consumption check as held cards on EVERY fresh read, including a CAS retry.
         let kept = supplied.filter(n => (!isHeld(n) && n.action.kind !== 'elicit_link_effect_clarification')
-          || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
+          || onLatest.has(identity(n)) || !seenByThisRequest.has(identity(n)));
         const graph = writesGraph ? write.graph : params.baseGraphForInvariants;
         const shapedGraph = graph !== null && typeof graph === 'object' && !Array.isArray(graph)
           && Array.isArray((graph as { nodes?: unknown }).nodes) && Array.isArray((graph as { edges?: unknown }).edges);
@@ -425,7 +435,9 @@ export async function appendCheckedGraphWrite(
         const sameClarificationSource = (a: PendingAction, b: PendingAction): boolean =>
           sameClarificationLink(a, b) && a.action.kind === 'elicit_link_effect_clarification'
           && b.action.kind === 'elicit_link_effect_clarification' && a.action.quote === b.action.quote;
-        const arrivingClarifications = liveClarifications.filter(p => !seenByThisRequest.has(p.chip_id)
+        const arrivingClarifications = liveClarifications.filter(p => (!seenByThisRequest.has(identity(p))
+          // A newer durable revision of a carried lineage still wins; consuming that lineage supplies no carrier.
+          || kept.some(n => n.action.kind === 'elicit_link_effect_clarification' && identity(n) === identity(p)))
           && !kept.some(n => n.chip_id === p.chip_id)
           // A consumed newer question must not license an older arrival either; compare BEFORE presence pruning too.
           && ![...supplied, ...liveClarifications].some(n => sameClarificationLink(n, p)

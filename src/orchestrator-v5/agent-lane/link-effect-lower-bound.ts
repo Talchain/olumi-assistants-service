@@ -58,8 +58,10 @@ export function linkEffectLatestFiguresDisclosure(floor: LinkEffectFloor | undef
     : unitComparisonKey(effect.amount_unit) === unitComparisonKey(floor.unit);
   if (!sameUnit || unitComparisonKey(effect.per_source_change_unit) !== unitComparisonKey(floor.per_source_change_unit)) return undefined;
   const basis = floor.per_source_change / effect.per_source_change;
+  const belowFloor = (value: number): boolean => value * basis < floor.value
+    || floor.exclusive === true && value * basis === floor.value;
   if (!Number.isFinite(basis) || basis <= 0
-    || !(answer.guess * basis < floor.value || answer.lower !== undefined && answer.lower * basis < floor.value)) return undefined;
+    || !(belowFloor(answer.guess) || answer.lower !== undefined && belowFloor(answer.lower))) return undefined;
   return LINK_EFFECT_LATEST_FIGURES_DISCLOSURE.replace("<user's floor words>", () => floor.words);
 }
 

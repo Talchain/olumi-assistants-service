@@ -60,20 +60,20 @@ const run = (store: ReturnType<typeof concurrentStore>['store'], prior: readonly
 afterEach(() => vi.restoreAllMocks());
 
 describe('RC2a r3 P1: inner Run commits reconcile live clarifications at the persistence floor', () => {
-  it.each([false, true])('RED reviewer row: slow Run snapshots A; card preparation consumes A without graph CAS movement (after floor read: %s)', async retry => {
-    const s = concurrentStore(retry ? [question] : [], retry ? [[]] : []);
+  it('RED reviewer row: slow Run snapshots A; card preparation consumes A before the final pending read without graph CAS movement', async () => {
+    const s = concurrentStore([]);
     await run(s.store, [question]);
     expect(s.written).toHaveLength(1);
     expect(s.written[0]?.expectedGraphIdentityHash).toBe(GRAPH_HASH);
     expect(s.written[0]?.expectedGraphAnalysisHash).toBe(GRAPH_HASH);
     expect(s.written[0]?.pending_actions, 'inner Run cannot restore the ask that the other request consumed').toEqual([]);
-    expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(retry ? ['row-0', 'row-1'] : ['row-0']);
+    expect(s.calls.map(c => c.options?.expectedLatestRowId), 'handler rows use the existing ordinary production append').toEqual([undefined]);
     expect(s.written[0]?.assistantMessage).toBeUndefined();
 
     const innerWriteCount = s.written.length;
     await appendCheckedGraphWrite({ store: s.store, writesGraph: false,
       write: { scenario_id: SCENARIO, turn_id: 'outer-answer', turn_class: 'direct_answer', handler_id: null,
-        request_hash: 'sha256:outer-answer', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
+        request_hash: 'agent_turn:outer-answer', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
         handler_facts: [], pending_actions: [question] },
       heldProposals: { isHeld: () => false, seenByThisRequest: new Set([question.chip_id]) } });
     expect(s.written[innerWriteCount]?.pending_actions, 'the outer answer cannot inherit a resurrected inner carrier').toEqual([]);
@@ -100,7 +100,7 @@ describe('RC2a r3 P1: inner Run commits reconcile live clarifications at the per
     const s = concurrentStore(retry ? [question] : [fast], retry ? [[fast]] : []);
     await appendCheckedGraphWrite({ store: s.store, writesGraph: false,
       write: { scenario_id: SCENARIO, turn_id: 'slow-answer', turn_class: 'direct_answer', handler_id: null,
-        request_hash: 'sha256:slow-answer', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
+        request_hash: 'agent_turn:slow-answer', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
         handler_facts: [], pending_actions: [question] },
       heldProposals: { isHeld: () => false, seenByThisRequest: new Set([question.chip_id]) } });
     expect(s.written[0]?.pending_actions).toEqual([fast]);
@@ -141,7 +141,7 @@ describe('RC2a r3 P1: inner Run commits reconcile live clarifications at the per
     const s = concurrentStore(retry ? [question] : [fast], retry ? [[fast]] : []);
     await appendCheckedGraphWrite({ store: s.store, writesGraph: false,
       write: { scenario_id: SCENARIO, turn_id: 'slow-sibling-answer', turn_class: 'direct_answer', handler_id: null,
-        request_hash: 'sha256:slow-sibling-answer', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
+        request_hash: 'agent_turn:slow-sibling-answer', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
         handler_facts: [], pending_actions: [slow] },
       heldProposals: { isHeld: () => false, seenByThisRequest: new Set([question.chip_id]) } });
     expect(s.written[0]?.pending_actions, 'the canonical durable reading cannot be overwritten by an equal-time sibling').toEqual([fast]);

@@ -113,11 +113,14 @@ export interface LinkEffectBound {
 }
 
 // One vocabulary for every link-size reader. Prefix and suffix forms remain attached to their particular amount.
-const LOWER_BOUND_WORDS = 'at least|no less than|no fewer than|at minimum|(?:a |the )?minimum(?: of)?|upwards? of|more than|over|above';
-const UPPER_BOUND_WORDS = 'at most|no more than|no greater than|no higher than|no larger than|at maximum|(?:a |the )?maximum(?: of)?|up to|less than|under|below';
-const BOUND_BEFORE = new RegExp(`\\b(${LOWER_BOUND_WORDS}|${UPPER_BOUND_WORDS})\\s+`
-  + '(?:(?:increase|decrease|rise|fall|change|by|about|around|roughly|approximately|a|an)\\s+)*[+−-]?\\s*$', 'i');
+const LOWER_EXTREME_WORDS = 'lowest(?:\\s+it\\s+could\\s+plausibly\\s+be)?|at\\s+the\\s+low\\s+end';
+const UPPER_EXTREME_WORDS = 'highest(?:\\s+it\\s+could\\s+plausibly\\s+be)?|at\\s+the\\s+high\\s+end';
+const LOWER_BOUND_WORDS = `at least|no less than|no fewer than|at minimum|(?:a |the )?minimum(?: of)?|upwards? of|more than|over|above|${LOWER_EXTREME_WORDS}`;
+const UPPER_BOUND_WORDS = `at most|no more than|no greater than|no higher than|no larger than|at maximum|(?:a |the )?maximum(?: of)?|up to|less than|under|below|${UPPER_EXTREME_WORDS}`;
+const BOUND_BEFORE = new RegExp(`\\b(${LOWER_BOUND_WORDS}|${UPPER_BOUND_WORDS})(?:\\s+|\\s*:\\s*)`
+  + '(?:(?:increase|decrease|rise|fall|change|by|about|around|roughly|approximately|a|an|is)\\s+)*(?::\\s*)?[+−-]?\\s*$', 'i');
 const LOWER_BOUND = new RegExp(`^(?:${LOWER_BOUND_WORDS})$`, 'i');
+const EXTREME = new RegExp(`^(?:${LOWER_EXTREME_WORDS}|${UPPER_EXTREME_WORDS})$`, 'i');
 const STRICT_BOUND = /^(?:more than|over|above|less than|under|below)$/i;
 // Units may be a short count or currency-period phrase; punctuation or a second figure cannot be crossed.
 const BOUND_AFTER = /^\s*(?:[\p{L}]+(?:\/[\p{L}]+)?\s+){0,5}(or\s+(?:more|less|fewer))\b/iu;
@@ -139,7 +142,7 @@ export function findLinkEffectBounds(quote: string, options?: { readonly changes
     const start = prefix?.index ?? amount.index;
     // The amount scanner omits a leading sign; it belongs to this figure, not the words proving it is a change.
     const lead = (before.slice(0, prefix?.index ?? amount.index).split(/[,;.!?\n]/).at(-1) ?? '').replace(/[+−-]\s*$/, '');
-    const changes = prefix !== null && CHANGE_WORDS.test(prefix[0])
+    const changes = prefix !== null && (CHANGE_WORDS.test(prefix[0]) || EXTREME.test(prefix[1]!))
       || /(?:\bby|\bevery|\beach|\bper)\s*$/i.test(lead)
       || CHANGE_WORDS.test(lead.match(/(?:[\p{L}]+\s*){1,3}$/u)?.[0] ?? '')
       || LINK_EFFECT_CHANGE_AFTER.test(after);
