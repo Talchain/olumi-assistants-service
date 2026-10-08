@@ -146,6 +146,7 @@ import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '..
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
+import { methodResultForEgress, testLinkMethodResult, whatChangesMethodResult, type MethodResultV1 } from '../orchestrator-v5/agent-lane/actions/method-result.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
@@ -2081,6 +2082,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // live uninterpreted Run (the ready text and break-even as host parts, the withheld goal chance's sentence as its
       // reason, asks as asks, the root line and basis as evidence), so the bytes and `_answer_shape` come out equal.
       let replayObligations: FaceObligation[] | undefined;
+      /** Accel P24 / SCI-10: remembered typed rows, re-licensed on today's shown Run (below). */
+      let replayMethodResult: MethodResultV1 | null = null;
       const boundControl: OfferedAction[] = [];
       const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
@@ -2110,7 +2113,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // words. The SAME owner as the live turn (`whatWouldChangeAnswer`): this turn's measured answer while its Run is
         // still the bound one, else today's coaching. Never measured again here.
         const remembered = turnId !== undefined ? measuredWhatChanges.get(`${scenarioId}:${turnId}`) ?? null : null;
-        replayText = whatWouldChangeAnswer(scenarioId, state, remembered, prior.assistant_message).text;
+        const answer = whatWouldChangeAnswer(scenarioId, state, remembered, prior.assistant_message);
+        replayText = answer.text;
+        if (answer.measured !== null && turnId !== undefined) {
+          replayMethodResult = whatChangesMethodResult(answer.measured.turn, {
+            scenarioId, turnId, run: null, analysisResult: state.analysisResult,
+          });
+        }
         boundControl.push(TALK_IT_THROUGH_CHIP);
       } else if (approvedProposal === undefined && (pressedChipIsStructural
         || (chiplessRetry && prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)))) {
@@ -2125,6 +2134,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // identical typed answer. Compare only the two deterministic composer outputs, never stored wording.
         replayText = remembered !== undefined && presented.reply === remembered.reply
           ? prior.assistant_message ?? presented.reply : presented.reply;
+        if (remembered !== undefined && presented.reply === remembered.reply && turnId !== undefined) {
+          replayMethodResult = testLinkMethodResult(presented, { scenarioId, turnId });
+        }
         boundControl.push(...presented.actions);
       } else if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
         const runKey = explanationId.slice(RUN_EXPLANATION_PREFIX.length);
@@ -2296,7 +2308,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      return withShapeOnlyIfItDerives(gatedReplay);
+      const finalReplay = withShapeOnlyIfItDerives(gatedReplay);
+      // Accel P24 / SCI-10: the typed rows go on AFTER every replay guard and the shape check (a structured scrub must never
+      // reach them), and only when each row and figure is in the reply those guards left (Codex r1 P2).
+      const replayMethod = methodResultForEgress(replayMethodResult, String(finalReplay.assistant_text ?? ''));
+      return replayMethod !== null ? { ...finalReplay, _method_result: replayMethod } : finalReplay;
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -4719,9 +4735,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
       'PREMORTEM_WORKSHEET_WITHHELD');
     }
+    // ⭐ Accel P24 / SCI-10: the probe's typed rows (`_method_result` v:1), from the turn AS PRESENTED, sent only when every
+    // row and figure is in the final reply (the worksheet's egress rule above). This follows finaliseV5Response, both
+    // leader gates, driver-absence egress, Run-unavailable replacement and reply shaping. Only additive response fields
+    // follow: nothing below rewrites assistant_text or passes the sidecar through a scrub. Absent for every other turn.
+    const methodResult = methodResultForEgress(
+      structuralChallengeTurn !== null && turnId !== undefined ? testLinkMethodResult(structuralChallengeTurn, { scenarioId, turnId })
+        : whatChangesTurn !== null && turnId !== undefined
+          ? whatChangesMethodResult(whatChangesTurn, { scenarioId, turnId, run: null, analysisResult: composedRead.analysisResult })
+          : null,
+      String(wireBody.assistant_text ?? ''));
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),
+      ...(methodResult !== null ? { _method_result: methodResult } : {}),
       /**
        * ⭐ S-B: the action bar (a root key DGAI keeps in `__additive__`, as it does `guidance`), and on an action press its
        * receipt `_action`: which action, on which revision, and whether it ran or answered "can't yet" (contract v1.1 item 5).
