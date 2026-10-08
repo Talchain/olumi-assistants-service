@@ -404,13 +404,13 @@ describe('GUIDED HONESTY round 4: D1 non-converting band uses the same guided li
     expect(draft.total).toBe(2);
     expect(draft.links).toHaveLength(2);
     expect(guidedSizingActions(draft, graph).map(a => a.label).join(' ')).not.toContain('Olumi has it as a band');
-    expect(draft.recovery_line).toContain('I need a size for the effect from Starter tier MRR to monthly recurring revenue.');
+    expect(draft.recovery_line).toContain('I need a size for the link from Starter tier MRR to monthly recurring revenue.');
     expect(bindGuidedSizing(draft, guidedSizingActions(draft, graph), { graph_hash: '0123456789abcdef', run_key: 'same-run' }))
       .not.toHaveProperty('recovery_line');
     const said = goalChanceWithheldForAgent(run, graph)?.say ?? '';
     // Class (ii): the user's refused conversion still blocks after the two placeholders are sized.
     expect(said).not.toContain('Give a rough strength');
-    expect(said).toContain('I need a size for the effect from Starter tier MRR to monthly recurring revenue.');
+    expect(said).toContain('I need a size for the link from Starter tier MRR to monthly recurring revenue.');
     expect(said).toContain('Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?');
   });
 });
