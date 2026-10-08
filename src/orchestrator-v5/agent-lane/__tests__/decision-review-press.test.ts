@@ -97,12 +97,13 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
       edge('carry_on', 'tech_leads'), edge('carry_on', 'developers'), edge('tech_leads', 'productivity'), edge('developers', 'productivity'),
       edge('productivity', 'goal'), edge('demand_shortfall', 'goal', true)] };
   })();
-  const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is it today?';
+  const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
   it('F1: the unvalued risk root is said with its ask (the outcome metric M1 shape), and a data-gap warning naming it adds nothing', () => {
     const gap = { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Goal node 'goal' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'demand_shortfall' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)." };
     const turn = decisionReviewFor(SCENARIO, readOf({ graph: G2_GRAPH, enrichment: { inference_warnings: [gap] } }));
     expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ROOT_SENTENCE}`]);
-    expect(turn.reply.split('Demand shortfall')).toHaveLength(2);
+    expect(turn.reply.split(ROOT_SENTENCE)).toHaveLength(2);
+    expect(turn.reply.split('Demand shortfall')).toHaveLength(3); // The disclosure and its own question both name it.
   });
 
   it('RED (Codex r2 P2): an unnamed risk root (F1) and an unnamed default-0 factor (F2) are counted as two, in one sentence', () => {
@@ -138,7 +139,7 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
 
   it('CONTROL (F1): two named roots keep their labels', () => {
     expect(treatedAsZeroReplyLine(withRoots({}, true), COMPARATIVE)).toBe(
-      'No figures are set for "Demand shortfall" and "Supply delay" yet, so the analysis treats them as zero. How likely or how large is each today?');
+      'No figures are set for "Demand shortfall" and "Supply delay" yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supply delay" today?');
   });
 
   it('RED (Codex r2 P2): a goal-figure reason the editors would rewrite says the withhold in the reader\'s own opening', () => {

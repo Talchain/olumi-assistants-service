@@ -12,7 +12,7 @@ import { SPREAD_NOTE_WITHOUT_DOWNSIDE } from '../../goal-target/goal-chance-lice
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { untestedHorizonLine } from '../decision-input-ask.js';
 import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
-import { HORIZON_MARKER, type ReplyComposeInput, type ReplyComposition } from '../reply/compose-reply.js';
+import { HORIZON_MARKER, WITHHOLD_FALLBACK_MARKER, type ReplyComposeInput, type ReplyComposition } from '../reply/compose-reply.js';
 import { runExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 import { goalKindOf } from '../../goal-target/goal-kind.js';
 import { teamShareMoments, extraShareMoments } from '../../goal-target/event-by-date-share.js';
@@ -21,6 +21,8 @@ type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
 /** B5 T1b on 3fce64f: three point lines on the `each` licence, leader withheld (near tie); the gate deleted the chat's copy. */
 const READ_T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
+/** The live HEAD-B1 pilot, copied locally with its graph, Run and original displayed face/detail. */
+const READ_B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as Json;
 let READ: Json = READ_B3;
 const VIEW = {
   view: 'Before comparing, size how strongly running a fourth shop changes its monthly operating profit.',
@@ -95,10 +97,20 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       response_version: 2, assistant_text: forwardedText, suggested_actions: [], insights: [], graph_hash: READ.graph_hash,
       blocks: [analysisResult], analysis_ready: READ.analysis_ready, analysis_state: READ.analysis_state,
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: READ.graph, graph_hash: READ.graph_hash, analysis_result: analysisResult, analysis_state: READ.analysis_state,
-      analysis_ready: READ.analysis_ready,
-    }));
+    app.post('/assist/v1/scenarios/:id/graph', async req => {
+      const { recordCanonicalAnalysisViewInput } = await import('../../../routes/canonical-analysis-input-context.js');
+      // The harness authors the successful fact wrapper around this captured Run; production never invents one.
+      recordCanonicalAnalysisViewInput({ graph: READ.graph,
+        runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+          scenario_id: SCENARIO, run_id: 'fixture-screen-run', summary: analysisResult.summary,
+          leading_option_id: analysisResult.leading_option_id, enrichment: analysisResult.enrichment,
+          graph_hash_at_run: READ.graph_hash, computed_at: READ.analysis_state.run_state.computed_at,
+        } } as never,
+        analysisState: READ.analysis_state as never, analysisReady: READ.analysis_ready,
+        currentResult: analysisResult as never }, req.headers['x-olumi-canonical-input-receipt'] as string | undefined);
+      return { graph: READ.graph, graph_hash: READ.graph_hash, analysis_result: analysisResult, analysis_state: READ.analysis_state,
+        analysis_ready: READ.analysis_ready };
+    });
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -123,6 +135,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   const run = (reply: string) => [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }], say(reply)];
   const count = (text: string, s: string): number => text.split(s).length - 1;
+  const faceUnits = (body: Body): string[] => [body._answer_shape!.headline, ...body._answer_shape!.bullets];
+  const withholdMarkers = (body: Body): string[] => faceUnits(body).filter(unit => /^Not shown(?::| yet;)/.test(unit));
   const expectStoredAndReplayed = async (body: Body): Promise<void> => {
     const payload = structuredClone(lastTurnPayload);
     expect(body._answer_shape, 'PL live: displayed contract carries its face/detail shape').toBeDefined();
@@ -213,6 +227,93 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
+
+  it('r11b B1 pilot: withheld canonical cells give one face marker and the chance-free horizon once', async () => {
+    READ = structuredClone(READ_B1);
+    analysisResult = structuredClone(READ.analysis_result);
+    // Exercise the Run's real producer, including when an earlier identity withhold already removed its figures.
+    const { withholdGoalFiguresForMissingCurrentLevel } = await import('../../tools/handlers/run-analysis.js');
+    analysisResult.enrichment = withholdGoalFiguresForMissingCurrentLevel(analysisResult.enrichment, READ.graph);
+    expect(analysisResult.enrichment.inference_warnings.some((warning: Json) => warning.code === 'GOAL_FIGURES_MISSING_CURRENT_LEVEL')).toBe(true);
+    expect(goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)).toEqual([]);
+    const b = await turn(run(READ_B1.before_text), 'Run it');
+    expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
+    expect(composeInput?.chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
+    expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    const horizon = "This model doesn't yet say whether any option gets there within 12 months.";
+    expect(count(b.assistant_text, horizon), 'the exact staging chance-free horizon survives once').toBe(1);
+    expect(withholdMarkers(b), 'one marker is supplied by the Run cells despite three detail withhold sentences').toHaveLength(1);
+    expect(withholdMarkers(b)[0], 'distinct identity and current-level causes cannot be replaced by one partial cause').toBe(WITHHOLD_FALLBACK_MARKER);
+    for (const sentence of [
+      "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
+      'This run doesn’t yet show each option’s chance of reaching £20,000.',
+      "Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.",
+    ]) expect(b._answer_shape!.detail, 'the three original withhold sentences retain their producers this round').toContain(sentence);
+    const words = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+    process.stdout.write(`R11B_B1 ${JSON.stringify({
+      before: READ_B1.before_shape, after: b._answer_shape,
+      words: { before_face: words([READ_B1.before_shape.headline, ...READ_B1.before_shape.bullets].join(' ')),
+        before_detail: words(READ_B1.before_shape.detail), after_face: words(faceUnits(b).join(' ')),
+        after_detail: words(b._answer_shape!.detail) },
+    })}\n`);
+    await expectStoredAndReplayed(b);
+  });
+
+  it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'] as const)(
+    'r11c identity-only withheld Run: %s retains the named face marker through storage and replay', async code => {
+      READ = structuredClone(READ_B1);
+      analysisResult = structuredClone(READ.analysis_result);
+      const identity = analysisResult.enrichment.inference_warnings.find((warning: Json) =>
+        warning.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED');
+      expect(identity).toBeDefined();
+      analysisResult.enrichment.inference_warnings = [{ ...identity, code }];
+      const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
+      expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
+      expect(composeInput?.chanceCells?.every(cell => cell.kind === 'withheld'
+        && cell.reasons.length === 1 && cell.reasons[0]!.code === code)).toBe(true);
+      expect(withholdMarkers(b)).toEqual(["Not shown: how MRR is worked out isn't confirmed"]);
+      expect(b.assistant_text).not.toMatch(/This chance uses|These chances use/);
+      await expectStoredAndReplayed(b);
+    });
+
+  it('r11b B3 range fixture: the ranged option counts as a chance and supplies no withhold marker', async () => {
+    // Reuse the served B3 range; narrow its Run roster to that option so the other B3 withholds do not add a marker.
+    analysisResult.enrichment.option_comparison = analysisResult.enrichment.option_comparison
+      .filter((option: Json) => option.option_id === 'fourth_shop_in_clifton');
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expect(composeInput?.chanceCells?.map(cell => cell.kind)).toEqual(['range']);
+    expect(b.assistant_text).toContain(SCREEN[0]!);
+    expect(b.assistant_text).toContain("This chance uses the model's numbers as they are today");
+    expect(b.assistant_text).not.toContain('These chances use');
+    expect(withholdMarkers(b)).toEqual([]);
+    expect(faceUnits(b)).toContain(HORIZON_MARKER);
+    await expectStoredAndReplayed(b);
+  });
+
+  it.each([1, 2] as const)('r11b mixed %s shown: figure cells choose horizon grammar beside exactly one withheld marker', async shown => {
+    oneChance();
+    const licence = analysisResult.enrichment.inference_warnings[0];
+    if (shown === 2) {
+      licence.option_ids.push('launch_49_starter_tier');
+      licence.pct_by_option.launch_49_starter_tier = 20;
+    }
+    analysisResult.enrichment.inference_warnings.push({
+      code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', severity: 'warning',
+      message: "Not shown. MRR's current level is missing.", option_ids: ['keep_pricing_as_it_is'],
+      detail: { reason: 'missing_goal_baseline' },
+    });
+    const b = await turn(run('Review the recorded assumptions.'), 'Run it');
+    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'figure')).toHaveLength(shown);
+    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'withheld')).toHaveLength(1);
+    const prefix = shown === 1 ? 'This chance uses' : 'These chances use';
+    const otherPrefix = shown === 1 ? 'These chances use' : 'This chance uses';
+    expect(b.assistant_text).toContain(prefix);
+    expect(b.assistant_text).not.toContain(otherPrefix);
+    expect(count(b.assistant_text, "doesn't project")).toBe(1);
+    expect(withholdMarkers(b)).toEqual(["Not shown: MRR's current level is missing"]);
+    expect(faceUnits(b)).toContain(HORIZON_MARKER);
+    await expectStoredAndReplayed(b);
+  });
 
   it('SCOPE: ordinary converse keeps its lead and three bullets visible without draft or Run contract', async () => {
     oneChance();

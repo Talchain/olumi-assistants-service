@@ -53,10 +53,15 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
+import { deriveAnalysisFreshness } from '../../context/freshness.js';
+import { selectCanonicalAnalysisState } from '../../context/canonical-analysis-state.js';
+import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding, readRawRobustnessFromResponseBody } from '../../compose/analysis-state-v1.js';
+import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
 import type {
   RunAnalysisArgs,
@@ -2118,6 +2123,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (!chanceGoalWithheld) {
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis, snapshot.goal_node_id);
+      // Record the additional typed cause only AFTER the target gate has applied its original P1/P5 outcome rules.
+      response = withholdGoalFiguresForMissingCurrentLevel(response, graphForAnalysis);
       if (response !== before) {
         log.info(
           {
@@ -2170,10 +2177,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.
     response = withoutDirectionUnattestedOnHeldFloor(response, heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id));
 
-    // ⭐ A7 AS A TYPED FACT (DL 0df0e1, beat 2): a held deadline no duration limit scores is untested, and the Run says so
-    // on the carrier a consumer reads, in A7's own sentence (`decision-input-ask.ts`, the one rule the chat line uses too).
     response = withShareByDateChanceGate(response, snapshot.rawPersistedGraph ?? snapshot.graph, snapshot.goal_node_id);
-    response = withUntestedHorizonWarning(response, graphForAnalysis);
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
@@ -2812,8 +2816,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
-    // The short horizon clause beside a goal chance this Run licensed, when no month count put the full one above.
-    response = withShortHorizonBesideChance(response, graphForAnalysis);
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
@@ -3088,6 +3090,26 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           : leaderPermission,
       },
     };
+
+    // The completed Run's final cells own every horizon form, after all withholds, licences and range scoping.
+    // Use the read's existing fact, freshness, state and public-block gates rather than interpreting warning order.
+    const horizonGraph = snapshot.rawPersistedGraph ?? snapshot.graph;
+    const horizonDerivation = deriveAnalysisFreshness([factCandidate], graphHashAtRun, undefined, { currentGraph: horizonGraph });
+    const horizonResult = buildAnalysisResultBlock(factCandidate);
+    const horizonState = composeAnalysisStateV1({
+      canonical: selectCanonicalAnalysisState({ handlerFacts: [factCandidate], currentGraphHash: graphHashAtRun, currentGraph: horizonGraph }),
+      freshness: horizonDerivation,
+      runFactBinding: { scenarioId: args.scenario_id, selectedResult: factCandidate.result },
+      rawRobustness: readRawRobustnessFromResponseBody({ blocks: [horizonResult] }),
+    });
+    const currentHorizonResult = horizonState === undefined ? null
+      : projectAnalysisBlocksForRunBinding([horizonResult], horizonState, horizonDerivation.reason)[0] ?? null;
+    const chanceCells = projectCanonicalAnalysisView({
+      graph: horizonGraph, runFact: factCandidate, derivation: horizonDerivation,
+      analysisState: horizonState, currentResult: currentHorizonResult,
+    }).options.map(option => option.cell);
+    factCandidate.result.enrichment = withShortHorizonBesideChance(
+      withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells), horizonGraph, chanceCells);
 
     // --- 7. Zod-validate the fact ----------------------------------------
     //
@@ -3897,6 +3919,26 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
     ...(Object.keys(perOption).length > 0 ? { per_option: perOption } : {}),
   };
   return withholdOptionGoalFigures(response, new Set(ids), recorded, { keepOutcome, keepOrdering: true });
+}
+
+/** The engine's current-level refusal is a typed per-option withhold even when an earlier gate removed the figures. */
+export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph: unknown): E {
+  if (response === null || typeof response !== 'object' || Array.isArray(response)
+    || thresholdReasonOf(response)?.reason !== 'missing_goal_baseline') return response;
+  const env = response as Record<string, unknown>;
+  const warnings = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
+  if (warnings.some(w => w !== null && typeof w === 'object'
+    && (w as Record<string, unknown>).code === GOAL_FIGURES_MISSING_CURRENT_LEVEL)) return response;
+  const goal = soleGoalOf(graph);
+  const { scored } = goalFigureOptions(response);
+  if (goal === undefined || scored.length === 0) return response;
+  const label = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'The goal';
+  return withholdOptionGoalFigures(response, new Set(scored), {
+    code: GOAL_FIGURES_MISSING_CURRENT_LEVEL, severity: 'warning',
+    message: `Not shown. ${label}'s current level is missing.`,
+    node_ids: [String(goal.id)], option_ids: scored,
+    detail: { reason: 'missing_goal_baseline' },
+  }, { keepOutcome: true, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */

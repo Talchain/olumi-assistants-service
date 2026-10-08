@@ -12,6 +12,8 @@ import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclos
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 import { identityCardOfferable, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
+import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
+import { thresholdReasonLine } from '../break-even.js';
 
 type Rec = Record<string, unknown>;
 type Graph = { nodes: Rec[]; edges: Rec[] };
@@ -21,7 +23,12 @@ type Body = { assistant_text: string; _answer_shape?: AnswerShape; suggested_act
 const FX = JSON.parse(readFileSync(new URL('./fixtures/one-reply-paul-pricing.json', import.meta.url), 'utf8')) as {
   brief: string; narrator: string; read: Rec & { graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec };
 };
+const B1 = JSON.parse(readFileSync(new URL('./fixtures/r11b-head-b1.json', import.meta.url), 'utf8')) as {
+  brief: string; graph: Graph; graph_hash: string; analysis_result: Rec; analysis_state: Rec;
+  analysis_ready: Rec; before_shape: AnswerShape; before_text: string;
+};
 let currentRead = FX.read;
+let buildBrief = FX.brief;
 let lastComposeInput: unknown;
 let withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['withholdDisclosureFor'];
 let lastBuildPayload: Rec;
@@ -80,6 +87,9 @@ const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: '
 const face = (shape: AnswerShape) => [shape.headline, ...shape.bullets].join('\n');
 const count = (text: string, phrase: string) => text.split(phrase).length - 1;
 const words = (text: string) => text.trim().split(/\s+/u).filter(Boolean).length;
+const withheldCells = (code: string, message: string | null = null): readonly CanonicalAnalysisCell[] => [
+  { kind: 'withheld', reasons: [{ code, message }] },
+];
 
 describe('ONE reply contract through the build route', () => {
   let app: FastifyInstance;
@@ -92,7 +102,7 @@ describe('ONE reply contract through the build route', () => {
       if (!askedToBuild) {
         askedToBuild = true;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'build_model_from_brief',
-          call_id: 'build', arguments: JSON.stringify({ brief: FX.brief }) }] }), { status: 200 });
+          call_id: 'build', arguments: JSON.stringify({ brief: buildBrief }) }] }), { status: 200 });
       }
       return new Response(JSON.stringify(say(narrator)), { status: 200 });
     }));
@@ -100,9 +110,24 @@ describe('ONE reply contract through the build route', () => {
     withholdDisclosureFor = route.withholdDisclosureFor;
     const { agentV1TurnRoute } = route;
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => saved.nodes.length === 0
-      ? { graph: saved, graph_hash: 'empty', analysis_state: { run_state: { kind: 'never_run' } } }
-      : { ...currentRead, graph: saved });
+    app.post('/assist/v1/scenarios/:id/graph', async req => {
+      const { recordCanonicalAnalysisViewInput } = await import('../../../routes/canonical-analysis-input-context.js');
+      if (saved.nodes.length === 0) {
+        recordCanonicalAnalysisViewInput({ graph: saved }, req.headers['x-olumi-canonical-input-receipt'] as string | undefined);
+        return { graph: saved, graph_hash: 'empty', analysis_state: { run_state: { kind: 'never_run' } } };
+      }
+      // Reconstruct only the captured successful fact wrapper owned by this test's served graph read.
+      recordCanonicalAnalysisViewInput({ graph: saved,
+        runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
+          scenario_id: (req.params as { id: string }).id, run_id: 'fixture-build-run', summary: currentRead.analysis_result.summary,
+          leading_option_id: currentRead.analysis_result.leading_option_id, enrichment: currentRead.analysis_result.enrichment,
+          graph_hash_at_run: currentRead.graph_hash, computed_at: (currentRead.analysis_state.run_state as Rec).computed_at,
+        } } as never,
+        analysisState: currentRead.analysis_state as never,
+        analysisReady: (currentRead.current_read as Rec)?.analysis_ready,
+        currentResult: currentRead.analysis_result as never }, req.headers['x-olumi-canonical-input-receipt'] as string | undefined);
+      return { ...currentRead, graph: saved };
+    });
     app.post('/assist/v1/scenarios/:id/graph/register', async req => {
       saved = (req.body as { graph: Graph }).graph;
       return { registered: true, graph_hash: currentRead.graph_hash, model_version: { version_number: 1 } };
@@ -116,7 +141,7 @@ describe('ONE reply contract through the build route', () => {
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
   beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); askedToBuild = false;
     narrator = process.env.ONE_REPLY_CAPTURE_BASE === '1' ? FX.narrator : `${FX.narrator}\n\n${GOAL_CHANCE_CAPTURE}`;
-    currentRead = FX.read; lastComposeInput = undefined; info.mockClear(); });
+    currentRead = FX.read; buildBrief = FX.brief; lastComposeInput = undefined; info.mockClear(); });
   // #2851 supersedes the captured draft's automatic-card premise: Olumi's basis-less 250 is not a user level.
   // Keep the exact positive identity assertions on the same count explicitly ratified by the user; the original
   // capture remains untouched and has its own no-card route control below.
@@ -132,7 +157,7 @@ describe('ONE reply contract through the build route', () => {
   };
   async function buildTurn() {
     const turnId = randomUUID();
-    lastBuildPayload = { kind: 'message', scenario_id: randomUUID(), turn_id: turnId, message: FX.brief };
+    lastBuildPayload = { kind: 'message', scenario_id: randomUUID(), turn_id: turnId, message: buildBrief };
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: lastBuildPayload });
     expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
     const body = response.json() as Body;
@@ -157,61 +182,124 @@ describe('ONE reply contract through the build route', () => {
     expect(replay.assistant_text, 'PL replay: display is the exact shape derivation').toBe(deriveAnswerTextFromShape(replay._answer_shape!));
   };
 
+  it('r11b B1 automatic first Run: exact pilot face/detail uses one cell marker and the chance-free horizon', async () => {
+    currentRead = { ...structuredClone(B1), current_read: { analysis_ready: structuredClone(B1.analysis_ready),
+      computed_against_hash: B1.graph_hash, current_analysis_hash: B1.graph_hash, run_id: 'fixture-head-b1' } };
+    buildBrief = B1.brief;
+    // The pilot completed its build with the host's ready/status words; its already-composed reply is not a narrator input.
+    narrator = 'Your results are ready. You can view them now or ask me to explain them.';
+    const { withholdGoalFiguresForMissingCurrentLevel } = await import('../../tools/handlers/run-analysis.js');
+    currentRead.analysis_result.enrichment = withholdGoalFiguresForMissingCurrentLevel(currentRead.analysis_result.enrichment, currentRead.graph);
+    const body = await buildTurn();
+    expect((lastComposeInput as ReplyComposeInput).faceContract).toBe('draft');
+    expect((lastComposeInput as ReplyComposeInput).chanceCells?.length).toBeGreaterThan(0);
+    expect((lastComposeInput as ReplyComposeInput).chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
+    expect(body._answer_shape).toBeDefined();
+    const shown = face(body._answer_shape!);
+    expect(shown.split('\n').filter(line => /^Not shown(?::| yet;)/.test(line))).toEqual(['Not shown yet; why is under More detail']);
+    expect(shown).toContain('How likely or how large is "Price-rise cancellation risk" today?');
+    expect(shown).not.toContain('How likely or how large is it today?');
+    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    for (const sentence of [
+      "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
+      'This run doesn’t yet show each option’s chance of reaching £20,000.',
+      "Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.",
+    ]) expect(body._answer_shape!.detail, 'the three original detail withhold sentences are retained').toContain(sentence);
+    process.stdout.write(`R11B_B1_BUILD ${JSON.stringify({ before: B1.before_shape, after: body._answer_shape, input: lastComposeInput,
+      words: { before_face: words(face(B1.before_shape)), before_detail: words(B1.before_shape.detail),
+        after_face: words(shown), after_detail: words(body._answer_shape!.detail) } })}\n`);
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
+  it('r11c identity-only automatic first Run: the cell reason keeps the named identity marker through durable replay', async () => {
+    currentRead = { ...structuredClone(B1), current_read: { analysis_ready: structuredClone(B1.analysis_ready),
+      computed_against_hash: B1.graph_hash, current_analysis_hash: B1.graph_hash, run_id: 'fixture-head-b1-identity-only' } };
+    buildBrief = B1.brief;
+    narrator = 'Your results are ready. You can view them now or ask me to explain them.';
+    // Keep the captured Run's identity-only cell reasons. Its graph's current-level gap is not marker authority.
+    const body = await buildTurn();
+    const input = lastComposeInput as ReplyComposeInput;
+    expect(input.faceContract).toBe('draft');
+    expect(input.chanceCells?.length).toBeGreaterThan(0);
+    for (const cell of input.chanceCells!) {
+      expect(cell.kind).toBe('withheld');
+      if (cell.kind === 'withheld') expect(cell.reasons.map(reason => reason.code)).toEqual(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED']);
+    }
+    expect(body._answer_shape).toBeDefined();
+    const shown = face(body._answer_shape!);
+    expect(shown.split('\n').filter(line => /^Not shown(?::| yet;)/.test(line))).toEqual([
+      "Not shown: how MRR is worked out isn't confirmed",
+    ]);
+    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
   it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'])(
-    'typed %s warning cannot claim that a confirmed identity is unconfirmed', code => {
+    'typed %s cell owns the named marker even when the current graph identity is confirmed', code => {
       const graph = structuredClone(FX.read.graph);
       const goal = graph.nodes.find(n => n.id === 'mrr')!;
       (goal.nonlinear_identity as Rec).stated_in_brief = true;
       const verdict = targetTestabilityOf(graph);
       expect(verdict.kind === 'not_testable' && verdict.failures.some(f => f.code === 'identity_unconfirmed')).toBe(false);
-      const note = withholdDisclosureFor(graph, { enrichment: { inference_warnings: [{ code,
-        message: 'The identity is not confirmed — deliberately misleading words must not select the cause.' }] } });
-      expect(note).toEqual({ kind: 'withhold', cause: 'other', goalLabel: 'MRR' });
-      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+      const note = withholdDisclosureFor(graph, withheldCells(code,
+        'A generic read failure — reason prose must not select the cause.'));
+      expect(note).toEqual({ kind: 'withhold', cause: 'unconfirmed_identity', goalLabel: 'MRR' });
+      expect(markerForDisclosure(note!)).toBe("Not shown: how MRR is worked out isn't confirmed");
     });
 
   it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'])(
-    'typed %s warning uses unconfirmed wording only when the graph verdict confirms that cause', code => {
+    'typed %s cell keeps the same named marker with an unconfirmed current graph identity', code => {
       const verdict = targetTestabilityOf(FX.read.graph);
       expect(verdict.kind === 'not_testable' && verdict.failures.some(f => f.code === 'identity_unconfirmed')).toBe(true);
-      const note = withholdDisclosureFor(FX.read.graph, { inference_warnings: [{ code, message: 'A generic read failure.' }] });
+      const note = withholdDisclosureFor(FX.read.graph, withheldCells(code, 'A generic read failure.'));
       expect(note).toEqual({ kind: 'withhold', cause: 'unconfirmed_identity', goalLabel: 'MRR' });
-      expect(markerForDisclosure(note)).toBe("Not shown: how MRR is worked out isn't confirmed");
+      expect(markerForDisclosure(note!)).toBe("Not shown: how MRR is worked out isn't confirmed");
     });
 
   it.each([null, 42, { nodes: null }, { nodes: [null, undefined, 12, 'x', {}] },
     { nodes: [{ kind: 'goal', label: 42 }] }, { nodes: [{ kind: 'goal', label: '  ' }] }])(
     'typed withheld marker safely falls back when graph nodes or the goal label are malformed (%j)', graph => {
-      const note = withholdDisclosureFor(graph, { inference_warnings: [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE',
-        detail: { reason: 'missing_goal_baseline' } }] });
+      const note = withholdDisclosureFor(graph, withheldCells('GOAL_FIGURES_MISSING_CURRENT_LEVEL'));
       expect(note).toEqual({ kind: 'withhold', cause: 'missing_current_level' });
-      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+      expect(markerForDisclosure(note!)).toBe('Not shown yet; why is under More detail');
     });
 
-  it.each(['GOAL_FIGURES_USER_EFFECT_CLAMPED', 'GOAL_FIGURES_OPTIONS_IDENTICAL', 'GOAL_FIGURES_PROBABILITY_UNUSABLE',
+  it.each(['GOAL_FIGURES_TARGET_NOT_TESTABLE', 'GOAL_FIGURES_USER_EFFECT_CLAMPED', 'GOAL_FIGURES_OPTIONS_IDENTICAL', 'GOAL_FIGURES_PROBABILITY_UNUSABLE',
     'GOAL_FIGURES_SHARE_APPROXIMATION', 'GOAL_FIGURES_CHANCE_AS_GOAL'])(
     'typed %s cause uses the fallback instead of borrowing a different graph cause', code => {
-      const note = withholdDisclosureFor(FX.read.graph, { inference_warnings: [{ code, message: 'A retained exact note.' }] });
+      const note = withholdDisclosureFor(FX.read.graph, withheldCells(code, 'A retained exact note.'));
       expect(note).toEqual({ kind: 'withhold', cause: 'other', goalLabel: 'MRR' });
-      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+      expect(markerForDisclosure(note!)).toBe('Not shown yet; why is under More detail');
     });
 
-  it.each(['non_finite_conversion_input', 'future_unmapped_reason'])(
-    'typed threshold cause %s cannot be renamed after a latent graph failure', reason => {
-      const note = withholdDisclosureFor(FX.read.graph, { inference_warnings: [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE',
-        detail: { reason }, message: 'The complete threshold note stays under More detail.' }] });
+  it.each(['reason_not_recorded', 'FUTURE_UNMAPPED_WITHHOLD'])(
+    'typed cell cause %s cannot be renamed after a latent graph failure', code => {
+      const note = withholdDisclosureFor(FX.read.graph, withheldCells(code, 'The complete note stays under More detail.'));
       expect(note).toEqual({ kind: 'withhold', cause: 'other', goalLabel: 'MRR' });
-      expect(markerForDisclosure(note)).toBe('Not shown yet; why is under More detail');
+      expect(markerForDisclosure(note!)).toBe('Not shown yet; why is under More detail');
     });
+
+  it.each([{ cells: [] }, { cells: [{ kind: 'none' }] }, { cells: [{ kind: 'figure', display: '67%' }] }] as { cells: readonly CanonicalAnalysisCell[] }[])(
+    'no withheld cell supplies no marker despite latent graph failures (%j)', ({ cells }) => {
+      expect(withholdDisclosureFor(FX.read.graph, cells)).toBeNull();
+    });
+
+  it('the missing-current-level cell supplies its typed cause without reading reason prose', () => {
+    const note = withholdDisclosureFor(FX.read.graph, withheldCells('GOAL_FIGURES_MISSING_CURRENT_LEVEL',
+      'A deliberately generic producer message.'));
+    expect(note).toEqual({ kind: 'withhold', cause: 'missing_current_level', goalLabel: 'MRR' });
+    expect(markerForDisclosure(note!)).toBe("Not shown: MRR's current level is missing");
+  });
 
   it('typed marker labels apply the existing proposal-id display reader before the last writer', () => {
     const graph = structuredClone(FX.read.graph);
     graph.nodes.find(n => n.id === 'mrr')!.label = 'MRR prop_deadbeef0123456789';
-    const note = withholdDisclosureFor(graph, { inference_warnings: [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE',
-      detail: { reason: 'missing_goal_baseline' } }] });
+    const note = withholdDisclosureFor(graph, withheldCells('GOAL_FIGURES_MISSING_CURRENT_LEVEL'));
     expect(note).toEqual({ kind: 'withhold', cause: 'missing_current_level', goalLabel: 'MRR this proposal' });
-    expect(markerForDisclosure(note)).toBe("Not shown: MRR this proposal's current level is missing");
-    expect(markerForDisclosure(note)).not.toContain('prop_deadbeef0123456789');
+    expect(markerForDisclosure(note!)).toBe("Not shown: MRR this proposal's current level is missing");
+    expect(markerForDisclosure(note!)).not.toContain('prop_deadbeef0123456789');
   });
 
   it('R1 Paul, user-ratified count: one concise face, typed-card question in detail, RC4 census, plain units', async () => {
@@ -305,6 +393,8 @@ describe('ONE reply contract through the build route', () => {
     const enrichment = currentRead.analysis_result.enrichment as Rec;
     enrichment.inference_warnings = (enrichment.inference_warnings as Rec[])
       .filter(w => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE');
+    const { withholdGoalFiguresForMissingCurrentLevel } = await import('../../tools/handlers/run-analysis.js');
+    currentRead.analysis_result.enrichment = withholdGoalFiguresForMissingCurrentLevel(enrichment, saved);
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'Run analysis.',
       chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
@@ -315,8 +405,9 @@ describe('ONE reply contract through the build route', () => {
     const shown = face(body._answer_shape!);
     const marker = "Not shown: MRR's current level is missing";
     expect(shown, 'typed missing-current-level marker is must-face').toContain(marker);
-    const reason = (lastComposeInput as ReplyComposeInput).obligations?.find(o => o.role === 'withheld_reason' && o.lead === true && o.ownsNextStep !== true)?.text;
-    expect(reason, 'typed full withheld reason is produced by the route').toBeDefined();
+    expect((lastComposeInput as ReplyComposeInput).chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
+    const reason = thresholdReasonLine(saved, currentRead.analysis_result);
+    expect(reason, 'the exact threshold producer still supplies the full detail reason').not.toBeNull();
     expect(count(shown, reason!), 'full withheld reason stays off the face').toBe(0);
     expect(count(body._answer_shape!.detail, reason!), 'full withheld reason is verbatim in detail once').toBe(1);
     expect(words(shown)).toBeLessThanOrEqual(80);

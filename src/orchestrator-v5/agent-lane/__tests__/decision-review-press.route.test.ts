@@ -24,7 +24,7 @@ const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leade
 const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0003';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
-const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is it today?';
+const ROOT_SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
 const WITHHELD_SAY = goalChanceWithheldForAgent(SERVED.block)!.say;
 
 type Rec = Record<string, unknown>;

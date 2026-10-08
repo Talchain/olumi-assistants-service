@@ -15,10 +15,10 @@ import { readFileSync } from 'node:fs';
 import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
-import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, withholdGoalFiguresForMissingCurrentLevel } from '../run-analysis.js';
 import {
   GOAL_HORIZON_NOT_TESTED,
   decisionInputLines,
@@ -30,6 +30,7 @@ import { GOAL_CHANCE_LICENSED } from '../../../goal-target/goal-chance-licence.j
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { goalKindOf } from '../../../goal-target/goal-kind.js';
 import { teamShareMoments } from '../../../goal-target/event-by-date-share.js';
+import { targetTestabilityOf } from '../../../admission/target-testability.js';
 
 type Json = Record<string, any>;
 const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run-20260930.json', import.meta.url), 'utf8')) as {
@@ -38,7 +39,10 @@ const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run
 const SCENARIO = 'c8108752-0000-4000-8000-0000000000a7';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const A7_12 = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.";
+const A7_PLURAL_12 = "These chances use the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.";
+const A7_FREE_12 = "This model doesn't yet say whether any option gets there within 12 months.";
 const A7_SHORT = "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.";
+const ONE_FIGURE = [{ kind: 'figure' as const, display: 'about 40%' }];
 
 async function runOn(graph: Json, body: Json = M1.plot_body): Promise<Json> {
   const store = {
@@ -130,10 +134,10 @@ describe('A7 is one rule: the chat line and the Run warning say the same sentenc
     expect((M1.graph.goal_constraints as Json[]).map((k) => k.unit)).toEqual(['%']);
   });
 
-  it('the rule says A7, and the chat\'s host line is that same string', () => {
+  it('the low-level chance formatter retains its bytes; the host without cells says the chance-free fact', () => {
     expect(untestedHorizonLine(M1.graph)).toBe(A7_12);
     const lines = decisionInputLines(M1.graph, { restingText: 'A sketch.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
-    expect(lines).toContain(A7_12);
+    expect(lines).toContain(A7_FREE_12);
   });
 });
 
@@ -142,7 +146,7 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
     const result = await runOn(M1.graph);
     const w = horizonWarnings(result);
     expect(w).toHaveLength(1);
-    expect(w[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_12, node_ids: ['mrr'] });
+    expect(w[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_FREE_12, node_ids: ['mrr'] });
   });
 
   it('RED: it rides beside the target withhold, never in place of it (two separate facts)', async () => {
@@ -154,7 +158,7 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
   it('RED: a Run that SHOWS the goal chance still says the deadline is untested (the PL\'s distinction)', async () => {
     const result = await runOn(sizedRoute());
     expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).toBe(false);
-    expect(horizonWarnings(result).map((w) => w.message)).toEqual([A7_12]);
+    expect(horizonWarnings(result).map((w) => w.message)).toEqual([A7_PLURAL_12]);
   });
 
   it('CONTROL: a duration limit scores the deadline → no horizon warning on a Run with no licensed chance, and no chat A7', async () => {
@@ -169,15 +173,15 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
 
   it('R3 a Run that LICENSED a goal chance with no held months carries the SHORT form byte-exact, on the warning and the licence', () => {
     const licence = { code: GOAL_CHANCE_LICENSED, severity: 'info', message: 'licensed', option_ids: ['a'] };
-    const out = withShortHorizonBesideChance({ inference_warnings: [licence] }, withoutHeldMonths()) as Json;
+    const out = withShortHorizonBesideChance({ inference_warnings: [licence] }, withoutHeldMonths(), ONE_FIGURE) as Json;
     expect(horizonWarnings(out)).toHaveLength(1);
     expect(horizonWarnings(out)[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_SHORT, node_ids: ['mrr'] });
     expect(out.inference_warnings[0]).toMatchObject({ code: GOAL_CHANCE_LICENSED, horizon_untested: true, horizon_line: A7_SHORT });
     // CONTROLS: no licensed chance → the same object; a held month count already wrote the full sentence → the same object.
     const unlicensed = { inference_warnings: [] };
     expect(withShortHorizonBesideChance(unlicensed, withoutHeldMonths())).toBe(unlicensed);
-    const full = withUntestedHorizonWarning({ inference_warnings: [licence] }, M1.graph);
-    expect(withShortHorizonBesideChance(full, M1.graph)).toBe(full);
+    const full = withUntestedHorizonWarning({ inference_warnings: [licence] }, M1.graph, ONE_FIGURE);
+    expect(withShortHorizonBesideChance(full, M1.graph, ONE_FIGURE)).toBe(full);
   });
 
   it('R3 no-months draft chat A7 host owes no horizon line', () => {
@@ -195,6 +199,65 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
     const envelope = { inference_warnings: [] };
     expect(withUntestedHorizonWarning(envelope, g)).toBe(envelope);
     expect(horizonWarnings(envelope)).toEqual([]);
+  });
+});
+
+describe('the current-level producer records the engine refusal as a typed option withhold', () => {
+  it('the real handler preserves the original P1 target gate\'s outcome stripping before recording the current-level cause', async () => {
+    const graph = sizedRoute();
+    const goal = graph.nodes.find((node: Json) => node.kind === 'goal');
+    delete goal.observed_state;
+    delete goal.nonlinear_identity;
+    const verdict = targetTestabilityOf(graph);
+    expect(verdict).toMatchObject({ kind: 'not_testable', failures: expect.arrayContaining([
+      { precondition: 'P1', case: 'a', code: 'missing_goal_baseline' },
+    ]) });
+    const body = clone(M1.plot_body);
+    body.inference_warnings.push({
+      code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', message: 'Threshold not convertible.', severity: 'warning',
+      detail: { reason: 'missing_goal_baseline' },
+    });
+    const centres = ['mean', 'std', 'p10', 'p50', 'p90'];
+    expect(body.option_comparison.every((option: Json) => centres.every(field => typeof option.outcome?.[field] === 'number'))).toBe(true);
+    const result = await runOn(graph, body);
+    const warnings = warningsOf(result);
+    expect(warnings.map(warning => warning.code)).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
+    expect(warnings).toContainEqual(expect.objectContaining({
+      code: GOAL_FIGURES_MISSING_CURRENT_LEVEL, detail: { reason: 'missing_goal_baseline' },
+      option_ids: ['59_price', 'current_price'],
+    }));
+    const compared = result.enrichment.option_comparison as Json[];
+    expect(compared).toHaveLength(body.option_comparison.length);
+    for (const option of compared) {
+      expect(option).not.toHaveProperty('probability_of_goal');
+      for (const field of centres) expect(option.outcome).not.toHaveProperty(field);
+      const original = body.option_comparison.find((record: Json) => record.option_id === option.option_id);
+      const remaining = Object.fromEntries(Object.entries(original.outcome).filter(([field]) => !centres.includes(field)));
+      expect(option.outcome).toEqual(remaining);
+    }
+  });
+
+  it('records missing_goal_baseline even when another typed withhold already removed every chance', () => {
+    const body = clone(M1.plot_body);
+    for (const option of body.option_comparison) delete option.probability_of_goal;
+    body.inference_warnings = [
+      { code: 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', message: 'Not shown. The identity was not evaluated.', severity: 'warning' },
+      { code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', message: 'Threshold not convertible.', severity: 'warning', detail: { reason: 'missing_goal_baseline' } },
+    ];
+    const out = withholdGoalFiguresForMissingCurrentLevel(body, M1.graph) as Json;
+    expect(out.inference_warnings).toContainEqual(expect.objectContaining({
+      code: GOAL_FIGURES_MISSING_CURRENT_LEVEL, severity: 'warning', message: "Not shown. MRR's current level is missing.",
+      node_ids: ['mrr'], option_ids: ['59_price', 'current_price'], detail: { reason: 'missing_goal_baseline' },
+    }));
+    expect(out.inference_warnings).toContainEqual(body.inference_warnings[0]);
+    expect(withholdGoalFiguresForMissingCurrentLevel(out, M1.graph)).toBe(out);
+  });
+
+  it('a different carried refusal leaves the existing envelope untouched', () => {
+    const body = { ...clone(M1.plot_body), inference_warnings: [
+      { code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', message: 'Threshold not convertible.', severity: 'warning', detail: { reason: 'change_rel_base_zero' } },
+    ] };
+    expect(withholdGoalFiguresForMissingCurrentLevel(body, M1.graph)).toBe(body);
   });
 });
 

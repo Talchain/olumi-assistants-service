@@ -28,7 +28,7 @@ const TEXT_WRITERS = [
   'withDisclosures(', 'withWriteOutcome(', 'withB3LinesAtRest(', 'withBreakEvenAnswer(', 'withScreenLinesOwed(',
   'withA7AfterGate(', 'enforceAgentLaneLeaderClaimsAtWire(', 'enforceLeaderLicenceAtFinalEgress(',
   'withoutDriverAbsenceClaimsAtEgress(', 'withLeftOutOptionCorrectionAtEgress(',
-  'withEstimateGoalPointsAtEgress(',
+  'withEstimateGoalPointsAtEgress(', 'withCellHorizon(',
   'guidedSizingReplyText(',
   'withoutProposalIds(', 'composeDirectAnswerResponse(', 'textAtRest(',
 ];
@@ -60,13 +60,14 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
   // ⭐ 2b-0 (DL APPROVE #2783): the current-Run REPLAY applies the SAME composer to the same typed parts, and its shape
   // rides only when the composed text equals the stored words and still derives the text after the final gates
   // (`withShapeOnlyIfItDerives`). Exactly these two named sites; any third is a second shaping mechanism.
-  const REPLAY_CALL = ': composeReplyShape({ text: withoutProposalIds(replayText), obligations: withWithholdMarkers(withA7AsDetail(replayObligations, replayA7,';
+  const REPLAY_CALL = ': composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7,';
   it('1. exactly two composer calls: the live one and the parity-proven replay', () => {
     expect(ROUTE.split('composeReplyShape(').length - 1).toBe(2);
     expect(ROUTE).toContain(CALL);
     expect(ROUTE).toContain(REPLAY_CALL);
-    expect(ROUTE).toContain('withWithholdMarkers(withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayScreen.length > 0), state.graph, state.analysisResult)');
-    expect(ROUTE).toContain("obligations: withWithholdMarkers(withA7AsDetail(obligations, a7Repeat, reply, faceContract === 'run' && screenLines.length > 0), readbackGraph, analysisResult),");
+    expect(ROUTE).not.toContain('withWithholdMarkers(');
+    expect(ROUTE).not.toContain('withheldRunFinding');
+    expect(ROUTE).toContain("obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),");
     expect(ROUTE).toContain('&& composedCandidate.text === prior.assistant_message ? composedCandidate : null;');
     expect(ROUTE).toContain('return withShapeOnlyIfItDerives(gatedReplay);');
   });

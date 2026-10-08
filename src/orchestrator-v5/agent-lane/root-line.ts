@@ -17,6 +17,7 @@
 import { readinessViewOf, treatedAsZeroLine } from './readiness-view.js';
 import { withoutProposalIds } from './display-ids.js';
 import { textAtRest } from './decision-input-ask.js';
+import { sentencesOf } from './reply/compose-reply.js';
 import { dropRankingSentences, rankingLabelContext } from './withheld-leader-fail-closed.js';
 import { textAssertsLeadingOption } from '../compose/leading-option-egress-guard.js';
 import { optionRosterFromGraph, textNamesAnOption } from '../compose/leading-option-wire-enforcement.js';
@@ -36,6 +37,8 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
   if (line.includes('\n')) return false;
   if (withoutProposalIds(line) !== line) return false;
   if (textAtRest(line) !== line) return false;
+  // The face composer splits this ask: a repeated label must survive in each question/disclosure partition too.
+  if (sentencesOf(line).some(sentence => textAtRest(sentence) !== sentence)) return false;
   if (dropRankingSentences(line, rankingLabelContext(graph, analysisReady)).droppedSentences !== 0) return false;
   if (textNamesAnOption(line, optionRosterFromGraph(graph))) return false;
   // The leader vocabulary as the DELETING consumers read it (`textAssertsLeadingOption`: the egress vocabulary minus its

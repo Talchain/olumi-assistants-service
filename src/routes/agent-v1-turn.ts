@@ -93,7 +93,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { whatChangesFaceLine } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
@@ -106,7 +106,8 @@ import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-g
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, targetVerdictWithoutGuidedLinks, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingReplyText, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress, type GuidedSizingDraft, type GuidedSizingHistory } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
-import { GOAL_FIGURES_WITHHELD_CODES } from '../orchestrator/context/option-result-source.js';
+import { projectCanonicalAnalysisView, type CanonicalAnalysisCell, type CanonicalAnalysisViewInput } from './canonical-analysis-view.js';
+import { captureCanonicalAnalysisViewInput, currentCanonicalAnalysisInputReceipt } from './canonical-analysis-input-context.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -125,7 +126,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf, noLeaderBecauseSentences } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDerivedAnswerText, type FaceDisclosure, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDerivedAnswerText, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
@@ -608,49 +609,23 @@ async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, e
  * the user read already said it word for word, this reply types it `detail`: still said, under More detail, never removed.
  * `null` when A7 is not owed, the latest answer did not say it, or the read fails (then it stays where it is).
  */
-/** Marker vocabulary comes only from the typed Run warning and target verdict, never their display words. */
-export function withholdDisclosureFor(graph: unknown, result: unknown): FaceDisclosure {
-  const g = graph as { nodes?: unknown[] } | null;
-  const goals = Array.isArray(g?.nodes) ? g.nodes.filter((n): n is { kind: 'goal'; label?: unknown } =>
-    n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'goal') : [];
-  const rawLabel = goals.length === 1 ? goals[0]?.label : undefined;
-  const displayedLabel = typeof rawLabel === 'string' ? withoutProposalIds(rawLabel).trim() : '';
-  const label = displayedLabel === '' ? undefined : displayedLabel;
-  const r = result as { enrichment?: { inference_warnings?: Array<{ code?: string; detail?: { reason?: string } }> }; inference_warnings?: Array<{ code?: string; detail?: { reason?: string } }> } | null;
-  const rawWarnings = r?.enrichment?.inference_warnings ?? r?.inference_warnings;
-  const warnings = Array.isArray(rawWarnings) ? rawWarnings.filter(w => w !== null && typeof w === 'object') : [];
-  const verdict = targetTestabilityOf(graph);
-  const causes = new Set<'missing_current_level' | 'unconfirmed_identity' | 'unsized_links' | 'no_target'>();
-  const fallback = (): FaceDisclosure => ({ kind: 'withhold', cause: 'other', ...(label === undefined ? {} : { goalLabel: label }) });
-  // A Run's other typed withholds (identical options, clamped effects, unusable points, etc.) cannot be renamed after
-  // an unrelated graph precondition. Their complete note survives; this vocabulary intentionally has no short cause.
-  if (warnings.some(w => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
-    && !['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ', 'GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_TARGET_NOT_TESTABLE'].includes(w.code))) return fallback();
-  if (warnings.some(w => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE' && w.detail?.reason === 'missing_goal_baseline')) return { kind: 'withhold', cause: 'missing_current_level', ...(label === undefined ? {} : { goalLabel: label }) };
-  if (warnings.some(w => w.code === 'GOAL_THRESHOLD_NOT_CONVERTIBLE')) return fallback();
-  if (warnings.some(w => w.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED' || w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
-    // An evaluation/read failure may concern an already confirmed identity. Only the typed graph verdict licenses
-    // unconfirmed wording; otherwise the complete warning remains in detail behind the conservative marker.
-    if (verdict.kind === 'not_testable' && verdict.failures.some(f => f.code === 'identity_unconfirmed')) causes.add('unconfirmed_identity');
-    else return { kind: 'withhold', cause: 'other', ...(label === undefined ? {} : { goalLabel: label }) };
-  }
-  if (warnings.some(w => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')) causes.add('unsized_links');
-  // A recorded Run cause wins over other latent preconditions in today's graph.
-  if (causes.size > 0) return { kind: 'withhold', cause: causes.size === 1 ? [...causes][0]! : 'other', ...(label === undefined ? {} : { goalLabel: label }) };
-  if (verdict.kind === 'no_target') causes.add('no_target');
-  if (verdict.kind === 'not_testable') for (const failure of verdict.failures) {
-    if (failure.code === 'missing_goal_baseline') causes.add('missing_current_level');
-    if (failure.code === 'identity_unconfirmed') causes.add('unconfirmed_identity');
-    if (failure.code === 'goal_path_placeholder' || failure.code === 'goal_path_unsized') causes.add('unsized_links');
-  }
-  // A combined note carries every cause in detail; do not pretend one selected cause is its whole explanation.
-  return { kind: 'withhold', cause: causes.size === 1 ? [...causes][0]! : 'other', ...(label === undefined ? {} : { goalLabel: label }) };
+export { withholdDisclosureForCells as withholdDisclosureFor } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+
+/** Normalize only the exact horizon producer identities; the cells select their single replacement form. */
+function withCellHorizon(text: string, graph: unknown, cells: readonly CanonicalAnalysisCell[]): string {
+  const line = untestedHorizonLineForCells(graph, cells);
+  const variants = [untestedHorizonLine(graph), untestedHorizonLine(graph, { besideChance: true }),
+    untestedHorizonLine(graph, { besideChance: true, plural: true }), untestedHorizonLineForCells(graph, [])];
+  for (const variant of new Set(variants)) if (variant !== null && variant !== line) text = text.replaceAll(variant, line ?? '');
+  return text;
 }
 
-function withWithholdMarkers(obligations: readonly FaceObligation[], graph: unknown, result: unknown): FaceObligation[] {
-  const guided = obligations.filter(o => o.ownsNextStep === true).map(o => o.text);
-  return obligations.map(o => o.role !== 'withheld_reason' || guided.some(text => text.includes(o.text) || o.text.includes(text))
-    ? o : { ...o, disclosure: withholdDisclosureFor(graph, result) });
+/** Same graph-read receipt and gates as the UI; unavailable receipt never invents a Run. */
+function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>): readonly CanonicalAnalysisCell[] {
+  return projectCanonicalAnalysisView({ ...read.canonicalAnalysisInput, graph: read.graph,
+    analysisState: read.analysisState as CanonicalAnalysisViewInput['analysisState'],
+    analysisReady: read.analysisReady, currentResult: read.analysisResult as CanonicalAnalysisViewInput['currentResult'],
+  }).options.map(row => row.cell);
 }
 
 /** A7 typed `detail` (one role per unit: any other typing of the same line is replaced). Pure; unchanged when `a7` is null. */
@@ -659,12 +634,12 @@ export function withA7AsDetail(obligations: readonly FaceObligation[], a7: strin
   return [...obligations.filter((o) => o.text !== a7), { role: 'detail', text: a7 }];
 }
 
-async function a7SaidLastTurn(graph: unknown, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string | null> {
-  const a7 = untestedHorizonLine(graph);
+async function a7SaidLastTurn(graph: unknown, cells: readonly CanonicalAnalysisCell[], store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string | null> {
+  const a7 = untestedHorizonLineForCells(graph, cells);
   if (a7 === null) return null;
   try {
     const [latest] = await recentAgentReplies(store, scenarioId, exceptTurnId);
-    return typeof latest === 'string' && UNTESTED_HORIZON_PREFIXES.some(prefix => latest.includes(prefix)) && latest.includes(a7) ? a7 : null;
+    return typeof latest === 'string' && [...UNTESTED_HORIZON_PREFIXES, CHANCE_FREE_HORIZON_PREFIX].some(prefix => latest.includes(prefix)) && latest.includes(a7) ? a7 : null;
   } catch {
     return null;
   }
@@ -1289,7 +1264,8 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
   if (scopeInput.issues.length === 0) {
     // Preserve ordinary permitted bytes. Only a scope-withheld verdict needs its canonical inputs reread on removal.
     if (state?.leader_claim?.withheld_reason !== WITHHELD_GOAL_SCOPE_UNRESOLVED) return read;
-    const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, goalScopeClaimInput: scopeInput });
+    const captured = await captureCanonicalAnalysisViewInput(async () => ({ json: await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, goalScopeClaimInput: scopeInput }) }));
+    const current = captured.response.json;
     // A different selected Run must never license the old readback's result. An unavailable/moved authority stays closed.
     if (current.analysis_state === null || JSON.stringify(current.analysis_state.run_state) !== JSON.stringify(state.run_state)) {
       return { ...read, scopeOpen: false, analysisState: { ...state,
@@ -1297,7 +1273,7 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
       } };
     }
     // Restore the verdict and its projected result from this SAME identity-bound canonical read.
-    return { ...read, scopeOpen: false, analysisState: current.analysis_state, analysisResult: current.analysis_result ?? undefined };
+    return { ...read, canonicalAnalysisInput: captured.input, scopeOpen: false, analysisState: current.analysis_state, analysisResult: current.analysis_result ?? undefined };
   }
   const authorityAvailable = AnalysisStateV1Schema.safeParse(state).success;
   const base = authorityAvailable ? state! : composeAnalysisStateV1({ canonical: canonicalStateFromFreshness(NO_ANALYSIS_CONTEXT_DERIVATION), rawRobustness: null })!;
@@ -1325,7 +1301,8 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ canonicalAnalysisInput?: CanonicalAnalysisViewInput; graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+  let canonicalAnalysisInput: CanonicalAnalysisViewInput | undefined;
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1390,7 +1367,9 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   /** The persisted graph as read — the leader wire gate reads its option ROSTER, never a verdict. */
   let graph: unknown;
   try {
-    const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+    const captured = await captureCanonicalAnalysisViewInput(() => dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}));
+    const after = captured.response;
+    canonicalAnalysisInput = captured.input;
     if (after.status === 200) {
       graph = after.json.graph;
       scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
@@ -1549,7 +1528,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
+  return { canonicalAnalysisInput, graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1648,18 +1627,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const dispatchFor = (authorization: string | undefined): InternalDispatch =>
     async (path, body) => {
-      const res = await app.inject({
-        method: 'POST',
-        url: path,
-        headers: internalHeaders(
-          config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '',
-          authorization,
-        ),
-        payload: body as Record<string, unknown>,
-      });
-      let json: Record<string, unknown> = {};
-      try { json = res.json() as Record<string, unknown>; } catch { json = {}; }
-      return { status: res.statusCode, json };
+      const perform = async () => {
+        const res = await app.inject({
+          method: 'POST',
+          url: path,
+          headers: {
+            ...internalHeaders(config.auth.assistApiKey ?? config.auth.assistApiKeys?.[0] ?? '', authorization),
+            ...(currentCanonicalAnalysisInputReceipt() === undefined ? {} : {
+              'x-olumi-canonical-input-receipt': currentCanonicalAnalysisInputReceipt(),
+            }),
+          },
+          payload: body as Record<string, unknown>,
+        });
+        let json: Record<string, unknown> = {};
+        try { json = res.json() as Record<string, unknown>; } catch { json = {}; }
+        return { status: res.statusCode, json };
+      };
+      // Capabilities may seed the graph-read cache before readBackState. Capture that same read too.
+      return path.endsWith('/graph') && currentCanonicalAnalysisInputReceipt() === undefined
+        ? (await captureCanonicalAnalysisViewInput(perform)).response : perform();
     };
 
 
@@ -2241,6 +2227,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
+      const replayChanceCells = replyChanceCells(state);
       const replayScopedDraftForRun = guidedSizingForRun(state.analysisResult, state.graph);
       const replayGuidedText = guidedSizingReplyText(replayScopedDraftForRun).guided;
       /**
@@ -2328,8 +2315,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph) !== undefined, builtOrRan: true,
-            horizonPlural: goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
-              (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current').length > 1 };
+            chanceCells: replayChanceCells };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           let say = goalChanceLineOwed([{ ok: true, ran: true,
             goal_chance: goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText),
@@ -2373,12 +2359,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           const guidedReplayFinding = replayGuidedText !== null && replayText.includes(replayGuidedText) ? replayGuidedText : null;
-          const withheldReplayFinding = guidedReplayFinding
-            ?? (screenNow.length === 0 ? (reasonNow === null ? say : sentencesOf(reasonNow)[0]) : null);
           replayObligations = [
-            ...(typeof withheldReplayFinding === 'string' && withheldReplayFinding !== ''
-              ? [{ role: 'withheld_reason' as const, text: withheldReplayFinding, lead: true as const,
-                ...(guidedReplayFinding === null ? {} : { ownsNextStep: true as const }) }] : []),
+            ...(guidedReplayFinding === null ? [] : [{ role: 'host' as const, text: guidedReplayFinding,
+              lead: true as const, ownsNextStep: true as const }]),
             { role: 'host', text: RUN_RESULT_READY_TEXT },
             ...(reasonNow === null ? [] : [{ role: 'host' as const, text: reasonNow }]),
             ...(typeof say === 'string' && say.trim() !== '' ? [say, ...sentencesOf(say)].map((text): FaceObligation => ({ role: 'withheld_reason', text })) : []),
@@ -2460,20 +2443,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
       // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.
       // The live turn's A7 rule, read the same way (the answer before the replayed one), so the parity check can hold.
-      const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, historyReader, scenarioId, turnId);
+      const replayA7 = replayObligations === undefined ? null : await a7SaidLastTurn(state.graph, replayChanceCells, historyReader, scenarioId, turnId);
       const replayEstimates = replayObligations === undefined ? null : actionFactsOf({ scenarioId, graph: state.graph,
         graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady,
         analysisResult: state.analysisResult, optionParticipation: state.optionParticipation, identityEvaluated: state.identityEvaluated }).olumiEstimates;
       const replayControlQuestions = replayActions
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
-      const replayScreen = replayObligations === undefined ? [] : goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
-        (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
-      const replayHorizon = replayScreen.length === 0 ? null : untestedHorizonLine(state.graph, { besideChance: true, plural: replayScreen.length > 1 });
+      const replayHorizon = replayObligations === undefined ? null : untestedHorizonLineForCells(state.graph, replayChanceCells);
       const replayWhatChanges = replayObligations === undefined
         || (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'complete_current'
         ? null : whatChangesFaceLine(state.analysisResult, state.graph);
+      const replayComposeText = withCellHorizon(withoutProposalIds(replayText), state.graph, replayChanceCells);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: withWithholdMarkers(withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayScreen.length > 0), state.graph, state.analysisResult), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
+        : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
@@ -2484,7 +2466,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Current/stale result-first replays above retain their state-bound recomposition rather than an old shape.
       const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText) : null;
       const replayComposed = parityReplayComposed ?? (durableShape === null ? null : { text: replayText, shape: durableShape }) ?? (composedCandidate !== null && composedCandidate.shape !== null
-        && replayScreen.length === 0 && replayObligations?.some(o => o.role === 'withheld_reason' && o.lead === true)
+        && replayChanceCells.some(cell => cell.kind === 'withheld')
         ? composedCandidate : null);
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: replayComposed !== null ? replayComposed.text : withoutProposalIds(replayText),
@@ -3945,6 +3927,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState, analysisResult } = composedRead;
+    const chanceCells = replyChanceCells(composedRead);
     const resultFirstRunCompleted = firstAnalysisResultFirst || (fastPath === 'run' && result.tool_results.some((r) => r.ran === true));
     // One final scoped draft supplies the words, the offered presses and the hook on this bound Run.
     const guidedDraftForRun = ((resultFirstRunCompleted && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null)
@@ -4499,8 +4482,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       awaitingApproval,
-      horizonPlural: goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null,
-        (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current').length > 1,
+      chanceCells,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
@@ -4733,15 +4715,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
       const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
-      // The narrator may echo the Run warning's singular fact. Bind that same producer-authored fact to the
-      // selected screen's plural grammar before the one composer; it must not become a second horizon clause.
-      if (screenLines.length > 1) {
-        const singular = untestedHorizonLine(readbackGraph);
-        const plural = untestedHorizonLine(readbackGraph, { besideChance: true, plural: true });
-        if (singular !== null && plural !== null && singular !== plural) {
-          wireBody = { ...wireBody, assistant_text: String(wireBody.assistant_text).split(singular).join(plural) };
-        }
-      }
+
     }
     let pendingPreview: ProposalPreview | undefined;
     /**
@@ -4855,7 +4829,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
-      const reply = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
+      const reply = withCellHorizon(typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '', readbackGraph, chanceCells);
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
@@ -4864,8 +4838,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const faceContract = result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true)
         ? 'draft' as const : fastPath === 'run' || fastPath === 'explain' || screenLines.length > 0 || goalChanceOwed !== null || coHold !== undefined
           ? 'run' as const : undefined;
-      const horizonLine = faceContract === 'run' && screenLines.length > 0
-        ? untestedHorizonLine(readbackGraph, { besideChance: true, plural: screenLines.length > 1 }) : null;
+      const horizonLine = faceContract === 'run' ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;
       const whatChanges = faceContract === 'run' && selectedRunCurrent && (fastPath !== 'explain' || explainsCurrentRun)
         ? whatChangesFaceLine(analysisResult, readbackGraph ?? null) : null;
       // The gate's typed cause precedence: a different claim reason does not name the co-held links.
@@ -4876,14 +4849,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The scoped guided producer is both the withheld finding and the next step; its presses own that step.
       const guidedRunFinding = faceContract === 'run' && guidedReplyText.guided !== null && reply.includes(guidedReplyText.guided)
         ? guidedReplyText.guided : undefined;
-      const withheldRunFinding = guidedRunFinding ?? (screenLines.length === 0
-        && (fastPath === 'run' || explainsCurrentRun || (closingSubjects?.length ?? 0) > 0)
-        ? [reasonLine === null ? null : sentencesOf(reasonLine)[0], goalChanceOwed,
-          ...sentencesOf(goalChanceOwed ?? ''), coHold?.why, leaderGateClosing].find((line): line is string =>
-          typeof line === 'string' && line !== '' && reply.includes(line)) : undefined);
       const obligations: FaceObligation[] = [
-        ...(withheldRunFinding === undefined ? [] : [{ role: 'withheld_reason' as const, text: withheldRunFinding, lead: true as const,
-          ...(guidedRunFinding === undefined ? {} : { ownsNextStep: true as const }) }]),
+        ...(guidedRunFinding === undefined ? [] : [{ role: 'host' as const, text: guidedRunFinding, lead: true as const,
+          ownsNextStep: true as const }]),
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
         ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
         ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
@@ -4943,7 +4911,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
-      const a7Repeat = await a7SaidLastTurn(readbackGraph, historyReader, scenarioId, turnId);
+      const a7Repeat = await a7SaidLastTurn(readbackGraph, chanceCells, historyReader, scenarioId, turnId);
       const estimates = actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady,
         analysisResult, optionParticipation, identityEvaluated, guidance: guidanceHistory, pending: durablePending }).olumiEstimates;
       const controlsOnReply = (wireBody.suggested_actions ?? []) as readonly OfferedAction[];
@@ -4955,6 +4923,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       const composedReply = composeReplyShape({
         text: reply,
+        chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),
         ...(horizonLine === null ? {} : { horizonLine }),
         ...(whatChanges === null ? {} : { whatChanges }),
@@ -4962,7 +4931,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
-        obligations: withWithholdMarkers(withA7AsDetail(obligations, a7Repeat, reply, faceContract === 'run' && screenLines.length > 0), readbackGraph, analysisResult),
+        obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }

@@ -29,7 +29,7 @@ const SCENARIO = '9b9a4b81-aaaa-4aaa-8aaa-aaaaaaaa0002';
 const HASH = String(SERVED.block.computed_against_hash);
 const READY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
 const WITHHELD_FINDING = 'This run doesn’t yet show each option’s chance of meeting your goal.';
-const SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is it today?';
+const SENTENCE = 'No figure is set for "Demand shortfall" yet, so the analysis treats it as zero. How likely or how large is "Demand shortfall" today?';
 
 type Rec = Record<string, unknown>;
 const option = (id: string, label: string, interventions: Rec, is_baseline = false): Rec => ({
@@ -251,7 +251,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   ])('CONTROL: %s → the labelled sentence, whole, once', async (_n, label) => {
     riskLabel = label;
     const shown = label.replace(/\s+/g, ' ');
-    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is "${shown}" today?`;
     const body = (await runTurn(randomUUID())).json() as Body;
     expect(body.assistant_text.split(sentence)).toHaveLength(2);
     expect(body.assistant_text).not.toContain(TREATED_AS_ZERO_UNNAMED_ONE);
@@ -266,7 +266,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     ['the option-name gate', 'Hire a Tech Lead backlog'],
     ['a line break that reached the check', 'Demand\nfalls'],
   ])('survivesReplyEditors: %s → not quoted', (_n, label) => {
-    const line = `No figure is set for "${label}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    const line = `No figure is set for "${label}" yet, so the analysis treats it as zero. How likely or how large is "${label}" today?`;
     expect(survivesReplyEditors(line, graphWith(false, label), READY)).toBe(false);
   });
   // Plural and 3+: the WHOLE line is quoted or none of it; the count is the typed roots'.
@@ -280,15 +280,15 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   };
   it.each([
     ['two ordinary labels', ['Demand shortfall', 'Supplier delay'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" yet, so the analysis treats them as zero. How likely or how large is each today?'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" today?'],
     ['three ordinary labels', ['Demand shortfall', 'Supplier delay', 'Churn spike'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each today?'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" and 1 more today?'],
     ['two, one unsafe (either position)', ['Demand shortfall', 'Hire a Tech Lead leads. Demand falls'],
       '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
     ['two, the first unsafe', ['Demand prop_abcdef12 falls', 'Supplier delay'],
       '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
     ['three, the undisplayed third unsafe (it never reaches the text)', ['Demand shortfall', 'Supplier delay', 'The analysis shows which option leads'],
-      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each today?'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each of "Demand shortfall" and "Supplier delay" and 1 more today?'],
     ['three, a displayed one unsafe', ['Demand shortfall', 'The analysis shows which option leads', 'Supplier delay'],
       '3 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
   ])('treatedAsZeroReplyLine, %s → the exact line', (_n, labels, line) => {
@@ -304,7 +304,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   });
 
   it('the protected line is kept only where it stands whole; a neighbouring ranking sentence still goes', () => {
-    const line = 'No figure is set for "Competitor wins. Demand falls" yet, so the analysis treats it as zero. How likely or how large is it today?';
+    const line = 'No figure is set for "Competitor wins. Demand falls" yet, so the analysis treats it as zero. How likely or how large is "Competitor wins. Demand falls" today?';
     const text = `Hire a Tech Lead is the best option here.\n\n${line}`;
     const out = dropRankingSentences(text, undefined, [line]);
     expect(out.text).toBe(line);

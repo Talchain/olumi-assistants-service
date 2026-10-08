@@ -29,8 +29,10 @@
  * `__tests__/compose-reply.test.ts`.
  */
 import { z } from 'zod';
+import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
+import { withoutProposalIds } from '../display-ids.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 
 /** Straight and curly quotes as one glyph each, length-preserving (offsets in the folded text are offsets in the original). */
@@ -78,6 +80,27 @@ export function markerForDisclosure(note: FaceDisclosure): string {
     case 'no_target': return 'Not shown: no target figure yet';
     case 'other': return WITHHOLD_FALLBACK_MARKER;
   }
+}
+
+/** A recorded cell reason owns the chance marker; graph labels only supply its name. */
+export function withholdDisclosureForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): FaceDisclosure | null {
+  const withheld = cells.filter((cell): cell is Extract<CanonicalAnalysisCell, { kind: 'withheld' }> => cell.kind === 'withheld');
+  if (withheld.length === 0) return null;
+  const nodes = (graph as { nodes?: { kind?: string; label?: string }[] } | null)?.nodes;
+  const goals = Array.isArray(nodes) ? nodes.filter(node => node !== null && typeof node === 'object' && node.kind === 'goal') : [];
+  const goalLabel = goals.length === 1 && typeof goals[0]?.label === 'string' ? withoutProposalIds(goals[0].label).trim() : undefined;
+  const causes = new Set<Extract<FaceDisclosure, { kind: 'withhold' }>['cause']>();
+  for (const cell of withheld) for (const reason of cell.reasons) {
+    switch (reason.code) {
+      case 'GOAL_FIGURES_MISSING_CURRENT_LEVEL': causes.add('missing_current_level'); break;
+      case 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED':
+      case 'GOAL_FIGURES_PRODUCT_NOT_READ': causes.add('unconfirmed_identity'); break;
+      case 'GOAL_FIGURES_PLACEHOLDER_PATH': causes.add('unsized_links'); break;
+      default: causes.add('other');
+    }
+  }
+  return { kind: 'withhold', cause: causes.size === 1 ? [...causes][0]! : 'other',
+    ...(goalLabel === undefined || goalLabel === '' ? {} : { goalLabel }) };
 }
 
 /**
@@ -130,6 +153,8 @@ export interface ReplyComposeInput {
   readonly faceContract?: 'draft' | 'run';
   /** Exact horizon disclosure owed beside on-face Run chances, after their own notes. */
   readonly horizonLine?: string;
+  /** The canonical per-option cells, projected once by the route from the gated Run. */
+  readonly chanceCells?: readonly CanonicalAnalysisCell[];
   /** P05b owns these words and counts; Draft face immediately after H, Run detail, ignored without a contract. */
   readonly widenedLine?: string;
   /** Draft detail; Run must-face marker after chances, with the full note in detail. */
@@ -617,21 +642,24 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
         : input.text.split('\n').flatMap(raw => sentencesOf(BULLET_LINE.exec(raw)?.[2] ?? raw)).find(part => part.includes(written));
       return [{ ...o, text: sentence ?? written }];
     }) : [];
-  const markerObligations = disclosures.filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
+  const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
+  const chanceMarker = chanceDisclosure === null ? undefined : markerForDisclosure(chanceDisclosure);
+  const markerObligations = disclosures.filter(o => o.disclosure?.kind !== 'withhold').filter(o => o.lead === true || (o.disclosure?.kind === 'robustness' && !(o.subjects?.length))
     || (input.obligations ?? []).some(finding => finding.lead === true && finding.role === 'evidence'
       && (o.subjects ?? []).some(subject => finding.subjects?.includes(subject)))).map((o): FaceObligation => ({ ...o, text: markerForDisclosure(o.disclosure!), disclosure: undefined }));
   // The full typed note owns detail even when another host part contained it. Its marker carries the face identity.
   const inputObligations = (input.obligations ?? []).filter(o => !disclosures.some(d => foldQuotes(o.text).includes(foldQuotes(d.text)) || foldQuotes(d.text).includes(foldQuotes(o.text))))
-    .concat(markerObligations);
+    .concat(markerObligations, chanceMarker === undefined ? [] : [{ role: 'withheld_reason' as const, text: chanceMarker, ...((input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range') ? {} : { lead: true as const }) }]);
   const horizonDetail = canMark && input.faceContract === 'run' ? input.horizonLine : undefined;
+  const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
   const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
-  const markerLines = [...new Set(markerObligations.map(o => o.text))];
+  const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
   const faceHostLines = !faceContract || !canMark ? [] : [
-    horizonDetail === undefined ? undefined : HORIZON_MARKER,
+    horizonDetail === undefined || !horizonBesideChance ? undefined : HORIZON_MARKER,
     input.faceContract === 'draft' ? input.widenedLine : undefined,
     widenedRiskMarker,
     input.whatChanges, input.estimatesLine,
@@ -865,8 +893,9 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
         return present.some((o) => (o.role === 'withheld_reason' || o.role === 'caveat') && u.text.includes(o.text)
           && (o.subjects ?? []).some((subject) => figureSubjects.has(subject)));
       }));
-    const horizon = input.faceContract !== 'run' || input.horizonLine === undefined ? undefined
+    const horizon = input.faceContract !== 'run' || input.horizonLine === undefined || !horizonBesideChance ? undefined
       : units.find((u) => u.text === HORIZON_MARKER);
+    const withhold = chanceMarker === undefined ? undefined : units.find(u => u.text === chanceMarker);
     const widened = input.faceContract !== 'draft' || input.widenedLine === undefined ? undefined
       : units.find(u => u.text === asWritten(input.widenedLine!.trim()));
     const widenedRisk = widenedRiskMarker === undefined ? undefined
@@ -884,7 +913,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       });
     const whatChanges = input.whatChanges === undefined ? undefined : units.find((u) => u.text === asWritten(input.whatChanges!.trim()));
     const estimates = input.estimatesLine === undefined ? undefined : units.find((u) => u.text === asWritten(input.estimatesLine!.trim()));
-    faceSet = new Set<Unit>([...findingUnits, ...companions, ...exceptions, ...robustnessPoints, ...[widened, widenedRisk, robustness].filter((u): u is Unit => u !== undefined), ...(horizon === undefined ? [] : [horizon]),
+    faceSet = new Set<Unit>([...findingUnits, ...companions, ...exceptions, ...robustnessPoints, ...[widened, widenedRisk, robustness, withhold].filter((u): u is Unit => u !== undefined), ...(horizon === undefined ? [] : [horizon]),
       ...(whatChanges === undefined ? [] : [whatChanges]), ...(estimates === undefined ? [] : [estimates]),
       ...(ask === undefined ? [] : [ask]), ...(chanceLeadIn === undefined ? [] : [chanceLeadIn])]);
     const faceWordCount = (): number => wordCount(headlineText) + [...faceSet]
@@ -922,7 +951,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       addExceptionsAfter(chance);
     }
     faceBullets.push(...robustnessPoints);
-    for (const line of [horizon, widenedRisk, whatChanges, estimates, ask]) {
+    for (const line of [horizon, withhold, widenedRisk, whatChanges, estimates, ask]) {
       if (line !== undefined && line !== headline && faceSet.has(line) && !faceBullets.includes(line)) faceBullets.push(line);
     }
     faceWords = faceWordCount();

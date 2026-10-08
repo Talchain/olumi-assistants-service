@@ -1322,7 +1322,7 @@ describe('r2 scope and mandatory horizon units', () => {
     const ownNote = 'This depends on subscribers staying after launch.';
     const context = 'The team retains the assumptions and evidence behind the figures for later review.';
     const text = [chance, chance2, ownNote, context, ...(existing ? [horizonLine] : []), ask].join('\n\n');
-    const c = composeReplyShape({ text, faceContract: 'run', horizonLine, whatChanges, estimatesLine, obligations: [
+    const c = composeReplyShape({ text, faceContract: 'run', chanceCells: [{ kind: 'figure', display: '34%' }, { kind: 'figure', display: '47%' }], horizonLine, whatChanges, estimatesLine, obligations: [
       { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
       { role: 'evidence', text: chance2, lead: true, subjects: ['price'] },
       { role: 'evidence', text: ownNote, companionOf: 'price' },
@@ -1346,7 +1346,7 @@ describe('r2 scope and mandatory horizon units', () => {
     const ownNote = 'The range retains each uncertainty about subscriber response, delivery timing and the available evidence behind the relationship.';
     const firmness = 'This chance is provisional because its churn input is estimated and still needs independent evidence from the team.';
     const text = [frame, finding, ownNote, firmness, ask].join('\n\n');
-    const c = composeReplyShape({ text, faceContract: 'run', horizonLine, whatChanges, estimatesLine, obligations: [
+    const c = composeReplyShape({ text, faceContract: 'run', chanceCells: [{ kind: 'figure', display: '34%' }, { kind: 'figure', display: '47%' }], horizonLine, whatChanges, estimatesLine, obligations: [
       { role: 'evidence', text: finding, lead: true, subjects: ['starter'] },
       { role: 'evidence', text: ownNote, companionOf: 'starter' },
       { role: 'caveat', text: firmness, subjects: ['starter'] },
@@ -1401,7 +1401,7 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     const graph = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold_raw: 20000, goal_threshold_unit: '£/month',
       ...(months === undefined ? {} : { goal_horizon_months: months }) }], edges: [] };
     expect(untestedHorizonLine(graph, { besideChance: true, plural: chances.length > 1 })).toBe(full);
-    const c = composeReplyShape({ faceContract: 'run', text: [...chances, context, ask].join('\n\n'), horizonLine: full,
+    const c = composeReplyShape({ faceContract: 'run', text: [...chances, context, ask].join('\n\n'), chanceCells: chances.map(() => ({ kind: 'figure' as const, display: '34%' })), horizonLine: full,
       obligations: [...chances.map((text, index) => ({ role: 'evidence' as const, text, lead: true as const, subjects: [`option-${index}`] })),
         { role: 'ask', text: ask }] });
     expect(HORIZON_MARKER).toBe("At today's numbers; not projected forward yet");
@@ -1413,21 +1413,60 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
   });
 
   it.each([
-    ['missing_current_level', "Not shown: MRR's current level is missing"],
-    ['unconfirmed_identity', "Not shown: how MRR is worked out isn't confirmed"],
-    ['unsized_links', "Not shown: some relationships aren't sized yet"],
-    ['no_target', 'Not shown: no target figure yet'],
-    ['other', 'Not shown yet; why is under More detail'],
-  ] as const)('R3 withheld Run: typed %s cause supplies the exact marker, independently of the note words', (cause, marker) => {
+    ['GOAL_FIGURES_MISSING_CURRENT_LEVEL', "Not shown: MRR's current level is missing"],
+    ['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', "Not shown: how MRR is worked out isn't confirmed"],
+    ['GOAL_FIGURES_PRODUCT_NOT_READ', "Not shown: how MRR is worked out isn't confirmed"],
+    ['GOAL_FIGURES_PLACEHOLDER_PATH', "Not shown: some relationships aren't sized yet"],
+    ['reason_not_recorded', 'Not shown yet; why is under More detail'],
+    ['NEW_UNMAPPED_CODE', 'Not shown yet; why is under More detail'],
+  ] as const)('R3 withheld Run: canonical %s reason supplies the exact marker, independently of the note words', (code, marker) => {
     // The note deliberately does not provide the marker noun phrase: the typed source owns that choice.
     const note = 'This figure cannot be shown from the current model; the recorded inputs need your check.';
-    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, note, ask].join('\n\n'), obligations: [
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, note, ask].join('\n\n'), graph: { nodes: [{ kind: 'goal', label: 'MRR' }] },
+      chanceCells: [{ kind: 'figure', display: '34%' }, { kind: 'withheld', reasons: [{ code, message: note }] }], obligations: [
       { role: 'evidence', text: chance, lead: true, subjects: ['mrr'] },
-      { role: 'withheld_reason', text: note, subjects: ['mrr'], disclosure: { kind: 'withhold', cause, goalLabel: 'MRR' } },
+      { role: 'withheld_reason', text: note, subjects: ['mrr'], disclosure: { kind: 'withhold', cause: 'other', goalLabel: 'MRR' } },
       { role: 'ask', text: ask },
     ] });
     expect(c.shape!.headline).toBe(chance);
     expect(c.shape!.bullets).toEqual([marker, ask]);
+    assertDisclosure(c, marker, note);
+  });
+
+  it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'] as const)(
+    'r11c identity-only withheld Run: %s names the goal without a graph verdict', code => {
+      const note = 'The recorded Run cannot show these figures until its inputs are checked.';
+      const marker = "Not shown: how MRR is worked out isn't confirmed";
+      const c = composeReplyShape({ faceContract: 'run', text: [context, note, ask].join('\n\n'),
+        graph: { nodes: [{ kind: 'goal', label: 'MRR' }] },
+        chanceCells: [{ kind: 'withheld', reasons: [{ code, message: note }] }],
+        obligations: [{ role: 'withheld_reason', text: note }, { role: 'ask', text: ask }] });
+      expect(c.shape!.headline).toBe(marker);
+      expect(c.shape!.bullets).toEqual([ask]);
+      assertDisclosure(c, marker, note);
+    });
+
+  it.each(['GOAL_FIGURES_MISSING_CURRENT_LEVEL', 'NEW_UNMAPPED_CODE'] as const)(
+    'r11c identity plus %s keeps the fallback for distinct recorded causes', code => {
+      const note = 'The recorded Run cannot show these figures until its inputs are checked.';
+      const c = composeReplyShape({ faceContract: 'run', text: [context, note, ask].join('\n\n'),
+        graph: { nodes: [{ kind: 'goal', label: 'MRR' }] },
+        chanceCells: [{ kind: 'withheld', reasons: [
+          { code: 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', message: note }, { code, message: note },
+        ] }], obligations: [{ role: 'withheld_reason', text: note }, { role: 'ask', text: ask }] });
+      expect(c.shape!.headline).toBe('Not shown yet; why is under More detail');
+      assertDisclosure(c, 'Not shown yet; why is under More detail', note);
+    });
+
+  it('r11c both identity codes are one cause kind across withheld cells', () => {
+    const note = 'The recorded Run cannot show these figures until its inputs are checked.';
+    const marker = "Not shown: how MRR is worked out isn't confirmed";
+    const c = composeReplyShape({ faceContract: 'run', text: [context, note, ask].join('\n\n'),
+      graph: { nodes: [{ kind: 'goal', label: 'MRR' }] },
+      chanceCells: ['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'].map(code =>
+        ({ kind: 'withheld' as const, reasons: [{ code, message: note }] })),
+      obligations: [{ role: 'withheld_reason', text: note }, { role: 'ask', text: ask }] });
+    expect(c.shape!.headline).toBe(marker);
     assertDisclosure(c, marker, note);
   });
 
@@ -1491,7 +1530,8 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     const typed = 'The chance is withheld because ‘MRR’ has no recorded current level.';
     const written = typed.replace(/[‘’]/g, "'");
     const marker = "Not shown: MRR's current level is missing";
-    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, written, ask].join('\n\n'), obligations: [
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, written, ask].join('\n\n'), graph: { nodes: [{ kind: 'goal', label: 'MRR' }] },
+      chanceCells: [{ kind: 'figure', display: '34%' }, { kind: 'withheld', reasons: [{ code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: typed }] }], obligations: [
       { role: 'evidence', text: chance, lead: true, subjects: ['mrr'] },
       { role: 'withheld_reason', text: typed, subjects: ['mrr'], disclosure: { kind: 'withhold', cause: 'missing_current_level', goalLabel: 'MRR' } },
       { role: 'ask', text: ask },
@@ -1519,7 +1559,7 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     const closing = `No single option can be put forward yet, because ${cause}.`;
     const marker = "Not shown: some relationships aren't sized yet";
     const text = [closing, context].join('\n\n');
-    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+    const c = composeReplyShape({ faceContract: 'run', text, chanceCells: [{ kind: 'withheld', reasons: [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', message: closing }] }], obligations: [
       { role: 'withheld_reason', text: cause, lead: true, subjects: ['mrr→goal'], disclosure: { kind: 'withhold', cause: 'unsized_links' } },
       { role: 'withheld_reason', text: closing, subjects: ['mrr→goal'], disclosure: { kind: 'withhold', cause: 'unsized_links' } },
     ] });
@@ -1539,7 +1579,7 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     const closing = `No single option can be put forward yet, because ${cause}.`;
     const marker = "Not shown: some relationships aren't sized yet";
     const text = [closing, context].join('\n\n');
-    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+    const c = composeReplyShape({ faceContract: 'run', text, chanceCells: [{ kind: 'withheld', reasons: [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', message: closing }] }], obligations: [
       { role: 'withheld_reason', text: cause, lead: true, subjects: ['mrr→goal'], disclosure: { kind: 'withhold', cause: 'unsized_links' } },
     ] });
     expect(c.shape, c.reason).not.toBeNull();
@@ -1552,7 +1592,7 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
     everySentenceExceptReportedKept([text, marker].join('\n\n'), c);
   });
-  it.each(['withhold', 'firmness'] as const)('a matched %s marker precedes the chance companion immediately after the figure', kind => {
+  it.each(['withhold', 'firmness'] as const)('a %s marker qualifies the figure or canonical withheld option while retaining its chance companion', kind => {
     const companion = 'This chance also carries the recorded spread in subscriber outcomes.';
     const note = kind === 'firmness'
       ? 'The churn input is held as an exact Olumi estimate in this Run.'
@@ -1563,7 +1603,9 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     const marker = kind === 'firmness'
       ? "May look firmer: uses Olumi's 5% as exact"
       : "Not shown: MRR's current level is missing";
-    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, companion, note, ask].join('\n\n'), obligations: [
+    const c = composeReplyShape({ faceContract: 'run', text: [chance, context, companion, note, ask].join('\n\n'),
+      graph: { nodes: [{ kind: 'goal', label: 'MRR' }] },
+      chanceCells: kind === 'firmness' ? [{ kind: 'figure', display: '34%' }] : [{ kind: 'figure', display: '34%' }, { kind: 'withheld', reasons: [{ code: 'GOAL_FIGURES_MISSING_CURRENT_LEVEL', message: note }] }], obligations: [
       { role: 'evidence', text: chance, lead: true, subjects: ['starter'] },
       { role: 'evidence', text: companion, companionOf: 'starter', subjects: ['starter'] },
       { role: kind === 'firmness' ? 'caveat' : 'withheld_reason', text: note, subjects: ['starter'], disclosure },
@@ -1571,7 +1613,7 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     ] });
     expect(c.shape, c.reason).not.toBeNull();
     expect(c.shape!.headline).toBe(chance);
-    expect(c.shape!.bullets).toEqual([marker, companion, ask]);
+    expect(c.shape!.bullets).toEqual(kind === 'firmness' ? [marker, companion, ask] : [companion, marker, ask]);
     assertDisclosure(c, marker, note);
     expect(c.shape!.detail).not.toContain(companion);
     expect(count(c.text, companion)).toBe(1);

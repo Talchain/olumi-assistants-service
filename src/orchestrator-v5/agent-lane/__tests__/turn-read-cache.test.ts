@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { turnReadCache } from '../turn-read-cache.js';
+import { captureCanonicalAnalysisViewInput, recordCanonicalAnalysisViewInput } from '../../../routes/canonical-analysis-input-context.js';
 
 const READ = '/assist/v1/scenarios/s1/graph';
 
@@ -33,6 +34,34 @@ function fakeStore() {
 const reads = (calls: string[]) => calls.filter((c) => c === READ).length;
 
 describe('turnReadCache: one read per write epoch', () => {
+  it('retains the selected Run input through isolated cached copies and replaces it after a write', async () => {
+    let version = 1;
+    let graphReads = 0;
+    const cache = turnReadCache(async path => {
+      if (path !== READ) { version += 1; return { status: 200, json: {} }; }
+      graphReads += 1;
+      const input = { revision: version, graph: { nodes: [{ id: 'goal', label: `Goal ${version}` }] }, runFact: null };
+      return (await captureCanonicalAnalysisViewInput(async () => {
+        recordCanonicalAnalysisViewInput(input);
+        return { status: 200, json: { graph: input.graph } };
+      })).response;
+    }, READ);
+    // A capability seeds the cache before the final reply starts its capture.
+    await cache.dispatch(READ, {});
+    const first = await captureCanonicalAnalysisViewInput(() => cache.dispatch(READ, {}));
+    expect(first.input?.revision).toBe(1);
+    (first.response.json.graph as { nodes: { label: string }[] }).nodes[0]!.label = 'Caller mutation';
+    const repeat = await captureCanonicalAnalysisViewInput(() => cache.dispatch(READ, {}));
+    expect(repeat.input).toBe(first.input);
+    expect((repeat.response.json.graph as { nodes: { label: string }[] }).nodes[0]!.label).toBe('Goal 1');
+    expect(graphReads).toBe(1);
+    await cache.dispatch('/assist/v1/scenarios/s1/graph/register', {});
+    const next = await captureCanonicalAnalysisViewInput(() => cache.dispatch(READ, {}));
+    expect(next.input?.revision).toBe(2);
+    expect(next.input).not.toBe(first.input);
+    expect(graphReads).toBe(2);
+  });
+
   it('RED (the approve shape): read → write → read → read → read makes TWO graph reads, and every read after the write sees it', async () => {
     const s = fakeStore();
     const c = turnReadCache(s.inner, READ);

@@ -88,6 +88,9 @@ export const GOAL_FIGURES_PRODUCT_NOT_READ = 'GOAL_FIGURES_PRODUCT_NOT_READ';
  */
 export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
 
+/** CEE's typed current-level cause, carried from this Run's missing_goal_baseline refusal for every scored option. */
+export const GOAL_FIGURES_MISSING_CURRENT_LEVEL = 'GOAL_FIGURES_MISSING_CURRENT_LEVEL';
+
 /**
  * ⛔ DL gate 1 v2 (Science 0df0e1, 5 Oct): an option whose RUN outcome is identical to the explicit baseline's
  * (`identical-to-baseline.ts`). The duplicate splits the baseline's wins (ISL ties split 1/len(winners)), so every
@@ -119,6 +122,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
+  GOAL_FIGURES_MISSING_CURRENT_LEVEL,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
   GOAL_FIGURES_SHARE_APPROXIMATION,
