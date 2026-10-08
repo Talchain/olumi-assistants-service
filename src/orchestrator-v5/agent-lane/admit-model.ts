@@ -1832,6 +1832,11 @@ export interface NonlinearIdentityLeaderWithhold {
 
 type GraphNodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown } & Record<string, unknown>;
 
+function isAccumulationCarrier(n: GraphNodeLike): boolean {
+  const c = n.nonlinear_identity as { operation?: unknown } | null | undefined;
+  return c !== null && typeof c === 'object' && c.operation === 'accumulation';
+}
+
 function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
   const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
   if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
@@ -1848,7 +1853,11 @@ export function nodesUnderANonlinearIdentity(graph: unknown): ReadonlySet<string
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return new Set();
   const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string');
-  const carried = nodes.filter((n) => readCarrier(n) !== null).map((n) => n.id as string);
+  // ⭐ CEE #3: an accumulation carrier's value is worked out by ISL too, never additively, so a limit on it is distrusted
+  // like a product's (the conservative direction: an over-withheld limit sentence, never a false one). C46's sign test
+  // (`readCarrier`) stays product-only: S_T rises with the stock and the inflow and falls with the churn rate, so its sign
+  // in each input is fixed, which is what the sign test exists to prove.
+  const carried = nodes.filter((n) => readCarrier(n) !== null || isAccumulationCarrier(n)).map((n) => n.id as string);
   if (carried.length === 0) return new Set();
   return new Set([...carried, ...nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string)]);
 }
