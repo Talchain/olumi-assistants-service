@@ -56,7 +56,7 @@ import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, linkEffectGaugeStatement, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
 import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
-import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
+import { applyIdentityConfirmEdit, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { identityReceiptWords, proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
@@ -3047,8 +3047,20 @@ export function createAgentCapabilities(
     read: { readonly raw: unknown; readonly graph_hash: unknown } | null | undefined) => {
     if (read === null || read === undefined || typeof read.graph_hash !== 'string' || read.graph_hash === '') return undefined;
     const card = proposeProductIdentity(read.raw);
-    // An unwritable base (the writer's own check) offers no card: its Yes could not be recorded (DL 5897757819).
-    return identityCardHintFor(card !== null && identityConfirmBaseIsWritable(read.raw) ? card : null, false);
+    // An unwritable base (the writer's own check) offers no card: its Yes could not be recorded (DL 5897757819). Nor does a
+    // part with no level (B1 828d87ac): the writer refuses that Yes, and the level is asked first (`identityLevelAskFor`).
+    return identityCardHintFor(card !== null && identityConfirmBaseIsWritable(read.raw)
+      && identityPartsWithoutLevel(read.raw, card.factor_ids).length === 0 ? card : null, false);
+  };
+  /** The words said instead of the card when the stored reading has a part with no level; null otherwise. */
+  const identityLevelAskFor = (raw: unknown): string | null => {
+    const card = proposeProductIdentity(raw);
+    if (card === null) return null;
+    const missing = identityPartsWithoutLevel(raw, card.factor_ids);
+    if (missing.length === 0) return null;
+    const nodes = (raw as { nodes?: { id?: unknown; label?: unknown }[] } | null)?.nodes ?? [];
+    const labelOf = (id: string): string => { const l = nodes.find((n) => n?.id === id)?.label; return typeof l === 'string' && l.trim() !== '' ? l.trim() : id; };
+    return identityPartLevelAsk(labelOf(card.outcome_id), card.factor_ids.map(labelOf), missing);
   };
 
   /**
@@ -4024,7 +4036,9 @@ export function createAgentCapabilities(
       if (dry.kind === 'refused') {
         const label = g.nodes.find((n) => n.id === card.outcome_id)?.label;
         return { ok: false, mutated: false, refusal: `identity_${dry.reason}`,
-          detail: identityRefusalWords(dry.reason, typeof label === 'string' && label !== '' ? label : card.outcome_id) };
+          detail: dry.reason === 'operand_level_missing' && dry.detail !== undefined
+            ? `Nothing was offered. Say exactly this, and never guess the figure or offer a confirmation: ${dry.detail}`
+            : identityRefusalWords(dry.reason, typeof label === 'string' && label !== '' ? label : card.outcome_id) };
       }
       const proposal = proposals.put(identityProposalFor(ctx, g.graph_hash, card));
       return {
@@ -9101,7 +9115,8 @@ export function createAgentCapabilities(
         ...withGoalChance(result, graphForProduct ?? postRunRead?.raw),
         // ⭐ MC D1 (c): #416's ONE ask, from the graph this Run analysed (the read above), said after its reason by the route.
         ...(() => {
-          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) : null;
+          // The level a waiting reading's part lacks is asked here too (B1 828d87ac): its card is not offered until it has one.
+          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) ?? identityLevelAskFor(postRunRead.raw) : null;
           return say !== null ? { identity_ask_say: say } : {};
         })(),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),

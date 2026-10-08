@@ -1073,6 +1073,9 @@ function productStillGives(nodes: GoalLevelRead['nodes'], goal: GoalLevelRead['n
   if (identity === null || typeof identity !== 'object' || identity.operation !== 'product' || !Array.isArray(identity.factor_ids)) return null;
   const parts = identity.factor_ids.map((id) => nodes.find((n) => n.id === id));
   if (parts.length < 2 || parts.some((p) => p === undefined || !num(p.observed_state?.raw_value))) return null;
+  // ⛔ #2851 buddy r2 P1 (DL ruling 2): a part's figure is the user's or none; Olumi's basis-less 250 gave "those figures
+  // still give £12,250 / month" on an approval while the card asked for that count.
+  if (parts.some((p) => { const o = classifyValueSource(p!.observed_state?.source); return o !== 'user_stated' && o !== 'user_ratified'; })) return null;
   return {
     parts: parts.map((p) => `"${p!.label}"`).join(' × '),
     value: parts.reduce((product, p) => product * (p!.observed_state!.raw_value as number), 1),

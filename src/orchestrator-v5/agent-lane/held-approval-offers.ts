@@ -4,16 +4,30 @@ import { ProposalStore } from './proposal.js';
 import { AMEND_CHIP, typedApprovalOf } from './approval-chips.js';
 import { offeredApproveChipOnRow, rehydrateProposals } from './durable-proposal.js';
 import { isPendingActionExpired, parsePendingAction, type PendingAction } from '../session/pending-action.js';
+import { identityReadingOf } from './identity-card.js';
+import { identityCardOfferable } from '../system-events/identity-confirm-edit.js';
+import type { StructuredProposal } from './proposal.js';
+
+/**
+ * ⛔ A HELD IDENTITY CARD IS SHOWN ONLY WHILE IT IS STILL OFFERABLE (#2851 Codex buddy r1 P1-1): a card held from before
+ * the part-level gate, or one whose part lost the user's level, would be restored or carried and then refused on its Yes,
+ * which is confirm-then-refuse again. Given the graph the caller read, a `confirm_identity` proposal is executable only
+ * while `identityCardOfferable` holds on it. Without a graph nothing changes (the hash check stands alone, as before).
+ */
+export function identityProposalOfferable(proposal: StructuredProposal | undefined, graph: unknown): boolean {
+  if (graph === undefined || proposal === undefined || identityReadingOf(proposal) === undefined) return true;
+  return identityCardOfferable(graph);
+}
 
 /** The SAME process store the turn route authorises and settles. */
 export const agentProposals = new ProposalStore();
 const proposals = agentProposals;
 
 /** The turn's authorise call, shared verbatim: current analysis-affecting graph hash and verified subject. */
-export function executableProposalId(id: string, scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
+export function executableProposalId(id: string, scenarioId: string, userId: string | null, graphHash: string | undefined, graph?: unknown): string | undefined {
   if (graphHash === undefined) return undefined;
   const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
-  return decision.status === 'execute' ? id : undefined;
+  return decision.status === 'execute' && identityProposalOfferable(proposals.get(id), graph) ? id : undefined;
 }
 
 /**
@@ -23,12 +37,12 @@ export function executableProposalId(id: string, scenarioId: string, userId: str
  * replay checked only id membership, so after the model moved a retried Run showed a chip that could not
  * commit).
  */
-export function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
+export function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined, graph?: unknown): string | undefined {
   if (graphHash === undefined) return undefined;
   const waiting = proposals.outstanding(scenarioId, userId);
   if (waiting.length !== 1) return undefined;
   const id = waiting[0]!.proposal_id;
-  return executableProposalId(id, scenarioId, userId, graphHash);
+  return executableProposalId(id, scenarioId, userId, graphHash, graph);
 }
 
 /** The turn replay's approve/amend pair, in its original order. No other action is inferred. */
@@ -58,6 +72,8 @@ export const HELD_OFFER_ROWS_READ_CAP = 8;
 export async function readExecutableHeldProposalOffers(input: {
   scenarioId: string; userId: string | null; graphHash: string | undefined;
   latest: readonly PendingAction[];
+  /** The graph read with `graphHash`: a held identity card is armed only while it is still offerable on it. */
+  graph?: unknown;
   rows: readonly { turn_id: string }[]; // newest first, answer rows only
   store: { readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null> };
 }): Promise<HeldProposalOfferRead[]> {
@@ -75,7 +91,7 @@ export async function readExecutableHeldProposalOffers(input: {
       authenticated_user_id: input.userId, current_graph_identity_hash: input.graphHash,
       // Test the exact chip click; the row below must still offer this same typed identity.
       typed_approval_of: id };
-    if (membership.authorise(request).status !== 'execute') return [];
+    if (membership.authorise(request).status !== 'execute' || !identityProposalOfferable(membership.get(id), input.graph)) return [];
     // get and authorise only read Maps; neither changes order, capacity, or settlement.
     // A known warm refusal (including applied/partial/stale/integrity) vetoes durable authority.
     if (proposals.get(id) !== undefined && proposals.authorise(request).status !== 'execute') return [];
