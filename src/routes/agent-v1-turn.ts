@@ -560,12 +560,18 @@ const MUTATION_INSTRUCTION =
 const RECENT_REPLIES_READ = 20;
 
 type RecentRowsReader = { readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null; readonly user_message?: string | null }[]> };
+type RecentTextRows = Awaited<ReturnType<NonNullable<RecentRowsReader['readRecent']>>>;
 
 /** Protect visible user sentences after a restart, without treating stored messages as authority for graph writes. */
-async function userTextsForEgress(store: RecentRowsReader, scenarioId: string, typed: readonly string[]): Promise<string[]> {
-  if (typeof store.readRecent !== 'function') return [...typed];
-  const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
-  return [...typed, ...rows.filter(isAgentAnswerRow).flatMap(row => typeof row.user_message === 'string' ? [row.user_message] : [])];
+async function userTextsForEgress(store: RecentRowsReader, scenarioId: string, typed: readonly string[], knownRows?: RecentTextRows): Promise<string[]> {
+  if (knownRows === undefined && typeof store.readRecent !== 'function') return [...typed];
+  try {
+    const rows = knownRows ?? await store.readRecent!(scenarioId, CONVERSATION_ROWS_READ);
+    return [...typed, ...rows.filter(isAgentAnswerRow).flatMap(row => typeof row.user_message === 'string' ? [row.user_message] : [])];
+  } catch (err) {
+    log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: earlier user words could not be read — current typed words stay protected');
+    return [...typed];
+  }
 }
 
 /**
@@ -2698,11 +2704,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // `historyFromDurableTurns`. A failed read degrades to no history; it never
     // fails the turn.
     const held = histories.get(sessionId);
+    let durableSeedRows: RecentTextRows | undefined;
     /** T1 (a): this conversation's earlier words are KNOWN — held in-process, or read durably. A failed or absent read leaves them unknown. */
     let earlierWordsKnown = !needsDurableSeed(held);
     if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
       try {
-        const durable = historyFromDurableTurns(await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ));
+        // One read covers the wider user-span protection window; the history producer still keeps only its newest 20 answers.
+        durableSeedRows = await store.readRecent(scenarioId, Math.max(DURABLE_SEED_ROWS_READ, CONVERSATION_ROWS_READ));
+        const durable = historyFromDurableTurns(durableSeedRows);
         if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
         earlierWordsKnown = true;
       } catch (err) {
@@ -4669,7 +4678,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       analysisResult, graph: readbackGraph ?? null,
       current: (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
       userAuthoredTexts: await userTextsForEgress(store, scenarioId,
-        [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])]),
+        [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], durableSeedRows),
     });
     /**
      * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a

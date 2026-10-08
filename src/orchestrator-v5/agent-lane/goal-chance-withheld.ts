@@ -158,7 +158,8 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   ...scopedDraft: [] | [GuidedSizingDraft | undefined] | [GuidedSizingDraft | undefined, string | null]): GoalChanceWithheld | undefined {
   // An explicitly supplied empty draft also owns the scope; do not fall back to another read.
   const guided = scopedDraft.length > 0 ? scopedDraft[0] : guidedSizingForRun(result, graph);
-  const suppliedGuidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : guidedSizingReplyText(guided).guided;
+  // The default words depend on the complete cause set below, including warning-only legacy Runs.
+  const suppliedGuidedText = scopedDraft.length > 1 ? scopedDraft[1] ?? null : null;
   // A one-pair explanation changes words only; the established offer/hook eligibility stays with `guided`.
   const single = guided === undefined ? guidedSizingForRun(result, graph, true) : undefined;
   const wordDraft = guided ?? (single?.total === 1 ? single : undefined);
@@ -174,9 +175,14 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
     .filter(w => !(opening === RANGE_OPENING && w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && w.say === ''));
   if (sourceWarnings.length === 0) return undefined;
   const graphNodes = recordOf(graph)?.nodes;
+  // A graph-less mixed Run cannot prove that GP's pairs exhaust its target requirements. Preserve that
+  // independent recorded requirement verbatim; the GP explanation has its own words beside it.
+  const legacyTargetWords = graph === undefined ? sourceWarnings.filter(w => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)
+    .flatMap(w => typeof w.say === 'string' && w.say.trim() !== '' ? [w.say.trim()]
+      : typeof w.message === 'string' ? [w.message.replace(UI_OPENING, '').trim()] : []) : [];
   const factorLabels = [...(Array.isArray(graphNodes) ? graphNodes.map(recordOf) : [])
     .flatMap(n => typeof n?.label === 'string' ? [n.label] : []),
-  ...(wordDraft?.links.flatMap(l => [l.from_label, l.to_label]) ?? [])];
+  ...(wordDraft?.links.flatMap(l => [l.from_label, l.to_label]) ?? []), ...legacyTargetWords];
   const reply = (value: GoalChanceWithheld): GoalChanceWithheld => wordDraft === undefined
     && !sourceWarnings.some(w => w.code === GOAL_FIGURES_PLACEHOLDER_PATH) ? value : {
       ...value, say: withoutGuidedSizingJargon(value.say, factorLabels),

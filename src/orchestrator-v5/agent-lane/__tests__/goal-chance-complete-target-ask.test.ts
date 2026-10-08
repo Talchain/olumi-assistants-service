@@ -59,7 +59,8 @@ describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more, h
   const warnings = block.enrichment.inference_warnings;
   const placeholder = warnings.find((w) => w.code === PLACEHOLDER)!;
   const target = warnings.find((w) => w.code === TARGET)!;
-  const complete = `${gpReason(target.say!)} ${header}`;
+  // The unknown legacy cause set keeps its separate recorded target requirement byte-for-byte.
+  const complete = `${target.say!} ${header}`;
 
   it('PRECONDITION: the captured wire carries both warnings with distinct claim and option scopes', () => {
     expect(warnings.map((w) => w.code)).toEqual(['FACTOR_EVPPI_NOT_COMPUTED', PLACEHOLDER, TARGET]);
@@ -122,7 +123,7 @@ describe.each(rows)('W5 witnessed $name', ({ captured, placeholderCount, more, h
     const { say: _say, ...withoutSay } = target;
     const older = warnings.map((w) => w.code === TARGET ? withoutSay : w);
     expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: older } })?.say)
-      .toBe(`${gpReason(target.message.replace(/^Not shown\.\s*/, ''))} ${header}`);
+      .toBe(`${target.message.replace(/^Not shown\.\s*/, '')} ${header}`);
   });
 });
 
@@ -132,7 +133,7 @@ it('independent identity reasons remain beside the complete target ask, under th
   const warnings = rows[0]!.captured.analysis_result.enrichment.inference_warnings;
   const chance = goalChanceWithheldForAgent({ enrichment: { inference_warnings: [...warnings, identity] } })!;
   const target = warnings.find(w => w.code === TARGET)!;
-  expect(chance.say).toBe(`${gpReason(identity.message.replace(/^Not shown\.\s*/, ''))} ${gpReason(target.say!)} ${rows[0]!.header}`);
+  expect(chance.say).toBe(`${gpReason(identity.message.replace(/^Not shown\.\s*/, ''))} ${target.say!} ${rows[0]!.header}`);
   expect(chance.say).not.toContain('Give a rough strength');
   expect(chance.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
   expect(chance.node_ids).toEqual([...new Set(warnings.concat(identity).flatMap((w) => w.node_ids ?? []))]);
