@@ -286,9 +286,17 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
       message: 'Not shown. Raise needs a testable target.' };
     const bothWithheld = { ...licence, withheld_option_ids: ['raise', 'keep'], pct_by_option: {} };
     const input = args([bothWithheld, target]);
+    // #2879: a licence with no licensed point is emitted only to carry zero-spread reasons, so the no-reason case uses
+    // a licence the producer does emit: a third option holds a licensed point.
+    const withLicensedHold = (): Json => {
+      const held = args([{ ...bothWithheld, option_ids: ['raise', 'keep', 'hold'], pct_by_option: { hold: 40 } }, target]);
+      held.graph = { ...graph, nodes: [...graph.nodes, { id: 'hold', kind: 'option', label: 'Hold' }] };
+      held.currentResult.enrichment.option_comparison.push({ option_id: 'hold' });
+      return held;
+    };
     const line = 'Not shown yet: needs month-by-month changes';
     for (const carrier of [{ keep: { reason: 'zero_spread', side: 'falls_short', line } }, {}]) {
-      const view = projectWithReasonCarrier(input, carrier);
+      const view = projectWithReasonCarrier(Object.hasOwn(carrier, 'keep') ? input : withLicensedHold(), carrier);
       expect(cell(view, 'raise')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why: target.message });
       expect(cell(view, 'keep')).toMatchObject({ kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN,
         why: Object.hasOwn(carrier, 'keep') ? line : `‘Keep’: ${OPTION_CHANCE_WITHHELD}` });
