@@ -872,8 +872,8 @@ describe('the producer half: one shape rule for every model', () => {
     expect(REPLY_SHAPE_INSTRUCTION).toContain('More detail');
     expect(REPLY_SHAPE_INSTRUCTION).toContain('If you ask a question, it stays your last sentence.');
     expect(REPLY_SHAPE_INSTRUCTION).not.toMatch(/[‒-―]/);
-    expect(REPLY_SHAPE_INSTRUCTION).toContain('under 80 words, with one reasoning move and at most one question or next action');
-    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toEqual(['20', '80']);
+    expect(REPLY_SHAPE_INSTRUCTION).toContain('under 75 words, with one reasoning move and at most one question or next action');
+    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toEqual(['20', '75']);
   });
 });
 
@@ -1095,7 +1095,9 @@ describe('ONE reply contract: typed controls own only their matching next step',
   it('a question-bearing ordinary bullet: only its question is N; the preceding host sentence stays in detail', () => {
     const ask = 'Which assumption should we check first?';
     const prefix = 'We should check the recorded assumptions before relying on this result.';
-    const text = `${headline}\n- ${prefix} ${ask}\n\n${context}`;
+    // Long enough that the contract shapes it (a reply already within the face ships whole, as on staging).
+    const longer = Array.from({ length: 12 }, (_, i) => `Supporting point ${i + 1} explains one more part of the model in plain words.`).join(' ');
+    const text = `${headline}\n- ${prefix} ${ask}\n\n${context}\n\n${longer}`;
     const c = composeReplyShape({ faceContract: 'draft', text });
     expect(c.outcome).toBe('shaped');
     expect(c.shape!.headline).toBe(headline);
@@ -1353,7 +1355,9 @@ describe('r2 scope and mandatory horizon units', () => {
 
   it('a draft without a chance cannot synthesize the short horizon form', () => {
     const c = composeReplyShape({ text: 'I mapped your strategy.', faceContract: 'draft', horizonLine });
-    expect(c.shape!.headline).toBe('I mapped your strategy.');
+    // Already the whole face: shipped as written, with no horizon line added.
+    expect(c.outcome).toBe('already_in_shape');
+    expect(c.text).toBe('I mapped your strategy.');
     expect(c.text).not.toContain(horizonLine);
   });
 });

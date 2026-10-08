@@ -61,7 +61,7 @@ export const FACE_DEMOTION_ORDER = ['estimates', 'what_changes'] as const;
 export const REPLY_SHAPE_INSTRUCTION =
   'Shape: begin with one short sentence that answers. Then give at most three bullets, each on its own line starting '
   + 'with "- " and under 20 words: concise, action-oriented points grounded in this model (two bullets if you also ask a '
-  + 'question). Keep that part under 80 words, with one reasoning move and at most one question or next action; no '
+  + 'question). Keep that part under 75 words, with one reasoning move and at most one question or next action; no '
   + 'generic advice. Put any further explanation after the bullets, after a blank line: Olumi shows it under More '
   + 'detail, so never repeat it in the bullets. If you ask a question, it stays your last sentence.';
 
@@ -863,6 +863,11 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
       && units[u.idx - 1]!.kind === 'sentence' && /:["'”’)\]*]{0,4}$/.test(units[u.idx - 1]!.text))) {
       return { text, shape: null, outcome: 'kept_whole', reason: 'lead_in_split', measure };
     }
+  } else if (split?.lead !== '' && faceHostLines.length === 0 && controlQuestions.length === 0 && goalChanceHeadline === undefined
+    && detailLines.length === 0 && restatements.size === 0 && wordCount(text) <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) {
+    // A contract reply that is already the whole face (≤ budget, at most one question, nothing for the contract to place:
+    // no chance, no horizon/W/E line, no card question to move) ships exactly as written, as on staging.
+    return { text, shape: null, outcome: 'already_in_shape', measure };
   }
   const detail = [renderDetail(detailUnits, faceContract), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
   // A typed host or goal-chance part can contain several sentences; narrator headlines keep the single-sentence contract.

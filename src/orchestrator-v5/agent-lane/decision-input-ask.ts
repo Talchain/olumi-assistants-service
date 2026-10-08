@@ -13,6 +13,7 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
  */
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
@@ -232,7 +233,7 @@ export const GOAL_HORIZON_NOT_TESTED = 'GOAL_HORIZON_NOT_TESTED';
  * moves no figure. An envelope already carrying the code is returned as is. Pure.
  */
 export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown): E {
-  const line = untestedHorizonLine(graph, { besideChance: true });
+  const line = untestedHorizonLine(graph);
   if (line === null || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const env = envelope as Rec;
   const existing: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
@@ -243,6 +244,33 @@ export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown): E {
     ...(typeof goalId === 'string' ? { node_ids: [goalId] } : {}),
   };
   return { ...env, inference_warnings: [...existing, warning] } as E;
+}
+
+/**
+ * The SHORT horizon clause beside every goal chance (DL ruling, 8 Oct): a Run that licensed a goal chance and holds no
+ * month count (so `withUntestedHorizonWarning` added nothing) gains the short clause as its typed warning, and each
+ * GOAL_CHANCE_LICENSED warning carries it as `horizon_line`, exactly as `goalChanceHorizonOf` would have spread it. Runs
+ * without a licensed chance, and Runs already carrying the warning, are returned as the same object. Pure.
+ */
+export function withShortHorizonBesideChance<E>(envelope: E, graph: unknown): E {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const env = envelope as Rec;
+  const warnings: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
+  if (warnings.some((w) => recordOf(w)?.code === GOAL_HORIZON_NOT_TESTED)) return envelope;
+  if (!warnings.some((w) => recordOf(w)?.code === GOAL_CHANCE_LICENSED)) return envelope;
+  const short = untestedHorizonLine(graph, { besideChance: true });
+  if (short === null) return envelope;
+  const goalId = goalOf(graph)?.id;
+  const warning = {
+    code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: short,
+    ...(typeof goalId === 'string' ? { node_ids: [goalId] } : {}),
+  };
+  const licensed = warnings.map((w) => {
+    const r = recordOf(w);
+    return r?.code === GOAL_CHANCE_LICENSED && r.horizon_line === undefined
+      ? { ...r, horizon_untested: true, horizon_line: short } : w;
+  });
+  return { ...env, inference_warnings: [...licensed, warning] } as E;
 }
 
 /** The one ask writer, before display scrubbing or turn eligibility. */

@@ -23,8 +23,10 @@ import {
   GOAL_HORIZON_NOT_TESTED,
   decisionInputLines,
   untestedHorizonLine,
+  withShortHorizonBesideChance,
   withUntestedHorizonWarning,
 } from '../../../agent-lane/decision-input-ask.js';
+import { GOAL_CHANCE_LICENSED } from '../../../goal-target/goal-chance-licence.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { goalKindOf } from '../../../goal-target/goal-kind.js';
 import { teamShareMoments } from '../../../goal-target/event-by-date-share.js';
@@ -155,16 +157,27 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
     expect(horizonWarnings(result).map((w) => w.message)).toEqual([A7_12]);
   });
 
-  it('a duration limit scores the deadline → Run keeps only the short basis and chat says no A7', async () => {
+  it('CONTROL: a duration limit scores the deadline → no horizon warning on a Run with no licensed chance, and no chat A7', async () => {
     const g = withDurationLimit(M1.graph);
-    expect(horizonWarnings(await runOn(g)).map((w) => w.message)).toEqual([A7_SHORT]);
+    expect(horizonWarnings(await runOn(g))).toEqual([]);
     expect(untestedHorizonLine(g)).toBeNull();
   });
 
-  it('R3 no-months Run warning carries the SHORT form byte-exact', async () => {
-    const w = horizonWarnings(await runOn(withoutHeldMonths()));
-    expect(w).toHaveLength(1);
-    expect(w[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_SHORT, node_ids: ['mrr'] });
+  it('CONTROL: no held months and no licensed chance on the Run → no horizon warning (stored bytes as before)', async () => {
+    expect(horizonWarnings(await runOn(withoutHeldMonths()))).toEqual([]);
+  });
+
+  it('R3 a Run that LICENSED a goal chance with no held months carries the SHORT form byte-exact, on the warning and the licence', () => {
+    const licence = { code: GOAL_CHANCE_LICENSED, severity: 'info', message: 'licensed', option_ids: ['a'] };
+    const out = withShortHorizonBesideChance({ inference_warnings: [licence] }, withoutHeldMonths()) as Json;
+    expect(horizonWarnings(out)).toHaveLength(1);
+    expect(horizonWarnings(out)[0]).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_SHORT, node_ids: ['mrr'] });
+    expect(out.inference_warnings[0]).toMatchObject({ code: GOAL_CHANCE_LICENSED, horizon_untested: true, horizon_line: A7_SHORT });
+    // CONTROLS: no licensed chance → the same object; a held month count already wrote the full sentence → the same object.
+    const unlicensed = { inference_warnings: [] };
+    expect(withShortHorizonBesideChance(unlicensed, withoutHeldMonths())).toBe(unlicensed);
+    const full = withUntestedHorizonWarning({ inference_warnings: [licence] }, M1.graph);
+    expect(withShortHorizonBesideChance(full, M1.graph)).toBe(full);
   });
 
   it('R3 no-months draft chat A7 host owes no horizon line', () => {
@@ -200,7 +213,7 @@ describe('withUntestedHorizonWarning withholds nothing', () => {
     const once = withUntestedHorizonWarning(clone(envelope), M1.graph);
     expect(withUntestedHorizonWarning(once, M1.graph)).toBe(once);
     const limited = clone(envelope);
-    expect((withUntestedHorizonWarning(limited, withDurationLimit(M1.graph)) as Json).inference_warnings.at(-1)?.message).toBe(A7_SHORT);
+    expect(withUntestedHorizonWarning(limited, withDurationLimit(M1.graph))).toBe(limited);
     const twoGoals = { ...M1.graph, nodes: [...M1.graph.nodes, { id: 'mrr2', kind: 'goal', label: 'MRR 2', goal_horizon_months: 6 }] };
     expect(withUntestedHorizonWarning(limited, twoGoals)).toBe(limited);
   });
