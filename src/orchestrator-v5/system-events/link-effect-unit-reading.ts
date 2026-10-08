@@ -6,12 +6,13 @@ import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
 import { afterChangeWord, denominatorWords, isChangeWord, levelDenominatorOf, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { singular, words } from '../agent-lane/same-unit.js';
-import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
+import { boundedLinkEffectText, findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
 import { isPercentageLevelUnit, resolveMagnitudeFrame, sourceUnitWords } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
 import { mediatorReadings } from '../agent-lane/mediator-reading.js';
 import { canAdoptLabelUnit, labelHeadUnit } from '../agent-lane/label-head-unit.js';
+import { naturalFloorAmount, readLinkEffectFloorAnswer, type LinkEffectFloor } from '../agent-lane/link-effect-lower-bound.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -20,6 +21,45 @@ const text = (v: unknown): string | undefined => typeof v === 'string' && v.trim
 export interface LinkEffectUnitReading {
   readonly node_id: string;
   readonly unit_reading: { readonly unit: string; readonly source: 'user_stated'; readonly source_quote: string };
+}
+/** The recorded answer settles one endpoint's reading of its unchanged, verbatim statement. */
+export interface LinkEffectClarificationReading {
+  readonly node_id: string;
+  readonly quote: string;
+  readonly answer: string;
+  /** RC2: the recorded minimum and its settled unit reading, never a point estimate. */
+  readonly floor?: LinkEffectFloor;
+  /** The upper plausible extreme supplied in the same answer, in the floor's reading. */
+  readonly upper?: number;
+}
+
+/** No conversion or chosen figure: only the literal percentage's own magnitude read explicitly as points. */
+export function linkEffectClarificationSettlesPoints(
+  clarification: LinkEffectClarificationReading | undefined, nodeId: string, quote: string, value: number,
+): boolean {
+  if (!isRec(clarification) || clarification.node_id !== nodeId || clarification.quote !== quote
+    || typeof clarification.answer !== 'string' || clarification.answer.length > 400) return false;
+  if (clarification.floor !== undefined) {
+    const floor = clarification.floor;
+    const answer = readLinkEffectFloorAnswer(floor, clarification.answer);
+    return answer.ok && floor.reading === 'points'
+      && naturalFloorAmount(floor, answer.guess) === value
+      && answer.upper === clarification.upper
+      && boundedLinkEffectText(quote) !== undefined
+      && findLinkEffectAmounts(quote).some(a => a.magnitude === Math.abs(floor.value));
+  }
+  if (hasLinkEffectRange(quote)) return false;
+  const stated = findLinkEffectAmounts(quote);
+  // Choosing points settles a unit reading; it never turns a one-sided bound into a single size.
+  if (boundedLinkEffectText(quote) !== undefined
+    || !stated.some(a => a.kind === 'percent' && a.magnitude === Math.abs(value))) return false;
+  const reply = clarification.answer.trim().replace(/^(?:I mean|I meant|it['’]?s|that['’]?s)\s+/i, '').replace(/[.!]$/, '').trim();
+  if (/^percentage\s+points?$/i.test(reply)) return true;
+  const amounts = findLinkEffectAmounts(reply);
+  const one = amounts.length === 1 ? amounts[0] : undefined;
+  return one !== undefined && one.kind === 'plain' && one.magnitude === Math.abs(value)
+    && reply.slice(0, one.index).trim() === ''
+    && /^percentage\s+points?$/i.test(reply.slice(one.index + one.matchedText.length).trim());
 }
 export interface PreparedLinkEffectUnitReadings {
   readonly unit_readings: readonly LinkEffectUnitReading[];
@@ -316,7 +356,7 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
 
 export function prepareLinkEffectUnitReadings(
   graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string,
-  options?: { readonly link_selected?: boolean },
+  options?: { readonly link_selected?: boolean; readonly clarification?: LinkEffectClarificationReading },
 ): PreparedLinkEffectUnitReadings {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return { unit_readings: [] };
   const nodes = graph.nodes.filter(isRec);
@@ -379,6 +419,9 @@ export function prepareLinkEffectUnitReadings(
         // U3 (d5 (1)): "X% of {the level's own denominator}" is points in the user's own words: no question; the card says
         // points for approval and the writer stores the points reading, exactly as at a typed 0.
         if (percentOfOwnDenominator(quote, literalPercent, node, amounts)) { points_at_zero.push(String(node.id)); continue; }
+        if (linkEffectClarificationSettlesPoints(options?.clarification, String(node.id), quote, value)) {
+          points_at_zero.push(String(node.id)); continue;
+        }
         asks.push(pointsOrShareAsk(label, value, level, frame));
         continue;
       }

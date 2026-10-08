@@ -369,7 +369,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how much an EXISTING link moves its target, as the user\u2019s own figures, when the user has just said it in numbers '
       + '(for example "every \u00a31 on the price loses us about 50 subscribers"). This does NOT change anything: it prepares ONE change and '
       + 'returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + 'Both magnitudes must be the user\u2019s own figures in ONE statement from THIS message. Deterministic number words '
+      + 'Both magnitudes must be the user\u2019s own figures in ONE statement from THIS message. A live link_effect_clarifications entry in canonical state also licenses its exact stored quote for that same link, together with this reply answering its question. Never use another link\u2019s or an expired clarification. Record a lower bound with its open question; never choose its bound as a size. Once its reading is resolved, ask for the best single guess and the most it could plausibly be. For that answer, use the exact held quote, the guess as amount (relative guesses converted using the recorded relative_base), and the floor’s recorded per_source_change and units. If the upper end was also supplied, pass upper; a guess alone keeps the floor without a range. Deterministic number words '
       + 'are accepted ("two", "one and a half", "half a point", "about a point"); explicit percent levels such as '
       + '"from 8% to 4%" state a -4-point change. Never choose a figure from a range or invent a missing figure. '
       + '`amount` is your proposed signed change in the TARGET (negative when it falls); `per_source_change` is your '
@@ -390,6 +390,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         amount: { type: 'number', description: 'The signed target change.' }, amount_unit: { type: 'string', description: 'The target unit.' },
         per_source_change: { type: 'number', description: 'The signed source change this is per.' }, per_source_change_unit: { type: 'string', description: 'The source unit.' },
         quote: { type: 'string', description: 'The exact user words for this link.' },
+        upper: { type: 'number', description: 'The plausible upper end supplied with the best guess answering a recorded lower-bound question, in that bound reading.' },
       }, ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote']), },
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
@@ -397,7 +398,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       amount_unit: { type: 'string', description: 'The target\u2019s unit (for a percentage level, "percentage points").' },
       per_source_change: { type: 'number', description: 'Your proposed signed reading of the user\u2019s source magnitude (non-zero), disclosed on the approval card.' },
       per_source_change_unit: { type: 'string', description: 'The source\u2019s unit.' },
-      quote: { type: 'string', description: 'The user\u2019s complete statement from THIS message, copied exactly with its punctuation.' },
+      quote: { type: 'string', description: 'The user\u2019s complete statement from THIS message, or the exact live stored statement being clarified, copied exactly with its punctuation.' },
+      upper: { type: 'number', description: 'The plausible upper end supplied with the best guess answering a recorded lower-bound question, in that bound reading.' },
       }, []),
       oneOf: [
         { required: ['links'] },

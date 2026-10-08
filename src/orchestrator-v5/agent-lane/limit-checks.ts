@@ -22,6 +22,7 @@ import {
   type PlaceholderPartsFinding,
 } from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
+import type { LinkEffectClarificationPending } from './link-effect-clarification.js';
 import { limitCheckAsks } from './limited-level-ask.js';
 
 export interface LimitCheck {
@@ -45,6 +46,48 @@ export interface LimitCheck {
 }
 
 const q = (label: string): string => `‘${label}’`;
+
+function carriedLinkAsk(
+  from: unknown,
+  to: unknown,
+  clarifications: readonly LinkEffectClarificationPending[],
+): string | undefined {
+  const action = clarifications.find(pending => pending.action.from_id === from && pending.action.to_id === to)?.action;
+  // AIQ: words pending
+  return action === undefined ? undefined : `You said “${action.quote}”. ${action.question}`;
+}
+
+/** The old part-to-target ask can span a path. Use its one carried edge only when that edge is unambiguous. */
+function carriedPartAsk(
+  partId: string | undefined,
+  targetId: string,
+  nodes: readonly Record<string, unknown>[],
+  links: readonly Record<string, unknown>[],
+  clarifications: readonly LinkEffectClarificationPending[],
+): string | undefined {
+  const exact = carriedLinkAsk(partId, targetId, clarifications);
+  if (exact !== undefined || partId === undefined || clarifications.length === 0) return exact;
+  const allowed = new Set(nodes.filter(node => node.kind !== 'option' && node.kind !== 'decision'
+    && (node.analysis_participation !== 'retained_excluded' || node.id === targetId)).map(node => node.id));
+  const onPath = links.filter(link => allowed.has(link.from) && allowed.has(link.to));
+  const reaches = (from: unknown, to: unknown): boolean => {
+    const seen = new Set<unknown>([from]);
+    const queue: unknown[] = [from];
+    while (queue.length > 0) {
+      const at = queue.shift();
+      if (at === to) return true;
+      for (const link of onPath) {
+        if (link.from !== at || seen.has(link.to)) continue;
+        seen.add(link.to);
+        queue.push(link.to);
+      }
+    }
+    return false;
+  };
+  const candidates = clarifications.filter(({ action }) => onPath.some(link => link.from === action.from_id && link.to === action.to_id)
+    && reaches(partId, action.from_id) && reaches(action.to_id, targetId));
+  return candidates.length === 1 ? carriedLinkAsk(candidates[0]!.action.from_id, candidates[0]!.action.to_id, candidates) : undefined;
+}
 
 /**
  * ⛔ AN OFF-SCALE LIMIT IS NOT A MISSING LEVEL (AIQ #72 5868296245; DL 5868320182). Served `pj-20260928T101026Z` A14:
@@ -78,11 +121,13 @@ function guessWords(
   f: PlaceholderPartsFinding,
   labelOf: (id: unknown) => string | null,
   target: string | null,
+  clarifications: readonly LinkEffectClarificationPending[],
 ): { why: string; ask: string } | null {
   if (f.arm === 'link' && f.link !== undefined) {
     const [x, y] = [labelOf(f.link.from), labelOf(f.link.to)];
     return x === null || y === null ? null
-      : { why: `it depends on how strongly ${q(x)} moves ${q(y)}, which Olumi estimated.`, ask: `How much does ${q(x)} change ${q(y)}?` };
+      : { why: `it depends on how strongly ${q(x)} moves ${q(y)}, which Olumi estimated.`,
+        ask: carriedLinkAsk(f.link.from, f.link.to, clarifications) ?? `How much does ${q(x)} change ${q(y)}?` };
   }
   if (target === null) return null;
   if (f.arm === 'level') return { why: `it starts from Olumi’s estimate of today’s ${q(target)}.`, ask: `What is ${q(target)} today?` };
@@ -106,6 +151,7 @@ function withheldOptionsFor(
   graph: unknown,
   targetId: string | null,
   identityEvaluated?: ReadonlySet<string>,
+  clarifications: readonly LinkEffectClarificationPending[] = [],
 ): WithheldOptions {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
@@ -125,7 +171,7 @@ function withheldOptionsFor(
     if (finding === null || label === null) continue;
     out.labels.push(label);
     if (finding.reason === OLUMI_GUESS_LIMIT_REASON) {
-      const words = guessWords(finding, labelOf, target);
+      const words = guessWords(finding, labelOf, target, clarifications);
       if (words === null) continue;
       out.guesses.set(words.why, [...(out.guesses.get(words.why) ?? []), label]);
       out.guessAsk ??= words.ask;
@@ -133,7 +179,8 @@ function withheldOptionsFor(
     }
     out.byReason.set(finding.reason, [...(out.byReason.get(finding.reason) ?? []), label]);
     const part = finding.reason === PLACEHOLDER_PARTS_REASON ? labelOf(finding.partId) : null;
-    const ask = part !== null && target !== null ? `How much does ${q(part)} change ${q(target)}?` : null;
+    const ask = part !== null && target !== null
+      ? carriedPartAsk(finding.partId, targetId, recs, links, clarifications) ?? `How much does ${q(part)} change ${q(target)}?` : null;
     if (ask !== null && !out.asks.includes(ask)) out.asks.push(ask);
   }
   return out;
@@ -151,9 +198,14 @@ interface WithheldOptions {
 const NONE_WITHHELD = (): WithheldOptions => ({ labels: [], byReason: new Map(), asks: [], guesses: new Map() });
 
 /** {@link withheldOptionsFor} that never throws: a failure costs only the per-option words and asks, never the rows. */
-function withheldOptionsOrNone(graph: unknown, targetId: string | null, identityEvaluated?: ReadonlySet<string>): ReturnType<typeof withheldOptionsFor> {
+function withheldOptionsOrNone(
+  graph: unknown,
+  targetId: string | null,
+  identityEvaluated?: ReadonlySet<string>,
+  clarifications: readonly LinkEffectClarificationPending[] = [],
+): ReturnType<typeof withheldOptionsFor> {
   try {
-    return withheldOptionsFor(graph, targetId, identityEvaluated);
+    return withheldOptionsFor(graph, targetId, identityEvaluated, clarifications);
   } catch (err) {
     log.warn({ event: 'agent_lane.limit_withheld_options_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the options withheld on a limit could not be read; the row goes without them');
     return NONE_WITHHELD();
@@ -208,7 +260,12 @@ export function limitAskIdsOf(graph: unknown): ReadonlySet<string> {
 }
 
 /** `undefined` when the run carries no per-limit rows, or none can be named. */
-export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined, identityEvaluated?: ReadonlySet<string>): LimitCheck[] | undefined {
+export function limitChecksForAgent(
+  graph: unknown,
+  verdicts: StoredLimitVerdicts | null | undefined,
+  identityEvaluated?: ReadonlySet<string>,
+  clarifications: readonly LinkEffectClarificationPending[] = [],
+): LimitCheck[] | undefined {
   if (verdicts === null || verdicts === undefined) return undefined;
   const limits = readRatifiedConstraints(graph);
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
@@ -231,7 +288,7 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // unscored row checked no option, so it names none (its own sentence already says it could not be checked)...
     const perOptionRow = row.state !== 'unscored' || row.reason === PLACEHOLDER_PARTS_REASON
       || row.reason === PARTS_IDENTITY_UNMODELLED_REASON || row.reason === OLUMI_GUESS_LIMIT_REASON;
-    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null, identityEvaluated) : NONE_WITHHELD();
+    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null, identityEvaluated, clarifications) : NONE_WITHHELD();
     // ...unless B6 withheld one of its options (AIQ 5916187873): then every option was withheld PER OPTION, for its own
     // reason, and the row says each one — never one option's reason as if it were every option's.
     if (row.state === 'unscored' && perOption.guesses.size === 0) {

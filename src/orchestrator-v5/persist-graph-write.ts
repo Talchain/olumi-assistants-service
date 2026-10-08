@@ -185,8 +185,9 @@ export interface CheckedGraphAppendParams {
     readonly isHeld: (pending: PendingAction) => boolean;
     readonly seenByThisRequest: ReadonlySet<string>;
     readonly offeredChipIds?: ReadonlySet<string>;
-    /** Re-project the answer sidecar and say capacity lapses from this final pending read, before the append. */
-    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[]) => SessionTurnWrite;
+    /** Re-project the answer sidecar and owe named capacity lapses from this final read; held cards keep their existing lifecycle. */
+    readonly onReconciled?: (write: SessionTurnWrite, overCap: readonly PendingAction[],
+      overCapClarifications: readonly PendingAction[]) => SessionTurnWrite;
   };
 }
 
@@ -373,27 +374,35 @@ export async function appendCheckedGraphWrite(
       let supplied = write.pending_actions ?? [];
       // Per attempt: what did not fit is said from THIS read's reconciliation only (S-D slice 2 x S-D.1b).
       const heldOverCap: PendingAction[] = [];
+      const clarificationOverCap: PendingAction[] = [];
+      const arriving = new Set<string>();
+      const heldPriority = (p: PendingAction): number => p.action.kind === 'reconcile_goal_scope' ? 0
+        : params.heldProposals?.isHeld(p) && params.heldProposals.offeredChipIds?.has(p.chip_id) ? 1
+          : arriving.has(p.chip_id) ? 2 : params.heldProposals?.isHeld(p) ? 3
+            : p.action.kind === 'elicit_link_effect_clarification' ? 4 : 5;
+      const capWithHeldPriority = (pending: readonly PendingAction[]): PendingAction[] => {
+        const merged = [...pending].sort((a, b) => heldPriority(a) - heldPriority(b)
+          // RC2: holds outrank clarification questions; the oldest question lapses when the row fills.
+          || (a.action.kind === 'elicit_link_effect_clarification' && b.action.kind === 'elicit_link_effect_clarification'
+            ? b.emitted_at_iso.localeCompare(a.emitted_at_iso) : a.emitted_at_iso.localeCompare(b.emitted_at_iso)));
+        const dropped = merged.slice(PENDING_ACTIONS_PER_TURN_CAP);
+        heldOverCap.push(...dropped.filter(p => params.heldProposals!.isHeld(p)));
+        clarificationOverCap.push(...dropped.filter(p => p.action.kind === 'elicit_link_effect_clarification'));
+        if (dropped.length > 0) log.warn({ scenario_id: write.scenario_id, source, dropped: dropped.map(p => p.chip_id) },
+          '[persist] concurrent pending actions exceed the row cap; named capacity lapses are owed on the next reply');
+        return merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP).sort((a, b) =>
+          Number(b.action.kind === 'reconcile_goal_scope') - Number(a.action.kind === 'reconcile_goal_scope')
+          || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
+      };
       if (params.heldProposals !== undefined) {
         const { isHeld, seenByThisRequest } = params.heldProposals;
         const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
         const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id) || !seenByThisRequest.has(n.chip_id));
         const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
         if (kept.length !== supplied.length || arrived.length > 0) {
-          const merged = [...kept, ...arrived];
-          const arriving = new Set(arrived.map(p => p.chip_id));
+          for (const p of arrived) arriving.add(p.chip_id);
           // A concurrently arriving offer keeps its room alongside this answer's offer. Other holds remain oldest first.
-          const priority = (p: PendingAction): number => p.action.kind === 'reconcile_goal_scope' ? 0
-            : isHeld(p) && params.heldProposals?.offeredChipIds?.has(p.chip_id) ? 1
-              : arriving.has(p.chip_id) ? 2 : isHeld(p) ? 3 : 4;
-          merged.sort((a, b) => priority(a) - priority(b) || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
-          if (merged.length > PENDING_ACTIONS_PER_TURN_CAP) {
-            heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(isHeld));
-            log.warn({ scenario_id: write.scenario_id, source, dropped: merged.slice(PENDING_ACTIONS_PER_TURN_CAP).map((p) => p.chip_id) },
-              '[persist] held proposal another request added does not fit the row; the lowest-priority items are not carried');
-          }
-          supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP).sort((a, b) =>
-            Number(b.action.kind === 'reconcile_goal_scope') - Number(a.action.kind === 'reconcile_goal_scope')
-            || a.emitted_at_iso.localeCompare(b.emitted_at_iso));
+          supplied = capWithHeldPriority([...kept, ...arrived]);
           write = { ...write, pending_actions: supplied };
         }
       }
@@ -403,10 +412,10 @@ export async function appendCheckedGraphWrite(
         .flatMap(p => { const kept = refreshScopePending(p, writesGraph ? write.graph : params.baseGraphForInvariants); return kept ? [kept] : []; });
       if (missing.length > 0) {
         const merged = [...missing, ...supplied];
-        if (params.heldProposals !== undefined) heldOverCap.push(...merged.slice(PENDING_ACTIONS_PER_TURN_CAP).filter(params.heldProposals.isHeld));
-        write = { ...write, pending_actions: merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
+        write = { ...write, pending_actions: params.heldProposals === undefined
+          ? merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP) : capWithHeldPriority(merged) };
       }
-      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap);
+      if (params.heldProposals?.onReconciled !== undefined) write = params.heldProposals.onReconciled(write, heldOverCap, clarificationOverCap);
     }
     if (writesGraph) assertNoScopedIdentityConflict(write.graph);
 

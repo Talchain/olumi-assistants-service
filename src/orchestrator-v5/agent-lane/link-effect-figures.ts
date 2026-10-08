@@ -2,6 +2,9 @@
 import { findStatedAmounts, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 
+/** Shared with the statement binder: a figure followed by one of these words describes a change. */
+export const LINK_EFFECT_CHANGE_AFTER = /^\s*(?:(?:percentage\s+)?points?\s+)?(?:rises?|increases?|cuts?|drops?|falls?|jumps?|hikes?|reductions?|decreases?|gains?|loss|more|fewer|less|extra|additional|higher|lower|up|down|off|changes?|swings?)\b/i;
+
 function normalised(quote: string): { text: string; starts: number[]; ends: number[] } {
   const re = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})(?:\\s+and\\s+a\\s+half)?\\b|\\bhalf(?:\\s+a)?(?=\\s+(?:percentage\\s+)?points?\\b)|\\ba(?=\\s+(?:percentage\\s+)?points?\\b)`, 'giu');
   let text = ''; const starts: number[] = []; const ends: number[] = [];
@@ -84,6 +87,7 @@ const fractionOfAFigure = new RegExp(`\\b(?:${FRACTION}|half)\\s+of\\s+(?:(?:a|a
 
 /** Ranges cannot license either endpoint or a midpoint as a single user's figure. */
 export function hasLinkEffectRange(quote: string): boolean {
+  if (boundedLinkEffectText(quote) !== undefined) return true;
   if (fractionOfANumber.test(quote) || fractionOfAUnit.test(quote) || fractionOfAFigure.test(quote) || digitsAndAFraction.test(quote)
     || new RegExp(`\\bpoint\\s+(?:${CARDINAL_AMOUNT_SOURCE}|\\d)\\b`, 'iu').test(quote)) return true;
   const amounts = findLinkEffectAmounts(quote);
@@ -94,4 +98,21 @@ export function hasLinkEffectRange(quote: string): boolean {
     return /^\s*(?:,?\s*(?:maybe|or)|[-–—]|to)\s*$/i.test(between) && !/\bfrom\s*$/i.test(quote.slice(0, a.index))
       || /^\s*and\s*$/i.test(between) && /\bbetween\s*$/i.test(quote.slice(0, a.index));
   });
+}
+
+/** A one-sided change bound, never a bounded current level elsewhere in the sentence. */
+export function boundedLinkEffectText(quote: string): string | undefined {
+  const changes = /\b(?:increas(?:e|es|ing|ed)|decreas(?:e|es|ing|ed)|rais(?:e|es|ing|ed)|ris(?:e|es|ing)|fall(?:s|ing)?|fell|cut(?:s|ting)?|drop(?:s|ped|ping)?|add(?:s|ed|ing)?|los(?:e|es|ing|t)|reduce(?:s|d)?|gain(?:s|ed)?|change(?:s|d)?)\b/i;
+  for (const amount of findLinkEffectAmounts(quote)) {
+    const before = quote.slice(0, amount.index);
+    const bound = /\b(?:at least|at most|no less than|no more than|minimum(?: of)?|maximum(?: of)?|more than|less than)\s+(?:(?:increase|decrease|rise|fall|by|about|approximately)\s+)*[+−-]?\s*$/i.exec(before);
+    if (bound === null) continue;
+    const lead = before.slice(0, bound.index).split(/[,;.!?\n]/).at(-1) ?? '';
+    const after = quote.slice(amount.index + amount.matchedText.length);
+    if (!changes.test(bound[0]) && !/(?:\bby|\bevery|\beach|\bper)\s*$/i.test(lead)
+      && !changes.test(lead.match(/(?:[\p{L}]+\s*){1,3}$/u)?.[0] ?? '')
+      && !LINK_EFFECT_CHANGE_AFTER.test(after)) continue;
+    return quote.slice(bound.index, amount.index + amount.matchedText.length).trim();
+  }
+  return undefined;
 }

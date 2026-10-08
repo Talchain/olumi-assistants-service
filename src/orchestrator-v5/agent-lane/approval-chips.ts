@@ -28,6 +28,7 @@ import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
 import { statedInOneOf } from '../system-events/link-effect-edit.js';
+import { naturalFloorAmount, readLinkEffectFloorAnswer, type LinkEffectFloor } from './link-effect-lower-bound.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -388,7 +389,7 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
-      quote?: unknown; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
+      quote?: unknown; clarification?: { quote?: unknown; answer?: unknown; node_id?: unknown; floor?: LinkEffectFloor; upper?: number }; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
@@ -476,6 +477,23 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     const perWords = e.per_source_change < 0 ? signed(e.per_source_change, e.per_source_change_unit) : unsigned(e.per_source_change, e.per_source_change_unit);
     disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${perWords} `
       + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
+  }
+  if (op.clarification !== undefined) {
+    if (op.clarification.quote !== op.quote || typeof op.clarification.answer !== 'string'
+      || (op.clarification.node_id !== op.from && op.clarification.node_id !== op.to)) return undefined;
+    if (op.clarification.floor !== undefined) {
+      const floor = op.clarification.floor;
+      const answer = readLinkEffectFloorAnswer(floor, op.clarification.answer);
+      if (!answer.ok || naturalFloorAmount(floor, answer.guess) !== e.amount
+        || answer.upper !== op.clarification.upper || floor.per_source_change !== e.per_source_change
+        || !statedInOneOf(floor.per_source_change_unit, [e.per_source_change_unit])) return undefined;
+      // AIQ: words pending
+      disclosures.push(`Your recorded floor: “${floor.words}”.`
+        + (answer.upper === undefined ? ' No range was supplied.'
+          : ` Your plausible extremes are ${unsigned(floor.value, floor.unit)} and ${unsigned(answer.upper, floor.unit)}; your best guess is ${unsigned(answer.guess, floor.unit)}.`));
+    }
+    // AIQ: words pending
+    disclosures.push(`Your clarification: “${op.clarification.answer}”.`);
   }
   disclosures.push(...mediated);
   // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.

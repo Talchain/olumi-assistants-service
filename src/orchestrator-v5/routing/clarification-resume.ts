@@ -347,6 +347,7 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // land on a graph the question was not asked about.
   elicit_goal_target: 'mutating',
   elicit_goal_current_level: 'mutating', // Agent-only answer route; never the general short-confirm resumer.
+  elicit_link_effect_clarification: 'mutating', // Agent-only link proposal route; never the general short-confirm resumer.
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(

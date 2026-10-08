@@ -16,6 +16,11 @@ const scope: PendingAction = { ...held('scope'), action: { kind: 'reconcile_goal
 const answer = (pending: readonly PendingAction[]): SessionTurnWrite => ({ scenario_id: SCENARIO, turn_id: 'answer',
   turn_class: 'direct_answer', handler_id: null, request_hash: 'agent_turn:digest', response_emitted: true,
   llm_calls_used: 0, duration_ms: 1, handler_facts: [], assistantMessage: 'Here is your answer.', pending_actions: pending });
+const clarification = (chip: string, second: number): PendingAction => ({ ...held(chip),
+  emitted_at_iso: `2026-10-06T00:00:0${second}Z`,
+  action: { kind: 'elicit_link_effect_clarification', from_id: chip, to_id: 'churn', from_label: chip,
+    to_label: 'Monthly churn', quote: 'Churn will rise by at least 1%.', question: 'Points or relative?',
+    refusal: 'unit_mismatch', value_text: 'at least 1%' } });
 
 // Stage the other request INSIDE append, after the floor's read. Compare row ids,
 // never action counts: equal payloads on different rows still mean latest_moved.
@@ -76,6 +81,37 @@ describe('S-D.1b conditional answer floor', () => {
     expect(s.calls.map(c => c.options?.expectedLatestRowId)).toEqual(['row-0', 'row-1']);
     expect(s.written[0]?.pending_actions).toEqual([scope, hold, arrival]);
     expect(s.written[0]?.pending_actions?.[2]).toBe(arrival);
+  });
+
+  it('RC2 C3 RED: a held proposal arriving at append lapses the oldest clarification and reports it beside held lapses', async () => {
+    const effects = [clarification('effect-old', 0), clarification('effect-middle', 1), clarification('effect-new', 2)];
+    const s = setup(effects, [[...effects, arrival]]);
+    const lapses: { holds: readonly PendingAction[]; clarifications: readonly PendingAction[] }[] = [];
+    await appendCheckedGraphWrite({ store: s.store, write: answer([effects[2]!, effects[0]!, effects[1]!]), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set(),
+        onReconciled: (w, holds, clarifications: readonly PendingAction[]) => {
+          lapses.push({ holds, clarifications: clarifications ?? [] });
+          return w;
+        } } });
+    expect(s.written).toHaveLength(1);
+    expect(s.written[0]?.pending_actions).toEqual([effects[1], effects[2], arrival]);
+    expect(lapses).toEqual([{ holds: [], clarifications: [] }, { holds: [], clarifications: [effects[0]] }]);
+    expect(s.written[0]?.assistantMessage).toBe('Here is your answer.'); // The route owes the named lapse on its next reply.
+  });
+
+  it('RC2 C3 CONTROL: a clarification cut on an obsolete retry is not reported as lapsed by the final append', async () => {
+    const effects = [clarification('effect-old', 0), clarification('effect-middle', 1), clarification('effect-new', 2)];
+    const s = setup(effects, [[...effects, arrival], effects]);
+    const lapses: (readonly PendingAction[])[] = [];
+    await appendCheckedGraphWrite({ store: s.store, write: answer(effects), writesGraph: false,
+      heldProposals: { isHeld: p => p.chip_id.startsWith('hold-'), seenByThisRequest: new Set(),
+        onReconciled: (w, _holds, clarifications: readonly PendingAction[]) => {
+          lapses.push([...(clarifications ?? [])]);
+          return w;
+        } } });
+    expect(s.calls).toHaveLength(3);
+    expect(s.written[0]?.pending_actions).toEqual(effects);
+    expect(lapses).toEqual([[], [effects[0]], []]);
   });
 
   it('CONTROL: stable row means one append with unchanged bytes and object identity', async () => {

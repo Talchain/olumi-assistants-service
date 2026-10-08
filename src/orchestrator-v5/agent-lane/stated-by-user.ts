@@ -31,7 +31,7 @@
  * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
-import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
+import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels, LINK_EFFECT_CHANGE_AFTER as CHANGE_AFTER } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import type { CandidateModel } from './admit-model.js';
@@ -1292,8 +1292,6 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
 const HEDGE = /^(?:about|around|roughly|approximately|nearly|almost|only|just|some|maybe|perhaps|probably)$/i;
 /** The word right before a figure (hedges skipped) that makes it a change: "every £1", "by £1", "a £10 rise". */
 const CHANGE_BEFORE = /^(?:every|each|per|by|a|an|another|extra|additional|one)$/i;
-/** Right after a figure: it is a change ("£1 rise", "50 fewer", "4 points off"). */
-const CHANGE_AFTER = /^\s*(?:(?:percentage\s+)?points?\s+)?(?:rises?|increases?|cuts?|drops?|falls?|jumps?|hikes?|reductions?|decreases?|gains?|loss|more|fewer|less|extra|additional|higher|lower|up|down|off|changes?|swings?)\b/i;
 /** Whether ONE word is a change word the binder itself reads ("adds", "costs", "raises", "means", …): where a statement's
  * predicate begins, after the counted phrase (RT-6 row 1b). */
 export function isChangeWord(token: string): boolean {

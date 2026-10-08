@@ -3291,6 +3291,7 @@ export type CommitOptionLevelsInput = {
      */
     readonly reading_token: string;
     readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
+    readonly clarification?: ApprovedLinkEffect['clarification'];
     readonly reversal?: ApprovedLinkEffect['reversal'];
     readonly link_selected?: true;
   };
@@ -3303,6 +3304,7 @@ export type CommitOptionLevelsInput = {
     readonly quote: string;
     readonly reading_token: string;
     readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
+    readonly clarification?: ApprovedLinkEffect['clarification'];
     readonly reversal?: ApprovedLinkEffect['reversal'];
     readonly link_selected?: true;
   }[];
@@ -3408,11 +3410,13 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token,
       ...(input.link_effect.reversal !== undefined ? { reversal: input.link_effect.reversal } : {}),
       ...(input.link_effect.link_selected === true ? { link_selected: true as const } : {}),
+      ...(input.link_effect.clarification !== undefined ? { clarification: input.link_effect.clarification } : {}),
       ...(input.link_effect.unit_readings !== undefined ? { unit_readings: input.link_effect.unit_readings } : {}) } } : {}),
     ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { linkEffects: input.link_effects.map((effect) => ({ from: effect.from, to: effect.to, effect: effect.effect,
       edge_token: effect.edge_token, quote: effect.quote, reading_token: effect.reading_token,
       ...(effect.reversal !== undefined ? { reversal: effect.reversal } : {}),
       ...(effect.link_selected === true ? { link_selected: true as const } : {}),
+      ...(effect.clarification !== undefined ? { clarification: effect.clarification } : {}),
       ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
