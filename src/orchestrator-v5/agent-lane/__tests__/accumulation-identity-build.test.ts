@@ -133,6 +133,58 @@ describe('the accumulation reaches the registered graph only on an attested dead
 });
 
 describe('recorded head pilot outputs replayed offline through admission and registration', () => {
+  it('invented accumulation levels reach neither month-12/MRR reply figures nor Run readiness; stated ACC levels do', async () => {
+    // Raw provider_calls[-1].output_text from p45-acc4-pilot-20261008/live2-head/{B1,ACC}-d1.json.
+    // The older accumulation-pilot-head fixture has B1 150/5/25 and an ACC draft without its goal product.
+    const recorded = JSON.parse(readFileSync(new URL('./fixtures/accumulation-live2-head.json', import.meta.url), 'utf8')) as typeof PILOT;
+    const brief = 'Our goal is to reach £20k MRR within 12 months while keeping monthly churn under 8%. Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?';
+    expect(recorded.B1.brief).toBe(brief);
+    const { result, graph, nodes } = await build(brief, recorded.B1.draft);
+
+    // Enumerate EVERY returned string recursively, including assistant-facing fields and any reply/receipt added later.
+    const stringFields = (value: unknown, path = 'result'): [string, string][] => {
+      if (typeof value === 'string') return [[path, value]];
+      if (Array.isArray(value)) return value.flatMap((item, i) => stringFields(item, `${path}[${i}]`));
+      if (value !== null && typeof value === 'object') return Object.entries(value)
+        .flatMap(([key, item]) => stringFields(item, `${path}.${key}`));
+      return [];
+    };
+    const fields = stringFields(result);
+    expect(fields.length).toBeGreaterThan(0);
+    expect(fields.some(([path]) => path.startsWith('result.open_questions['))).toBe(true);
+    expect(fields.some(([path]) => path.startsWith('result.not_represented['))).toBe(true);
+    let inputSentences = 0;
+    for (const [path, value] of fields) {
+      expect.soft(value, path).not.toMatch(/\b200\s*[×x*]|(?:£|GBP)\s*9[\s,]?800\b|\b314\b/i);
+      for (const sentence of value.split(/(?<=[.!?])\s+/u)) {
+        // Product reconciliation's "(within 5%)" is a tolerance, not the invented monthly churn level.
+        const withoutTolerance = sentence.replace(/\(\s*within\s+5\s*%\s*\)/gi, '');
+        if (!/\b(?:200|20)\b|\b5\s*%/.test(withoutTolerance)) continue;
+        expect.soft(sentence, `${path}: invented input used in a projection`).not.toMatch(/\bmonth[\s-]*12\b|\bMRR\b|monthly recurring revenue/i);
+        if (!/subscrib|churn|inflow|sign.?ups/i.test(value)) continue;
+        inputSentences++;
+        // The drafter's own question ("The model provisionally assumes 200 …") is the only ask for these figures until the
+        // one-card ask (#5) replaces it: a mention must be hedged as an assumption or labelled Olumi's, never stated as fact.
+        expect.soft(sentence, `${path}: invented input attribution`).toMatch(/Olumi['’]s estimates?\b|starting figure|provisional|assum|estimat/i);
+      }
+    }
+    expect(inputSentences).toBeGreaterThan(0); // The attribution check must actually see the recorded invented inputs.
+
+    const stock = nodes.find((n) => n.label === SUBS12)!;
+    expect.soft(stock.nonlinear_identity, 'B1 carrier').toMatchObject({ operation: 'accumulation', stated_in_brief: false });
+    const inputs = (stock.nonlinear_identity as { factor_ids: string[] }).factor_ids.map((id) => nodes.find((n) => n.id === id)!.observed_state as Rec);
+    expect(inputs.map((s) => [s.raw_value ?? s.value, s.source])).toEqual([[200, 'cee_inference'], [5, 'cee_inference'], [20, 'cee_inference']]);
+    // Census chance_ready = !chancesWithheldByAGuess(graph): p44-2848-pilot-20261008/census3.ts:25.
+    // Reuse the Run placeholder/P5 readers in runtime/build-model.ts:1453, rather than inferring readiness from the stamp.
+    expect.soft(!chancesWithheldByAGuess(graph), 'B1 chance_ready').toBe(false);
+
+    const accBrief = 'We have 250 Pro subscribers paying £49 a month. We add about 20 new Pro subscribers a month and lose about 3% of them each month. Our goal is to reach £20k MRR within 12 months. Should we raise the Pro price to £59 a month?';
+    expect(recorded.ACC.brief).toBe(accBrief);
+    const control = await build(accBrief, recorded.ACC.draft);
+    expect.soft(carrierOn(control.nodes, SUBS12), 'ACC carrier').toMatchObject({ operation: 'accumulation', stated_in_brief: true });
+    expect.soft(!chancesWithheldByAGuess(control.graph), 'ACC chance_ready').toBe(true);
+  });
+
   it('B1 retains its used accumulation as Olumi\'s reading and cannot make chances ready from invented levels', async () => {
     const { graph, nodes } = await build(PILOT.B1.brief, PILOT.B1.draft);
     const stock = nodes.find((n) => n.label === SUBS12)!;
