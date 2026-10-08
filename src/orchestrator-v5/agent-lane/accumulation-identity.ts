@@ -18,11 +18,12 @@
  *    framed `observed_state.value`); any other period or unit is refused, never converted;
  *  · today's level of each input is known, the stock and inflow are not negative, and the rate is below 100%;
  *  · the outcome has a positive frame, kept when already present or worked out from the stock and inflow ranges;
- *  · the outcome carries no other identity.
- * `stated_in_brief` is the declaration's own provenance (`explicit`), as for a product. Pure.
+ *  · the outcome carries no other identity and is a part of the admitted goal product.
+ * `stated_in_brief` follows all three input levels, never the drafter's declaration stamp alone. Pure.
  */
 import { canonicalLabel } from './model-primitives.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
+import { classifyValueSource, reflectsAHumanAct } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { CandidateIdentity } from './admit-model.js';
 
 export interface AccumulationCarrier {
@@ -37,7 +38,7 @@ type NodeLike = {
   readonly id: string;
   readonly kind?: unknown;
   readonly label?: unknown;
-  readonly observed_state?: { readonly value?: unknown; readonly raw_value?: unknown; readonly unit?: unknown; readonly cap?: unknown } | undefined;
+  readonly observed_state?: { readonly value?: unknown; readonly raw_value?: unknown; readonly unit?: unknown; readonly cap?: unknown; readonly source?: unknown } | undefined;
   readonly scale_frame?: unknown;
   readonly nonlinear_identity?: unknown;
   readonly goal_horizon_months?: unknown;
@@ -159,12 +160,20 @@ export function admitAccumulationIdentities(
     if (accumulationFrame(outcome, stock, inflow, horizon) === undefined) {
       refuse('its range could not be worked out'); continue;
     }
+    // A plain causal link to the goal does not use this calculation. Only its admitted product does.
+    const goalProduct = goal.length === 1 ? goal[0]!.nonlinear_identity : undefined;
+    if (goalProduct === null || typeof goalProduct !== 'object'
+      || (goalProduct as { operation?: unknown }).operation !== 'product'
+      || !Array.isArray((goalProduct as { factor_ids?: unknown }).factor_ids)
+      || !(goalProduct as { factor_ids: unknown[] }).factor_ids.includes(outcome.id)) {
+      refuse('nothing in the model works the goal out from it'); continue;
+    }
     carriers.set(outcome.id, {
       operation: 'accumulation',
       factor_ids: [stock.id, rate.id, inflow.id],
       horizon_months: horizon,
       rate_scale: 0.01,
-      stated_in_brief: d.provenance === 'explicit',
+      stated_in_brief: [stock, rate, inflow].every((n) => reflectsAHumanAct(classifyValueSource(n.observed_state?.source))),
     });
   }
   return { carriers, loss };

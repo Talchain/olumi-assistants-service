@@ -1542,6 +1542,8 @@ function markProductIdentities(
     if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
     // The DECLARATION holds and bears on the goal: it is persisted as the node's carrier whatever the
     // options do today, so a Run re-judges it on the graph it analyses (an option added later included).
+    // No 5% current-level reconciliation here: accumulation carriers are attached later, so this reader cannot see S₀.
+    // The card/coherence readers compare price × S₀; price × the month-N operand is not today's goal level.
     accepted.push({ outcome_id: outcomeId, factor_ids: [...factorIds], stated_in_brief: d.provenance === 'explicit' });
 
     /**

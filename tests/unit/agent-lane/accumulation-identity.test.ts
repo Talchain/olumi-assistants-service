@@ -7,14 +7,19 @@ import { NodeV3 } from '../../../src/schemas/cee-v3.js';
 
 // Paul's brief: 250 Pro subscribers, 3% monthly churn (served frame: value 0.03, raw 3), +20 a month, within 12 months.
 const nodes = [
-  { id: 'goal', kind: 'goal', label: 'Pro MRR', goal_horizon_months: 12 },
+  { id: 'goal', kind: 'goal', label: 'Pro MRR', goal_horizon_months: 12,
+    nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subs12'], stated_in_brief: false } },
+  { id: 'price', kind: 'factor', label: 'Pro price', observed_state: { value: 49, unit: 'GBP', source: 'brief_extraction' } },
   { id: 'subs', kind: 'factor', label: 'Pro subscribers', observed_state: { value: 250, unit: 'subscribers' } },
   { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, unit: '%' } },
   { id: 'adds', kind: 'factor', label: 'New Pro subscribers per month', observed_state: { value: 20, unit: 'subscribers/month' } },
   { id: 'subs12', kind: 'outcome', label: 'Pro subscribers at month 12' },
 ];
+const userNodes = nodes.map((n) => ['subs', 'churn', 'adds'].includes(n.id)
+  ? { ...n, observed_state: { ...n.observed_state!, source: 'brief_extraction' } } : n);
 const edges = [
   { from: 'subs', to: 'subs12' }, { from: 'churn', to: 'subs12' }, { from: 'adds', to: 'subs12' }, { from: 'subs12', to: 'goal' },
+  { from: 'price', to: 'goal' },
 ];
 const decl = (over: Record<string, unknown> = {}) => ({
   outcome: 'Pro subscribers at month 12', operation: 'accumulation',
@@ -28,7 +33,36 @@ describe('admitAccumulationIdentities', () => {
     expect(r.carriers.get('subs12')).toEqual({
       operation: 'accumulation', factor_ids: ['subs', 'churn', 'adds'], horizon_months: 12, rate_scale: 0.01, stated_in_brief: false,
     });
-    expect(admitAccumulationIdentities(nodes, edges, [decl({ provenance: 'explicit' })]).carriers.get('subs12')?.stated_in_brief).toBe(true);
+    expect(admitAccumulationIdentities(nodes, edges, [decl({ provenance: 'explicit' })]).carriers.get('subs12')?.stated_in_brief).toBe(false);
+  });
+
+  it.each(['cee_inference', undefined])('an explicit declaration over one %s level remains Olumi\'s reading', (source) => {
+    const mixed = userNodes.map((n) => n.id === 'churn'
+      ? { ...n, observed_state: { ...n.observed_state!, source } } : n);
+    const r = admitAccumulationIdentities(mixed, edges, [decl({ provenance: 'explicit' })]);
+    expect(r.loss).toEqual([]);
+    expect(r.carriers.get('subs12')).toMatchObject({ operation: 'accumulation', stated_in_brief: false });
+  });
+
+  it('all three user-stated or user-ratified levels carry the brief\'s levels even when the declaration is inferred', () => {
+    const reviewed = userNodes.map((n) => n.id === 'churn'
+      ? { ...n, observed_state: { ...n.observed_state!, source: 'user_confirmed' } } : n);
+    expect(admitAccumulationIdentities(reviewed, edges, [decl({ provenance: 'explicit' })]).carriers.get('subs12')?.stated_in_brief).toBe(true);
+    expect(admitAccumulationIdentities(reviewed, edges, [decl()]).carriers.get('subs12')?.stated_in_brief).toBe(true);
+  });
+
+  it.each([
+    ['no admitted goal product', undefined],
+    ['a non-product goal carrier', { operation: 'sum', factor_ids: ['price', 'subs12'], stated_in_brief: false }],
+    ['an admitted goal product over today\'s stock instead', { operation: 'product', factor_ids: ['price', 'subs'], stated_in_brief: false }],
+  ])('refuses when %s uses the projected stock, even if the drafter declared a goal product', (_why, identity) => {
+    const unused = nodes.map((n) => n.id === 'goal' ? { ...n, nonlinear_identity: identity } : n);
+    const declaredProduct = { outcome: 'Pro MRR', operation: 'product', factors: ['Pro price', 'Pro subscribers at month 12'], provenance: 'inferred' };
+    const r = admitAccumulationIdentities(unused, edges, [decl(), declaredProduct]);
+    expect(r.carriers.size).toBe(0);
+    expect(r.loss).toHaveLength(1);
+    expect(r.loss[0]!.reason).toContain('but nothing in the model works the goal out from it, so that was not used');
+    expect(withAccumulationCarriers(unused, r.carriers)).toEqual(unused);
   });
 
   it('the written carrier survives NodeV3 (CEE #3 reader) byte-for-byte', () => {

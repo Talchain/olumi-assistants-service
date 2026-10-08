@@ -5,7 +5,7 @@ import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { identityConflictsWithScope } from './goal-scope.js';
 import { proposeProductIdentity, todaysLevelFor } from './identity-proposal.js';
 import { identityPartsWithoutLevel } from '../system-events/identity-confirm-edit.js';
-import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
+import { accumulationStockFor, RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { periodIn, readCount, readMoney, readMoneyTotal, sameUnit } from './same-unit.js';
 import { sayFigure, sayFigureAsWritten } from './say-figure.js';
 
@@ -39,12 +39,22 @@ const twoFigures = (v: number): number => Number(v.toPrecision(2));
 
 /** Native figures only. The existing today reader supplies its one-cause fallback, never a scale re-derivation. */
 function levelFor(graph: unknown, node: Rec): Level | null {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const byId = new Map(nodes.flatMap((n) => typeof n.id === 'string' ? [[n.id, n] as const] : []));
+  const stock = accumulationStockFor(node, byId);
+  // No S₀ means no today-level reconciliation; a projected S_N must never stand in for it.
+  if (isRec(node.nonlinear_identity) && node.nonlinear_identity.operation === 'accumulation' && stock === null) return null;
+  if (stock !== null) {
+    // Coherence compares today's goal level: the month-N carrier contributes S₀ here, not S_N.
+    const os = isRec(stock.observed_state) ? stock.observed_state : undefined;
+    const unit = words(os?.unit);
+    return os !== undefined && finite(os.raw_value) && unit !== null ? { node, raw: os.raw_value, unit } : null;
+  }
   const today = typeof node.id === 'string' ? todaysLevelFor(graph, node.id) : null;
   if (today !== null) return { node, raw: today.raw, unit: today.unit };
   const os = isRec(node.observed_state) ? node.observed_state : undefined;
   if (os?.raw_value !== undefined) {
     const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
-    const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
     // An outcome's Olumi projection is not today's count; preserve the today reader's refusal to copy it.
     if (node.kind === 'outcome' && classifyValueSource(os.source) !== 'user_stated'
       && edges.some((e) => e.to === node.id
