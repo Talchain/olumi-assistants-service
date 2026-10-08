@@ -114,14 +114,17 @@ describe('MC P0 R7 stated unsized goal path cause', () => {
     expect(staleAuto.analysis_state?.leader_claim.withheld_reason).toBe(compose.WITHHELD_UNREQUESTED_ANALYSIS);
   });
 
-  it('precedence: unrequested > every-option limit > identity > unsized > stale > unrecorded > constraint', async () => {
+  it('precedence: unrequested > every-option limit > stale > identity > unsized > unrecorded > constraint', async () => {
     const result = await runP0Graph(graph(1), brief), input = inputFor(result);
     const claim = (extra: Partial<compose.AnalysisStateComposeInput>, state = fresh) => compose.composeLeaderClaim({ ...input, ...extra }, state, false).withheld_reason;
     expect(claim({ withheldBecauseUnrequested: true, everyOptionLimit: 'none_meets', withheldBecauseNonlinearIdentity: true })).toBe(compose.WITHHELD_UNREQUESTED_ANALYSIS);
     expect(claim({ everyOptionLimit: 'none_meets', withheldBecauseNonlinearIdentity: true })).toBe(compose.WITHHELD_NO_OPTION_MEETS_LIMIT);
     expect(claim({ everyOptionLimit: 'likely_breaks', withheldBecauseNonlinearIdentity: true })).toBe(compose.WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT);
     expect(claim({ withheldBecauseNonlinearIdentity: true })).toBe(compose.WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
-    expect(claim({}, stale)).toBe('goal_path_unsized');
+    // DL 7 Oct (W1c): an out-of-date Run's reason leads over the causes that describe the revision it analysed.
+    expect(claim({}, stale)).toBe(compose.WITHHELD_RUN_OUT_OF_DATE);
+    expect(claim({ withheldBecauseNonlinearIdentity: true }, stale)).toBe(compose.WITHHELD_RUN_OUT_OF_DATE);
+    expect(claim({}), 'CONTROL: the same unsized input on a current Run').toBe('goal_path_unsized');
     expect(claim({ withheldBecauseUnsizedPath: undefined }, stale)).toBe(compose.WITHHELD_RUN_OUT_OF_DATE);
     expect(claim({ withheldBecauseUnsizedPath: undefined })).toBe('analysis_leader_withheld');
     expect(claim({ withheldBecauseUnsizedPath: undefined, withheldWithoutConstraintCause: false })).toBe(compose.WITHHELD_CONSTRAINT_VERDICT);
@@ -133,13 +136,13 @@ describe('MC P0 R7 stated unsized goal path cause', () => {
     expect(compose.leaderClaimReasonKind('goal_path_unsized')).toBe('withheld');
   });
 
-  it('stale d1 reload retains the Run-stated path; the edited graph is never walked to invent a cause', async () => {
+  it('stale d1 reload: the out-of-date reason leads, and the edited graph is never walked to invent a cause', async () => {
     const g = graph(1), result = await runP0Graph(g, brief);
     reads.facts = [factOf(result)];
     g.edges = []; // Removes today's failing path, and makes the recorded Run stale.
     const cold = await readScenarioAnalysis({ scenarioId: result.scenario_id, graph: g as never, requestId: 'r7-stale' });
     expect(cold.analysis_state?.run_state.kind).toBe('complete_stale');
-    expect(cold.analysis_state?.leader_claim.withheld_reason).toBe('goal_path_unsized');
+    expect(cold.analysis_state?.leader_claim.withheld_reason).toBe(compose.WITHHELD_RUN_OUT_OF_DATE);
   });
 
   it('the scenario permission reader carries the newer cause, rather than an older hot-window Run', async () => {

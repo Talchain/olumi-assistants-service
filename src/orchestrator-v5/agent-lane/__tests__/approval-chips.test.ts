@@ -186,9 +186,11 @@ describe('the route offers one-click approval for the proposal it just made', ()
     expect(body._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_model_change', ok: true })]);
     expect(proposalId).toMatch(/^prop_[0-9a-f]{6,}$/);
 
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
     expect(body.suggested_actions.map((a) => [a.label, a.message])).toEqual([
       ['Make this change', 'Yes, make that change.'],
       ['Change something first', 'Before you apply it, I want to change some of it.'],
+      ['Not now', 'Not now.'],
     ]);
     expect(body.assistant_text).not.toMatch(/prop_[0-9a-f]{6,}/);
     expect(body.assistant_text).toContain('**This proposal** would connect Team size to Velocity.');

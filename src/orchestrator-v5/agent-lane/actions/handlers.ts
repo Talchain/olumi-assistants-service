@@ -17,6 +17,7 @@ import { ACTION_PRESS_PREFIX, ACTION_REGISTRY, actionOfPress, isUnknownActionPre
 import { actionBarOf, currentOfferFor, DISABLED, type ActionBarV1, type ActionOffer, type ItemRef } from './rank.js';
 import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
 import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
+import { biasBadgeApplies } from './bias-triggers.js';
 import { resolveDskClaimProvenance, type DskClaimProvenance } from '../../compose/dsk-claim-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { composeGoalTargetQuestion } from '../../goal-target/decide-goal-target-ask.js';
@@ -118,6 +119,10 @@ const BECAUSE: Record<keyof typeof DISABLED, string> = {
 };
 
 function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
+  // An estimate action not offered because no Run is bound still has its points: say what it needs, never "no triggers".
+  if ((action === 'bias_anchoring' || action === 'check_estimates') && !f.runBound && estimatePointsOf(f).length > 0) {
+    return { text: `${CANT_YET[action]}: ${BECAUSE.needs_current_analysis}`, reason: 'needs_current_analysis', exits: runExits(f) };
+  }
   if (action === 'bias_anchoring') return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const reasonKey = (Object.keys(DISABLED) as (keyof typeof DISABLED)[]).find((k) => DISABLED[k] === offer?.disabled_reason);
   if (reasonKey !== undefined) {
@@ -143,7 +148,7 @@ function estimateReply(action: 'bias_anchoring' | 'check_estimates', f: ActionFa
   }
   if (points.length === 0) return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const stage = f.canonicalStage === null ? null : mapStageToDecisionStage(f.canonicalStage);
-  const science = stage === 'frame' || stage === 'evaluate' ? resolveDskClaimProvenance('DSK-B-001') : null;
+  const science = biasBadgeApplies('DSK-B-001', stage) ? resolveDskClaimProvenance('DSK-B-001') : null;
   return { text: ["A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
     ...points.map(p => `- Olumi put ‘${p.label}’ at ${p.figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
     'Which of these would you check first?'].join('\n'), exits: [], outcome: 'ran', ...(science !== null ? { science } : {}) };

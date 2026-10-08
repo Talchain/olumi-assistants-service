@@ -208,6 +208,11 @@ export function approvalChipsFor(
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
   }
+  if (tool === 'propose_model_change' && stored?.proposal_id === proposalId && stored.operations.length === 1
+    && stored.operations[0]?.op === 'add_edge' && (stored.operations[0].value as { author?: unknown }).author === 'model_proposed') {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Approve', message: approve.message, detail: stored.public_label }, AMEND_CHIP,
+      { id: `agent-decline-drawn-link:${proposalId}`, label: 'Decline', message: 'Decline this suggested link.' }];
+  }
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {
@@ -291,6 +296,9 @@ function directionChoiceFor(tool: string, source: ApprovalLabelSource | undefine
 
 /** The stored basis of a keep proposal (`proposeAssumptions` `keep: true`) — the authority the keep button binds to. */
 export const KEEP_PROPOSAL_BASIS = 'Olumi\u2019s current estimates, unchanged, for the user to accept';
+export const isKeepProposal = (proposal: StructuredProposal): boolean =>
+  proposal.provenance.basis === KEEP_PROPOSAL_BASIS || proposal.provenance.original_basis === KEEP_PROPOSAL_BASIS;
+
 
 /**
  * The keep button, ONLY when the STORED proposal is a keep (its basis) and the proposer's own result for that same id
@@ -300,7 +308,7 @@ function keepCardFor(tool: string, source: ApprovalLabelSource | undefined): { l
   const proposal = source?.proposal;
   const result = source?.result;
   if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  if (proposal.provenance.basis !== KEEP_PROPOSAL_BASIS || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
+  if (!isKeepProposal(proposal) || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
   const n = proposal.operations.length;
   return n === 1
     ? { label: 'Keep Olumi\u2019s estimate', message: 'Yes, keep Olumi\u2019s estimate.', detail: proposal.public_label }

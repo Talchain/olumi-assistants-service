@@ -217,7 +217,7 @@ import {
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
-import { productHoldRecord, proposalFieldsWire } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
+import { proposalRecord, proposalFieldsWire } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -239,6 +239,8 @@ import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
 import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
+import { readChangedSinceRun } from '../orchestrator-v5/context/changed-since-run.js';
+import { deriveDecisionContextGraphHash } from '../orchestrator-v5/build-turn-context.js';
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
@@ -756,14 +758,24 @@ export default async function route(app: FastifyInstance) {
        * Agent's own internal reads stay byte-identical.
        */
       const proposalFields = conversationRequested && graphPresent
-        ? proposalFieldsWire(latestPending.flatMap((pa) => { const r = productHoldRecord(pa, graph); return r === undefined ? [] : [r]; }),
+        ? proposalFieldsWire(latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }),
           computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
         : undefined;
+
+      /**
+       * ⭐ P48 (audit #27): what changed in the model since the last Run, by id, so the canvas marks it until the next
+       * Run and a reload keeps the marks. Recomputed from the durable receipts (`context/changed-since-run.ts`). Opt-in
+       * with the conversation, so the Agent's own internal reads stay byte-identical; absent = could not answer.
+       */
+      const changedSinceRun = conversationRequested && graphPresent ? await readChangedSinceRun(store, scenarioId,
+        // The Run's own projection (CS-AN-2): the raw-bytes hash never equals `graph_hash_at_run` on a promoted graph.
+        deriveDecisionContextGraphHash(graph)) : undefined;
 
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
+        ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
         graph: graphPresent ? graph : null,
         graph_present: graphPresent,

@@ -1,3 +1,4 @@
+import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
 import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
@@ -718,7 +719,8 @@ async function applyApprovedLinkStrengths(
     // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
     const stored = (working as EditableGraph).edges.find(e => e.from === l.from && e.to === l.to) as
       { provenance?: { source?: unknown; reviewed_by_user?: { intent?: unknown; at?: unknown } }; defaulted?: unknown } | undefined;
-    if (l.adopted && stored?.provenance?.source === 'user_specified' && stored.defaulted !== true) return refuse('link_became_users_own', i);
+    if (l.adopted && stored?.provenance?.source === 'user_specified' && stored.defaulted !== true
+      && drawnLinkAdoptionFor(ctx.scenarioId, l.from, l.to, l.magnitude, stored) === undefined) return refuse('link_became_users_own', i);
     // …and a link the user REVIEWED since the proposal (a canvas confirm writes only that stamp) is their settled view.
     const review = stored?.provenance?.reviewed_by_user;
     const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
