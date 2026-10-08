@@ -174,9 +174,12 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   /** The served build-turn reply on `6ff7bc9` (#70 5851078813), verbatim up to the parked questions. */
   const SERVED_FIRST = 'Not yet\u2014the provisional first pass cannot establish which choice improves MRR.\n\n- I modelled your target as **\u00a320k Pro-plan MRR** and churn at **10% or less**; confirm if \u00a320k means all-plan MRR instead.\n\nI saved the model I drafted. The figures above are not recorded until you approve them. Questions this model does not answer yet: Which did you mean? Ask me for the other 11. The analysis can run now.';
 
-  it('RED (served 6ff7bc9): the arithmetic follows the model\'s lead, before the bullets, the save line and the questions', () => {
+  it('RED (served 6ff7bc9, P50 copy): the arithmetic follows the model\'s lead, before the bullets and the questions', () => {
     const para = breakEvenLine(breakEvenFor(graph())!);
-    const said = withBreakEvenAnswer(SERVED_FIRST, breakEvenFor(graph())!);
+    const currentFirst = SERVED_FIRST.replace('I saved the model I drafted. ', '');
+    const said = withBreakEvenAnswer(currentFirst, breakEvenFor(graph())!);
+    expect(said).not.toMatch(/model was saved|I saved the model/i);
+    expect(said).toContain('Questions this model does not answer yet:');
     expect(said.startsWith(`Not yet\u2014the provisional first pass cannot establish which choice improves MRR.\n\n${para}\n\n- I modelled`)).toBe(true);
     expect(said.indexOf(para)).toBeLessThan(said.indexOf('Questions this model does not answer yet'));
   });
