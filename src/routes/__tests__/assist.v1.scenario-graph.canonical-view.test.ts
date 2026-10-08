@@ -29,6 +29,7 @@ vi.mock('../../orchestrator-v5/build-turn-context.js', async (original) => {
 import scenarioGraphRoute from '../assist.v1.scenario-graph.js';
 import { buildAnalysisResultBlock } from '../../orchestrator-v5/compose.js';
 import { goalChanceFactsForAgent } from '../../orchestrator-v5/goal-target/goal-chance-range-agent.js';
+import { goalChanceCellFacesForAgent } from '../../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { buildAnalysisRefusalFact } from '../../orchestrator-v5/context/analysis-refusal-continuity.js';
 import { deriveDecisionContextGraphHash } from '../../orchestrator-v5/build-turn-context.js';
 
@@ -90,7 +91,9 @@ describe('canonical view on the existing scenario read route', () => {
     expect(view).toBeDefined();
     expect(view.source).toBe('stored_run_facts');
     expect(view.staleness).toMatchObject({ stale: false, revision: 7, run_revision: null, basis: 'analysis_graph_hash_interim' });
-    expect(view.options.map((o: Json) => [o.option_id, o.cell])).toEqual(Object.entries(expected.goal_chance_display!).map(([option_id, display]) => [option_id, { kind: 'figure', display }]));
+    const faces = goalChanceCellFacesForAgent(buildAnalysisResultBlock(fact), saved.graph, true);
+    expect(view.options.map((o: Json) => [o.option_id, o.cell])).toEqual(Object.entries(expected.goal_chance_display!).map(([option_id, display]) => [option_id, { kind: 'figure', display, face: faces.get(option_id) }]));
+    expect(view.options.every((o: Json) => typeof o.cell.face === 'string' && o.cell.face.includes(o.cell.display))).toBe(true);
     expect(JSON.stringify(fact)).toBe(before);
     expect(store.readExistingScenario).toHaveBeenCalledExactlyOnceWith(SCENARIO);
   });
