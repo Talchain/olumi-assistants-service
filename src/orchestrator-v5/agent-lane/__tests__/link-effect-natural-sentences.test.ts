@@ -72,8 +72,7 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
   { id: 'S5', fixture: 'f0eb03ac', from: 'monthly_wholesale_subscription_revenue', to: 'gross_margin',
     quote: 'Each 10% rise in monthly wholesale subscription revenue adds about 1 percentage point of gross margin.',
     effect: effect(1, 'percentage points', 10, '%'),
-    ask: bestGuessAsk('Each 10% rise in monthly wholesale subscription revenue adds about 1 percentage point of gross margin.',
-      'Monthly wholesale subscription revenue', 'gross margin') },
+    ask: 'What GBP per month change in “Monthly wholesale subscription revenue” do you mean by 10%?' },
   { id: 'S6', fixture: 'f0eb03ac', from: 'subscribed_local_caf_s', to: 'monthly_wholesale_subscription_revenue',
     quote: 'Each additional subscribed local café raises monthly wholesale subscription revenue by about £400.',
     effect: effect(400, 'GBP per month', 1, 'cafés'),
@@ -81,7 +80,7 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
   { id: 'F1', fixture: 'b8143909', from: 'bread_price_change', to: 'footfall',
     quote: "If we put bread prices up 10%, I'd expect footfall to drop by roughly 3%.",
     effect: effect(-3, '%', 10, '%'),
-    ask: bestGuessAsk("If we put bread prices up 10%, I'd expect footfall to drop by roughly 3%.", 'Bread price change', 'Footfall') },
+    ask: 'Is that a 10-point rise in “Bread price change” (say 10% → 20%), or 10% of today’s level; is that a 3-point fall in “Footfall” (say 13% → 10%), or 3% of today’s level?' },
   { id: 'F2', fixture: 'b8143909', from: 'staff_hours', to: 'gross_margin',
     quote: 'Cutting 100 staff hours a week would add about one and a half points to our gross margin.',
     effect: effect(1.5, 'points', -100, 'staff hours/week'),
@@ -356,18 +355,18 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     const row = { ...NATURAL_SENTENCE_ROWS[0]!, quote: 'Each 1% rise in production waste rate cuts gross margin by about 0.5 percentage points.' };
     const w = world(row); const before = w.graph(); const result = await propose(w, row);
     expect(result.refusal).toBe('unit_mismatch');
-    oneQuestion(result, contextQuestionFor(w, row));
+    oneQuestion(result, 'Is that a 1-point rise in “Production waste rate” (12% → 13%), or 1% of today’s 12% (a 0.12-point rise: 12% → 12.12%)?');
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
   });
-  it('F1 on the served graph: a user-stated source level keeps the refusal and neutral context question', async () => {
+  it('F1 on the served graph: a user-stated source zero settles its reading and only Footfall is asked', async () => {
     const row = NATURAL_SENTENCE_ROWS.find(r => r.id === 'F1')!;
     const initial = fixture(row);
-    // The user's own source level does not supply a current figure in the target's units.
+    // RC2a Rule 3: resolve the target's initial unit question before asking for the current best guess.
     expect(nodeOf(initial, 'bread_price_change').observed_state).toMatchObject({ raw_value: 0, source: 'cee_inference' });
     nodeOf(initial, 'bread_price_change').observed_state.source = 'brief_extraction';
     const w = world(row, initial); const before = w.graph(); const result = await propose(w, row);
     expect(result.refusal).toBe('unit_mismatch');
-    oneQuestion(result, contextQuestionFor(w, row));
+    oneQuestion(result, 'Is that a 3-point fall in “Footfall” (say 13% → 10%), or 3% of today’s level?');
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
   });
   it('M-number: a target figure the user never wrote cannot yield a card', async () => {
@@ -535,6 +534,8 @@ describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is nev
     expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
     expect(String(result.detail)).not.toMatch(/no unit or scale/);
     oneQuestion(result, contextQuestionFor(w, rt1));
+    expect(String(result.detail)).toContain('"Wholesale subscription revenue" is measured in %');
+    expect(String(result.detail)).toContain('"Café subscribers" in cafés');
     expect(result.link_effect_clarifications).toContainEqual(expect.objectContaining({
       from_id: rt1.from, to_id: rt1.to, quote: rt1.quote, refusal: 'unit_mismatch' }));
     expect(cardsFor(w, result)).toEqual([]);
@@ -632,6 +633,7 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     effect: effect(1, 'percentage points', 2, 'developers') } as const;
   const kidLink = (g: Json) => (g.edges as Json[]).filter(e => e.from === 'onboarding_drag' && e.to === 'feature_points_per_developer_week');
   const unitMismatch = { ok: false, mutated: false, refusal: 'unit_mismatch' };
+  const unitMismatchDetail = 'Nothing was prepared: "Onboarding drag" is measured in feature points/developer/week and "Developer headcount" in developers. Ask the user for their figure in those units; never convert it yourself.';
   it('AS SERVED (P52): C-poss on d39c05ba → stated percentage points supersede the unwritten gauge, card, nothing stored', async () => {
     const served = fixture(cPoss as CorpusRow);
     expect(kidLink(served)).toHaveLength(1);
@@ -666,6 +668,7 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     const w = world(cPoss as CorpusRow, g); const before = w.graph(); const result = await propose(w, cPoss as CorpusRow);
     expect(result).toMatchObject(unitMismatch);
     oneQuestion(result, contextQuestionFor(w, cPoss as CorpusRow));
+    expect(result.detail).toBe(`${unitMismatchDetail} Then ask: "${contextQuestionFor(w, cPoss as CorpusRow)}"`);
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, cPoss as CorpusRow, before);
   });
   it('P52 U1 stored-size guard: an incompatible touching size makes stated percentage points ineligible beside an unwritten gauge', async () => {
@@ -682,6 +685,7 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     const w = world(cPoss as CorpusRow, g); const before = w.graph(); const result = await propose(w, cPoss as CorpusRow);
     expect(result).toMatchObject(unitMismatch);
     oneQuestion(result, contextQuestionFor(w, cPoss as CorpusRow));
+    expect(result.detail).toBe(`${unitMismatchDetail} Then ask: "${contextQuestionFor(w, cPoss as CorpusRow)}"`);
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, cPoss as CorpusRow, before);
   });
   it('r9 SYNTHETIC percent LEVEL (constraint-only, d39c05ba clone): a literal £ never supersedes the gauge on a % level', async () => {
@@ -718,6 +722,7 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     const result = await propose(w, row);
     expect(result).toMatchObject(unitMismatch);
     oneQuestion(result, contextQuestionFor(w, row));
+    expect(result.detail).toBe(`${unitMismatchDetail} Then ask: "${contextQuestionFor(w, row)}"`);
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
   });
   it('P52 NO stated unit CONTROL: the existing gauge unit retains the 1b945d35 proposal and no-card outcome by link identity', async () => {

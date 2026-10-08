@@ -43,7 +43,7 @@ const onlyReads = (w: ReturnType<typeof world>) => {
 };
 
 describe('⭐ the served correction reads exactly as the same sentence without its "not" tail', () => {
-  // The correction and its twin retain the same refusal state. RC2a carries each exact current statement in its ask.
+  // RC2a Rule 3 (rc2a.md:9): keep the initial points/relative question; the carrier retains each exact statement.
   const TWIN = 'Each 1% price rise adds £600 a month to monthly recurring revenue.';
   it.each(['%', 'percentage points'])('one link, per-change unit %s: served sentence ≡ its twin, never a denial', async (unit) => {
     const run = async (said: string) => {
@@ -54,10 +54,11 @@ describe('⭐ the served correction reads exactly as the same sentence without i
     const served = await run(SAID);
     const twin = await run(TWIN);
     expect(served.r.why, JSON.stringify(served.r)).not.toBe('denied');
-    expect({ ok: served.r.ok, refusal: served.r.refusal })
-      .toEqual({ ok: twin.r.ok, refusal: twin.r.refusal });
+    expect({ ok: served.r.ok, refusal: served.r.refusal, question: served.r.question })
+      .toEqual({ ok: twin.r.ok, refusal: twin.r.refusal, question: twin.r.question });
     for (const [result, quote] of [[served.r, SAID], [twin.r, TWIN]] as const) {
-      expect(result.question).toBe(`You said ‘${quote}’. What's your best single guess, and the lowest and highest it could plausibly be?`);
+      expect(result.question).toBe('Is that a 1-point rise in “Price rise” (say 10% → 11%), or 1% of today’s level?');
+      expect(result.link_effect_clarifications[0].question).toBe(result.question);
       expect(result.link_effect_clarifications[0].quote).toBe(quote);
     }
     onlyReads(served.w);

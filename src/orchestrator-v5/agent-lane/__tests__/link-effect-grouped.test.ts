@@ -63,7 +63,7 @@ describe('propose_link_effect grouped natural effects', () => {
     expect(store.get(String(result.proposal_id))?.operations).toHaveLength(2);
   });
 
-  it('RC2a: a refused bare % in a group carries one best-guess question; other links still prepare', async () => {
+  it('RC2a: a refused bare % in a group carries its initial unit question; other links still prepare', async () => {
     const { caps, store } = world();
     const bare = { ...links[1], per_source_change_unit: 'percent per month', quote: 'Every 1% monthly churn loses about 40 Pro plan paying subscribers' };
     const text = `${links[0].quote}. ${bare.quote}.`;
@@ -71,7 +71,11 @@ describe('propose_link_effect grouped natural effects', () => {
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(result.links).toHaveLength(1);
     expect(result.not_prepared).toEqual([expect.objectContaining({ from_label: 'Monthly churn', refusal: 'unit_mismatch' })]);
-    expect(String(result.not_prepared[0].detail)).toContain("What's your best single guess, and the lowest and highest it could plausibly be?");
+    // RC2a Rule 3 (rc2a.md:9): resolve points/relative before advancing the carried ask to the best guess.
+    const question = 'Is that a 1-point rise in “Monthly churn” (say 10% → 11%), or 1% of today’s level?';
+    expect(String(result.not_prepared[0].detail)).toContain(question);
+    expect(result.not_prepared[0].question).toBe(question);
+    expect(result.link_effect_clarifications[0].question).toBe(question);
     expect(result.link_effect_clarifications[0].quote).toBe(bare.quote);
     expect(store.get(String(result.proposal_id))?.operations).toHaveLength(1);
   });

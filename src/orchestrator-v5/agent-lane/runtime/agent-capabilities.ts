@@ -1580,6 +1580,13 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
   }
 }
 
+function linkEffectUnitRefusalQuestion(refusal: string, detail: string): string | undefined {
+  // A unitless refusal already carries the panel's question. Store that question without adding a second ask.
+  // Other refusals, including a size outside the model's range, still need the best-guess clarification.
+  const question = 'How strong is this effect?';
+  return refusal === 'unit_mismatch' && detail.includes(`\u201c${question}\u201d`) ? question : undefined;
+}
+
 /**
  * RT-6 step 2 (Science U3): ONE question first, then the canvas control as the alternative, in one quoted sentence.
  * Nothing is recorded until the user answers, so it never says the figure "can't" be recorded from chat.
@@ -3688,8 +3695,11 @@ export function createAgentCapabilities(
               && (reply !== null || quoteSpansIn(text, contextQuote).length > 0
               && linkEffectStatementNamesEndpoints(contextQuote, { source: refusalEnds.from.label, target: refusalEnds.to.label }));
             if (canCarry) {
-              question ??= guessQuestion(refusalEnds!.from, refusalEnds!.to, contextQuote);
-              detail = preserveReason ? `${detail} Then ask: "${question}"` : linkEffectUnitAskWords(question, refusalEnds!.from, refusalEnds!.to);
+              const ownQuestion = preserveReason ? linkEffectUnitRefusalQuestion(refusal, detail) : undefined;
+              question = ownQuestion ?? question ?? guessQuestion(refusalEnds!.from, refusalEnds!.to, contextQuote);
+              if (ownQuestion === undefined) {
+                detail = preserveReason ? `${detail} Then ask: "${question}"` : linkEffectUnitAskWords(question, refusalEnds!.from, refusalEnds!.to);
+              }
               clarifications.push(effectClarification(refusalEnds!.from, refusalEnds!.to, contextQuote, question, refusal,
                 floor, reply?.action.source_text ?? refusalSourceText, linkEffectResolvedReading(text) ?? reply?.action.resolved_reading,
                 reply === null ? undefined : linkEffectClarificationLineage(reply)));
@@ -3802,7 +3812,8 @@ export function createAgentCapabilities(
           const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
             ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
           if (unitAsk !== undefined) {
-            fail('unit_mismatch', '', guessQuestion(from, to, reply?.action.quote ?? entryQuote));
+            // Resolve the whole current statement's initial unit ambiguity; a detached clause keeps the neutral ask.
+            fail('unit_mismatch', '', reply === null && said === entryQuote ? unitAsk : guessQuestion(from, to, reply?.action.quote ?? entryQuote));
             continue;
           }
           const unitView = withLinkEffectUnitReadings(working, unitReading.unit_readings);
@@ -3818,7 +3829,7 @@ export function createAgentCapabilities(
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
-              : linkEffectRefusalWords(dry.reason, working, from, to, effect, unitReading.unit_readings), undefined, undefined, dry.reason === 'not_representable');
+              : linkEffectRefusalWords(dry.reason, working, from, to, effect, unitReading.unit_readings), undefined, undefined, dry.reason === 'not_representable' || dry.reason === 'unit_mismatch');
             continue;
           }
           // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
@@ -3887,11 +3898,14 @@ export function createAgentCapabilities(
       }
       const reply = await effectReply(ctx, g, from.id, to.id, text, quote);
       const refusalWithAsk = (refusal: string, question: string, why?: string, floor = reply?.action.floor, reasonDetail?: string): ToolResult => {
+        const ownQuestion = reasonDetail === undefined ? undefined : linkEffectUnitRefusalQuestion(refusal, reasonDetail);
+        question = ownQuestion ?? question;
         const contextQuote = reply?.action.quote ?? (quoteSpansIn(text, quote).length > 0 && linkEffectStatementNamesEndpoints(quote, { source: from.label, target: to.label }) ? quote : text);
         const canCarry = reply !== null || quoteSpansIn(text, contextQuote).length > 0
           && linkEffectStatementNamesEndpoints(contextQuote, { source: from.label, target: to.label });
         return { ok: false, mutated: false, refusal, question, ...(why === undefined ? {} : { why }),
-          detail: reasonDetail === undefined ? linkEffectUnitAskWords(question, from, to) : `${reasonDetail} Then ask: "${question}"`,
+          detail: reasonDetail === undefined ? linkEffectUnitAskWords(question, from, to)
+            : ownQuestion === undefined ? `${reasonDetail} Then ask: "${question}"` : reasonDetail,
           ...(canCarry ? { link_effect_clarifications: [effectClarification(from, to, contextQuote, question, refusal, floor,
             reply?.action.source_text ?? text, linkEffectResolvedReading(text) ?? reply?.action.resolved_reading,
             reply === null ? undefined : linkEffectClarificationLineage(reply))] } : {}),
@@ -3947,7 +3961,8 @@ export function createAgentCapabilities(
         const question = reply !== null || linkEffectStatementNamesEndpoints(quote, statedEnds)
           ? guessQuestion(from, to, reply?.action.quote ?? quote)
           : linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds, statedScope.target_units)?.question);
-        return refusalWithAsk(miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement', question, miss);
+        return refusalWithAsk(miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement', question,
+          miss === 'figures_not_in_statement' ? undefined : miss);
       }
       const said = answerReading !== undefined ? quote : statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
       const endpoints = linkEffectTargetOf(g.raw, from.id, to.id);
@@ -3969,7 +3984,8 @@ export function createAgentCapabilities(
       const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
         ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
       if (unitAsk !== undefined) {
-        return refusalWithAsk('unit_mismatch', guessQuestion(from, to, reply?.action.quote ?? quote));
+        // RC2a keeps the whole statement's initial unit question; a clause cannot discard its surrounding speech act.
+        return refusalWithAsk('unit_mismatch', reply === null && said === quote ? unitAsk : guessQuestion(from, to, reply?.action.quote ?? quote));
       }
       const unitView = withLinkEffectUnitReadings(g.raw, unitReading.unit_readings);
       const consent = { ...linkEffectConsent(unitView, from.id, to.id, stated), ...selected };
@@ -3986,7 +4002,8 @@ export function createAgentCapabilities(
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         if (reply !== null || linkEffectStatementNamesEndpoints(quote, statedEnds)) {
           return refusalWithAsk(dry.reason, guessQuestion(from, to, reply?.action.quote ?? quote), undefined, undefined,
-            dry.reason === 'not_representable' ? linkEffectRefusalWords(dry.reason, g.raw, from, to, effect, unitReading.unit_readings) : undefined);
+            dry.reason === 'not_representable' || dry.reason === 'unit_mismatch'
+              ? linkEffectRefusalWords(dry.reason, g.raw, from, to, effect, unitReading.unit_readings) : undefined);
         }
         return { ok: false, mutated: false, refusal: dry.reason,
           detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to, effect, unitReading.unit_readings) };
