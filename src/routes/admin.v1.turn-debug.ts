@@ -44,7 +44,7 @@ export async function adminTurnDebugRoutes(app: FastifyInstance): Promise<void> 
    *   404 -- turn_id not found (never stored or store not enabled)
    *   410 -- entry existed but TTL (1 hour) has elapsed
    */
-  app.get('/admin/v1/turn-debug/:turn_id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/turn-debug/:turn_id', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const params = TurnIdParamsSchema.safeParse(request.params);
@@ -117,7 +117,7 @@ export async function adminTurnDebugRoutes(app: FastifyInstance): Promise<void> 
    *
    * Diagnostics: current store occupancy.
    */
-  app.get('/admin/v1/turn-debug-stats', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/turn-debug-stats', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
     return reply.status(200).send({
       store_size: getTurnDebugStoreSize(),

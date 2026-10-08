@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ACCOUNTS B3 — the guest → account COPY route.
  *
@@ -15,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   forgeUserToken,
   makeEs256Key,
-  startJwksFixture,
+  // JWKS network transport is replaced locally below; ES256 verification remains real.
   type JwksFixture,
 } from '../../utils/__tests__/helpers/supabase-jwks-fixture.js';
 
@@ -55,6 +56,7 @@ function portReturning(outcome: Outcome | Error) {
 }
 async function buildApp(store: Port): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  await installOwnershipHarness(app);
   await copyRoute(app, { store });
   await app.ready();
   return app;
@@ -160,6 +162,7 @@ describe('the rate limit is keyed by the verified user (REAL limiter)', () => {
     try {
       const app = Fastify({ logger: false });
       await app.register(rateLimit, { global: true, max: 1000, timeWindow: '1 minute' });
+      await installOwnershipHarness(app);
       await copyRoute(app, { store });
       await app.ready();
       return app;
@@ -231,3 +234,15 @@ describe('the adapter: exactly one RPC, and the SQL function\'s SQLSTATEs map to
     await expect(client({ data: { scenario_id: COPY }, error: null }).store.copyGuestScenario(GUEST, ME)).rejects.toBeInstanceOf(GuestCopyStoreError);
   });
 });
+
+const fixtureKeys = vi.hoisted(() => ({ keys: [] as import('jose').JWK[] }));
+vi.mock('jose', async load => {
+  const actual = await load<typeof import('jose')>();
+  return { ...actual, createRemoteJWKSet: () => actual.createLocalJWKSet({ keys: fixtureKeys.keys }) };
+});
+async function startJwksFixture(keys: import('jose').JWK[]): Promise<JwksFixture> {
+  fixtureKeys.keys = keys;
+  return { base: 'https://owniso.invalid', issuer: 'https://owniso.invalid/auth/v1', close: async () => {} } as JwksFixture;
+}
+
+vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => ({ readExistingScenario: async () => ({ userId: null }) }) }));

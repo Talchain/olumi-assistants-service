@@ -69,6 +69,7 @@ import {
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "./utils/errors.js";
+import { scenarioOwnershipPlugin, installScenarioDeclarationGuard } from "./plugins/scenario-ownership.js";
 import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
@@ -189,50 +190,9 @@ export async function build() {
     log.warn({ event: 'config.dead_env_var', key: w.key }, w.message);
   }
 
-  // ── SCENARIO OWNERSHIP POSTURE — say it out loud, at boot, unconditionally ──
-  //
-  // Ownership on the /assist/v1/scenarios/* family is derived from the VERIFIED
-  // token subject alone (route-v2-preflight.ts's
-  // CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE). That is correct — and it makes
-  // CEE_REQUIRE_USER_JWT load-bearing rather than optional.
-  //
-  // With the flag OFF, `resolveUserIdentity` returns `{ mode: "off" }` for every
-  // caller, so the effective user is null. A scenario with a non-null stored
-  // owner then has a non-null owner and a null caller, which is refused
-  // (`scenario_requires_authenticated_owner`) on EVERY endpoint below. The
-  // owner cannot read their own scenario and cannot write to it. It reads to
-  // the user as data loss; the cause is a flag.
-  //
-  // ⚠ THIS IS NOT A ROLLBACK LEVER. Turning CEE_REQUIRE_USER_JWT off no longer
-  // restores legacy behaviour — it takes the scenario surfaces DOWN for every
-  // signed-in user. Nothing else in the config layer guards this direction: the
-  // only refine on this flag (config/index.ts) fires when it is TRUE.
-  //
-  // Non-fatal on purpose: guest (unowned) scenarios still work, so this is a
-  // partial outage, and a service that refuses to boot would be worse. But it
-  // must never be silent again.
-  if (config.auth?.requireUserJwt !== true) {
-    log.warn(
-      {
-        event: 'config.scenario_ownership_posture',
-        require_user_jwt: false,
-        owned_scenarios_reachable_by_owner: false,
-        endpoints: [
-          'POST /assist/v1/scenarios/:scenario_id/graph',
-          'POST /assist/v1/scenarios/:scenario_id/graph/register',
-          'POST /assist/v1/scenarios/:scenario_id/versions',
-          'POST /assist/v1/scenarios/:scenario_id/versions/compare',
-          'POST /assist/v1/scenarios/:scenario_id/versions/save',
-          'POST /assist/v1/scenarios/:scenario_id/versions/restore',
-        ],
-      },
-      'MISCONFIGURATION: CEE_REQUIRE_USER_JWT is OFF, so no caller is ever identified — and ownership ' +
-        'on the scenario surfaces is derived from the verified token subject alone. Every OWNED scenario ' +
-        'is therefore unreadable AND unwritable by its own owner across all six /assist/v1/scenarios/* ' +
-        'endpoints, which answer 404. Guest (unowned) scenarios are unaffected. This flag is NOT a ' +
-        'rollback lever for the scenario family: set CEE_REQUIRE_USER_JWT=true to restore owner access.',
-    );
-  }
+  log.info({ event: 'config.scenario_ownership_posture', identity_source: 'verified_supabase_jwt',
+    guest_owner_null_allowed: true, viewer_member_read: 'scenario_graph_only' },
+    'Scenario ownership is enforced centrally, independently of CEE_REQUIRE_USER_JWT');
 
   // Prompt environment — always logged at startup so every boot records which
   // PMS pointer this deployment serves and why. A production runtime resolving
@@ -480,6 +440,15 @@ export async function build() {
     trustProxy: nodeEnv === "production",
   });
 
+  // @fastify/cors owns one framework-generated OPTIONS route. Its explicit
+  // declaration is installed before the strict guard; no application route gets a default.
+  app.addHook('onRoute', route => {
+    if (route.method === 'OPTIONS' && route.url === '*') {
+      route.config = { ...route.config, scenarioId: 'none' };
+    }
+  });
+  installScenarioDeclarationGuard(app);
+
   // CORS: Strict allowlist (default: olumi.app + localhost dev)
   const allowedOrigins = resolveAllowedOrigins();
   const allowedOriginSet = new Set(allowedOrigins);
@@ -610,6 +579,7 @@ await app.register(rateLimit, {
   // Auth: API key authentication with per-key quotas (v1.3.0)
   // Note: authPlugin uses getRequestId() which now has correct ID from above hook
   await app.register(authPlugin);
+  await app.register(scenarioOwnershipPlugin);
 
   // Response hash: Add x-olumi-response-hash header (v1.5 PR N)
   await app.register(responseHashPlugin);
@@ -811,7 +781,7 @@ function buildCeeConfig() {
 // ---------------------------------------------------------------------------
 // /healthz — minimal public probe (load balancers, readiness checks, CI)
 // ---------------------------------------------------------------------------
-app.get("/healthz", async (_request, reply) => {
+app.get("/healthz", { config: { scenarioId: 'none' } }, async (_request, reply) => {
   // GATE 0 — a production runtime must never serve the PMS staging pointer.
   // When the prod verdict is a POSITIVE identification (OLUMI_ENV=prod, or
   // RENDER_SERVICE_NAME set and not containing "staging") and the resolved
@@ -1006,7 +976,7 @@ app.get("/healthz", async (_request, reply) => {
 // ---------------------------------------------------------------------------
 // /healthz/detail — full diagnostics (admin auth required)
 // ---------------------------------------------------------------------------
-app.get("/healthz/detail", async (request, reply) => {
+app.get("/healthz/detail", { config: { scenarioId: 'none' } }, async (request, reply) => {
   const providedKey = request.headers["x-admin-key"] as string | undefined;
   if (!providedKey) {
     return reply.code(401).send({
@@ -1257,7 +1227,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       )
     : null;
 
-  app.get("/diagnostics", async (request, reply) => {
+  app.get("/diagnostics", { config: { scenarioId: 'none' } }, async (request, reply) => {
     // Security: Diagnostics access requires explicit key ID allowlist
     if (!diagnosticsKeyIds || diagnosticsKeyIds.size === 0) {
       reply.code(403);

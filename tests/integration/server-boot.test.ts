@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from '../utils/ownership-route-harness.js';
 /**
  * Server-boot test — verifies /orchestrate/v2/turn route registration.
  *
@@ -82,12 +83,14 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', async (importOriginal) => {
 // v5-maintenance: mock session store so commit succeeds without Supabase.
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
+    scenarioExists: async () => true,
+    getScenarioOwner: async () => null,
     append: async () => ({ id: 'boot-mock-row' }),
     readRecent: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
+    ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
@@ -113,6 +116,7 @@ describe('server-boot: /orchestrate/v2/turn registration is unconditional', () =
   it('route registered → POST succeeds (200)', async () => {
     const app = Fastify();
     // Mirrors src/server.ts: registration is unconditional.
+    await installOwnershipHarness(app);
     await ceeOrchestratorRouteV2(app);
     await app.ready();
 

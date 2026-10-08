@@ -61,7 +61,7 @@ export default async function route(app: FastifyInstance) {
    * POST /assist/share
    * Create a signed, redacted share URL
    */
-  app.post("/assist/share", async (req, reply) => {
+  app.post("/assist/share", { config: { scenarioId: 'none' } }, async (req, reply) => {
     if (!isShareEnabled()) {
       const requestId = getRequestId(req);
       return reply.code(404).send(
@@ -199,7 +199,7 @@ export default async function route(app: FastifyInstance) {
    * GET /assist/share/:token
    * Retrieve shared content (read-only, redacted)
    */
-  app.get("/assist/share/*", async (req, reply) => {
+  app.get("/assist/share/*", { config: { scenarioId: 'none' } }, async (req, reply) => {
     if (!isShareEnabled()) {
       const requestId = getRequestId(req);
       return reply.code(404).send(
@@ -261,7 +261,7 @@ export default async function route(app: FastifyInstance) {
    * DELETE /assist/share/:token
    * Revoke share immediately
    */
-  app.delete("/assist/share/*", async (req, reply) => {
+  app.delete("/assist/share/*", { config: { scenarioId: 'none' } }, async (req, reply) => {
     if (!isShareEnabled()) {
       const requestId = getRequestId(req);
       return reply.code(404).send(

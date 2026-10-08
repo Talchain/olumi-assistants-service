@@ -107,7 +107,7 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
       ),
   });
 
-  app.get('/admin/prompts/status', async (request, reply) => {
+  app.get('/admin/prompts/status', { config: { scenarioId: 'none' } }, async (request, reply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
     const keys = await buildKeyRows('status');
     return reply.code(200).send({ keys });
@@ -126,7 +126,7 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
       // the file that reads the prompt STORE (`store.list()` for the archive
       // -drift measurement), so it is the only one whose cost scales with the
       // estate rather than with in-memory state.
-      config: { rateLimit: { max: 20, timeWindow: 15 * 60 * 1000 } },
+      config: { scenarioId: 'none',  rateLimit: { max: 20, timeWindow: 15 * 60 * 1000 } },
     },
     async (request, reply) => {
       if (!verifyAdminKey(request, reply, 'read')) return;
@@ -135,7 +135,7 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
     },
   );
 
-  app.post('/admin/prompts/reload', async (request, reply) => {
+  app.post('/admin/prompts/reload', { config: { scenarioId: 'none' } }, async (request, reply) => {
     if (!verifyAdminKey(request, reply, 'write')) return;
 
     // 1. Store layer.

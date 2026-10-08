@@ -113,7 +113,7 @@ export default async function proxyV5TurnStreamRoute(app: FastifyInstance): Prom
     "[proxy-v5-stream] Browser streamed turn registered: POST /proxy/v5/turn/stream",
   );
 
-  app.post(PROXY_STREAMED_TURN_ROUTE, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post(PROXY_STREAMED_TURN_ROUTE, { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const requestId = (request.headers["x-request-id"] as string) ?? crypto.randomUUID();
 
     // ── 1. Origin validation ────────────────────────────────────────────────

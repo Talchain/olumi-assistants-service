@@ -53,7 +53,7 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
@@ -842,7 +842,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // can apply it to that option alone. Identity + zero incidence + no named limit is the SAME readiness predicate.
     // PLoT cannot return a driver, sensitivity or worth-checking row for a risk it never receives. Project BEFORE the
     // remaining compute readers; the snapshot and persisted graph (including the stamp) are untouched.
-    const graphForAnalysis = withoutPreconditionRisks(participation.graph, snapshot.graph);
+    let graphForAnalysis = withoutPreconditionRisks(participation.graph, snapshot.graph);
 
     // --- 3. ONE request-level scale projection, on the FINAL option set -----
     // ROUND 4: the projection runs HERE — after the scaffold, immediately
@@ -1121,8 +1121,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // A graph saved before #2300 carries no identity where the card would offer Olumi's reading: that reading is carried
     // on this wire copy as the unconfirmed product #2300 would have minted, so PLoT #420 withholds the goal's figures
     // (`unconfirmed-goal-product.ts`). Nothing persisted; `graph_hash_at_run` is hashed from the raw persisted graph.
-    const wireGraph = carryUnconfirmedGoalProduct(switchGraph, snapshot.rawPersistedGraph ?? snapshot.graph);
-    if (wireGraph !== switchGraph) {
+    const productWireGraph = carryUnconfirmedGoalProduct(switchGraph, snapshot.rawPersistedGraph ?? snapshot.graph);
+    if (productWireGraph !== switchGraph) {
       log.info(
         {
           event: 'run_analysis.unconfirmed_goal_product_carried',
@@ -1131,6 +1131,22 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           node_ids: [snapshot.goal_node_id],
         },
         'run_analysis carried Olumi\'s unconfirmed goal product on the wire copy of a graph with no identity (ids only)',
+      );
+    }
+    // Accumulation works out a stock at its declared month. A deadline edit must not reuse that stock at another
+    // month: withdraw only the carrier on the WIRE copy, preserving the stored graph and its freshness hash.
+    const accumulationDrift = withoutDriftedAccumulations(productWireGraph, snapshot.goal_node_id);
+    const wireGraph = accumulationDrift.graph;
+    // The run's claim readers must see the same withdrawn definitions as PLoT. This is still a run-local copy;
+    // snapshot.graph/rawPersistedGraph retain every carrier exactly as stored.
+    if (accumulationDrift.warnings.length > 0) {
+      graphForAnalysis = withoutDriftedAccumulations(graphForAnalysis, snapshot.goal_node_id).graph;
+    }
+    for (const warning of accumulationDrift.warnings) {
+      log.warn(
+        { event: 'run_analysis.accumulation_horizon_drift', request_id: invocation.requestId,
+          scenario_id: args.scenario_id, node_ids: warning.node_ids, goal_id: snapshot.goal_node_id },
+        'run_analysis withdrew an accumulation whose month differs from the goal deadline (wire copy only)',
       );
     }
     // ⭐ CLAMP AT PERSIST (DL 5924108406): a link stored at ±1 with its full β marked is sent at that full β, on this wire
@@ -2183,6 +2199,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     response = withoutDirectionUnattestedOnHeldFloor(response, heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id));
 
     response = withShareByDateChanceGate(response, snapshot.rawPersistedGraph ?? snapshot.graph, snapshot.goal_node_id);
+    for (const warning of accumulationDrift.warnings) response = appendInferenceWarning(response, warning);
+    if (accumulationDrift.warnings.length > 0) {
+      // The withdrawn identity was not evaluated: use #416's existing Run-wide withholding route before claim readers.
+      const scoredIds = goalFigureOptions(response).scored;
+      response = withholdOptionGoalFigures(response, new Set(scoredIds), {
+        code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, severity: 'warning',
+        message: accumulationDrift.warnings.map(w => w.message).join(' '),
+        node_ids: accumulationDrift.warnings.flatMap(w => w.node_ids as string[]), option_ids: scoredIds,
+      });
+      // PLoT never saw the withdrawn carrier, so CEE records it in the existing run-use ledger for later link readers.
+      const meta = isRecord(response._meta) ? response._meta : {};
+      response = { ...response, _meta: { ...meta, identities_not_forwarded: [
+        ...(Array.isArray(meta.identities_not_forwarded) ? meta.identities_not_forwarded : []),
+        ...accumulationDrift.warnings.flatMap(w => (w.node_ids as string[]).map(node_id =>
+          ({ node_id, reason: 'accumulation_horizon_drift' }))),
+      ] } };
+    }
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
@@ -3104,7 +3137,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const chanceCells = projectCanonicalAnalysisCells(horizonResult, horizonGraph, factCandidate.result.goal_certainty)
       .map(option => option.cell);
     factCandidate.result.enrichment = withShortHorizonBesideChance(
-      withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells), horizonGraph, chanceCells);
+      withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells, accumulationDrift.warnings.length > 0),
+      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0);
 
     // --- 7. Zod-validate the fact ----------------------------------------
     //
@@ -3585,6 +3619,29 @@ export function readResultRecords(response: V2RunResponseEnvelope): ReadonlyArra
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+/** Run-only withdrawal, bound to the scored goal and each carrier's node id. */
+function withoutDriftedAccumulations<G>(graph: G, goalId: string): { graph: G; warnings: Record<string, unknown>[] } {
+  const warnings: Record<string, unknown>[] = [];
+  if (!isRecord(graph) || !Array.isArray(graph.nodes)) return { graph, warnings };
+  const goal = graph.nodes.find((n: unknown) => isRecord(n) && n.id === goalId && n.kind === 'goal');
+  if (!isRecord(goal)) return { graph, warnings };
+  const deadline = typeof goal.goal_horizon_months === 'number' && Number.isFinite(goal.goal_horizon_months)
+    ? goal.goal_horizon_months : undefined;
+  const nodes = graph.nodes.map((node: unknown) => {
+    if (!isRecord(node) || !isRecord(node.nonlinear_identity) || node.nonlinear_identity.operation !== 'accumulation') return node;
+    const horizon = node.nonlinear_identity.horizon_months;
+    if (horizon === deadline) return node;
+    const label = typeof node.label === 'string' && node.label.trim() !== '' ? node.label : String(node.id);
+    warnings.push({ code: 'ACCUMULATION_HORIZON_DRIFT', severity: 'warning', node_ids: [node.id],
+      message: deadline === undefined
+        ? `‘${label}’ is worked out to month ${horizon}, but your deadline is no longer set, so it wasn't used in this run.`
+        : `‘${label}’ is worked out to month ${horizon}, but your deadline is now month ${deadline}, so it wasn't used in this run.` });
+    const { nonlinear_identity: _carrier, ...withoutCarrier } = node;
+    return withoutCarrier;
+  });
+  return { graph: warnings.length > 0 ? { ...graph, nodes } as G : graph, warnings };
 }
 
 /**

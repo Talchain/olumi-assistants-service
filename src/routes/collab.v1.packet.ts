@@ -96,7 +96,7 @@ export default async function route(
   }
 
   for (const path of collabPaths('/packet/:round_id')) {
-    app.get(path, async (req, reply) => {
+    app.get(path, { config: { scenarioId: 'none' } }, async (req, reply) => {
       const store = resolveStore();
       const participant = await requireParticipant(req, reply, store);
       if (participant === null) return reply;
@@ -115,7 +115,7 @@ export default async function route(
   }
 
   for (const path of collabPaths('/packet/:round_id/events')) {
-    app.post(path, async (req, reply) => {
+    app.post(path, { config: { scenarioId: 'none' } }, async (req, reply) => {
       const store = resolveStore();
       const participant = await requireParticipant(req, reply, store);
       if (participant === null) return reply;
@@ -152,7 +152,7 @@ export default async function route(
   }
 
   for (const path of collabPaths('/packet/:round_id/reveal')) {
-    app.get(path, async (req, reply) => {
+    app.get(path, { config: { scenarioId: 'none' } }, async (req, reply) => {
       const store = resolveStore();
       const participant = await requireParticipant(req, reply, store);
       if (participant === null) return reply;
@@ -180,7 +180,7 @@ export default async function route(
   // Same gate as the reveal, inherited from `assembleRevealView` inside the
   // projection rather than restated here.
   for (const path of collabPaths('/packet/:round_id/disagreement')) {
-    app.get(path, async (req, reply) => {
+    app.get(path, { config: { scenarioId: 'none' } }, async (req, reply) => {
       const store = resolveStore();
       const participant = await requireParticipant(req, reply, store);
       if (participant === null) return reply;

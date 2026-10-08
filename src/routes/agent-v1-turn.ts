@@ -55,13 +55,11 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
-import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
 import { BOARD_EDIT_PREFIX, DURABLE_SEED_ROWS_READ, HistoryStore, dropSupersededPairs, historyFromDurableTurns, historyWithSentText, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
 import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/agent-lane/runtime/request-assembly.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
-import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
 import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
@@ -2114,28 +2112,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(422).send({ error: 'BAD_INPUT', detail: '`turn_id` must be a UUID when supplied.' });
     }
 
-    /**
-     * Bound from the request, never from the Agent.
-     *
-     * ⛔ `req.effectiveUserId` DOES NOT EXIST. It is not a Fastify decorator:
-     * it is a local computed inside `route-v2-preflight.ts` by calling
-     * `resolveUserIdentity`. Reading it off the request always yielded
-     * `undefined`, so every caller looked anonymous — and on a signed-in user's
-     * OWN scenario the ownership comparison then refused with 404 before a
-     * single tool ran. Measured: 404 in 423 ms with no tool calls, WITH a valid
-     * bearer token presented.
-     *
-     * Every local witness used guest scenarios, where anonymous is the right
-     * answer, so nothing failed until an owned scenario was tried.
-     */
-    const identity = await resolveUserIdentity(req, String(req.id));
-    if (identity.mode === 'refused') {
-      // A presented-but-unusable token is refused, never downgraded to guest:
-      // silently treating a signed-in user as anonymous is how someone else's
-      // scenario becomes readable.
-      return reply.code(401).send({ error: 'SIGN_IN_REQUIRED', detail: identity.reason });
-    }
-    const userId = identity.mode === 'verified' ? identity.userId : null;
+    if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
+    // Verified identity and deferred scenario provisioning came from the ownership hook.
+    const userId = req.scenarioAccess?.callerUserId ?? null;
 
     // A session is a correlation token: bound once, verified every time.
     const refusal = sessions.check(sessionId, userId, scenarioId);
@@ -2144,27 +2123,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
     }
 
-    /**
-     * Provision the scenario exactly as the product does.
-     *
-     * ⛔ WITHOUT THIS, PAUL'S FIRST TURN ON A NEW DECISION FAILS. Measured:
-     * posting a turn for a scenario id with no row returns `not_found` from the
-     * read AND from the build, and the Agent — correctly — reports that it
-     * could not initialise a model. The control settles whose gap it is:
-     * CEE's own `/orchestrate/v2/turn` given the same unknown id answers 200
-     * and CREATES the row (guest, `user_id: null`). So the product
-     * auto-provisions and this route did not.
-     *
-     * `ensureScenarioExists` is the product's own upsert — `INSERT … ON
-     * CONFLICT (id) DO NOTHING`, returning the AUTHORITATIVE owner of the
-     * stored row. It is NOT a permission grant: the returned owner is compared
-     * below, so an existing row belonging to someone else is refused rather
-     * than adopted.
-     *
-     * ⚠ Fails CLOSED, like the product's pre-flight: if the ownership oracle
-     * cannot answer, the turn is refused rather than run against an
-     * unverifiable scenario.
-     */
     const store = getSessionStore();
     let recentRowsForEgress: RecentTextRows | undefined;
     // Existing readers keep their own fail-open contracts and windows. Egress only consumes rows they already obtained.
@@ -2175,16 +2133,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return rows;
       },
     } : {};
-    try {
-      const owner = await store.ensureScenarioExists(scenarioId, userId);
-      if (scenarioAccessDecision(owner.user_id, userId) !== 'allow') {
-        return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
-      }
-    } catch (err) {
-      log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: ownership oracle unavailable — refusing turn');
-      return reply.code(409).send({ error: 'SCENARIO_OWNERSHIP_UNVERIFIABLE', detail: 'Could not verify the scenario. Nothing was changed.' });
-    }
-
     const dispatchLedger: DispatchTiming[] = [];
     // Every in-process call the Agent makes for this turn is a SUB-TURN: a turn row it commits keeps no conversation
     // text, because the user never saw it (`agent-subturn-context.ts`, #75 5910983526). This route's own claim and
@@ -5400,7 +5348,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
     });
   };
-  app.post('/agent/v1/turn', (req: FastifyRequest, reply: FastifyReply) =>
+  app.post('/agent/v1/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, (req: FastifyRequest, reply: FastifyReply) =>
     runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => agentTurnHandler(req, reply)));
 
   log.info({ event: 'agent_lane.route_mounted' }, 'POST /agent/v1/turn mounted');

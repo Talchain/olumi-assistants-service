@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -159,6 +160,7 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message',
     content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 })));
   app = Fastify({ logger: false });
+  await installOwnershipHarness(app, () => ({ mode: 'verified', userId: identity.userId }));
   await scenarioGraphRoute(app); await app.register(agentV1TurnRoute); await app.ready();
 });
 afterEach(async () => {
@@ -350,3 +352,5 @@ describe('X4 real commit door → cold graph-read door', () => {
     expect(EXPECTED.every(isDurableAnswerOffer)).toBe(true);
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({ looksLikeJwt: () => true, verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity }));

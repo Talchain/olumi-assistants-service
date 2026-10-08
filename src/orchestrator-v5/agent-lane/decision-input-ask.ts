@@ -13,6 +13,7 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
  */
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
@@ -201,6 +202,7 @@ export const UNTESTED_HORIZON_PREFIXES = [
   "These chances use the model's numbers as they are today",
 ] as const;
 export const CHANCE_FREE_HORIZON_PREFIX = "This model doesn't yet say whether any option gets there";
+const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 
 /** One horizon form for the reply and stored Run, from the same cells the UI reads. */
 export function untestedHorizonLineForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): string | null {
@@ -252,25 +254,58 @@ export const GOAL_CHANCE_RANGE_HORIZON_CONFLICT = 'GOAL_CHANCE_RANGE_HORIZON_CON
 /**
  * Write the horizon as one typed Run fact after the final current cells are projected. A point/range cell supplies
  * the chance form; otherwise held months supply staging's chance-free form. No figure or licence is inferred here.
+ * A withdrawn accumulation retains that sentence even with no deadline or a duration limit.
  */
-export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = []): E {
-  return withCellHorizonWarning(envelope, graph, cells);
+export function withUntestedHorizonWarning<E>(
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] | boolean = [], accumulationWithdrawn = false,
+): E {
+  // Retain staging's pre-cell third-argument form for callers that only carry the withdrawal fact.
+  return withCellHorizonWarning(envelope, graph, typeof cells === 'boolean' ? [] : cells,
+    typeof cells === 'boolean' ? cells : accumulationWithdrawn);
 }
 
 /**
  * The same final-cell rule also writes the short basis where a visible point/range has no untested month count, and
  * keeps any point licence's horizon_line in agreement. The presence/order of a licence or warning chooses no form.
  */
-export function withShortHorizonBesideChance<E>(envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = []): E {
-  return withCellHorizonWarning(envelope, graph, cells);
+export function withShortHorizonBesideChance<E>(
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = [], accumulationWithdrawn = false,
+): E {
+  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn);
+}
+
+/** A horizon is tested only along the selected goal's Run-attested identity dependencies. */
+function accumulationTestedAtGoalHorizon(graph: unknown, envelope: Rec): boolean {
+  const goal = goalOf(graph);
+  const rawNodes = recordOf(graph)?.nodes;
+  if (goal === undefined || !finite(goal.goal_horizon_months) || !Array.isArray(rawNodes)) return false;
+  const nodes = rawNodes.map(recordOf).filter((node): node is Rec => node !== undefined);
+  const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
+  // This reader binds accumulation attestations to their declared month and positional inputs.
+  const evaluated = evaluatedIdentityCarriers(nodes, evaluations);
+  const byId = new Map(nodes.map(node => [node.id, node] as const));
+  const seen = new Set<unknown>();
+  const tested = (id: unknown): boolean => {
+    if (seen.has(id) || !evaluated.has(id)) return false;
+    seen.add(id);
+    const identity = recordOf(byId.get(id)?.nonlinear_identity);
+    if (identity?.operation === 'accumulation') return identity.horizon_months === goal.goal_horizon_months;
+    return Array.isArray(identity?.factor_ids) && identity.factor_ids.some(tested);
+  };
+  return tested(goal.id);
 }
 
 /** Replace any intermediate wording with the final cell form; the warning and licence stay in agreement. */
-function withCellHorizonWarning<E>(envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[]): E {
+function withCellHorizonWarning<E>(
+  envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[], accumulationWithdrawn: boolean,
+): E {
   if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const env = envelope as Rec;
   const warnings: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
-  const line = untestedHorizonLineForCells(graph, cells);
+  const goal = goalOf(graph);
+  const line = !accumulationWithdrawn && accumulationTestedAtGoalHorizon(graph, env) ? null
+    : untestedHorizonLineForCells(graph, cells) ?? (accumulationWithdrawn && goal !== undefined
+      ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const hasRange = cells.some(cell => cell.kind === 'range');
   let changed = false;

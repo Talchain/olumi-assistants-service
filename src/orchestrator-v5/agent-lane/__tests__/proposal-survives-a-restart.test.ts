@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../../tests/utils/ownership-route-harness.js";
 /**
  * ⛔ A PENDING APPROVAL SURVIVES A RESTART (root cause of Paul's failing test, 24 Sep 09:39–09:53Z,
  * scenario `d41e2c21`, #63 5811981438): proposals lived only in process memory
@@ -48,6 +49,8 @@ const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
 const store = {
+  scenarioExists: async () => true,
+  getScenarioOwner: async () => null,
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   // The committed row a REPLAY is answered from, with its pending actions parsed exactly as
   // `supabase-store.ts` readCommittedTurn parses them (real parser, foreign-scenario entries dropped).
@@ -97,13 +100,14 @@ describe('a pending approval survives a restart', () => {
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const a = Fastify({ logger: false });
-    a.post('/assist/v1/scenarios/:id/graph', async () => ({
+    await installOwnershipHarness(a, () => identity);
+    a.post('/assist/v1/scenarios/:id/graph', { config: { scenarioId: { from: 'params', key: 'id' } } }, async () => ({
       graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
       graph_hash: `h${edges.length}`,
     }));
     // Counted, and never served: a write this harness did not expect fails loudly instead of "landing".
-    a.post('/assist/v1/scenarios/:id/graph/register', async (_req, reply) => { registers += 1; return reply.code(503).send({ code: 'NOT_SERVED_BY_THIS_HARNESS' }); });
-    a.post('/orchestrate/v2/turn', async (req) => {
+    a.post('/assist/v1/scenarios/:id/graph/register', { config: { scenarioId: { from: 'params', key: 'id' } } }, async (_req, reply) => { registers += 1; return reply.code(503).send({ code: 'NOT_SERVED_BY_THIS_HARNESS' }); });
+    a.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (req) => {
       writes += 1;
       const b = req.body as { kind?: string; event?: { from: string; to: string } };
       if (b.kind === 'system_event') systemEvents += 1;
@@ -662,3 +666,5 @@ describe('a proposal with object operation values survives the JSONB round trip'
     } finally { warn.mockRestore(); }
   });
 });
+
+vi.mock('../../../utils/supabase-user-jwt.js', async () => ({ looksLikeJwt: () => true, verifySupabaseUserJwt: (await import('../../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity }));

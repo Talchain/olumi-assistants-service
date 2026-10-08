@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ROADMAP 2.312 track 2 (2) — THE SCENARIO-ADDRESSED GRAPH READ.
  *
@@ -163,6 +164,7 @@ const GRAPH_WITH_LAYOUT = {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioGraphRoute(app);
   await app.ready();
   return app;
@@ -389,6 +391,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
 
     scenarioExists.mockResolvedValue(true);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const notMine = await read(app, SCENARIO, { user_id: OTHER_USER });
 
     expect(notMine.statusCode).toBe(absent.statusCode);
@@ -401,6 +404,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
   it("never leaks the graph of a scenario owned by someone else", async () => {
     resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
 
     const app = await buildApp();
     const res = await read(app, SCENARIO, { user_id: OTHER_USER });
@@ -415,6 +419,7 @@ describe("HONEST ABSENCE — typed 404, pin (2)", () => {
     // Without this, the refusal pins above could all pass on a route that
     // refuses everything. This is what makes them mean something.
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
 
     const app = await buildApp();
     const res = await read(app, SCENARIO, { user_id: OWNER });
@@ -462,14 +467,17 @@ describe("THE UPSERT FENCE — a read must never create the row, pin (1)", () =>
     }
   });
 
-  it("POSITIVE CONTROL — the upsert IS reached on an existing scenario", async () => {
+  it("POSITIVE CONTROL — the read-only owner oracle IS reached on an existing scenario", async () => {
     // Trap 13: proves the spy can SEE the call it asserts the absence of
     // above. Without this, `not.toHaveBeenCalled()` would pass on a route that
     // never wired the ownership check at all — i.e. on the IDOR.
     const app = await buildApp();
-    await read(app, SCENARIO, { user_id: OWNER });
+    const res = await read(app, SCENARIO, { user_id: OWNER });
 
-    expect(ensureScenarioExists).toHaveBeenCalledWith(SCENARIO, OWNER);
+    expect(getScenarioOwner).toHaveBeenCalledWith(SCENARIO);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["x-ownership-caller"]).toBe(OWNER);
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
     await app.close();
   });
 });
@@ -508,6 +516,7 @@ describe("THE ASSIST-KEY GATE — the same one every other route uses", () => {
 
     const app = Fastify();
     await app.register(authPlugin);
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioGraphRoute(app);
     await app.ready();
 
@@ -534,6 +543,7 @@ describe("THE ASSIST-KEY GATE — the same one every other route uses", () => {
 
     const app = Fastify();
     await app.register(authPlugin);
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioGraphRoute(app);
     await app.ready();
 
@@ -572,6 +582,7 @@ describe("RATE LIMITING — CodeQL js/missing-rate-limiting, and it was right", 
     // `global: false` so ONLY this route's own config is in play — the
     // assertions below are then about THIS route's limit, not an ambient one.
     await app.register(rateLimit, { global: false });
+    await installOwnershipHarness(app, () => resolveUserIdentity());
     await scenarioGraphRoute(app);
     await app.ready();
     return app;
@@ -713,3 +724,8 @@ describe("coalesced existing-scenario read", () => {
     await app.close();
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

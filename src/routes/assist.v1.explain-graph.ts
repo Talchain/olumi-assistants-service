@@ -79,7 +79,7 @@ export default async function route(app: FastifyInstance) {
   const EXPLAIN_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_EXPLAIN_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.explainFeatureVersion || "explain-model-1.0.0";
 
-  app.post("/assist/v1/explain-graph", async (req, reply) => {
+  app.post("/assist/v1/explain-graph", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

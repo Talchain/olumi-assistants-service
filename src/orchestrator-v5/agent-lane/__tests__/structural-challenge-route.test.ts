@@ -8,7 +8,7 @@ type Rec = Record<string, any>;
 const LINK = { from_id: 'driver_retention', to_id: 'goal_value' };
 const RUN_A = 'run-a';
 const RUN_B = 'run-b';
-const SCENARIO = '8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f6';
+const SCENARIO = '8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f600';
 const PRESS = structuralChallengePressId(LINK);
 const dispatch = vi.hoisted(() => ({ calls: [] as Rec[] }));
 const graphReads = vi.hoisted(() => ({ count: 0, noGraph: false }));
@@ -57,6 +57,8 @@ vi.mock('../../handlers/structural-challenge-dispatch.js', async (importOriginal
 
 const rows = new Map<string, Rec>();
 const store = {
+  readExistingScenario: vi.fn(async (id: string) => id === SCENARIO
+    ? { userId: null, graph: null, briefText: null, analysisInvalidatedAt: null } : null),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
   readMostRecentPendingActions: vi.fn(async () => []),
@@ -80,8 +82,10 @@ describe('agent route: structural challenge press', () => {
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => { graphReads.count += 1; if (graphReads.noGraph) return {}; return { graph: { nodes: [{ id: LINK.from_id, kind: 'factor', label: 'Driver retention' }, { id: LINK.to_id, kind: 'goal', label: 'Goal value' }], edges: [{ from: LINK.from_id, to: LINK.to_id }] }, graph_hash: 'graph-a', analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-04T10:00:00.000Z' } }, analysis_ready: { status: 'ready', may_run: true } }; });
-    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'normal', blocks: [] }));
+    const { scenarioOwnershipPlugin } = await import('../../../plugins/scenario-ownership.js');
+    await app.register(scenarioOwnershipPlugin);
+    app.post('/assist/v1/scenarios/:id/graph', { config: { scenarioId: { from: 'params', key: 'id' } } }, async () => { graphReads.count += 1; if (graphReads.noGraph) return {}; return { graph: { nodes: [{ id: LINK.from_id, kind: 'factor', label: 'Driver retention' }, { id: LINK.to_id, kind: 'goal', label: 'Goal value' }], edges: [{ from: LINK.from_id, to: LINK.to_id }] }, graph_hash: 'graph-a', analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-04T10:00:00.000Z' } }, analysis_ready: { status: 'ready', may_run: true } }; });
+    app.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async () => ({ assistant_text: 'normal', blocks: [] }));
     await app.register(agentV1TurnRoute); await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });

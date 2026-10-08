@@ -27,9 +27,9 @@ import { compactWordLabel } from './reply/labels.js';
  */
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
-import { identityCanCarryExactLinks } from '../admission/identity-evaluations.js';
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
 import { userSizedLevelLessLinks } from './mediator-reading.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
@@ -134,8 +134,8 @@ export function goalCertaintyDecisions(
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
   const evaluations = new Map((identityEvaluations ?? []).filter(isRec)
-    .filter((e) => e.evaluated === true && typeof e.node_id === 'string')
-    .filter((e) => identityCanCarryExactLinks(nodes, byId.get(e.node_id)?.nonlinear_identity))
+    // Retain metadata only from an attestation of THIS declaration, including accumulation's month/input order.
+    .filter((e) => typeof e.node_id === 'string' && evaluatedIdentityCarriers(nodes, [e]).has(e.node_id))
     .map((e) => [e.node_id as string, e] as const));
   const evaluated = (id: unknown): boolean => typeof id === 'string' && evaluations.has(id);
   const declared = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
@@ -265,6 +265,8 @@ function breakEvenOf(
   through: string,
 ): GoalCertaintyDecision['break_even'] {
   const op = identity?.operation;
+  // Accumulation is excluded from break-even: neither a product ratio nor a sum delta models its horizon.
+  if (op === 'accumulation') return undefined;
   if ((op !== 'product' && op !== 'sum') || !operands.has(through) || through in iv) return undefined;
   const today = levelOf(goal).raw;
   const threshold = num(goal.goal_threshold_raw);
@@ -471,9 +473,7 @@ export function placeholderGoalPaths(
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const goal = nodes.find((n) => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return [];
-  const evaluated = new Set((identityEvaluations ?? []).filter(isRec)
-    .filter((e) => e.evaluated === true && typeof e.node_id === 'string'
-      && identityCanCarryExactLinks(nodes, byId.get(e.node_id)?.nonlinear_identity)).map((e) => e.node_id as string));
+  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
   // ⛔ THE CARD IS THE ONE ROUTE (AIQ 5902606752): a goal that declares an INFERRED product this run did not evaluate is
   // Olumi's unconfirmed reading of how the goal is made. PLoT never forwards it (variant (d), `translator-v3.ts`) and
   // withholds every goal figure itself (#416, which (S) defers to), and C46 names the leader's cause. (S) stands down, so

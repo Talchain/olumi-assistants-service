@@ -33,7 +33,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getGuestCopyStore } from '../orchestrator-v5/guest-copy/index.js';
 import type { GuestCopyRefusal, GuestCopyStorePort } from '../orchestrator-v5/guest-copy/index.js';
 import { resolveCeeRateLimit } from '../cee/config/limits.js';
-import { verifySupabaseUserJwt } from '../utils/supabase-user-jwt.js';
 import { getRequestId } from '../utils/request-id.js';
 import { log } from '../utils/telemetry.js';
 
@@ -76,21 +75,11 @@ export default async function route(
     {
       // JWT FIRST: this route-level hook is in place before the limiter attaches its own `preHandler`, so it runs first.
       preHandler: async (req, reply) => {
-        const header = req.headers.authorization;
-        const token = typeof header === 'string' && header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
-        if (token === '') {
-          return refuse(reply, req, 401, 'sign_in_required', 'Sign in to keep this decision in your account.');
-        }
-        const verified = await verifySupabaseUserJwt(token);
-        if (!verified.ok) {
-          return refuse(
-            reply, req, 401, verified.reason,
-            verified.reason === 'expired_token' ? 'Your session has expired. Sign in again and retry.' : 'That token could not be verified.',
-          );
-        }
-        verifiedUserOf.set(req, verified.userId);
+        const userId = req.scenarioAccess?.callerUserId;
+        if (!userId) return refuse(reply, req, 401, 'sign_in_required', 'Sign in to keep this decision in your account.');
+        verifiedUserOf.set(req, userId);
       },
-      config: {
+      config: { scenarioId: { from: 'params', key: 'scenario_id' },
         rateLimit: { max: RATE_LIMIT_MAX, timeWindow: '1 minute', hook: 'preHandler', keyGenerator: scenarioCopyRateKey },
       },
     },

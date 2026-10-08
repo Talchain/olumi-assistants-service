@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from '../utils/ownership-route-harness.js';
 /**
  * 2.909 N-suite — ROUTE-GRAIN TOKEN BOUNDARY — RED pre-DDL by construction.
  *
@@ -32,6 +33,7 @@ async function appWithRoute(seam: "src/routes/collab.v1.packet.ts" | "src/routes
   const mod = await importSeam<RouteModule>(seam);
   const app = Fastify({ logger: false });
   app.decorate("collabStore", store);
+  await installOwnershipHarness(app);
   await app.register(mod.default);
   await app.ready();
   return app;
