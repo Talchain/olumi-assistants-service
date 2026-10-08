@@ -12,6 +12,16 @@ import * as rateClassifier from '../rate-as-quantity.js';
 import { goalKindOf, rateUnitInPercent } from '../goal-kind.js';
 import { readStatedGoalLevel } from '../../agent-lane/goal-current-level.js';
 import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
+import { actionFactsOf } from '../../agent-lane/actions/state.js';
+import { actionBarOf } from '../../agent-lane/actions/rank.js';
+import { decidePress } from '../../agent-lane/actions/handlers.js';
+import { placeholderGoalWarning, placeholderAskWords } from '../../agent-lane/goal-certainty.js';
+import { decisionInputLines } from '../../agent-lane/decision-input-ask.js';
+import { createAgentCapabilities, projectModelContext, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
+import { ProposalStore } from '../../agent-lane/proposal.js';
+import { modelGapOf } from '../../agent-lane/method-turn/widen-turn.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../orchestrator/context/option-result-source.js';
+import { composeGoalTargetQuestion } from '../decide-goal-target-ask.js';
 
 // Register every expected-chance corpus row for the fail-safe invariant below; keep the original table assertions too.
 const chanceCorpus: { label?: string; goal_threshold_unit: string }[] = [];
@@ -80,6 +90,82 @@ describe('the goal’s label is read with its unit (the drafter often writes the
   ] as const))('SERVED CHANCE stays a chance: %s measured in %s', (label, unit) => {
     expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe('chance_of_event');
   });
+});
+
+describe('outside-corpus unsafe direction: a chance label with a bare percent unit', () => {
+  it.each([
+    ['On-time feature-launch probability', 'chance_of_event'], // RED before: a one-off chance was read as a level.
+    ['Monthly churn probability', 'level'], // Science (b): rule 1 precedes rule 2 and either chance rule.
+    ['Monthly churn', 'level'], // No chance word: today's quantity reading is unchanged.
+    ['Conversion probability per visitor', 'level'], // Science (b): rule 1.
+  ] as const)('%s measured in a bare percent → %s', (label, kind) => {
+    expect(goalKindOf({ label, goal_threshold_unit: '%' })).toBe(kind);
+  });
+  it('the shared chance-word and bare-percent vocabularies keep their boundaries and quantity frames', () => {
+    for (const word of ['probability', 'chance', 'likelihood', 'odds']) {
+      for (const unit of ['%', 'percent', 'per cent', 'pct', 'percentage']) {
+        expect(goalKindOf({ label: `On-time feature-launch ${word}`, goal_threshold_unit: unit })).toBe('chance_of_event');
+      }
+    }
+    for (const unit of ['percentage points', '% of launch done', '% per month', '£', 'percentile']) {
+      expect(goalKindOf({ label: 'On-time feature-launch probability', goal_threshold_unit: unit })).toBe('level');
+    }
+    for (const goal_threshold_frame of ['change_abs', 'change_rel']) {
+      for (const label of ['Monthly churn probability', 'Monthly churn', 'Conversion probability per visitor']) {
+        expect(goalKindOf({ label, goal_threshold_unit: '%', goal_threshold_frame })).toBe('change');
+      }
+    }
+    expect(goalKindOf({ label: 'Launch unlikelihoodish', goal_threshold_unit: '%' })).toBe('level');
+    expect(goalKindOf({ label: `churn probability ${'x'.repeat(1_000_000)}`, goal_threshold_unit: '%' })).toBe('chance_of_event');
+  });
+
+  // Every reader listed in #2780's body, including the action state's indirect ranker and press dispatcher.
+  it.each(['Monthly churn probability', 'Monthly churn', 'Conversion probability per visitor'])(
+    'all PR-body readers keep the bare-percent quantity paths: %s', async (label) => {
+      const goal = { id: 'g', kind: 'goal', label, goal_threshold_unit: '%', goal_threshold_frame: 'level' };
+      const graph = { goal_node_id: 'g', nodes: [goal,
+        { id: 'f', kind: 'factor', label: 'Driver', observed_state: { value: 0.1, raw_value: 10, cap: 100, unit: '%', source: 'user_override' } },
+        { id: 'a', kind: 'option', label: 'Change driver' }],
+      edges: [{ from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, defaulted: true,
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } }] };
+      const facts = actionFactsOf({ scenarioId: 'p17-control', graph, analysisReady: { status: 'ready', may_run: true } });
+      expect(facts.goalKind).toBe('level');
+      const bar = actionBarOf(facts);
+      expect(bar.priority.map(o => o.action_id)).toContain('set_goal');
+      expect(bar.priority.map(o => o.action_id)).not.toContain('set_deadline');
+      const reply = decidePress({ id: 'act:frame_brief' }, facts, bar);
+      expect(reply.kind).toBe('reply');
+      if (reply.kind === 'reply') expect(reply.reply.text).toContain(composeGoalTargetQuestion());
+
+      const links = [{ from: 'f', to: 'g' }];
+      const warning = placeholderGoalWarning(graph, [{ option_id: 'a', links }], GOAL_FIGURES_PLACEHOLDER_PATH);
+      expect(warning.first_ask).toEqual(expect.objectContaining({ kind: 'goal_level', node_id: 'g' }));
+      expect(warning.acceptable_links).toEqual(links);
+      expect(placeholderAskWords(graph, links)?.first).toEqual(expect.objectContaining({ kind: 'goal_level', node_id: 'g' }));
+      expect(decisionInputLines(graph, { builtOrRan: true, awaitingApproval: false, restingText: '', questionsToggle: false })
+        .join(' ')).toContain("I'll propose it as your target.");
+      expect(modelGapOf(graph)).toEqual(expect.objectContaining({ kind: 'goal_target_missing', goal_id: 'g' }));
+      expect(projectModelContext({ nodes: graph.nodes, edges: graph.edges, raw: graph, analysis_state: undefined })
+        .goal).not.toHaveProperty('measured_as');
+      const envelope = { option_comparison: [{ option_id: 'a', probability_of_goal: 0.4 }], inference_warnings: [] };
+      expect(withholdGoalFiguresForChanceGoal(envelope, graph)).toBe(envelope);
+
+      const before = JSON.stringify(graph);
+      const dispatch: InternalDispatch = async (path) => {
+        if (!path.endsWith('/graph')) throw new Error(`Unexpected write: ${path}`);
+        return { status: 200, json: { graph, graph_hash: 'p17-control' } };
+      };
+      const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full');
+      const text = `${label} should stay at most 3%.`;
+      const ctx = { scenario_id: 'p17-control', authenticated_user_id: null, request_id: 'p17', user_text: text, user_turn_text: text };
+      const target = await caps.proposeGoalTarget!(ctx, { constraint_type: 'at_most', value: 3, unit: '%', rationale: text });
+      expect(target).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      const today = `${label} is 5% today.`;
+      const level = await caps.proposeGoalCurrentLevel!({ ...ctx, user_text: today, user_turn_text: today },
+        { goal_label: label, value: 5, unit: '%', user_stated: true });
+      expect(level).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      expect(JSON.stringify(graph)).toBe(before);
+    });
 });
 
 describe('Codex buddy r1 (#2780 @ 7ddad08b): event timing and everyday words never make a one-off event a rate', () => {

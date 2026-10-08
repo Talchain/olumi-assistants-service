@@ -4,7 +4,7 @@
  *
  * Every producer and consumer of a goal asks THIS module what kind of goal it holds, and so what may be asked, written
  * and said about it. Kinds:
- *  · `chance_of_event` — the goal's unit names the CHANCE of an event ("% likelihood of on-time launch"). INVALID as a
+ *  · `chance_of_event` — the goal's unit, or its label with a bare percent unit, names the CHANCE of an event. INVALID as a
  *    quantity: Olumi computes that chance, so it is never propagated, never asked for ("today's level" of it, D-06), and
  *    never given a target. Every goal figure is withheld with ONE sentence, and the one question is the deadline.
  *  · `change`          — a target stated as a change from today (`goal_threshold_frame` `change_abs` / `change_rel`).
@@ -13,9 +13,10 @@
  *  · `share_by_date` — a forecast pure sum of held share parts, with a fixed date;
  *    recognised only with the graph, since a node cannot attest its incoming links.
  *
- * The chance predicate reads the goal's UNIT only (the ruling's wording: "a goal unit naming a chance of an event"),
- * whole words, bounded: must-fire "% likelihood of on-time launch", "chance of hitting the date", "probability of launch
- * on time", "% likely"; must-not-fire "% of launch done", "% of customers", "churn %".
+ * Chance words are read whole and bounded in the unit, and also in the label when the stored unit is a bare percent.
+ * Science (b)'s rate reader decides whether that segment names a population quantity or a one-off chance: must-fire
+ * "% likelihood of on-time launch", "On-time feature-launch probability" in "%"; must-not-fire "% of launch done",
+ * "% of customers", "churn %", "Monthly churn probability" in "%".
  */
 
 import { readRateAsQuantity } from './rate-as-quantity.js';
@@ -143,6 +144,15 @@ export function goalKindOf(goal: unknown, graph?: unknown): GoalKind {
     // Each part is cut to 401 characters BEFORE the classifier receives it; an over-long segment falls to rule 4.
     && ![...chanceUnits, typeof goal.label === 'string' ? goal.label : '']
       .map((t) => readRateAsQuantity(t.slice(0, 401))).some((r) => r.kind === 'quantity')) {
+    return 'chance_of_event';
+  }
+  // Outside-corpus P17: a bare percent carries no subject, so a chance word in the LABEL must reach the same reader.
+  // Keep named-unit readings above intact; within the label, Science (b)'s quantity rules still precede chance rules.
+  const unit = goalUnitOf(goal);
+  const label = typeof goal.label === 'string' ? goal.label.slice(0, 401) : '';
+  if (chanceUnits.length === 0 && unit !== undefined && shareKind(unit) === 'percent'
+    && label.split(/[^a-z]+/i).some((w) => CHANCE_WORD.test(w))
+    && readRateAsQuantity(label).kind === 'chance') {
     return 'chance_of_event';
   }
   const share = graph === undefined ? null : shareByDateGoalOf(graph);
