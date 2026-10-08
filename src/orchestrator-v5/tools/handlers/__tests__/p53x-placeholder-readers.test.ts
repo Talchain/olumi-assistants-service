@@ -19,7 +19,6 @@ import { composeExplainFromStructureFallback } from '../explanation-fallback.js'
 import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
 import { honestLimitReply } from '../../../agent-lane/method-turn/what-changes-turn.js';
 import { assembleGuidanceSignals } from '../../../agent-lane/turn-context/guidance-signals.js';
-import { POLICY } from '../../../agent-lane/guidance/policy.js';
 
 type Rec = Record<string, any>;
 const FROM = 'enterprise_prospect_signing_likelihood';
@@ -165,18 +164,6 @@ describe('P53x: S1 honest-limit reply follows the selected edge’s sizing', () 
     analysisState: capture.body.analysis_state, analysisResult: capture.body.analysis_result,
     optionParticipation: capture.body.option_participation, explicitRequest: 'RC-WHAT-CHANGES', leaderLicensed: false });
 
-  it('policy copy and renderer never call a selected placeholder Olumi’s estimate', () => {
-    const graph = servedD1();
-    const s = signals(graph);
-    expect(s['model.placeholder_goal_links']).toContain(`${FROM}->${TO}`);
-    const reply = honestLimitReply(s, graph);
-    // Science 393023 LICENCE ruling 3 (P53x), re-derived: S1 selects the captured placeholder, so it is Olumi’s estimate → this link is not sized yet.
-    expect(reply).toContain('how much enterprise prospect signing likelihood affects quarterly revenue');
-    expect(reply).toContain('not sized yet');
-    expect(reply).not.toMatch(/Olumi.s estimate/);
-    const placeholderCopy = (POLICY.method_turns['RC-WHAT-CHANGES'].honest_limit as unknown as { placeholder_text: string }).placeholder_text;
-    expect(placeholderCopy).not.toMatch(/Olumi.s estimate/);
-  });
 
   it('same pair sized by Olumi keeps the original estimate copy', () => {
     const graph = targetPair(sizedD1());

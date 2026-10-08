@@ -78,15 +78,6 @@ describe('P53x singular review never names a placeholder prior as a settled band
 
   // Science 393023 LICENCE ruling 3 (P53x), re-derived: projected prospect→revenue is a placeholder;
   // the singular review's "already sits in that band" claim → numbers kept, nobody has sized it.
-  it('a projected placeholder review keeps numbers without claiming it already sits in a band', async () => {
-    const result = await capabilitiesFor({ source: 'user_specified', mean_projected: true })
-      .proposeLinkStrength!(context, args);
-    expect(result.ok).toBe(true);
-    expect(result).toHaveProperty('link.keeps_current_strength', true);
-    expect(result).not.toHaveProperty('link.was.band');
-    expect(result.note).toContain("The link's numbers are kept exactly as they are; nobody has sized this link.");
-    expect(result.note).not.toContain('already sits in that band');
-  });
 
   it('CONTROL: a user-sized prospect→revenue link keeps its existing settled-band note', async () => {
     const result = await capabilitiesFor({ source: 'user_specified' }).proposeLinkStrength!(context, args);

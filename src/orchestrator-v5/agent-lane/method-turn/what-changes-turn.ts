@@ -25,7 +25,6 @@ import { cut, midSentence } from '../guidance/render.js';
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
 import { itemRefOf } from '../turn-context/guidance-wire.js';
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
-import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 
 export const WHAT_CHANGES_PRESS_ID = 'agent-next-what-would-change';
 const METHOD = 'RC-WHAT-CHANGES' as const;
@@ -145,19 +144,7 @@ export function honestLimitReply(s: TurnSignals, graph: unknown): string {
     : ref.kind === 'link'
       ? from !== undefined && to !== undefined ? `how much ${midSentence(cut(from))} affects ${midSentence(cut(to))}` : undefined
       : factor !== undefined ? `the figure for ${midSentence(cut(factor))}` : undefined;
-  if (itemLabel === undefined) return first!;
-  const edges = (graph as { edges?: unknown } | null)?.edges;
-  const edge = ref?.kind === 'link' && Array.isArray(edges)
-    ? edges.find((candidate: unknown) => {
-      if (candidate === null || typeof candidate !== 'object') return false;
-      const ends = candidate as { from?: unknown; to?: unknown };
-      return ends.from === ref.from_id && ends.to === ref.to_id;
-    })
-    : undefined;
-  const sizingWords = edge === undefined ? undefined : edgeStrengthWords(edge);
-  return sizingWords === 'not sized yet'
-    ? fill(contract.placeholder_text, { item_label: itemLabel, sizing_words: sizingWords })
-    : fill(contract.text, { item_label: itemLabel });
+  return itemLabel === undefined ? first! : fill(contract.text, { item_label: itemLabel });
 }
 
 /** Sentences this turn owns outside RC's two contracts. RC owns their wording too; flagged on the lease for RC. */

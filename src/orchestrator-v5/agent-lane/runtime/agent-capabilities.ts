@@ -3607,15 +3607,15 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: edgeStrengthWords(edge) }), direction: current },
+        link: { from: from.label, to: to.label, was: { ...(linkSizing(edge) === 'placeholder' ? {} : { band: linkBandWord(currentBand) }), direction: current },
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
-          ? (linkSizing(edge) === 'placeholder'
-            ? `Nothing has changed yet. The link's numbers are kept exactly as they are; nobody has sized this link. Approving records review, never the user\u2019s authorship. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : keptIsTheirs
+          ? (keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
+              ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
+              : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },

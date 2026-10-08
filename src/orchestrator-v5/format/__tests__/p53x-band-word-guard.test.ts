@@ -108,6 +108,51 @@ function bandMeanCalls(file: string, text: string): string[] {
   return found;
 }
 
+const CONVERTERS = new Set(['edgeBandFromMagnitude', 'strengthBand', 'CANVAS_BAND_WORD', 'relationshipPhrase', 'bidirectedRelationshipPhrase', 'formatEdgeStrengthMagnitude']);
+const isConverter = (name: string): boolean => CONVERTERS.has(name) || /^describeBand[A-Za-z]*$/.test(name);
+const CONVERTER_MODULE = /edge-strength-bands|edge-strength-words|influence-bands|format-confirmation|format-graph-for-context|comparison/;
+
+/**
+ * Codex review of #2819 P2: a converter reached by INDIRECTION (a local alias, a re-export, passing it as a value, a
+ * namespace import) escapes the call scanner. Outside the helper and the module that DECLARES the converter, any value
+ * reference that is not the callee of a direct call (or the object of a CANVAS_BAND_WORD[...] read) is refused.
+ */
+function converterIndirections(file: string, text: string): string[] {
+  if (file === helper) return [];
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const aliases = new Map<string, string>();
+  const declared = new Set<string>();
+  const found: string[] = [];
+  for (const statement of source.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) for (const b of bindings.elements) aliases.set(b.name.text, b.propertyName?.text ?? b.name.text);
+      if (bindings && ts.isNamespaceImport(bindings) && ts.isStringLiteral(statement.moduleSpecifier) && /edge-strength-bands/.test(statement.moduleSpecifier.text)) {
+        found.push(`${file}::namespace-import::${statement.moduleSpecifier.text}`);
+      }
+    }
+    if (ts.isFunctionDeclaration(statement) && statement.name && isConverter(statement.name.text)) declared.add(statement.name.text);
+    if (ts.isVariableStatement(statement)) for (const d of statement.declarationList.declarations) if (ts.isIdentifier(d.name) && isConverter(d.name.text)) declared.add(d.name.text);
+  }
+  function visit(node: ts.Node): void {
+    if (ts.isIdentifier(node)) {
+      const name = aliases.get(node.text) ?? node.text;
+      const parent = node.parent;
+      const ok = !isConverter(name) || declared.has(name)
+        || ts.isImportSpecifier(parent) || ts.isImportClause(parent) || ts.isTypeQueryNode(parent)
+        || ((ts.isFunctionDeclaration(parent) || ts.isVariableDeclaration(parent)) && parent.name === node)
+        || (ts.isCallExpression(parent) && parent.expression === node)
+        || ((ts.isElementAccessExpression(parent) || ts.isPropertyAccessExpression(parent)) && parent.expression === node && name === 'CANVAS_BAND_WORD')
+        || (ts.isPropertyAccessExpression(parent) && parent.name === node && ts.isCallExpression(parent.parent) && parent.parent.expression === parent)
+        || (ts.isPropertyAssignment(parent) && parent.name === node) || (ts.isPropertyAccessExpression(parent) && parent.name === node && !CONVERTER_MODULE.test(file) && false);
+      if (!ok) found.push(`${file}::${ownerOf(node, source)}::indirect:${name}`);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return found;
+}
+
 function forbiddenCalls(file: string, text: string, used: Map<string, number> = new Map()): string[] {
   if (file === helper) return [];
   const allowed = new Set([...arithmetic, ...explicitBandWords].map(([path, owner, call]) => key(path, owner, call)));
@@ -127,14 +172,17 @@ it('P53x AST: band-from-mean calls exist only in the sizing-aware helper or name
       const path = join(dir, item.name);
       if (item.isDirectory()) { scan(path); continue; }
       if (!/\.tsx?$/.test(path) || /\.(test|spec)\.tsx?$/.test(path)) continue;
-      forbidden.push(...forbiddenCalls(path, readFileSync(path, 'utf8'), used));
+      const text = readFileSync(path, 'utf8');
+      // Prefilter (speed only): a file that names no converter cannot call or alias one.
+      if (!/edgeBandFromMagnitude|strengthBand|CANVAS_BAND_WORD|relationshipPhrase|formatEdgeStrengthMagnitude|describeBand|edge-strength-bands/.test(text)) continue;
+      forbidden.push(...forbiddenCalls(path, text, used), ...converterIndirections(path, text));
     }
   }
   scan('src');
   expect(forbidden).toEqual([]);
   // Keep the exceptions live: a moved/removed arithmetic site requires a reviewed census update too.
   expect([...used.keys()].sort()).toEqual([...arithmetic, ...explicitBandWords].map(([path, owner, call]) => key(path, owner, call)).sort());
-});
+}, 60_000);
 
 it('P53x AST firing control detects forbidden, renamed and extra calls in an allowed function', () => {
   expect(forbiddenCalls('src/new-reader.ts', 'function voice(edge) { return edgeBandFromMagnitude(edge.strength.mean); }')).toHaveLength(1);
@@ -145,4 +193,13 @@ it('P53x AST firing control detects forbidden, renamed and extra calls in an all
   expect(forbiddenCalls('src/new-reader.ts', "import { CANVAS_BAND_WORD as words } from './bands.js'; function voice(edge) { return words[edge.strength.mean > .4 ? 'strong' : 'weak']; }")).toHaveLength(1);
   const [file, owner, call] = arithmetic[0];
   expect(forbiddenCalls(file, `function ${owner}() { ${call}; ${call}; }`)).toHaveLength(1);
+});
+
+it('P53x AST firing control (Codex #2819 P2): aliases, re-exports, values and namespace imports are refused', () => {
+  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude, CANVAS_BAND_WORD } from './edge-strength-bands.js';\nconst toBand = edgeBandFromMagnitude; const words = CANVAS_BAND_WORD;\nexport function voice(edge) { return words[toBand(Math.abs(edge.strength.mean))]; }")).toHaveLength(2);
+  expect(converterIndirections('src/new-reader.ts', "export { edgeBandFromMagnitude as band } from './edge-strength-bands.js';")).toHaveLength(1);
+  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude } from './edge-strength-bands.js';\nexport const all = (ms: number[]) => ms.map(edgeBandFromMagnitude);")).toHaveLength(1);
+  expect(converterIndirections('src/new-reader.ts', "import * as B from '../format/edge-strength-bands.js';\nexport const v = (m: number) => B.CANVAS_BAND_WORD[B.edgeBandFromMagnitude(m)];")).not.toHaveLength(0);
+  // CONTROL: a direct call (checked by the call scanner) and a type query are not indirections.
+  expect(converterIndirections('src/new-reader.ts', "import { edgeBandFromMagnitude } from './edge-strength-bands.js';\ntype B = ReturnType<typeof edgeBandFromMagnitude>;\nexport const v = (m: number) => edgeBandFromMagnitude(m);")).toEqual([]);
 });
