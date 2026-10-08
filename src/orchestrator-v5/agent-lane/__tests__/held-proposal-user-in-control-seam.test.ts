@@ -589,13 +589,13 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
   it('P53-gmh-1 RED: an older 10–30% card cannot approve the newer 40–60% hold with the same id, words and graph; digest is checked before the writer door', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const oldTurn = randomUUID();
-    const oldMessage = `${RISK_MSG} It may happen 10–30% in the next 6 months.`;
+    const oldMessage = `${RISK_MSG} A 10–30% chance in the next 6 months.`;
     const old = await proposeRisk({ caused_by: [] }, oldMessage, { turn_id: oldTurn });
     const oldFields = fieldsOf(old)!;
     const oldCard = oldFields.proposals[0]!;
     expect(oldCard.issued_turn_id).toBe(oldTurn);
     expect(oldCard.approve_action.detail).toContain('10–30%');
-    const fresh = await proposeRisk({ caused_by: [] }, `${RISK_MSG} It may happen 40–60% in the next 6 months.`);
+    const fresh = await proposeRisk({ caused_by: [] }, `${RISK_MSG} A 40–60% chance in the next 6 months.`);
     const freshTurn = latestRow()!.turn_id;
     const freshFields = fieldsOf(fresh)!;
     const freshCard = shownOf(fresh, oldCard.proposal_id);
@@ -676,7 +676,7 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
   it('P53-gmh-2 RED: current empty-fields binding commits with byte-equal plain-approve reply, graph and receipts', async () => {
     const approveTwin = async (bound: boolean) => {
       graphOf.set(SCENARIO, seedGraph());
-      const b = await proposeRisk({ caused_by: [] }, `${RISK_MSG} It may happen 40–60% in the next 6 months.`);
+      const b = await proposeRisk({ caused_by: [] }, `${RISK_MSG} A 40–60% chance in the next 6 months.`);
       const f = fieldsOf(b)!; const p = f.proposals[0]!;
       const writesBefore = graphWrites.get(SCENARIO) ?? 0;
       const r = await turn({ ...press(p), ...(bound ? { proposal_edits: binding(f, p) } : {}) });

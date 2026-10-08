@@ -1,0 +1,2295 @@
+{
+  "metadata": {
+    "source_git_sha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+    "source_state": "uncommitted working tree; no commit or push",
+    "working_source_sha256": {
+      "src/orchestrator-v5/routing/stated-event-risk.ts": "e11f36d89804ca5a2f4a7264d6434f7b3417fc37c829a536763945cc303fb599",
+      "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+      "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+      "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f",
+      "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+      "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+      "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+      "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+      "pnpm-lock.yaml": "ce7d9e4700397052733037b77f59c985405aa01de113e4cf2050bd81b6d7f763"
+    },
+    "script_sha256": {
+      "evidence-utils-fix3.ts": "0587ca627f887da54b4b4209e0f53d4f2b42d3e849cdd5b7e2711af52ed87c04",
+      "compare-corpus-fix3.ts": "5c18448a7cab59d4173a4de0ee9d301c0f59afb27e52295121b2830516da8dc3",
+      "measure-timing-fix3.ts": "14bbe934f7e61d0443c1e66be3ececa977c263e82ab49bde4ccc8bdde1b2d177",
+      "run-mutants-fix3.ts": "435b4824ed8f909b3a0ac29f07bcb3c280a3f9a35f417899c2c40f548d6382ee"
+    },
+    "created_at": "2026-10-08T09:37:57.900Z",
+    "starting_load": 15.68310546875,
+    "review_fixture_sha256": "496dfcee22efa1a6ec669200bc1dabe7a0d5b283b37f7ce725852be70f5e947c",
+    "incumbent_control_source_git_sha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+    "incumbent_control_source_path": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+    "incumbent_control_source_sha256": "bbbde790b943877f77dd71867879d5349eba2f3b8a2667d434c39dd2ed4be76c",
+    "incumbent_control_parser": "TypeScript AST 5.9.3; literal five-tuples under it.each",
+    "required_pair_control_policy": "The 42 incumbent r2 five-tuple likelihood controls must remain GREEN. All 34 review must-fire rows are also evaluated and reported separately; mixed dip rows depend on the removed tail guard.",
+    "original": {
+      "name": "working",
+      "source_git_sha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+      "source_state": "working tree",
+      "reader_sha256": "e11f36d89804ca5a2f4a7264d6434f7b3417fc37c829a536763945cc303fb599",
+      "drafter_sha256": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "shared_dependency_sha256": {
+        "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+        "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+        "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+        "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+        "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+        "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+        "src/utils/telemetry.ts": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2",
+        "src/utils/logger-config.ts": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9",
+        "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f"
+      },
+      "shared_dependencies_verified_against_source_sha": false
+    },
+    "mutant": {
+      "name": "drop-FIGURE_TAIL",
+      "source_git_sha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+      "source_state": "scratch mutant of working tree",
+      "reader_sha256": "efc8c955aead4b3d5b96f0db19de253ee9900284b70b203fbf224e4e8c5d4f61",
+      "drafter_sha256": "b5c25d03d5819776487189228fc97006b9d8c38883ce8421c515fce1299d460e",
+      "shared_dependency_sha256": {
+        "src/cee/extraction/numeric-parser.ts": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+        "src/utils/magnitude-alphabet.ts": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+        "src/utils/amount-range.ts": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+        "src/utils/currency-alphabet.ts": "57862a046520885af0a5fab5c9eeda2310f8286229edb477e642046a261e28b5",
+        "src/schemas/event-risk.ts": "886df0eb7bba799e8c588e1da9b3f379939b2b62ede0b5fae40894f45f0dfa32",
+        "src/cee/utils/id-normalizer.ts": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+        "src/utils/telemetry.ts": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2",
+        "src/utils/logger-config.ts": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9",
+        "src/orchestrator-v5/agent-lane/horizon-attestation.ts": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f"
+      },
+      "shared_dependencies_verified_against_source_sha": false,
+      "original_reader_sha256": "e11f36d89804ca5a2f4a7264d6434f7b3417fc37c829a536763945cc303fb599"
+    },
+    "mutation": "remove exactly one if (!FIGURE_TAIL.test(after)) continue;",
+    "serial": true,
+    "source_file_restored_sha256": "e11f36d89804ca5a2f4a7264d6434f7b3417fc37c829a536763945cc303fb599",
+    "source_file_never_modified": true
+  },
+  "must_fire_count": 42,
+  "must_fire_green": 42,
+  "must_fire_failures": [],
+  "mutant_killed_rows": [
+    "review-03",
+    "review-11",
+    "review-12",
+    "review-13",
+    "review-15",
+    "review-16",
+    "review-17",
+    "review-18",
+    "review-19",
+    "review-20",
+    "review-21",
+    "review-22",
+    "review-31",
+    "review-32",
+    "review-33",
+    "review-34",
+    "review-35",
+    "review-36"
+  ],
+  "incumbent_original_failures": [],
+  "incumbent_control_rows": [
+    {
+      "id": "2a-positive-range",
+      "suite": "2a-positive-%s",
+      "input_sha256": "60cc70cd47be01c0a9d012b29381227cb0cb36b3c3161c432492e2cf1471f663",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-single",
+      "suite": "2a-positive-%s",
+      "input_sha256": "af4c5d9a36f549263f70568548d6073c55c8e719303feb4cab78907caaa749e1",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-between-percent",
+      "suite": "2a-positive-%s",
+      "input_sha256": "4587cc8f50b70c2aaccbb02b8f4dd3b52d92630be174cad89b19adc0c95c94bb",
+      "expected": {
+        "pLow": 0.05,
+        "pHigh": 0.15,
+        "months": 18
+      },
+      "original_actual": {
+        "pLow": 0.05,
+        "pHigh": 0.15,
+        "months": 18
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.05,
+        "pHigh": 0.15,
+        "months": 18
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-hyphen",
+      "suite": "2a-positive-%s",
+      "input_sha256": "8cfdcae04d56576520fa52d8c6817bbc32cee8743a07ece5b27b39cae8f8b72f",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-to",
+      "suite": "2a-positive-%s",
+      "input_sha256": "324c51d5c3a1840f73e9fb5e2cca21326ddeea40333e360faca2e187cecc0e9f",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 24
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 24
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 24
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-both-percent",
+      "suite": "2a-positive-%s",
+      "input_sha256": "c714b969b7fa07ba005a51a9019d58932b66f06cd454b9f248d7a75d55efb79d",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 24
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 24
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 24
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-weeks",
+      "suite": "2a-positive-%s",
+      "input_sha256": "c4f9788496e6751a021dcdc8428377f7957026ea2f86fd4964d3a69f265d38cb",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 1.4
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 1.4
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 1.4
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-week-minimum",
+      "suite": "2a-positive-%s",
+      "input_sha256": "118c5b5777b87285b302e7c63cb46a4188beae8f054acd75bbd3358a6e0f2ccd",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 0.1
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 0.1
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 0.1
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-zero",
+      "suite": "2a-positive-%s",
+      "input_sha256": "c71f72d2a44090cb48f86f22aa92785a9f4102b7b3f11c71c76a4a80faac5db8",
+      "expected": {
+        "pLow": 0,
+        "pHigh": 0,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0,
+        "pHigh": 0,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0,
+        "pHigh": 0,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-hundred",
+      "suite": "2a-positive-%s",
+      "input_sha256": "fb4727b0a56aa6d92f8555a35f112c71c666ee17dec455d9010e24fd5db7bb2b",
+      "expected": {
+        "pLow": 1,
+        "pHigh": 1,
+        "months": 1
+      },
+      "original_actual": {
+        "pLow": 1,
+        "pHigh": 1,
+        "months": 1
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 1,
+        "pHigh": 1,
+        "months": 1
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-decimal",
+      "suite": "2a-positive-%s",
+      "input_sha256": "4dd9d9051ed401489a273a246382594cf0c1ca1c512cdc94b4494584550311a7",
+      "expected": {
+        "pLow": 0.125,
+        "pHigh": 0.125,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.125,
+        "pHigh": 0.125,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.125,
+        "pHigh": 0.125,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-one-in-five",
+      "suite": "2a-positive-%s",
+      "input_sha256": "37edf27284a14a72c3a737dd4f66f146d59c28897071fd5db51dc6ab56e7e471",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-one-in-four-words",
+      "suite": "2a-positive-%s",
+      "input_sha256": "c7e8607b59886f849c8129d5c4cdd022f7235ed13452945c3c5dbe8445c29529",
+      "expected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-one-in-three-rounded",
+      "suite": "2a-positive-%s",
+      "input_sha256": "6ea4f5aea3cbb0c62f5be3a1763adc4af175b771f81ee232e7e78494478d35e9",
+      "expected": {
+        "pLow": 0.3333,
+        "pHigh": 0.3333,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3333,
+        "pHigh": 0.3333,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3333,
+        "pHigh": 0.3333,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-one-in-two-boundary",
+      "suite": "2a-positive-%s",
+      "input_sha256": "71e0d42a1c30670e4be590c3b9f63c89c8254d6484a29e0555b020e52b6efe76",
+      "expected": {
+        "pLow": 0.5,
+        "pHigh": 0.5,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.5,
+        "pHigh": 0.5,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.5,
+        "pHigh": 0.5,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-one-in-thousand-boundary",
+      "suite": "2a-positive-%s",
+      "input_sha256": "60aa378dc1fdb77ecadba6360ad4d24b29c03556aeed07366e0a20665fc7e234",
+      "expected": {
+        "pLow": 0.001,
+        "pHigh": 0.001,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.001,
+        "pHigh": 0.001,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.001,
+        "pHigh": 0.001,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-probability-then-and",
+      "suite": "2a-positive-%s",
+      "input_sha256": "402b63461725d18278d89e29322cf53a1c6002330d2111cdbce8b80af4fa1fa8",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "2a-positive-probability-is-sentence-end",
+      "suite": "2a-positive-%s",
+      "input_sha256": "9789302a9202dca2a1de96d193efbcff416e03f99db1d09c8a2692fb6a769140",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-probability-of-event",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "b014d83d19d2e744e3dfceec520a44247b80f4244e35e3065f7df8440977bdf6",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-mixed-cost",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "d358c8eae91aa89cbe77de715c1ccfaa11743c1b8104b4eca8082eead107bc42",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-percent-risk",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "ec83f782071e4939a997f340692034daa22cbe8b66c64586b048b1659da7fe99",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-reckon-after-semicolon",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "10b1ab449854b99165f5bfef36f7ec9391b9349aa01eaf6250c75e12d3e84fb8",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-percent-likely",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "ed91deca19727998d57ba1c2ae0f1f4ad419dcb7067751df17fd57960bece7b5",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-odds-of",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "47959c498fbe8453d55804c04171e558bf498fe1c7ca5ce42102f2ded6c01f2b",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-percent-probability",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "bb38faf9d473c2fb782691025f08e72b6d529db660a928f554859096d6a1f578",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-maybe-range",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "0f4d9ef1de10f4ec46089a1ba71ef790b8401aadeaaeaed07700531682a192fb",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-put-it-at-range",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "0931cbbfaa643f741a05f399d37b533d43501821e50a230f8f6c9c3f8e28becf",
+      "expected": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-chance",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "19e0301e65d78eff2c9d817e51ae4b3dafb077c7dde1a5e1ab73b3cb6df71783",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-one-in",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "58eda8c235c177b449add632db9522b40ff3b6a9b4dd1cf333884d818a685f12",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-may-happen-card-words",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "d6a3564b3783bf3eb2f1c19abf91aeb617de70d6f6d76b2a959014f4e92ca88d",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "fix1-must-still-read-might-happen-colon",
+      "suite": "fix1-must-still-read-%s",
+      "input_sha256": "c66859aef9653cf70e0a1bd77b335cc52543f7aae69f451e2c0b28943691619c",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-served-developer",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "72a393a02ec3988d94bc944c0f85f43bbde61ef1d651e3026bf30499e87a3b0a",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-served-competitor",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "bd11084f90d83d13d5e3c22881cd1d258f02ff710cd33c7f427d2d223c103af5",
+      "expected": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-chance",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "19e0301e65d78eff2c9d817e51ae4b3dafb077c7dde1a5e1ab73b3cb6df71783",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-one-in",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "58eda8c235c177b449add632db9522b40ff3b6a9b4dd1cf333884d818a685f12",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-mixed",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "89786e89078b050e1017f677c9b883ee6433a19c79d7b6cf435a6b4f44c4271e",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-mixed-impact-first",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "9dd632263646922dbf73067c1556940608072dac6802eacdc255d6b4672f4b07",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-bare-event",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "79ae67878adf3a1af61220f881a69a77ecfc1c17117c7b15d9861db6d9a2a8a2",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-put-it-at",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "23aaa2a095aa3eb2cd315f615745afd79b9e411b34b81f52bd9d586d89957e28",
+      "expected": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-verb-event-with-direct-chance",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "dc2f77bff128ff61aa71c4cb4330134e1a012a25806aa3ac23616b65ddc2a914",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-verb-event-with-direct-probability",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "b53cb755cc4a0fa5c95781427b1465863f44f43eac8486b18caed3a808c5b085",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "impact-pct-must-still-read-percent-risk-of",
+      "suite": "impact-pct-must-still-read-%s",
+      "input_sha256": "077c752ce11cb3553285e6ea4d94f7e2fe4de696ad3d1fa078a5a7af3a85cf6d",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    }
+  ],
+  "review_must_fire_count": 34,
+  "review_must_fire_green": 32,
+  "review_must_fire_failures": [
+    {
+      "id": "review-09",
+      "input": "There is a 20% chance of a 10% dip within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": null,
+      "mutant_outcome": "refusal"
+    },
+    {
+      "id": "review-10",
+      "input": "There is a 1 in 5 chance of a 10% dip within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": null,
+      "mutant_outcome": "refusal"
+    }
+  ],
+  "share_red_rows": [
+    "review-18",
+    "review-19",
+    "review-20",
+    "review-21",
+    "review-22"
+  ],
+  "dip_red_rows": [
+    "review-03",
+    "review-11",
+    "review-12",
+    "review-13",
+    "review-17"
+  ],
+  "original_failures": [],
+  "satisfies_required_pair": true,
+  "rows": [
+    {
+      "id": "review-01",
+      "input": "There will be a 20% hit to revenue within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-02",
+      "input": "Revenue could fall 15% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-03",
+      "input": "There's maybe a 10% dip in MRR within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-04",
+      "input": "The outage is likely to cut revenue 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-05",
+      "input": "Odds are it drops 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-06",
+      "input": "There is a one-in-five chance of a 10% fall within 6 months.",
+      "label": "AMBIGUOUS",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-07",
+      "input": "There is a 1 in 5 chance of a 10% fall within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-08",
+      "input": "There is a 20% chance of a 10% fall within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-09",
+      "input": "There is a 20% chance of a 10% dip within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": null,
+      "mutant_outcome": "refusal"
+    },
+    {
+      "id": "review-10",
+      "input": "There is a 1 in 5 chance of a 10% dip within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": null,
+      "mutant_outcome": "refusal"
+    },
+    {
+      "id": "review-11",
+      "input": "Probably a 10% dip in MRR within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-12",
+      "input": "Maybe a 10% decrease in revenue within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-13",
+      "input": "Perhaps a 10% shortfall against plan within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-14",
+      "input": "MRR will probably be 10% down within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-15",
+      "input": "MRR is probably 10% below forecast within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-16",
+      "input": "Revenue is probably 10% under target within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-17",
+      "input": "Possibly a 15% slump in sales over the next 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-18",
+      "input": "There's a chance 10% of our customers cancel within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-19",
+      "input": "Maybe 10% of users churn within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-20",
+      "input": "I reckon 10% of our customers will leave within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-21",
+      "input": "I'd say 20% of the team quits within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-22",
+      "input": "Probably 10% of accounts downgrade in the next 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-23",
+      "input": "It might happen: 10% of our customers cancel within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-24",
+      "input": "There's a chance of a fall of 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-25",
+      "input": "There is a real chance of a drop of 10% in MRR within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-26",
+      "input": "The odds of a price cut of 15% within 3 months are high.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-27",
+      "input": "There is a chance that revenue is 10% below plan within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-28",
+      "input": "There's a chance that MRR is 10% down within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-29",
+      "input": "There is a chance that churn is 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-30",
+      "input": "There is a chance that MRR will be down 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-31",
+      "input": "The risk of 10% customer churn within 6 months worries me.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-32",
+      "input": "There is a risk of 10% attrition within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-33",
+      "input": "We face a risk of 10% budget overrun within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-34",
+      "input": "The risk of 7% user churn over 3 months is the issue.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.07,
+        "pHigh": 0.07,
+        "months": 3
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-35",
+      "input": "The mitigation gives a 20% risk reduction within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-36",
+      "input": "Lenders will charge a 10% risk premium within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "false_attribution"
+    },
+    {
+      "id": "review-37",
+      "input": "Add a risk: a 10% chance-free drop in MRR within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-38",
+      "input": "Add a risk: a 10% chance–free drop in MRR within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-39",
+      "input": "The delay raises our churn risk 10% within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-40",
+      "input": "The new competitor increases the chance 10% within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-41",
+      "input": "It may happen: 10% in lost revenue within 6 months.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-42",
+      "input": "It could happen, 10% over budget, within a year.",
+      "label": "IMPACT",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-43",
+      "input": "There is a 30% chance the supplier fails within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-44",
+      "input": "I'd say 30% within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-45",
+      "input": "Probably 20% within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-46",
+      "input": "It's 20% likely to happen within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-47",
+      "input": "Odds are about 20% within a year.",
+      "label": "LIKELIHOOD",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-48",
+      "input": "a 1 in 5 chance within 6 months",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-49",
+      "input": "There is a one in five chance within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": null,
+      "original_actual": null,
+      "original_outcome": "correct_refusal",
+      "mutant_actual": null,
+      "mutant_outcome": "correct_refusal"
+    },
+    {
+      "id": "review-50",
+      "input": "20–30% chance within 6 months",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-51",
+      "input": "There's a 25% probability that the supplier fails within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-52",
+      "input": "The likelihood is about 20% within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-53",
+      "input": "I think there's a 20% chance within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-54",
+      "input": "Chance of supplier failure: 20% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-55",
+      "input": "Probability of a supplier failure: 20% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-56",
+      "input": "Likelihood of an outage = 20% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-57",
+      "input": "The chance of an outage is about 20% within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-58",
+      "input": "Roughly 10% likely within a year.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-59",
+      "input": "Supplier failure is 15% probable within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-60",
+      "input": "The probability that the supplier fails is 30% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-61",
+      "input": "There's a 30% chance the release slips within 6 months, which would cut MRR by 10%.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-62",
+      "input": "A 30% chance the release slips within 6 months; it would cut MRR by 10%.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-63",
+      "input": "The release might slip, maybe 30% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-64",
+      "input": "I estimate 30% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-65",
+      "input": "I guess about 30% within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-66",
+      "input": "Add a risk: our key developer might leave, maybe 10–30% in the next 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-67",
+      "input": "I'd put it at about 15–25% within 3 months",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-68",
+      "input": "10% chance it happens within 6 months",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-69",
+      "input": "1 in 10 chance within a year",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-70",
+      "input": "30% chance within 6 months",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-71",
+      "input": "30% likely within 6 months",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-72",
+      "input": "Supplier failure is 30% probable within 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-73",
+      "input": "odds of 30% within a year",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12
+      },
+      "mutant_outcome": "correct"
+    },
+    {
+      "id": "review-74",
+      "input": "It may happen 10–30% in the next 6 months.",
+      "label": "LIKELIHOOD",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "original_outcome": "correct",
+      "mutant_actual": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "mutant_outcome": "correct"
+    }
+  ]
+}
