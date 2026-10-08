@@ -3543,7 +3543,9 @@ export function createAgentCapabilities(
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
           ? (keptIsTheirs
             ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
-            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: ${linkSizing(edge) === 'placeholder'
+              ? 'nobody had sized this link; approving records review, never the user\u2019s authorship'
+              : 'the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own'}. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
@@ -4022,15 +4024,16 @@ export function createAgentCapabilities(
       }
       const whose = (x: Shown): string => x.yours
         ? (x.keeps ? 'reviewed by you, kept as it is' : 'your estimate')
-        : 'Olumi\u2019s estimate';
+        : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
       /**
        * Whose figure each link holds AFTER the approval (M1 Accept receipt, Codex pre-review P2): naming the band a link
        * already sits in is review (R11), never authorship — the writer keeps who sized it, so a kept link is the user's
-       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its two literals are a typed contract
+       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its literals are a typed contract
        * (`proposal-reply.ts` `LINK_WHOSE`, fail-closed on any other).
        */
-      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' =>
-        x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours' : 'Olumi\u2019s estimate';
+      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' | 'Olumi\u2019s first estimate for a link nobody had sized' =>
+        x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours'
+          : (x.sizedBefore === 'placeholder' ? 'Olumi\u2019s first estimate for a link nobody had sized' : 'Olumi\u2019s estimate');
       const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user').length;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -4043,7 +4046,8 @@ export function createAgentCapabilities(
           + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
       });
       proposals.put(proposal);
-      const olumis = shown.filter((x) => !x.yours).length;
+      const olumis = shown.filter((x) => !x.yours && x.sizedBefore !== 'placeholder').length;
+      const firstEstimates = shown.filter((x) => whoseFigure(x) === 'Olumi\u2019s first estimate for a link nobody had sized');
       // A link Olumi had ALREADY estimated is re-sized, not sized: the Agent says so, never "your placeholders" (R3 DEFECT 2).
       const reEstimated = shown.filter((x) => !x.yours && !x.keeps && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted'));
       return {
@@ -4061,6 +4065,10 @@ export function createAgentCapabilities(
           + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
+            : '')
+          + (firstEstimates.length > 0
+            ? 'For links nobody had sized, this offers Olumi\u2019s first estimate: approving records it as Olumi\u2019s, never as the user\u2019s own. '
+              + (firstEstimates.some((x) => x.keeps) ? 'Where the strength is kept as it is, approving records only the user\u2019s review, never authorship. ' : '')
             : '')
           + (keptNotTheirs > 0
             ? `${keptNotTheirs === shown.length ? 'Every link here' : `${keptNotTheirs} of these links`} already sits in the band the user named, so approving records only their review: its strength is kept exactly as it is and is never the user\u2019s own (\`whose\`). `

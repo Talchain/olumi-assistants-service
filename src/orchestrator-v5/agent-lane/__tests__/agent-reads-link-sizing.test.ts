@@ -13,6 +13,9 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { composeProposalReply } from '../proposal-reply.js';
+import { approvalChipsFor, linkStrengthCardFor } from '../approval-chips.js';
+import { offeredApproveChipOnRow, proposalPendingAction, rehydrateProposals } from '../durable-proposal.js';
+import served from './fixtures/m1-s1-served-graphs.json';
 import type { InfluenceBand } from '../../format/influence-bands.js';
 
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-799d1a5d-cold-s1-graph.json', import.meta.url), 'utf8')) as {
@@ -130,7 +133,10 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
   it('CONTROL: sizing the two real placeholders replaces nothing, so no replacement line', async () => {
     const { result, text } = await composed(REAL_PLACEHOLDERS.map((k) => [k, 'strong'] as const));
     expect(result.links.map((l) => l.was.sizing)).toEqual(['placeholder', 'placeholder']);
-    expect(text).toContain('Olumi\u2019s estimates stay marked as Olumi\u2019s');
+    // Science 393023 LICENCE ruling 3 (DL 6049287136 P0), re-derived:
+    // a placeholder already held Olumi's estimate → this offers the first estimate for a link nobody had sized.
+    expect(text).toContain('For links nobody had sized, this offers Olumi\u2019s first estimate');
+    expect(text).not.toContain('Olumi\u2019s estimates stay marked as Olumi\u2019s');
     expect(text).not.toContain(REPLACES);
   });
 
@@ -149,5 +155,114 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
     const { result } = await composed(PARTS_ESTIMATES.map((k) => [k, 'very strong'] as const));
     const untyped = { ...result, links: result.links.map((l) => ({ ...l, was: { ...l.was, sizing: undefined } })) };
     expect(composeProposalReply('propose_link_strengths', { whole_request: true, links: [] }, untyped, 'fix them all')).toBeNull();
+  });
+});
+
+describe('Science 393023 LICENCE ruling 3: D1 consent says whether a link had a size', () => {
+  const FROM = 'enterprise_prospect_signing_likelihood';
+  const TO = 'quarterly_revenue';
+  const FIRST = 'Olumi\u2019s first estimate for a link nobody had sized';
+  const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!.graph;
+  const fromLabel = D1.nodes.find((n) => n.id === FROM)!.label;
+  const toLabel = D1.nodes.find((n) => n.id === TO)!.label;
+  const pair = `"${fromLabel}" \u2192 "${toLabel}"`;
+  const prepare = async (sized = false, singular = false, named = false) => {
+    const graph = structuredClone(D1);
+    const edge = graph.edges.find((e) => e.from === FROM && e.to === TO)!;
+    expect(edge).toMatchObject({ from: FROM, to: TO, strength: { mean: 0.5, std: 0.125 }, defaulted: true });
+    if (sized) {
+      edge.strength.std = 0.1;
+      edge.provenance = { ...edge.provenance, magnitude: 'olumi_estimate' } as typeof edge.provenance;
+      delete (edge as { defaulted?: boolean }).defaulted;
+    }
+    const dispatch: InternalDispatch = async (path) => {
+      expect(path.endsWith('/graph')).toBe(true);
+      return { status: 200, json: { graph, graph_hash: 'h-d1-licence-r3' } };
+    };
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(dispatch, store);
+    const words = `${fromLabel} is strong`;
+    const userText = named || singular ? words : 'Offer a strength for this link';
+    const context = { ...ctx, user_text: userText, user_turn_text: userText };
+    const link = { from_label: fromLabel, to_label: toLabel, strength: 'strong' as const,
+      ...(named ? { from_words: words } : {}) };
+    const args = singular ? link : { links: [link], whole_request: true };
+    const result = singular ? await caps.proposeLinkStrength!(context, link)
+      : await caps.proposeLinkStrengths!(context, { links: [link] });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const proposal = store.get(String(result.proposal_id))!;
+    // Same-band approval stays a review at 0.5; these rows change words only, never author or magnitude.
+    expect(proposal.operations).toEqual([expect.objectContaining({
+      op: singular ? 'update_edge' : 'set_link_strength', path: `${FROM}::${TO}`,
+      value: expect.objectContaining({ magnitude: 0.5, intent: 'confirm_current', band: 'strong' }),
+    })]);
+    return { result, proposal, store, args, userText };
+  };
+
+  it('RED: unsized prospect → revenue card, whose and Agent note offer a FIRST estimate, never imply a prior size', async () => {
+    const { result, proposal } = await prepare();
+    expect(proposal.public_label).toContain(`${pair} as strong, ${FIRST}`);
+    expect(result.public_label).toBe(proposal.public_label);
+    expect(result.links).toEqual([expect.objectContaining({ from: fromLabel, to: toLabel,
+      was: { sizing: 'placeholder' }, whose: FIRST, keeps_current_strength: true })]);
+    expect(result.note).toContain('For links nobody had sized, this offers Olumi\u2019s first estimate');
+    expect(result.note).toContain('only the user\u2019s review, never authorship');
+    expect(result.note).not.toContain('Every strength here is Olumi\u2019s estimate');
+  });
+
+  it('RED: live and replay approval details carry THIS unsized link’s first-estimate card verbatim', async () => {
+    const { result, proposal, store } = await prepare();
+    const [chip] = approvalChipsFor([{ name: 'propose_link_strengths', ok: true, mutated: false, proposal_id: proposal.proposal_id }],
+      (id) => ({ proposal: store.get(id), result }));
+    expect(chip!.detail).toContain(`${pair} as strong, ${FIRST}`);
+    expect(chip!.detail).toBe(proposal.public_label);
+    const pending = proposalPendingAction(proposal, chip!, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() });
+    const restored = new ProposalStore();
+    expect(rehydrateProposals([pending], restored, { scenario_id: SCENARIO, user_id: null })).toBe(1);
+    expect(offeredApproveChipOnRow([pending], { scenario_id: SCENARIO, user_id: null })?.detail).toBe(chip!.detail);
+    expect(linkStrengthCardFor(proposal.proposal_id, restored.get(proposal.proposal_id))).toBe(chip!.detail);
+    expect(linkStrengthCardFor('another-proposal', proposal)).toBeUndefined();
+  });
+
+  it('RED: composed reply for THIS placeholder offers a first estimate and says kept strength is review', async () => {
+    const { result, args, userText } = await prepare();
+    const text = composeProposalReply('propose_link_strengths', args, result, userText);
+    expect(text).toContain(`${pair} as strong, ${FIRST}`);
+    expect(text).toContain('For links nobody had sized, this offers Olumi\u2019s first estimate');
+    expect(text).toContain('only your review, never authorship');
+    expect(text).not.toContain('Olumi\u2019s estimates stay marked as Olumi\u2019s');
+  });
+
+  it('RED: singular same-band placeholder note says nobody sized it; user review receives no authorship', async () => {
+    const { result, proposal } = await prepare(false, true);
+    expect(proposal.public_label).toContain(`${pair} as strong`);
+    expect(proposal.public_label).not.toContain('as your own estimate');
+    expect(result.note).toContain('nobody had sized this link; approving records review, never the user\u2019s authorship');
+    expect(result.note).not.toMatch(/Olumi[’']s estimate/);
+  });
+
+  it('CONTROL: independently sized prospect → revenue keeps Olumi’s estimate across card, whose, note and reply', async () => {
+    const { result, proposal, args, userText } = await prepare(true);
+    expect(proposal.public_label).toContain(`${pair} as strong, Olumi\u2019s estimate`);
+    expect(result.links).toEqual([expect.objectContaining({ whose: 'Olumi\u2019s estimate', was: { band: 'strong', sizing: 'olumi_estimate' } })]);
+    expect(result.note).toContain('Every strength here is Olumi\u2019s estimate');
+    expect(linkStrengthCardFor(proposal.proposal_id, proposal)).toBe(proposal.public_label);
+    expect(composeProposalReply('propose_link_strengths', args, result, userText)).toContain('Olumi\u2019s estimates stay marked as Olumi\u2019s');
+    expect((await prepare(true, true)).result.note).toContain('Olumi\u2019s estimate stays Olumi\u2019s');
+  });
+
+  it('CONTROL: the user naming a placeholder’s existing band is review, with first-estimate attribution and no user credit', async () => {
+    const { result, proposal } = await prepare(false, false, true);
+    expect(proposal.public_label).toContain(`${pair} as strong, reviewed by you, kept as it is`);
+    expect(result.links).toEqual([expect.objectContaining({ whose: FIRST, keeps_current_strength: true })]);
+  });
+
+  it('FAIL-CLOSED: first-estimate attribution on a sized link, or existing-estimate attribution on a placeholder, keeps the second call', async () => {
+    for (const sized of [false, true]) {
+      const { result, args, userText } = await prepare(sized);
+      const links = result.links as Record<string, unknown>[];
+      const wrong = { ...result, links: links.map((l) => ({ ...l, whose: sized ? FIRST : 'Olumi\u2019s estimate' })) };
+      expect(composeProposalReply('propose_link_strengths', args, wrong, userText)).toBeNull();
+    }
   });
 });

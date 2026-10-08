@@ -182,31 +182,31 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     const b = await press('agent-next-pre-mortem');
     expect(b.guidance).toBeUndefined();
   });
-  it('NEGATIVE: the Strengthen press (its held card is the decision point) → no row', async () => {
+  // Science 393023 LICENCE ruling 3 (DL verdict 6049287136 P0), re-derived: the S1 target is a placeholder, so the press
+  // ASKS for its size (ask_only) and holds NO card. The size question is the step: no row, and nothing waits for a yes.
+  // (The "no row beside a waiting proposal" rule keeps its coverage in contextual-next-step-pills.test.ts / offeredNow.)
+  it('NEGATIVE: the Strengthen press (its size question is the decision point) → no row, no card held', async () => {
     const b = await press('agent-next-strengthen');
-    expect(b.suggested_actions.some((a) => a.id.startsWith('agent-approve'))).toBe(true);
+    expect(b.suggested_actions.some((a) => a.id.startsWith('agent-approve'))).toBe(false);
+    expect(b.assistant_text).not.toMatch(/Olumi[’']s estimate/);
+    expect(modelCalls).toBe(0);
     expect(b.guidance).toBeUndefined();
   });
-  it('NEGATIVE: a typed turn while the Strengthen card still waits for its yes → no row; the waiting card is the step', async () => {
-    const held = await press('agent-next-strengthen');
-    expect(held.suggested_actions.some((a) => a.id.startsWith('agent-approve-proposal:'))).toBe(true);
+  it('a typed turn after the Strengthen size question: nothing is held from the press, so no approval is offered', async () => {
+    await press('agent-next-strengthen');
+    expect(rows.get([...rows.keys()].find((k) => k.startsWith(`${SCENARIO}:`))!)?.pending_actions ?? []).toEqual([]);
     const b = await turn({ message: 'Where does this leave me?' });
-    // The route's own rule agrees: no next steps beside a proposal that would still execute (`offeredNow`).
-    expect(b.suggested_actions.map((a) => a.id)).not.toContain('agent-next-strengthen');
-    expect(b.guidance).toBeUndefined();
+    expect(b.suggested_actions.map((a) => a.id).filter((id) => id.startsWith('agent-approve-proposal:'))).toEqual([]);
   });
-  it('NEGATIVE: TWO proposals still waiting for their yes → no row (Codex pre-review P1: the one-proposal chip rule missed it)', async () => {
+  it('two Strengthen presses on two placeholders hold NOTHING (each is a size question)', async () => {
     const first = await press('agent-next-strengthen');
-    // The first link is now sized (as after its Apply), so the next press holds a card on the OTHER placeholder.
     graph = { ...D1.graph, edges: D1.graph.edges.map((e) => (e.from === AI.from && e.to === AI.to
       ? { ...e, provenance: { ...e.provenance, magnitude: 'olumi_accepted' } } : e)) };
     const second = await press('agent-next-strengthen');
     const held = (b: Body) => b.suggested_actions.map((a) => a.id).filter((id) => id.startsWith('agent-approve-proposal:'));
-    expect(held(first)).toHaveLength(1);
-    expect(held(second)).toHaveLength(1);
-    expect(held(second)).not.toEqual(held(first));
-    const b = await turn({ message: 'Where does this leave me?' });
-    expect(b.guidance).toBeUndefined();
+    expect(held(first)).toEqual([]);
+    expect(held(second)).toEqual([]);
+    expect(second.assistant_text).not.toBe(first.assistant_text);
   });
   it('NEGATIVE: a replay of the same turn_id carries no row (never on the answer row; PANEL restores from its transcript)', async () => {
     const turn_id = randomUUID();
