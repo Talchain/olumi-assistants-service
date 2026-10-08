@@ -109,7 +109,29 @@ describe('the narrating call may withdraw, never approve (Codex r1 P1 / r2 P2; D
     expect(r.tool_calls.map((c) => [c.name, c.refusal ?? null])).toEqual([['propose_new_risk', null], ['authorise_change', NOT_ON_NARRATION], ['withdraw_proposal', null]]);
     expect(approvalChipsFor(r.tool_calls).find((c) => c.id === `agent-approve-proposal:${HELD.proposal_id}`)).toBeUndefined();
     const status = narrateWriteOutcome(r.assistant_text, r.tool_calls, r.tool_results).status;
-    expect(status).toBe('Nothing was approved or changed.');
+    expect(status).toBeNull();
+  });
+
+  // ⛔ THE LINE SPEAKS FOR ITS OWN CHANGE ONLY (Codex #2781 r5 P2): an earlier approval this turn DID save, so no turn-wide
+  // "nothing has been changed" / "nothing was approved" beside it.
+  it('RED P2 earlier save: approved A, held B, narrating authorise(B) refused → no turn-wide negative claim', async () => {
+    const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true, proposal_id: 'gmh_earlier_a', receipts: [{ version: 2 }] }));
+    const withdrawProposal = vi.fn(async () => ({ ok: true, mutated: false, proposal_id: HELD.proposal_id }));
+    const caps = { proposeNewRisk: vi.fn(async () => HELD), authoriseChange, withdrawProposal } as unknown as AgentCapabilities;
+    for (const withdraw of [false, true]) {
+      const callModel = vi.fn()
+        .mockResolvedValueOnce({ output: [fc('authorise_change', { proposal_id: 'gmh_earlier_a' }, 'c0')] })
+        .mockResolvedValueOnce({ output: [call] })
+        .mockResolvedValueOnce({ output: [fc('authorise_change', { proposal_id: HELD.proposal_id }, 'c2')] });
+      if (withdraw) callModel.mockResolvedValueOnce({ output: [fc('withdraw_proposal', { proposal_id: HELD.proposal_id }, 'c3')] });
+      callModel.mockResolvedValueOnce(answer);
+      const r = await runAgentTurn({ ...base, composeReply: () => null } as never, caps, callModel as never);
+      expect(r.tool_calls.map((c) => [c.name, c.refusal ?? null]).slice(0, 3)).toEqual([['authorise_change', null], ['propose_new_risk', null], ['authorise_change', NOT_ON_NARRATION]]);
+      const status = narrateWriteOutcome(r.assistant_text, r.tool_calls, r.tool_results).status ?? '';
+      expect(status).toMatch(/saved/i);
+      expect(status).not.toMatch(/nothing (has been|was) (approved or )?changed/i);
+      expect(status.includes('waiting for your approval')).toBe(!withdraw);
+    }
   });
 
   it('RED: authorise_change on the narrating call is refused before dispatch, and the held change keeps its approve card', async () => {
