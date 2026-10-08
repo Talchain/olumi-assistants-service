@@ -170,7 +170,7 @@ afterEach(async () => {
   for (const p of agentProposals.outstanding(scenario, OWNER)) agentProposals.discard(p.proposal_id);
 });
 
-type Offer = { action_id: string; press_id: string; enabled: boolean; offer_key: string; label: string; disabled_reason?: string; why_now?: string };
+type Offer = { action_id: string; press_id: string; enabled: boolean; offer_key: string; label: string; user_line: string; disabled_reason?: string; why_now?: string };
 type Bar = { v: number; state_key: string; revision: { graph_hash: string | null; run_key: string | null }; priority: Offer[]; standard: Offer[]; more: Offer[];
   bias_risk?: { v: 1; items: { claim_id: string; press_id: string; offer_key: string }[] } };
 type Body = { assistant_text: string; suggested_actions: { id: string; label: string; message: string }[]; action_bar?: Bar;
@@ -368,6 +368,28 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     }
     const again = (await reload()).action_bar!;
     expect(JSON.stringify(again.bias_risk)).toBe(JSON.stringify(live.bias_risk));
+  });
+  it('P45 slice 3 RED: licensed bias_check press lists both model items, zero model calls, ran receipt, and identical reload bar', async () => {
+    setState('licensed');
+    const b = await press('act:bias_check');
+    expect(modelCalls).toBe(0);
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(b._action).toMatchObject({ action_id: 'bias_check', outcome: 'ran' });
+    expect(b._action?.science).toBeUndefined();
+    expect(b.assistant_text.startsWith('Checked: Narrow framing, Anchoring.')).toBe(true);
+    expect(b.assistant_text).toContain("Narrow framing: where the pattern could bite: ‘Phased GCP migration’, ‘Switch to GCP’. One test: press ‘More options’.");
+    expect(b.assistant_text).toContain("Anchoring: where the pattern could bite: ‘Migration preparation effort’. One test: press ‘Anchoring’.");
+    const claim = resolveDskClaimProvenance('DSK-B-001')!;
+    expect(b.assistant_text).toContain(`Decision-science claim: ${claim.claim_title} · ${claim.evidence_strength} evidence`);
+    expect(b.assistant_text).not.toMatch(/\b(best|winner|recommend|ahead|beats|leader|top|most)\b|you are biased|\d/i);
+    const offers = offersOf(b.action_bar!);
+    expect(b.suggested_actions).toEqual(['more_options', 'bias_anchoring'].map(action_id => {
+      const offer = offers.find(o => o.action_id === action_id)!;
+      expect(offer.enabled, action_id).toBe(true);
+      return { id: offer.press_id, label: offer.label, message: offer.user_line };
+    }));
+    coldStore();
+    expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(b.action_bar));
   });
   it('the three captured bars are the committed fixtures DGAI binds to (pre-Run, withheld Run, licensed Run)', async () => {
     scenario = '6f1e2d3c-4b5a-4e6d-9c7b-00000000f1c5';

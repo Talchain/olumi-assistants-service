@@ -14,14 +14,15 @@
  *
  * SLICE 1 = the actions whose typed handler is complete today (ACTION-SYSTEM-DRAFT §E.4, binding): review, what_changes,
  * pre_mortem, more_options, test_link, and strengthen in its S1 scope only. SLICE 2a adds the canonical standing gaps
- * (frame_brief, set_goal, set_deadline) and S-C WIDEN's risks door. SLICE 2b adds bias_anchoring and check_estimates. Further methods join when their
- * owner supplies a TOTAL typed handler; adding the id makes `tsc` demand its `HANDLERS` entry. Outside view, trade-offs,
- * bias review stay held (AIE 6036471065 item 2). An id that is not here is never emitted.
+ * (frame_brief, set_goal, set_deadline) and S-C WIDEN's risks door. SLICE 2b adds bias_anchoring and check_estimates.
+ * SLICE 3 adds bias_check. Further methods join when their
+ * owner supplies a TOTAL typed handler; adding the id makes `tsc` demand its `HANDLERS` entry. Outside view and trade-offs
+ * stay held (AIE 6036471065 item 2). An id that is not here is never emitted.
  */
 
 import { SUGGEST_RISKS_CHIP, widenTargetOf } from '../method-turn/widen-turn.js';
 
-export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates'] as const;
+export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates', 'bias_check'] as const;
 export type ActionId = (typeof ACTION_IDS)[number];
 
 /** The four standard actions, in their FIXED bar positions (D.3: users learn their places). */
@@ -136,6 +137,12 @@ export const ACTION_REGISTRY: Readonly<Record<ActionId, ActionEntry>> = {
     press: { kind: 'fixed', id: 'act:check_estimates' },
     user_line: "Show me Olumi's estimates that this result rests on.",
     authorities: { eligibility: 'Canonical', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: true,
+  },
+  bias_check: {
+    label: 'Bias check', icon: 'ScanSearch', group: 'method',
+    press: { kind: 'fixed', id: 'act:bias_check' },
+    user_line: 'Where could a common reasoning pattern bite in this model?',
+    authorities: { eligibility: 'Canonical', science: 'DSK', quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: false,
   },
 };
 

@@ -136,3 +136,31 @@ describe('timing: all new bounded regexes, 5k → 20k, ratio < 8×', () => {
     expect(tLarge / Math.max(tSmall, 0.05)).toBeLessThan(8);
   });
 });
+
+describe('B15 (Codex r2 P2 #2783): a unit carrying a lead chance beside other words never leads by any selector', () => {
+  const share = 'In this model, 73% of runs supported ‘Launch starter tier’.';
+  const chance = '‘Launch starter tier’: about 52% chance of meeting your goal, in this model.';
+  const lead: FaceObligation = { role: 'evidence', text: chance, lead: true };
+  it('restatement fallback: the share-led mixed bullet is not the headline; the typed closing is', () => {
+    const text = `- ${share} ${chance}\n\n${restatement}\n\n${closing}`;
+    const c = composeReplyShape({ text, graph, obligations: [obligation, lead] });
+    expect(c.measure?.restatements_to_detail, 'control: the restatement selector is the one in play').toBe(1);
+    expect(c.shape?.headline ?? '').not.toContain(share);
+    expect(c.shape?.headline).toBe(closing);
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset(text));
+  });
+});
+
+describe('withShapeOnlyIfItDerives (Codex r2 P1 #2783): a shape an egress edited alone never ships', () => {
+  it('drops a shape whose derivation differs from the shipped text; keeps one that derives it', async () => {
+    const { withShapeOnlyIfItDerives } = await import('../compose-reply.js');
+    const { deriveAnswerTextFromShape } = await import('../../../routing/answer-shape.js');
+    const shape = { headline: 'Raise prices 10%: about 34%.', bullets: ['Hire team leads: about 47%.'], detail: 'More words here for the detail.' };
+    const text = deriveAnswerTextFromShape(shape);
+    expect(withShapeOnlyIfItDerives({ assistant_text: text, _answer_shape: shape })._answer_shape, 'control: a proven shape rides').toEqual(shape);
+    const edited = { ...shape, bullets: [] };
+    const out = withShapeOnlyIfItDerives({ assistant_text: text, _answer_shape: edited });
+    expect(out._answer_shape).toBeUndefined();
+    expect(out.assistant_text).toBe(text);
+  });
+});
