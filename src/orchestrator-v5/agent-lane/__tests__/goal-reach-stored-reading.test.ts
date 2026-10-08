@@ -54,9 +54,16 @@ describe('GOAL-REACH build 1 stored reading', () => {
     expect(proposeProductIdentity(withCurrent(30000))).toBeNull();
     expect(confirm(withCurrent(30000))).toHaveLength(0);
   });
-  it('row 4 resolving control: stated £14,700 reconciles with £49 × 300 and is offered', () => {
+  // #2851 RE-PIN (class: the fixture's count was Olumi's inferred 300): the reconciliation control keeps its purpose on
+  // the USER's 300; Olumi's basis-less 300 is a missing level, so the bar offers no confirm over it (DL, 8 Oct).
+  it('row 4 resolving control: stated £14,700 reconciles with the user\'s £49 × 300 and is offered', () => {
+    const g = withCurrent(14700); node(g, 'pro_paying_subscribers').observed_state.source = 'user_override';
+    expect(proposeProductIdentity(g)).toMatchObject({ words: WORDS });
+    expect(confirm(g)).toHaveLength(1);
+  });
+  it('row 4 #2851: with Olumi\'s inferred 300 the reading exists but the bar offers no confirm (the count is asked)', () => {
     expect(proposeProductIdentity(withCurrent(14700))).toMatchObject({ words: WORDS });
-    expect(confirm(withCurrent(14700))).toHaveLength(1);
+    expect(confirm(withCurrent(14700))).toHaveLength(0);
   });
   it.each([[], ['pro_plan_price'], ['pro_plan_price', 'pro_plan_price'], ['pro_plan_price', 'absent'], ['pro_plan_price', 'pro_paying_subscribers', 'monthly_churn_rate'], [3, 'pro_paying_subscribers']].map(ids => ({ ids })))('row 5: malformed factor_ids $ids fail closed', ({ ids }) => {
     const g = graph(g => { node(g, 'mrr').nonlinear_identity.factor_ids = ids; });
