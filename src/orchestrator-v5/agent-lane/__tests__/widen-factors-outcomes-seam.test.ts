@@ -280,10 +280,11 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
   }
 
   for (const door of ['factors', 'outcomes'] as const)
-  (door === 'outcomes' ? it.skip : it)(`SF-7 reload ${door}: typed method press is durable and survives current-result reload only${door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : ''}`, async () => {
+  (door === 'outcomes' ? it.skip : it)(`SF-7 reload ${door}: typed method press is live-only until the offers envelope admits its id (as SR-7, #2792), and stands only while the result is current${door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : ''}`, async () => {
     const { isDurableAnswerOffer, stillValidOffers } = await import('../../../routes/agent-v1-turn.js');
     const offer = PRESS[door];
-    expect(isDurableAnswerOffer(offer), `P14 missing durable method press: ${offer.id}`).toBe(true);
+    // #2792: the answer-offers envelope admits only `agent-…` ids, so a canvas `ask:` press is never stored (SR-7's family rule).
+    expect(isDurableAnswerOffer(offer), `P14 ${offer.id} must not be stored outside the envelope`).toBe(false);
     const current = { analysisReady: undefined, modelExists: true, analysisState: { run_state: { kind: 'complete_current' }, usable_for_chips: true } };
     expect(stillValidOffers([offer], { ...current, outstandingProposalIds: new Set() }).map((c) => c.id)).toEqual([offer.id]);
     expect(stillValidOffers([offer], { ...current, outstandingProposalIds: new Set(['gmh_0123456789ab']) })).toEqual([]);
