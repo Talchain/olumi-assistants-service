@@ -70,7 +70,7 @@ describe('canonical analysis view — one stored Run and the existing licences',
 
   it('DATA-WITHHELD: one scoped option carries its exact recorded reason and the other keeps its figure', async () => {
     const view = await project(input({ graph, currentResult: result([licence, warning]) }));
-    expect(cell(view, 'raise')).toEqual({ kind: 'withheld', reasons: [{ code: warning.code, message: warning.message }], face: warning.message });
+    expect(cell(view, 'raise')).toEqual({ kind: 'withheld', reasons: [{ code: warning.code, message: warning.message }], face: 'Chance not shown yet', why: warning.message });
     expect(cell(view, 'keep')).toEqual({ kind: 'figure', display: 'about 63%', face: 'about 63% chance of meeting your goal, in this model.' });
   });
 
@@ -78,7 +78,7 @@ describe('canonical analysis view — one stored Run and the existing licences',
     const held = { ...licence, withheld_option_ids: ['raise'] };
     const view = await project(input({ graph, currentResult: result([held]) }));
     expect(cell(view, 'raise')).toEqual({ kind: 'withheld', reasons: [{ code: 'reason_not_recorded', message: null }],
-      face: 'Olumi can’t yet say its chance of meeting your goal, in this model.' });
+      face: 'Chance not shown yet', why: 'Olumi can’t yet say its chance of meeting your goal, in this model.' });
     expect(cell(view, 'keep')).toEqual({ kind: 'figure', display: 'about 63%', face: 'about 63% chance of meeting your goal, in this model.' });
   });
 

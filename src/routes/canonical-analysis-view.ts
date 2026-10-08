@@ -19,6 +19,8 @@ const rec = (value: unknown): Rec | undefined => value !== null && typeof value 
 const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
 
+const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
+
 /**
  * Moved readGoalIdentityWithheld message selection from DGAI
  * src/components/results/utils/goalIdentityWithheld.ts @ the same commit.
@@ -51,7 +53,9 @@ export type CanonicalAnalysisCell =
   | { readonly kind: 'range'; readonly display: string; readonly detail: GoalChanceRangeDisplay;
       /** absent = the server has no licensed sentence for this cell; the UI must not invent one */
       readonly face?: string }
-  | { readonly kind: 'withheld'; readonly reasons: readonly RecordedGoalChanceWithholdReason[]; readonly face: string }
+  | { readonly kind: 'withheld'; readonly reasons: readonly RecordedGoalChanceWithholdReason[];
+      /** The face is the ≤8-word marker; why is shown verbatim behind "Why?", never shortened. */
+      readonly face: string; readonly why: string }
   | { readonly kind: 'none' };
 
 export type CanonicalMainDriver =
@@ -158,15 +162,19 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
       const reasons = goalChanceWithheldReasonsForAgent(result, option_id);
       const recordedLabel = licence?.option_labels_by_option?.[option_id];
       const label = typeof recordedLabel === 'string' && recordedLabel.trim() !== '' ? recordedLabel : labels.get(option_id);
+      const reasonByOption = rec(rec(licence)?.withheld_reason_by_option);
+      const carriedLine = reasonByOption !== undefined && Object.hasOwn(reasonByOption, option_id)
+        ? rec(reasonByOption[option_id])?.line : undefined;
+      const reasonLine = typeof carriedLine === 'string' && carriedLine.trim() !== '' ? carriedLine : undefined;
       // MOVED c6 licence line: DGAI analysis-hero/goalChanceCopy.ts:135, same commit.
       const licenceLine = licence?.withheld_option_ids?.includes(option_id) && label !== undefined
         ? `‘${label}’: ${OPTION_CHANCE_WITHHELD}` : undefined;
       // DGAI RunView:125 precedence, applied only to the existing withheld cell.
-      const withheldFace = identityMessage ?? certainty.get(option_id) ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
+      const withheldWhy = identityMessage ?? certainty.get(option_id) ?? reasonLine ?? licenceLine ?? OPTION_CHANCE_WITHHELD;
       const face = faces.get(option_id);
       const cell: CanonicalAnalysisCell = range !== undefined ? { kind: 'range', display: range.range, detail: range, ...(face === undefined ? {} : { face }) }
         : display !== undefined ? { kind: 'figure', display, ...(face === undefined ? {} : { face }) }
-          : reasons.length > 0 ? { kind: 'withheld', reasons, face: withheldFace } : { kind: 'none' };
+          : reasons.length > 0 ? { kind: 'withheld', reasons, face: OPTION_CHANCE_NOT_SHOWN, why: withheldWhy } : { kind: 'none' };
       const driver = cell.kind === 'figure' ? drivers.get(option_id) : undefined;
       const status = driverStatus.get(option_id);
       const detail = facts.goal_chance_driver_display?.[option_id];
