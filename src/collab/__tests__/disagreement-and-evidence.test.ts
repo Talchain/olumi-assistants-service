@@ -1011,16 +1011,26 @@ describe('summariseDisagreementForPrompt', () => {
  *    round_id could read that round's beliefs.
  * ══════════════════════════════════════════════════════════════════════════ */
 
-async function ownerView(kind: 'reveal' | 'disagreement', store: CollabStore, args: Parameters<typeof assembleRevealView>[1]) {
-  if (args.requested_by.kind !== 'owner') return kind === 'reveal' ? assembleRevealView(store, args) : assembleDisagreementView(store, args);
+type OwnerViewKind = 'reveal' | 'disagreement';
+type OwnerViewProjection<K extends OwnerViewKind> = Awaited<ReturnType<
+  K extends 'reveal' ? typeof assembleRevealView : typeof assembleDisagreementView
+>>;
+async function ownerView<K extends OwnerViewKind>(kind: K, store: CollabStore, args: Parameters<typeof assembleRevealView>[1]): Promise<OwnerViewProjection<K>> {
+  if (args.requested_by.kind !== 'owner') {
+    // Each assembler's result is bound to the same kind as the caller.
+    const view = await (kind === 'reveal' ? assembleRevealView(store, args) : assembleDisagreementView(store, args));
+    return view as OwnerViewProjection<K>;
+  }
   const userId = args.requested_by.user_id;
   const app = Fastify(); await installOwnershipHarness(app, () => ({ mode: 'verified', userId }));
   await ownerRoutes(app, { store: { ...store, getScenarioOwnerUserId: async () => 'owner-user' } });
   try {
     const response = await app.inject({ method: 'GET', url: `/collab/v1/rounds/${args.round_id}/${kind}` });
-    const body = response.json();
-    if (response.statusCode !== 200) throw new CollabRefusal(body.code, body.message);
-    return body;
+    if (response.statusCode !== 200) {
+      const refusal = response.json<{ code: ConstructorParameters<typeof CollabRefusal>[0]; message: string }>();
+      throw new CollabRefusal(refusal.code, refusal.message);
+    }
+    return response.json<OwnerViewProjection<K>>();
   } finally { await app.close(); }
 }
 

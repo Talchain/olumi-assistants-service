@@ -165,7 +165,7 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
     return state.outcomeResult;
   });
   const readScenarioOwner = vi.fn(async () => state.scenarioOwner);
-  const readRecordForOutcome = vi.fn(async () => state.record ? { scenario_id: SCENARIO_ID, ...state.record } : null);
+  const readRecordForOutcome = vi.fn(async () => state.record);
   const readNewestAnalysisAnchor = vi.fn(async () => state.anchor);
   const retrieveRecords = vi.fn(async () => ({ records: [], totalCount: 0 }));
 
@@ -427,7 +427,7 @@ describe('T10 — guest and cross-user isolation', () => {
 
   it('another user\'s RECORD cannot be outcome-written, and the RPC is never reached', async () => {
     const { store, recordOutcome } = makeStore({
-      record: { record_id: RECORD_ID, owner_user_id: OTHER_USER_ID, confidence: 0.72, hasOutcome: false },
+      record: { record_id: RECORD_ID, scenario_id: SCENARIO_ID, owner_user_id: OTHER_USER_ID, confidence: 0.72, hasOutcome: false },
     });
     const app = await buildApp(store);
     const res = await app.inject({
@@ -583,7 +583,7 @@ describe('T2/T3 — outcome writes the brier component, or honestly none', () =>
 
   it('T3 — a record with NO confidence still records an outcome, stored UNSCORED', async () => {
     const { store, recordOutcome } = makeStore({
-      record: { record_id: RECORD_ID, owner_user_id: OWNER_ID, confidence: undefined, hasOutcome: false },
+      record: { record_id: RECORD_ID, scenario_id: SCENARIO_ID, owner_user_id: OWNER_ID, confidence: undefined, hasOutcome: false },
     });
     const app = await buildApp(store);
     const res = await app.inject({

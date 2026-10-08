@@ -329,3 +329,13 @@ it.each([() => tokenA, () => null])('deleted scenario refuses without CREATE and
 it('copy ownership-reader outage retains exact copy_unavailable 503 bytes', async () => {
  state.oracleThrows = true; const r = await request('/assist/v1/scenarios/:scenario_id/copy', tokenA); expect(r.statusCode).toBe(503); expect(normalise(r.payload)).toBe(JSON.stringify({ error: 'copy_unavailable', code: 'copy_unavailable', message: 'Your decision could not be copied just now. Try again shortly.', request_id: 'row' }));
 });
+
+it('ROUND 4: JWT-shaped garbage refuses with the flag off, before any scenario read or CREATE', async () => {
+  state.owner = null;
+  session.readExistingScenario.mockClear();
+  const r = await request('/orchestrate/v2/turn', 'garbage.garbage.garbage');
+  expect(r.statusCode).toBe(401);
+  expect(r.json().details).toEqual({ reason: 'sign_in_required', code: 'sign_in_required', recoverable: true, auth_reason: 'invalid_token' });
+  expect(session.readExistingScenario).not.toHaveBeenCalled();
+  expect(state.writes).not.toHaveBeenCalled();
+});

@@ -1,6 +1,7 @@
 /** One HTTP scenario admission authority. Registered after service/HMAC authentication. */
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteOptions } from 'fastify';
+import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
@@ -13,7 +14,7 @@ import { validateIngress } from '../validators/b1.js';
 import { stripExtensionFields } from '../orchestrator/route-v2-preflight.js';
 import { SCENARIO_DELETED_RECOVERY_BODY } from '../orchestrator/route-v2-preflight.js';
 import { verifySupabaseUserJwt, looksLikeJwt } from '../utils/supabase-user-jwt.js';
-import { buildErrorV1 } from '../utils/errors.js';
+import { buildErrorV1, isClientAbortError } from '../utils/errors.js';
 import { getOrGenerateRequestId } from '../utils/request-id.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 type SessionStore = ReturnType<typeof getSessionStore>;
@@ -105,6 +106,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
   installScenarioDeclarationGuard(app);
   app.addHook('preHandler', async (req, reply) => {
+    // Fastify's not-found handler is not a mounted route and has no config.
+    // Keep its existing 404 contract; onRoute still rejects undeclared doors.
+    if (req.is404) return;
     const declaration = req.routeOptions.config.scenarioId;
     if (declaration === 'none') return;
     if (!declaration) throw new Error('Missing config.scenarioId at request admission');
@@ -114,9 +118,18 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
     let identity: UserIdentityResolution = { mode: 'service_legacy' };
     if (token && (personal(path) || looksLikeJwt(token))) {
       const verified = await verifySupabaseUserJwt(token);
-      if (!verified.ok) return signInRefusal(req, reply, verified.reason);
+      if (!verified.ok) {
+        emit(TelemetryEvents.UserJwtRefused, { request_id: requestId, reason: verified.reason });
+        return signInRefusal(req, reply, verified.reason);
+      }
+      emit(TelemetryEvents.UserJwtVerified, { request_id: requestId });
       identity = { mode: 'verified', userId: verified.userId };
     } else if (personal(path)) return signInRefusal(req, reply, 'missing_token');
+    else if (config.auth?.requireUserJwt === true) {
+      // Preserve the existing legacy-service telemetry, independently of the
+      // always-on JWT/ownership decision above.
+      emit(TelemetryEvents.UserJwtServiceCallerLegacy, { request_id: requestId });
+    }
     const body = req.body as { user_id?: unknown } | undefined;
     const claimed = typeof body?.user_id === 'string' && body.user_id.length > 0 ? body.user_id : null;
     // Existing named HMAC carve-out, restricted to its declared direct turn/stop scope.
@@ -189,6 +202,9 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
         }
       }
     } catch (err) {
+      // Let the central handler retain its 499/no-5xx classification when
+      // a client disconnects during the newly awaited ownership read.
+      if (isClientAbortError(err)) throw err;
       log.warn({ event: 'scenario_ownership.read_failed', request_id: requestId, err: String(err) }, 'Scenario ownership reader failed; refusing');
       if (path.startsWith('/collab/') || (path.startsWith('/assist/v1/decision-records') && !path.endsWith('/list'))) throw err;
       return refuse(req, reply, scenarioId ?? '', 'scenario_ownership_unverifiable', true);

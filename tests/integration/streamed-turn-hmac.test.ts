@@ -151,3 +151,10 @@ describe("ADVERSARIAL: HMAC client parity between buffered and streamed turn", (
     expect(JSON.stringify(complete!.payload)).toContain("UNAUTHENTICATED");
   }, 60_000);
 });
+
+// Auth parity uses an existing guest scenario; persistency is not this suite's subject.
+vi.mock('../../src/orchestrator-v5/session/index.js', async load => {
+  const actual = await load<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return { ...actual, getSessionStore: () => createMockSessionStore() };
+});
