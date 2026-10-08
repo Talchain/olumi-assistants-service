@@ -643,6 +643,19 @@ export const NodeV3 = z.object({
         factor_ids: z.array(z.string().min(1)).min(2),
         stated_in_brief: z.literal(false),
       }).strict(),
+      // ⭐ `accumulation` (Science goals §(v); contract: programme-docs design/ACCUMULATION-CARRIER-CONTRACT-20261008.md):
+      // a STOCK at the goal's horizon, worked out without time-stepping, S_T = S₀(1−c)^T + inflow·(1−(1−c)^T)/c, on a
+      // DERIVED node (never the goal). `factor_ids` is POSITIONAL: [stock today, churn rate per month, inflow per month],
+      // three distinct parents. `rate_scale` turns the churn factor's user-unit value into a fraction (0.01 for "%").
+      // Read-tolerant FIRST (CEE #3): before this member, `.catch(undefined)` erased the carrier on every read.
+      z.object({
+        operation: z.literal('accumulation'),
+        factor_ids: z.tuple([z.string().min(1), z.string().min(1), z.string().min(1)])
+          .refine((ids) => new Set(ids).size === 3, 'three distinct ids'),
+        horizon_months: z.number().int().min(1).max(120),
+        rate_scale: z.number().gt(0).lte(1),
+        stated_in_brief: z.boolean(),
+      }).strict(),
     ])
     .optional()
     .catch(undefined),
