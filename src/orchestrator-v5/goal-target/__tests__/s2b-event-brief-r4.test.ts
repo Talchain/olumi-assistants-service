@@ -11,8 +11,8 @@ const eventCandidate = (metric = 'launch', deliverable = metric): CandidateModel
   options: [{ label: 'Carry on', provenance: 'ai_proposed', is_status_quo: true }],
   factors: [], risks: [], outcomes: [], links: [], constraints: [], identities: [],
 });
-const budgetCandidate = (): CandidateModel => ({ ...eventCandidate(), constraints: [
-  { metric: 'Budget', operator: '<=', value: 200000, unit: 'GBP', provenance: 'explicit' },
+const budgetCandidate = (value = 200000): CandidateModel => ({ ...eventCandidate(), constraints: [
+  { metric: 'Budget', operator: '<=', value, unit: 'GBP', provenance: 'explicit' },
 ] });
 const eventGoal = (candidate: CandidateModel, brief: string) =>
   admitCandidateModel(candidate, {}, brief).nodes.find(n => n.kind === 'goal');
@@ -98,5 +98,70 @@ describe('R4 ordinary event briefs through real candidate checks', () => {
 
   it('R4-3-CONTROL contextual limit does not mask a separate goal quantity', () => {
     expect(() => eventGoal(budgetCandidate(), 'Launch by April on a budget of £200k and reach £300k MRR by April')).toThrow('event_goal_needs_redraft');
+  });
+});
+
+describe('R5 money limits never replace monetary objectives', () => {
+  it.each([
+    ['launch budget', 'the launch budget', 'GBP', 'Ensure the launch budget is £200k by April'],
+    ['revenue', 'revenue', '% of revenue', 'Deliver revenue within £200k of our target by April'],
+    ['launch budget', 'the launch budget', '% of the launch budget', 'Ensure the launch budget is £200k by April'],
+    ['launch', 'the launch budget', '% of the launch budget', 'Ensure the launch budget is £200k by April'],
+    ['launch', 'launch', 'GBP', 'Launch by April on a budget of £200k'],
+    ['launch', 'launch', 'GBP/month', 'Launch by April on a budget of £200k'],
+    ['cost', 'the cost', '% of the cost', 'Deliver the cost within £200k by April'],
+    ['spend', 'the spend', '% of the spend', 'Deliver the spend within £200k by April'],
+    ['MRR', 'MRR', '% of MRR', 'Deliver MRR within £200k of our target by April'],
+  ])('R5-C1-OWN quantity stays outside event admission: %s / %s / %s', async (metric, deliverable, unit, brief) => {
+    const candidate = eventCandidate(metric, deliverable);
+    candidate.goal.unit = unit;
+    expect(() => eventGoal(candidate, brief)).toThrow('event_goal_needs_redraft');
+    const { result, graph } = await build(candidate, brief);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expect(graph).toBeUndefined();
+  });
+
+  it.each([
+    ['£200k', 200000, ' and '],
+    ['£200.5k', 200500, ' and '],
+    ['£200k', 200000, '. '],
+    ['£200.5k', 200500, '. '],
+  ] as const)('R5-C2-EVERY separate MRR objective survives %s budget at %s with %s separator', async (amount, value, separator) => {
+    const candidate = budgetCandidate(value);
+    const brief = `Launch by April on a budget of ${amount}${separator}reach £300k MRR by April`;
+    expect(() => eventGoal(candidate, brief)).toThrow('event_goal_needs_redraft');
+    const { result, graph } = await build(candidate, brief);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expect(graph).toBeUndefined();
+  });
+
+  it('R5-C2-DECIMAL-LIMIT a decimal contextual budget remains one amount through admission and build', async () => {
+    const candidate = budgetCandidate(200500);
+    const brief = 'Launch by April on a budget of £200.5k';
+    const admitted = admitCandidateModel(candidate, {}, brief);
+    expect(admitted.nodes.find(n => n.kind === 'goal')).toMatchObject({
+      threshold_source: 'definitional', goal_threshold_unit: '% of launch', goal_threshold_raw: 100,
+    });
+    expect(admitted.goal_constraints).toContainEqual(expect.objectContaining({ value: 200500, unit: 'GBP' }));
+    expect(admitted.nodes.some(n => n.id === admitted.goal_constraints[0]!.node_id)).toBe(true);
+    const { result, graph } = await build(candidate, brief);
+    expect(result).toMatchObject({ ok: true, mutated: true });
+    expect(graph?.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({ threshold_source: 'definitional' });
+    expect(graph?.goal_constraints).toContainEqual(expect.objectContaining({ value: 200500, unit: 'GBP' }));
+    expect(graph?.nodes.some((n: Rec) => n.id === graph.goal_constraints[0]!.node_id)).toBe(true);
+  });
+
+  it.each([
+    ['£200k', 200000, 'our'],
+    ['£200.5k', 200500, 'our'],
+    ['£200k', 200000, 'the'],
+    ['£200.5k', 200500, 'the'],
+  ] as const)('R5-C-EVERY-TOLERANCE %s budget at %s preserves revenue tolerance against %s target', async (amount, value, targetOwner) => {
+    const candidate = budgetCandidate(value);
+    const brief = `Launch by April on a budget of ${amount} and deliver revenue within £300k of ${targetOwner} target by April`;
+    expect(() => eventGoal(candidate, brief)).toThrow('event_goal_needs_redraft');
+    const { result, graph } = await build(candidate, brief);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expect(graph).toBeUndefined();
   });
 });

@@ -151,13 +151,17 @@ export function goalChanceLicenceOf(
   const recordOf = new Map<string, Rec>();
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
+  const exactExtremes = new Set<string>();
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
     recordOf.set(id, r);
     const p = r.probability_of_goal;
     option_ids.push(id);
-    const shareGate = share !== null && share.goal.id === goalId ? shareGateForOption(graph, id) : undefined;
+    const precision = goalChancePrecisionOf(r);
+    const step = precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision));
+    const shareGate = share !== null && share.goal.id === goalId
+      ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
     if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) { withheld.push(id); continue; }
@@ -165,12 +169,15 @@ export function goalChanceLicenceOf(
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
     licensed.push(id);
     // ⭐ Ruling 5: the displayed step follows the figure's own precision; no precision block → whole, as before.
-    const precision = goalChancePrecisionOf(r);
     if (precision !== null) {
       precisionOf.set(id, precision);
-      rounding[id] = displayRoundingFor(precisionHalfWidthPoints(precision));
+      rounding[id] = step;
     }
-    pct[id] = displayedPctAt(p, rounding[id] ?? 'whole');
+    // The licence is the sole producer of the exact-extreme display; the raw Run evidence stays intact.
+    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined) {
+      pct[id] = shareGate.exact_extreme * 100;
+      exactExtremes.add(id);
+    } else pct[id] = displayedPctAt(p, step);
   }
   if (option_ids.length < 2 || licensed.length === 0) return null;
 
@@ -204,6 +211,7 @@ export function goalChanceLicenceOf(
   const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
   if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
     for (const id of licensed) {
+      if (exactExtremes.has(id)) { noDrivers[id] = 'none'; continue; } // drivers are moot at a ruled extreme
       const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
       if ('driver' in claim) drivers[id] = claim.driver;
       else noDrivers[id] = claim.no_driver;
@@ -423,7 +431,7 @@ export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<str
   return out;
 }
 
-/** Both Agent doors refuse a raw point whose class contradicts its licensed display (including retained r3 Runs).
+/** Both Agent doors carry the licence's extreme instead of its raw normal point (including retained r3 Runs).
  * A licensed nearest-5 replacement is checked as displayed, preserving the card's deliberate coarse rounding.
  */
 export function goalChancePointForAgent(p: number, display: string | undefined, nearestFive?: number): number | undefined {
@@ -431,6 +439,8 @@ export function goalChancePointForAgent(p: number, display: string | undefined, 
   const projected = nearestFive ?? p;
   if (display === undefined) return projected; // legacy permission remains the caller's existing rule
   const expectedClass = display === 'less than 1%' ? 'less_than_1' : display === 'more than 99%' ? 'more_than_99' : 'interior';
+  if (expectedClass === 'less_than_1') return 0;
+  if (expectedClass === 'more_than_99') return 1;
   return goalChanceDisplayClass(projected) === expectedClass ? projected : undefined;
 }
 

@@ -3,6 +3,7 @@ import { draftedTeamPartOf, eventShareCarrierOf, isEventShareForecast, unresolve
 import { goalDeadlineOf, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
 import { timeBetween, todayInLondon } from './deadline-date.js';
 import { gate, type ShareGate, type ShareParts } from './event-by-date-share.js';
+import type { GoalChanceDisplayRounding } from './goal-chance-display.js';
 
 type Rec = Record<string, any>;
 
@@ -112,10 +113,11 @@ export function sharePartsForOption(graph: unknown, optionId: string): SharePart
 }
 
 /** Null means unsupported parts, never permission to display a point. */
-export function shareGateForOption(graph: unknown, optionId: string): ShareGate | null {
+export function shareGateForOption(graph: unknown, optionId: string, displayedPoint?: number,
+  rounding: GoalChanceDisplayRounding = 'whole'): ShareGate | null {
   const share = shareByDateGoalForChanceOf(graph), parts = sharePartsForOption(graph, optionId);
   if (share === null || parts === null) return null;
-  return gate(parts, share.threshold_raw / 100);
+  return gate(parts, share.threshold_raw / 100, displayedPoint, rounding);
 }
 
 /** Per-option words: only the active capacity contributes an Olumi estimate. */

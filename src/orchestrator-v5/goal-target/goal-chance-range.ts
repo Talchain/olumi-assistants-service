@@ -14,7 +14,8 @@ import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import { licenceUnsizedLink, type PlaceholderGoalPath } from '../agent-lane/goal-certainty.js';
-import { byIslRank, groupPct, linkEnds, runEdge, topDriverRow, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
+import { byIslRank, displayRoundingFor, goalChancePrecisionOf, groupPct, linkEnds, precisionHalfWidthPoints,
+  runEdge, topDriverRow, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -186,7 +187,9 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     // Existing gates have precedence even if a malformed upstream response kept its point.
     if (warnings.some(w => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
       && (!Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(id)))) continue;
-    const decision = shareGateForOption(graph, id);
+    const precision = goalChancePrecisionOf(r);
+    const decision = shareGateForOption(graph, id, r.probability_of_goal,
+      precision === null ? 'whole' : displayRoundingFor(precisionHalfWidthPoints(precision)));
     if (decision?.form === 'point') continue;
     withheld.add(id);
     if (sharePartsForOption(graph, id)?.extra !== undefined) addedCapacity.add(id);

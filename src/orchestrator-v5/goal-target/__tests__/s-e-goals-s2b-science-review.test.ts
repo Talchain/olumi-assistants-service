@@ -53,7 +53,7 @@ const result = (): Rec => ({ option_comparison: [
   { option_id: 'hire', option_label: 'Hire two developers', probability_of_goal: 0.390 },
 ] });
 const warning = (out: Rec): Rec | undefined => out.inference_warnings?.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION);
-const saved = (g: Rec): Rec => ({ enrichment: withGoalChanceLicence(withShareByDateChanceGate(result(), g, 'goal'), g, 'goal') });
+const saved = (g: Rec, before = result()): Rec => ({ enrichment: withGoalChanceLicence(withShareByDateChanceGate(before, g, 'goal'), g, 'goal') });
 /** Both production Agent doors, with a deterministic dispatch in place of external I/O. */
 async function agentDoor(g: Rec, block: Rec, door: 'Run' | 'saved-read'): Promise<Rec> {
   const state = { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'near_tie' } };
@@ -67,7 +67,7 @@ async function agentDoor(g: Rec, block: Rec, door: 'Run' | 'saved-read'): Promis
     : (await caps.getCanonicalState(ctx) as Rec).analysis;
 }
 const agentRows = (view: Rec): Rec[] => view.saved_run_options ?? view.enrichment.option_comparison;
-/** Explicit r3 retained record: its exact-extreme override contradicted the raw normal point. */
+/** Retained r3 licence is authoritative; both doors must replace its raw normal point. */
 const retainedR3Point = (): Rec => ({ enrichment: { ...result(), inference_warnings: [{
   code: GOAL_CHANCE_LICENSED, severity: 'info', message: 'Licensed.', form: 'each', option_ids: ['carry', 'hire'],
   pct_by_option: { carry: 0, hire: 39 },
@@ -150,45 +150,50 @@ describe('SCIENCE review rows and controls', () => {
   it('S2-FAILING-INPUT control: valid hiring range stays supported', () => {
     expect(goalChanceLicenceOf(result(), graph(), 'goal')?.pct_by_option.hire).toBe(39);
   });
-  it('S4-P40-CLASS: carry-on U(6,10), D=6 withholds the class-mismatched point', () => {
+  // Authority: science-393023-goals-rulings-20261007.md §(d)4:78–84, including its exact-extreme exception.
+  it('S4-P40-CLASS: carry-on U(6,10), D=6 shows the exact extreme, never about 2% or a range', () => {
     const g = graph(), before = result(), out = withShareByDateChanceGate(before, g, 'goal');
-    expect(out.option_comparison.find((r: Rec) => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
     const licence = goalChanceLicenceOf(out, g, 'goal')!;
-    expect(licence.pct_by_option).not.toHaveProperty('carry');
-    expect(licence.withheld_option_ids).toContain('carry');
     const carryLine = goalChanceScreenLinesForAgent({ enrichment: withGoalChanceLicence(out, g, 'goal') }, g, true)
       .find(l => l.option_id === 'carry');
-    expect(carryLine?.figure).toBe('between less than 1% and more than 99%');
-    expect(carryLine?.chance).toBe('‘Carry on’: less than 1% chance of launching by 7 April 2027 if it takes 10 months, and more than 99% if it takes 6 months, in this model.');
-    expect(warning(out)?.message).toBe("Not shown as a single figure. The approximation of your team's stated time or pace range does not support one figure here, so this chance is shown as a range.");
+    expect(carryLine?.chance).toBe('‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model.');
+    expect(carryLine?.figure).toBe('less than 1%');
+    expect(licence.pct_by_option.carry).toBe(0);
+    expect(licence.withheld_option_ids).toBeUndefined();
+    expect(out.option_comparison[0].probability_of_goal).toBe(0.0199); // producer evidence is retained
+    expect(warning(out)).toBeUndefined();
+    expect(out.inference_warnings?.some((w: Rec) => w.code === GOAL_CHANCE_RANGE) ?? false).toBe(false);
     expect(exactChance(CARRY, 1)).toBe(0);
     expect(normalChance(CARRY, 1)).toBeCloseTo(0.0199356, 6);
-    expect(gate(CARRY, 1)).toMatchObject({ form: 'range' });
+    expect(gate(CARRY, 1)).toMatchObject({ form: 'point', exact_extreme: 0 });
   });
-  it.each([6.2, 6.3])('S4-P40-CLASS rounded boundary: normal between 0.5 and 1 percent vs exact 0, team low=%s, withholds', low => {
+  it.each([6.2, 6.3])('S4-P40-CLASS rounded boundary: low=%s shows less than 1%, never about 1% or a range', low => {
     const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low, high: 10 } };
     const p = normalChance(parts, 1);
     expect(p).toBeGreaterThanOrEqual(0.005);
     expect(p).toBeLessThan(0.01);
     expect(Math.round(p * 100)).toBe(1); // the card says "about 1%", not "less than 1%"
     expect(exactChance(parts, 1)).toBe(0);
-    expect(gate(parts, 1).form).toBe('range');
+    expect(gate(parts, 1)).toMatchObject({ form: 'point', exact_extreme: 0 });
     const before = result(); before.option_comparison[0].probability_of_goal = p;
-    const out = withShareByDateChanceGate(before, graph(low, 10), 'goal');
-    expect(out.option_comparison.find((r: Rec) => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
-    expect(warning(out)?.message).toBe("Not shown as a single figure. The approximation of your team's stated time or pace range does not support one figure here, so this chance is not shown.");
+    const g = graph(low, 10), block = saved(g, before);
+    expect(block.enrichment.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_LICENSED).pct_by_option.carry).toBe(0);
+    expect(goalChanceScreenLinesForAgent(block, g, true).find(l => l.option_id === 'carry')?.chance)
+      .toBe('‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model.');
+    expect(warning(block.enrichment)).toBeUndefined();
   });
-  it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS %s door: fresh carry-on point never reaches the Agent', async door => {
+  it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS %s door: fresh carry-on carries the licence extreme and no raw point', async door => {
     const g = graph(), view = await agentDoor(g, saved(g), door);
-    expect(agentRows(view).find(r => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
+    expect(agentRows(view).find(r => r.option_id === 'carry')?.probability_of_goal).toBe(0);
     expect(JSON.stringify(view)).not.toContain('0.0199');
-    expect(view.goal_chance_display).not.toHaveProperty('carry');
+    expect(view.goal_chance_display.carry).toBe('less than 1%');
     expect(agentRows(view).find(r => r.option_id === 'hire')?.probability_of_goal).toBe(0.390);
   });
-  it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS %s door: retained r3 class-mismatched raw 0.0199 is refused', async door => {
+  it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS %s door: retained r3 raw 0.0199 is replaced by the licence extreme', async door => {
     const block = retainedR3Point(), view = await agentDoor(graph(), block, door);
     expect(block.enrichment.option_comparison[0].probability_of_goal).toBe(0.0199); // control on the actual ingress
-    expect(agentRows(view).find(r => r.option_id === 'carry')).not.toHaveProperty('probability_of_goal');
+    expect(agentRows(view).find(r => r.option_id === 'carry')?.probability_of_goal).toBe(0);
+    expect(view.goal_chance_display.carry).toBe('less than 1%');
     expect(JSON.stringify(view)).not.toContain('0.0199');
     expect(agentRows(view).find(r => r.option_id === 'hire')?.probability_of_goal).toBe(0.390);
   });
@@ -197,6 +202,68 @@ describe('SCIENCE review rows and controls', () => {
     expect(gate(HIRE, 1).form).toBe('point');
     expect(goalChanceScreenLinesForAgent(saved(graph()), graph(), true).find(l => l.option_id === 'hire')?.chance)
       .toBe("‘Hire two developers’: about 39% chance of launching by 7 April 2027, in this model, using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month).");
+  });
+  it.each([6.2, 6.3, 6.4].flatMap(low => (['Run', 'saved-read'] as const).map(door => ({ low, door }))))('S4-P40-CLASS $door door: low=$low projects the licensed extreme, including the 20/4000 producer', async ({ low, door }) => {
+      const g = graph(low, 10), parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low, high: 10 } };
+      const p = low === 6.4 ? 20 / 4000 : normalChance(parts, 1), before = result();
+      before.option_comparison[0].probability_of_goal = p;
+      if (low === 6.4) {
+        expect(normalChance(parts, 1)).toBeLessThan(0.005);
+        expect(Math.round(p * 100)).toBe(1); // producer would show about 1%, analytic normal would not
+      }
+      const licence = goalChanceLicenceOf(before, g, 'goal')!;
+      expect(licence.pct_by_option.carry).toBe(0);
+      const block = saved(g, before), view = await agentDoor(g, block, door);
+      expect(agentRows(view).find(r => r.option_id === 'carry')?.probability_of_goal).toBe(0);
+      expect(view.goal_chance_display.carry).toBe('less than 1%');
+      expect(JSON.stringify(view)).not.toContain(String(p));
+      expect(goalChanceScreenLinesForAgent(block, g, true).find(l => l.option_id === 'carry')?.chance)
+        .toBe('‘Carry on’: less than 1% chance of launching by 7 April 2027, in this model.');
+    });
+  it('S4-P40-CLASS same-class control: producer 0.0039 licenses a point without an override', () => {
+    const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 6.4, high: 10 } };
+    expect(gate(parts, 1, 0.0039)).toMatchObject({ form: 'point' });
+    expect(gate(parts, 1, 0.0039)).not.toHaveProperty('exact_extreme');
+  });
+  it('S4-P40-CLASS displayed-point control: analytic less than 1% cannot license producer about 1%', () => {
+    const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 6.4, high: 10 } };
+    expect(exactChance(parts, 1)).toBe(0);
+    expect(normalChance(parts, 1)).toBeCloseTo(0.0039476, 6);
+    expect(gate(parts, 1, 20 / 4000)).toMatchObject({ form: 'point', exact_extreme: 0 });
+  });
+  it('S4-P40-CLASS precision control compares the actual nearest-five point', () => {
+    const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 6.4, high: 10 } };
+    expect(gate(parts, 1, 0.0039, 'nearest_5')).toMatchObject({ form: 'point', exact_extreme: 0 });
+  });
+  it.each(['Run', 'saved-read'] as const)('S4-P40-CLASS $0 door: upper exact extreme carries more than 99%', async door => {
+    const g = graph(3, 5), before = result(), parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 3, high: 5 } };
+    before.option_comparison[0].probability_of_goal = normalChance(parts, 1);
+    expect(gate(parts, 1)).toMatchObject({ form: 'point', exact_extreme: 1 });
+    expect(goalChanceLicenceOf(before, g, 'goal')?.pct_by_option.carry).toBe(100);
+    const block = saved(g, before), view = await agentDoor(g, block, door);
+    expect(agentRows(view).find(r => r.option_id === 'carry')?.probability_of_goal).toBe(1);
+    expect(view.goal_chance_display.carry).toBe('more than 99%');
+    expect(goalChanceScreenLinesForAgent(block, g, true).find(l => l.option_id === 'carry')?.chance)
+      .toBe('‘Carry on’: more than 99% chance of launching by 7 April 2027, in this model.');
+  });
+  it('S4-P40-CLASS exact-extreme drivers are moot on the licence', () => {
+    const before = result(); before.option_comparison[0].probability_of_goal_drivers = { invalid_rows_dropped: 1 };
+    const licence = goalChanceLicenceOf(before, graph(), 'goal')!;
+    expect(licence.no_driver_by_option?.carry).toBe('none');
+    expect(licence.driver_by_option ?? {}).not.toHaveProperty('carry');
+  });
+  it('S4-P40-CLASS interior exact against extreme normal stays a range even within two points', () => {
+    const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 1.6, high: 21.6 } };
+    const exact = exactChance(parts, 2.99), normal = normalChance(parts, 2.99);
+    expect(Math.round(exact * 100)).toBe(2);
+    expect(Math.round(normal * 100)).toBe(0);
+    expect(gate(parts, 2.99)).toMatchObject({ form: 'range' });
+    expect(gate(parts, 2.99).error_points).toBeLessThanOrEqual(2);
+  });
+  it('S4-P40-CLASS more-than-two-points control keeps the range and exact endpoints', () => {
+    const parts: ShareParts = { team: { quantity: 'months_to_finish', D: 6, low: 4, high: 8 } };
+    expect(gate(parts, 1)).toMatchObject({ form: 'range', low: 0, high: 1 });
+    expect(gate(parts, 1).error_points).toBeGreaterThan(2);
   });
   it('L1-PAST-DEADLINE-RERUN: a passed date withholds with recovery words', () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2027-04-08T12:00:00Z'));

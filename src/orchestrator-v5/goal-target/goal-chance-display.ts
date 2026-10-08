@@ -12,8 +12,8 @@ export function displayedPctAt(p: number, rounding: GoalChanceDisplayRounding): 
   return five;
 }
 
-/** The card's whole-percentage classes; 0.5–1% displays as "about 1%". */
-export function goalChanceDisplayClass(p: number): 'less_than_1' | 'interior' | 'more_than_99' {
-  const shown = displayedPctAt(p, 'whole');
+/** The card's classes at its licensed rounding step; whole 0.5–1% displays as "about 1%". */
+export function goalChanceDisplayClass(p: number, rounding: GoalChanceDisplayRounding = 'whole'): 'less_than_1' | 'interior' | 'more_than_99' {
+  const shown = displayedPctAt(p, rounding);
   return shown === 0 ? 'less_than_1' : shown === 100 ? 'more_than_99' : 'interior';
 }

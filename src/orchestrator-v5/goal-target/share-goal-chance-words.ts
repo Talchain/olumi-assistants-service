@@ -1,11 +1,15 @@
 /** Shared CEE/DGAI words for a licensed deliverable forecast. */
 import { sayDate } from './deadline-date.js';
 
-/** A terminal launch noun or launching with an explicit object names the event. */
+const HEAD_PREPOSITIONS = new Set(['before', 'after', 'in', 'for', 'of', 'by', 'to', 'on', 'with', 'at', 'from', 'across']);
+
+/** The deliverable's head names the event; later launch references do not. */
 export function deliverableIsALaunch(deliverable: string): boolean {
   const words = deliverable.trim().toLowerCase().split(/\s+/u);
-  return words.at(-1) === 'launch'
-    || (words[0] === 'launching' && words.length > 2 && ['the', 'a', 'an'].includes(words[1]!));
+  const preposition = words.findIndex(word => HEAD_PREPOSITIONS.has(word));
+  const head = preposition < 0 ? words : words.slice(0, preposition);
+  return head.at(-1) === 'launch'
+    || (head[0] === 'launching' && head.slice(1).some(word => !['the', 'a', 'an', ''].includes(word)));
 }
 
 export function shareGoalChanceWords(deliverable: string, dateIso: string): string {

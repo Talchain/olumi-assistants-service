@@ -4,6 +4,7 @@ import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js
 import { goalDeadlineOf, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { sayDate, timeBetween } from './deadline-date.js';
 import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
+import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -14,8 +15,10 @@ export const EVENT_DEADLINE = /\b(?:deadlines?|on[ \t-]{1,4}time|by[ \t]{1,4}(?:
 export const QUANTITY_TARGET = /[£$€][ \t]{0,4}\d|\b\d[\d,.]{0,20}[ \t]{0,4}(?:%|(?!(?:days?|weeks?|months?|years?|developers?|people|leads?|January|February|March|April|May|June|July|August|September|October|November|December)\b)[a-z][a-z-]{0,40}\b)/i;
 /** Date numbers are dates, not quantity targets; every run is bounded. */
 const CALENDAR_NUMBERS = /\b(?:\d{1,2}(?:st|nd|rd|th)?[ \t]{1,4})?(?:January|February|March|April|May|June|July|August|September|October|November|December)(?:[ \t]{1,4}\d{4})?\b/gi;
-/** Ignore only an explicitly contextual money limit, leaving other quantities available to reject. */
-const CONTEXTUAL_MONEY_LIMIT = /\b(?:on[ \t]{1,4}a[ \t]{1,4}budget[ \t]{1,4}of|within|budget[ \t]{1,4}is)[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?(?![\p{L}\p{N}])|\bwith[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?[ \t]{1,4}to[ \t]{1,4}spend\b/giu;
+/** Ignore only an explicitly contextual money limit; a tolerance to a target remains a quantity. */
+const CONTEXTUAL_MONEY_LIMIT = /\b(?:on[ \t]{1,4}a[ \t]{1,4}budget[ \t]{1,4}of|within|budget[ \t]{1,4}is)[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?(?![\p{L}\p{N}])(?![ \t]{0,4}of[ \t]{1,4}(?:our|the)[ \t]{1,4}target\b)|\bwith[ \t]{1,4}[£$€][ \t]{0,4}\d[\d,]{0,20}(?:\.\d{1,4})?[ \t]{0,4}(?:k|m|thousand|million)?[ \t]{1,4}to[ \t]{1,4}spend\b/giu;
+/** A money limit is not context when the goal itself names that money quantity. */
+const MONEY_GOAL_QUANTITY = /\b(?:budgets?|revenue|mrr|arr|costs?|spend(?:ing)?|expenses?|income|profits?|turnover|prices?|sales|salar(?:y|ies)|wages?|cash)\b/i;
 const EVENT_VERB_ROOTS: Readonly<Record<string, string>> = {
   launch: 'launch', launching: 'launch', launched: 'launch', launches: 'launch',
   ship: 'ship', shipping: 'ship', shipped: 'ship', ships: 'ship',
@@ -27,11 +30,17 @@ export function briefAttestsEventByDate(brief: unknown, goal?: CandidateModel['g
   if (typeof brief !== 'string' || brief.length > 20000) return false;
   if (goal && (QUANTITY_TARGET.test(goal.metric)
     || (goal.value !== null && goal.value !== undefined))) return false;
+  const mayMaskMoney = !goal || (!MONEY_GOAL_QUANTITY.test(`${goal.metric} ${goal.deliverable ?? ''}`)
+    && readCurrencyUnitWithQualifiers(goal.unit).kind !== 'currency');
   const words = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u)
     .filter(w => w && !['a', 'an', 'the'].includes(w)).map(w => EVENT_VERB_ROOTS[w] ?? w);
-  return brief.split(/[.!?;\n]/).some(sentence => {
-    if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence)
-      || QUANTITY_TARGET.test(sentence.replace(CONTEXTUAL_MONEY_LIMIT, 'limit').replace(CALENDAR_NUMBERS, 'date'))) return false;
+  // Keep decimal amounts intact, and check every quantity before accepting any event sentence.
+  const sentences = brief.split(/(?<!\d)\.|\.(?!\d)|[!?;\n]/);
+  const quantities = sentences.map(sentence =>
+    (mayMaskMoney ? sentence.replace(CONTEXTUAL_MONEY_LIMIT, 'limit') : sentence).replace(CALENDAR_NUMBERS, 'date'));
+  if (quantities.some(sentence => QUANTITY_TARGET.test(sentence))) return false;
+  return sentences.some(sentence => {
+    if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence)) return false;
     if (!goal) return true;
     const held = new Set(words(sentence)), deliverable = words(goal.deliverable ?? ''), metric = words(goal.metric);
     return deliverable.length > 0 && metric.length > 0 && [...deliverable, ...metric].every(w => held.has(w));

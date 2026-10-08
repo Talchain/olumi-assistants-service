@@ -1,7 +1,7 @@
 /** S2a: the stated quantity is uniform; derived share is never silently uniform.
  * Fractions throughout. Independent team time/pace and lead time; no sampling.
  */
-import { goalChanceDisplayClass } from './goal-chance-display.js';
+import { goalChanceDisplayClass, type GoalChanceDisplayRounding } from './goal-chance-display.js';
 export interface Moments { readonly mean: number; readonly sd: number }
 export interface TeamShare {
   readonly quantity: 'months_to_finish' | 'share_per_month';
@@ -111,14 +111,18 @@ export function normalChance(parts: ShareParts, threshold: number): number {
   return sd === 0 ? (mean >= threshold ? 1 : 0) : normalTail((threshold - mean) / sd);
 }
 
-export type ShareGate = { readonly form: 'point'; readonly error_points: number }
+export type ShareGate = { readonly form: 'point'; readonly error_points: number; readonly exact_extreme?: 0 | 1 }
   | { readonly form: 'range'; readonly low: number; readonly high: number; readonly error_points: number };
 export const SHARE_GATE_MAX_ERROR_POINTS = 2;
-export function gate(parts: ShareParts, threshold: number): ShareGate {
+export function gate(parts: ShareParts, threshold: number, displayedPoint = normalChance(parts, threshold),
+  rounding: GoalChanceDisplayRounding = 'whole'): ShareGate {
   const normal = normalChance(parts, threshold), exact = exactChance(parts, threshold);
   const error = Math.abs(normal - exact) * 100;
-  if (error <= SHARE_GATE_MAX_ERROR_POINTS && goalChanceDisplayClass(normal) === goalChanceDisplayClass(exact)) {
-    return { form: 'point', error_points: error };
+  const exactClass = goalChanceDisplayClass(exact);
+  // Science §(d)4: compare the point the licence WOULD display, then restore a known exact extreme.
+  if (error <= SHARE_GATE_MAX_ERROR_POINTS) {
+    if (goalChanceDisplayClass(displayedPoint, rounding) === exactClass) return { form: 'point', error_points: error };
+    if (exactClass !== 'interior') return { form: 'point', error_points: error, exact_extreme: exactClass === 'less_than_1' ? 0 : 1 };
   }
   const t = parts.team;
   const at = (v: number): number => exactChance({ ...parts, team: { ...t, low: v, high: v } }, threshold);
