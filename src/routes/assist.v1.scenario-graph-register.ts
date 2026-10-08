@@ -32,8 +32,10 @@ import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations, Preconditio
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { useAppendV6 } from "../orchestrator-v5/session/supabase-store.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
+import { readRevisionConflictDetails, withRevisionConflictWire } from "../orchestrator-v5/graph-revision-conflict.js";
 import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
 import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
 import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
@@ -717,6 +719,7 @@ export default async function route(app: FastifyInstance) {
       // `goal_constraints` wholesale-erased the stored limits on a transient error.
       let expectedGraphIdentityHash: string | null | undefined;
       let expectedGraphAnalysisHash: string | null | undefined;
+      let expectedRevision: number | undefined;
       // The SAME server-read bytes serve two different questions: the trusted
       // CAS base (hashes, below) and the invariant BASELINE handed to the
       // persistence floor. Hoisted out of the try so the floor can see it —
@@ -728,7 +731,14 @@ export default async function route(app: FastifyInstance) {
       // re-derives — one helper, one base, so a lost-response retry still matches its own committed request hash.
       const withEntityRefs = <G,>(g: G): G => assignEntityRefs(g, baseGraphForInvariants).graph;
       try {
-        const base = await store.loadGraph(scenarioId);
+        let base: unknown;
+        if (useAppendV6()) {
+          const state = await store.loadGraphAndBriefText(scenarioId);
+          base = state.graph;
+          expectedRevision = state.revision;
+        } else {
+          base = await store.loadGraph(scenarioId);
+        }
         baseGraphForInvariants = base;
         const hashes = computeExpectedGraphCasHashes(base);
         expectedGraphIdentityHash = hashes.expectedGraphIdentityHash;
@@ -1194,6 +1204,7 @@ export default async function route(app: FastifyInstance) {
             ...(threadedPendings === undefined ? {} : { pending_actions: threadedPendings }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
+            ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           },
           });
         });
@@ -1277,7 +1288,7 @@ export default async function route(app: FastifyInstance) {
           return reply
             .code(409)
             .send(
-              buildErrorV1(
+              withRevisionConflictWire(buildErrorV1(
                 // See the `invalid()` note: the shared `ErrorCode` family has
                 // no CONFLICT member, so 409 is carried by the HTTP status and
                 // the reason by `details.code`.
@@ -1285,7 +1296,7 @@ export default async function route(app: FastifyInstance) {
                 "This model changed while you were importing. Reload and import again.",
                 { code: "GRAPH_STALE" },
                 requestId,
-              ),
+              ), { conflict_category: err.conflict_category, ...readRevisionConflictDetails(err) }),
             );
         }
         log.error(

@@ -1,5 +1,7 @@
 import { horizonSteadyAttested } from './horizon-basis.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
+import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
+export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
 /**
  * ⭐ D3 MILESTONE 1, STEP 2 — EACH OPTION'S CHANCE OF MEETING THE GOAL, AND WHAT MAY BE SAID ABOUT IT (DL 0df0e1 #87
  * 6005048156 + plan 6006078553; Science d5 6005138341 / 6005279728 / 6005640764; Wording c6 6005196947 + rulings 6 Oct).
@@ -11,7 +13,8 @@ import { shareGoalChanceWords } from './share-goal-chance-words.js';
  * read the same decision.
  *
  *  · LICENSED — the goal states a level target with its direction and unit, and at least one scored option still carries
- *    a finite goal chance in [0, 1] after every withhold (the seam gate runs first).
+ *    a finite goal chance in [0, 1] after every withhold (the seam gate runs first). With no licensed figure, a zero-spread
+ *    reason alone may retain an `each` record: empty percentages/message, no licensed chance claim.
  *  · PER OPTION (Science d5 #87 6007421281): an option whose chance was withheld for its OWN path (no figure on its record,
  *    or an exact 0/1 the Run did not earn, which the transport strips) loses only its own line — `withheld_option_ids`.
  *    Only the superlative and every-option forms need every option: with any option withheld the form is `each`.
@@ -190,7 +193,6 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
  *  · no carrier and no horizon: "Meets £20,000 a month if today’s figures hold." / "Falls short of … if today’s figures hold.";
  *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
  */
-export const ZERO_SPREAD_NEEDS_MONTHLY_CHANGES = 'Not shown yet: needs month-by-month changes';
 function zeroSpreadReasons(
   sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown,
 ): Record<string, GoalChanceZeroSpread> {
@@ -203,7 +205,7 @@ function zeroSpreadReasons(
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
     const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
-    const line = !rates && months !== undefined ? ZERO_SPREAD_NEEDS_MONTHLY_CHANGES
+    const line = !rates && months !== undefined ? zeroSpreadNoCarrierHorizonLine()
       : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
     out[id] = { reason: 'zero_spread', side, line };
   }
@@ -278,7 +280,7 @@ export function goalChanceLicenceOf(
       exactExtremes.add(id);
     } else pct[id] = displayedPctAt(p, step);
   }
-  if (option_ids.length < 2 || licensed.length === 0) return null;
+  if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0)) return null;
 
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
   const complete = withheld.length === 0;
@@ -318,13 +320,13 @@ export function goalChanceLicenceOf(
   }
   const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   const shortfall = shortfallNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form, target.unit, graph, envelope);
-  const estimateLinks = goalChanceEstimateLinkCount(graph, option_ids, goalId);
+  const estimateLinks = licensed.length === 0 ? 0 : goalChanceEstimateLinkCount(graph, option_ids, goalId);
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
     ...(horizonSteadyAttested(storedGraph, scenarioId) ? { horizon_basis: { basis: 'steady_attested' as const, source: 'user_stated' as const,
       months: goal!.horizon_basis_months as number, why: steadyHorizonWhy(String(goal!.label), goal!.horizon_basis_months as number) } } : {}),
-    message: `Each option’s ${share === null ? 'chance of meeting your goal'
+    message: licensed.length === 0 ? '' : `Each option’s ${share === null ? 'chance of meeting your goal'
       : shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)} is licensed on this Run.`,
     form,
     option_ids,
@@ -359,7 +361,7 @@ export function sentGoalThresholdOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
 ): SentGoalThreshold | undefined {
   const licence = goalChanceLicenceOf(envelope, graph, goalId, earned);
-  if (licence === null) return undefined;
+  if (licence === null || Object.keys(licence.pct_by_option).length === 0) return undefined;
   const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
   if (goal === undefined || !isRec(envelope)) return undefined;
@@ -392,7 +394,7 @@ function spreadNotesOf(
   sent: SentGoalThreshold | undefined, goal: Rec | undefined, nodes: Rec[], licensed: string[],
   pct: Record<string, number>, records: Map<string, Rec>, comparator: GoalChanceComparator, form: GoalChanceForm,
 ): Record<string, string> | undefined {
-  if (sent === undefined || !finite(sent.value) || goal === undefined
+  if (licensed.length === 0 || sent === undefined || !finite(sent.value) || goal === undefined
     || !['goal_threshold', 'goal_threshold_raw'].includes(sent.field) || goal[sent.field] !== sent.value
     || (sent.frame !== 'level' && sent.frame !== 'delta')) return undefined;
   let offset = 0;
@@ -705,6 +707,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
   shortfall_note_by_option?: Readonly<Record<string, string>>;
+  withheld_reason_by_option?: Readonly<Record<string, GoalChanceZeroSpread>>;
   olumi_estimate_link_count?: number;
   goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
   horizon_basis?: SteadyHorizonBasis;
@@ -735,6 +738,14 @@ export function goalChanceLicenceForAgent(result: unknown): {
     : r.similar_option_ids !== undefined) return undefined;
   if (r.withheld_option_ids !== undefined
     && (form !== 'each' || withheld === undefined || withheld.length === 0 || !withheld.every((id) => optionIds.includes(id)))) return undefined;
+  // This is the producer's stored finding, never reconstructed from a public row whose exact 0/1 was stripped.
+  const zeroSpreadReasons: Record<string, GoalChanceZeroSpread> = {};
+  for (const [id, reason] of Object.entries(isRec(r.withheld_reason_by_option) ? r.withheld_reason_by_option : {})) {
+    if (!withheld?.includes(id) || (isRec(r.pct_by_option) && Object.hasOwn(r.pct_by_option, id))
+      || !isRec(reason) || reason.reason !== 'zero_spread' || (reason.side !== 'meets' && reason.side !== 'falls_short')
+      || typeof reason.line !== 'string' || reason.line.trim() === '' || /[\r\n]/.test(reason.line)) continue;
+    zeroSpreadReasons[id] = { reason: 'zero_spread', side: reason.side, line: reason.line };
+  }
   const sent = isRec(r.sent_threshold) ? r.sent_threshold : undefined;
   const notes = isRec(r.spread_note_by_option) ? r.spread_note_by_option : undefined;
   const validSent = sent !== undefined && finite(sent.value)
@@ -779,5 +790,6 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
+    ...(Object.keys(zeroSpreadReasons).length > 0 ? { withheld_reason_by_option: zeroSpreadReasons } : {}),
   };
 }
