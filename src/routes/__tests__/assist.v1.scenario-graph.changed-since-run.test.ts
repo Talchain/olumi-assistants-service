@@ -65,6 +65,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
 });
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
+import { deriveDecisionContextGraphHash } from "../../orchestrator-v5/build-turn-context.js";
 
 const GRAPH = {
   nodes: [
@@ -77,6 +78,11 @@ const GRAPH = {
 const RUN_AT = "2026-10-07T20:00:00.000Z";
 const runRow = { fact: { fact_type: "run_analysis", fact_version: 1, noop: false, result: { run_id: "run_b", graph_hash_at_run: "aaaa", computed_at: RUN_AT } }, fact_row_id: "r1", fact_created_at: RUN_AT };
 const receipt = (nodeId: string, iso: string) => ({ fact: { fact_type: "set_factor_value", fact_version: 1, noop: false, result: { target_id: nodeId, status: "applied", before: { value: 1 }, after: { value: 2 } } }, fact_row_id: `f-${nodeId}`, fact_created_at: iso });
+const staleRunRow = {
+  ...runRow,
+  fact: { ...runRow.fact, result: { ...runRow.fact.result, scenario_id: SCENARIO, graph_hash_at_run: "aaaaaaaaaaaaaaaa",
+    leading_option_id: "n1", summary: "Take the job leads.", enrichment: { analysis_status: "computed" } } },
+};
 
 async function readGraph(body: Record<string, unknown>) {
   const app = Fastify();
@@ -95,6 +101,7 @@ beforeEach(() => {
   resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   ensureScenarioExists.mockResolvedValue({ user_id: null });
   getScenarioOwner.mockResolvedValue(null);
+  readRecent.mockResolvedValue([]);
   loadGraphAndBriefText.mockResolvedValue({ graph: GRAPH, briefText: "Should I take the job?" });
   readScenarioRunAnalysisFactsFor.mockResolvedValue({ facts: [runRow], total_count: 1 });
   readRecentAppliedMutationFactsFor.mockResolvedValue([receipt("n2", "2026-10-07T20:05:00.000Z"), receipt("n1", "2026-10-07T19:55:00.000Z")]);
@@ -106,8 +113,33 @@ describe("POST /assist/v1/scenarios/:id/graph — changed_since_run", () => {
     const res = await readGraph({ include_conversation_turns: true });
     expect(res.statusCode).toBe(200);
     expect(res.json().changed_since_run).toEqual({
-      version: 1, since_run_id: "run_b", node_ids: ["n2"], links: [], unattributed_changes: 0, complete: true,
+      version: 1, since_run_id: "run_b", since_run_computed_at: RUN_AT, node_ids: ["n2"], links: [], unattributed_changes: 0, complete: true,
     });
+  });
+
+  it("a complete_stale read carries the same Run's computed_at in both served blocks", async () => {
+    expect(deriveDecisionContextGraphHash(GRAPH)).not.toBe(staleRunRow.fact.result.graph_hash_at_run);
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ facts: [staleRunRow], total_count: 1 });
+    const res = await readGraph({ include_conversation_turns: true });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.analysis_state.run_state).toMatchObject({ kind: "complete_stale", computed_at: staleRunRow.fact.result.computed_at });
+    expect(body.changed_since_run.since_run_id).toBe(staleRunRow.fact.result.run_id);
+    expect(body.changed_since_run.since_run_computed_at).toBe(body.analysis_state.run_state.computed_at);
+  });
+
+  it.each(["partial", "degraded", "refused"])("a newer %s Run's stamp belongs to since_run_id, even when freshness selects the older success", async (status) => {
+    const newer = { ...staleRunRow, fact_row_id: "r2", fact_created_at: "2026-10-07T20:10:00.000Z",
+      fact: { ...staleRunRow.fact, result: { ...staleRunRow.fact.result, run_id: "run_c", computed_at: "2026-10-07T20:09:00.123Z",
+        enrichment: { analysis_status: status } } } };
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ facts: [newer, staleRunRow], total_count: 2 });
+    const res = await readGraph({ include_conversation_turns: true });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.analysis_state.run_state).toMatchObject({ kind: "complete_stale", computed_at: staleRunRow.fact.result.computed_at });
+    expect(body.changed_since_run.since_run_id).toBe(newer.fact.result.run_id);
+    expect(body.changed_since_run.since_run_computed_at).toBe(newer.fact.result.computed_at);
+    expect(body.changed_since_run.since_run_computed_at).not.toBe(body.analysis_state.run_state.computed_at);
   });
 
   it("the Agent's internal read (no conversation) is unchanged: no key and no extra receipt query", async () => {

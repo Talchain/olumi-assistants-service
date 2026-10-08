@@ -19,6 +19,7 @@
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { z } from 'zod';
 
 import { isNoopFact } from '../tools/fact-noop.js';
 import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
@@ -30,6 +31,7 @@ const RUN_FACT_LOOKAHEAD = 50;
 const RUN_FACT_MAX = 1000;
 const MAX_NODE_IDS = 200;
 const MAX_EDGES = 400;
+const RUN_COMPUTED_AT = z.string().datetime();
 
 export interface ChangedSinceRunLink {
   readonly from: string;
@@ -40,6 +42,8 @@ export interface ChangedSinceRunV1 {
   readonly version: 1;
   /** The Run the marks are relative to; `null` = no Run recorded yet. */
   readonly since_run_id: string | null;
+  /** The boundary Run's snapshot stamp (schemas 0.83.0; local until published). */
+  readonly since_run_computed_at?: string;
   readonly node_ids: readonly string[];
   readonly links: readonly ChangedSinceRunLink[];
   readonly unattributed_changes: number;
@@ -57,6 +61,11 @@ export interface RunBoundary {
    * made WHILE the Run computed, which that Run never saw (buddy r1 P1 / r2 P1). Absent → the row time is the bound.
    */
   readonly snapshot_at?: string;
+  /**
+   * The same `run_analysis.result.computed_at`, as `analysis_state.run_state.computed_at` serves it (trimmed, ISO), for
+   * `since_run_computed_at` only. Kept apart from `snapshot_at` so the receipt window's bound is unchanged.
+   */
+  readonly computed_at?: string;
 }
 
 type Rec = Record<string, unknown>;
@@ -170,9 +179,11 @@ export function projectChangedSinceRun(
   const hashMovedUnplaced = boundary?.graph_hash_at_run !== undefined && typeof currentGraphHash === 'string'
     && currentGraphHash !== boundary.graph_hash_at_run && nodes.size === 0 && links.size === 0 && unattributed === 0;
   const overCap = nodeIds.length > MAX_NODE_IDS || linkList.length > MAX_EDGES;
+  const sinceRunId = boundary?.run_id ?? null;
   return {
     version: 1,
-    since_run_id: boundary?.run_id ?? null,
+    since_run_id: sinceRunId,
+    ...(sinceRunId !== null && boundary?.computed_at !== undefined ? { since_run_computed_at: boundary.computed_at } : {}),
     node_ids: nodeIds.slice(0, MAX_NODE_IDS),
     links: linkList.slice(0, MAX_EDGES),
     unattributed_changes: unattributed,
@@ -186,11 +197,14 @@ export function newestRunBoundary(runFacts: readonly IdentifiedHandlerFact[]): R
     if (entry.fact.fact_type !== 'run_analysis') continue;
     const result = (entry.fact as { result?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown } }).result;
     const snapshotAt = typeof result?.computed_at === 'string' && isoToMicros(result.computed_at) !== null ? result.computed_at : undefined;
+    // Match the analysis-state composer's trim; datetime validation preserves the remaining bytes.
+    const stamp = typeof result?.computed_at === 'string' ? RUN_COMPUTED_AT.safeParse(result.computed_at.trim()) : undefined;
     const runId = id(result?.run_id);
     const hash = typeof result?.graph_hash_at_run === 'string' && result.graph_hash_at_run.length > 0 ? result.graph_hash_at_run : undefined;
     if (runId !== null) {
       return { run_id: runId, created_at: entry.fact_created_at, ...(hash !== undefined ? { graph_hash_at_run: hash } : {}),
-        ...(snapshotAt !== undefined ? { snapshot_at: snapshotAt } : {}) };
+        ...(snapshotAt !== undefined ? { snapshot_at: snapshotAt } : {}),
+        ...(stamp?.success === true ? { computed_at: stamp.data } : {}) };
     }
   }
   return null;

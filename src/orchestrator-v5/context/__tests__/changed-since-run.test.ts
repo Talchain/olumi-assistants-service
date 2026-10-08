@@ -168,7 +168,7 @@ describe('newestRunBoundary', () => {
       at('2026-10-07T20:10:00.000Z', runFact()),
       at(RUN_AT, runFact('run_b')),
       at('2026-10-07T19:00:00.000Z', runFact('run_a')),
-    ])).toEqual({ run_id: 'run_b', created_at: RUN_AT, graph_hash_at_run: 'aaaa', snapshot_at: RUN_AT });
+    ])).toEqual({ run_id: 'run_b', created_at: RUN_AT, graph_hash_at_run: 'aaaa', snapshot_at: RUN_AT, computed_at: RUN_AT });
   });
 });
 
@@ -177,6 +177,42 @@ describe('readChangedSinceRun', () => {
     readScenarioRunAnalysisFactsFor: vi.fn(async (_s: string, limit: number) => ({ facts: runFacts.slice(0, limit), total_count: runFacts.length })),
     readRecentAppliedMutationFactsFor: vi.fn(async () => { if (receipts instanceof Error) throw receipts; return receipts; }),
   }) as unknown as ChangedSinceRunReads;
+
+  it.each([
+    RUN_AT, '2026-10-07T20:00:00.123456Z', '2026-10-07T20:00:00Z',
+    '2026-10-07T20:00Z', '2026-10-07T20:00:00.1234567890Z',
+  ])('carries the boundary Run\'s computed_at exactly: %s', async (computedAt) => {
+    const fact = { ...runFact('run_b'), result: { run_id: 'run_b', computed_at: computedAt } } as unknown as HandlerFact;
+    const out = await readChangedSinceRun(storeWith([at(RUN_AT, fact)], []), 's1');
+    expect(out?.since_run_id).toBe('run_b');
+    expect(out).toHaveProperty('since_run_computed_at', computedAt);
+  });
+
+  it('a padded computed_at is served trimmed, as the analysis-state composer serves run_state.computed_at', async () => {
+    const fact = { ...runFact('run_b'), result: { run_id: 'run_b', computed_at: ` ${RUN_AT}\n` } } as unknown as HandlerFact;
+    const out = await readChangedSinceRun(storeWith([at(RUN_AT, fact)], []), 's1');
+    expect(out).toHaveProperty('since_run_computed_at', RUN_AT);
+  });
+
+  it('no Run omits the stamp; a recorded Run carries it', async () => {
+    const out = await readChangedSinceRun(storeWith([], []), 's1');
+    expect(out?.since_run_id).toBeNull();
+    expect(out).not.toHaveProperty('since_run_computed_at');
+    const control = await readChangedSinceRun(storeWith([at(RUN_AT, runFact('run_b'))], []), 's1');
+    expect(control).toHaveProperty('since_run_computed_at', RUN_AT);
+  });
+
+  it.each([
+    undefined, null, 123, '', 'not-a-date', '2026-02-30T20:00:00.000Z',
+    '2026-10-07T20:00:00.000+00:00', '2026-10-07T20:00:00.000',
+  ])('a missing/invalid computed_at (%s) omits only the stamp', async (computedAt) => {
+    const fact = { ...runFact('run_b'), result: { run_id: 'run_b', ...(computedAt === undefined ? {} : { computed_at: computedAt }) } } as unknown as HandlerFact;
+    const out = await readChangedSinceRun(storeWith([at(RUN_AT, fact)], []), 's1');
+    expect(out?.since_run_id).toBe('run_b');
+    expect(out).not.toHaveProperty('since_run_computed_at');
+    const control = await readChangedSinceRun(storeWith([at(RUN_AT, runFact('run_b'))], []), 's1');
+    expect(control).toHaveProperty('since_run_computed_at', RUN_AT);
+  });
 
   it('reads the Run page and the receipts and projects them', async () => {
     const store = storeWith([at(RUN_AT, runFact('run_b'))], [at('2026-10-07T20:05:00.000Z', factorValue('fac_price'))]);
