@@ -42,6 +42,7 @@ import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
+import { identityCanCarryExactLinks } from '../../admission/identity-evaluations.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
@@ -60,6 +61,7 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
+import { admitAccumulationIdentities, withAccumulationCarriers } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -308,11 +310,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
      * marks whether its sign is provable. REQUIRED so "none" is an empty list, never an omission.
      */
     identities: { type: 'array', description:
-      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together. Empty when none.',
+      'Quantities in this model that are, BY DEFINITION, other quantities in this model multiplied together, or (accumulation) a stock worked out month by month to the goal\u2019s deadline. Empty when none.',
       items: obj({
-        outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product.' },
-        operation: { type: 'string', enum: ['product'] },
-        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied.' },
+        outcome: { type: 'string', description: 'The EXACT label of the quantity that is the product, or the stock at the deadline.' },
+        operation: { type: 'string', enum: ['product', 'accumulation'] },
+        factors: { type: 'array', items: { type: 'string' }, description: 'The EXACT labels of every quantity multiplied; for accumulation EXACTLY three, in this order: the stock today, the percentage lost per month, the amount added per month.' },
         provenance,
       }, ['outcome', 'operation', 'factors', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
@@ -411,6 +413,10 @@ export const BUILD_INSTRUCTIONS = [
   'NEVER PICK THE SCOPE OF THE GOAL SILENTLY. When the goal metric could mean one part or the whole — the brief says "MRR" or "revenue" and the decision is about one plan, product, segment or region — set `goal.scope`: `modelled` is what your model actually measures (e.g. "the Pro plan only"), `alternative` is the other reading (e.g. "all plans together"), and `stated_in_brief` is true only when the brief itself says which. Keep `goal.metric` in the user’s own words: Olumi states the modelled scope as its own assumption and asks the user which they meant from `goal.scope`. When the goal metric has no part-or-whole reading, `goal.scope` is null.',
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
   'DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together — a plan’s revenue is its price times its paying subscribers; a cost is headcount times cost per head — add one entry to `identities`: `outcome` is that quantity’s EXACT label, `operation` "product", and `factors` the EXACT labels of every quantity multiplied. Still state each factor’s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds.',
+  // ⭐ CEE #4 (Science goals §(v)): a goal with a deadline over a stock that churns and grows is about that stock AT the
+  // deadline, which a model of today's levels cannot see. Admission (`accumulation-identity.ts`) refuses any shape below
+  // that does not hold, and says why.
+  'A STOCK AT THE DEADLINE IS WORKED OUT, NEVER GUESSED. Only when the goal states a deadline in months AND the goal depends on a stock that loses a share each month and gains an amount each month (paying subscribers with monthly churn and new sign-ups): add an outcome labelled with the stock and the deadline (e.g. "Pro subscribers at month 12"), link the stock today, its monthly churn and its monthly new additions each DIRECTLY to that outcome, and add one entry to `identities` with `operation` "accumulation", `outcome` that label, and `factors` EXACTLY [the stock today, the churn as a percentage per month (unit "%"), the amount added per month], in that order. Each of the three needs today\u2019s level. Whenever an accumulation is declared, the goal\u2019s PRODUCT in `identities` over [the price-like part, "<stock> at month N"] is REQUIRED; link both parts directly to the goal. Never use it for a churn stated per year, or without a stated deadline.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"); "change_abs" when they limit a CHANGE from today in the quantity\u2019s own unit ("churn no more than 2 points higher than now"); "change_rel" when they limit a PERCENTAGE change from today ("cost no more than 10% above today", "cut spend by at least 15%"): give `value` as that signed percentage (10, or -15) and `unit` "%". When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. When the user limits a quantity whose current level the brief does not state, still give it a `baseline_value`: your provisional estimate, with baseline_known:false and provenance ai_proposed, never the user\u2019s (the user is asked for theirs) \u2014 a limit on a quantity with no level cannot be checked. Keep the direction the user stated: a budget, cost or spend cap is an upper bound and a floor such as a minimum margin is a lower bound; never add the opposite bound to the same limit. Type the comparator the user wrote: "<" for "under", "below" or "less than"; "<=" for "at most", "no more than" or "up to"; ">" for "over", "above" or "more than"; ">=" for "at least" or "no less than".',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
@@ -1451,6 +1457,13 @@ export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unkn
     .filter((n) => n.analysis_participation === 'retained_excluded' && n.kind !== 'goal').map((n) => n.id));
   const nodes = (drafted.nodes as readonly Record<string, unknown>[]).filter((n) => !out.has(n.id));
   const graph = { nodes, edges: (drafted.edges as readonly Record<string, unknown>[]).filter((e) => !out.has(e.from) && !out.has(e.to)) };
+  // A held stock still sets the goal's level when an option changes only price, so an option-path walk cannot attest it.
+  const goalProducts = nodes.filter((n) => n.kind === 'goal' && n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object')
+    .map((n) => n.nonlinear_identity as Record<string, unknown>).filter((i) => i.operation === 'product');
+  if (goalProducts.some((i) => Array.isArray(i.factor_ids) && i.factor_ids.some((id) => {
+    const part = nodes.find((n) => n.id === id);
+    return part !== undefined && !identityCanCarryExactLinks(nodes, part.nonlinear_identity);
+  }))) return true;
   const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
   const evaluations = nodes.filter((n) => n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object').map((n) => {
     const i = n.nonlinear_identity as Record<string, unknown>;
@@ -2147,10 +2160,17 @@ export async function buildModelFromBrief(
   // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
   // target, a spread would move, a new link would be cut, or the target is a bounded scale.
   // ⭐ CLAMP AT PERSIST (DL 5924108406): a link no refit could fit is stored at ±1 with its full β marked (`refit-frames.ts`).
+  // ⭐ CEE #4 (Science goals §(v)): a stock worked out to the goal's deadline is carried only on the HELD deadline
+  // (`goal_horizon_months`, set above where the brief attests it), so it is admitted here, after the hold. Each refusal
+  // is said; a model with no accumulation declared is byte-identical.
+  const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, candidate.identities);
+  if (accumulation.loss.length > 0) {
+    admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
+  }
   const graph = clampForPersist(refitFramesForStatedEffects({
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
     // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-    nodes: markOlumiOptions(goalNodes, candidate, brief),
+    nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }
