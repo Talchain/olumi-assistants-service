@@ -462,9 +462,25 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
     }
   }
   const keptByDrop = new Map<SentenceSpan, SentenceSpan>();
+  // A typed range LONGER than the sentence is an atomic finding (one option's chance + what it rests on). A STATEMENT
+  // inside one belongs to that option and stays with it, even when another option's finding says the same words (Codex
+  // r9 on #2801: dropping it would leave the qualification on the other option only). Only a repeated QUESTION (R2)
+  // leaves an atomic unit: asked once, it closes the first.
+  const unitOf = (span: SentenceSpan): { start: number; end: number } | undefined => typedRanges
+    .filter((r) => covers(r, span) && (r.end - r.start) > (span.end - span.start))
+    .sort((a, b) => (b.end - b.start) - (a.end - a.start))[0];
+  const isQuestion = (span: SentenceSpan): boolean => /\?["'”’)\]*_`]{0,4}$/.test(span.text.trim());
   groups.forEach((group, idx) => {
     const kept = groups[carrier.get(idx) ?? idx]!.first;
-    for (const copy of group.copies) if (copy !== kept) keptByDrop.set(copy, kept);
+    for (const copy of group.copies) {
+      if (copy === kept) continue;
+      const unit = unitOf(copy);
+      const keptUnit = unitOf(kept);
+      // The SAME finding repeated word for word (equal unit text) is one finding said twice; a different unit is another option's.
+      const sameFinding = unit !== undefined && keptUnit !== undefined && text.slice(unit.start, unit.end) === text.slice(keptUnit.start, keptUnit.end);
+      if (unit !== undefined && !isQuestion(copy) && !sameFinding && !(unit.start <= kept.start && kept.end <= unit.end)) continue;
+      keptByDrop.set(copy, kept);
+    }
   });
   const dropped = spans.filter((s) => keptByDrop.has(s));
   if (dropped.length === 0) return { text, dropped: [], obligations: [...obligations], questions: split };

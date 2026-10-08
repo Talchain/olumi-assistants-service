@@ -757,6 +757,18 @@ describe('RC6 said once', () => {
     everySentenceExceptReportedKept(text, c);
   });
 
+  it('Codex r9 P1: two options sharing a qualification keep it each; only the shared QUESTION is asked once', () => {
+    const qual = 'It rests most on the size you set: if that effect is weaker than that, the chance falls.';
+    const q = 'How sure are you of that size?';
+    const a = `‘Raise prices 10%’: about 47% chance of meeting your goal, in this model. ${qual} ${q}`;
+    const b = `‘Launch starter tier’: about 34% chance of meeting your goal, in this model. ${qual} ${q}`;
+    const text = [a, b, context].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: a, lead: true }, { role: 'evidence', text: b, lead: true }] });
+    expect(count(c.text, qual), 'each option keeps its own qualification').toBe(2);
+    expect(count(c.text, q), 'the shared question is asked once').toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([q]);
+  });
+
   it('an exactly repeated multi-sentence atomic finding retains the first complete span and lead identity when both later sentences drop', () => {
     const firstSentence = 'The chance is low.';
     const secondSentence = 'The premise is estimated.';
