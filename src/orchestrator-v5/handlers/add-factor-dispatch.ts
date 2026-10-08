@@ -9,9 +9,9 @@
  *   3. records each factor's figure — the user's, framed by the one rule — on that hold (`GM_HELD_USER_TODAY_KEY`), by
  *      the id THIS batch gives it. Never in the ops (R4): the confirm stamps it in the same apply.
  *
- * Every new factor must carry exactly one such figure: a door that would hold a factor without the user's value holds
- * nothing. The confirm is UNCHANGED: `executeGmHeldResume`, ONE commit under CAS. This module writes no state, makes no
- * model call and never throws.
+ * The conversational door requires exactly one user-stated figure per factor. P14's internal `olumi_direction`
+ * variant instead holds bare factors and placeholder links, with no user_today member. Both variants confirm through
+ * `executeGmHeldResume`, ONE commit under CAS. This module writes no state, makes no model call and never throws.
  */
 import type { OlumiResponse, HeldProposalBlock } from '@talchain/schemas/boundary';
 
@@ -19,20 +19,13 @@ import { evaluateEditGraphMutations, GM_HELD_OPERATIONS_MAX_JSON_CHARS, type Edi
 import { chipToBoundaryAction, toGraphView } from './add-option-dispatch.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
-import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isUserTodayObservedState, readUserTodayMember, type AddFactorSkipReason, type UserTodayBasis } from '../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, GM_HELD_OLUMI_DIRECTION_KEY, GM_HELD_USER_TODAY_KEY, isUserTodayObservedState, readUserTodayMember, type AddFactorSkipReason, type UserTodayBasis } from '../routing/add-factor-transaction.js';
 
 type StageIndicator = OlumiResponse['stage_indicator'];
 
-export interface AddFactorTransactionInput {
+interface AddFactorTransactionBase {
   /** `{ factors: [{ id?, label, link: { to_id, effect_direction } }] }` — see `buildAddFactorTransaction`. */
   readonly params: unknown;
-  /** Each factor's figure, in the order of `params.factors`: the user's, framed (`isUserTodayObservedState`). */
-  readonly userToday: readonly unknown[];
-  /**
-   * Why each figure is the user's, in the same order (`UserTodayLevel.basis` / `quote`); recorded on the hold, read back
-   * fail-closed by `readUserTodayMember`. Absent → no record (as before).
-   */
-  readonly userTodayWhy?: readonly { readonly basis?: UserTodayBasis; readonly quote?: string }[];
   /** The PERSISTED pre-edit graph (the frame authority the hold is pinned to). */
   readonly currentGraph: unknown;
   /** Hash of `currentGraph`, resolved by the caller (never re-derived here). */
@@ -45,6 +38,22 @@ export interface AddFactorTransactionInput {
   readonly requestId: string;
   readonly stage: StageIndicator;
 }
+
+export type AddFactorTransactionInput = AddFactorTransactionBase & (
+  | {
+      readonly variant?: never;
+      /** Each factor's figure, in request order: the user's, framed (`isUserTodayObservedState`). */
+      readonly userToday: readonly unknown[];
+      /** Why the figure is the user's; recorded on the hold and read back fail-closed. */
+      readonly userTodayWhy?: readonly { readonly basis?: UserTodayBasis; readonly quote?: string }[];
+    }
+  | {
+      /** Internal widen Add only; direction is Olumi's and strength is a placeholder. */
+      readonly variant: 'olumi_direction';
+      readonly userToday?: never;
+      readonly userTodayWhy?: never;
+    }
+);
 
 export type AddFactorTransactionOutcome =
   | {
@@ -69,11 +78,15 @@ export function dispatchAddFactorTransaction(input: AddFactorTransactionInput): 
   const view = toGraphView(input.currentGraph);
   if (view === null) return { kind: 'refused', reason: 'unreadable_graph' };
 
-  const built = buildAddFactorTransaction(input.params, view);
+  const built = buildAddFactorTransaction(input.params, view,
+    input.variant === 'olumi_direction' ? { kind: 'olumi_direction' } : undefined);
   if (!built.matched) return { kind: 'refused', reason: built.reason };
   const { operations, factors } = built.proposal;
-  // ONE figure per factor, each the user's framed one: never a factor held without its value.
-  if (input.userToday.length !== factors.length || !input.userToday.every(isUserTodayObservedState)) {
+  // The conversational path still requires ONE user figure per factor. The internal direction-only variant must not
+  // carry a user figure or its authorship record: its bare factor remains unset through approval.
+  if (input.variant === 'olumi_direction'
+    ? input.userToday !== undefined || input.userTodayWhy !== undefined
+    : input.userToday.length !== factors.length || !input.userToday.every(isUserTodayObservedState)) {
     return { kind: 'refused', reason: 'today_invalid' };
   }
   if (JSON.stringify(operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) return { kind: 'refused', reason: 'payload_too_large' };
@@ -95,21 +108,24 @@ export function dispatchAddFactorTransaction(input: AddFactorTransactionInput): 
   if (decision.governing !== 'held' || decision.pendingActions === null || decision.pendingActions.length !== 1 || chip === undefined) {
     return { kind: 'refused', reason: 'not_held', governing: decision.governing };
   }
-  const userToday = factors.map((f, i) => ({
+  const userToday = input.variant === 'olumi_direction' ? undefined : factors.map((f, i) => ({
     factor_id: f.id,
     observed_state: { ...(input.userToday[i] as Record<string, unknown>) },
     ...(input.userTodayWhy?.[i]?.basis !== undefined ? { basis: input.userTodayWhy[i]!.basis } : {}),
     ...(input.userTodayWhy?.[i]?.quote !== undefined ? { quote: input.userTodayWhy[i]!.quote } : {}),
   }));
   // The record of WHY each figure is theirs must itself read back (fail-closed), or nothing is held.
-  if (readUserTodayMember(userToday) === undefined) return { kind: 'refused', reason: 'today_invalid' };
+  if (userToday !== undefined && readUserTodayMember(userToday) === undefined) return { kind: 'refused', reason: 'today_invalid' };
   const pending = decision.pendingActions[0]!;
   const ip = pending.action.kind === 'apply_proposed_change' ? pending.action.inline_patch : null;
   // Only a hold carrying the executable batch can carry its figures; anything else is refused whole.
   if (ip === null || typeof ip !== 'object' || !Array.isArray((ip as { operations?: unknown }).operations)) {
     return { kind: 'refused', reason: 'not_held', governing: decision.governing };
   }
-  const held = { ...pending, action: { ...pending.action, inline_patch: { ...ip, [GM_HELD_USER_TODAY_KEY]: userToday } } } as PendingAction;
+  const held = { ...pending, action: { ...pending.action, inline_patch: {
+    ...ip,
+    ...(input.variant === 'olumi_direction' ? { [GM_HELD_OLUMI_DIRECTION_KEY]: true } : { [GM_HELD_USER_TODAY_KEY]: userToday }),
+  } } } as PendingAction;
   const blocks: OlumiResponse['blocks'] = decision.heldProposalBlock != null ? [decision.heldProposalBlock as HeldProposalBlock] : [];
   const response: OlumiResponse = {
     response_version: 2,

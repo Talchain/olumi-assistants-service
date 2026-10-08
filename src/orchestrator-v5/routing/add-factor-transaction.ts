@@ -27,6 +27,7 @@
 import { z } from 'zod';
 
 import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
+import { PLACEHOLDER_MAGNITUDE } from '../../cee/magnitude/link-sizing.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../graph-management/types.js';
@@ -90,7 +91,11 @@ export function isNewFactorTarget(node: { kind: string; category?: string } | un
 }
 
 /** Build the atomic add-factor batch against the current graph, or a classified refusal. A refusal builds nothing. */
-export function buildAddFactorTransaction(params: unknown, graph: AddOptionGraphView | null): AddFactorBuildResult {
+export function buildAddFactorTransaction(
+  params: unknown,
+  graph: AddOptionGraphView | null,
+  internal?: { readonly kind: 'olumi_direction' },
+): AddFactorBuildResult {
   if (graph === null) return fail('no_graph');
   const parsed = AddFactorParamsSchema.safeParse(params);
   if (!parsed.success) return fail('parameters_invalid');
@@ -122,7 +127,12 @@ export function buildAddFactorTransaction(params: unknown, graph: AddOptionGraph
   if (factors.length * 2 > TYPED_TRANSACTION_ENVELOPE_CAP) return fail('too_many_ops');
   const operations: PatchOperation[] = [
     ...factors.map((f): PatchOperation => ({ op: 'add_node', path: f.id, value: { id: f.id, kind: 'factor', label: f.label, category: 'external' } })),
-    ...factors.map((f): PatchOperation => ({ op: 'add_edge', path: `${f.id}::${f.to}`, value: hypothesisEdgeValue(f.id, f.to, f.effect_direction) })),
+    ...factors.map((f): PatchOperation => {
+      const value = hypothesisEdgeValue(f.id, f.to, f.effect_direction);
+      return { op: 'add_edge', path: `${f.id}::${f.to}`, value: internal?.kind === 'olumi_direction'
+        ? { ...value, provenance: { ...(value.provenance as Record<string, unknown>), magnitude: PLACEHOLDER_MAGNITUDE } }
+        : value };
+    }),
   ];
   return { matched: true, proposal: { operations, factors } };
 }
@@ -168,6 +178,9 @@ export function recheckAddFactorBatch(
  * the referee screens), read only by the confirm. Absent on every other hold, so their bytes are unchanged.
  */
 export const GM_HELD_USER_TODAY_KEY = 'user_today';
+
+/** The internal direction-only add-factor door stamps `true` here; other held edits never acquire its rules by shape. */
+export const GM_HELD_OLUMI_DIRECTION_KEY = 'olumi_direction';
 
 /**
  * Whose the figure is: the user's, typed in chat and approved at the confirm — the product's literal for exactly that

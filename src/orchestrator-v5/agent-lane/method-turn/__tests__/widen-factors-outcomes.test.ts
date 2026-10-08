@@ -57,36 +57,38 @@ describe('P14 press identity', () => {
   it('PI-F: DGAI factor press opens factors', () => {
     expect(mod.widenTargetOf('ask:missing-factor', 'What else could change how this turns out that the model doesn’t have yet?')).toBe('factors');
   });
-  it('PI-O: DGAI outcome press opens outcomes', () => {
+  it.skip('PI-O: DGAI outcome press opens outcomes — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)', () => {
     expect(mod.widenTargetOf('ask:missing-outcome', 'Where else could this lead that the model doesn’t have yet?')).toBe('outcomes');
   });
 });
 
 for (const door of ['factors', 'outcomes'] as const) {
   const prefix = door === 'factors' ? 'FD' : 'OD';
+  const rowIt = door === 'outcomes' ? it.skip : it;
+  const rowSuffix = door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : '';
   describe(`P14 ${door} identity gate and deterministic reply`, () => {
-    it(`${prefix}-NO-DUP pair: fold-equal dropped; distinct label kept`, () => {
+    rowIt(`${prefix}-NO-DUP pair: fold-equal dropped; distinct label kept${rowSuffix}`, () => {
       const gate = gateFn(door); const t = turnOn(door);
       expect(labels(gate(t, [candidate(door, { label: '  ReVeNuE  ' })]))).toEqual([]);
       expect(labels(gate(t, [candidate(door)]))).toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
     });
     for (const field of ['label', 'since'] as const) {
-      it(`${prefix}-NO-FIGURE ${field}: digit dropped; no-digit control kept`, () => {
+      rowIt(`${prefix}-NO-FIGURE ${field}: digit dropped; no-digit control kept${rowSuffix}`, () => {
         const gate = gateFn(door); const t = turnOn(door);
         expect(labels(gate(t, [candidate(door, { [field]: field === 'label' ? 'Retention phase 2' : 'relationships last 2 years' })]))).toEqual([]);
         expect(labels(gate(t, [candidate(door)]))).toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
       });
     }
-    it.each(['key', 'main', 'top', 'root cause', 'the real', 'best', 'winner', 'recommend', 'ahead', 'beats', 'leader',
+    rowIt.each(['key', 'main', 'top', 'root cause', 'the real', 'best', 'winner', 'recommend', 'ahead', 'beats', 'leader',
       'you missed', 'incomplete', 'all the drivers', 'complete', 'will', 'proven', 'likely', 'probably', 'hidden risks',
       'unintended consequences', 'most important', 'primary', 'the answer', 'you forgot', 'your model is wrong',
       'the complete list', 'everything that matters', 'research shows'])
-    (`${prefix}-WORDS: "%s" dropped in label AND since; neutral control kept`, (word) => {
+    (`${prefix}-WORDS: "%s" dropped in label AND since; neutral control kept${rowSuffix}`, (word) => {
       const gate = gateFn(door); const t = turnOn(door);
       for (const field of ['label', 'since']) expect(labels(gate(t, [candidate(door, { [field]: `${word} relationships` })])), field).toEqual([]);
       expect(labels(gate(t, [candidate(door)]))).toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
     });
-    it(`${prefix}-CATEGORY: six categories; distinct categories, at most three exact items`, () => {
+    rowIt(`${prefix}-CATEGORY: six categories; distinct categories, at most three exact items${rowSuffix}`, () => {
       const gate = gateFn(door); const t = turnOn(door); const m = method(door);
       expect(m.categories).toHaveLength(6);
       expect(new Set(m.categories).size).toBe(6);
@@ -97,14 +99,14 @@ for (const door of ['factors', 'outcomes'] as const) {
       expect(labels(gate(t, [items[0], { ...items[1], category: m.categories[0] }]))).toEqual(['Customer retention']);
       expect(labels(gate(t, [candidate(door, { category: 'unrecognised' })]))).toEqual([]);
     });
-    it(`${prefix}-WORDS cap: thirteen-word since dropped; twelve-word control kept`, () => {
+    rowIt(`${prefix}-WORDS cap: thirteen-word since dropped; twelve-word control kept${rowSuffix}`, () => {
       const gate = gateFn(door); const t = turnOn(door);
       const words = 'steadier customer relationships support the team through long periods of changing outside conditions';
       expect(labels(gate(t, [candidate(door, { since: words })]))).toEqual([]);
       expect(labels(gate(t, [candidate(door, { since: words.split(' ').slice(0, 12).join(' ') })])))
         .toEqual([door === 'factors' ? 'Customer retention' : 'Team morale']);
     });
-    it(`${prefix}-METHOD: named method and uncertainty lines VERBATIM`, () => {
+    rowIt(`${prefix}-METHOD: named method and uncertainty lines VERBATIM${rowSuffix}`, () => {
       const settle = settleFn(door); const t = turnOn(door);
       expect(method(door).id).toBe(door === 'factors' ? 'influence_diagram_elicitation' : 'objective_generation');
       const s = settle(t, appendix(door, [candidate(door)]));
@@ -113,7 +115,7 @@ for (const door of ['factors', 'outcomes'] as const) {
       expect(s.reply).toContain(caveat(door));
       expect(s.actions.map((a) => a.label)).toEqual([`Add ‘${s.gate.kept[0]!.label}’`, 'Something else']);
     });
-    it(`${prefix}-RX: twenty-thousand whitespace in candidate words stays bounded and is dropped`, () => {
+    rowIt(`${prefix}-RX: twenty-thousand whitespace in candidate words stays bounded and is dropped${rowSuffix}`, () => {
       const gate = gateFn(door); const t = turnOn(door);
       const time = (n: number) => {
         let best = Infinity;
@@ -154,7 +156,7 @@ it('FD-NOT-DEFINED: profit = revenue − cost has held definitional carriers; re
   expect(labels(gate(t, [candidate('factors', { anchor_id: 'revenue' })]))).toEqual(['Customer retention']);
 });
 
-it('OD-FROM / OD-NOT-GOAL: existing factor or outcome only; never the goal, option, risk or unknown id', () => {
+it.skip('OD-FROM / OD-NOT-GOAL: existing factor or outcome only; never the goal, option, risk or unknown id — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)', () => {
   const gate = gateFn('outcomes'); const t = turnOn('outcomes');
   for (const from_id of ['revenue', 'lever', 'profit']) expect(labels(gate(t, [candidate('outcomes', { from_id })]))).toEqual(['Team morale']);
   for (const from_id of ['goal', 'option', 'risk', 'unknown']) expect(labels(gate(t, [candidate('outcomes', { from_id })])), from_id).toEqual([]);

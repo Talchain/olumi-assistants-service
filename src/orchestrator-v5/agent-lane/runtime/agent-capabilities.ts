@@ -8168,7 +8168,7 @@ export function createAgentCapabilities(
      * framed by the ONE rule (`framedObservedState` on `defaultFrameFor`, the statedToday block in `proposeNewOption`), then
      * stamped as the user's (`USER_TODAY_SOURCE`). The range is Olumi's: said ONCE, by the confirm that writes it.
      */
-    async proposeNewFactor(ctx, args): Promise<ToolResult> {
+    async proposeNewFactor(ctx, args, internal?: { readonly kind: 'olumi_direction' }): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       if (opts.holdAddFactor === undefined) {
         return { ok: false, mutated: false, refusal: 'unavailable', detail: 'A factor cannot be added here. Nothing was changed. Tell the user plainly.' };
@@ -8180,6 +8180,59 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      // P14: the typed widen Add is the only caller with this internal argument. The conversational tool dispatcher
+      // supplies only (ctx, args), so an Agent's tool arguments can never turn a missing user figure into Olumi's.
+      if (internal?.kind === 'olumi_direction') {
+        const raw = requested[0];
+        const f = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+        const label = typeof f.label === 'string' ? f.label.trim() : '';
+        const target = typeof f.affects === 'string' ? g.nodes.find((n) => n.id === f.affects) : undefined;
+        const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
+        if (requested.length !== 1 || label === '' || target === undefined || direction === null
+          || Object.keys(f).some((key) => !['label', 'affects', 'direction'].includes(key))) {
+          return { ok: false, mutated: false, refusal: 'not_prepared',
+            detail: 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+        }
+        const built = buildAddFactorTransaction({ factors: [{ label, link: { to_id: target.id, effect_direction: direction } }] },
+          { nodes: g.nodes as never, edges: g.edges as never }, internal);
+        if (!built.matched) {
+          return { ok: false, mutated: false, refusal: 'not_prepared', reason: built.reason,
+            detail: 'Those factors could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
+        }
+        const factor = built.proposal.factors[0]!;
+        const res = await opts.holdAddFactor({ scenario_id: ctx.scenario_id, turn_id: randomUUID(), base_graph_hash: g.graph_hash,
+          variant: 'olumi_direction', factors: [{ id: factor.id, label, link: { to_id: target.id, effect_direction: direction } }] });
+        if (res.status === 'stale') {
+          return { ok: false, mutated: false, refusal: 'model_changed',
+            detail: 'The model changed while this was being prepared, so nothing was held. Read it again and propose afresh.' };
+        }
+        const ref = gmHeldProposalRef(ctx.scenario_id, `node:${factor.id}`);
+        let heldOk = res.status === 'held' && res.proposal_id === ref && JSON.stringify(res.factor_ids) === JSON.stringify([factor.id]);
+        if (heldOk && opts.readPendingActions !== undefined) {
+          try {
+            const hold = await liveHeldHold(ctx.scenario_id, ref);
+            const ip = hold !== undefined ? (hold.action as { inline_patch?: Record<string, unknown> }).inline_patch : undefined;
+            // The held batch must be precisely this pure builder's batch, with no user figure or user provenance member.
+            heldOk = hold !== undefined && isDeepStrictEqual(heldOpsOf(hold), built.proposal.operations)
+              && ip !== undefined && !(GM_HELD_USER_TODAY_KEY in ip);
+          } catch {
+            heldOk = false;
+          }
+        }
+        if (!heldOk || res.status !== 'held') {
+          return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
+            detail: 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+        }
+        const basisLine = "Olumi's suggestion: the direction is Olumi's estimate from general patterns, not from your data or your words. Its strength isn't set yet.";
+        const question = `How much could ‘${label}’ move ‘${target.label}’? Give a figure and a range if you can, or leave it for now.`;
+        return { ok: true, mutated: false, proposal_id: ref, public_label: 'Add this factor', held_message: res.held_message,
+          ...(res.detail !== undefined && res.detail.trim() !== '' ? { held_detail: res.detail } : {}), base_revision: g.graph_hash,
+          basis_line: basisLine, question,
+          held_reply: [`Ready to add ‘${label}’, which could ${direction === 'positive' ? 'raise' : 'lower'} ‘${target.label}’ and whose strength nobody has set yet.`,
+            basisLine, 'Nothing is added until you approve the change.', question].join('\n'),
+          factors: [{ label, affects: `${target.label} (${direction === 'positive' ? 'raises it' : 'lowers it'})`,
+            how_strongly: 'whose strength nobody has set yet' }], note: 'Nothing has changed yet.' };
+      }
       const planned: { label: string; unit: string; value: number; to_id: string; direction: 'positive' | 'negative'; observed_state: Record<string, unknown>; basis: UserTodayBasis; quote: string }[] = [];
       const todayNotSet: { factor: string; value: unknown; reason: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];

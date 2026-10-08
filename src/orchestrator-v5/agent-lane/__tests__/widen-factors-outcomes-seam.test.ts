@@ -203,7 +203,9 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
 
   for (const door of ['factors', 'outcomes'] as const) {
     const row = door === 'factors' ? 'SF' : 'SO';
-    it(`${row}-1: typed press → ONE tool-less call, ≤3 exact suggestions and Adds, Something else; no graph write`, async () => {
+    const rowIt = door === 'outcomes' ? it.skip : it;
+    const rowSuffix = door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : '';
+    rowIt(`${row}-1: typed press → ONE tool-less call, ≤3 exact suggestions and Adds, Something else; no graph write${rowSuffix}`, async () => {
       paulV1(); const before = await reread(); const bodies: Record<string, unknown>[] = [];
       const reply = await candidates(door);
       script = [(body) => { bodies.push(asSent(body) as Record<string, unknown>); return reply; }];
@@ -222,7 +224,7 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
       expect(await reread()).toEqual(before); expect(routerCalls).toEqual([]);
     }, 120_000);
 
-    it(`${row}-2 WRITER: Add → ONE gmh_ hold → real approve → exactly one node and one edge; Olumi placeholder, hash changes, fresh read agrees`, async () => {
+    rowIt(`${row}-2 WRITER: Add → ONE gmh_ hold → real approve → exactly one node and one edge; Olumi placeholder, hash changes, fresh read agrees${rowSuffix}`, async () => {
       paulV1(); const before = await reread(); const add = await suggest(door); const calls = openAiCalls;
       const heldReply = await press(add);
       expect(openAiCalls, 'Add makes NO model call').toBe(calls);
@@ -231,6 +233,10 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
       const approve = approveChipOf(heldReply);
       expect(approve?.id).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
       expect(approve!.id).toBe(`agent-approve-proposal:${held[0]!.chip_id}`);
+      if (door === 'factors') {
+        expect(held[0]!.action.inline_patch).toMatchObject({ olumi_direction: true });
+        expect(held[0]!.action.inline_patch).not.toHaveProperty('user_today');
+      }
       const ops = held[0]!.action.inline_patch!.operations!;
       expect(ops.map((o) => o.op)).toEqual(['add_node', 'add_edge']);
       const id = ops[0]!.path;
@@ -258,7 +264,7 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
       if (door === 'factors') expect((newNode as Record<string, unknown>)['observed_state']).toBeUndefined();
       for (const n of before.graph.nodes) expect(after.graph.nodes.find((x) => x.id === n.id)).toEqual(n);
       for (const e of before.graph.edges) expect(after.graph.edges.find((x) => x.from === e.from && x.to === e.to)).toEqual(e);
-      expect(after.graph).toEqual({ ...before.graph, nodes: after.graph.nodes, edges: after.graph.edges });
+      expect(after.graph).toEqual({ ...before.graph, nodes: after.graph.nodes, edges: after.graph.edges, ...(door === 'factors' ? { ref_high_water: { F: 1 } } : {}) });
       expect(after.graph.edges.filter((e) => e.to === 'meet_our_next_feature_launch_deadline')).toEqual(before.graph.edges.filter((e) => e.to === 'meet_our_next_feature_launch_deadline'));
       const { hypothesisEdgeValue } = await import('../../routing/add-option-transaction.js');
       const edge = after.graph.edges.find((e) => e.from === from && e.to === to)!;
@@ -273,7 +279,8 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
     }, 120_000);
   }
 
-  it.each(['factors', 'outcomes'] as const)('SF-7 reload %s: typed method press is durable and survives current-result reload only', async (door) => {
+  for (const door of ['factors', 'outcomes'] as const)
+  (door === 'outcomes' ? it.skip : it)(`SF-7 reload ${door}: typed method press is durable and survives current-result reload only${door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : ''}`, async () => {
     const { isDurableAnswerOffer, stillValidOffers } = await import('../../../routes/agent-v1-turn.js');
     const offer = PRESS[door];
     expect(isDurableAnswerOffer(offer), `P14 missing durable method press: ${offer.id}`).toBe(true);
@@ -283,12 +290,32 @@ describe('P14 factors/outcomes on the live route and real held commit door', () 
     expect(stillValidOffers([offer], { ...current, analysisState: { run_state: { kind: 'stale' }, usable_for_chips: true }, outstandingProposalIds: new Set() })).toEqual([]);
   });
 
-  it.each(['factors', 'outcomes'] as const)('SF-8 %s: edited Add message refused; no model call, hold or graph write', async (door) => {
+  for (const door of ['factors', 'outcomes'] as const)
+  (door === 'outcomes' ? it.skip : it)(`SF-8 ${door}: edited Add message refused; no model call, hold or graph write${door === 'outcomes' ? ' — SKIPPED: P14-O awaits Science ruling on side-outcome readiness (DL ruling B, 8 Oct)' : ''}`, async () => {
     paulV1(); const before = await reread(); const add = await suggest(door); const calls = openAiCalls;
     const refused = await press({ ...add, message: add.message.replace(LABELS[door][0], 'Changed suggestion') });
     expect(openAiCalls).toBe(calls); expect(refused._agent.tool_calls).toEqual([]);
     expect(refused.assistant_text).toContain('nothing was added');
-    expect(refused.suggested_actions.map((c) => c.id)).toEqual([PRESS[door].id]);
+    const { SUGGEST_RISKS_CHIP } = await import('../method-turn/widen-turn.js');
+    // An edited message identifies no valid call; its words must not choose a factor fallback.
+    expect(refused.suggested_actions.map((c) => c.id)).toEqual([SUGGEST_RISKS_CHIP.id]);
     expect(await heldOnLatestRow()).toEqual([]); expect(await reread()).toEqual(before);
+  }, 120_000);
+
+  it('SF-9 identity: valid factor Add refused by the door still reoffers factors; no model call, hold or graph write', async () => {
+    paulV1(); const before = await reread(); const add = await suggest('factors'); const calls = openAiCalls;
+    // The Add identity stays valid; the real holder reads the source hash and refuses this stale served revision.
+    extraRead = { graph_hash: '0'.repeat(16) };
+    const refused = await press(add);
+    expect(openAiCalls, 'refused Add makes NO model call').toBe(calls);
+    expect(refused._agent.tool_calls).toEqual([
+      expect.objectContaining({ name: 'propose_new_factor', ok: false, mutated: false, refusal: 'model_changed' }),
+    ]);
+    expect(refused.assistant_text).toContain('nothing was added');
+    expect(refused.suggested_actions.map((c) => c.id)).toEqual([PRESS.factors.id]);
+    expect(await heldOnLatestRow()).toEqual([]);
+    extraRead = {};
+    expect(await reread(), 'the refused door writes no graph').toEqual(before);
+    expect(routerCalls).toEqual([]);
   }, 120_000);
 });

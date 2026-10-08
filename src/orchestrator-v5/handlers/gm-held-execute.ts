@@ -43,7 +43,7 @@ import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRis
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
-import { GM_HELD_USER_TODAY_KEY, readUserTodayMember, recheckAddFactorBatch, stampNewUserTodayLevels, type UserTodayLevel } from '../routing/add-factor-transaction.js';
+import { GM_HELD_OLUMI_DIRECTION_KEY, GM_HELD_USER_TODAY_KEY, readUserTodayMember, recheckAddFactorBatch, stampNewUserTodayLevels, type UserTodayLevel } from '../routing/add-factor-transaction.js';
 import { toGraphView } from './add-option-dispatch.js';
 import {
   canonicaliseValueOps,
@@ -502,6 +502,8 @@ export type GmHeldResumeRead =
        * confirm writes in the same apply (`stampNewUserTodayLevels`). Absent on every other hold.
        */
       readonly userToday?: readonly UserTodayLevel[];
+      /** Validated direction-only add-factor door stamp. Absent on the hold → false. */
+      readonly olumiDirection: boolean;
       /** event_risk.v1 slice 2a: validated hold member. */
       readonly userEventRisk?: UserEventRisk;
     };
@@ -542,12 +544,16 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   const rawUserToday = patch[GM_HELD_USER_TODAY_KEY];
   const userToday = rawUserToday === undefined ? undefined : readUserTodayMember(rawUserToday);
   if (rawUserToday !== undefined && userToday === undefined) return { kind: 'no_payload' };
+  // P14: only the add-factor door's literal stamp enables its direction-only recheck. A malformed stamp declines.
+  const rawOlumiDirection = patch[GM_HELD_OLUMI_DIRECTION_KEY];
+  if (rawOlumiDirection !== undefined && rawOlumiDirection !== true) return { kind: 'no_payload' };
   const rawUserEventRisk = patch[GM_HELD_USER_EVENT_RISK_KEY];
   const userEventRisk = rawUserEventRisk === undefined ? undefined : readUserEventRiskMember(rawUserEventRisk);
   if (rawUserEventRisk !== undefined && userEventRisk === undefined) return { kind: 'no_payload' };
   return {
     kind: 'ok',
     operations: parsed.data,
+    olumiDirection: rawOlumiDirection === true,
     ...(userEventRisk !== undefined ? { userEventRisk } : {}),
     ...(envelopeCap !== undefined ? { envelopeCap } : {}),
     ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
@@ -576,6 +582,8 @@ export interface GmHeldExecuteInput {
   readonly gradedToday?: readonly GradedTodayLevel[];
   /** ⭐ PJ-E-FIG — the add-factor door's figures, the user's (`readGmHeldResume`); they land in this apply. */
   readonly userToday?: readonly UserTodayLevel[];
+  /** The validated internal add-factor door stamp (`readGmHeldResume`); absent → false. */
+  readonly olumiDirection?: boolean;
   /** event_risk.v1 slice 2a: validated hold member. */
   readonly userEventRisk?: UserEventRisk;
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
@@ -774,7 +782,9 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // placeholder links land in ONE apply and ONE commit; a member that does not match the batch declines it whole.
   // The door's own rules are re-run on THIS graph first (a name taken since the proposal, a target that changed kind):
   // a threaded or multi-step confirm lands on a graph the proposal never saw, and the referee has no name rule.
-  if (input.userToday !== undefined && input.userToday.length > 0) {
+  // P14's widen Add has no user figure. Its explicit door stamp opts into the same name and target rules;
+  // another door's factor+edge batch never acquires those rules from its shape.
+  if ((input.userToday !== undefined && input.userToday.length > 0) || input.olumiDirection === true) {
     const conflict = recheckAddFactorBatch(operations, toGraphView(input.currentGraph));
     if (conflict !== null) {
       log.warn(

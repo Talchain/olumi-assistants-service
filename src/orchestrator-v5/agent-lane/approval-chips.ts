@@ -179,7 +179,9 @@ export function approvalChipsFor(
   const source = labelSourceFor?.(proposalId);
   const held = source?.result;
   if (HELD_ON_THE_PRODUCT_SEAM.has(tool) && /^gmh_/.test(proposalId) && held !== undefined) {
-    const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
+    const singleFactor = tool === 'propose_new_factor' && Array.isArray(held.factors) && held.factors.length === 1;
+    const label = singleFactor ? 'Add this factor'
+      : typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
     const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
     /**
      * ⛔ THE BUTTON NEVER CUTS THE OPTION'S NAME (Paul's test, 27 Sep, B3): the product's label is clamped to 57
