@@ -84,6 +84,9 @@ function row3(propose: Proposer): void {
   // Keep the unit clash as the only failing class condition: both are own
   // parents as Science §(e) requires, and no current MRR was stated.
   g.edges.push({ from: 'monthly_churn_rate', to: 'mrr', strength: { mean: 0.5, std: 0.125 } });
+  // Science §(e) addendum 2 vetoes any other non-definitional direct parent; the replaced
+  // subscribers edge would otherwise reject the row before condition 3 is reached.
+  g.edges = g.edges.filter((e: Json) => !(e.from === 'pro_paying_subscribers' && e.to === 'mrr'));
   expect(propose(g), 'row 3: price × churn % cannot compose into MRR').toBeNull();
 }
 

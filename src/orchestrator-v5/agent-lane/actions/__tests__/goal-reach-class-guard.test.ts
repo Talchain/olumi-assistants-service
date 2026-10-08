@@ -10,7 +10,7 @@ import paulStored from '../../__tests__/fixtures/goal-reach-paul-graph-632b92b9.
 import {
   GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE,
-  GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_FIGURES_WITHHELD_CODES, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  GOAL_FIGURES_SHARE_APPROXIMATION, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_FIGURES_WITHHELD_CODES, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
@@ -24,6 +24,7 @@ import { unreadGoalProduct, unreadGoalProductWarning } from '../../unread-goal-p
 import { proposeProductIdentity } from '../../identity-proposal.js';
 import { actionFactsOf, type ActionRead } from '../state.js';
 import { actionBarOf } from '../rank.js';
+import { withShareByDateChanceGate } from '../../../goal-target/goal-chance-range.js';
 
 type Rec = Record<string, any>;
 type Graph = { nodes: Rec[]; edges: Rec[]; [key: string]: unknown };
@@ -49,6 +50,9 @@ export const KNOWN_GAPS = new Set<string>([
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
   // A dated chance-of-event goal still needs its scientific event-model recovery.
   GOAL_FIGURES_CHANCE_AS_GOAL,
+  // GOALS #2762 (S2b): a share-by-deadline chance outside its licence. Its recovery is GOALS' typed team-time ask
+  // (chat → card) and "say what this option changes"; neither is a bar action yet.
+  GOAL_FIGURES_SHARE_APPROXIMATION,
   // Build 1b: ask what the goal is made of; never confirm a contradictory reading.
   `${IDENTITY}:contradictory_current_level`,
 ]);
@@ -143,6 +147,12 @@ const INVENTORY: Readonly<Record<string, { make: () => Fixture; resolves: readon
     message: "Not shown. Your size for how ‘Pro paying subscribers’ moves ‘MRR’ is bigger than this model's scale can hold, so the run couldn't use it at full size, and the figures that depend on it would be wrong.",
   }), resolves: [] },
   [GOAL_FIGURES_PLACEHOLDER_PATH]: { make: placeholderPath, resolves: ['strengthen'] },
+  [GOAL_FIGURES_SHARE_APPROXIMATION]: { make: () => {
+    // The real S2a gate: a share-by-deadline goal (definitional '% of …' threshold) with no supported forecast carrier.
+    const graph = twoParentGraph(); const goal = goalOf(graph);
+    goal.threshold_source = 'definitional'; goal.goal_threshold_unit = '% of the launch';
+    return { graph, result: withShareByDateChanceGate(baselineResult(), graph, 'mrr') as Rec };
+  }, resolves: [] },
   [GOAL_FIGURES_PRODUCT_NOT_READ]: { make: productNotRead, resolves: ['confirm_reading'] },
   [GOAL_FIGURES_TARGET_NOT_TESTABLE]: { make: targetNotTestable, resolves: [] },
   [GOAL_FIGURES_OPTIONS_IDENTICAL]: { make: identicalOptions, resolves: [] },
