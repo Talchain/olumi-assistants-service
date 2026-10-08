@@ -42,10 +42,11 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     ['digits', (n: number) => '9'.repeat(n)],
     ['spaces', (n: number) => `between ${' '.repeat(n)}10% within 6 months`],
     ['near-matches', (n: number) => '10- within '.repeat(Math.ceil(n / 10)).slice(0, n)],
-  // Calibrated batches (scalingRatio): single-call min-of-5 read 8.18× on CI for near-matches (7 Oct). Linear ≈ 4×, quadratic ≈ 16×.
-  ])('2a-LINEAR TIME-%s: 5k to 20k, min of 7 calibrated batches, ratio < 8', (_id, make) => {
-    const [small, large] = [make(5000), make(20000)];
+  // Calibrated batches (scalingRatio): single-call min-of-5 read 8.18× on CI for near-matches (7 Oct).
+  ])('2a-LINEAR TIME-%s: 5k to 40k, min of 7 calibrated batches, ratio < 22', (_id, make) => {
+    const [small, large] = [make(5000), make(40000)];
     const m = scalingRatio(() => readStatedEventRisk(small), () => readStatedEventRisk(large));
-    expect(m.ratio, m.detail).toBeLessThan(8);
+    // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
+    expect(m.ratio, m.detail).toBeLessThan(22);
   });
 });
