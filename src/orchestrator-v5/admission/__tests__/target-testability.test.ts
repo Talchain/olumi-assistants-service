@@ -1,3 +1,4 @@
+// Science 393023 LICENCE (a)/(b), 7 Oct: goal_path_unsized → goal_path_placeholder; endpoint questions stay pinned.
 /**
  * ⭐ DECISION-REPRESENTATION row 4 — "not target-testable" is said BEFORE any Run, on the one carrier (PTL A #77
  * 5912737934; AIQ words #77 5912882031 + rules #75 5913502854; R3 P1–P6 #77 5912916965; P0 PARTNER row 9 5913561360).
@@ -55,7 +56,7 @@ describe('the verdict (0 LLM)', () => {
   it('Paul: no today\'s level (a) AND his goal is reached only through links nobody sized (c)', () => {
     expect(targetTestabilityOf(FIX.paul)).toEqual({ kind: 'not_testable', goal_id: 'securing_funding', failures: [
       { precondition: 'P1', case: 'a', code: 'missing_goal_baseline' },
-      { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Investment firm meetings', link_to: 'securing funding',
+      { precondition: 'P5', case: 'c', code: 'goal_path_placeholder', lever: 'Investment firm meetings', link_to: 'securing funding',
         link: { from: 'investment_firm_meetings', to: 'securing_funding' }, links: [
         { from: 'investment_firm_meetings', to: 'securing_funding' },
         { from: 'angel_investor_meetings', to: 'securing_funding' },
@@ -81,7 +82,7 @@ describe('the verdict (0 LLM)', () => {
 
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {
     const v = targetTestabilityOf(withToday(FIX.paul));
-    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_placeholder']);
   });
 
   it('CONTROL: £0 today AND every link into the goal sized IN £ by the user → testable', () => {

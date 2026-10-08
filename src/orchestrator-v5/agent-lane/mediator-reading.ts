@@ -209,7 +209,7 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const chainOnly = !operand && edges.filter(e => e.from === id).length === 1
       && edges.filter(e => e.to === id && walkable(e.from)).length === 1;
     const kidUnsized = !isRec(kidProvenance.natural_effect) && kidProvenance.definitional !== true
-      && licenceUnsizedLink(kids[0]) && kidProvenance.source !== 'user_specified';
+      && licenceUnsizedLink(kids[0]);
     const gauge = (extra: { stored?: true; replaces?: string }): MediatorReading | null =>
       childUnit === undefined || childFrame === undefined || (extra.stored !== true && (!kidUnsized || !chainOnly)) ? null
         : { via: 'gauge', unit: childUnit, scale_frame: childFrame, child: childId, ...extra };
@@ -219,7 +219,8 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     // M has no unit again and a re-answer is refused, never written over the edit or across another path.
     if (isGaugeLink(kids[0])) {
       const kidMean = isRec(kids[0]!.strength) ? (kids[0]!.strength as Rec).mean : undefined;
-      const intact = chainOnly && kidProvenance.magnitude === 'olumi_estimate' && kidProvenance.source !== 'user_specified'
+      const kidSizing = linkSizing(kids[0]);
+      const intact = chainOnly && (kidSizing === 'olumi_estimate' || kidSizing === 'olumi_accepted')
         && !isRec(kidProvenance.natural_effect) && kidProvenance.definitional !== true && (kidMean === 1 || kidMean === -1);
       const r = intact ? gauge({ stored: true }) : null;
       if (r !== null) out.set(id, r);
@@ -230,7 +231,10 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const sized = parents.filter(e => isRec(e.provenance) && isRec(e.provenance.natural_effect));
     if (sized.length > 0) {
       // (C) Every sized parent is Olumi's estimate with a natural effect: never a placeholder, a projected mean or the user's.
-      if (!sized.every(e => (e.provenance as Rec).magnitude === 'olumi_estimate' && !licenceUnsizedLink(e))) continue;
+      if (!sized.every(e => {
+        const sizing = linkSizing(e);
+        return sizing === 'olumi_estimate' || sizing === 'olumi_accepted';
+      })) continue;
       const units = sized.map(e => ((e.provenance as Rec).natural_effect as Rec).amount_unit);
       if (!units.every((u): u is string => typeof u === 'string' && u.trim() !== '')) continue;
       const u = units[0]!;

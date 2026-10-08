@@ -41,8 +41,8 @@ export const acceptedOlumiEstimateSentence = (from: string, to: string): string 
 /** RC's other change sentences (`change_label_templates`), verbatim. */
 const acceptedEstimate = acceptedOlumiEstimateSentence;
 const ownEstimate = (from: string, to: string) => `You gave your own estimate for how much ${from} changes ${to}.`;
-const ownEstimateMoved = (from: string, to: string, before: string, after: string) =>
-  `You gave your own estimate for how much ${from} changes ${to}: ${before} → ${after}.`;
+const ownEstimateMoved = (from: string, to: string, before: string | undefined, after: string) =>
+  `You gave your own estimate for how much ${from} changes ${to}: ${before === undefined ? '' : `${before} → `}${after}.`;
 const strengthMoved = (from: string, to: string, before: string, after: string) =>
   `You changed how much ${from} changes ${to}: ${before} → ${after}.`;
 /**
@@ -205,15 +205,19 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     const l = links.get(s);
     if (l === undefined) return s;
     saidLinks.add(s);
+    const sizedBefore = text(rec(l.sizing?.before)?.raw);
     const sizedTo = text(rec(l.sizing?.after)?.raw);
-    const band = l.strength !== undefined ? { before: bandWord(l.strength.before), after: bandWord(l.strength.after) } : undefined;
+    // Science 393023 LICENCE ruling 3: an unsized prior has no band to name; the recorded after band remains said.
+    const band = l.strength !== undefined
+      ? { before: sizedBefore === 'placeholder' ? undefined : bandWord(l.strength.before), after: bandWord(l.strength.after) } : undefined;
     if (sizedTo === 'user') {
-      return band?.before !== undefined && band.after !== undefined ? ownEstimateMoved(l.from, l.to, band.before, band.after) : ownEstimate(l.from, l.to);
+      return band?.after !== undefined && (band.before !== undefined || sizedBefore === 'placeholder')
+        ? ownEstimateMoved(l.from, l.to, band.before, band.after) : ownEstimate(l.from, l.to);
     }
     if (sizedTo === 'olumi_accepted') {
       // ⛔ The Accept is never folded away (buddy draft CR 5939351197): with a band move on the same link it is still said.
-      return band?.before !== undefined && band.after !== undefined
-        ? `You accepted Olumi's estimate for how much ${l.from} changes ${l.to}: ${band.before} → ${band.after}.` : acceptedEstimate(l.from, l.to);
+      return band?.after !== undefined && (band.before !== undefined || sizedBefore === 'placeholder')
+        ? `You accepted Olumi's estimate for how much ${l.from} changes ${l.to}: ${band.before === undefined ? '' : `${band.before} → `}${band.after}.` : acceptedEstimate(l.from, l.to);
     }
     if (band?.before !== undefined && band.after !== undefined && userWritten.has(s)) return strengthMoved(l.from, l.to, band.before, band.after);
     saidLinks.delete(s);

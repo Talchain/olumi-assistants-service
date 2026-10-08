@@ -1,0 +1,458 @@
+[
+  {
+    "name": "door default positive cee_hypothesis",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "door default negative cee_hypothesis",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": -0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "door default brief_extraction",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "brief_extraction"
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "door default no source",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {}
+    },
+    "placeholder": true
+  },
+  {
+    "name": "door default no provenance",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true
+    },
+    "placeholder": true
+  },
+  {
+    "name": "mean_projected cee_hypothesis",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.1
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "mean_projected": true
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "tagged olumi_placeholder",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.1
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder"
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "constant without defaulted",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "defaulted std 0.1",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.1
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "defaulted constant natural_effect",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "natural_effect": {
+          "amount": 1
+        }
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "defaulted constant olumi_estimate",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "defaulted constant example_figure",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "example_figure"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "user_specified constant defaulted",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "user_specified"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "user_stated magnitude",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "user_stated"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "defaulted mean 0.4 std 0.125",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "user_specified projected is unsized (ruling 1: the user drew it, gave no number)",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "user_specified",
+        "mean_projected": true
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "user_stated projected",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "magnitude": "user_stated",
+        "mean_projected": true
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "projected with estimate tag fails closed to placeholder (ruling 1)",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "magnitude": "olumi_estimate",
+        "mean_projected": true
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "projected with natural_effect fails closed to placeholder (ruling 1)",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "mean_projected": true,
+        "natural_effect": {
+          "amount": 1
+        }
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "false projection non-default",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.125
+      },
+      "defaulted": true,
+      "provenance": {
+        "mean_projected": false
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "mean_projected without defaulted",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "provenance": {
+        "source": "cee_hypothesis",
+        "mean_projected": true
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "enricher door default positive",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.2
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "enricher door default negative",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": -0.5,
+        "std": 0.2
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": true
+  },
+  {
+    "name": "enricher constant without defaulted",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.2
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "enricher constant natural_effect",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.2
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis",
+        "natural_effect": {
+          "amount": 1
+        }
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "user_specified enricher constant defaulted",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.2
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "user_specified"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "bare user 0.5 no defaulted never matches",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.125
+      },
+      "provenance": {
+        "source": "user_specified"
+      }
+    },
+    "placeholder": false
+  },
+  {
+    "name": "projected without source",
+    "edge": {
+      "from": "x",
+      "to": "y",
+      "strength": {
+        "mean": 0.3,
+        "std": 0.15
+      },
+      "provenance": {
+        "mean_projected": true
+      }
+    },
+    "placeholder": true
+  }
+]

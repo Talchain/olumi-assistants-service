@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from './licence-test-graphs.js';
 /**
  * T3 on the LIVE Agent route (real loop, model stubbed): a pre-mortem press runs RC's method turn. The scenario is R3's
  * SERVED D1 capture (#2465 `rc-served-signal-cases.json` A-Q-D1-BUILD: 2 own options, leader withheld), returned by the
@@ -31,7 +32,9 @@ type Body = { assistant_text: string; suggested_actions: Chip[]; _agent: { tool_
 type Sent = { instructions: string; tools: { name: string }[]; input: unknown[]; model?: string; reasoning?: { effort?: string }; max_output_tokens?: number };
 
 const SERVED = JSON.parse(readFileSync(new URL('../turn-context/__tests__/fixtures/rc-served-signal-cases.json', import.meta.url), 'utf8')) as { cases: { id: string; capture_sha_matches_case: boolean; body: Record<string, any> }[] };
-const D1 = SERVED.cases.find((c) => c.id === 'A-Q-D1-BUILD')!;
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const D1_SERVED = SERVED.cases.find((c) => c.id === 'A-Q-D1-BUILD')!;
+const D1 = { ...D1_SERVED, body: { ...D1_SERVED.body, draft_graph: legacyDoorGraph(D1_SERVED.body.draft_graph) } as Record<string, any> };
 const label = (id: string) => (D1.body.draft_graph.nodes as { id: string; label: string }[]).find((n) => n.id === id)!.label;
 const q = (s: string) => `‘${s}’`;
 const PLAN = 'ai_reporting_module_sprint';
@@ -334,4 +337,10 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(sent[0].reasoning?.effort).toBe(interpret.reasoning_effort);
     expect(sent[0].max_output_tokens).toBe(interpret.max_output_tokens);
   });
+});
+
+it('Science 393023: as-served D1 prospect/revenue is now an unsized guidance item', async () => {
+  const { assembleGuidanceSignals } = await import('../turn-context/guidance-signals.js');
+  const signals = assembleGuidanceSignals({ graph: D1_SERVED.body.draft_graph, request: 'turn', offeredSpecific: [], analysisState: undefined, analysisResult: undefined, leaderLicensed: false });
+  expect(signals['model.goal_path_links'].find(l => l.link_id === 'enterprise_prospect_signing_likelihood->quarterly_revenue')?.link_sizing).toBe('placeholder');
 });

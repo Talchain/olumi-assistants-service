@@ -275,7 +275,8 @@ export function approvalChipsFor(
 /**
  * ⭐ A LINK-STRENGTH APPROVAL SAYS WHAT IT RECORDS (CODEX_CLI_OVERFLOW P1 + DL ruling on #2481; ONE projection, shared
  * with #2480's card): the button alone read "Record these links", so the band and whose estimate it is were hidden. The
- * STORED proposal's own card — each link, its band and "Olumi's estimate" or "your estimate", as `proposeLinkStrengths`
+ * STORED proposal's own card — each link, its band and whose estimate it is, including a first estimate for a link
+ * nobody had sized, as `proposeLinkStrengths`
  * minted it — rides in `detail`. Identity: the store's proposal for THIS chip's id, every operation a link strength.
  * Never the Agent's prose. Used live and on a replay, which rebuilds the chip from the same stored proposal.
  */
