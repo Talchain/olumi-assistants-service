@@ -1,4 +1,4 @@
-import { sameEngineQuantity } from '../untouched-level-invariant.js';
+import { sameEngineQuantity, records, resolverInput, resolverFrame } from '../untouched-level-invariant.js';
 import { isDeepStrictEqual } from 'node:util';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { defaultFrameFor } from './admit-model.js';
@@ -43,8 +43,8 @@ export function siblingReencodeDisclosure(option: string, factor: string): strin
 
 type Dict = Record<string, unknown>;
 function frameOf(node: Dict): number | undefined {
-  const os = (node.observed_state ?? {}) as Dict;
-  return typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap
+  const cap = resolverFrame(node)?.cap;
+  return typeof cap === 'number' && Number.isFinite(cap) && cap > 0 ? cap
     : typeof node.scale_frame === 'number' && Number.isFinite(node.scale_frame) && node.scale_frame > 1 ? node.scale_frame : undefined;
 }
 
@@ -61,41 +61,51 @@ export function preserveSiblingQuantities<T>(before: unknown, after: T,
   const prior = before as { nodes?: Dict[]; options?: Dict[] };
   const result = structuredClone(after) as T & { nodes?: Dict[]; options?: Dict[] };
   if (!Array.isArray(prior.nodes) || !Array.isArray(result.nodes)) return { kind: 'preserved', graph: after, reencoded: [] };
-  const attached = new Map<string, { cap: number; label: string; initial: boolean }>();
-  for (const node of result.nodes) {
+  const oldNodes = records(prior.nodes);
+  const newNodes = records(result.nodes);
+  const scales = new Map(oldNodes.map(n => [n.id, resolverFrame(n)]));
+  const finalScales = new Map(newNodes.map(n => [n.id, resolverFrame(n)]));
+  const affected = new Map<string, { cap: number | undefined; label: string; initial: boolean }>();
+  const representationRefreshes = new Map<string, { cap: number | undefined; label: string; initial: boolean }>();
+  for (const node of newNodes) {
     if (node.kind !== 'factor' || typeof node.id !== 'string') continue;
-    const was = prior.nodes.find(n => n.id === node.id);
+    const was = oldNodes.find(n => n.id === node.id);
+    if (was === undefined) continue;
     const cap = frameOf(node);
-    if (was !== undefined && frameOf(was) !== cap && cap !== undefined) {
-      attached.set(node.id, { cap, label: String(node.label ?? node.id), initial: frameOf(was) === undefined });
-    }
+    const frameChanged = !isDeepStrictEqual(scales.get(node.id), finalScales.get(node.id));
+    // Existing scale_frame-only writers pin coordinate refresh even though
+    // scale_frame itself is not in the egress scale map. Keep that representation
+    // policy alongside (never instead of) full resolver-frame change detection.
+    const representationRefresh = frameOf(was) !== cap && cap !== undefined;
+    const plan = { cap, label: String(node.label ?? node.id), initial: frameOf(was) === undefined };
+    if (frameChanged) affected.set(node.id, plan);
+    if (representationRefresh) representationRefreshes.set(node.id, plan);
   }
-  if (attached.size === 0) return { kind: 'preserved', graph: after, reencoded: [] };
-  const scales = buildFactorScaleMap(prior.nodes);
-  const finalScales = buildFactorScaleMap(result.nodes);
+  const planned = new Map([...representationRefreshes, ...affected]);
+  if (planned.size === 0) return { kind: 'preserved', graph: after, reencoded: [] };
   const selected = new Set(targets.map(t => `${t.optionId}::${t.factorId}`));
   const reencoded = new Map<string, ReencodedSibling>();
   const collections = [
-    { before: prior.nodes.filter(n => n.kind === 'option'), after: result.nodes.filter(n => n.kind === 'option') },
-    { before: prior.options ?? [], after: result.options ?? [] },
+    { before: oldNodes.filter(n => n.kind === 'option'), after: newNodes.filter(n => n.kind === 'option') },
+    { before: records(prior.options), after: records(result.options) },
   ];
   for (const collection of collections) for (const option of collection.after) {
     const was = collection.before.find(n => n.id === option.id);
     if (was === undefined) continue;
     const carriers = [option.interventions, (option.data as Dict | undefined)?.interventions]
       .filter((c): c is Dict => c !== null && typeof c === 'object');
-    for (const [factorId, { cap, label, initial }] of attached) {
+    for (const [factorId, { cap, label, initial }] of planned) {
       const key = `${option.id}::${factorId}`;
       if (selected.has(key)) continue;
       const cells = [...carriers.filter(c => Object.hasOwn(c, factorId)).map(c => ({ carrier: c, key: factorId })),
         ...(Object.hasOwn(option, `data/interventions/${factorId}`) ? [{ carrier: option, key: `data/interventions/${factorId}` }] : [])];
       if (cells.length === 0) continue;
-      const resolved = resolveRawInterventionValue(mergeInterventionSourceObjects(was)[factorId], scales.get(factorId));
+      const resolved = resolveRawInterventionValue(resolverInput(was, factorId), scales.get(factorId));
       if (resolved.value === null) return { kind: 'refused', reason: SIBLING_LEVEL_UNRESOLVABLE };
       if (resolved.codeNotMagnitude) continue;
       const quantity = resolved.value;
-      const nextResolved = resolveRawInterventionValue(mergeInterventionSourceObjects(option)[factorId], finalScales.get(factorId));
-      const held = mergeInterventionSourceObjects(was)[factorId];
+      const nextResolved = resolveRawInterventionValue(resolverInput(option, factorId), finalScales.get(factorId));
+      const held = resolverInput(was, factorId);
       const rawPair = held !== null && typeof held === 'object' ? held as Dict : undefined;
       // Keep existing writer representations: initial attachment re-encodes
       // siblings (including scale_frame-only factors); cap edits refresh
@@ -105,7 +115,7 @@ export function preserveSiblingQuantities<T>(before: unknown, after: T,
       const initialEncoding = initial && (resolved.rule === 'raw_value_used'
         || (resolved.inputValue !== null && resolved.inputValue >= 0 && resolved.inputValue <= 1));
       if (sameEngineQuantity(quantity, nextResolved.value) && !refreshPair && !initialEncoding) continue;
-      if (!Number.isFinite(quantity) || quantity < 0 || quantity > cap) return { kind: 'refused', reason: 'level_frame_mismatch' };
+      if (cap === undefined || !Number.isFinite(quantity) || quantity < 0 || quantity > cap) return { kind: 'refused', reason: 'level_frame_mismatch' };
       for (const { carrier, key: cellKey } of cells) {
         const cell = carrier[cellKey];
         const next = { ...(typeof cell === 'object' && cell !== null ? cell : {}), value: quantity / cap, raw_value: quantity, cap };
@@ -129,16 +139,16 @@ export function preserveSiblingQuantities<T>(before: unknown, after: T,
 export function reencodedSiblingDiff(before: unknown, after: unknown): ReencodedSibling[] {
   const prior = before as { nodes?: Dict[]; options?: Dict[] };
   const current = after as { nodes?: Dict[]; options?: Dict[] };
-  const hybrid = { ...current, nodes: current.nodes?.map(n => n.kind === 'option' ? prior.nodes?.find(p => p.id === n.id) ?? n : n),
+  const hybrid = { ...current, nodes: records(current.nodes).map(n => n.kind === 'option' ? records(prior.nodes).find(p => p.id === n.id) ?? n : n),
     ...(prior.options !== undefined ? { options: prior.options } : {}) };
   const plan = preserveSiblingQuantities(before, hybrid, []);
   if (plan.kind !== 'preserved') return [];
-  const scales = buildFactorScaleMap(current.nodes ?? []);
+  const scales = buildFactorScaleMap(records(current.nodes));
   return plan.reencoded.filter(cell => {
-    const option = [...(current.nodes ?? []), ...(current.options ?? [])].find(n => n.id === cell.option_id);
+    const option = [...records(current.nodes), ...records(current.options)].find(n => n.id === cell.option_id);
     if (option === undefined) return false;
     const held = mergeInterventionSourceObjects(option)[cell.factor_id] as Dict | undefined;
-    const was = [...(prior.nodes ?? []), ...(prior.options ?? [])].find(n => n.id === cell.option_id);
+    const was = [...records(prior.nodes), ...records(prior.options)].find(n => n.id === cell.option_id);
     return held !== undefined && !isDeepStrictEqual(was && mergeInterventionSourceObjects(was)[cell.factor_id], held)
       && held.value === cell.quantity / (held.cap as number) && held.raw_value === cell.quantity
       && resolveRawInterventionValue(held, scales.get(cell.factor_id)).value === cell.quantity;

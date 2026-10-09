@@ -249,3 +249,348 @@ describe('FR carrier and byte controls', () => {
     }
   });
 });
+
+
+// r1 inputs retain the review's f/o identities and native figures verbatim.
+function reviewGraph(): Graph {
+  const g = graph();
+  const ids: Record<string, string> = { duration: 'f', full: 'o' };
+  for (const n of g.nodes) {
+    n.id = ids[n.id] ?? n.id;
+    if (n.id === 'o') n.interventions = { f: 0.2 };
+  }
+  for (const e of g.edges) { e.from = ids[e.from] ?? e.from; e.to = ids[e.to] ?? e.to; }
+  return g;
+}
+function reviewQuantity(g: Graph) {
+  return resolveRawInterventionValue(mergeInterventionSourceObjects(g.nodes.find(n => n.id === 'o')!).f,
+    buildFactorScaleMap(g.nodes).get('f')).value;
+}
+async function reviewFactorWrite(g: Graph, value: number, cap = 100) {
+  const proposal: ProposalAction = { handler_id: 'set_factor_value', entity: { id: 'f', kind: 'node',
+    resolution_status: 'resolved', resolution_method: 'id_match' }, parameters: [{ name: 'value',
+    value: { value, unit: 'days', cap }, operator: 'set', source: 'user_explicit' }], cited_context_fields: [] };
+  return createSetFactorValueHandler()(buildHandlerInvocation({ graph: g, proposal }));
+}
+describe('FR build5 r1 concrete failing inputs', () => {
+  it.each(['slash', 'nested'])('r1 P1-1 promotion: %s carrier via projectGraphForPersistence and real door', async carrier => {
+    const before = reviewGraph(); const option = before.nodes.find(n => n.id === 'o')! as Record<string, unknown>;
+    delete option.interventions;
+    if (carrier === 'slash') option['data/interventions/f'] = 0.2;
+    else option.data = { interventions: { f: 0.2 } };
+    const candidate = structuredClone(before);
+    candidate.nodes.find(n => n.id === 'f')!.observed_state = { value: 0.2, raw_value: 40, cap: 200, unit: 'days' };
+    const projected = projectGraphForPersistence(candidate) as Graph;
+    expect(reviewQuantity(before)).toBe(20); expect(reviewQuantity(projected)).toBe(40);
+    expect(projected.nodes.find(n => n.id === 'o')!.interventions).toMatchObject({ f: { value: 0.2 } });
+    const p = product(before); const bytes = p.bytes();
+    await expect(door(p, projected, before)).rejects.toMatchObject({ reason: 'untouched_level_rescaled' });
+    expect(p.append).not.toHaveBeenCalled(); expect(p.bytes()).toBe(bytes);
+  });
+  it('r1 P1-1 shadow-carrier: winning nested 0.2 stays untouched while top-level changes to 0.3', async () => {
+    const before = reviewGraph();
+    Object.assign(before.nodes.find(n => n.id === 'o')!, { data: { interventions: { f: 0.2 } } });
+    const after = structuredClone(before);
+    after.nodes.find(n => n.id === 'f')!.observed_state = { value: 0.2, raw_value: 40, cap: 200, unit: 'days' };
+    after.nodes.find(n => n.id === 'o')!.interventions = { f: 0.3 };
+    expect(reviewQuantity(before)).toBe(20); expect(reviewQuantity(after)).toBe(40);
+    const p = product(before); const bytes = p.bytes();
+    await expect(door(p, after)).rejects.toMatchObject({ reason: 'untouched_level_rescaled' });
+    expect(p.append).not.toHaveBeenCalled(); expect(p.bytes()).toBe(bytes);
+  });
+  it('r1 P1-2 raw-only approved cell: real createApplyOperations preserves approval of raw60', async () => {
+    const before = reviewGraph();
+    before.nodes.find(n => n.id === 'trial')!.interventions = { f: 0.2 };
+    const p = product(before);
+    const operations = [
+      { op: 'update_node', path: 'f', value: { observed_state: { value: 0.2, raw_value: 40, cap: 200, unit: 'days' } } },
+      { op: 'update_node', path: 'o', value: { interventions: { f: { raw_value: 60, unit: 'days' } } } },
+    ];
+    const out = await createApplyOperations({ scenarioId: SID, requestId: 'FR', store: p.store })({
+      proposalId: 'FR', idempotencyKey: TID, modelRevision: modelRevisionOf(before)!,
+      operations: [{ kind: 'edit_graph', summary: 'Approved factor and native option', detail: { operations } }],
+    });
+    expect(out).toMatchObject({ ok: true }); expect(p.writes).toHaveLength(1);
+    expect(reviewQuantity(p.read())).toBe(60);
+    expect(resolveRawInterventionValue(mergeInterventionSourceObjects(p.read().nodes.find(n => n.id === 'trial')!).f,
+      buildFactorScaleMap(p.read().nodes).get('f')).value).toBe(20);
+  });
+  it.each(['nonzero-to-zero', 'zero-to-nonzero'])('r1 P1-3 zero-baseline %s at equal cap: real handler then real door', async direction => {
+    const before = reviewGraph();
+    if (direction === 'zero-to-nonzero') before.nodes.find(n => n.id === 'f')!.observed_state = { value: 0, raw_value: 0, cap: 100, unit: 'days' };
+    const q = reviewQuantity(before); const p = product(before);
+    const out = await reviewFactorWrite(before, direction === 'nonzero-to-zero' ? 0 : 40);
+    const after = out.mutated_graph as Graph;
+    expect(buildFactorScaleMap(before.nodes).get('f')?.cap).toBe(100);
+    expect(buildFactorScaleMap(after.nodes).get('f')?.cap).toBe(100);
+    expect(reviewQuantity(after)).toBe(q);
+    await door(p, after); expect(p.writes).toHaveLength(1); expect(reviewQuantity(p.read())).toBe(q);
+  });
+  it('r1 P2 options:{}: real handler safely ignores malformed mirror', async () => {
+    const before = reviewGraph(); before.options = {};
+    const p = product(before); const out = await reviewFactorWrite(before, 40, 200);
+    expect(reviewQuantity(out.mutated_graph as Graph)).toBe(20);
+    await door(p, out.mutated_graph as Graph); expect(p.writes).toHaveLength(1);
+  });
+  it('r1 P2 null/non-object nodes and malformed mirrors: shared owner skips invalid records', () => {
+    const before = reviewGraph(); const after = structuredClone(before);
+    after.nodes.find(n => n.id === 'f')!.observed_state = { value: 0.2, raw_value: 40, cap: 200, unit: 'days' };
+    const out = preserveSiblingQuantities({ ...before, nodes: [null, 1, ...before.nodes], options: {} },
+      { ...after, nodes: [null, 1, ...after.nodes], options: {} }, []);
+    expect(out.kind).toBe('preserved');
+    if (out.kind === 'preserved') expect(() => assertUntouchedLevelQuantities(before, out.graph)).not.toThrow();
+  });
+});
+
+
+// Extend the original 80 cases without altering their assertions: fill every
+// new transition/representation combination in the 4 × 7 × 6 cross product.
+const extendedTransitions = [...transitions, 'nonzero-to-zero', 'zero-to-nonzero'] as const;
+const extendedRepresentations = [...representations, 'slash-promoted', 'nested-promoted'] as const;
+const extendedMatrix = writers.flatMap(writer => extendedTransitions.flatMap(transition =>
+  extendedRepresentations.filter(representation => transition === 'nonzero-to-zero' || transition === 'zero-to-nonzero'
+    || representation === 'slash-promoted' || representation === 'nested-promoted')
+    .map(representation => ({ writer, transition, representation }))));
+describe('FR build5 generated matrix extension (88 rows; combined cross product 168)', () => {
+  it.each(extendedMatrix)('$writer / $transition / $representation', async ({ writer, transition, representation }) => {
+    const zeroTransition = transition === 'nonzero-to-zero' || transition === 'zero-to-nonzero';
+    const oldCap = transition === 'created' ? undefined : 100;
+    const cap = zeroTransition || transition === 'unchanged' ? 100
+      : transition === 'created' || transition === 'widened' ? 200 : 50;
+    const native = transition === 'over-frame' ? 80 : oldCap === undefined || transition === 'zero-to-nonzero' ? 0.2 : 20;
+    const value = oldCap === undefined || transition === 'zero-to-nonzero' ? native : native / oldCap;
+    const inputCell = representation === 'code' ? bool : representation === 'raw' || representation === 'raw-cap'
+      ? { value, raw_value: native, ...(representation === 'raw-cap' && oldCap !== undefined ? { cap: oldCap } : {}), source: 'user_specified' }
+      : value;
+    const before = graph(oldCap, inputCell);
+    if (oldCap === undefined) before.nodes.find(n => n.id === 'duration')!.observed_state = { value: 40, raw_value: 40, unit: 'days' };
+    if (transition === 'zero-to-nonzero') before.nodes.find(n => n.id === 'duration')!.observed_state = { value: 0, raw_value: 0, cap: 100, unit: 'days' };
+    const option = before.nodes.find(n => n.id === 'full')! as Record<string, unknown>;
+    if (representation === 'slash-promoted' || representation === 'nested-promoted') {
+      delete option.interventions;
+      if (representation === 'slash-promoted') option['data/interventions/duration'] = inputCell;
+      else option.data = { interventions: { duration: inputCell } };
+    }
+    const next = reframe(before, cap);
+    if (transition === 'nonzero-to-zero') next.nodes.find(n => n.id === 'duration')!.observed_state = { value: 0, raw_value: 0, cap: 100, unit: 'days' };
+    // R2's structural parser and #2919's canonical ingress require promotion
+    // before admission. R3 and the direct door admit the original carriers.
+    const admitted = writer === 'R2' || writer === 'level-batch' ? projectGraphForPersistence(before) as Graph : before;
+    expect(quantity(admitted)).toBe(quantity(before));
+    const p = product(admitted); const bytes = p.bytes(); const q = quantity(before);
+    let refused = false;
+    if (writer === 'direct') {
+      const projected = projectGraphForPersistence(next) as Graph;
+      try { await door(p, projected); }
+      catch (e) { expect(e).toBeInstanceOf(UntouchedLevelRescaledError); refused = true; }
+      const bare = representation === 'bare' || representation === 'slash-promoted' || representation === 'nested-promoted';
+      expect(refused).toBe(bare && transition !== 'unchanged');
+    } else if (writer === 'R3') {
+      const operations = [{ op: 'update_node', path: 'duration', value: { observed_state: next.nodes.find(n => n.id === 'duration')!.observed_state } }];
+      const out = await createApplyOperations({ scenarioId: SID, requestId: 'FR', store: p.store })({
+        proposalId: 'FR', idempotencyKey: TID, modelRevision: modelRevisionOf(before)!,
+        operations: [{ kind: 'edit_graph', summary: 'Approved factor transition', detail: { operations } }],
+      });
+      refused = !out.ok; expect(refused).toBe(transition === 'over-frame' && representation !== 'code');
+    } else if (writer === 'R2') {
+      const proposal: ProposalAction = { handler_id: 'set_factor_value', entity: { id: 'duration', kind: 'node',
+        resolution_status: 'resolved', resolution_method: 'id_match' }, parameters: [{ name: 'value',
+        value: { value: transition === 'nonzero-to-zero' ? 0 : 40, unit: 'days', cap }, operator: 'set', source: 'user_explicit' }], cited_context_fields: [] };
+      try {
+        const out = await createSetFactorValueHandler()(buildHandlerInvocation({ graph: admitted, proposal }));
+        await door(p, out.mutated_graph as Graph);
+      } catch (e) { expect((e as { cause_kind?: string }).cause_kind).toBe('graph_invariant_violated'); refused = true; }
+      expect(refused).toBe(transition === 'over-frame' && representation !== 'code');
+    } else {
+      // This API cannot mutate factor baselines or overwrite existing frames.
+      const out = await batch(p, cap, transition !== 'unchanged');
+      refused = out.kind === 'refused';
+      expect(refused).toBe(transition !== 'unchanged' && transition !== 'created');
+      if (refused) expect(out).toMatchObject({ reason: 'frame_not_applicable' });
+      else expect(out.kind).toBe('committed');
+    }
+    if (refused) { expect(p.append).not.toHaveBeenCalled(); expect(p.bytes()).toBe(bytes); }
+    else {
+      expect(p.writes).toHaveLength(1); expect(quantity(p.read())).toBeCloseTo(q!, 10);
+      if (representation === 'slash-promoted' || representation === 'nested-promoted') {
+        expect(p.read().nodes.find(n => n.id === 'full')!.interventions).toHaveProperty('duration');
+      }
+    }
+  });
+});
+
+describe('FR build5 approval spellings and resolver metadata controls', () => {
+  it.each(['nested', 'data-slash', 'interventions-slash', 'observed-slash', 'path'])('raw-only %s operation approves exactly its option/factor cell', async spelling => {
+    const before = reviewGraph(); const p = product(before);
+    const native = { raw_value: 60, unit: 'days' };
+    const patch = spelling === 'nested' ? { data: { interventions: { f: native } } }
+      : spelling === 'data-slash' ? { 'data/interventions/f': native }
+      : spelling === 'interventions-slash' ? { 'interventions/f': native }
+      : { 'observed_state/interventions/f': native };
+    const operations = [
+      { op: 'update_node', path: 'f', value: { observed_state: { value: 0.2, raw_value: 40, cap: 200, unit: 'days' } } },
+      { op: 'update_node', path: spelling === 'path' ? '/nodes/o/data/interventions/f' : 'o', value: spelling === 'path' ? native : patch },
+    ];
+    const out = await createApplyOperations({ scenarioId: SID, requestId: 'FR', store: p.store })({
+      proposalId: 'FR', idempotencyKey: TID, modelRevision: modelRevisionOf(before)!,
+      operations: [{ kind: 'edit_graph', summary: 'Approved native option', detail: { operations } }],
+    });
+    expect(out).toMatchObject({ ok: true }); expect(p.writes).toHaveLength(1); expect(reviewQuantity(p.read())).toBe(60);
+  });
+  it('metadata and cell-cap edits cannot exempt an unchanged resolver input from the real door', async () => {
+    const before = graph(100, { value: 0.2, cap: 100, source: 'cee_hypothesis', evidence: ['e1'] });
+    const after = reframe(before, 200);
+    after.nodes.find(n => n.id === 'full')!.interventions = { duration: { value: 0.2, cap: 200,
+      source: 'user_specified', evidence: ['e2'], target_match: { node_id: 'duration', match_type: 'exact_id', confidence: 'high' } } };
+    const p = product(before); const bytes = p.bytes();
+    await expect(door(p, after)).rejects.toMatchObject({ reason: 'untouched_level_rescaled' });
+    expect(p.append).not.toHaveBeenCalled(); expect(p.bytes()).toBe(bytes);
+  });
+});
+
+// Build6 keeps the existing 199 tests and assertions intact.
+function build6RouteGraph(): Graph {
+  return {
+    goal_node_id: 'g-revenue',
+    nodes: [
+      { id: 'g-revenue', kind: 'goal', label: 'Revenue' },
+      { id: 'f-edited', kind: 'factor', label: 'Marketing budget',
+        observed_state: { value: 0.4, raw_value: 40000, cap: 100000, unit: '£', source: 'cee_inference' } },
+      { id: 'f-untouched', kind: 'factor', label: 'Marketing budget',
+        observed_state: { value: 0.2, raw_value: 0.2, cap: 1, source: 'cee_inference' } },
+      { id: 'o-configured', kind: 'option', label: 'Increase marketing' },
+      { id: 'o-hold', kind: 'option', label: 'No change (status quo)', is_baseline: true },
+    ],
+    edges: ['f-edited', 'f-untouched'].map(from => ({ from, to: 'g-revenue',
+      strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' })),
+    options: [
+      { id: 'o-configured', option_id: 'o-configured', label: 'Increase marketing',
+        interventions: { 'f-edited': { value: 0.6 }, 'f-untouched': { value: 0.2 } } },
+      { id: 'o-hold', option_id: 'o-hold', label: 'No change (status quo)', is_baseline: true, interventions: {} },
+    ],
+  } as Graph;
+}
+async function build6Event(g: Graph, targetId: string, unit: string) {
+  const { applyFactorValueEdit } = await import('../system-events/factor-value-edit.js');
+  const event = { kind: 'factor_value_edit' as const, target_id: targetId, value: 0, raw_value: 0, unit };
+  return applyFactorValueEdit({ payload: { kind: 'system_event', scenario_id: SID, turn_id: TID, stage: 'analyse', event },
+    event, requestId: 'FR-build6', persistedGraph: g, priorFacts: [] });
+}
+function build6MirrorQuantity(g: Graph) {
+  const option = (g.options as Record<string, unknown>[]).find(n => n.id === 'o-configured')!;
+  return resolveRawInterventionValue(mergeInterventionSourceObjects(option)['f-edited'],
+    buildFactorScaleMap(g.nodes).get('f-edited')).value;
+}
+describe('FR build6 named route regressions', () => {
+  it('fully specified zero remains a valid zero: mirror-only £60000 stays £60000 through the real owner and door', async () => {
+    const before = build6RouteGraph(); const p = product(before);
+    const out = await build6Event(before, 'f-edited', '£');
+    expect(out.kind).toBe('mutated');
+    if (out.kind !== 'mutated') throw new Error('Expected mutation');
+    expect(((out.mutatedGraph as Graph).options as Record<string, unknown>[])[0]!.interventions)
+      .toMatchObject({ 'f-edited': { value: 0.6, raw_value: 60000, cap: 100000 } });
+    // The real commit projects the D1 merge before the final door.
+    const after = projectGraphForPersistence(out.mutatedGraph) as Graph;
+    expect(after.nodes.find(n => n.id === 'f-edited')!.observed_state)
+      .toMatchObject({ value: 0, raw_value: 0, cap: 100000, unit: '£' });
+    expect((after.options as Record<string, unknown>[])[0]!.interventions)
+      .toMatchObject({ 'f-edited': { value: 0.6, raw_value: 60000, cap: 100000 } });
+    expect(build6MirrorQuantity(after)).toBe(60000);
+    await door(p, after);
+    expect(p.writes).toHaveLength(1); expect(build6MirrorQuantity(p.read())).toBe(build6MirrorQuantity(before));
+    expect(p.read().nodes.find(n => n.id === 'f-untouched')).toEqual(before.nodes.find(n => n.id === 'f-untouched'));
+    expect(before).toEqual(build6RouteGraph());
+  });
+  it('system-event untouched_level_rescaled reuses the existing invariant refusal verbatim and saves no graph', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
+    const owner = await import('../agent-lane/level-batch-frame.js');
+    // Plant the owner's omission; the actual final door must detect the drift.
+    vi.spyOn(owner, 'preserveSiblingQuantities').mockImplementation((_before, after) => ({ kind: 'preserved', graph: after, reencoded: [] }));
+    const p = product(build6RouteGraph()); const bytes = p.bytes();
+    const app = Fastify();
+    try {
+      await ceeOrchestratorRouteV2(app); await app.ready();
+      const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', headers: { 'x-request-id': 'FR-build6-refusal' },
+        payload: { kind: 'system_event', scenario_id: SID, turn_id: TID, stage: 'analyse',
+          event: { kind: 'factor_value_edit', target_id: 'f-edited', value: 0, raw_value: 0, unit: '£' } } });
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.assistant_text).toBe("Applying that change would have left the model in an invalid state, so it wasn't saved.");
+      expect(body.blocks).toEqual([]);
+      expect(body).not.toHaveProperty('draft_graph'); expect(body).not.toHaveProperty('graph_hash');
+      expect(p.writes).toHaveLength(1);
+      expect(p.writes[0]).toMatchObject({ turn_class: 'direct_answer', handler_id: null, handler_facts: [] });
+      expect(p.writes[0]!.graph).toBeUndefined();
+      expect(p.writes[0]!.assistantMessage).toBe(body.assistant_text);
+      expect(p.bytes()).toBe(bytes);
+    } finally { await app.close(); }
+  }, 30_000);
+});
+
+const build6ZeroMatrix = writers.flatMap(writer => extendedRepresentations.map(representation => ({ writer, representation })));
+describe('FR build6 matrix transition: factor value set to 0 (raw 0) at the same cap (24 rows)', () => {
+  it.each(build6ZeroMatrix)('$writer / $representation', async ({ writer, representation }) => {
+    const input = representation === 'code' ? bool : representation === 'raw' || representation === 'raw-cap'
+      ? { value: 0.2, raw_value: 20, ...(representation === 'raw-cap' ? { cap: 100 } : {}) } : 0.2;
+    const before = graph(100, input);
+    const option = before.nodes.find(n => n.id === 'full')! as Record<string, unknown>;
+    if (representation === 'slash-promoted' || representation === 'nested-promoted') {
+      delete option.interventions;
+      if (representation === 'slash-promoted') option['data/interventions/duration'] = input;
+      else option.data = { interventions: { duration: input } };
+    }
+    const admitted = writer === 'R2' || writer === 'level-batch' ? projectGraphForPersistence(before) as Graph : before;
+    expect(quantity(admitted)).toBe(quantity(before));
+    const p = product(admitted); const bytes = p.bytes(); const q = quantity(before);
+    const next = structuredClone(before);
+    next.nodes.find(n => n.id === 'duration')!.observed_state = { value: 0, raw_value: 0, cap: 100, unit: 'days' };
+    let refused = false;
+    if (writer === 'direct') {
+      try { await door(p, projectGraphForPersistence(next) as Graph); }
+      catch (error) { expect(error).toBeInstanceOf(UntouchedLevelRescaledError); refused = true; }
+      expect(refused).toBe(representation === 'bare' || representation === 'slash-promoted' || representation === 'nested-promoted');
+    } else if (writer === 'R3') {
+      const out = await createApplyOperations({ scenarioId: SID, requestId: 'FR-build6', store: p.store })({
+        proposalId: 'FR-build6', idempotencyKey: TID, modelRevision: modelRevisionOf(before)!,
+        operations: [{ kind: 'edit_graph', summary: 'Approved zero factor', detail: { operations: [
+          { op: 'update_node', path: 'duration', value: { observed_state: next.nodes.find(n => n.id === 'duration')!.observed_state } },
+        ] } }],
+      });
+      expect(out).toMatchObject({ ok: true });
+    } else if (writer === 'R2') {
+      const out = await build6Event(admitted, 'duration', 'days');
+      expect(out.kind).toBe('mutated');
+      if (out.kind !== 'mutated') throw new Error('Expected mutation');
+      await door(p, out.mutatedGraph as Graph);
+    } else {
+      const out = await batch(p, 100, true);
+      expect(out).toMatchObject({ kind: 'refused', reason: 'frame_not_applicable' }); refused = true;
+    }
+    if (refused) { expect(p.append).not.toHaveBeenCalled(); expect(p.bytes()).toBe(bytes); }
+    else {
+      expect(p.writes).toHaveLength(1); expect(quantity(p.read())).toBe(q);
+      expect(p.read().nodes.find(n => n.id === 'duration')!.observed_state).toMatchObject({ value: 0, raw_value: 0, cap: 100 });
+    }
+  });
+});
+
+describe('FR build6 final owner uses the winning mirror cell', () => {
+  it.each(['nested', 'slash'])('%s mirror carrier retains quantity and metadata through the D1 structural merge', async carrier => {
+    const before = build6RouteGraph();
+    const mirror = (before.options as Record<string, unknown>[])[0]!;
+    const winning = { value: 0.2, unit: '£', source: 'user_specified', evidence: ['e1'] };
+    if (carrier === 'nested') mirror.data = { interventions: { 'f-edited': winning } };
+    else mirror['data/interventions/f-edited'] = winning;
+    expect(build6MirrorQuantity(before)).toBe(20000);
+    const out = await build6Event(before, 'f-edited', '£');
+    expect(out.kind).toBe('mutated');
+    if (out.kind !== 'mutated') throw new Error('Expected mutation');
+    const held = mergeInterventionSourceObjects(((out.mutatedGraph as Graph).options as Record<string, unknown>[])[0]!);
+    expect(held['f-edited']).toEqual({ ...winning, raw_value: 20000, cap: 100000 });
+    const projected = projectGraphForPersistence(out.mutatedGraph) as Graph;
+    const p = product(before);
+    await door(p, projected);
+    expect(p.writes).toHaveLength(1); expect(build6MirrorQuantity(p.read())).toBe(20000);
+  });
+});

@@ -98,7 +98,7 @@
  */
 
 import { preserveSiblingQuantities } from './agent-lane/level-batch-frame.js';
-import { mergeInterventionSourceObjects } from '../orchestrator/tools/analysis-ready-helper.js';
+import { approvedInterventionTargets } from './untouched-level-invariant.js';
 import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -678,12 +678,7 @@ export function createApplyOperations(
     }
 
     // Approvals name option/factor cells, never every level on a touched factor or option.
-    const approvedLevels = operations.flatMap(op => {
-      const node = before.nodes.find(n => n.id === op.path && n.kind === 'option');
-      if (!node || op.op !== 'update_node' || op.value === null || typeof op.value !== 'object') return [];
-      return Object.keys(mergeInterventionSourceObjects(op.value as Record<string, unknown>))
-        .map(factorId => ({ optionId: node.id, factorId }));
-    });
+    const approvedLevels = approvedInterventionTargets(operations, applied.nodes);
     const preserved = preserveSiblingQuantities(before, encoded.graph, approvedLevels);
     if (preserved.kind === 'refused') {
       return refuse('I could not work out what that change means for the options, so I have not saved it');
