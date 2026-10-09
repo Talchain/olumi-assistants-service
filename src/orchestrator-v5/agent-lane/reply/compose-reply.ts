@@ -18,7 +18,7 @@
  *   · Optional estimates and whatChanges demote in that order over 80 visible words. Chance findings, their own
  *     notes, horizon, matching figure disclosures and the next step stay; mandatory overflow is counted.
  *   · Ordinary coaching retains the three-bullet pool, small-detail/short-reply passthrough and whole-reply exits.
- *   · Proposal bodies stay whole, with only an eligible action/Why suffix; other whole-reply paths are unchanged.
+ *   · Proposal bodies stay whole, with only an eligible Why suffix; other whole-reply paths are unchanged.
  *   · `_answer_shape` and assistant_text have one identity: deriveAnswerTextFromShape(shape). RC6 removes only its
  *     recorded whole-sentence copies; every other sentence is conserved. Open questions belong to detail.
  *

@@ -5,14 +5,13 @@ import type { ReplyComposition } from './compose-reply.js';
 export const INTERVENTION_WHY_LABEL = 'Why?';
 const words = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length;
 
-/** Append RC's selected action and Science's exact disclosure after normal composition. */
+/** Append Science's exact disclosure; coaching also retains RC's selected action. */
 export function composeEligibleIntervention(composed: ReplyComposition, intervention: EligibleIntervention,
   actionLabel: string | undefined, faceContract: boolean, wholeProposal = false): ReplyComposition {
   const disclosure = `<details>\n<summary>${INTERVENTION_WHY_LABEL}</summary>\n\n${intervention.why}\n\n</details>`;
   // Proposal disclosures and approval questions retain every byte; only the carried suffix is new.
   if (wholeProposal) {
-    const suffix = [actionLabel === undefined ? undefined : `- ${actionLabel}`, disclosure].filter(Boolean).join('\n\n');
-    return { ...composed, text: `${composed.text}\n\n${suffix}` };
+    return { ...composed, text: `${composed.text}\n\n${disclosure}` };
   }
   // Run/Draft H/W/E/N belongs to the existing composer, byte for byte.
   if (faceContract) {
