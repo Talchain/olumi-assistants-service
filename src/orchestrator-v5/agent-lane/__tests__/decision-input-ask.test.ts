@@ -25,7 +25,7 @@ const graphWith = (goal: Rec) => ({ nodes: [goal, { id: 'opt_a', kind: 'option',
 // "Funding secured" reads no direction (`deriveGoalIntent` undetermined, no minimise), so the neutral words (AIQ 5924149215).
 const ASK = 'What figure should "Funding secured" reach or stay under within 2 months? I\'ll propose it as your target.';
 const ASK_QUESTION = 'What figure should "Funding secured" reach or stay under within 2 months?';
-const OBJECTIVE_QUESTION = 'What should this model help you explore?';
+const OBJECTIVE_QUESTION = 'Is that what you want to improve?';
 const expectOwnAskOnce = (text: string, ask: string) => {
   for (const sentence of sentencesOf(ask)) expect(text.split(sentence).length - 1, `own sentence once: ${sentence}`).toBe(1);
 };
@@ -40,13 +40,13 @@ const captureB3 = (source: string, text: string, line: string, question: string)
   b3WireCases.push({ source, text, line, question });
   writeFileSync(`${process.env.B3_WIRE_EVIDENCE}/b3-question-tail-selected-wire.json`, JSON.stringify(b3WireCases, null, 2) + '\n');
 };
-const OBJECTIVE_ASK = 'I used "Quarterly revenue" as a provisional objective. What should this model help you explore?';
+const OBJECTIVE_ASK = "I've assumed the goal is ‘Quarterly revenue’. Is that what you want to improve?";
 const inferredGoal = { ...FX.goal_after_build, label: 'Quarterly revenue', provenance: 'ai_inferred' };
 
 describe('B3-7: offer the inferred objective before its target', () => {
   it('the untouched D1 capture is inferred too: a numerical target does not establish objective authorship', () => {
     for (const goal of [SERVED_FX.goal_after_build, SERVED_FX.goal_after_target]) {
-      expect(decisionInputAsk(graphWith(goal), base)).toBe('I used "Funding secured" as a provisional objective. What should this model help you explore?');
+      expect(decisionInputAsk(graphWith(goal), base)).toBe("I've assumed the goal is ‘Funding secured’. Is that what you want to improve?");
     }
   });
   it('RED: the objective offer is the one visible ask, including with a user-stated numerical target', () => {
@@ -57,12 +57,15 @@ describe('B3-7: offer the inferred objective before its target', () => {
   });
   it('RED: durable rendered-text history suppresses the objective offer without falling through to a target ask', () => {
     expect(decisionInputAsk(graphWith(inferredGoal), { ...base, recentReplies: [`Saved. ${OBJECTIVE_ASK}`] })).toBeNull();
-    const statement = 'I used "Quarterly revenue" as a provisional objective.';
+    const statement = "I've assumed the goal is ‘Quarterly revenue’.";
     expect(decisionInputAsk(graphWith(inferredGoal), { ...base, recentReplies: [`${OBJECTIVE_QUESTION}\n\n${statement}`] })).toBeNull();
     expect(decisionInputAsk(graphWith({ ...inferredGoal, label: 'Another goal' }), { ...base, recentReplies: [`${OBJECTIVE_QUESTION}\n\n${statement}`] })).not.toBeNull();
   });
-  it.each([{ awaitingApproval: true }, { restingText: 'Which matters most?' }, { builtOrRan: false }])('CONTROL: an existing step suppresses the offer (%j)', (over) => {
+  it.each([{ awaitingApproval: true }])('CONTROL: approval suppresses the confirm (%j)', (over) => {
     expect(decisionInputAsk(graphWith(inferredGoal), { ...base, ...over })).toBeNull();
+  });
+  it.each([{ restingText: 'Which matters most?' }, { builtOrRan: false }])('Gate A: an unasked inferred objective survives another question or an ordinary turn (%j)', (over) => {
+    expect(decisionInputAsk(graphWith(inferredGoal), { ...base, ...over })).toBe(OBJECTIVE_ASK);
   });
   it('CONTROL: from-brief and user-authored goals keep their existing target question', () => {
     for (const provenance of ['from_brief', 'user_set']) {
@@ -412,10 +415,13 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     goal = { ...inferredGoal, goal_threshold_raw: 100, threshold_source: 'user' };
     const A = 'e311e890-734f-41b0-8b1f-718054e58109';
     const B = 'cd15ad39-7363-41b0-bc15-e068518c74fb';
-    const first = (await runTurn(A)).assistant_text;
+    const firstWire = await runTurn(A);
+    const first = firstWire.assistant_text;
     expect(textAtRest(first)).toContain(OBJECTIVE_QUESTION);
     expectOwnAskOnce(first, OBJECTIVE_ASK);
-    expect(first.match(/\?/g)).toHaveLength(1);
+    const firstFace = firstWire._answer_shape === undefined ? first : [firstWire._answer_shape.headline, ...firstWire._answer_shape.bullets].join('\n');
+    expect(firstFace.match(/\?/g)).toHaveLength(1);
+    expect(firstWire._answer_shape?.detail).toContain('I used "Quarterly revenue" as a provisional objective. What should this model help you explore?');
     expect((await runTurn(B)).assistant_text).not.toContain(OBJECTIVE_QUESTION);
     expect((await runTurn(B)).assistant_text).not.toContain('as your target.');
     expectOwnAskOnce((await runTurn(A)).assistant_text, OBJECTIVE_ASK);

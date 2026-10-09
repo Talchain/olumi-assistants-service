@@ -53,6 +53,8 @@ export function setTestSink(sink: ((eventName: string, data: Record<string, any>
  * DO NOT modify these names without updating CI guards and dashboards
  */
 export const TelemetryEvents = {
+  /** Gate A: persisted inferred objective was eligible but did not reach this reply face. */
+  CeeObjectiveConfirmSuppressed: "cee.objective_confirm.suppressed",
   // Core lifecycle events
   DraftStarted: "assist.draft.started",
   DraftCompleted: "assist.draft.completed",

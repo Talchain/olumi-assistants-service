@@ -117,6 +117,8 @@ const ROLE_RANK: Record<FaceObligationRole, number> = { ask: 5, withheld_reason:
 export interface FaceObligation {
   readonly role: FaceObligationRole;
   readonly text: string;
+  /** Ask priority only; absent rank preserves last-ask selection. Ranked asks remain one atomic prompt. */
+  readonly rank?: number;
   readonly subjects?: readonly string[];
   /** The screen finding this separately written depends/spread/shortfall note belongs to. */
   readonly companionOf?: string;
@@ -715,7 +717,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const text = once.text;
   // RC6 first prefers the complete typed host copy. Only then split N into its one question sentence; splitting
   // before copy selection would mistakenly type the narrator's earlier echo as the same host question.
-  const normalised = !faceContract ? once.obligations : once.obligations.flatMap((o): FaceObligation[] => o.role !== 'ask' ? [o] : sentencesOf(o.text).map((text) => ({
+  const normalised = !faceContract ? once.obligations : once.obligations.flatMap((o): FaceObligation[] => o.role !== 'ask' || o.rank !== undefined ? [o] : sentencesOf(o.text).map((text) => ({
     ...o, text, role: QUESTION_END.test(text.trim()) ? 'ask' as const : 'host' as const,
   })));
   const present = normalised.flatMap((o): FaceObligation[] => {
@@ -727,12 +729,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   }).sort((a, b) => b.text.length - a.text.length);
   // Overlapping obligations are ONE unit (the gate's closing can carry the ask): the larger span stands for both, and it
   // is the ask when it holds one, so it closes the face.
-  const owed: { role: FaceObligationRole; text: string; lead?: true; subjects?: readonly string[] }[] = [];
+  const owed: { role: FaceObligationRole; text: string; rank?: number; lead?: true; subjects?: readonly string[] }[] = [];
   for (const o of present) {
     const container = owed.find((k) => k.text.includes(o.text));
     if (container === undefined) owed.push({ ...o });
     else {
       if (ROLE_RANK[o.role] > ROLE_RANK[container.role]) container.role = o.role;
+      if (o.role === 'ask' && o.rank !== undefined) container.rank = Math.max(container.rank ?? o.rank, o.rank);
       if (o.lead === true) container.lead = true;
       if (o.subjects !== undefined) container.subjects = [...new Set([...(container.subjects ?? []), ...o.subjects])];
     }
@@ -802,8 +805,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const controlAsk = (u: Unit): boolean => controlQuestions.some((question) => foldQuotes(u.text).includes(foldQuotes(question)));
   const nextStepFinding = !faceContract ? undefined : units.find((u) => !controlAsk(u)
     && present.some((o) => o.lead === true && o.ownsNextStep === true && u.text === o.text));
-  const selectedAsk = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
-  const ask = nextStepFinding !== undefined || (selectedAsk !== undefined && controlAsk(selectedAsk)) ? undefined : selectedAsk;
+  const askRank = (u: Unit): number => {
+    const ranks = owed.filter(o => o.role === 'ask' && u.text.includes(o.text)).map(o => o.rank ?? 0);
+    return ranks.length === 0 ? 0 : Math.max(...ranks);
+  };
+  const selectedAsk = hostAsks.reduce<Unit | undefined>((best, u) => best === undefined || askRank(u) >= askRank(best) ? u : best, undefined)
+    ?? questions.filter((u) => u.obligation === undefined).at(-1);
+  const ask = (nextStepFinding !== undefined && (selectedAsk === undefined || askRank(selectedAsk) === 0)) || (selectedAsk !== undefined && controlAsk(selectedAsk)) ? undefined : selectedAsk;
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
   const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u)));

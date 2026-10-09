@@ -31,12 +31,19 @@ import type { CanonicalAnalysisCell } from '../../routes/canonical-analysis-view
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const OBJECTIVE_ASK_QUESTION = 'What should this model help you explore?';
+export const OBJECTIVE_ASK_QUESTION = 'What should this model help you explore?';
+export const OBJECTIVE_CONFIRM_RANK = 100;
+const OBJECTIVE_CONFIRM_ENDING = 'Is that what you want to improve?';
+export const OBJECTIVE_CONFIRM_CHIPS = [
+  { id: 'agent-objective-confirm:yes', label: 'Yes', message: "Yes, that's the goal." },
+  { id: 'agent-objective-confirm:change', label: 'Change it', message: 'I want to change the goal.' },
+] as const;
 const TARGET_ASK_TAIL = "I'll propose it as your target.";
 
 /** The same exact host-owned words still count as said when the composer places the question apart from its context. */
 function ownAskAlreadySaid(wanted: string, recentReplies: readonly string[]): boolean {
-  const ending = wanted.endsWith(OBJECTIVE_ASK_QUESTION) ? OBJECTIVE_ASK_QUESTION
+  const ending = wanted.endsWith(OBJECTIVE_CONFIRM_ENDING) ? OBJECTIVE_CONFIRM_ENDING
+    : wanted.endsWith(OBJECTIVE_ASK_QUESTION) ? OBJECTIVE_ASK_QUESTION
     : wanted.endsWith(TARGET_ASK_TAIL) ? TARGET_ASK_TAIL : null;
   const units = ending === null ? [wanted] : [wanted.slice(0, -ending.length).trimEnd(), ending].filter((s) => s !== '');
   return recentReplies.some((reply) => units.every((unit) => reply.includes(unit)));
@@ -47,6 +54,33 @@ function goalOf(graph: unknown): Rec | undefined {
   const nodes = recordOf(graph)?.nodes;
   const goals = Array.isArray(nodes) ? nodes.map(recordOf).filter((n): n is Rec => n !== undefined && n.kind === 'goal') : [];
   return goals.length === 1 ? goals[0] : undefined;
+}
+
+/** Gate A reads only the persisted single goal's authorship, never compacted value provenance or target source. */
+export function objectiveConfirmOf(graph: unknown): string | null {
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  return goal?.provenance === 'ai_inferred' && label !== ''
+    ? withoutProposalIds(`I've assumed the goal is ‘${label}’. ${OBJECTIVE_CONFIRM_ENDING}`) : null;
+}
+
+/** #2537's original words remain available in progressive detail. */
+export function objectiveConfirmDetailOf(graph: unknown): string | null {
+  if (objectiveConfirmOf(graph) === null) return null;
+  return withoutProposalIds(`I used "${String(goalOf(graph)?.label).trim()}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`);
+}
+
+/** Both generations of the host's objective ask use the same sentence units and durable reply history. */
+export function objectiveConfirmAlreadySaid(graph: unknown, recentReplies: readonly string[]): boolean {
+  const confirm = objectiveConfirmOf(graph);
+  const legacy = objectiveConfirmDetailOf(graph);
+  return confirm !== null && (ownAskAlreadySaid(confirm, recentReplies)
+    || (legacy !== null && ownAskAlreadySaid(legacy, recentReplies)));
+}
+
+/** Bind only the host's derived confirm to the composer's ask priority. */
+export function objectiveConfirmRankFor(text: string, graph: unknown): { rank?: number } {
+  return text === objectiveConfirmOf(graph) ? { rank: OBJECTIVE_CONFIRM_RANK } : {};
 }
 
 /**
@@ -377,6 +411,8 @@ function withCellHorizonWarning<E>(
 
 /** The one ask writer, before display scrubbing or turn eligibility. */
 function rawDecisionInputAsk(graph: unknown): string | null {
+  const confirm = objectiveConfirmOf(graph);
+  if (confirm !== null) return confirm;
   const part = draftedTeamPartOf(graph);
   if (part !== null) return goalDeadlineOf(part.goal) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
   const goal = goalOf(graph);
@@ -386,8 +422,7 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
   // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
   if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineOf(goal) === undefined ? chanceGoalDeadlineAsk(label) : null;
-  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`
-    : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
+  return !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
 }
 
 /** Normalise only exact narrator copies of this graph's host ask before placement. */
@@ -397,18 +432,20 @@ export function withDecisionInputAskDisplay(text: string, graph: unknown): strin
 }
 
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
-  if (!ctx.builtOrRan) return [];
+  const confirm = objectiveConfirmOf(graph);
+  if (!ctx.builtOrRan && (confirm === null || objectiveConfirmAlreadySaid(graph, ctx.recentReplies ?? []))) return [];
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return [];
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
-  const leftOut = leftOutLines(graph, label, ctx.chanceCells ?? []);
-  const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
-  const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
+  const leftOut = ctx.builtOrRan ? leftOutLines(graph, label, ctx.chanceCells ?? []) : [];
+  const a7 = ctx.builtOrRan ? untestedHorizonLineForCells(graph, ctx.chanceCells ?? []) : null;
+  const rawWanted = ctx.awaitingApproval || (confirm === null && /\?/.test(ctx.restingText)) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
   const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
-  const ask = wanted !== null && ownAskAlreadySaid(wanted, ctx.recentReplies ?? []) ? null : wanted;
+  const ask = wanted !== null && (ownAskAlreadySaid(wanted, ctx.recentReplies ?? [])
+    || (confirm !== null && objectiveConfirmAlreadySaid(graph, ctx.recentReplies ?? []))) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
@@ -430,7 +467,7 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
 export function isDecisionInputAsk(line: string): boolean {
   if (line === 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?') return true;
   if (line.startsWith('How long would ') && line.endsWith(' take with the team you have now?')) return true;
-  return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith(OBJECTIVE_ASK_QUESTION);
+  return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith(OBJECTIVE_ASK_QUESTION) || line.endsWith(OBJECTIVE_CONFIRM_ENDING);
 }
 
 /** The one framing or target ask, or null. */

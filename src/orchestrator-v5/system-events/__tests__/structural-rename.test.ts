@@ -191,7 +191,7 @@ describe('structural_rename — the rename LANDS (defect class A)', () => {
     nodes.find((n) => n.id === 'goal_revenue')!.provenance = 'ai_inferred';
     base.goal_constraints = [{ constraint_id: 'budget', node_id: 'fac_price', operator: '<=', value: 50000, unit: 'GBP', value_frame: 'level', provenance: 'explicit' }];
     const ctx = { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
-    expect(decisionInputAsk(base, ctx)).toContain('provisional objective');
+    expect(decisionInputAsk(base, ctx)).toContain('Is that what you want to improve?');
     const result = run({ node_id: 'goal_revenue', expected_label: 'Grow revenue', label: 'Increase profit', base_graph_hash: baseHashOf(base) }, base);
     expect(result.kind).toBe('mutated');
     if (result.kind !== 'mutated') throw new Error('rename did not commit');
@@ -199,7 +199,7 @@ describe('structural_rename — the rename LANDS (defect class A)', () => {
     const readback = JSON.parse(JSON.stringify(result.graph));
     expect(readback.goal_constraints).toEqual(base.goal_constraints);
     expect(readback.nodes.find((n: Record<string, unknown>) => n.id === 'goal_revenue').provenance).toBe('user_set');
-    expect(decisionInputAsk(readback, ctx)).not.toContain('provisional objective');
+    expect(decisionInputAsk(readback, ctx)).not.toContain('Is that what you want to improve?');
     expect(readback.nodes.find((n: Record<string, unknown>) => n.id === 'goal_revenue').label).toBe('Increase profit');
   });
   it('⭐ the named node carries the new label in the graph that would persist', () => {

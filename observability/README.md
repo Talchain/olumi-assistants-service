@@ -329,3 +329,14 @@ curl https://olumi-assistants-service-staging.onrender.com/assist/draft-graph \
 **Related Docs:**
 - [Telemetry Aggregation Strategy](../Docs/telemetry-aggregation-strategy.md)
 - [Specification v04](canvas) - Product SSOT
+
+
+## Objective confirmation (Gate A)
+
+`cee.objective_confirm.suppressed` is an info-level diagnostic log when a persisted
+inferred objective is eligible, still unasked in durable history, and its
+confirmation is absent from the reply face. Its `suppressor` is one of
+`awaiting_approval`, `typed_turn`, or `reply_egress`. Approval owns the face; an
+unasked confirm can return on an ordinary later turn. Both the current confirm
+and the legacy objective ask count as asked in durable assistant text. This event has no
+Datadog metric or alert mapping and contains no goal label or user text.

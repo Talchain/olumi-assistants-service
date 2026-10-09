@@ -94,7 +94,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, isDecisionInputAsk, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { objectiveConfirmAlreadySaid, objectiveConfirmOf, objectiveConfirmDetailOf, objectiveConfirmRankFor, OBJECTIVE_CONFIRM_CHIPS, OBJECTIVE_ASK_QUESTION, decisionInputLines, isDecisionInputAsk, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { whatChangesFaceLine } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
@@ -191,7 +191,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
+import { withoutSentenceCopies, type AnswerShape } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /**
@@ -2136,6 +2136,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return rows;
       },
     } : {};
+    const objectiveConfirmSaidInHistory = (graph: unknown): boolean => objectiveConfirmAlreadySaid(graph,
+      (recentRowsForEgress ?? []).filter(isAgentAnswerRow)
+        .slice(0, RECENT_REPLIES_READ).flatMap(row => typeof row.assistant_message === 'string' ? [row.assistant_message] : []));
     const dispatchLedger: DispatchTiming[] = [];
     // Every in-process call the Agent makes for this turn is a SUB-TURN: a turn row it commits keeps no conversation
     // text, because the user never saw it (`agent-subturn-context.ts`, #75 5910983526). This route's own claim and
@@ -2361,7 +2364,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...(reasonNow === null ? [] : [{ role: 'host' as const, text: reasonNow }]),
             ...(typeof say === 'string' && say.trim() !== '' ? [say, ...sentencesOf(say)].map((text): FaceObligation => ({ role: 'withheld_reason', text })) : []),
             // Mirror live typing: a combined goal-chance say may carry the level ask beside guided sizing.
-            ...[askNow, rootNow, ...lines, say].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
+            ...[askNow, rootNow, ...lines, say].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text, ...objectiveConfirmRankFor(text, state.graph) })),
             ...indexNow.map((text): FaceObligation => ({ role: 'host', text })),
             ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !indexNow.includes(l) && !l.includes('?'))]
               .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text): FaceObligation => ({ role: 'evidence', text })),
@@ -2453,6 +2456,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
+          detailLines: replayText.includes(objectiveConfirmOf(state.graph) ?? '\0') ? [objectiveConfirmDetailOf(state.graph)!] : [],
           ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
@@ -2522,7 +2526,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      return withShapeOnlyIfItDerives(gatedReplay);
+      const finalReplay = withShapeOnlyIfItDerives(gatedReplay);
+      const replayConfirm = objectiveConfirmOf(state.graph);
+      const replayShape = (finalReplay as { _answer_shape?: AnswerShape })._answer_shape;
+      const replayFace = replayShape === undefined ? String(finalReplay.assistant_text ?? '')
+        : [replayShape.headline, ...replayShape.bullets].join('\n');
+      if (replayConfirm !== null && replayFace.includes(replayConfirm)) {
+        return { ...finalReplay, suggested_actions: firstOfEachId([...(finalReplay.suggested_actions ?? []), ...OBJECTIVE_CONFIRM_CHIPS]) };
+      }
+      if (replayConfirm !== null && !objectiveConfirmSaidInHistory(state.graph)) log.info({ event: 'cee.objective_confirm.suppressed',
+        suppressor: replayActions.some(action => typedApprovalOf({ chip: { id: action.id } }) !== undefined)
+          ? 'awaiting_approval' : 'reply_egress' }, 'agent-lane: eligible objective confirm is not on this replay face');
+      return finalReplay;
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -3537,6 +3552,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
+    // Change it owns a typed, read-only reply. Yes follows the ordinary agent turn; durable text stops repetition.
+    if (result === undefined && pressedChipId === OBJECTIVE_CONFIRM_CHIPS[1].id) {
+      fastPath = 'method';
+      result = { assistant_text: OBJECTIVE_ASK_QUESTION,
+        items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
     let briefReadingOpen = false;
     let levelAnswerTool: typeof CURRENT_LEVEL_TOOL | undefined;
     /**
@@ -4512,7 +4534,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
         : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText),
-          [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
+          [basis, ...decisionLines.filter((line) => line === objectiveConfirmOf(readbackGraph) || line.endsWith(OBJECTIVE_ASK_QUESTION))])),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
@@ -4870,7 +4892,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           subjects: screenLines.map(line => line.option_id) }]),
         ...(guidedRunFinding === undefined ? [] : [{ role: 'host' as const, text: guidedRunFinding, lead: true as const,
           ownsNextStep: true as const }]),
-        ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
+        ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text, ...objectiveConfirmRankFor(text, readbackGraph) })),
         ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
         ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
           .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
@@ -4914,7 +4936,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...[...(uninterpretedRun || firstAnalysisResultFirst ? [RUN_RESULT_READY_TEXT, ...decisionLines] : []), ...owed.filter((l) => l !== goalChanceOwed), guidedReplyText.progress, narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
           .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
           .filter((l): l is string => typeof l === 'string' && l !== '')
-          .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
+          .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text, ...objectiveConfirmRankFor(text, readbackGraph) })),
       ];
       // THE TYPED RESPONSE PROFILE, by the turn's kind (DL, AIE line review 6037446159 item 5): a method press is one
       // structured prompt; a substantive proposal keeps its whole disclosure. The route's automatic identity card
@@ -4952,7 +4974,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(faceContract !== undefined && profile === 'coaching' && estimates !== null && estimates.count > 0
           ? { estimatesLine: `Olumi's estimates: ${estimates.count}, see Check estimates.` } : {}),
         typedControlQuestions,
-        detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
+        detailLines: stateFacts.current_state_unknown === true ? [] : [...eventRiskDisclosuresFor(result.tool_results),
+          ...(decisionLines.includes(objectiveConfirmOf(readbackGraph) ?? '') ? [objectiveConfirmDetailOf(readbackGraph)!] : [])],
         obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),
         graph: readbackGraph,
         profile,
@@ -4979,6 +5002,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.
     const sentText = String(wireBody.assistant_text ?? text);
+    const objectiveConfirm = objectiveConfirmOf(readbackGraph);
+    const deliveredShape = (wireBody as { _answer_shape?: AnswerShape })._answer_shape;
+    const deliveredFace = deliveredShape === undefined ? sentText : [deliveredShape.headline, ...deliveredShape.bullets].join('\n');
+    if (objectiveConfirm !== null && deliveredFace.includes(objectiveConfirm)) {
+      wireBody = { ...wireBody, suggested_actions: firstOfEachId([...(wireBody.suggested_actions ?? []), ...OBJECTIVE_CONFIRM_CHIPS]) };
+    } else if (objectiveConfirm !== null && !objectiveConfirmSaidInHistory(readbackGraph)) {
+      log.info({ event: 'cee.objective_confirm.suppressed', suppressor: awaitingApproval ? 'awaiting_approval'
+        : fastPath === 'method' ? 'typed_turn' : 'reply_egress' },
+      'agent-lane: eligible objective confirm is not on this reply face');
+    }
     // Persist the producer's exact delivered question or its qualified clarification, after every egress gate.
     const levelAskAnswered = levelAnswerTool !== undefined || result.tool_calls.some(call => call.name === CURRENT_LEVEL_TOOL);
     // GOAL-REACH 3b (COPY-SHAPE patch): the bar's set_current_level press is a typed reply ('method'), and its words ARE
