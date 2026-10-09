@@ -3224,7 +3224,7 @@ export function createAgentCapabilities(
         detail: 'Your answer was sent but could not be confirmed in the saved model.' };
     }
     const check = await readGraph(ctx.scenario_id);
-    if (check === null || !horizonSteadyAttested(check.raw, ctx.scenario_id)
+    if (check === null || !horizonSteadyAttested(check.raw)
       || check.nodes.find(n => n.id === op.path && n.kind === 'goal')?.goal_horizon_months !== months) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
         detail: 'Your answer was sent but could not be confirmed in the saved model.' };

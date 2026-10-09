@@ -67,23 +67,35 @@ const store = {
   loadGraphAndBriefText: vi.fn(async (sid: string) => ({ graph: graphOf.get(sid) ?? null, briefText: null })),
   hasPriorTurns: vi.fn(async (sid: string) => order.some((k) => rows.get(k)!.scenario_id === sid)),
 };
+// 2b's proof is an HMAC minted only by applyGoalSteadyEdit; the secret is test-only (as horizon-basis-door.test.ts does).
+vi.mock('../../../config/index.js', async original => {
+  const actual = await original<typeof import('../../../config/index.js')>();
+  return { ...actual, config: new Proxy(actual.config, { get(target, key) {
+    if (key === 'auth') return { ...target.auth, hmacSecret: 'p45-card-test-only-secret' };
+    return Reflect.get(target, key);
+  } }) };
+});
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
-let commitMode: 'real' | 'missing_basis' | 'wrong_scenario' | 'stale' | 'refused' | 'unconfirmed' = 'real';
+let commitMode: 'real' | 'missing_basis' | 'forged_proof' | 'stale' | 'refused' | 'unconfirmed' = 'real';
 vi.mock('../../system-events/dispatch.js', async original => {
   const actual = await original<typeof import('../../system-events/dispatch.js')>();
   return { ...actual, commitOptionLevelsInProcess: vi.fn(async (input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> => {
     if (commitMode === 'stale') return { status: 'stale' };
     if (commitMode === 'refused') return { status: 'refused', reason: 'test_refusal' };
     if (commitMode === 'unconfirmed') return { status: 'unconfirmed' };
-    if (commitMode === 'missing_basis' || commitMode === 'wrong_scenario') {
-      if (commitMode === 'wrong_scenario') {
-        const edit = applyGoalSteadyEdit(jsonbGraph(), input.goal_steady!, 'another-scenario');
+    if (commitMode === 'missing_basis' || commitMode === 'forged_proof') {
+      // 2b r8 (DL): the basis is valid only with the HMAC proof the door mints; a stored basis whose proof does not verify
+      // is not the user's answer (the predicate is graph-only, so a wrong scenario is no longer a failure mode).
+      if (commitMode === 'forged_proof') {
+        const edit = applyGoalSteadyEdit(jsonbGraph(), input.goal_steady!, SCENARIO);
         if (edit.kind !== 'mutated') throw new Error('attestation refused');
+        const goal = (edit.mutatedGraph.nodes as Rec[]).find(n => n.kind === 'goal')!;
+        goal.horizon_basis = { ...goal.horizon_basis, proof: '0'.repeat(64) };
         graphOf.set(SCENARIO, edit.mutatedGraph);
       }
       return { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(jsonbGraph() as never)!, receipt: null, already_applied: false, committed_levels: [] };
@@ -182,7 +194,7 @@ describe('steady horizon: one held card through the existing approved batch door
     modelTool = { type: 'function_call', name: 'run_analysis', call_id: 'requested_run', arguments: '{}' };
     cardOf(await turn({ message: 'Run analysis again.' }));
     expect(runs).toBe(1);
-    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph())).toBe(false);
   });
   it('JOINED: B2 nine-month Run → card → approved door → attested read-back → follow-up; no implicit Run', async () => {
     const baseHash = computeAnalysisAffectingGraphHash(jsonbGraph() as never);
@@ -194,7 +206,7 @@ describe('steady horizon: one held card through the existing approved batch door
       scenario_id: SCENARIO, links: [], levels: [], goal_steady: { goal_id: goalOf(jsonbGraph()).id, months: 9 },
     }), expect.any(String));
     expect(reply.assistant_text).toContain('Recorded as your judgement. Then run the analysis again.');
-    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(true);
+    expect(horizonSteadyAttested(jsonbGraph())).toBe(true);
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(computeAnalysisAffectingGraphHash(jsonbGraph() as never)).not.toBe(baseHash);
     expect(runs).toBe(1);
@@ -212,7 +224,7 @@ describe('steady horizon: one held card through the existing approved batch door
     const before = JSON.stringify(jsonbGraph());
     modelTool = { type: 'function_call', name: 'authorise_change', call_id: 'forged_yes', arguments: JSON.stringify({ proposal_id: card.id.split(':')[1] }) };
     await turn({ message: 'yes' });
-    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph())).toBe(false);
     expect(JSON.stringify(jsonbGraph())).toBe(before);
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
     expect(agentProposals.get(card.id.split(':')[1]!)).toBeDefined();
@@ -222,7 +234,7 @@ describe('steady horizon: one held card through the existing approved batch door
     goalOf(jsonbGraph()).goal_horizon_months = 12;
     await press(card);
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
-    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph())).toBe(false);
   });
   it('offer requires Run, positive H, no attestation, no other approval and no admitted carrier', () => {
     const graph = seed();
@@ -268,12 +280,12 @@ describe('steady horizon: one held card through the existing approved batch door
     // CONTROL: the same seed without the carrier is offered.
     expect(offered(seed())).not.toBeNull();
   });
-  it.each(['missing_basis', 'wrong_scenario'] as const)('unconfirmed: committed door without a valid read-back (%s) cannot claim success', async mode => {
+  it.each(['missing_basis', 'forged_proof'] as const)('unconfirmed: committed door without a valid read-back (%s) cannot claim success', async mode => {
     const card = cardOf(await run());
     commitMode = mode;
     const reply = await press(card);
     expect(commitOptionLevelsInProcess).toHaveBeenCalledTimes(1);
-    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph())).toBe(false);
     expect(reply._agent.tool_calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'not_confirmed' }),
     ]));
@@ -287,7 +299,7 @@ describe('steady horizon: one held card through the existing approved batch door
     expect(reply._agent.tool_calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'authorise_change', ok: false, refusal: mode === 'unconfirmed' ? 'not_confirmed' : mode }),
     ]));
-    expect(horizonSteadyAttested(jsonbGraph(), SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(jsonbGraph())).toBe(false);
   });
   it('JOINED CONTROL: Run with an unconfirmed accumulation node offers no steady card', async () => {
     jsonbGraph().nodes.push({ id: 'stock_at_9', kind: 'outcome', label: 'Stock at month 9', nonlinear_identity: {
