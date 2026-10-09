@@ -141,7 +141,7 @@ describe('identity, precedence, absence and typed future basis', () => {
     expect(readGoalRecord(multi, 'B')?.horizon?.deadline).toBe(goalDeadlineOf(multi.nodes[1]));
     expect(readGoalRecord(multi, 'B')).toEqual({
       goal_id: 'B', label: 'at least 999',
-      target: { raw: 40, unit: '£', frame: 'level', comparator: '<', source: 'user' },
+      target: { raw: 40, unit: '£', frame: 'level', comparator: '<', comparator_source: 'row_operator_as_stated', source: 'user' },
       horizon: { deadline: '2027-01-01', as_stated: 'by January' }, provenance: 'user_set',
     });
   });
@@ -170,13 +170,13 @@ describe('identity, precedence, absence and typed future basis', () => {
       { node_id: 'A', value: 40, operator: '<=' }, { node_id: 'B', value: 1, operator: '<=' },
       { node_id: 'B', value: 40, operator: '>=', operator_as_stated: '<', provenance: 'explicit' },
     ] };
-    expect(readGoalRecord(graph, 'B')).toEqual({ goal_id: 'B', label: 'under 1', target: { raw: 40, comparator: '>=' }, horizon: null, provenance: 'explicit' });
+    expect(readGoalRecord(graph, 'B')).toEqual({ goal_id: 'B', label: 'under 1', target: { raw: 40, comparator: '>=', comparator_source: 'row_operator' }, horizon: null, provenance: 'explicit' });
   });
   it('pins the documented node/row conflict rather than bending the record', () => {
     const goal = { id: 'B', kind: 'goal', label: 'B', goal_direction: '>=', goal_threshold_unit: 'customers' };
     const graph = { nodes: [goal], goal_constraints: [{ node_id: 'B', value: 40, operator: '<=', unit: '£' }] };
     expect(statedGoalTargetOf(graph, goal)).toEqual({ value: 40, held: '<=', unit: '£' });
-    expect(readGoalRecord(graph, 'B')?.target).toEqual({ raw: 40, comparator: '>=', unit: 'customers' });
+    expect(readGoalRecord(graph, 'B')?.target).toEqual({ raw: 40, comparator: '>=', comparator_source: 'goal_direction', unit: 'customers' });
     expect(readHeldGoalComparator(graph, 'B')).toBe('>=');
     expect(goalUnitOf(goal)).toBe('customers');
   });

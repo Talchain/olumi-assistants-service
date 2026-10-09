@@ -4,6 +4,7 @@ import "dotenv/config";
 import { markDraftGraphWriteFailed } from './orchestrator-v5/build-turn-context.js';
 import { currentTurnFenceSlot } from './orchestrator-v5/session/turn-fence.js';
 import { ModelWriteOwnershipRefused } from "./orchestrator-v5/ownership/door-ownership.js";
+import { startSessionAnalysisRunSweeper } from "./orchestrator-v5/session/index.js";
 
 import { env } from "node:process";
 import Fastify from "fastify";
@@ -1585,6 +1586,12 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       'Critical prompt coverage check failed (non-fatal)',
     );
   }
+
+  let stopAnalysisRunSweeper = () => {};
+  app.addHook('onReady', async () => {
+    if (nodeEnv !== 'test') stopAnalysisRunSweeper = startSessionAnalysisRunSweeper();
+  });
+  app.addHook('onClose', async () => { stopAnalysisRunSweeper(); });
 
   // Sentry: register Fastify error handler AFTER all routes
   setupSentryFastify(app);

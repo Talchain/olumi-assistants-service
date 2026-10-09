@@ -14,6 +14,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
+import { rerunRecordForModel } from '../rerun-explanation.js';
 import { buildRunDelta } from '../../coaching/build-run-delta.js';
 
 const SCENARIO = '8b3e4d5c-6f7a-4b8c-9d0e-1f2a3b4c5d6f';
@@ -132,7 +133,12 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
     expect(b.run_delta).toEqual(DELTA);
     await explainRun(app, SCENARIO, { statusCode: 200, json: () => b });
     const cs = interpreterSaw?.canonical_state as Record<string, unknown> | undefined;
-    expect(cs?.run_delta, 'the one interpreter call reads the delta the wire carries').toEqual(DELTA);
+    const expected = rerunRecordForModel(DELTA, false, [
+      { id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' },
+    ]);
+    expect(cs?.rerun_record, 'the interpreter reads the licensed code line from the same displayed delta').toEqual(expected);
+    expect(expected?.code_line).toBeDefined();
+    expect(cs).not.toHaveProperty('run_delta');
   });
 
   it('a first Run carries its reason; the separate explanation never invents absent canonical metadata', async () => {

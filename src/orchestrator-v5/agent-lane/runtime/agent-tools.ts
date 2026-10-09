@@ -886,7 +886,7 @@ export type NewOptionActsOn = {
 };
 
 export interface AgentCapabilities {
-  getCanonicalState(ctx: AgentToolContext): Promise<ToolResult>;
+  getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult>;
   proposeModelChange(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; direction: 'positive' | 'negative'; rationale: string;
     /** The band the user typed THIS turn; without it (or with one they did not type) nothing is prepared. */

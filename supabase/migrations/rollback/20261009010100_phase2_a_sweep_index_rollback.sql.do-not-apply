@@ -1,0 +1,3 @@
+-- NOT transactional; run alone OUTSIDE BEGIN/COMMIT, before the main rollback.
+SET lock_timeout='3s';
+DROP INDEX CONCURRENTLY IF EXISTS public.analysis_run_facts_sweep_idx;
