@@ -1,5 +1,5 @@
 {
-  "source_sha": "a42b8338792067c4c654280d5f2c5406c92fce01",
+  "source_sha": "fc6f7599d18ecddfd4ac4c3e3684d624648f11dc",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -218,11 +218,11 @@
       "src/orchestrator-v5/admission/target-testability.ts": 1,
       "src/orchestrator-v5/agent-lane/accumulation-identity.ts": 3,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 1,
-      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 6,
+      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/horizon-attestation.ts": 1,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 1,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 3,
       "src/schemas/cee-v3.ts": 3,
@@ -783,7 +783,7 @@
     "goal_deadline_as_stated": 4,
     "goal_direction": 91,
     "goal_horizon": 50,
-    "goal_horizon_months": 25,
+    "goal_horizon_months": 20,
     "goal_level_reading": 18,
     "goal_node_id": 279,
     "goal_period": 3,
@@ -808,7 +808,7 @@
     "threshold_source": 28,
     "unit_reading": 79
   },
-  "total_references": 2334,
+  "total_references": 2329,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

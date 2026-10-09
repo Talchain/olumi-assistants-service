@@ -41,6 +41,8 @@ function result(warnings: Json[]): Json {
 describe('canonical analysis view — one stored Run and the existing licences', () => {
   it('DATA-FIGURE: captured displayed chances equal the existing reader, independently of leader permission', async () => {
     const args = input();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    args.graph = nonTimeGraph(args.graph);
     const before = JSON.stringify(args);
     const view = await project(args);
     const expected = goalChanceFactsForAgent(args.currentResult, args.graph, true);
@@ -56,6 +58,8 @@ describe('canonical analysis view — one stored Run and the existing licences',
 
   it('DATA-DRIVER: carries the stored licensed driver and recorded absence, never factor_sensitivity', async () => {
     const args = input();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    args.graph = nonTimeGraph(args.graph);
     const view = await project(args);
     const stored = args.currentResult.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
     expect(view.options.find((o: Json) => o.option_id === 'raise_prices_10').main_driver).toMatchObject({
@@ -128,3 +132,12 @@ describe('canonical analysis view — one stored Run and the existing licences',
     expect(view.staleness.stale).toBeNull();
   });
 });
+
+function nonTimeGraph<T>(graph: T): T {
+  const current = structuredClone(graph);
+  for (const node of (current as { nodes: Json[] }).nodes) if (node.kind === 'goal') {
+    delete node.goal_horizon_months;
+    delete node.goal_deadline_as_stated;
+  }
+  return current;
+}

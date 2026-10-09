@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from '../goal-target/goal-horizon-verdict.js';
 /**
  * ⛔ DECISION SENSITIVITY COMES FROM EVPPI ALONE (Canonical #70 5847574837; finish line: truthful explanation).
  *
@@ -172,7 +173,7 @@ function screenShowsSensitivity(block: Record<string, unknown>, graph: unknown, 
 
 /** The run's `analysis_result` block as the Agent reads it: (i)–(iii) above. Never mutates its input. */
 export function analysisResultForAgent(result: unknown, graph?: unknown, current = true, screenGraph?: unknown): unknown {
-  const block = recordOf(result);
+  const block = recordOf(withReadTimeHorizonGate(result, graph ?? screenGraph));
   if (block === undefined) return result;
   const enrichment = recordOf(block.enrichment);
   const goalFacts = goalChanceFactsForAgent(block, graph, current);

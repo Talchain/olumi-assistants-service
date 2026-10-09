@@ -53,12 +53,12 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
-import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
-import { goalHorizonWithholdDetail } from '../../goal-target/goal-horizon-detail.js';
+import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
+export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
@@ -4007,22 +4007,6 @@ export function withholdGoalFiguresForMissingCurrentLevel<E>(response: E, graph:
     message: `Not shown. ${label}'s current level is missing.`,
     node_ids: [String(goal.id)], option_ids: scored,
     detail: { reason: 'missing_goal_baseline' },
-  }, { keepOutcome: true, keepOrdering: true });
-}
-
-/** A held month needs this Run's evaluated carrier or the user's explicit steady attestation. */
-export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown): E {
-  if (goalHorizonVerdict(graph, response) !== 'withhold') return response;
-  const goal = soleGoalOf(graph);
-  const { scored } = goalFigureOptions(response);
-  if (goal === undefined || scored.length === 0) return response;
-  const message = goalHorizonWithholdDetail(graph);
-  return withholdOptionGoalFigures(response, new Set(scored), {
-    code: GOAL_FIGURES_HORIZON_NOT_TESTED, severity: 'warning', message, say: message,
-    node_ids: [String(goal.id)], option_ids: scored,
-    detail: { reason: 'HORIZON_NOT_TESTED' },
-    // Science 93 @54dbc0fe (Q-a): only claims AGAINST the target's month go. The leader and win shares compare options on
-    // the outcome and do not depend on the month, so the ordering stays (TARGET_ONLY_CLAIMS, as for a missing level).
   }, { keepOutcome: true, keepOrdering: true });
 }
 

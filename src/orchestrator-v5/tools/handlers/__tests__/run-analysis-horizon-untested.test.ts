@@ -163,16 +163,17 @@ describe('Science §(ad) replaces a held-horizon disclaimer with typed withhold'
     for (const option of result.enrichment.option_comparison) expect(option).not.toHaveProperty('probability_of_goal');
   });
 
-  it('user_set steady_attested preserves the chances without an old horizon warning', async () => {
+  it('a stored user_stated triple does not unlock the chances', async () => {
     const graph = sizedRoute();
     const steadyGoal = graph.nodes.find((node: Json) => node.kind === 'goal');
     Object.assign(steadyGoal, {
       horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: steadyGoal.goal_horizon_months,
     });
     const result = await runOn(graph);
-    expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(false);
+    // P1a (DL 87114 #2895): a stored triple does not unlock.
+    expect(warningsOf(result).some((w) => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)).toBe(true);
     expect(horizonWarnings(result)).toEqual([]);
-    expect(result.enrichment.option_comparison.some((option: Json) => typeof option.probability_of_goal === 'number')).toBe(true);
+    expect(result.enrichment.option_comparison.some((option: Json) => typeof option.probability_of_goal === 'number')).toBe(false);
   });
 
   it.each(['ai_inferred', 'from_brief'])('%s steady_attested cannot license the month-H chance', async (provenance) => {

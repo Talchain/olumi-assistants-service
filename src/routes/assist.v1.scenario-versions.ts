@@ -659,6 +659,8 @@ export default async function route(app: FastifyInstance) {
         } else {
           // This route alone requests an explicit pair; ordinary turns keep chronology.
           const built = buildRunDelta({ priorFacts: bound.facts, selectedPair: bound.selectedPair,
+            // The selected TO version is the graph being read, including any deadline edit excluded from the Run hash.
+            currentGraph: records.to.graph,
             mayNameLeadingOption: bound.mayNameLeadingOption });
           // Reuse the final licence, projecting only the typed leader-claim fields.
           // Recorded input identities and values are facts, so must never enter a prose scrubber.

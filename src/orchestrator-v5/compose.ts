@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate, withStoredHorizonEvidence } from './goal-target/goal-horizon-verdict.js';
 /**
  * Compose a successful OlumiResponse for A2 turn classes.
  *
@@ -1452,11 +1453,11 @@ export function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
   analysisReady?: unknown,
 ): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
-  return confineUnrequestedAnalysisBlock(
+  return withStoredHorizonEvidence(confineUnrequestedAnalysisBlock(
     buildAnalysisResultBlockUnconfined(fact),
     fact,
     analysisReady,
-  );
+  ), fact.result.enrichment);
 }
 
 /**
@@ -1817,10 +1818,12 @@ function buildLifecycleBlocksFromPrior(
     return [];
   }
 
-  const priorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index, {
+  const selectedPriorFact = selectPriorRunAnalysisFact(priorFacts, freshness.selected_fact_index, {
     requestId: lifecycle.requestId,
     scenarioId: lifecycle.scenarioId,
   });
+  const priorFact = selectedPriorFact === null ? null : { ...selectedPriorFact,
+    result: withReadTimeHorizonGate(selectedPriorFact.result, persistedGraph) };
   if (priorFact === null) {
     emitLifecycle(lifecycle, {
       lifecycle_state: 'rebuild_failed',

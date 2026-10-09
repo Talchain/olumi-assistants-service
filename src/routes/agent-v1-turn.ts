@@ -1,3 +1,4 @@
+import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
@@ -1463,7 +1464,11 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
         analysisReady = (after.json.current_read as { analysis_ready?: unknown }).analysis_ready;
       }
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
-      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
+      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) {
+        const view = after.json.canonical_analysis_view as { schema?: unknown; source?: unknown } | undefined;
+        analysisResult = withReadTimeHorizonGate(after.json.analysis_result, graph,
+          view?.schema === 'canonical_analysis_view.v1' && view.source === 'stored_run_facts' ? { checkedReadGraph: graph } : undefined);
+      }
       // The selected run's own constraint verdict state, bound to the SAME fact as
       // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.
       // Narrowed through the contract's own enum: a string that is not a state is not carried.
@@ -2489,7 +2494,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       // Ordinary replay is the durable answer, including its canonical presentation grammar. No cache is needed.
       // Current/stale result-first replays above retain their state-bound recomposition rather than an old shape.
-      const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText) : null;
+      const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText,
+        replayChanceCells.find((cell): cell is Extract<OptionChanceCell, { kind: 'withheld' }> => cell.kind === 'withheld'
+          && cell.reasons.some(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED'))?.face) : null;
       const replayComposed = parityReplayComposed ?? (durableShape === null ? null : { text: replayText, shape: durableShape }) ?? (composedCandidate !== null && composedCandidate.shape !== null
         && replayChanceCells.some(cell => cell.kind === 'withheld')
         ? composedCandidate : null);

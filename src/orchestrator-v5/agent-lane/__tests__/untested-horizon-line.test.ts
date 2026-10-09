@@ -14,7 +14,7 @@ import {
 } from '../decision-input-ask.js';
 import { GOAL_CHANCE_LICENSED } from '../../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../../goal-target/goal-chance-range.js';
-import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
+import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 
 type Rec = Record<string, unknown>;
 type Json = Record<string, any>;
@@ -113,6 +113,7 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
   });
 
   it('removing a positive-H qualifier cannot license a conflicted range or remove an admitted point', () => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     const graph = clone(READ_B3.graph);
     graph.nodes.find((node: Json) => node.kind === 'goal').goal_horizon_months = 9;
     const result = clone(READ_B3.analysis_result);
@@ -127,8 +128,9 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
     const before = rangeCells(graph, result);
     expect(before.some(option => option.cell.kind === 'range')).toBe(false);
     expect(before.find(option => option.option_id === 'continue_as_now')?.cell).toEqual({
-      kind: 'figure', display: 'about 40%',
-      face: '‘Continue as now’: about 40% chance of meeting your goal, in this model, using Olumi\'s estimates for 5 relationships (see Check estimates).',
+      kind: 'withheld', face: 'Not shown yet: needs month-by-month changes',
+      reasons: [{ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', message: "Your goal is for month 9, and this model only has today's numbers." }],
+      why: "Your goal is for month 9, and this model only has today's numbers.",
     });
     const cells = before.map(option => option.cell);
     const enrichment = withUntestedHorizonWarning(result.enrichment, graph, cells);
@@ -240,20 +242,18 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
     expect(withUntestedHorizonWarning(empty, graph, TWO_FIGURES)).toBe(empty);
   });
 
-  it('user_set steady_attested is the month-H chance basis and owes no horizon disclaimer', () => {
+  it('a stored triple does not unlock; intermediate chance cells still have no old disclaimer', () => {
     const graph = graphWith({ horizon_basis: 'steady_attested', provenance: 'user_set',
       horizon_basis_source: 'user_stated', horizon_basis_months: 12 });
-    expect(goalHorizonVerdict(graph)).toBe('steady_attested');
+    // P1a (DL 87114 #2895): a stored triple does not unlock.
+    expect(goalHorizonVerdict(graph)).toBe('withhold');
     expect(untestedHorizonLine(graph)).toBe(FULL); // Historical identity remains available to exact-copy normalization.
     expect(untestedHorizonLineForCells(graph, TWO_FIGURES)).toBeNull();
     expect(decisionInputLines(graph, {
       restingText: 'Run ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false, chanceCells: TWO_FIGURES,
     })).toEqual([]);
     const previous = { inference_warnings: [{ code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: FULL }] };
-    expect(withUntestedHorizonWarning(previous, graph, TWO_FIGURES).inference_warnings).toEqual([{
-      code: GOAL_HORIZON_STEADY_ATTESTED, severity: 'info', node_ids: ['goal'],
-      message: 'You said ‘Monthly recurring revenue’ stays about where it is over 12 months unless you act, so this is its chance once each option is in effect.',
-    }]);
+    expect(withUntestedHorizonWarning(previous, graph, TWO_FIGURES).inference_warnings).toEqual([]);
   });
 
   it.each(['ai_inferred', 'from_brief', undefined])('steady_attested with %s provenance still withholds', (provenance) => {

@@ -108,6 +108,21 @@ describe('SCI-DEEP comparator · historical oracles (bank 2)', () => {
 });
 
 describe('SCI-DEEP comparator · licences, absence and construction', () => {
+  it('a current deadline without an evaluated carrier withholds stored goal chances on both endpoints', () => {
+    const graph = { nodes: [{ id: GOAL, kind: 'goal', goal_horizon_months: 12 }] };
+    const out = compareStructuralChallenge({ baselineFact: runFact(A_BODY, A_GRAPH, 'hash-a'),
+      candidateFact: runFact(B_BODY, B_GRAPH, 'hash-b'), baselineGraph: graph, candidateGraph: graph,
+      turnMayNameLeader: true, reachable: ALL, goalNodeId: GOAL, goalLevelTarget: TARGET });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    for (const row of out.claims.filter(c => c.kind === 'goal_probability')) {
+      expect(row).toMatchObject({ baseline: null, alternative: null, verdict: 'not_comparable' });
+    }
+    expect(out.certainty.baselineDisplay).toBeUndefined();
+    expect(out.certainty.alternativeDisplay).toBeUndefined();
+    expect(out.certainty.baseline).toBeUndefined();
+    expect(out.certainty.alternative).toBeUndefined();
+  });
   it('a link that cannot reach the goal: its goal claims hold BY CONSTRUCTION and say so (never robustness evidence)', () => {
     const { claims } = compare(runFact(A2_BODY, A2_GRAPH, 'hash-a2'), new Set(['an_unrelated_leaf']));
     const goalClaims = claims.filter((c) => c.kind !== 'constraint_probability');

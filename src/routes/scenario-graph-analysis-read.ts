@@ -111,6 +111,8 @@ import {
   deriveDecisionContextGraphHash,
   loadScenarioAnalysisFactsForRead,
 } from '../orchestrator-v5/build-turn-context.js';
+import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
 import { attachComputedAt } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
@@ -403,7 +405,7 @@ export async function readScenarioAnalysis(
       selected !== null && selected.fact.fact_type === 'run_analysis'
         ? (selected.fact as RunAnalysisHandlerFact)
         : null;
-    const analysisResult = fact !== null ? buildAnalysisResultBlock(fact) : null;
+    const analysisResult = fact !== null ? withReadTimeHorizonGate(buildAnalysisResultBlock(fact), params.graph) : null;
     // ⭐ #730's SHADOW CASE (Canonical, single-projection parity C2): a NEWER claim-bearing Run (partial or degraded —
     // the refusal marker makes no claim, `selectClaimBearingRunAnalysisFact`) that withheld the leader is never
     // overridden by the older success displayed here. The turn's entitlement reads that same claim; without this the
@@ -543,7 +545,7 @@ export async function readScenarioAnalysis(
       if (fact === null || builtResult === null || newerClaimWithholds) return undefined;
       const pair = selectTwoNewestRunAnalysisFacts(facts);
       if (pair === null || pair.current !== fact) return undefined;
-      const built = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayPresentLeaderClaimForFact(fact) });
+      const built = buildRunDelta({ priorFacts: facts, currentGraph: params.graph, mayNameLeadingOption: mayPresentLeaderClaimForFact(fact) });
       return built.kind === 'ok' ? built.delta : undefined;
     })();
     // ⭐ ONE RUN, ONE SERIALISATION (F1b; DL ruling 5949485462, lease 5950467893). The Run turn ships its block and pair
@@ -569,6 +571,8 @@ export async function readScenarioAnalysis(
     ).response;
     const boundResult = builtResult === null ? null
       : ((licensed.blocks as unknown[] | undefined)?.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as typeof builtResult | undefined) ?? null;
+    const horizonHeld = (boundResult as { enrichment?: { inference_warnings?: readonly { code?: unknown }[] } } | null)
+      ?.enrichment?.inference_warnings?.some(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED) === true;
     const runDelta = licensed.run_delta as typeof builtRunDelta;
     // ⭐ 0.79 SD-1 Slice R (DL ruling #87, option A): what the selected Run's turn DELIVERED (its Phase 3 blocks and
     // `analysis_ready` options), so a reload or a second device says what the Run's turn said. The agent lane records it
@@ -578,7 +582,8 @@ export async function readScenarioAnalysis(
     // SERVE OR OMIT: a failed read, a corrupt row or a re-licensed block omits it; the read never ships a re-worded copy.
     const deliveredRecord = await (async () => {
       // A selected `fact` is already a FRESH Run (`selected` above); `current_read` re-gates on `complete_current`.
-      if (fact === null || boundResult === null || newerClaimWithholds) return undefined;
+      // Delivered cards can contain stored chance prose. They are serve-or-omit, so cannot outlive the horizon licence.
+      if (fact === null || boundResult === null || newerClaimWithholds || horizonHeld) return undefined;
       const runId = fact.result.run_id;
       if (runId === undefined || store.readNewestRunDeliveryFor === undefined) return undefined;
       let delivery: Awaited<ReturnType<NonNullable<typeof store.readNewestRunDeliveryFor>>>;
@@ -691,6 +696,8 @@ export async function readScenarioAnalysis(
             // The ONE reader both legs use (the Agent turn reads this same key through it too, DL 5887273384): only an
             // array the published contract accepts is carried, `[]` included; anything else is not recorded.
             ...(() => {
+              // Exact stored 0/1 decisions are target claims too; they cannot bypass the result's current horizon gate.
+              if (horizonHeld) return {};
               const certainty = readStoredGoalCertainty(fact.result.goal_certainty);
               return certainty === undefined ? {} : { analysis_goal_certainty: certainty };
             })(),

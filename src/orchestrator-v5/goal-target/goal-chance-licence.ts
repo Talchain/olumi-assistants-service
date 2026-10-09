@@ -1,4 +1,4 @@
-import { goalHorizonVerdict } from './goal-horizon-verdict.js';
+import { goalHorizonVerdict, heldGoalHorizonMonths, withReadTimeHorizonGate } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -188,8 +188,7 @@ function zeroSpreadReasons(
   const rates = verdict === 'computed_at_h' || (verdict === 'no_horizon'
     && isRec(graph) && Array.isArray(graph.nodes) && graph.nodes.some(n => isRec(n)
       && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation'));
-  const horizon = goal?.goal_horizon_months;
-  const months = typeof horizon === 'number' && Number.isInteger(horizon) && horizon > 0 ? horizon : undefined;
+  const months = heldGoalHorizonMonths(goal);
   // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
   const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
   const out: Record<string, GoalChanceZeroSpread> = {};
@@ -690,7 +689,7 @@ export function agentLicenceRecordOf(result: unknown): Rec | undefined {
  * No percentage travels: the Agent quotes each option's `probability_of_goal` from its own row. `undefined` when the Run
  * carries no single well-formed licence.
  */
-export function goalChanceLicenceForAgent(result: unknown): {
+export function goalChanceLicenceForAgent(result: unknown, currentGraph?: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
   sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
   shortfall_note_by_option?: Readonly<Record<string, string>>;
@@ -698,6 +697,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
   olumi_estimate_link_count?: number;
   goal_node_id?: string; goal_label?: string; option_labels_by_option?: Readonly<Record<string, string>>;
 } | undefined {
+  result = withReadTimeHorizonGate(result, currentGraph);
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : [])).filter((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED);

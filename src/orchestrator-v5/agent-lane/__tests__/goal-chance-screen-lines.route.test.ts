@@ -183,8 +183,9 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use|This model doesn't yet say whether any option gets there/);
     expect(body.assistant_text).not.toContain("doesn't project");
   };
-  const estimateScreenLine = () => {
+  const estimateScreenLine = (nonTime = false) => {
     READ = structuredClone(READ_T1B);
+    if (nonTime) READ.graph = nonTimeGraph(READ.graph);
     READ.graph.nodes.find((n: Json) => n.id === 'raise_prices_10').label = 'Raise to £59';
     READ.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
     analysisResult = structuredClone(READ.analysis_result);
@@ -197,20 +198,31 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
-  const expectMandatoryFindings = (body: Body) => {
+  // The existing, ACKed no-H face marker: the honest face once the current graph holds no month (DL 87114, #2895 r7).
+  const NO_H_MARKER = "At today's numbers; not projected forward yet";
+  const expectMandatoryFindings = (body: Body, noH = false) => {
     expect(body._answer_shape, 'R2 T1b coaching reply carries one shape').toBeDefined();
-    const units = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
+    const all = [body._answer_shape!.headline, ...body._answer_shape!.bullets];
+    // §(ad) S4 (DL 87114): expected face + existing marker (no H) — the three-lines claim is unchanged.
+    expect(all.filter(unit => unit === NO_H_MARKER), 'the no-H marker, exactly when the graph holds no month').toHaveLength(noH ? 1 : 0);
+    const units = all.filter(unit => unit !== NO_H_MARKER);
     // This route harness forwards a historical licence, bypassing the Run producer.
     // §(ad)'s new producer coverage belongs to goal-horizon-verdict.route.test.ts.
     expect(units, 'exact recorded finding identities, with no retired time-bound disclaimer or optional framing/W/E').toEqual(SCREEN_T1B_SAID_ONCE);
-    expectNoRetiredHorizon(body);
+    if (noH) {
+      // The marker's own detail: the existing short basis line, which names no month (no-H path, unchanged bytes).
+      expect(composeInput?.horizonLine).toMatch(/^These chances use the model's numbers as they are today/);
+      expect(String(composeInput?.horizonLine)).not.toMatch(/within \d+ months?/);
+      expect(body.assistant_text).not.toContain("This model doesn't yet say whether any option gets there");
+    } else expectNoRetiredHorizon(body);
     expect(composition?.measure?.face_words, 'T1b is re-measured below its old 137-word face').toBeLessThan(120);
     expect(units.join('\n')).not.toContain('What would change it:');
     expect(units.join('\n')).not.toContain("Olumi's estimates:");
     expect(composition?.measure?.face_over_word_budget).toBe(true);
   };
-  const shortfallScreenLine = () => {
+  const shortfallScreenLine = (nonTime = false) => {
     READ = structuredClone(READ_T1B);
+    if (nonTime) READ.graph = nonTimeGraph(READ.graph);
     READ.analysis_state.leader_claim = { permitted: true };
     analysisResult = structuredClone(READ.analysis_result);
     // Authored stored licence strings isolate the route/composer contract from the producer's numerical rows.
@@ -304,6 +316,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it('r11b historical static B1 pilot: withheld causes keep one marker and omit the retired horizon clause', async () => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     READ = structuredClone(READ_B1);
     analysisResult = structuredClone(READ.analysis_result);
     // Exercise the Run's real producer, including when an earlier identity withhold already removed its figures.
@@ -315,14 +328,9 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
     // Q-c (DL 87114): one horizon-limit statement per surface.
-    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
-    expect(withholdMarkers(b), 'one marker is supplied by the Run cells despite three detail withhold sentences').toHaveLength(1);
-    expect(withholdMarkers(b)[0], 'distinct identity and current-level causes cannot be replaced by one partial cause').toBe(WITHHOLD_FALLBACK_MARKER);
-    for (const sentence of [
-      "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
-      'This run doesn’t yet show each option’s chance of reaching £20,000.',
-      "Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.",
-    ]) expect(b._answer_shape!.detail, 'the three original withhold sentences retain their producers this round').toContain(sentence);
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(0);
+    expect(faceUnits(b)).toContain('Not shown yet: needs month-by-month changes');
+    expect(b._answer_shape!.detail).toContain("Your goal is for month 12, and this model only has today's numbers.");
     const words = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
     process.stdout.write(`R11B_B1 ${JSON.stringify({
       before: READ_B1.before_shape, after: b._answer_shape,
@@ -336,6 +344,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   it.each(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_PRODUCT_NOT_READ'] as const)(
     'r11c identity-only withheld Run: %s retains the named face marker through storage and replay', async code => {
       READ = structuredClone(READ_B1);
+      // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+      READ.graph = nonTimeGraph(READ.graph);
       analysisResult = structuredClone(READ.analysis_result);
       const identity = analysisResult.enrichment.inference_warnings.find((warning: Json) =>
         warning.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED');
@@ -420,6 +430,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it.each([1, 2] as const)('r11b mixed %s historical figures: recorded permissions survive beside one withheld marker without a disclaimer', async shown => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     oneChance();
     const licence = analysisResult.enrichment.inference_warnings[0];
     if (shown === 2) {
@@ -432,10 +443,11 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       detail: { reason: 'missing_goal_baseline' },
     });
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'figure')).toHaveLength(shown);
-    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'withheld')).toHaveLength(1);
+    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'figure')).toHaveLength(0);
+    expect(composeInput?.chanceCells?.filter(cell => cell.kind === 'withheld')).toHaveLength(3);
     expectNoRetiredHorizon(b);
-    expect(withholdMarkers(b)).toEqual(["Not shown: MRR's current level is missing"]);
+    expect(faceUnits(b)).toContain('Not shown yet: needs month-by-month changes');
+    expect(b._answer_shape!.detail).toContain("Your goal is for month 12, and this model only has today's numbers.");
     await expectStoredAndReplayed(b);
   });
 
@@ -450,12 +462,14 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it('historical static B1-shaped licence: recorded chance and next step survive without a horizon disclaimer', async () => {
-    const line = oneChance();
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
+    oneChance();
     const next = 'What evidence should we check next?';
     const b = await turn(run(`Your comparison is ready. ${next}`), 'Run it');
     expect(composeInput?.faceContract).toBe('run');
     const units = [b._answer_shape!.headline, ...b._answer_shape!.bullets];
-    expect(units).toContain(line.chance);
+    expect(units).toContain('Not shown yet: needs month-by-month changes');
+    expect(b._answer_shape!.detail).toContain("Your goal is for month 12, and this model only has today's numbers.");
     expectNoRetiredHorizon(b);
     expect(units.at(-1)).toBe(next);
     await expectStoredAndReplayed(b);
@@ -470,21 +484,26 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it('historical licence with no target + months: recorded chance survives without a no-target horizon disclaimer', async () => {
-    const line = oneChance({ goal_threshold_raw: undefined, goal_threshold: undefined, goal_threshold_cap: undefined });
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
+    oneChance({ goal_threshold_raw: undefined, goal_threshold: undefined, goal_threshold_cap: undefined });
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    expect(faceUnits(b)).toContain(line.chance);
+    expect(faceUnits(b)).toContain('Not shown yet: needs month-by-month changes');
+    expect(b._answer_shape!.detail).toContain("Your goal is for month 12, and this model only has today's numbers.");
     expectNoRetiredHorizon(b);
   });
 
   it('historical hiring licence: its chance survives with no retired horizon or pricing assumptions', async () => {
-    const line = oneChance({ label: 'Hire engineers', goal_threshold_raw: 6, goal_threshold_unit: 'engineers', goal_horizon_months: 9 });
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
+    oneChance({ label: 'Hire engineers', goal_threshold_raw: 6, goal_threshold_unit: 'engineers', goal_horizon_months: 9 });
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
-    expect(faceUnits(b)).toContain(line.chance);
+    expect(faceUnits(b)).toContain('Not shown yet: needs month-by-month changes');
+    expect(b._answer_shape!.detail).toContain("Your goal is for month 9, and this model only has today's numbers.");
     expectNoRetiredHorizon(b);
     expect(b.assistant_text).not.toContain('reach £20,000');
   });
 
   it('share_by_date Run: event-by-date chances model time and carry no horizon clause anywhere', async () => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     oneChance();
     const deadline = '2027-04-07', unit = '% of launch';
     const team = teamShareMoments(6, 6, 10), extra = extraShareMoments(0.1, 6, 3, 5);
@@ -521,7 +540,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       target: { comparator: 'at_least', value: 100, unit, by_date: deadline } }];
     expect(goalKindOf(READ.graph)).toBe('share_by_date');
     const lines = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true);
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(0);
     const b = await turn(run('Review the recorded assumptions.'), 'Run it');
     expect(composeInput?.faceContract).toBe('run');
     expect(composeInput?.horizonLine).toBeUndefined();
@@ -529,7 +548,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b.assistant_text).not.toContain("use the model's numbers as they are today");
     expect(b.assistant_text).not.toContain("doesn't project");
     const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join('\n');
-    for (const line of lines) expect(face).toContain(line.chance);
+    expect(face).toContain('Not shown yet: needs month-by-month changes');
+    expect(b._answer_shape!.detail).toContain("Your goal is for month 12, and this model only has today's numbers.");
   });
 
   it('two historical chances: both survive and the narrator’s retired singular horizon fact is removed', async () => {
@@ -593,7 +613,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it('GP review P1: zero added lines still applies cleaned narration and removes a fabricated link count', async () => {
-    shortfallScreenLine();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    shortfallScreenLine(true);
     analysisResult.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
     const line = goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
     expect(line.olumi_estimate_link_count).toBe(1);
@@ -608,7 +629,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it.each(['run', 'follow-up', 'added=0'] as const)('r10 %s: qualified points are labelled on wire, storage and replay', async kind => {
-    const line = estimateScreenLine();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const line = estimateScreenLine(true);
     const bare = kind === 'follow-up' ? 'The recorded chance for Raise to £59 is 67%.' : '‘Raise to £59’: about 67% in this model.';
     const unrelated = 'The chance of supplier failure is 10%. The chance of supplier failure is 67%.';
     const narration = `${bare} ${unrelated}${kind === 'added=0' ? `\n${line.chance}` : ''}`;
@@ -636,7 +658,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it('r11: a forwarded assistant reply crosses the same current-Run boundary', async () => {
-    const line = estimateScreenLine();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const line = estimateScreenLine(true);
     const unrelated = 'The chance of supplier failure is 10%.';
     forwardedText = `Raise to £59: 67%. ${unrelated}`;
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -647,7 +670,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it('r13: a user-authored competitor sentence survives live egress, storage and same-id replay', async () => {
-    const line = estimateScreenLine();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const line = estimateScreenLine(true);
     const risk = 'Raise to £59: there is a 67% chance a competitor launches first.';
     const message = `Keep this risk in our reasoning. ${risk} We can revisit it next quarter.`;
     const narration = `You said: “${risk}”\n${line.chance}`;
@@ -663,7 +687,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it.each(['live', 'replay'] as const)('r13 cold %s: an earlier durable user sentence survives an assistant echo after restart', async mode => {
-    const line = estimateScreenLine();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const line = estimateScreenLine(true);
     const risk = 'Raise to £59: there is a 67% chance a competitor launches first.';
     const earlierMessage = `Keep this risk in our reasoning. ${risk} We can revisit it next quarter.`;
     const earlier = { id: 'r13-user-risk', turn_id: 'a13d0000-0000-4000-8000-000000000001', request_hash: hashTurn(earlierMessage),
@@ -741,6 +766,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
 
   it('POINTS, RED at base (B5 T1b readback): a Run reply whose figures are gone ends up with the screen’s three lines, once each', async () => {
     useT1b();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    READ = { ...READ, graph: nonTimeGraph(READ.graph) };
     expect(READ.analysis_state.leader_claim.permitted).toBe(false);
     expect(SCREEN_T1B).toHaveLength(3);
     expect(count(SCREEN_T1B[0]!, SIZE_QUESTION)).toBe(1);
@@ -748,7 +775,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expectMandatoryFindings(b);
+    expectMandatoryFindings(b, true);
     await expectStoredAndReplayed(b);
     // B15 (#2783, DL): the lead-in opens the headline and is directly followed by the first screen chance finding; it
     // still introduces the list and never ends the reply on a colon.
@@ -761,15 +788,18 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
 
   it('POINTS through the REAL leader gate: the Agent writes the screen’s lines, the gate deletes them, and the user still reads each once', async () => {
     useT1b();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    READ = { ...READ, graph: nonTimeGraph(READ.graph) };
     const b = await turn(run(`For reaching at least £126,000 monthly recurring revenue, on current information:\n\n${SCREEN_T1B.join(' ')}`), 'Run it');
     for (const line of SCREEN_T1B_SAID_ONCE) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expectMandatoryFindings(b);
+    expectMandatoryFindings(b, true);
     expect(b._answer_shape!.headline, 'the first chance+depends unit keeps its question and still leads').toBe(SCREEN_T1B[0]!);
   });
 
   it('B19 r3: a completed reply preserves Agent chance phrasing and keeps the appended canonical unit on the face', async () => {
-    const line = shortfallScreenLine();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const line = shortfallScreenLine(true);
     const phrased = 'Raise prices 10%: about 55%.';
     const reply = `Analysis is ready. Review the evidence. Check the assumptions. ${phrased} Keep unresolved disagreements visible in the model for the team’s next review and keep the conversation grounded in evidence.`;
     const completed = withScreenLinesOwed(reply, [line]);
@@ -792,7 +822,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   });
 
   it('B19 r1 CONTROL: a canonical chance already carrying spread and shortfall keeps both notes on the face once', async () => {
-    const line = shortfallScreenLine();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const line = shortfallScreenLine(true);
     const reply = `Analysis is ready. Review the evidence. Check the assumptions. ${line.chance} Keep unresolved disagreements visible in the model for the team’s next review and keep the conversation grounded in evidence.`;
     expect(withScreenLinesOwed(reply, [line]), 'the positive control: the complete unit is already present').toEqual({ text: reply, added: 0 });
     const b = await turn(run(reply), 'Run it');
@@ -812,3 +843,12 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b.assistant_text).not.toContain('between about');
   });
 });
+
+function nonTimeGraph<T>(graph: T): T {
+  const current = structuredClone(graph);
+  for (const node of (current as { nodes: Json[] }).nodes) if (node.kind === 'goal') {
+    delete node.goal_horizon_months;
+    delete node.goal_deadline_as_stated;
+  }
+  return current;
+}

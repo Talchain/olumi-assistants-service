@@ -14,7 +14,7 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
-import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
+import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { goalHorizonSteadyWhyLine } from '../goal-target/goal-horizon-detail.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
@@ -150,8 +150,8 @@ const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
 const TOGGLE_LABEL_WORDS = 7;
 
 const withinMonths = (goal: Rec): string => {
-  const m = goal.goal_horizon_months;
-  return finite(m) && Number.isInteger(m) && m > 0 ? ` within ${m} ${m === 1 ? 'month' : 'months'}` : '';
+  const m = heldGoalHorizonMonths(goal);
+  return m !== undefined ? ` within ${m} ${m === 1 ? 'month' : 'months'}` : '';
 };
 
 /**

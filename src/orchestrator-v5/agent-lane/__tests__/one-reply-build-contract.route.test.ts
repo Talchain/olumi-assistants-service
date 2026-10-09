@@ -288,17 +288,16 @@ describe('ONE reply contract through the build route', () => {
   });
 
   it('r13 draft without widened: omitted and zero typed counts keep the existing reply byte-identical', async () => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     narrator = 'Olumi built your pricing model.';
     const body = await buildTurn();
     // The historical capture retains its display grammar, with §(ad)'s retired chance-free horizon clause removed.
     expect(body.assistant_text, 'no widening preserves the existing reply apart from the retired horizon clause').toBe([
-      "Not shown: how MRR is worked out isn't confirmed",
+      "Not shown yet: needs month-by-month changes",
       "• Olumi's estimates: 3, see Check estimates.",
       'Olumi built your pricing model.',
-      // Q-c (DL 87114): one horizon-limit statement per surface.
-      "This model doesn't yet say whether any option gets there within 12 months.",
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from. The rest of this Run's results still stand.",
-      GOAL_CHANCE_CAPTURE,
+      "Your goal is for month 12, and this model only has today's numbers.",
     ].join('\n\n'));
     const payload = structuredClone(lastBuildPayload);
     const input = lastComposeInput as ReplyComposeInput;
@@ -324,6 +323,8 @@ describe('ONE reply contract through the build route', () => {
 
   it('r13 automatic first Run: typed retained risks supply the note and marker on the build turn, with identical replay', async () => {
     useNumericChanceRead();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    currentRead.graph = nonTimeGraph(currentRead.graph);
     buildWidened = { options: 0, risks: 3 };
     const risks = withOlumiAddedRisks();
     const body = await buildTurn();
@@ -345,6 +346,8 @@ describe('ONE reply contract through the build route', () => {
 
   it('r13 Run: retained typed Olumi risks keep the marker beside the numeric chance and the note once; replay identical', async () => {
     useNumericChanceRead();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    currentRead.graph = nonTimeGraph(currentRead.graph);
     const risks = withOlumiAddedRisks();
     saved = structuredClone(currentRead.graph);
     const payload = { kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'Run analysis.',
@@ -379,6 +382,8 @@ describe('ONE reply contract through the build route', () => {
 
   it('FU1 mixed Run: another option shows a chance while the risk option is withheld, keeping its relies-on words; replay identical', async () => {
     useNumericChanceRead();
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    currentRead.graph = nonTimeGraph(currentRead.graph);
     const risks = withOlumiAddedRisks();
     const riskOption = ((risks[0]!.draft_widening as Rec).hits as Rec).id;
     const enrichment = currentRead.analysis_result.enrichment as Rec;
@@ -405,6 +410,7 @@ describe('ONE reply contract through the build route', () => {
   });
 
   it('r11b B1 automatic first Run: exact pilot face/detail uses one cell marker without the retired horizon clause', async () => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     currentRead = { ...structuredClone(B1), current_read: { analysis_ready: structuredClone(B1.analysis_ready),
       computed_against_hash: B1.graph_hash, current_analysis_hash: B1.graph_hash, run_id: 'fixture-head-b1' } };
     buildBrief = B1.brief;
@@ -418,17 +424,13 @@ describe('ONE reply contract through the build route', () => {
     expect((lastComposeInput as ReplyComposeInput).chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
     expect(body._answer_shape).toBeDefined();
     const shown = face(body._answer_shape!);
-    expect(shown.split('\n').filter(line => /^Not shown(?::| yet;)/.test(line))).toEqual(['Not shown yet; why is under More detail']);
+    expect(shown).toContain('Not shown yet: needs month-by-month changes');
     expect(shown).toContain('How likely or how large is "Price-rise cancellation risk" today?');
     expect(shown).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     // Q-c (DL 87114): one horizon-limit statement per surface.
-    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
-    for (const sentence of [
-      "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
-      'This run doesn’t yet show each option’s chance of reaching £20,000.',
-      "Olumi reads 'MRR' as 'Pro plan price' × 'Pro paying subscribers', but that hasn't been confirmed, so this run gives no chance of reaching the target for 'MRR'.",
-    ]) expect(body._answer_shape!.detail, 'the three original detail withhold sentences are retained').toContain(sentence);
+    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(0);
+    expect(body._answer_shape!.detail).toContain("Your goal is for month 12, and this model only has today's numbers.");
     process.stdout.write(`R11B_B1_BUILD ${JSON.stringify({ before: B1.before_shape, after: body._answer_shape, input: lastComposeInput,
       words: { before_face: words(face(B1.before_shape)), before_detail: words(B1.before_shape.detail),
         after_face: words(shown), after_detail: words(body._answer_shape!.detail) } })}\n`);
@@ -436,6 +438,7 @@ describe('ONE reply contract through the build route', () => {
   });
 
   it('r11c identity-only automatic first Run: the cell reason keeps the named identity marker through durable replay', async () => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     currentRead = { ...structuredClone(B1), current_read: { analysis_ready: structuredClone(B1.analysis_ready),
       computed_against_hash: B1.graph_hash, current_analysis_hash: B1.graph_hash, run_id: 'fixture-head-b1-identity-only' } };
     buildBrief = B1.brief;
@@ -447,16 +450,15 @@ describe('ONE reply contract through the build route', () => {
     expect(input.chanceCells?.length).toBeGreaterThan(0);
     for (const cell of input.chanceCells!) {
       expect(cell.kind).toBe('withheld');
-      if (cell.kind === 'withheld') expect(cell.reasons.map(reason => reason.code)).toEqual(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED']);
+      if (cell.kind === 'withheld') expect(cell.reasons.map(reason => reason.code)).toEqual(['GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_HORIZON_NOT_TESTED']);
     }
     expect(body._answer_shape).toBeDefined();
     const shown = face(body._answer_shape!);
-    expect(shown.split('\n').filter(line => /^Not shown(?::| yet;)/.test(line))).toEqual([
-      "Not shown: how MRR is worked out isn't confirmed",
-    ]);
+    expect(shown).toContain('Not shown yet: needs month-by-month changes');
+    expect(body._answer_shape!.detail).toContain("Your goal is for month 12, and this model only has today's numbers.");
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     // Q-c (DL 87114): one horizon-limit statement per surface.
-    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
+    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(0);
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
@@ -572,9 +574,13 @@ describe('ONE reply contract through the build route', () => {
   });
 
   it('R1 original capture: Olumi’s basis-less 250 offers no identity card or approval', async () => {
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const localFixture = structuredClone(FX);
+    localFixture.read.graph = nonTimeGraph(localFixture.read.graph);
+    currentRead = localFixture.read;
     // The provider now narrates the draft without the captured, obsolete "confirm on the button" instruction.
-    narrator = FX.narrator.slice(0, FX.narrator.indexOf('\n\n“Olumi reads'));
-    const before = structuredClone(FX.read.graph);
+    narrator = localFixture.narrator.slice(0, localFixture.narrator.indexOf('\n\n“Olumi reads'));
+    const before = structuredClone(localFixture.read.graph);
     expect(identityPartsWithoutLevel(before, ['pro_plan_price', 'pro_paying_subscribers'])).toEqual([
       { id: 'pro_paying_subscribers', label: 'Pro paying subscribers', kind: 'factor' },
     ]);
@@ -596,7 +602,7 @@ describe('ONE reply contract through the build route', () => {
     expect(body.assistant_text).not.toContain('Please confirm on the button.');
     expect(count(body.assistant_text, GOAL_CHANCE_CAPTURE), 'without a card, the full chance explanation remains owed once').toBe(1);
     expect(saved).toEqual(before);
-    expect(FX.read.graph).toEqual(before);
+    expect(localFixture.read.graph).toEqual(before);
     expect(saved.nodes.find(n => n.id === 'pro_paying_subscribers')!.observed_state).toMatchObject({
       raw_value: 250, value: 0.125, source: 'cee_inference',
     });
@@ -606,6 +612,8 @@ describe('ONE reply contract through the build route', () => {
 
   it('R3 withheld Run: typed current-level marker on the face, full reason in detail, one next step', async () => {
     currentRead = structuredClone(FX.read);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    currentRead.graph = nonTimeGraph(currentRead.graph);
     saved = structuredClone(currentRead.graph);
     const goal = saved.nodes.find(n => n.id === 'mrr')!;
     delete goal.nonlinear_identity;
@@ -644,3 +652,11 @@ describe('ONE reply contract through the build route', () => {
     expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape!));
   });
 });
+
+function nonTimeGraph(graph: Graph): Graph {
+  const current = structuredClone(graph);
+  for (const node of current.nodes) if (node.kind === 'goal') {
+    delete node.goal_horizon_months; delete node.goal_deadline_as_stated;
+  }
+  return current;
+}

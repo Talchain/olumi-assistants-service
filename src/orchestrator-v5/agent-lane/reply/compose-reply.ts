@@ -1049,14 +1049,20 @@ export function withShapeOnlyIfItDerives<B extends { assistant_text?: unknown; _
   return whole as B;
 }
 
-/** Recover a canonical bullet-bearing presentation from durable answer bytes, without a model or mutable cache. */
-export function shapeFromDerivedAnswerText(text: string): AnswerShape | null {
+/** Recover canonical presentation from durable bytes; bulletless recovery requires the caller's typed face. */
+export function shapeFromDerivedAnswerText(text: string, bulletlessFace?: string): AnswerShape | null {
   const parts = text.split('\n\n');
   const headline = parts[0];
   const bulletBlock = parts[1];
   if (headline === undefined || headline.trim() === '' || bulletBlock === undefined) return null;
   const rows = bulletBlock.split('\n');
-  if (rows.length === 0 || rows.some(row => !row.startsWith('• ') || row.slice(2).trim() === '')) return null;
+  if (rows.length === 0 || rows.some(row => !row.startsWith('• ') || row.slice(2).trim() === '')) {
+    // A horizon-withheld Run can have one face marker and detail, with no bullet block to recover.
+    // The caller opts in only for that typed finding; ordinary unstructured replies retain their whole-text grammar.
+    if (headline !== bulletlessFace) return null;
+    const shape: AnswerShape = { headline, bullets: [], detail: parts.slice(1).join('\n\n') };
+    return deriveAnswerTextFromShape(shape) === text ? shape : null;
+  }
   const shape: AnswerShape = { headline, bullets: rows.map(row => row.slice(2)), detail: parts.slice(2).join('\n\n') };
   return deriveAnswerTextFromShape(shape) === text ? shape : null;
 }

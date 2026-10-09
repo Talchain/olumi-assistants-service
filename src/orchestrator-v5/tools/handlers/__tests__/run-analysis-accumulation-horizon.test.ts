@@ -62,8 +62,11 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
   it('a withdrawn accumulation with held H owes no retired warning, even with a duration limit', () => {
     const graph = { nodes: [{ id: 'mrr', kind: 'goal', goal_horizon_months: 6 }],
       goal_constraints: [{ unit: 'months' }] };
+    // Q-c (DL 87114): the withdrawn carrier (true) leaves no §(ad) detail on this surface, so A7 is owed even with a duration limit.
+    const expected = { inference_warnings: [{ code: 'GOAL_HORIZON_NOT_TESTED', severity: 'info',
+      message: "This model doesn't yet say whether any option gets there within 6 months.", node_ids: ['mrr'] }] };
     expect(withUntestedHorizonWarning({}, graph)).toEqual({});
-    expect(withUntestedHorizonWarning({}, graph, true)).toEqual({});
+    expect(withUntestedHorizonWarning({}, graph, true)).toEqual(expected);
   });
 
   it('RED ROW subscribers_at_12: deadline changed to 6 drops only the wire carrier and records its exact warning', async () => {

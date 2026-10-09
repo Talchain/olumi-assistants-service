@@ -78,7 +78,8 @@ function noChance(view: Json) {
 
 describe('PR-S2: same-Run per-option chance, range and deadline licences', () => {
   it('(1) saved each/no leader: licensed chances match the display (RED on base: the leader gate drops them)', async () => {
-    const view = await saved(fixture());
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const view = await saved(nonTimeFixture());
     expect(view.claim_permissions.leader_may_be_named).toBe(false);
     expect(view.goal_chance_licence).toEqual({ form: 'each', option_ids: [A, B, C], withheld_option_ids: [C] });
     expect(view.goal_chance_display).toEqual({ [A]: 'about 45%', [B]: 'about 50%' });
@@ -89,7 +90,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     }
   });
   it('(2) the same Run gives the withheld option no figure, precision or drivers', async () => {
-    const view = await saved(fixture());
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const view = await saved(nonTimeFixture());
     const row = view.saved_run_options.find((r: Json) => r.option_id === C);
     expect(row).not.toHaveProperty('probability_of_goal');
     noCompanions(row);
@@ -105,7 +107,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
   // no licence facts on either door; the saved door's W3 leader rule (this fixture's leader is withheld → no chance) and the
   // run door's run-wide withhold (none here → the recorded chance stays, as on base).
   it('(4) no licence record: no licence facts; each door keeps its base rule for the raw chance', async () => {
-    const read = fixture([horizon]);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeFixture([horizon]);
     noChance(await saved(read));
     const view = await run(read);
     for (const key of ['goal_chance_display', 'goal_chance_licence', 'goal_chance_driver_display', 'goal_chance_range_display', 'goal_horizon_line']) expect(view).not.toHaveProperty(key);
@@ -113,7 +116,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     for (const row of view.enrichment.option_comparison) noCompanions(row);
   });
   it('(5) a scoped placeholder withhold keeps the other licensed displays (RED on base: the run-wide gate drops all)', async () => {
-    const read = fixture([licence, { code: GOAL_FIGURES_PLACEHOLDER_PATH, severity: 'info', message: 'A link needs sizing.', option_ids: [C] }]);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeFixture([licence, { code: GOAL_FIGURES_PLACEHOLDER_PATH, severity: 'info', message: 'A link needs sizing.', option_ids: [C] }]);
     const view = await run(read);
     expect(view.goal_chance_display).toEqual({ [A]: 'about 45%', [B]: 'about 50%' });
     expect(view.goal_chance_licence).toEqual({ form: 'each', option_ids: [A, B, C], withheld_option_ids: [C] });
@@ -130,7 +134,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     noChance(await run(read));
   });
   it('(7) ranges use exact words and graph labels on both doors, with no point for those options', async () => {
-    const read = fixture([licence, rangeRecord]);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeFixture([licence, rangeRecord]);
     const before = clone(read);
     const views = [await saved(read), await run(read)];
     for (const view of views) {
@@ -153,7 +158,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     rangeRecord, { code: withheldBy, severity: 'info', message: 'Withheld for this option.', option_ids: [A, B] },
   ]);
   it.each([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE])('(7b) the range shows beside its own %s withhold, on both doors', async (code) => {
-    const read = rangeRun(code);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeRead(rangeRun(code));
     for (const view of [await saved(read), await run(read)]) {
       expect(view.goal_chance_range_display).toEqual(expectedRanges);
       expect(view.goal_chance_display).toEqual({ [C]: 'about 25%' });
@@ -172,13 +178,15 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     [0, 40, 'between less than 1% and 40%'], [0, 100, 'between less than 1% and more than 99%'],
     [5, 100, 'between about 5% and more than 99%'], [20, 65, 'between about 20% and 65%'],
   ])('(7d) endpoints %i/%i read as the screen: %s, on both doors', async (low, high, words) => {
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
     const warning = clone(rangeRecord);
     Object.assign(warning.range_by_option[A], { low_pct: low, high_pct: high, low_rounding: 'whole', high_rounding: 'whole' });
-    const read = fixture([licence, warning]);
+    const read = nonTimeFixture([licence, warning]);
     for (const view of [await saved(read), await run(read)]) expect(view.goal_chance_range_display[A].range).toBe(words);
   });
   it('(7e) a link label that cannot be resolved drops THAT option’s range (the screen drops the line); never a raw id', async () => {
-    const read = fixture([licence, rangeRecord]);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeFixture([licence, rangeRecord]);
     read.graph.nodes = read.graph.nodes.filter((n: Json) => n.id !== 'missing_source');
     for (const view of [await saved(read), await run(read)]) {
       expect(view.goal_chance_range_display).toEqual({ [A]: expectedRanges[A] });
@@ -205,10 +213,11 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(goalChanceRangeDisplayForAgent({ inference_warnings: [rangeRecord, rangeRecord] }, fixture().graph)).toBeUndefined();
   });
   it('(9) the deadline travels verbatim with a chance or a range, and otherwise stays absent', async () => {
+    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     for (const warning of [licence, rangeRecord]) {
       const read = fixture([warning, horizon]);
-      expect((await saved(read)).goal_horizon_line).toBe(horizonLine);
-      expect((await run(read)).goal_horizon_line).toBe(horizonLine);
+      expect(await saved(read)).not.toHaveProperty('goal_horizon_line');
+      expect(await run(read)).not.toHaveProperty('goal_horizon_line');
     }
     noChance(await saved(fixture([horizon])));
     expect(await run(fixture([horizon]))).not.toHaveProperty('goal_horizon_line');
@@ -232,7 +241,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
   });
   it('CONTROL: similar licences and whole-percentage displays also work without a leader', async () => {
-    const read = fixture([{ ...licence, withheld_option_ids: undefined, form: 'similar', similar_option_ids: [A, B], pct_by_option: { [A]: 44, [B]: 48, [C]: 25 }, display_rounding_by_option: undefined }]);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeFixture([{ ...licence, withheld_option_ids: undefined, form: 'similar', similar_option_ids: [A, B], pct_by_option: { [A]: 44, [B]: 48, [C]: 25 }, display_rounding_by_option: undefined }]);
     const view = await saved(read);
     expect(view.goal_chance_display).toEqual({ [A]: 'about 44%', [B]: 'about 48%', [C]: 'about 25%' });
     // The number handed over is the Run's recorded figure (base W3 rule, served row (a) in same-run-…); the WORDS come
@@ -249,7 +259,8 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     noChance(await run(read));
   });
   it('CONTROL: legacy copies never restore a withheld chance or its companions', () => {
-    const read = fixture([licence, { code: GOAL_FIGURES_PLACEHOLDER_PATH, option_ids: [C] }]);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeFixture([licence, { code: GOAL_FIGURES_PLACEHOLDER_PATH, option_ids: [C] }]);
     read.analysis_result.enrichment.results = { options: clone(read.analysis_result.enrichment.option_comparison) };
     const view = analysisResultForAgent(read.analysis_result, read.graph) as Json;
     expect(view.enrichment.results).not.toHaveProperty('options');
@@ -286,7 +297,8 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     ['E: existence, user-stated link', { ...existenceDriver, user_stated_link: true },
       'It rests most on your link from ‘Pro plan price’ to ‘Monthly recurring revenue’: Olumi’s model also allows that it does not hold, and in those runs the chance is about 20%.'],
   ])('%s: exact words on both doors, availability unchanged and raw rows still stripped', async (_case, driver, sentence) => {
-    const read = driven(driver as Json);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeDriven(driver as Json);
     const before = clone(read);
     expect(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph)).toEqual({ [A]: sentence });
     for (const view of [await saved(read), await run(read)]) {
@@ -306,7 +318,8 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
   // S2 review r1 #4: a Run whose leader MAY be named skipped the run door's graph read, so the chat lost the screen's
   // "It rests most on …" (RED at e6327125: the run door's driver display was absent).
   it('(F4) a leader-nameable Run still hands the run door its driver sentence', async () => {
-    const read = driven(strengthDriver as Json);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeDriven(strengthDriver as Json);
     read.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
     read.analysis_ready = { ...read.analysis_ready, analysis_admission: { ...(read.analysis_ready?.analysis_admission ?? {}), admitted: true, permitted_analysis_mode: 'comparative_leader' } };
     const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json;
@@ -315,9 +328,10 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
   });
 
   it.each([factorDriver, strengthDriver, existenceDriver])('asks once per shared $kind driver in licence order, independently of side', async (driver) => {
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
     const otherSide = driver.kind === 'factor_value' ? { side: 'high' }
       : driver.kind === 'link_strength' ? { side: 'high', strength: 'stronger' } : {};
-    const read = driven(driver, { option_ids: [B, A, C], driver_by_option: { [A]: { ...driver, ...otherSide }, [B]: driver, [C]: driver } });
+    const read = nonTimeDriven(driver, { option_ids: [B, A, C], driver_by_option: { [A]: { ...driver, ...otherSide }, [B]: driver, [C]: driver } });
     for (const view of [await saved(read), await run(read)]) {
       expect(Object.keys(view.goal_chance_driver_display)).toEqual([B, A]);
       expect(view.goal_chance_driver_display[B]).toMatch(/\?$/);
@@ -326,7 +340,8 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
   });
 
   it('a withheld first option does not consume the shared question; a scoped withhold affects only its own id', async () => {
-    const read = driven(strengthDriver, { option_ids: [C, B, A], driver_by_option: { [C]: strengthDriver, [B]: strengthDriver, [A]: strengthDriver } });
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeDriven(strengthDriver, { option_ids: [C, B, A], driver_by_option: { [C]: strengthDriver, [B]: strengthDriver, [A]: strengthDriver } });
     read.analysis_result.enrichment.inference_warnings.push({ code: GOAL_FIGURES_PLACEHOLDER_PATH, option_ids: [B] });
     for (const view of [await saved(read), await run(read)]) {
       expect(Object.keys(view.goal_chance_driver_display)).toEqual([A]);
@@ -335,8 +350,9 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
   });
 
   it.each([0, 100])('factor and existence edge %s use the screen’s non-certainty words', (pct) => {
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
     for (const driver of [factorDriver, existenceDriver]) {
-      const read = driven({ ...driver, pct_if_side: pct });
+      const read = nonTimeDriven({ ...driver, pct_if_side: pct });
       expect(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph)[A])
         .toContain(pct === 0 ? 'less than 1%' : 'more than 99%');
     }
@@ -368,13 +384,14 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
   });
 
   it('only stored licensed drivers speak; unlicensed ids, withheld ids, conflicting entries and raw rows cannot supply a sentence', async () => {
-    const read = driven(strengthDriver, { driver_by_option: { [A]: strengthDriver, [B]: strengthDriver,
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeDriven(strengthDriver, { driver_by_option: { [A]: strengthDriver, [B]: strengthDriver,
       [C]: strengthDriver, unknown_option: strengthDriver }, no_driver_by_option: { [A]: 'none' } });
     for (const view of [await saved(read), await run(read)]) {
       expect(Object.keys(view.goal_chance_driver_display)).toEqual([B]);
       expect(view.goal_chance_driver_display[B]).toMatch(/\?$/);
     }
-    const rawOnly = fixture();
+    const rawOnly = nonTimeFixture();
     rawOnly.analysis_result.enrichment.option_comparison[0].probability_of_goal_drivers = { rows: [strengthDriver] };
     for (const view of [await saved(rawOnly), await run(rawOnly)]) expect(view).not.toHaveProperty('goal_chance_driver_display');
   });
@@ -395,7 +412,8 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
   });
 
   it('a top-level stored licence supplies the run-turn sentence, including alongside the unchanged deadline', () => {
-    const read = driven(strengthDriver);
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeDriven(strengthDriver);
     const result = { inference_warnings: [...read.analysis_result.enrichment.inference_warnings, horizon] };
     expect(analysisResultForAgent(result, read.graph)).toMatchObject({
       goal_chance_display: { [A]: 'about 45%' }, goal_horizon_line: horizonLine,
@@ -428,23 +446,29 @@ describe('#2840: the headline\'s "what would change it" names the licensed CHANC
     ['factor', factorDriver, 'What would change it: the value of ‘Pro plan price’.'],
     ['existence', churnExistence, 'What would change it: whether ‘Pro plan price’ really affects ‘Monthly churn’.'],
   ])('%s driver on every shown option: one unscoped exact line, naming the driver the screen sentence names', (_k, driver, line) => {
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const both = (a: Json, b: Json) => nonTimeRead(driven(a, { driver_by_option: { [A]: a, [B]: b } }));
     const read = both(driver as Json, driver as Json);
     expect(Object.keys(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph))).toEqual([A, B]);
     expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe(line);
   });
   it('different drivers say it per option, in licence order', () => {
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const both = (a: Json, b: Json) => nonTimeRead(driven(a, { driver_by_option: { [A]: a, [B]: b } }));
     const differ = both(churnStrength, factorDriver);
     expect(whatChangesFaceLine(differ.analysis_result, differ.graph)).toBe(
       'What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’; for ‘Raise to £54’, the value of ‘Pro plan price’.');
   });
   it('(P1-2) another shown option WITHOUT a driver (point) → scoped to the option that has one; the other gets nothing', () => {
-    const read = driven(churnStrength); // B's chance is shown (about 50%) with no driver
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
+    const read = nonTimeDriven(churnStrength); // B's chance is shown (about 50%) with no driver
     expect(Object.keys(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph))).toEqual([A]);
     expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe('What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’.');
   });
   it('(P1-2) another option shown as a RANGE → scoped as well, never an unscoped line', () => {
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time.
     const rangeB = { ...rangeRecord, option_ids: [B], range_by_option: { [B]: rangeRecord.range_by_option[B] } };
-    const read = fixture([{ ...licence, driver_by_option: { [A]: churnStrength } }, rangeB]);
+    const read = nonTimeFixture([{ ...licence, driver_by_option: { [A]: churnStrength } }, rangeB]);
     expect(Object.keys(goalChanceRangeDisplayForAgent(read.analysis_result, read.graph) ?? {})).toEqual([B]);
     expect(whatChangesFaceLine(read.analysis_result, read.graph)).toBe('What would change it: for ‘Keep £49 price’, how strongly ‘Pro plan price’ affects ‘Monthly churn’.');
   });
@@ -466,3 +490,16 @@ describe('#2840: the headline\'s "what would change it" names the licensed CHANC
     expect(whatChangesFaceLine(differ.analysis_result, differ.graph)).toBeNull();
   });
 });
+
+function nonTimeGraph<T>(graph: T): T {
+  const current = structuredClone(graph);
+  for (const node of (current as { nodes: Json[] }).nodes) if (node.kind === 'goal') {
+    delete node.goal_horizon_months;
+    delete node.goal_deadline_as_stated;
+  }
+  return current;
+}
+
+function nonTimeRead(read: Json): Json { return { ...read, graph: nonTimeGraph(read.graph) }; }
+function nonTimeFixture(...args: Parameters<typeof fixture>): Json { return nonTimeRead(fixture(...args)); }
+function nonTimeDriven(...args: Parameters<typeof driven>): Json { return nonTimeRead(driven(...args)); }

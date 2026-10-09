@@ -1,4 +1,5 @@
 /** Science §(o′)/(ad): exact horizon detail, populated only by typed graph facts. */
+import { heldGoalHorizonMonths } from './goal-horizon-verdict.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 
 type Rec = Record<string, unknown>;
@@ -10,8 +11,8 @@ function horizonGoal(graph: unknown): { goal: Rec; nodes: Rec[]; month: number }
   const rawNodes = rec(graph)?.nodes;
   const nodes = Array.isArray(rawNodes) ? rawNodes.map(rec).filter((node): node is Rec => node !== undefined) : [];
   const goals = nodes.filter(node => node.kind === 'goal');
-  const month = goals[0]?.goal_horizon_months;
-  return goals.length === 1 && typeof month === 'number' && Number.isInteger(month) && month > 0
+  const month = heldGoalHorizonMonths(goals[0]);
+  return goals.length === 1 && month !== undefined
     ? { goal: goals[0]!, nodes, month } : undefined;
 }
 

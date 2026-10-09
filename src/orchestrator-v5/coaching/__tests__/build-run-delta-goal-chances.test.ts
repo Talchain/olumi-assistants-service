@@ -27,6 +27,18 @@ const build = (prior: HandlerFact, current: HandlerFact, mayName = true) => {
 };
 
 describe('buildRunDelta — Compare goal chances keep their own licence and record order', () => {
+  it('read-time deadline edits withhold both stored chance sides while preserving the win comparison', () => {
+    const prior = fact(false, ['opt-a', 'opt-b'], { 'opt-a': 47, 'opt-b': 70 });
+    const current = fact(true, ['opt-a', 'opt-b'], { 'opt-a': 62, 'opt-b': 35 });
+    const result = buildRunDelta({ priorFacts: [current, prior], mayNameLeadingOption: true,
+      currentGraph: { nodes: [{ id: 'goal', kind: 'goal', goal_horizon_months: 12 }] } });
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.delta.goal_chances).toEqual(['opt-a', 'opt-b'].map(option_id => ({
+      option_id, prior: { kind: 'withheld' }, current: { kind: 'withheld' },
+    })));
+    expect(result.delta.win_probabilities).toHaveLength(2);
+  });
   it('pairs a pre-licence Run with the latest licensed Run without deriving old figures', () => {
     const delta = build(fact(false, ['opt-a', 'opt-b']), fact(true, ['opt-a', 'opt-b'], { 'opt-a': 47, 'opt-b': 70 }));
     expect(delta.goal_chances).toStrictEqual([

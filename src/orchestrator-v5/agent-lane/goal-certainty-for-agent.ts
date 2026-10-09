@@ -1,3 +1,5 @@
+import { GOAL_FIGURES_HORIZON_NOT_TESTED, goalFiguresWithheldWarnings } from '../../orchestrator/context/option-result-source.js';
+import { withReadTimeHorizonGate } from '../goal-target/goal-horizon-verdict.js';
 /**
  * ⛔ THE AGENT NEVER SAYS AN UNEARNED GOAL CERTAINTY AS 100% OR 0% (DL 5887061638 / 5887593253; AIQ 5882366427; MG's
  * producer #2270; Canonical's stored writer #2280).
@@ -93,6 +95,9 @@ function boundToThisRun(runResult: unknown, run: RunOfResult, read: GoalCertaint
  * Otherwise `undefined` when no option claims a certainty, or `unchecked` when an exact value cannot be checked.
  */
 export function goalCertaintyForAgent(runResult: unknown, run: RunOfResult, read: GoalCertaintyRead | null | undefined): Rec | undefined {
+  runResult = withReadTimeHorizonGate(runResult, read?.raw);
+  const envelope = isRec(runResult) && isRec(runResult.enrichment) ? runResult.enrichment : {};
+  if (goalFiguresWithheldWarnings(envelope).some(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED)) return undefined;
   const certain = certainOptionRows(runResult);
   const rows = optionRows(runResult);
   if (!hasGoalCertaintyCandidates(runResult)) return undefined;
