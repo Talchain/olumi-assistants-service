@@ -23,7 +23,7 @@ export function horizonBasisWriteIsAuthorised(write: HorizonBasisWrite, base: un
     || !isDeepStrictEqual(issued.value, write.value) || !record(base) || !Array.isArray(base.nodes)) return false;
   const goals = base.nodes.filter((n): n is Rec => record(n) && n.id === write.goal_id && n.kind === 'goal');
   return goals.length === 1 && issued.value.bound_months === goals[0]!.goal_horizon_months
-    && issued.value.metric === horizonBasisMetricKey(goals[0]!, scenarioId);
+    && issued.value.metric === horizonBasisMetricKey(goals[0]!);
 }
 
 /** Only the consumed, card-only proposal supplies this member to the existing approved batch door. */
@@ -45,12 +45,12 @@ export function applyGoalSteadyEdit(persistedGraph: unknown, approved: ApprovedG
   if (!Number.isInteger(approved.months) || approved.months <= 0 || approved.months !== goal.goal_horizon_months) {
     return { kind: 'refused', reason: 'goal_month_changed' };
   }
-  if (horizonSteadyAttested(persistedGraph, scenarioId)) return { kind: 'unchanged' };
+  if (horizonSteadyAttested(persistedGraph)) return { kind: 'unchanged' };
   const graph = structuredClone(persistedGraph);
   const written = (graph.nodes as Rec[]).find(n => n.id === approved.goal_id)!;
   // Stamp authorship here, never copy a producer's source from the operation.
   written.horizon_basis = { basis: 'steady_attested', source: 'user_stated',
-    bound_months: approved.months, metric: horizonBasisMetricKey(goal, scenarioId) };
+    bound_months: approved.months, metric: horizonBasisMetricKey(goal) };
   const horizonBasisWrite = { goal_id: approved.goal_id, value: structuredClone(written.horizon_basis) } as HorizonBasisWrite;
   authorisedWrites.set(horizonBasisWrite, { goal_id: approved.goal_id, value: structuredClone(horizonBasisWrite.value), scenarioId });
   const label = String(goal.label ?? 'the goal');

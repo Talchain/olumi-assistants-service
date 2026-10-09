@@ -27,7 +27,7 @@ import { applyStructuralAdd } from '../../system-events/structural-add.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import { horizonBasisMetricKey, horizonSteadyAttested } from '../horizon-basis.js';
-import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped } from '../goal-steady-write.js';
+import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, horizonBasisWriteIsAuthorised } from '../goal-steady-write.js';
 import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
 
 vi.mock('../../../orchestrator/tools/edit-graph.js', async original => ({
@@ -79,9 +79,9 @@ const seed = (): Rec => projectGraphForPersistence(GraphV3.parse({
     strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' })),
 })) as Rec;
 const goalOf = (g: Rec, id = 'goal'): Rec => g.nodes.find((n: Rec) => n.id === id);
-const metric = (g: Rec, scenario = SCENARIO, id = 'goal') => {
+const metric = (g: Rec, id = 'goal') => {
   const goal = goalOf(g, id);
-  return createHash('sha256').update(JSON.stringify([scenario, id, goal.label.trim().toLowerCase().replace(/\s+/g, ' '),
+  return createHash('sha256').update(JSON.stringify([id, goal.label.trim().toLowerCase().replace(/\s+/g, ' '),
     goal.goal_threshold_unit ?? null, goal.goal_horizon_months])).digest('hex').slice(0, 32);
 };
 const attested = (): Rec => {
@@ -153,7 +153,7 @@ async function turn(g: Rec, w: ReturnType<typeof world>) {
   return w.read();
 }
 
-describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + scenario', () => {
+describe('S5 horizon_basis door: real ingress and commit paths, stored meaning bound to goal; write capability bound to scenario', () => {
   it.each([false, true])('R1 one approved goal writes the typed object with one commit and exact confirmation (v6: %s)', async v6 => {
     __setUseAppendV6ForTest(v6);
     const g = seed(), w = world(g);
@@ -162,7 +162,7 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
     expect(w.writes).toHaveLength(1);
     expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(attested()).horizon_basis);
     expect(w.writes[0]!.assistantMessage).toBe('Recorded as your judgement: ‘Service quality’ stays about the same over 9 months unless you act. Then run the analysis again.');
-    expect(horizonSteadyAttested(w.read(), SCENARIO)).toBe(true);
+    expect(horizonSteadyAttested(w.read())).toBe(true);
     expect(goalOf(g)).not.toHaveProperty('horizon_basis');
     expect(goalSteadyPostimageIsScoped(g, w.read(), { goal_id: 'goal', months: 9 }, SCENARIO)).toBe(true);
   });
@@ -191,25 +191,40 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
       .toMatchObject({ kind: 'refused', reason: 'goal_month_changed' });
     expect(w.writes).toHaveLength(0);
   });
-  it.each(['label', 'unit', 'months', 'scenario', 'id'])('R4 key voids after %s moves', field => {
+  it.each(['label', 'unit', 'months', 'id'])('R4 key voids after %s moves', field => {
     const issued = applyGoalSteadyEdit(seed(), { goal_id: 'goal', months: 9 }, SCENARIO);
     if (issued.kind !== 'mutated') throw new Error('not written');
     const g = issued.mutatedGraph;
-    expect(horizonSteadyAttested(g, SCENARIO)).toBe(true);
+    expect(horizonSteadyAttested(g)).toBe(true);
     if (field === 'label') goalOf(g).label = 'Annual revenue';
     if (field === 'unit') goalOf(g).goal_threshold_unit = '£/year';
     if (field === 'months') goalOf(g).goal_horizon_months = 12;
     if (field === 'id') goalOf(g).id = 'other_goal';
-    expect(horizonSteadyAttested(g, field === 'scenario' ? 'different-scenario' : SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(g)).toBe(false);
+    if (field === 'months') {
+      // Pin the metric's month binding independently: bound_months mismatch must not mask M5.
+      goalOf(g).horizon_basis.bound_months = 12;
+      expect(horizonSteadyAttested(g)).toBe(false);
+    }
   });
-  it('R4 normalisation and exact key match parked sha256 tuple', () => {
+  it('R4 a copy into another scenario KEEPS the attestation', () => {
+    // S5 slice 2b r7, a2: the user's judgement is about the GOAL trajectory, not its scenario container.
+    const issued = applyGoalSteadyEdit(seed(), { goal_id: 'goal', months: 9 }, SCENARIO);
+    if (issued.kind !== 'mutated') throw new Error('not written');
+    const copied = clone(issued.mutatedGraph);
+    prepareHorizonBasisForWrite(copied, clone(copied), 'different-scenario');
+    expect(goalOf(copied).horizon_basis).toEqual(goalOf(issued.mutatedGraph).horizon_basis);
+    expect(horizonSteadyAttested(copied)).toBe(true);
+    expect(applyGoalSteadyEdit(copied, { goal_id: 'goal', months: 9 }, 'different-scenario')).toEqual({ kind: 'unchanged' });
+  });
+  it('R4 normalisation and exact key match r7 scenario-free sha256 tuple', () => {
     const g = attested(); goalOf(g).label = '  SERVICE   quality  ';
-    expect(horizonBasisMetricKey(goalOf(g), SCENARIO)).toBe(metric(g));
-    expect(horizonSteadyAttested(g, SCENARIO)).toBe(true);
+    expect(horizonBasisMetricKey(goalOf(g))).toBe(metric(g));
+    expect(horizonSteadyAttested(g)).toBe(true);
   });
   it.each([false, true])('R5 register/import drops a complete client forgery (existing: %s)', async existing => {
     const g = attested(), w = world(existing ? seed() : null);
-    expect(horizonSteadyAttested(g, SCENARIO)).toBe(true);
+    expect(horizonSteadyAttested(g)).toBe(true);
     expect(goalOf(await register(g, w))).not.toHaveProperty('horizon_basis');
   });
   it('R5 graph_state boundary echoes client basis without changing caller bytes', () => {
@@ -298,7 +313,7 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
     if (mode === 'fraction') b.bound_months = 1.5;
     if (mode === 'wrong_basis') b.basis = 'inferred';
     expect(NodeV3.parse(goalOf(g)).horizon_basis).toBeUndefined();
-    expect(horizonSteadyAttested(g, SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(g)).toBe(false);
   });
   it('R8 field-safety rejects LLM update and strips add-node basis', () => {
     const basis = goalOf(attested()).horizon_basis;
@@ -335,19 +350,19 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
     const w = world(g);
     expect((await executeOptionInterventionBatch(input(g, { goalSteady: { goal_id: 'b', months: 9 } }), w.store)).kind).toBe('committed');
     expect(goalOf(w.read())).toEqual(goalOf(g));
-    expect(goalOf(w.read(), 'b').horizon_basis.metric).toBe(metric(g, SCENARIO, 'b'));
-    expect(horizonSteadyAttested(w.read(), SCENARIO)).toBe(false);
+    expect(goalOf(w.read(), 'b').horizon_basis.metric).toBe(metric(g, 'b'));
+    expect(horizonSteadyAttested(w.read())).toBe(false);
   });
-  it('door scope refuses unrelated changes, missing goal and wrong scenario key', () => {
+  it('door scope refuses unrelated changes, missing goal and accumulation', () => {
     const g = seed(), edit = applyGoalSteadyEdit(g, { goal_id: 'goal', months: 9 }, SCENARIO);
     expect(edit.kind).toBe('mutated');
     if (edit.kind !== 'mutated') throw new Error('no edit');
     edit.mutatedGraph.edges = [];
     expect(goalSteadyPostimageIsScoped(g, edit.mutatedGraph, { goal_id: 'goal', months: 9 }, SCENARIO)).toBe(false);
     expect(applyGoalSteadyEdit(g, { goal_id: 'missing', months: 9 }, SCENARIO).kind).toBe('refused');
-    expect(horizonSteadyAttested(attested(), undefined)).toBe(false);
+    expect(horizonSteadyAttested(null)).toBe(false);
     const carrier = attested(); carrier.nodes.push({ id: 'stock', nonlinear_identity: { operation: 'accumulation' } });
-    expect(horizonSteadyAttested(carrier, SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(carrier)).toBe(false);
   });
 });
 
@@ -363,7 +378,7 @@ describe('S5 r1 append-door provenance', () => {
   it.each(['update_node', 'add_node'])('P1-1 generic approval %s cannot forge a correctly bound basis', async op => {
     const g = seed(), w = world(g);
     const forged = clone(goalOf(attested()));
-    if (op === 'add_node') { forged.id = 'b'; forged.horizon_basis.metric = horizonBasisMetricKey(forged, SCENARIO); }
+    if (op === 'add_node') { forged.id = 'b'; forged.horizon_basis.metric = horizonBasisMetricKey(forged); }
     const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'r1-approval', store: w.store });
     const pendingResult = apply({ proposalId: 'r1-forge', idempotencyKey: TURN,
       modelRevision: (await currentModelRevision(SCENARIO, { store: w.store }))!,
@@ -464,7 +479,7 @@ describe('S5 r1 append-door provenance', () => {
     expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
     expect(w.writes).toHaveLength(1);
     expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
-    expect(horizonSteadyAttested(w.read(), SCENARIO)).toBe(!changed);
+    expect(horizonSteadyAttested(w.read())).toBe(!changed);
   });
   it.each(['changed', 'removed'])('caller preparation restores stored value when unauthorised write %s it', async mode => {
     const g = attested(), proposed = clone(g), w = world(g);
@@ -500,6 +515,17 @@ describe('S5 r1 append-door provenance', () => {
       baseGraphForInvariants: g, horizonBasisWrite: authorisation } as never)).rejects.toThrow('horizon_basis');
     expect(w.writes).toHaveLength(0);
   });
+  it('door refuses a genuine write capability issued for another scenario before append', async () => {
+    const g = seed(), w = world(g), edit = applyGoalSteadyEdit(g, { goal_id: 'goal', months: 9 }, SCENARIO);
+    if (edit.kind !== 'mutated') throw new Error('no edit');
+    expect(horizonBasisWriteIsAuthorised(edit.horizonBasisWrite, g, SCENARIO)).toBe(true);
+    expect(horizonBasisWriteIsAuthorised(edit.horizonBasisWrite, g, 'different-scenario')).toBe(false);
+    await expect(appendCheckedGraphWrite({ store: w.store,
+      write: { ...doorWrite(edit.mutatedGraph), scenario_id: 'different-scenario' }, writesGraph: true,
+      baseGraphForInvariants: g, horizonBasisWrite: edit.horizonBasisWrite })).rejects.toThrow('horizon_basis');
+    expect(w.writes).toHaveLength(0);
+    expect(w.read()).toEqual(g);
+  });
   it('door keeps a basis when the graph and stored base share an object', async () => {
     const g = attested(), expected = clone(goalOf(g).horizon_basis), w = world(g);
     await appendCheckedGraphWrite({ store: w.store, write: doorWrite(g), writesGraph: true, baseGraphForInvariants: g });
@@ -526,7 +552,7 @@ describe('S5 r1 append-door provenance', () => {
     const g = attested();
     g.nodes.push({ id: 'stock', kind: 'factor', label: 'Stock', nonlinear_identity: {
       operation: 'accumulation', confirmed: false } });
-    expect(horizonSteadyAttested(g, SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(g)).toBe(false);
   });
 });
 
@@ -641,7 +667,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     expect(question).toBeDefined();
     expect(question!.preconditions.graph_hash).toBe(hash);
     expect(JSON.stringify(goalOf(stored).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
-    expect(horizonSteadyAttested(stored, SCENARIO)).toBe(true);
+    expect(horizonSteadyAttested(stored)).toBe(true);
     const resumed = tryGoalTargetElicitationResume({ message: '80%', pendingActions: pendings,
       nowMs: Date.now(), currentGraphHash: hash, graphNodes: stored.nodes });
     expect(resumed).toMatchObject({ matched: true, goalNodeId: 'goal', value: 80, unit: '%' });
@@ -665,7 +691,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     expect(pressed.kind).toBe('committed');
     expect(w.writes).toHaveLength(1);
     const after = w.read(), hashAfter = computeAnalysisAffectingGraphHash(after as never)!;
-    expect(horizonSteadyAttested(after, SCENARIO)).toBe(true);
+    expect(horizonSteadyAttested(after)).toBe(true);
     expect(computeGraphIdentityHash(after as never)?.value).not.toBe(computeGraphIdentityHash(g as never)?.value);
     const run = { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
       scenario_id: SCENARIO, leading_option_id: 'o-a', summary: 'The analysis ran.',
@@ -690,7 +716,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
       '../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url), 'utf8')));
     const scenarioReader = vi.fn(async () => {
       const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'r4-run-load', w.store);
-      expect(horizonSteadyAttested(snapshot.graph, SCENARIO)).toBe(true);
+      expect(horizonSteadyAttested(snapshot.graph)).toBe(true);
       expect(JSON.stringify(goalOf(snapshot.graph as Rec, 'g-profit').horizon_basis))
         .toBe(JSON.stringify(goalOf(after, 'g-profit').horizon_basis));
       return snapshot;
@@ -732,7 +758,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     // Restore returns that stored version's own answer/absence, without carrying today's answer.
     const restored = clone(oldVersion);
     expect(goalOf(restored, 'g-profit')).not.toHaveProperty('horizon_basis');
-    expect(horizonSteadyAttested(restored, SCENARIO)).toBe(false);
+    expect(horizonSteadyAttested(restored)).toBe(false);
     const reloaded = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: restored, requestId: 'r4-restored' });
     expect(reloaded.current_read.run_state).toMatchObject({ kind: 'complete_stale' });
     expect(reloaded.current_read.result).toBeNull();
