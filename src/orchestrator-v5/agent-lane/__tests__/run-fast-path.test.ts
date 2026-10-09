@@ -100,7 +100,8 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
     expect(modelBodies, 'exactly ONE model call').toHaveLength(1);
     expect(modelBodies[0]!['tool_choice'], 'it may interpret, never act').toBe('none');
     const input = JSON.stringify(modelBodies[0]!['input']);
-    expect(input, 'the call sees the canonical run result').toContain('analysis_result');
+    expect(input, 'the call sees the canonical selected Run').toContain('selected_run_reference');
+    expect(input, 'the call excludes raw analysis').not.toContain('analysis_result');
     expect(b._diagnostic_trace.fast_path).toBe('explain');
     expect(b._agent.tool_calls.map((c) => c.name)).toEqual([]);
     expect(b.assistant_text).toBe('In the current model, the result turns on Capacity.');

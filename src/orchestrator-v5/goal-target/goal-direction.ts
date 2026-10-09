@@ -88,6 +88,7 @@
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
+import { readGoalRecord } from './goal-record.js';
 
 /** The only sense this module will ever put on the wire. */
 export type EmittedGoalDirection = 'minimise';
@@ -128,18 +129,16 @@ export function readGoalLabel(graph: unknown, goalNodeId: unknown): string | nul
 }
 
 /**
- * The comparator the USER stated for the goal's target, as held on the goal node (`goal_direction`: written by
+ * The comparator the USER stated for the goal's target, as held on the goal node (written by
  * construction's `holdStatedGoalAttributes`, and by the user's approved goal target card, DR row 1), or `null` when
  * none is held. A value outside the stored four is not a held comparator.
  */
 export function readHeldGoalComparator(graph: unknown, goalNodeId: unknown): HeldComparator | null {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return null;
-  for (const node of readNodes(graph)) {
-    if (node.id !== goalNodeId) continue;
-    const held = node.goal_direction;
-    return typeof held === 'string' && HELD_COMPARATORS.includes(held) ? (held as HeldComparator) : null;
-  }
-  return null;
+  const record = readGoalRecord(graph, goalNodeId);
+  const held = record?.target?.comparator;
+  return record?.target?.comparator_source === 'goal_direction'
+    && typeof held === 'string' && HELD_COMPARATORS.includes(held) ? (held as HeldComparator) : null;
 }
 
 /**

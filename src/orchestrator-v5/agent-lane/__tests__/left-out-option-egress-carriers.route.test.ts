@@ -197,7 +197,7 @@ describe('Q6 r1 production graph read → finalRead/replay → left-out-option e
     expect(explained.statusCode, explained.body).toBe(200);
     const context = modelRequests.map(request => explanationContext(request.input)).find(Boolean);
     expect(context, 'control: the typed Explain interpreter ran with the saved Run facts').toBeDefined();
-    const limits = (context!.limit_checks as { limits: { say: string; withheld_for?: string[] }[] }).limits;
+    const limits = ((context!.canonical_state as { analysis: { limit_checks: unknown } }).analysis.limit_checks as { limits: { say: string; withheld_for?: string[] }[] }).limits;
     expect(limits[0]!.say).toBe(`For ‘Raise Pro price to £59’${sent ? ' and ‘Test £54 Pro price’' : ''} it isn’t shown: it depends on how strongly ‘Pro plan price’ moves ‘Monthly churn rate’, which Olumi estimated.`);
     expect(limits[0]!.withheld_for).toEqual(sent ? ['Raise Pro price to £59', 'Test £54 Pro price'] : ['Raise Pro price to £59']);
   });
