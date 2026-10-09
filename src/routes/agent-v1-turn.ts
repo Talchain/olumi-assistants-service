@@ -3108,8 +3108,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const goalChanceAskedOnce = goalChanceRead === undefined ? ''
         : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], historyReader, scenarioId, undefined));
       const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
-      const runForInterpreter = { canonical_state: goalChanceNow === undefined ? canonicalAfterRun
-        : { ...canonicalAfterRun, analysis: { ...selectedRun, goal_chance: goalChanceNow } } };
+      // ⭐ NEVER RE-ASK: the scoped section's question-bearing text is asked once too; its finding stays.
+      const section = canonicalAfterRun.run_explanation as Record<string, unknown> | undefined;
+      const target = section?.target_testability as Record<string, unknown> | undefined;
+      const sensitivity = section?.decision_sensitivity as Record<string, unknown> | undefined;
+      const sectionReplies = await repliesToCheckAsks([target?.say, sensitivity?.say]
+        .filter((l): l is string => typeof l === 'string'), historyReader, scenarioId, undefined);
+      const askedOnce = (carrier: Record<string, unknown>, key: string): Record<string, unknown> => {
+        const kept = withoutAskedQuestion(carrier[key] as string, sectionReplies);
+        const { [key]: _asked, ...rest } = carrier;
+        return kept.trim() === '' ? rest : { ...carrier, [key]: kept };
+      };
+      const sectionNow = section === undefined || sectionReplies.length === 0 ? section : {
+        ...section,
+        ...(typeof target?.say === 'string' ? { target_testability: askedOnce(target, 'say') } : {}),
+        ...(typeof sensitivity?.say === 'string' ? { decision_sensitivity: askedOnce(sensitivity, 'say') } : {}),
+      };
+      const runForInterpreter = { canonical_state: {
+        ...canonicalAfterRun,
+        ...(goalChanceNow === undefined ? {} : { analysis: { ...selectedRun, goal_chance: goalChanceNow } }),
+        ...(sectionNow === undefined ? {} : { run_explanation: sectionNow }),
+      } };
       const explanationInput = [...recentRunExplanationConversation(history ?? []), { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];

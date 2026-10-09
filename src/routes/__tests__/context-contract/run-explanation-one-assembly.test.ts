@@ -184,3 +184,16 @@ describe('Explain scoped assembly safety', () => {
       .toBe('53448d8ae84858e9f8fa84215d9aa85589b0d117dbdb7f783a6cf708f4f9d83c');
   },60000);
 });
+
+describe('Explain on a contract-valid Run row with no option label', () => {
+  it('a saved option row carrying only option_id still explains (no alias dereference throw)', async () => {
+    const w = await capture('Run-explanation', 'run2', { readSnapshot: async snapshot => {
+      const rows = (snapshot.analysis_result.enrichment as { option_comparison?: Record<string, unknown>[] }).option_comparison ?? [];
+      expect(rows.length, 'fixture has option rows').toBeGreaterThan(0);
+      for (const row of rows) { delete row.option_label; delete row.label; }
+      return snapshot;
+    } });
+    expect(w.calls).toHaveLength(1);
+    expect(object(w.response).assistant_text ?? object(w.response).narration).toBeDefined();
+  }, 60000);
+});

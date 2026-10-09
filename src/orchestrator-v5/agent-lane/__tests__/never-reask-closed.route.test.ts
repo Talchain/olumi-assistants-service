@@ -102,10 +102,14 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
       ...(first._agent?.session_id !== undefined ? { agent_session_id: first._agent.session_id } : {}),
       message: 'Explain this result', source: 'chip', chip: { id: chip!.id } } });
     expect(r.statusCode, r.body).toBe(200);
-    const sent = JSON.stringify(modelBodies);
-    const m = /\\"say\\":\\"((?:[^"\\]|\\\\.)*?)\\"/.exec(sent);
-    expect(m, 'the interpreter was handed goal_chance.say').not.toBeNull();
-    return plain(JSON.parse(`"${JSON.parse(`"${m![1]}"`)}"`) as string);
+    // Bound to goal_chance.say by path: the Explain packet also carries other scoped `say` lines (run_explanation).
+    const packet = modelBodies.flatMap((b) => (b['input'] as { content?: { text?: string }[] }[]) ?? [])
+      .flatMap((i) => Array.isArray(i.content) ? i.content : []).map((c) => c.text ?? '')
+      .find((t) => t.includes('"canonical_state"'));
+    const say = packet === undefined ? undefined : (JSON.parse(packet.slice(packet.indexOf('{'))) as
+      { canonical_state?: { analysis?: { goal_chance?: { say?: unknown } } } }).canonical_state?.analysis?.goal_chance?.say;
+    expect(typeof say, 'the interpreter was handed goal_chance.say').toBe('string');
+    return plain(say as string);
   };
   /** An Agent turn that runs (`run_analysis` scripted), then replies without the withheld sentence. */
   const agentRun = async (): Promise<string> => {
@@ -149,6 +153,24 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     const after = await explainSaySent();
     expect(after).toContain(plain(REASON));
     expect(after).not.toContain(QUESTION);
+  });
+
+  it('⭐ Explain: the scoped Run section carries no already-asked question either (canonical_state, not history); CONTROL: before', async () => {
+    const stateSent = (): string => {
+      const input = modelBodies.flatMap((b) => (b['input'] as { content?: { text?: string }[] }[]) ?? []);
+      const packet = input.flatMap((i) => Array.isArray(i.content) ? i.content : []).map((c) => c.text ?? '')
+        .find((t) => t.includes('"canonical_state"'));
+      expect(packet, 'Explain packet present').toBeDefined();
+      return JSON.stringify((JSON.parse(packet!.slice(packet!.indexOf('{'))) as { canonical_state: unknown }).canonical_state);
+    };
+    history = [];
+    await explainSaySent();
+    expect(stateSent(), 'CONTROL: before it was asked, the state carries the question').toContain(QUESTION);
+    history = [answerRow(1, D4.first_run_reply)];
+    await explainSaySent();
+    const after = stateSent();
+    expect(plain(after), 'the reason (the finding) is still handed over').toContain(plain(REASON));
+    expect(after, 'no copy of the asked question anywhere in the Run state (goal_chance, run_explanation section)').not.toContain(QUESTION);
   });
 
   it('a lost-response retry of the Run chip says what the live turn said (its own row is not "asked before")', async () => {

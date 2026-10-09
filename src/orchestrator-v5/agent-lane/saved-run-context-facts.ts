@@ -84,9 +84,9 @@ export function runExplanationContextFacts(
     ...(projected.decision_sensitivity === undefined ? {} : { decision_sensitivity: projected.decision_sensitivity }),
     ...(target === undefined ? {} : { target_testability: {
       code: target.code,
-      // Never the warning's own `say`: it repeats analysis.goal_chance.say WITH its question, and only that copy is
-      // filtered by the asked-once rule (never-reask-closed.route.test.ts).
-      ...(typeof target.message === 'string' ? { message: target.message } : {}),
+      // The gated producer text, carried as `say` (never under a producer `message` key). Never the warning's own `say`:
+      // that repeats analysis.goal_chance.say. The Explain route applies the asked-once rule to this `say` too.
+      ...(typeof target.message === 'string' ? { say: target.message } : {}),
     } }),
     warning_codes: [...rows, ...(() => {
       const brief = (projected.enrichment as { decision_brief?: { warnings?: unknown } } | undefined)?.decision_brief;

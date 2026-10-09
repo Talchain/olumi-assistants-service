@@ -1727,7 +1727,8 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       ? goalChancePointForAgent(row.probability_of_goal, goalChanceDisplay?.[id], shownChance.get(id)) : undefined;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
-      ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
+      // A contract-valid row may carry neither alias nor label: undefined === undefined must not dereference a missing alias.
+      ...((alias => alias !== undefined && alias.raw === label ? { display_label: alias.display } : {})(optionNames.get(id))),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
       ...(projectedChance !== undefined && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
         ? { probability_of_goal: projectedChance } : {}),
