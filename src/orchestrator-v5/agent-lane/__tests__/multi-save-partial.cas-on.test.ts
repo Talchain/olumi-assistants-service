@@ -7,7 +7,7 @@ import { GraphStaleWriteError } from '../../session/store.js';
 import { REVISION_CONFLICT_MESSAGE } from '../../graph-revision-conflict.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { createProposal, ProposalStore, type ProposalOperation } from '../proposal.js';
-import { narrateWriteOutcome } from '../write-outcome.js';
+import { narrateWriteOutcome, PARTIAL_WRITE_MESSAGES } from '../write-outcome.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -37,10 +37,6 @@ const WORDS = {
     "text": "The range was saved, but the scenario changed before the option levels could be saved. Check the saved range and try setting the option levels again.",
     "sha256": "db2f25296cdc60628b873b78a63fd2b832243c491e2523dce093b88727c98309"
   },
-  "range_saved_levels_refused": {
-    "text": "The range was saved, but the option levels could not be saved. Check the saved range and try setting the option levels again.",
-    "sha256": "96ad943c4e0cccba9bc7ec320091dbbde59aa3a9158c4fce8b043f2ceb96d6c4"
-  },
   "values_saved_remaining_values_not_saved": {
     "text": "The earlier values were saved, but the scenario changed before the remaining values could be saved. Check the saved values and try setting the remaining values again.",
     "sha256": "61675f3f4bf9d333c77ce999b9ce39435459d2244d56b3caee2617704b523192"
@@ -60,10 +56,6 @@ const WORDS = {
   "target_saved_level_not_saved": {
     "text": "The target was saved, but the scenario changed before today's level could be saved. Check the saved target and try setting today's level again.",
     "sha256": "8baed842111862bb30f63790a88d4d5567bfced46755a432e7fd2756783fc744"
-  },
-  "target_saved_level_refused": {
-    "text": "The target was saved, but today's level could not be saved. Check the saved target and try setting today's level again.",
-    "sha256": "7aa4599ab8a15891b6339d971d0db4c1ee9169e49f5c3297b3ce27cc15cd2bbe"
   },
   "link_saved_estimate_refused": {
     "text": "The link was saved, but its accepted estimate detail could not be saved. Check the saved link and try accepting its estimate again.",
@@ -85,7 +77,9 @@ const codes: Record<Site, readonly [string, string]> = {
 function world(site: Site, refusal: Refusal) {
   let graph = buildD1Fixture();
   const factor = graph.nodes.find(n => n.id === 'f-budget')!;
-  factor.observed_state = { value: 40, unit: '£', source: 'explicit' };
+  factor.observed_state = site === 'values_loop'
+    ? { value: 0.4, raw_value: 40, cap: 100, unit: '£', source: 'explicit' }
+    : { value: 40, unit: '£', source: 'explicit' };
   const goal = graph.nodes.find(n => n.kind === 'goal')!;
   goal.observed_state = { value: 0.1, raw_value: 10, cap: 100, unit: '£', source: 'explicit' };
   goal.goal_threshold_raw = 80;
@@ -123,7 +117,9 @@ function world(site: Site, refusal: Refusal) {
     }
     const event = body.event as { kind: string; target_id?: string; value?: number; raw_value?: number };
     if (event.kind === 'factor_value_edit') {
-      graph.nodes.find(n => n.id === event.target_id)!.observed_state = { value: event.value!, unit: '£', source: 'explicit' };
+      const node = graph.nodes.find(n => n.id === event.target_id)!;
+      node.observed_state = { ...node.observed_state, value: event.value!,
+        ...(event.raw_value !== undefined ? { raw_value: event.raw_value } : {}), unit: '£', source: 'explicit' };
       persist();
       return { status: 200, json: { graph_hash: computeAnalysisAffectingGraphHash(graph),
         blocks: [{ type: 'graph_patch', operation: 'set_factor_value', target_id: event.target_id, status: 'applied', after: { value: event.value } }],
@@ -219,9 +215,22 @@ describe('every multi-save capability keeps save 1 after save 2 is refused', () 
     expect(w.saved).toHaveLength(1);
     expect(w.attempts()).toBe(2);
     expect(result).toMatchObject({ mutated: true, applied: false, outcome: codes[site][1], receipts: [expect.objectContaining({ version_id: SID })] });
-    expect(result.detail).toBe(WORDS[codes[site][1] as keyof typeof WORDS].text);
-    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status).toBe(result.detail);
+    if (site === 'range_levels') {
+      expect(result).toMatchObject({ refusal: 'partially_applied', ranges_added_for_analysis: [{ factor: 'Marketing budget', range: 500 }] });
+      expect(result.detail).toBe('This approval attached a range where the analysis needed one, so the model did change: Marketing budget 0 to 500 (taken from the figure itself, a unit of measurement, not a forecast). But none of the levels were recorded. Read the model again before describing it: someone else may have changed it meanwhile.');
+      expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status).toBe('Partly saved: this approval attached a range (Marketing budget 0 to 500), but none of the levels were recorded. Read the model again before describing it.');
+    } else if (site === 'target_level') {
+      expect(result.detail).toBe('The goal "Revenue" now has the target at least £90, as you stated it. Its level today (£20) was not recorded. What is its level today?');
+      expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status).toBe(result.detail);
+    } else {
+      expect(result.detail).toBe(WORDS[codes[site][1] as keyof typeof WORDS].text);
+      expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status).toBe(result.detail);
+    }
     expect(String(result.detail)).not.toMatch(/scenario changed|nothing was saved/);
+    const narrated = narrateWriteOutcome(`Nothing was saved. ${REVISION_CONFLICT_MESSAGE} Useful reasoning remains.`, [{ name: 'authorise_change' }], [result]);
+    expect(narrated.text).toBe('Useful reasoning remains.');
+    expect(narrated.status).toBe(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status);
+
   });
   it.each(['range_levels', 'values_loop', 'values_range', 'target_level'] as const)('%s: an unknown second-write transport outcome keeps save 1 without claiming save 2 failed', async site => {
     const w = world(site, 'other_throw');
@@ -236,4 +245,11 @@ describe('every multi-save capability keeps save 1 after save 2 is refused', () 
     expect(String(result.detail)).not.toMatch(/scenario changed|nothing was saved|could not be saved/);
   });
 
+});
+
+it('all ACKed sentences retain their independent literal words and hashes', () => {
+  for (const [code, words] of Object.entries(WORDS)) {
+    expect(PARTIAL_WRITE_MESSAGES[code]).toBe(words.text);
+    expect(createHash('sha256').update(PARTIAL_WRITE_MESSAGES[code]).digest('hex')).toBe(words.sha256);
+  }
 });

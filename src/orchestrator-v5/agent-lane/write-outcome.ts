@@ -103,13 +103,11 @@ const REFUSAL_WORDS: Record<string, string> = {
 export const DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE = 'The link was saved, but the scenario changed before its accepted estimate detail could be saved. Check the saved link and try accepting its estimate again.';
 
 export const RANGE_SAVED_LEVELS_CONFLICT_MESSAGE = "The range was saved, but the scenario changed before the option levels could be saved. Check the saved range and try setting the option levels again.";
-export const RANGE_SAVED_LEVELS_REFUSED_MESSAGE = "The range was saved, but the option levels could not be saved. Check the saved range and try setting the option levels again.";
 export const VALUES_SAVED_REMAINING_CONFLICT_MESSAGE = "The earlier values were saved, but the scenario changed before the remaining values could be saved. Check the saved values and try setting the remaining values again.";
 export const VALUES_SAVED_REMAINING_REFUSED_MESSAGE = "The earlier values were saved, but the remaining values could not be saved. Check the saved values and try setting the remaining values again.";
 export const VALUES_SAVED_RANGE_CONFLICT_MESSAGE = "The values were saved, but the scenario changed before their range could be saved. Check the saved values and try setting their range again.";
 export const VALUES_SAVED_RANGE_REFUSED_MESSAGE = "The values were saved, but their range could not be saved. Check the saved values and try setting their range again.";
 export const TARGET_SAVED_LEVEL_CONFLICT_MESSAGE = "The target was saved, but the scenario changed before today's level could be saved. Check the saved target and try setting today's level again.";
-export const TARGET_SAVED_LEVEL_REFUSED_MESSAGE = "The target was saved, but today's level could not be saved. Check the saved target and try setting today's level again.";
 export const DRAWN_LINK_ESTIMATE_REFUSED_MESSAGE = "The link was saved, but its accepted estimate detail could not be saved. Check the saved link and try accepting its estimate again.";
 
 export const RANGE_SAVED_LEVELS_UNCONFIRMED_MESSAGE = "The range was saved, but Olumi could not confirm whether the option levels were saved. Check the saved model before trying to set the option levels again.";
@@ -127,15 +125,19 @@ export const PARTIAL_WRITE_MESSAGES: Readonly<Record<string, string>> = {
   values_saved_read_unconfirmed: VALUES_SAVED_READ_UNCONFIRMED_MESSAGE,
 
   range_saved_levels_not_saved: RANGE_SAVED_LEVELS_CONFLICT_MESSAGE,
-  range_saved_levels_refused: RANGE_SAVED_LEVELS_REFUSED_MESSAGE,
   values_saved_remaining_values_not_saved: VALUES_SAVED_REMAINING_CONFLICT_MESSAGE,
   values_saved_remaining_values_refused: VALUES_SAVED_REMAINING_REFUSED_MESSAGE,
   values_saved_range_not_saved: VALUES_SAVED_RANGE_CONFLICT_MESSAGE,
   values_saved_range_refused: VALUES_SAVED_RANGE_REFUSED_MESSAGE,
   target_saved_level_not_saved: TARGET_SAVED_LEVEL_CONFLICT_MESSAGE,
-  target_saved_level_refused: TARGET_SAVED_LEVEL_REFUSED_MESSAGE,
   link_saved_estimate_refused: DRAWN_LINK_ESTIMATE_REFUSED_MESSAGE,
 };
+
+/** These two partial outcomes retain their specific receipts instead of generic fixed copy. */
+function isPartialWriteResult(r: ToolResult): boolean {
+  return r.mutated === true && (PARTIAL_WRITE_MESSAGES[String(r.outcome)] !== undefined
+    || r.outcome === 'range_saved_levels_refused' || r.outcome === 'target_saved_level_refused');
+}
 
 const UNCONFIRMED_WORDS: Record<string, string> = {
   not_verified: 'The change was sent, but it could not be confirmed: the model may have changed again straight afterwards, so Olumi cannot yet say what it now holds. Look at the model, or ask me to check it.',
@@ -419,7 +421,17 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
-  if (partialMessage !== undefined) return partialMessage;
+  if (isPartialWriteResult(r)) {
+    if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
+      && r.refusal === 'not_verified' && typeof r.detail === 'string') return r.detail;
+    if (typeof r.follow_up === 'string') return withoutAgentDirections(r.follow_up).text;
+    if (r.refusal === 'partially_applied' && Array.isArray(r.ranges_added_for_analysis)) {
+      const ranges = (r.ranges_added_for_analysis as { factor: string; range: number }[])
+        .map(f => `${f.factor} 0 to ${f.range}`).join(', ');
+      return `Partly saved: this approval attached a range (${ranges}), but none of the levels were recorded. Read the model again before describing it.`;
+    }
+    if (partialMessage !== undefined) return partialMessage;
+  }
   // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
   // The narrating call's approval never reached the store, so the held change still awaits the user's yes — unless the
   // turn then withdrew it (Codex #2781 r4 P2): the words follow the approve chip's own rule (`pending`), never the refusal.
@@ -511,7 +523,7 @@ export function narrateWriteOutcome(
   let out = text;
   // An earlier write is confirmed. Strip whole-operation failure claims
   // only for a structured partial outcome; ordinary refusals keep their words.
-  const hasPartialWrite = writes.some(w => w.result.mutated === true && PARTIAL_WRITE_MESSAGES[String(w.result.outcome)] !== undefined);
+  const hasPartialWrite = writes.some(w => isPartialWriteResult(w.result));
   if (hasPartialWrite) {
     for (const claim of [
       REVISION_CONFLICT_MESSAGE,

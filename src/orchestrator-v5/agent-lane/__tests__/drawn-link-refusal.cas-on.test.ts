@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
-import { narrateWriteOutcome } from '../write-outcome.js';
+import { narrateWriteOutcome, PARTIAL_WRITE_MESSAGES } from '../write-outcome.js';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { OrchestratorTurnPayloadSchema, type SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import { GraphStaleWriteError } from '../../session/store.js';
@@ -100,7 +100,8 @@ it('drawn-link save2 returned refusal retains link receipt with exact partial wo
   expect(w.edge()).toBeDefined();
   expect(w.commits).toHaveLength(1);
   expect(w.events).toHaveLength(1);
-  expect(result.detail).toBe(words);
-  expect(narrateWriteOutcome('Nothing was saved. Useful reasoning.', [{ name: 'authorise_change' }], [result])).toMatchObject({ text: 'Useful reasoning.', status: words });
-  expect(createHash('sha256').update(String(result.detail)).digest('hex')).toBe("d9824f74f9c334ae7e09a2527ea9e6a2d8909db82024616acd7010583c08e916");
+  const specific = 'The link was added, but Olumi could not confirm its strength as the accepted Olumi estimate. Check the saved model before continuing.';
+  expect(result.detail).toBe(`${specific} ${words}`);
+  expect(narrateWriteOutcome('Nothing was saved. Useful reasoning.', [{ name: 'authorise_change' }], [result])).toMatchObject({ text: 'Useful reasoning.', status: `${specific} ${words}` });
+  expect(createHash('sha256').update(PARTIAL_WRITE_MESSAGES.link_saved_estimate_refused).digest('hex')).toBe("d9824f74f9c334ae7e09a2527ea9e6a2d8909db82024616acd7010583c08e916");
 });

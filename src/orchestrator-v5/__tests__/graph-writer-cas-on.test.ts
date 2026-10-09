@@ -278,7 +278,7 @@ vi.mock('../../config/index.js', async importOriginal => {
 
 
 import { runWithTurnFence } from '../session/turn-fence.js';
-import { REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
+import { MODEL_READ_FAILED_MESSAGE, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import { StateCommitFailedError, type SessionTurnWrite } from '../session/store.js';
 function setEdit(target = 'fac_price') {
   ports.edit.mockImplementation(async (input: { graph: ReturnType<typeof baseGraph> }) => {
@@ -328,16 +328,16 @@ describe('commit B server authority and real append doors', () => {
   it.each([true, false])('closed by B (2), versions=%s: unparseable non-empty server graph refuses without a provider call or write', async versionsEnabled => {
     vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', String(versionsEnabled)); _resetConfigCache();
     const h = harness(); h.tables.scenarios![0]!.graph = { corrupt: true }; setEdit();
-    await expect(edit(h)).rejects.toMatchObject({ conflict_category: 'revision_conflict' });
+    await expect(edit(h)).rejects.toMatchObject({ name: 'ModelReadFailedError', code: 'model_read_failed', statusCode: 503, retryable: true, message: MODEL_READ_FAILED_MESSAGE });
     expect(ports.edit).not.toHaveBeenCalled(); expect(h.rpcCalls).toEqual([]);
-    expectRevisionEvent(versionsEnabled ? 'v6' : 'v4r', h.graphReadFailures ? null : 7);
+    expect(warningSpy.mock.calls.map(call => call[0]).filter(row => row !== null && typeof row === 'object' && 'event' in row && row.event === 'graph_revision_conflict')).toEqual([]);
   });
   it.each([true, false])('failed combined read, versions=%s, refuses without retry, provider call or write', async versionsEnabled => {
     vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', String(versionsEnabled)); _resetConfigCache();
     const h = harness({ failGraphReadAt: 1 }); setEdit();
-    await expect(edit(h)).rejects.toMatchObject({ conflict_category: 'revision_conflict' });
+    await expect(edit(h)).rejects.toMatchObject({ name: 'ModelReadFailedError', code: 'model_read_failed', statusCode: 503, retryable: true, message: MODEL_READ_FAILED_MESSAGE });
     expect(ports.edit).not.toHaveBeenCalled(); expect(h.rpcCalls).toEqual([]);
-    expectRevisionEvent(versionsEnabled ? 'v6' : 'v4r', h.graphReadFailures ? null : 7);
+    expect(warningSpy.mock.calls.map(call => call[0]).filter(row => row !== null && typeof row === 'object' && 'event' in row && row.event === 'graph_revision_conflict')).toEqual([]);
     expect(h.graphReadFailures).toBe(1);
   });
   it('successful empty read adopts the client graph with its measured revision', async () => {
@@ -455,7 +455,7 @@ describe.each([true, false])('CAS-ON door population (model versions=%s)', versi
       const h = harness({ failGraphReadAt: 1 });
       await expect(dispatchEditGraph({ payload: message(), requestId: 'on-edit-read-failure',
         request: { headers: {} } as FastifyRequest, graphState: GraphStateIngressSchema.parse(baseGraph()), analysisState: null }))
-        .rejects.toMatchObject({ conflict_category: 'revision_conflict' });
+        .rejects.toMatchObject({ name: 'ModelReadFailedError', code: 'model_read_failed', statusCode: 503, retryable: true, message: MODEL_READ_FAILED_MESSAGE });
       expect(h.graphReadFailures).toBe(1);
       expect(h.rpcCalls).toEqual([]);
     })();
@@ -660,7 +660,7 @@ describe.each([true, false])('CAS-ON door population (model versions=%s)', versi
       await ceeOrchestratorRouteV2(app);
       try {
         const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: { ...message('Add opportunity cost of founder time as a risk'), turn_class: 'propose' } });
-        expect(result.statusCode, result.body).toBe(failRead ? 409 : 200);
+        expect(result.statusCode, result.body).toBe(failRead ? 503 : 200);
         expect(ports.routeDispatch).toHaveBeenCalledTimes(failRead ? 0 : 1);
         if (failRead) expect(h.graphReadFailures).toBe(1);
         else expect(h.rpcCalls.some(call => ['append_turn_atomic_v6', 'append_turn_atomic_v4r'].includes(call.name))).toBe(true);
@@ -697,9 +697,9 @@ describe.each([true, false])('CAS-ON real HTTP wire (model versions=%s)', versio
       const result = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
         ...message('Add opportunity cost of founder time as a risk'), graph_state: baseGraph(),
       } });
-      expect(result.statusCode, result.body).toBe(409);
-      expect(result.json()).toMatchObject({ code: 'revision_conflict', message: REVISION_CONFLICT_MESSAGE });
-      expectRevisionEvent(versionsEnabled ? 'v6' : 'v4r', mode === 'failed' ? null : 7);
+      expect(result.statusCode, result.body).toBe(503);
+      expect(result.json()).toMatchObject({ code: 'model_read_failed', message: MODEL_READ_FAILED_MESSAGE, retryable: true });
+      expect(warningSpy.mock.calls.map(call => call[0]).filter(row => row !== null && typeof row === 'object' && 'event' in row && row.event === 'graph_revision_conflict')).toEqual([]);
       expect(ports.edit).not.toHaveBeenCalled();
       expect(h.rpcCalls.filter(c => c.name.startsWith('append_'))).toEqual([]);
     } finally { await app.close(); }
