@@ -88,7 +88,7 @@ const SMUGGLE_NAMES = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
   .filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k))
   .sort();
 
-describe('the 24 zero-reader smuggle names — enumerated at the bytes', () => {
+describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
   it('is exactly the CEE-owned names that are NOT intervention contract keys', () => {
     // Six at 2.478; A6e adds `exists_defaulted` (Canonical #70 5855416983), a CEE-owned edge stamp;
     // A6f adds `std_defaulted` (AIQ N1 on #2096), the same stamp for the spread.
@@ -104,11 +104,15 @@ describe('the 24 zero-reader smuggle names — enumerated at the bytes', () => {
       'goal_deadline_as_stated',
       'goal_direction',
       'goal_horizon_months',
+      // S4: recorded reference/count and stock reading are pipeline-owned; producer adds cannot forge them.
+      'goal_horizon_reference_date',
+      'goal_horizon_stated_months',
       // + MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
       'goal_level_reading',
       // + MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
       'goal_scope',
       'goal_sense_reading',
+      'goal_stock_reading',
       // S4 §(ad): the horizon basis stamps are CEE-owned.
       'horizon_basis',
       'horizon_basis_months',
@@ -136,10 +140,10 @@ describe('the 24 zero-reader smuggle names — enumerated at the bytes', () => {
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the union adds six MORE names the same screen now kills (30 total: 24 smuggle names + five J2 names + event_risk)', () => {
+  it('the union adds six MORE names the same screen now kills (33 total: 27 smuggle names + five J2 names + event_risk)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
-    // 24 CEE-owned smuggle names, including the three S4 horizon-basis stamps, plus five J2 names and event_risk.
-    expect(all.length).toBe(30);
+    // 27 CEE-owned smuggle names include the three new S4 pipeline-owned fields and three horizon-basis stamps; add five J2 names and event_risk.
+    expect(all.length).toBe(33);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

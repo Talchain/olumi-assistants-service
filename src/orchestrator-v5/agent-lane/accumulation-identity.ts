@@ -21,6 +21,9 @@
  *  · the outcome carries no other identity and is a part of the admitted goal product.
  * `stated_in_brief` follows all three input levels, never the drafter's declaration stamp alone. Pure.
  */
+import { readGoalRecord } from '../goal-target/goal-record.js';
+import { isDeepStrictEqual } from 'node:util';
+import { readUnitParts, words } from './same-unit.js';
 import { periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { canonicalLabel } from './model-primitives.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
@@ -125,18 +128,21 @@ export function admitAccumulationIdentities(
   edges: readonly EdgeLike[],
   identities: readonly CandidateIdentity[] | undefined,
 ): AccumulationAdmission {
+  return admitAccumulationDeclarations(nodes, edges, (identities ?? []).filter(d => d?.operation === 'accumulation'));
+}
+
+function admitAccumulationDeclarations(nodes: readonly NodeLike[], edges: readonly EdgeLike[], declared: readonly CandidateIdentity[]): AccumulationAdmission {
   const carriers = new Map<string, AccumulationCarrier>();
   const loss: AccumulationLoss[] = [];
   const addedNodes: NodeLike[] = [];
   const addedEdges: AuthoredEdge[] = [];
   const goalCarriers = new Map<string, { carrierId: string; stated: boolean }>();
-  const declared = (identities ?? []).filter((d) => d?.operation === 'accumulation');
   if (declared.length === 0) return { carriers, loss, addedNodes, addedEdges, goalCarriers };
   const byLabel = new Map<string, NodeLike>();
   for (const n of nodes) if (typeof n.label === 'string' && !byLabel.has(canonicalLabel(n.label))) byLabel.set(canonicalLabel(n.label), n);
   const resolve = (label: unknown): NodeLike | undefined => (typeof label === 'string' ? byLabel.get(canonicalLabel(label)) : undefined);
   const goal = nodes.filter((n) => n.kind === 'goal');
-  const horizon = goal.length === 1 ? goal[0]!.goal_horizon_months : undefined;
+  const horizon = goal.length === 1 ? readGoalRecord({ nodes, edges }, goal[0]!.id)?.horizon?.months : undefined;
   const parents = (id: string): Set<string> => new Set(edges.filter((e) => e.to === id).map((e) => e.from));
 
   for (const d of declared) {
@@ -275,6 +281,41 @@ export function withAdmittedAccumulations<N extends NodeLike, E extends EdgeLike
         ? { ...e, to: goal.carrierId } : e;
     }), ...admission.addedEdges],
   };
+}
+
+
+/** Science §(aj): structure only. Admission remains the sole carrier writer; this is never a confirmation. */
+export function admitStructuralGoalAccumulation<N extends NodeLike, E extends EdgeLike>(nodes: readonly N[], edges: readonly E[]) {
+  const goals = nodes.filter(n => n.kind === 'goal');
+  const goal = goals.length === 1 ? goals[0] : undefined;
+  if (!goal || goal.nonlinear_identity != null || (goal as NodeLike & { goal_stock_reading?: unknown }).goal_stock_reading === 'one_off') return { nodes: [...nodes], edges: [...edges] };
+  const record = readGoalRecord({ nodes, edges }, goal.id);
+  if (record?.horizon?.months === undefined) return { nodes: [...nodes], edges: [...edges] };
+  const unit = record.target?.unit;
+  const dimension = readUnitParts(unit);
+  if (!dimension || (dimension.period !== null && dimension.period !== 'month')) return { nodes: [...nodes], edges: [...edges] };
+  const parents = nodes.filter(n => edges.some(e => e.to === goal.id && e.from === n.id) && n.kind !== 'option' && n.kind !== 'decision');
+  // A rate is never a stock in a different time dimension. Monthly-rate goals have the explicit ambiguity card.
+  const periodCount = (unit: unknown): number => typeof unit === 'string' ? words(unit).filter(w => periodNoun(w) !== null || periodAdverb(w) !== null).length : 0;
+  const levels = parents.filter(n => {
+    const parts = readUnitParts(n.observed_state?.unit);
+    return classifyValueSource(n.observed_state?.source) === 'user_stated' && !edges.some(e => e.to === n.id && nodes.some(p => p.id === e.from && p.kind === 'option')) && parts !== null && (parts.period === null || dimension.period === 'month' && parts.period === 'month')
+      && periodCount(n.observed_state?.unit) <= 1 && isDeepStrictEqual({ ...parts, period: null }, { ...dimension, period: null });
+  });
+  const flows = parents.filter(n => {
+    const tokens = typeof n.observed_state?.unit === 'string' ? words(n.observed_state.unit) : [];
+    const last = tokens.at(-1);
+    const connector = tokens.at(-2);
+    if (last === undefined || periodNoun(last) !== 'month' || !['/', 'per', 'a', 'each', 'every'].includes(connector ?? '')) return false;
+    return isDeepStrictEqual(readUnitParts(tokens.slice(0, -2).join(' ')), dimension);
+  });
+  if (levels.length !== 1 || flows.length !== 1 || levels[0]!.id === flows[0]!.id
+    || parents.some(n => n.id !== levels[0]!.id && !flows.some(flow => flow.id === n.id) && readUnitParts(n.observed_state?.unit)?.period === 'month' && periodCount(n.observed_state?.unit) > periodCount(unit))
+    || ![levels[0]!, flows[0]!].every(n => classifyValueSource(n.observed_state?.source) === 'user_stated')
+    || (levelOf(flows[0]!) ?? 0) <= 0) return { nodes: [...nodes], edges: [...edges] };
+  const admission = admitAccumulationDeclarations(nodes, edges, [{ outcome: String(goal.label), operation: 'accumulation',
+    factors: [String(levels[0]!.label), String(flows[0]!.label)], reading: 'net', provenance: 'inferred' }]);
+  return withAdmittedAccumulations(nodes, edges, admission);
 }
 
 export interface AccumulationOptionScope {

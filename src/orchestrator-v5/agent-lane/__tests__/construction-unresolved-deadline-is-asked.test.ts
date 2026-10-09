@@ -148,3 +148,9 @@ describe('CONTRAST: every other deadline shape reads exactly as before', () => {
     expect(questions.some((q) => q.startsWith('Which date does'))).toBe(false);
   });
 });
+
+it.each(['month 9', 'within nine months'])('construction retains %s as unresolved words, not a month count', async wording => {
+  const { goal } = await build(BRIEF.replace('by Q3', wording), candidate(9));
+  expect(goal.goal_horizon_months).toBeUndefined();
+  expect(goal.goal_deadline_as_stated).toBe(wording === 'month 9' ? wording : 'nine months');
+});

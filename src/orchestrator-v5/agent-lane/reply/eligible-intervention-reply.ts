@@ -7,8 +7,13 @@ const words = (text: string): number => text.trim().split(/\s+/).filter(Boolean)
 
 /** Append RC's selected action and Science's exact disclosure after normal composition. */
 export function composeEligibleIntervention(composed: ReplyComposition, intervention: EligibleIntervention,
-  actionLabel: string | undefined, faceContract: boolean): ReplyComposition {
+  actionLabel: string | undefined, faceContract: boolean, wholeProposal = false): ReplyComposition {
   const disclosure = `<details>\n<summary>${INTERVENTION_WHY_LABEL}</summary>\n\n${intervention.why}\n\n</details>`;
+  // Proposal disclosures and approval questions retain every byte; only the carried suffix is new.
+  if (wholeProposal) {
+    const suffix = [actionLabel === undefined ? undefined : `- ${actionLabel}`, disclosure].filter(Boolean).join('\n\n');
+    return { ...composed, text: `${composed.text}\n\n${suffix}` };
+  }
   // Run/Draft H/W/E/N belongs to the existing composer, byte for byte.
   if (faceContract) {
     if (composed.shape === null) return { ...composed, text: `${composed.text}\n\n${disclosure}` };

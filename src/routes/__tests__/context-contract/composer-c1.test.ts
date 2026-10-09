@@ -1,7 +1,8 @@
 /** C1 acceptance: real Fastify route; storage/snapshot ports and scripted HTTP provider only. */
 import { it, expect, vi, describe, beforeAll } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { capture, object, array, valueAt, type Obj, type Snapshot } from './provider-harness.js';
+import { capture, object, array, valueAt, fixture, type Obj, type Snapshot } from './provider-harness.js';
+import c2Base from './fixtures/composer-c2-base.json';
 import policy from '../../../orchestrator-v5/agent-lane/guidance/reasoning-interventions.json';
 import { computeAnalysisAffectingGraphHash } from '../../../orchestrator-v5/context/graph-hash.js';
 import { composeReplyShape } from '../../../orchestrator-v5/agent-lane/reply/compose-reply.js';
@@ -177,4 +178,109 @@ it.each(['run', 'draft'] as const)('Run-turn face %s: carrier appends Why in det
   expect(normal.shape).not.toBeNull();
   expect(carried.shape).toEqual({ ...normal.shape, detail: [normal.shape!.detail, `<details>\n<summary>Why?</summary>\n\n${why}\n\n</details>`].filter(Boolean).join('\n\n') });
   expect(carried.text).toBe(`${normal.text}\n\n<details>\n<summary>Why?</summary>\n\n${why}\n\n</details>`);
+});
+
+
+// C2 base bytes are captured on d820c6a1424891d59f7d70afc9f7b0c903ae6dc1 through this same real route.
+const proposalText = 'Our churn is 3%.\n\n- Test customer response.\n\nI proposed a £54 price level for you to review.\n\nWould you approve this starting figure?';
+const disclosure = `<details>\n<summary>Why?</summary>\n\n${why}\n\n</details>`;
+function recordC2(name: string, w: Awaited<ReturnType<typeof run>>): void {
+  if (!process.env.S8_CAPTURE_DIR) return;
+  mkdirSync(process.env.S8_CAPTURE_DIR, { recursive: true });
+  writeFileSync(`${process.env.S8_CAPTURE_DIR}/${name}.json`, JSON.stringify({ calls: w.calls, response: w.response }, null, 2));
+}
+async function proposalTurn(trigger: Trigger, name: string) {
+  const w = await run(trigger, { evidenceLabel: name, expectedCalls: 2,
+    payload: { message: 'Prepare a £54 price level for review. What should we examine next?' },
+    providerReply: (_body, index) => index === 1 ? { status: 'completed', output: [{ type: 'function_call', call_id: 'c2-level', name: 'propose_option_interventions', arguments: JSON.stringify({
+      interventions: [{ option_label: 'raise_price_to_54', factor_label: 'pro_price', value: 54, unit: '£/subscriber/month', user_stated: true }], whole_request: false,
+    }) }] } : response(proposalText),
+  });
+  recordC2(name, w);
+  return w;
+}
+it('P1 proposal carrier: base text is a byte-whole prefix, then exact action and Science Why; approval unchanged', async () => {
+  const w = await proposalTurn('W6', 'P1');
+  expect(carriers(w)).toHaveLength(2);
+  expect(carriers(w)[1]).toEqual(carriers(w)[0]);
+  expect(object(array(object(w.response._agent).tool_calls)[0])).toMatchObject({ name: 'propose_option_interventions', ok: true, proposal_id: expect.any(String) });
+  const base = object(c2Base.P1);
+  const baseText = String(base.assistant_text);
+  const label = object(object(object(w.response.guidance).slot1).primary_action).label;
+  expect(label).toBe('Suggest risks');
+  expect(String(w.response.assistant_text).slice(0, baseText.length)).toBe(baseText);
+  expect(String(w.response.assistant_text).slice(baseText.length)).toBe(`\n\n- ${String(label)}\n\n${disclosure}`);
+  expect(w.response.suggested_actions).toEqual(base.suggested_actions);
+  expect(array(w.response.suggested_actions).some(a => String(object(a).id).startsWith('agent-approve-proposal:'))).toBe(true);
+  expect(w.response._answer_shape).toBeUndefined();
+  // Both typed proposal identities keep their whole body, even when a caller supplies a shape-like body.
+  const intervention = object(carriers(w)[0]);
+  for (const identity of [{ profile: 'proposal' as const }, { keepWhole: 'proposal' as const }]) {
+    const input = { text: baseText, ...identity };
+    const normal = composeReplyShape(input);
+    const carried = composeReplyShape({ ...input, eligibleIntervention: intervention as never, interventionActionLabel: String(label) });
+    expect(carried).toEqual({ ...normal, text: `${baseText}\n\n- ${String(label)}\n\n${disclosure}` });
+  }
+});
+it('P2 proposal without carrier: byte-identical base text and suggested actions', async () => {
+  const w = await proposalTurn('none', 'P2');
+  expect(carriers(w)).toEqual([]);
+  expect(object(array(object(w.response._agent).tool_calls)[0])).toMatchObject({ ok: true, proposal_id: expect.any(String) });
+  expect(w.response.assistant_text).toBe(c2Base.P2.assistant_text);
+  expect(w.response.suggested_actions).toEqual(c2Base.P2.suggested_actions);
+  expect(w.response._answer_shape).toBeUndefined();
+});
+it('P3 host-only proposal: zero provider calls, base text unchanged and no Why', async () => {
+  const { riskAddPressFor } = await import('../../../orchestrator-v5/agent-lane/method-turn/widen-turn.js');
+  const press = riskAddPressFor({ label: 'Customer response', mechanism: 'drives',
+    hits: { id: 'raise_price_to_54', label: 'Raise price to £54', kind: 'option' },
+    through: { id: 'monthly_new_pro_subscribers', label: 'Monthly new Pro subscribers', direction: 'positive' },
+    affects: { id: 'mrr', label: 'MRR', direction: 'negative' } });
+  if (process.env.S8_CAPTURE_DIR) mkdirSync(`${process.env.S8_CAPTURE_DIR}/provider/P3/run2`, { recursive: true });
+  const state = snapshot(fixture('run2').snapshot, 'W6');
+  const graph = state.graph;
+  for (const node of graph.nodes) delete node.proposed_by;
+  for (const edge of graph.edges) edge.provenance = { ...object(edge.provenance), source: 'user_specified' };
+  state.graph_hash = computeAnalysisAffectingGraphHash(graph as never)!;
+  state.analysis_result.computed_against_hash = state.graph_hash;
+  state.current_read.computed_against_hash = state.graph_hash;
+  state.current_read.current_analysis_hash = state.graph_hash;
+  let pending: unknown[] = [];
+  const w = await run('W6', { evidenceLabel: 'P3', expectedCalls: 0, readSnapshot: async () => structuredClone(state), storage: { loadGraph: async () => graph, loadGraphAndBriefText: async () => ({ graph, briefText: null }),
+    readMostRecentPendingActions: async () => structuredClone(pending),
+    append: async (input: Obj) => { pending = array(input.pending_actions); return { id: 'c2-host-proposal' }; } }, payload: { message: press.message, chip: { id: press.id }, source: 'chip' } });
+  recordC2('P3', w);
+  expect(object(array(object(w.response._agent).tool_calls)[0])).toMatchObject({ name: 'propose_new_risk', ok: true, proposal_id: expect.any(String) });
+  expect(w.response.assistant_text).toBe(c2Base.P3.assistant_text);
+  expect(String(w.response.assistant_text)).not.toContain('Why?');
+});
+it('X4 carrier face caps: eight-word bullets, eighty-word face, long existing label whole in detail', async () => {
+  const longLabel = 'Test the impact of customer cancellations and downgrades after changing the Pro price';
+  const headline = `${'Customer response matters '.repeat(24).trim()}.`;
+  const short = ['Test customer evidence before changing the Pro price.', 'Check retention with the customer team.', 'Name another risk.'];
+  const text = `${headline}\n\n${[longLabel, ...short].map(b => `- ${b}`).join('\n')}\n\nWhich risk could change your plan?`;
+  const w = await run('W6', { evidenceLabel: 'X4', providerReply: () => response(text) });
+  recordC2('X4', w);
+  expect(carriers(w)).toHaveLength(1);
+  const shape = object(w.response._answer_shape);
+  const bullets = array(shape.bullets);
+  expect(bullets.length).toBeGreaterThan(0);
+  for (const bullet of bullets) expect(String(bullet).trim().split(/\s+/).length).toBeLessThanOrEqual(8);
+  expect([shape.headline, ...bullets].join(' ').trim().split(/\s+/).length).toBeLessThanOrEqual(80);
+  expect(String(shape.detail)).toContain(`- ${longLabel}`);
+  for (const line of [longLabel, ...short, 'Which risk could change your plan?']) expect(String(w.response.assistant_text)).toContain(line);
+  expect(String(shape.detail)).toContain(disclosure);
+});
+it('X5 profile gate: method_step with carrier is byte-identical; proposal appends per P1', async () => {
+  const w = await capture('pre-mortem', 'run2', { evidenceLabel: 'X5', readSnapshot: async s => snapshot(s, 'S1'), providerReply: () => response(reply) });
+  recordC2('X5', w);
+  expect(w.calls).toHaveLength(1);
+  expect(w.response.assistant_text).toBe(c2Base.X5.assistant_text);
+  expect(String(w.response.assistant_text)).not.toContain('Why?');
+  expect(carriers(w)).toHaveLength(1);
+  const intervention = object(carriers(w)[0]);
+  const method = { text: String(w.response.assistant_text), profile: 'method_step' as const };
+  expect(composeReplyShape({ ...method, eligibleIntervention: intervention as never, interventionActionLabel: 'Suggest risks' })).toEqual(composeReplyShape(method));
+  const proposed = await proposalTurn('W6', 'X5-proposal');
+  expect(String(proposed.response.assistant_text)).toBe(`${String(c2Base.P1.assistant_text)}\n\n- Suggest risks\n\n${disclosure}`);
 });

@@ -30,6 +30,7 @@ export interface HorizonAttestation {
   /** The brief's own words for the deadline, verbatim; '' when `absent`. */
   readonly wording: string;
   readonly status: HorizonStatus;
+  readonly proposed_months?: number;
 }
 
 const MONTHS_PER: Readonly<Record<string, number>> = { month: 1, year: 12 };
@@ -44,7 +45,7 @@ const SPELLED_DURATION = new RegExp(
 );
 /** A calendar point: a year or today's date is needed to count its months. */
 const CALENDAR_POINT = new RegExp(
-  String.raw`\b(?:by|before|until)\s+(?:the\s+)?(?:end\s+of\s+)?(?:(?:Q[1-4]|H[12])\b(?:\s+\d{4})?|(?:this|next)\s+(?:year|quarter)\b|year[-\s]?end\b)`
+  String.raw`\b(?:by|before|until)\s+(?:the\s+)?(?:end\s+of\s+)?(?:(?:Q[1-4]|H[12])\b(?:\s+\d{4})?|(?:this|next)\s+(?:year|quarter)\b|year[-\s]?end\b|(?:January|February|March|April|May|June|July|August|September|October|November|December)\b(?:\s+\d{4})?)`
   + String.raw`|\b(?:in|during)\s+(?:Q[1-4]|H[12])\b(?:\s+\d{4})?`,
   'gi',
 );
@@ -85,6 +86,20 @@ export function attestHorizon(
   if (typeof brief !== 'string' || brief.trim() === '') return absent;
   const claimed = candidate?.horizon_months;
   const durations = forwardDurations(brief);
+  const countWords: Readonly<Record<string, number>> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, eighteen: 18 };
+  const proposed = /\bmonth\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\s+months?\b/i.exec(brief);
+  if (proposed !== null) {
+    const count = proposed[1] ?? proposed[2]!;
+    const months = countWords[count.toLowerCase()] ?? Number(count);
+    if (Number.isInteger(months) && months > 0) {
+      const before = brief.slice(Math.max(0, proposed.index - 16), proposed.index);
+      if (!PAST_OR_RANGE_BEFORE.test(before) && !PAST_AFTER.test(brief.slice(proposed.index + proposed[0].length))) {
+        // A count explicitly at the end of month N is ruled, rather than a bare proposed month N.
+        if (/end of\s+$/i.test(before) && claimed === months) return { months, wording: `end of ${proposed[0]}`, status: 'attested' };
+        return { months: null, proposed_months: months, wording: proposed[0], status: 'unresolved' };
+      }
+    }
+  }
   if (typeof claimed === 'number' && Number.isInteger(claimed) && claimed > 0) {
     const match = durations.find((d) => d.months === claimed);
     if (match !== undefined) return { months: claimed, wording: match.wording, status: 'attested' };
