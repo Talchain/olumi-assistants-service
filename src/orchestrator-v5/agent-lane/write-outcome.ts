@@ -418,20 +418,27 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
   return waiting.every((t) => FIGURE_PROPOSERS.includes(t)) ? 'figures' : 'change';
 }
 
+/** The established range-only partial warning, shared with the approval-facing field. */
+export function partialRangeLevelsWarning(ranges: readonly { factor: string; range: number }[]): string {
+  const rangesText = ranges.map(f => `${f.factor} 0 to ${f.range}`).join(', ');
+  return `Partly saved: this approval attached a range (${rangesText}), but none of the levels were recorded. Read the model again before describing it.`;
+}
+
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
   if (isPartialWriteResult(r)) {
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
       && r.refusal === 'not_verified' && typeof r.detail === 'string') return r.detail;
-    if (typeof r.follow_up === 'string') return withoutAgentDirections(r.follow_up).text;
+    const disclosure = Array.isArray(r.reencoded_siblings)
+      ? (r.reencoded_siblings as { detail: string }[]).map(c => c.detail).join(' ') : '';
+    if (typeof r.follow_up === 'string' && disclosure === '') return withoutAgentDirections(r.follow_up).text;
     if (String(r.outcome).startsWith('range_saved_levels_')
       && r.refusal === 'partially_applied' && Array.isArray(r.ranges_added_for_analysis)) {
-      const ranges = (r.ranges_added_for_analysis as { factor: string; range: number }[])
-        .map(f => `${f.factor} 0 to ${f.range}`).join(', ');
-      return `Partly saved: this approval attached a range (${ranges}), but none of the levels were recorded. Read the model again before describing it.`;
+      const warning = partialRangeLevelsWarning(r.ranges_added_for_analysis as { factor: string; range: number }[]);
+      return disclosure === '' ? warning : withoutAgentDirections(`${warning} ${disclosure}`).text;
     }
-    if (partialMessage !== undefined) return partialMessage;
+    if (partialMessage !== undefined) return disclosure === '' ? partialMessage : withoutAgentDirections(`${partialMessage} ${disclosure}`).text;
   }
   // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
   // The narrating call's approval never reached the store, so the held change still awaits the user's yes — unless the
