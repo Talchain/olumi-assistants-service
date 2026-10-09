@@ -40,7 +40,7 @@ import { WIDENED_RISK_MARKER_DOWN as WIDENED_RISK_MARKER_TOO_HIGH,
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
-import { goalHorizonSteadyWhyLine } from '../../goal-target/goal-horizon-detail.js';
+import { goalHorizonSteadyWhyLine, goalStockMethodForRun } from '../../goal-target/goal-horizon-detail.js';
 
 export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
 export { REPLY_SHAPE_INSTRUCTION } from './reply-shape-instruction.js';
@@ -155,6 +155,8 @@ export interface ReplyComposeInput {
   readonly faceContract?: 'draft' | 'run';
   /** Exact horizon disclosure owed beside on-face Run chances, after their own notes. */
   readonly horizonLine?: string;
+  /** The current stored Run, supplying method scope from its submitted options. Internal only. */
+  readonly analysisResult?: unknown;
   /** The canonical per-option cells, projected once by the route from the gated Run. */
   readonly chanceCells?: readonly CanonicalAnalysisCell[];
   /** P05b owns these words and counts; Draft face immediately after H, Run detail, ignored without a contract. */
@@ -660,9 +662,10 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   // The full typed note owns detail even when another host part contained it. Its marker carries the face identity.
   const inputObligations = (input.obligations ?? []).filter(o => !disclosures.some(d => foldQuotes(o.text).includes(foldQuotes(d.text)) || foldQuotes(d.text).includes(foldQuotes(o.text))))
     .concat(markerObligations, chanceMarker === undefined ? [] : [{ role: 'withheld_reason' as const, text: chanceMarker, ...((input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range') ? {} : { lead: true as const }) }]);
+  const method = goalStockMethodForRun(input.graph, input.analysisResult);
   const steadyAttested = goalHorizonVerdict(input.graph) === 'steady_attested';
   const horizonWithheld = chanceDisclosure?.kind === 'withhold' && chanceDisclosure.cause === 'horizon_not_tested';
-  const horizonDetail = canMark && input.faceContract === 'run' && !steadyAttested && !horizonWithheld ? input.horizonLine : undefined;
+  const horizonDetail = canMark && input.faceContract === 'run' && !steadyAttested && method === null && !horizonWithheld ? input.horizonLine : undefined;
   const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const steadyWhy = canMark && faceContract && steadyAttested && horizonBesideChance
     ? goalHorizonSteadyWhyLine(input.graph) : undefined;
@@ -672,13 +675,14 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...horizonWithholdDetails, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonWithholdDetails, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
   const faceHostLines = !faceContract || !canMark ? [] : [
     horizonDetail === undefined || !horizonBesideChance ? undefined : HORIZON_MARKER,
     input.faceContract === 'draft' ? input.widenedLine : undefined,
     widenedRiskMarker,
+    input.faceContract === 'run' && horizonBesideChance && method !== null ? method.face : undefined,
     input.whatChanges, input.estimatesLine,
   ].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
   const inputQuestions = openQuestionsSegment(input.text);
@@ -910,8 +914,9 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
         return present.some((o) => (o.role === 'withheld_reason' || o.role === 'caveat') && u.text.includes(o.text)
           && (o.subjects ?? []).some((subject) => figureSubjects.has(subject)));
       }));
-    const horizon = input.faceContract !== 'run' || horizonDetail === undefined || !horizonBesideChance ? undefined
-      : units.find((u) => u.text === HORIZON_MARKER);
+    const horizon = input.faceContract !== 'run' || !horizonBesideChance ? undefined
+      : method !== null ? units.find(u => u.text === method.face)
+      : horizonDetail === undefined ? undefined : units.find((u) => u.text === HORIZON_MARKER);
     const withhold = chanceMarker === undefined ? undefined : units.find(u => u.text === chanceMarker);
     const widened = input.faceContract !== 'draft' || input.widenedLine === undefined ? undefined
       : units.find(u => u.text === asWritten(input.widenedLine!.trim()));

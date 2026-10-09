@@ -116,11 +116,15 @@ describe('the accumulation reaches the registered graph only on an attested dead
     expect(said(result)).toContain('but nothing in the model works the goal out from it, so that was not used');
   });
 
-  it('an accumulation declared on the goal is refused, said, and nothing is carried', async () => {
+  // Science §(ai) Q1 (9 Oct): a goal may now be the stock through a derived carrier (time-cut-goal-as-stock R1). This
+  // declaration still fails: its stock (subscribers) does not feed the goal (MRR) directly, so nothing is carried.
+  it('an accumulation declared on the goal whose stock does not feed it is refused, said, and nothing is carried', async () => {
     const { nodes, result } = await build(BRIEF, candidate([{ ...ACC, outcome: 'Pro MRR' }]));
     expect(carrierOn(nodes, 'Pro MRR')).toBeUndefined();
     expect(carrierOn(nodes, SUBS12)).toBeUndefined();
-    expect(said(result)).toMatch(/the goal itself is never worked out this way/);
+    const goalId = String(nodes.find((n) => n.kind === 'goal')?.id);
+    expect(nodes.some((n) => n.id === `${goalId}_at_month_12`)).toBe(false);
+    expect(said(result)).toMatch(/Pro subscribers\W+does not feed directly into \W+Pro MRR/);
   });
 
   // Bound at ADMISSION: its ledger is where the product checker's refusal lands (the build result does not echo it).

@@ -60,6 +60,7 @@ import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
+import { goalStockAccumulationOf } from '../../goal-target/goal-horizon-detail.js';
 import { identityReceiptWords, proposeProductIdentity, type IdentityPartLevel, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -3164,19 +3165,22 @@ export function createAgentCapabilities(
     const check = await readGraph(ctx.scenario_id);
     const held = (check?.raw as { nodes?: Array<{ id?: unknown; nonlinear_identity?: unknown }> } | undefined)?.nodes
       ?.find((n) => n.id === reading.outcome_id)?.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
-    const holds = held?.operation === 'product' && held.stated_in_brief === true && Array.isArray(held.factor_ids)
-      && held.factor_ids.length === 2 && reading.factor_ids.every((id) => (held.factor_ids as unknown[]).includes(id));
+    const holds = held?.operation === reading.operation && held.stated_in_brief === true && Array.isArray(held.factor_ids)
+      && held.factor_ids.length === reading.factor_ids.length && reading.factor_ids.every((id) => (held.factor_ids as unknown[]).includes(id));
     const holdsFigure = (reading.part_levels ?? []).every(part => {
       const saved = (check?.raw as { nodes?: Array<{ id?: unknown; observed_state?: { raw_value?: unknown; unit?: unknown; source?: unknown } }> } | undefined)?.nodes
         ?.find(n => n.id === part.part_id)?.observed_state;
       return saved?.raw_value === part.raw_value && saved.unit === part.unit && saved.source === 'user_override';
     });
-    if (!holds || !holdsFigure) {
+    const stock = reading.operation === 'sum' ? goalStockAccumulationOf(check?.raw) : null;
+    const holdsZero = reading.operation !== 'sum' || (stock !== null
+      && (stock.netZero === null || (stock.netZero.observed_state as Record<string, unknown>).source === 'user_confirmed'));
+    if (!holds || !holdsFigure || !holdsZero) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'This reading was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
-    const [rate, count] = [labelOf(reading.factor_ids[0]), labelOf(reading.factor_ids[1])];
+    const [rate, count] = [labelOf(reading.factor_ids[0]), labelOf(reading.factor_ids[1] ?? '')];
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
