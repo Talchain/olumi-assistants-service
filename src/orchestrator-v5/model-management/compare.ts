@@ -7,6 +7,7 @@
  * `what_changed` as a model-history diff.
  */
 
+import { reencodedSiblingDiff } from '../agent-lane/level-batch-frame.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { computeAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
@@ -416,6 +417,18 @@ function detailedDiff(from: ValidatedGraph, to: ValidatedGraph): {
     });
   }
 
+  // A range attachment can change storage coordinates without changing the
+  // engine quantity. Name both ends in the version diff, with the SAME fixed
+  // disclosure as the approval and its receipt, only when resolver-proven.
+  for (const cell of reencodedSiblingDiff(from.raw, to.raw)) {
+    const nodePrefix = `/nodes/${pointerSegment(cell.option_id)}/interventions/${pointerSegment(cell.factor_id)}`;
+    const optionPrefix = `/options/${pointerSegment(cell.option_id)}/interventions/${pointerSegment(cell.factor_id)}`;
+    for (const category of MODEL_VERSION_DIFF_CATEGORIES) {
+      categories[category] = categories[category].map(item =>
+        [nodePrefix, optionPrefix].some(prefix => item.path === prefix || item.path.startsWith(prefix + '/'))
+          ? { ...item, summary: cell.detail, why_it_matters: cell.detail } : item);
+    }
+  }
   sortCategories(categories);
   return {
     categories,

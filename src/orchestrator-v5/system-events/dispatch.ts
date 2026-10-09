@@ -1,3 +1,4 @@
+import { type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
 import type { ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
@@ -284,6 +285,7 @@ export interface DispatchSystemEventResult {
   readonly committedVersion?: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
   /** Olumi's own links a committed value/range re-sized to fit the new level (P1-a): ids only, never a graph diff. */
   readonly linksResized?: readonly { readonly from: string; readonly to: string }[];
+  readonly reencodedSiblings?: readonly ReencodedSibling[];
   /**
    * ⭐ THE OPTION-STATUS WRITER'S OWN ACCOUNT OF THIS ATTEMPT (MG F1 T6, #2471; CODEX overflow 5937013605 + DL). Set by
    * `dispatchOptionStatusEdit` only, and never put on the wire (`OlumiResponseSchema` is strict): the Agent reads it
@@ -3210,6 +3212,7 @@ export async function dispatchOptionLevelsBatch(
         mutation_id: outcome.modelVersionReceipt.mutation_id, source_turn_id: outcome.modelVersionReceipt.source_turn_id } } : {}),
       ...('linksResized' in outcome && outcome.linksResized !== undefined && outcome.linksResized.length > 0
         ? { linksResized: outcome.linksResized } : {}),
+      ...('reencodedSiblings' in outcome ? { reencodedSiblings: outcome.reencodedSiblings } : {}),
       // Readiness from the bytes that LANDED. `undefined` only when the
       // committed graph did not parse — an honest absence, not a guess.
       ...(graphForReadiness !== null ? { analysisReady: canonicalReady } : {}),
@@ -3435,13 +3438,15 @@ export type CommitOptionLevelsResult =
        * Each level exactly as the model holds it after this call: the writer's read-back verified every cell against
        * the persisted bytes (a commit), or the model already held each one exactly (a verified no-op).
        */
-      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number }[];
+      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number;
+        readonly raw_value?: number; readonly cap?: number; readonly unit?: string }[];
       /**
        * ⭐ P1-a: Olumi's own placeholder links this commit re-sized to fit a new level (ids only; empty on a no-op). The
        * receipt already names them; a consumer quoting its own receipt reads them here, never from a graph diff. The
        * door always sets it; optional only so a port's existing fakes still type-check.
        */
-      readonly links_resized?: readonly { readonly from: string; readonly to: string }[] }
+      readonly links_resized?: readonly { readonly from: string; readonly to: string }[];
+      readonly reencoded_siblings?: readonly ReencodedSibling[] }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string };
       /** The approved value, range or link that was refused (the whole approval is refused with it). */
@@ -3542,8 +3547,16 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       if (computeAnalysisAffectingGraphHash(committedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) !== input.base_graph_hash) return { status: 'stale' };
     } catch { return { status: 'unconfirmed' }; }
   }
-  const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id,
-    value: readCommittedOptionEffect(committedGraph, l.option_id, l.factor_id) }));
+  const committedLevels = input.levels.map(l => {
+    const node = (committedGraph as { nodes?: Record<string, unknown>[] } | undefined)?.nodes?.find(n => n.id === l.option_id);
+    const cell = (node?.interventions as Record<string, Record<string, unknown>> | undefined)?.[l.factor_id];
+    return { option_id: l.option_id, factor_id: l.factor_id,
+      value: readCommittedOptionEffect(committedGraph, l.option_id, l.factor_id),
+      ...(typeof cell?.raw_value === 'number' && Number.isFinite(cell.raw_value)
+        && typeof cell.cap === 'number' && Number.isFinite(cell.cap) && cell.cap > 0
+        ? { raw_value: cell.raw_value, cap: cell.cap } : {}),
+      ...(typeof cell?.unit === 'string' ? { unit: cell.unit } : {}) };
+  });
   if (committedLevels.some(l => l.value === undefined)) return { status: 'unconfirmed' };
   const verifiedLevels = committedLevels.map(l => ({ ...l, value: l.value! }));
   if (r.commitSkippedReason === 'verified_no_op') {
@@ -3555,7 +3568,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
   const receipt = r.committedVersion ?? null;
   return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: verifiedLevels,
-    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })) };
+    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })), reencoded_siblings: r.reencodedSiblings ?? [] };
 }
 
 /**

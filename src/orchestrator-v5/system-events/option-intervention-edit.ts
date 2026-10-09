@@ -1,4 +1,4 @@
-import { proposedFrameForLevels, levelOnFinalFrame } from '../agent-lane/level-batch-frame.js';
+import { proposedFrameForLevels, levelOnFinalFrame, preserveSiblingQuantities, type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
 import { applyTeamShareEdit, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { withApprovedShareByDateWrite } from '../goal-target/share-by-date-carrier.js';
 import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
@@ -874,7 +874,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
       readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'];
       /** Olumi's own links this commit re-sized to fit a new level (P1-a); empty when none. */
-      readonly linksResized?: readonly { from: string; to: string }[] }
+      readonly linksResized?: readonly { from: string; to: string }[];
+      readonly reencodedSiblings?: readonly ReencodedSibling[] }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number;
       readonly linkIndex?: number }
@@ -1004,6 +1005,15 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       valueConfirmations = [...valueConfirmations, ...applied.confirmations];
       linksResized = [...linksResized, ...applied.linksResized];
     }
+  }
+  // The approval's frame attachment also owns preserving unselected engine
+  // quantities, on both the observed-state and no-baseline scale_frame paths.
+  // This stays inside the same in-memory plan and ONE append below.
+  const siblingBase = preserveSiblingQuantities(before, levelBase, targets);
+  if (siblingBase.kind === 'refused') return { kind: 'refused', reason: siblingBase.reason };
+  levelBase = siblingBase.graph;
+  if (siblingBase.reencoded.length > 0 && isEditableGraph(levelBase)) {
+    levelBaseHash = computeAnalysisAffectingGraphHash(levelBase)!;
   }
   /**
    * ⭐ A SET OF LINK STRENGTHS (seam Canonical #72 5871633483): the values' own shape — applied in memory on the
@@ -1239,7 +1249,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
   const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
     .map(resizedLinksSentence);
-  const acknowledgment = [...valueConfirmations, ...resizedLine,
+  const acknowledgment = [...valueConfirmations, ...resizedLine, ...siblingBase.reencoded.map(c => c.detail),
     ...(gapsChanged ? optionGaps.map(d => optionGapCardWords(labelOf(d.optionId), d.mechanisms)) : []), ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue,
     ...((f) => (f !== undefined ? { committedFigure: f } : {}))(committedFigureOf(plan.graph, t.optionId, t.factorId, t.modelValue)) })
@@ -1275,7 +1285,12 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     // CommitResult.persistedGraph is projected INPUT, not DB readback. A
     // duplicate turn may return an older row without applying new request bytes.
     if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, plan.graph) || (optionGaps.length > 0 && !optionGapsHeld(reloaded, optionGaps))
-      || targets.some(t => readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue)) {
+      || targets.some(t => {
+        if (readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue) return true;
+        const cell = (reloaded as EditableGraph).nodes.find(n => n.id === t.optionId)?.interventions?.[t.factorId] as Record<string, unknown> | undefined;
+        return t.figure?.raw_value !== undefined && (cell?.raw_value !== t.figure.raw_value || cell?.cap !== t.figure.cap
+          || (t.figure.unit !== undefined && cell?.unit !== t.figure.unit.trim()));
+      })) {
       return { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true };
     }
     // The graph answers "what is saved now?", not "what did this turn
@@ -1314,7 +1329,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     }
     return { kind: 'committed', response: committed.response, graph: reloaded,
       analysisGraphHash: plan.analysisGraphHash, persistedRowId: committed.persisted_row_id,
-      modelVersionReceipt: receipt, linksResized };
+      modelVersionReceipt: receipt, linksResized, reencodedSiblings: siblingBase.reencoded };
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }
@@ -1496,7 +1511,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     const likelyMoves = figure?.likely_range !== undefined
       && !(storedRange?.low === figure.likely_range.low && storedRange?.high === figure.likely_range.high
         && storedRange?.meaning === 'likely_range' && storedRange?.source === 'user_specified');
-    if (entry.data.value === input.modelValue && !likelyMoves) return { kind: 'unchanged' };
+    const finalFigure = figure?.raw_value !== undefined ? figure : undefined;
+    const sameCoordinate = entry.data.value === input.modelValue
+      && (finalFigure === undefined || ((existing as Record<string, unknown>).raw_value === finalFigure.raw_value
+        && (existing as Record<string, unknown>).cap === finalFigure.cap
+        && (finalFigure.unit === undefined || (existing as Record<string, unknown>).unit === finalFigure.unit.trim())));
+    if (sameCoordinate && !likelyMoves) return { kind: 'unchanged' };
   }
   const built = buildOptionEffectRawOperation({
     optionId: option.id, optionLabel: option.label,
