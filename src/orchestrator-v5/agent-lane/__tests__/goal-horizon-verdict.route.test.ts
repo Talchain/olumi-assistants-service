@@ -15,12 +15,21 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { untestedHorizonLine } from '../decision-input-ask.js';
+import { applyGoalSteadyEdit } from '../../goal-target/goal-steady-write.js';
 import { horizonSteadyAttested } from '../../goal-target/horizon-basis.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForUntestedHorizon } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+
+vi.mock('../../../config/index.js', async original => {
+  const actual = await original<typeof import('../../../config/index.js')>();
+  return { ...actual, config: new Proxy(actual.config, { get(target, key) {
+    if (key === 'auth') return { ...target.auth, hmacSecret: 's5-r13-route-test-only-secret' };
+    return Reflect.get(target, key);
+  } }) };
+});
 
 type Rec = Record<string, any>;
 const fixture = (path: string): Rec => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
@@ -265,6 +274,20 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(body.assistant_text).not.toContain(OLD_HORIZON);
   }, 60_000);
 
+  it('fully sized B2 with real door-minted attestation shows chance and ACKed Why through the served route', async () => {
+    const clean = cleanB2(); providerBodyOverride = clean.body;
+    const issued = applyGoalSteadyEdit(clean.graph, { goal_id: GOAL, months: 9 }, SCENARIO);
+    if (issued.kind !== 'mutated') throw new Error('real route fixture mint refused');
+    graph = JSON.parse(JSON.stringify(issued.mutatedGraph));
+    const body = await turn();
+    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment)).toBe('steady_attested');
+    expect(lastView.options.some(row => row.cell.kind === 'figure' || row.cell.kind === 'range')).toBe(true);
+    expect(body.assistant_text).toContain('%');
+    expect(body._answer_shape.detail.split('\n\n')).toContain(WHY);
+    expect(body.assistant_text).toContain(WHY);
+    expect(body.assistant_text).not.toContain(OLD_HORIZON);
+  }, 60_000);
+
   it.skipIf(CAPTURE_BASELINE)('fully sized B2 shape: a stored triple does not unlock any option chance', async () => {
     // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
@@ -340,21 +363,21 @@ describe('Science §(ad) through the producer and reply route', () => {
 });
 
 describe.skipIf(CAPTURE_BASELINE)('Science §(ad) typed selector and unchanged controls', () => {
-  // P1a (DL 87114 #2895): all historical triple shapes remain forged until the S5 writer lands.
+  // P1a (DL 87114 #2895): historical flat triples remain forged even after the S5 writer lands.
   const steady = (patch: Record<string, unknown> = {}) => ({ kind: 'goal', goal_horizon_months: 9, horizon_basis: 'steady_attested',
     horizon_basis_source: 'user_stated', horizon_basis_months: 9, ...patch });
   it.each(['ai_inferred', 'from_brief', 'drafter', undefined])('steady flag is not user attestation with source %s', source => {
-    expect(horizonSteadyAttested(steady({ horizon_basis_source: source }))).toBe(false);
+    expect(horizonSteadyAttested({ nodes: [steady({ horizon_basis_source: source })], edges: [] })).toBe(false);
   });
   it('a stored triple does not unlock, including matching months and user_stated source', () => {
     // P1a (DL 87114 #2895): a stored triple does not unlock.
-    expect(horizonSteadyAttested(steady())).toBe(false);
+    expect(horizonSteadyAttested({ nodes: [steady()], edges: [] })).toBe(false);
     for (const horizon of [undefined, 0, -1, 1.5, '9', Number.NaN]) {
-      expect(horizonSteadyAttested(steady({ goal_horizon_months: horizon }))).toBe(false);
+      expect(horizonSteadyAttested({ nodes: [steady({ goal_horizon_months: horizon })], edges: [] })).toBe(false);
     }
-    expect(horizonSteadyAttested(steady({ goal_horizon_months: 12 })), 'a deadline edit voids the attestation').toBe(false);
-    expect(horizonSteadyAttested(steady({ kind: 'factor' }))).toBe(false);
-    expect(horizonSteadyAttested({ ...steady(), horizon_basis_source: undefined, provenance: 'user_set' }),
+    expect(horizonSteadyAttested({ nodes: [steady({ goal_horizon_months: 12 })], edges: [] }), 'a deadline edit voids the attestation').toBe(false);
+    expect(horizonSteadyAttested({ nodes: [steady({ kind: 'factor' })], edges: [] })).toBe(false);
+    expect(horizonSteadyAttested({ nodes: [{ ...steady(), horizon_basis_source: undefined, provenance: 'user_set' }], edges: [] }),
       'goal provenance alone is not the attestation').toBe(false);
   });
   it('no H leaves the exact envelope object and bytes unchanged', () => {

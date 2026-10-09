@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../../orchestrator-v5/goal-target/outbound-graph.js";
 /**
  * draft_graph Tool Handler
  *
@@ -475,7 +476,7 @@ export async function handleDraftGraph(
     operations,
     status: 'proposed',
     auto_apply: true,
-    ...(graphOutput && { applied_graph: graphOutput }),
+    ...(graphOutput && { applied_graph: toOutboundGraph(graphOutput) }),
   };
 
   // Extract analysis_ready from pipeline response (present in V3 schema responses).

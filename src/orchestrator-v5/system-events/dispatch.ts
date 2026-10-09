@@ -66,6 +66,7 @@ import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
+import type { ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
@@ -3017,6 +3018,7 @@ export async function dispatchOptionLevelsBatch(
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card (the goal's `goal_horizon` only): ONE commit, alone. */
     readonly goalHorizon?: ApprovedGoalHorizon;
+    readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
     readonly fenceRefusalReachesCaller?: boolean;
@@ -3024,7 +3026,7 @@ export async function dispatchOptionLevelsBatch(
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
-  const eventKind = batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
+  const eventKind = batch.goalSteady !== undefined ? 'goal_steady_edit' : batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
     : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
     : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
@@ -3085,7 +3087,7 @@ export async function dispatchOptionLevelsBatch(
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
-    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
@@ -3100,6 +3102,7 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.linkEffects !== undefined && batch.linkEffects.length > 0 ? { linkEffects: batch.linkEffects, lastRunIdentityUse } : {}),
       ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
       ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}),
+      ...(batch.goalSteady !== undefined ? { goalSteady: batch.goalSteady } : {}),
       ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
@@ -3423,6 +3426,7 @@ export type CommitOptionLevelsInput = {
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
   readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string };
+  readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
 export type CommitOptionLevelsResult =
@@ -3482,6 +3486,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { link_effects: input.link_effects } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
+      ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
       ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
@@ -3514,6 +3519,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token,
       ...(input.identity_confirm.part_levels !== undefined ? { part_levels: input.identity_confirm.part_levels } : {}) } } : {}),
+    ...(input.goal_steady !== undefined ? { goalSteady: input.goal_steady } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),

@@ -61,10 +61,10 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
     return heldGoalDeadline(goal) !== undefined && goalKindOf(graph) !== 'share_by_date' ? 'withhold' : 'no_horizon';
   }
   if (accumulationTestedAtGoalHorizon(graph, envelope)) return 'computed_at_h';
-  return horizonSteadyAttested(goal) ? 'steady_attested' : 'withhold';
+  return horizonSteadyAttested(graph) ? 'steady_attested' : 'withhold';
 }
 
-/** A held month needs this Run's evaluated carrier; attestation is parked (DL P1a). */
+/** A held month needs this Run's evaluated carrier or a verified S5 door attestation. */
 export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unknown): E {
   return goalHorizonVerdict(graph, response) === 'withhold' ? withholdUntestedHorizonFigures(response, graph) : response;
 }

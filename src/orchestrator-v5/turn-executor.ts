@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 TurnExecutor (Phase 1 — tool-use routing spine).
@@ -2591,7 +2592,10 @@ export async function runTurnExecutor(
   let graphLookupStatsForLog: GraphLookupStats | undefined;
   let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
     'no_graph';
-  let graphStateForTurn: GraphStateIngress | null = options.graphState ?? null;
+  let graphStateForTurn: GraphStateIngress | null = options.graphState == null ? null : structuredClone(options.graphState);
+  const storedBasisReadAvailable = context.persistedGraphRead?.status === 'ok_present' || context.persistedGraphRead?.status === 'ok_absent';
+  prepareHorizonBasisForWrite(graphStateForTurn,
+    storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
   // V5 finaliser contract: hoisted to outer scope so `finalizeRun` can
   // surface it on `TurnExecutorRunResult.analysisReady` for the response
   // finaliser. Declared here, populated below at the existing
@@ -2846,7 +2850,7 @@ export async function runTurnExecutor(
     // request graph as provisional; degraded/malformed/missing reads fail weak.
     const contextGraphSelection = selectContextGraphSnapshot({
       canonicalRead: context.persistedGraphRead,
-      requestGraph: options.graphState,
+      requestGraph: graphStateForTurn,
     });
     const contextGraphForReasoning = contextGraphSelection.graph;
     // Persisted analysis is licensed only beside a valid persisted canonical
@@ -13239,6 +13243,8 @@ export async function runTurnExecutor(
             ? { goal_constraints: mutated.goal_constraints }
             : {}),
         };
+        prepareHorizonBasisForWrite(mutated, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
+        prepareHorizonBasisForWrite(merged, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
         currentGraphForPostHandlerFreshness = merged;
         // M5 readiness authority: on a mutation the freshness hash reflects the
         // post-mutation graph, so canonical readiness must too. Use the handler's
@@ -14878,10 +14884,10 @@ export async function runTurnExecutor(
       // `graphStateForTurn` is the request graphState when present, else
       // the persisted-graph fallback loaded by buildTurnContext — the
       // same authority every other per-turn graph consumer uses.
-      const graphForProposalHash =
-        handlerOutcome?.mutated_graph !== undefined
+      const graphForProposalHash = handlerOutcome?.mutated_graph !== undefined
           ? handlerOutcome.mutated_graph
           : graphStateForTurn;
+      prepareHorizonBasisForWrite(graphForProposalHash, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
       let commitStartedAt = 0;
       if (timingsEnabled) {
         commitStartedAt = Date.now();

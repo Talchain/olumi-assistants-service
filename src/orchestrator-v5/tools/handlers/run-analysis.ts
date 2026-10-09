@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
 import { goalOrderedLinks } from '../../admission/target-testability.js';
@@ -1180,7 +1181,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const plotPayload: Record<string, unknown> = {
-      graph: withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph),
+      graph: toOutboundGraph(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph)),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).

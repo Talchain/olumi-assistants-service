@@ -21,6 +21,10 @@
       "todo": 11,
       "reason": "11 it.todo placeholders enumerating planned clean-payload assertions (spec-first stubs)."
     },
+    "src/orchestrator-v5/goal-target/__tests__/horizon-basis-door.test.ts": {
+      "todo": 2,
+      "reason": "S5 2b: attestation-aware Run licence + restore→withhold rows; need #2895 goalHorizonVerdict + P45 #2903 in one tree (DL 87114 train item)"
+    },
     "src/orchestrator-v5/routing/__tests__/prompt-loader.test.ts": {
       "skipIf": 1,
       "reason": "Compiled-boot check: it.skipIf(!dist). Executes in the required job now that CI builds dist (O-6); skips only on unbuilt local checkouts."

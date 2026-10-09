@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
 /** Register a scenario graph through the existing CAS/atomic-write boundary.
  * Central ownership admission uses the declared path id and verified caller.
  * Only valid initial imports may create a scenario; deleted-scenario fencing remains.
@@ -1051,6 +1052,7 @@ export default async function route(app: FastifyInstance) {
           scenarioId, turnClass: "direct_answer", source: "graph_registration",
         }));
 
+      prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);
       // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds
