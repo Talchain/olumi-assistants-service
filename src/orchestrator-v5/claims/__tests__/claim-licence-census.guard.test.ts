@@ -377,11 +377,16 @@ describe('claim licence discovery and zero-target ratchet', () => {
     expect(registry.size).toBe(CLAIM_LICENCE_REGISTRY.length);
     for (const found of discovered) {
       const entry = registry.get(found.owner);
-      expect(entry, `Unreviewed marker-bearing owner: ${found.owner}\n${found.literals.join('\n')}`).toBeDefined();
+      const hash = createHash('sha256').update(JSON.stringify(found.literals)).digest('hex');
+      expect(entry, `Unreviewed marker-bearing owner: ${found.owner}\n${found.literals.join('\n')}\n`
+        + 'If none of these literals reaches a user as a science claim, add to scripts/ci/claim-licence-registry.json:\n'
+        + JSON.stringify({ id: found.owner.replace(/^src\/orchestrator-v5\//, '').replace(/\.ts#/, '#'), owner: found.owner, surface: 'chat',
+          class: 'not_a_claim', licence: null, reason: '<why this is not an emitted science sentence>', reviewedLiteralHash: hash,
+          subject: 'run_wide', binding: { subjectField: null, run: 'selected_current' }, readerSubjectParameter: null })
+        + '\nOtherwise register it as a science claim with a licence or a declared gap (S3 owner: a1).').toBeDefined();
       if (entry?.class === 'not_a_claim') {
         expect(entry.reason.trim().length).toBeGreaterThan(10);
-        expect(createHash('sha256').update(JSON.stringify(found.literals)).digest('hex'),
-          `Re-review not_a_claim literals: ${found.owner}`).toBe(entry.reviewedLiteralHash);
+        expect(hash, `Re-review not_a_claim literals: ${found.owner}`).toBe(entry.reviewedLiteralHash);
       }
     }
     // Stale catalogue owners cannot silently claim coverage of moved or removed code.
