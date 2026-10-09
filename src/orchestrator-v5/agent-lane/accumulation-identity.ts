@@ -259,7 +259,7 @@ export function withAccumulationCarriers<N extends NodeLike>(
 /** Apply the one writer's admitted nodes and definitions; ordinary post-horizon effects stay on the goal. */
 export function withAdmittedAccumulations<N extends NodeLike, E extends EdgeLike>(
   nodes: readonly N[], edges: readonly E[], admission: AccumulationAdmission,
-): { nodes: N[]; edges: E[] } {
+): { nodes: N[]; edges: (E | AuthoredEdge)[] } {
   const written = withAccumulationCarriers([...nodes, ...admission.addedNodes] as N[], admission.carriers);
   return {
     nodes: written.map(n => {
@@ -273,7 +273,7 @@ export function withAdmittedAccumulations<N extends NodeLike, E extends EdgeLike
       const goal = admission.goalCarriers.get(e.to);
       return goal !== undefined && admission.carriers.get(goal.carrierId)?.factor_ids.includes(e.from)
         ? { ...e, to: goal.carrierId } : e;
-    }), ...admission.addedEdges as unknown as E[]],
+    }), ...admission.addedEdges],
   };
 }
 
