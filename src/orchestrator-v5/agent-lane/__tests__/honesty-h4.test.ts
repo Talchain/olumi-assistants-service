@@ -175,8 +175,8 @@ it('uncredited other operand stays Olumi’s despite the same number on A', () =
   const marked = markIdentityPartials(g.nodes as never, g.edges as never, text, new Set());
   expect(marked.find(e => e.from === 'existing_customers' && e.to === 'existing_plan_monthly_recurring_revenue')!.provenance!.identity_partial!.authored_by).toBe('olumi');
 });
-it('valid paraphrase still credits the relation without the draft’s literal labels', async () => {
-  const text = row.brief.replace('from 400 customers paying £300 a month', 'from 400 customers at £300 a month');
+it('valid paying paraphrase still credits the relation without the draft’s literal labels', async () => {
+  const text = row.brief.replace('from 400 customers paying £300 a month', 'from 400 customers paying £300 each month');
   const g = await replay(text);
   expect(edge(g, partials[0][0]).provenance.identity_partial.authored_by).toBe('brief');
   expect(text.includes('Existing customer monthly price')).toBe(false);
@@ -234,4 +234,36 @@ it('the stated 2-customer price-rise pair remains exactly user_stated', () => {
   expect(e.provenance.magnitude).toBe('user_stated');
   expect(e.provenance.natural_effect.amount).toBe(2);
   expect(e.provenance.source_quote).toBe('Each 1% price rise loses about 2 customers, between 1 and 4.');
+});
+
+// A source count beside a cost must never become the cost's per-one effect.
+it('near miss: 150 starter subscribers beside support costs £6 each is not a £150 effect', () => {
+  expect(naturalSizeReceipt(150, 'GBP/month',
+    'We expect 150 starter subscribers and support costs £6 each.',
+    'Starter subscribers', 'Starter support cost', ['Starter subscribers', 'Starter support cost'])).toBeNull();
+});
+it('the recorded f440be4a subscriber count cannot credit its support-cost edge', async () => {
+  const { manifest, fixture, prepare, admitted } = await import('./fixtures/r5-verified-cases.js');
+  const record = manifest.find(r => r.sc === 'f440be4a')!;
+  const brief = fixture(`r5-census/${record.brief_sha256}.txt`);
+  const candidate = JSON.parse(fixture('r5-census/f440be4a.json')) as CandidateModel;
+  const result = admitted(prepare(candidate, brief).candidate, brief);
+  const e = result.edges.find(e => e.from === 'support_cost_per_starter_subscriber' && e.to === 'starter_tier_monthly_support_cost')!;
+  expect(e).toBeDefined();
+  expect(e.provenance?.magnitude).not.toBe('user_stated');
+  expect(e.provenance?.identity_partial !== undefined || e.provenance?.magnitude === 'olumi_estimate').toBe(true);
+});
+
+it('a stated per-one amount cannot credit a per-100 link', () => {
+  expect(naturalSizeReceipt(6, 'GBP/month', 'Each starter subscriber costs about £6 a month in support.',
+    'Starter subscribers', 'Starter support cost', ['Starter subscribers', 'Starter support cost'], 'subscribers', 100)).toBeNull();
+});
+it('a money-rate source cannot borrow its subscribers’ per-one amount', () => {
+  expect(naturalSizeReceipt(6, 'GBP/month', 'Each starter subscriber costs about £6 a month in support.',
+    'Support cost per starter subscriber', 'Starter support cost', ['Support cost per starter subscriber', 'Starter support cost'], 'GBP/subscriber/month')).toBeNull();
+});
+
+it('the reverted at-payment widening conservatively leaves the product Olumi’s', async () => {
+  const g = await replay(row.brief.replace('from 400 customers paying £300 a month', 'from 400 customers at £300 a month'));
+  expect(edge(g, partials[0][0]).provenance.identity_partial.authored_by).toBe('olumi');
 });

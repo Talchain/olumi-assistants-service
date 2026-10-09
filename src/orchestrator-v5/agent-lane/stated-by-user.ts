@@ -185,7 +185,12 @@ export function levelWrittenApartFromTarget(value: number, unit: unknown, target
 function writtenAsTarget(text: string, a: { readonly index: number; readonly matchedText: string }): boolean {
   const before = text.slice(0, a.index).match(/[^.!?;,:\n\u2013\u2014]*$/u)?.[0] ?? '';
   const after = text.slice(a.index + a.matchedText.length).match(/^[^.!?;:\n\u2013\u2014]*/u)?.[0] ?? '';
-  return /\b(?:goals?|targets?|aim(?:s|ing)?|reach(?:es|ing)?|hit(?:ting)?)\b[^\d]*$/iu.test(before)
+  const hit = /\bhit(?:ting)?\b[^\d]*$/iu.test(before);
+  const intendedHit = hit && (/\bto\s+hit(?:ting)?\b[^\d]*$/iu.test(before)
+    || /\b(?:will|shall|would|plan(?:s|ning)?|intend(?:s|ing)?)\b[^\d]*\bhit(?:ting)?\b[^\d]*$/iu.test(before)
+    || /^[^\d]*\b(?:tomorrow|next\s+(?:week|month|quarter|year))/iu.test(after));
+  return /\b(?:goals?|targets?|aim(?:s|ing)?|reach(?:es|ing)?|want(?:s|ing)?|hop(?:e|es|ing)|looking\s+for|need(?:s|ing)?)\b[^\d]*$/iu.test(before)
+    || intendedHit
     || (/\bto\s*$/iu.test(before) && /^[^\d]*\bby\s+\S/iu.test(after));
 }
 
@@ -713,13 +718,13 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
       if (baseline && parts?.kind === 'currency' && label.includes('price')
         && label.every(w => /^(?:existing|current|plan|monthly|price)$/.test(w) || parts.per?.some(t => sameWord(t, w)))) {
         const payer = written.filter(x => x.kind === 'plain' && x.index + x.matchedText.length < a.index).at(-1);
-        const payment = payer === undefined ? null : /^\s+([\p{L} -]+?)\s+(?:paying|(?:who\s+)?pays?|at)\s*$/iu.exec(userText.slice(payer.index + payer.matchedText.length, a.index));
+        const payment = payer === undefined ? null : /^\s+([\p{L} -]+?)\s+paying\s*$/iu.exec(userText.slice(payer.index + payer.matchedText.length, a.index));
         if (a.kind === 'currency' && payment !== null && parts.per?.length)
           return statedTailParts(userText, a)?.period === parts.period && payerWordsFor(wordsOf(payment[1]!));
       }
       if (a.kind === 'plain' && parts?.kind === 'count' && baseline
         && label.every(w => /^(?:existing|current)$/.test(w) || parts.noun?.some(t => sameWord(t, w)))) {
-        const payment = /^\s+([\p{L} -]+?)\s+(?:paying|(?:who\s+)?pays?|at)\s*[£$€]/iu.exec(after);
+        const payment = /^\s+([\p{L} -]+?)\s+paying\s*[£$€]/iu.exec(after);
         if (payment !== null) return payerWordsFor(wordsOf(payment[1]!));
       }
     }

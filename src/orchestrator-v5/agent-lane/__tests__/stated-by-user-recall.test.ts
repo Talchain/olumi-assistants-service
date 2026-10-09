@@ -1,5 +1,6 @@
+import type { CandidateModel } from '../admit-model.js';
 import { expect, it } from 'vitest';
-import { figureTheUserWroteFor, goalLevelTheUserWrote, levelWrittenApartFromTarget, withdrawUnstatedBaselineStamps, type EntityScope } from '../stated-by-user.js';
+import { creditStatedFactorLevels, figureTheUserWroteFor, goalLevelTheUserWrote, levelWrittenApartFromTarget, withdrawUnstatedBaselineStamps, type EntityScope } from '../stated-by-user.js';
 
 // P02 instance #25: the complete heldout1-d1 brief and its quantity scope.
 const appointmentsBrief = "Our regional hospital's outpatient clinic completes 920 appointments each month, has 18 staff, and currently has 140 patients waiting for a first visit. Running the clinic costs roughly £48,000 per month, so additional activity needs a clear funding route. The waiting room is often quiet late in the afternoon, although reception says that transport difficulties make those slots hard to fill.\n\nOur single goal is to reach 1,100 completed appointments a month within the next 6 months. We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week. The Saturday plan would need volunteers from the existing team; longer weekdays would depend on patients accepting later slots.\n\nRecent pilots suggest each extra Saturday session adds between 14 and 18 completed appointments. Every extra nurse hour enables about 3 to 5 additional completed appointments, provided a consulting room is available. For every 100 reminder messages sent, missed appointments fall by about 7. Each Saturday session also adds £600 in staffing costs. These estimates come from local trials, and the weekday and Saturday effects should be assessed separately because they could draw on the same patients.";
@@ -122,4 +123,139 @@ it('repeated targets cannot stamp a baseline; a separate current writing equal t
 
 it('the target writing remains user-written in its own role', () => {
   expect(figureTheUserWroteFor(1100, appointmentsUnit, appointmentsBrief, { ...appointmentsScope, currentLevel: undefined })).toBe(true);
+});
+
+// Delegate contrast table from probe.ts; probe2.ts's typed-target checks follow.
+// Each row carries the full brief, its entity, the figure and must_credit verdict.
+const delegateRows = [
+  {
+    "id": "c1 hit",
+    "brief": "We hit 920 completed appointments last month; our goal is 1,100.",
+    "entity": "appointments",
+    "value": 920,
+    "must_credit": true
+  },
+  {
+    "id": "c2 hit+want",
+    "brief": "Our team hit 920 appointments in March and we want 1,100.",
+    "entity": "appointments",
+    "value": 920,
+    "must_credit": true
+  },
+  {
+    "id": "c3 at+aim",
+    "brief": "We are at 920 appointments and aim for 1,100.",
+    "entity": "appointments",
+    "value": 920,
+    "must_credit": true
+  },
+  {
+    "id": "c4 currently",
+    "brief": "Currently 920 completed appointments, goal 1,100.",
+    "entity": "appointments",
+    "value": 920,
+    "must_credit": true
+  },
+  {
+    "id": "c5 do today",
+    "brief": "Our goal is 1,100 appointments; we do 920 a month today.",
+    "entity": "appointments",
+    "value": 920,
+    "must_credit": true
+  },
+  {
+    "id": "c6 hitting",
+    "brief": "Hitting 920 a month already, target is 1,100.",
+    "entity": "appointments",
+    "value": 920,
+    "must_credit": true
+  },
+  {
+    "id": "t1 aim for",
+    "brief": "We aim for 1,100 appointments.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  },
+  {
+    "id": "t2 aiming",
+    "brief": "Aiming for 1,100 completed appointments next year.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  },
+  {
+    "id": "t3 want",
+    "brief": "We want 1,100 completed appointments.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  },
+  {
+    "id": "t4 hoping",
+    "brief": "Hoping to get to 1,100 appointments.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  },
+  {
+    "id": "t5 looking",
+    "brief": "Looking for 1,100 appointments a month.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  },
+  {
+    "id": "t6 need",
+    "brief": "Right now we do 920 appointments and need 1,100.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  },
+  {
+    "id": "t7 goal is",
+    "brief": "Our goal is 1,100 appointments.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  },
+  {
+    "id": "t8 reach",
+    "brief": "The goal is to reach 1,100.",
+    "entity": "appointments",
+    "value": 1100,
+    "must_credit": false
+  }
+];
+const factorCredit = (text: string, entity: string, value: number, unit = entity): boolean => {
+  const candidate = { goal: { metric: '__contrast_goal__' }, options: [], constraints: [], outcomes: [], risks: [], links: [],
+    factors: [{ label: entity, unit, baseline_value: value, baseline_known: false, provenance: 'inferred' }] } as unknown as CandidateModel;
+  const factor = creditStatedFactorLevels(candidate, text).factors[0]!;
+  return factor.baseline_known === true && factor.provenance === 'explicit';
+};
+it.each(delegateRows)('delegate $id: current-level credit contrast', ({ id, brief, entity, value, must_credit }) => {
+  expect(levelWrittenApartFromTarget(value, entity, undefined, brief)).toBe(must_credit);
+  expect(factorCredit(brief, entity, value)).toBe(must_credit);
+  process.stdout.write(`S7PROBE ${JSON.stringify({ id, brief, entity, value, must_credit, credited: factorCredit(brief, entity, value) })}\n`);
+});
+it('delegate probe2 typed-target and MRR contrasts', () => {
+  const brief = delegateRows[0]!.brief;
+  expect(levelWrittenApartFromTarget(920, 'appointments', 1100, brief)).toBe(true);
+  expect(levelWrittenApartFromTarget(1100, 'appointments', 1100, brief)).toBe(false);
+  const mrr = 'Our team hit £85k MRR in March; we want to reach £120k.';
+  expect(levelWrittenApartFromTarget(85000, 'GBP', 120000, mrr)).toBe(true);
+  expect(factorCredit(mrr, 'MRR', 85000, 'GBP')).toBe(true);
+});
+it.each([
+  'aim to hit', 'aiming to hit', 'to hit', 'hoping to hit', 'want to hit', 'need to hit', 'plan to hit', 'will hit',
+])('purpose/future hit: %s never states the current level', purpose => {
+  expect(factorCredit(`We ${purpose} 1,100 appointments.`, 'appointments', 1100)).toBe(false);
+});
+it('bare hit with a future time marker is a target; current beside need stays current', () => {
+  expect(factorCredit('We hit 1,100 appointments next year.', 'appointments', 1100)).toBe(false);
+  expect(factorCredit(delegateRows[11]!.brief, 'appointments', 920)).toBe(true);
+});
+
+it('a past deadline does not make bare hit a future intention', () => {
+  expect(factorCredit('We hit 920 appointments by March last year.', 'appointments', 920)).toBe(true);
 });

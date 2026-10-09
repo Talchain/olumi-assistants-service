@@ -4264,7 +4264,7 @@ function admitOnce(
       && !(Math.abs(l.effect_amount) === 1 && l.effect_per_source_change === 1
         && sameUnit(source.observed_state?.unit ?? unitById.get(source.id), target.observed_state?.unit ?? unitById.get(target.id)))
       && naturalSizeReceipt(l.effect_amount, target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit,
-        brief, source.label, target.label, quantityLabels) !== null) return true;
+        brief, source.label, target.label, quantityLabels, source.observed_state?.unit ?? unitById.get(source.id), l.effect_per_source_change) !== null) return true;
     if ((l.effect_provenance ?? l.provenance) !== 'explicit') return false;
     // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
     const levelUnit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
@@ -4425,7 +4425,7 @@ function admitOnce(
     if (p?.magnitude !== 'user_stated' || p.source_quote !== undefined || p.natural_effect === undefined) continue;
     const source = nodeOf.get(edge.from), target = nodeOf.get(edge.to);
     if (source === undefined || target === undefined) continue;
-    const quote = naturalSizeReceipt(p.natural_effect.amount, p.natural_effect.amount_unit, brief, source.label, target.label, quantityLabels);
+    const quote = naturalSizeReceipt(p.natural_effect.amount, p.natural_effect.amount_unit, brief, source.label, target.label, quantityLabels, source.observed_state?.unit ?? unitById.get(source.id), p.natural_effect.per_source_change);
     if (quote !== null) p.source_quote = quote;
   }
 

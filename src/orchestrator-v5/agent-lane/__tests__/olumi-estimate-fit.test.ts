@@ -607,8 +607,8 @@ it('served census: 116 corpus + 8 R2; fewer not_representable set-asides and goa
   const baseline = await count(true);
   const current = await count(false);
   process.stdout.write('S7 2BA CENSUS ' + JSON.stringify({ drafts: 124, ...current, baseline }) + '\n');
-  // H4 admission now credits stated pairs and removes stored product-partial sizes in BOTH arms.
+  // H4 admission uses source-scoped per-one receipts and typed product partials in BOTH arms.
   // The contrast still isolates only the estimate-frame fitter, with the same 1,122 goal-path links.
-  expect(baseline).toEqual({ not_representable: 57, placeholders: 360, goal_path_links: 1122 });
+  expect(baseline).toEqual({ not_representable: 59, placeholders: 362, goal_path_links: 1122 });
   expect(current.not_representable).toBeLessThan(baseline.not_representable);
 }, 120_000);
