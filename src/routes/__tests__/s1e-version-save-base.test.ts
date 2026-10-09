@@ -81,7 +81,7 @@ function persistenceClient(): SupabaseClient {
   return {
     rpc: async (name: string, args: Row) => {
       if (name === 'ensure_scenario_exists') return { data: OWNER, error: null };
-      if (name !== 'create_model_version') throw new Error(`Unexpected RPC ${name}`);
+      if (name !== 'create_model_version_cas_v1') throw new Error(`Unexpected RPC ${name}`);
       calls.push(copy(args));
       const interleave = beforeWrite;
       beforeWrite = null;
@@ -167,7 +167,7 @@ beforeEach(() => {
   _resetConfigCache();
   resetModelManagementServiceForTests();
   resetSessionStoreForTests();
-  scenario = { revision: 7, id: SCENARIO, user_id: OWNER, graph: graph('Working model'),
+  scenario = { revision: 7, analysis_invalidated_at: null, id: SCENARIO, user_id: OWNER, graph: graph('Working model'),
     graph_identity_hash: identity(graph('Working model')).value, current_model_version_id: null, events: [] };
   versions = []; rounds = []; events = []; calls = []; beforeWrite = null;
   addVersion(graph('Earlier model'));

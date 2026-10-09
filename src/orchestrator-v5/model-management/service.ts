@@ -61,6 +61,7 @@ import {
 } from './store-adapter.js';
 import {
   CAS_CONFLICT_KIND,
+  VersionRevisionConflictError,
   SIGN_IN_REQUIRED_MESSAGE,
   type AtomicRestoreVersionOutcome,
   type ModelManagementResult,
@@ -74,6 +75,7 @@ import {
 import { journeyRpcVersionEventSink, notifyVersionEventSink } from './version-event-sink.js';
 
 export interface SaveVersionRequest {
+  readonly expected_revision: number;
   readonly scenario_id: string;
   /** The graph to snapshot (wire/persisted shape; hashed CEE-side). */
   readonly graph: unknown;
@@ -93,6 +95,7 @@ export interface SaveVersionRequest {
 }
 
 export interface AtomicRestoreVersionRequest {
+  readonly expected_revision: number;
   readonly scenario_id: string;
   readonly version_id: string;
   readonly mutation_id: string;
@@ -155,6 +158,7 @@ export class ModelManagementService {
 
     return this.runWrite('model_version_created', request.scenario_id, () =>
       this.store.saveVersion({
+        expected_revision: request.expected_revision,
         scenario_id: request.scenario_id,
         graph: request.graph,
         graph_identity_hash: identity.value,
@@ -228,6 +232,7 @@ export class ModelManagementService {
 
     return this.runWrite('model_version_restored', request.scenario_id, () =>
       this.store.restoreVersionAtomic!({
+        expected_revision: request.expected_revision,
         scenario_id: request.scenario_id,
         version_id: request.version_id,
         mutation_id: request.mutation_id,
@@ -458,6 +463,19 @@ export class ModelManagementService {
 
 /** Fail-closed typed mapping — the service never rethrows. */
 function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
+  if (err instanceof VersionRevisionConflictError) {
+    return {
+      status: 'conflict',
+      conflict: {
+        kind: 'revision_conflict',
+        expected_graph_identity_hash: null,
+        // Preserve the existing result contract locally; routes own wire copy.
+        message: 'The scenario changed while I was saving, so nothing was saved. Try again.',
+        expected: err.expected,
+        ...(err.current !== null ? { current: err.current } : {}),
+      },
+    };
+  }
   if (err instanceof ModelVersionDiffInputError) {
     return {
       status: 'error',

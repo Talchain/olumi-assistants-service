@@ -1,4 +1,9 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { goalHorizonVerdict, GOAL_HORIZON_STEADY_ATTESTED, withReadTimeHorizonGate } from '../goal-horizon-verdict.js';
+import { goalHorizonSteadyWhyLine } from '../goal-horizon-detail.js';
+import { goalChanceLicenceForAgent } from '../goal-chance-licence.js';
+import { buildAnalysisResultBlock } from '../../compose.js';
 import * as graphHashes from '../../context/graph-hash.js';
 import * as graphIdentity from '../../context/graph-identity.js';
 import * as basisProvenance from '../horizon-basis-provenance.js';
@@ -126,7 +131,7 @@ function world(initial: unknown, withReceipt = false) {
     ensureScenarioExists: async () => ({ user_id: null }), getScenarioOwner: async () => null,
     scenarioExists: async () => true, readMostRecentPendingActions: async () => [],
   });
-  return { store, writes, read };
+  return { store, writes, read, restoreGraph: (graph: unknown) => { bytes = JSON.stringify(graph); } };
 }
 let activeStore = world(null).store;
 beforeEach(() => {
@@ -677,6 +682,80 @@ describe('S5 r2 pure append-door assertion', () => {
 });
 
 
+// Fully sized B2 level-change control from the P45 route harness; no time carrier.
+function steadyB2() {
+  const captured = JSON.parse(readFileSync(new URL(
+    '../../../routes/__tests__/fixtures/b2-zero-spread/read-graph-1791489457020.json', import.meta.url), 'utf8')).j;
+  const g = clone(captured.graph) as Rec;
+  const goalId = 'monthly_recurring_revenue';
+  g.nodes = g.nodes.filter((node: Rec) => ['goal', 'option', 'decision'].includes(node.kind));
+  g.nodes.push({ id: 'monthly_change', kind: 'factor', label: 'Monthly revenue change', scale_frame: 50000,
+    provenance: 'user_set', observed_state: { value: 0, raw_value: 0, unit: '£/month', source: 'user_confirmed' } });
+  g.nodes.filter((node: Rec) => node.kind === 'option').forEach((node: Rec, index: number) => {
+    const raw = [6000, 20000, 0][index]!;
+    node.interventions = { monthly_change: { value: raw / 50000, raw_value: raw, unit: '£/month', source: 'user_override' } };
+  });
+  const edge = (from: string, to: string): Rec => ({ from, to, strength: { mean: 1, std: 0.01 },
+    exists_probability: 1, effect_direction: 'positive', provenance: { source: 'user_specified' } });
+  g.edges = [...g.nodes.filter((node: Rec) => node.kind === 'option').flatMap((node: Rec) => [
+    edge('decision_monthly_recurring_revenue', node.id), edge(node.id, 'monthly_change'),
+  ]), { from: 'monthly_change', to: goalId, strength: { mean: 50000 / 157500, std: 0.01 },
+    exists_probability: 0.8, effect_direction: 'positive', defaulted: false,
+    provenance: { source: 'cee_hypothesis', magnitude: 'user_stated', natural_effect: {
+      amount: 1, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: '£/month',
+      strength_mean: 50000 / 157500, strength_mean_frame: 'edge_strength',
+    } } }];
+  const body = JSON.parse(readFileSync(new URL(
+    '../../../../tests/fixtures/plot/v2-run-golden-minimal.json', import.meta.url), 'utf8')) as Rec;
+  body.option_comparison = [
+    { option_id: 'raise_prices_10', option_label: 'Raise prices', probability_of_goal: 0.46,
+      outcome: { p10: 110000, p50: 125000, p90: 145000, mean: 126000, std: 10000 } },
+    { option_id: 'launch_starter_tier', option_label: 'Launch starter tier', probability_of_goal: 0.99,
+      outcome: { p10: 128000, p50: 140000, p90: 155000, mean: 140000, std: 10000 } },
+    { option_id: 'keep_current_pricing', option_label: 'Keep current pricing', probability_of_goal: 0.15,
+      outcome: { p10: 110000, p50: 120000, p90: 130000, mean: 120000, std: 5000 } },
+  ];
+  body.results = body.option_comparison.map((row: Rec, index: number) => ({ option_id: row.option_id,
+    option_label: row.option_label, win_probability: [0.2, 0.7, 0.1][index] }));
+  body.inference_warnings = [];
+  return { graph: projectGraphForPersistence(GraphV3.parse(g)) as Rec, body, goalId };
+}
+
+async function storedSteadyRun(w: ReturnType<typeof world>, body: Rec) {
+  const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
+  const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
+  const plotRun = vi.fn(async () => clone(body));
+  const outcome = await createRunAnalysisHandler({
+    scenarioReader: async () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'steady-door-load', w.store),
+    plotClient: { run: plotRun, validatePatch: vi.fn(async () => ({})) } as never,
+  })({ payload: { scenario_id: SCENARIO, turn_id: TURN }, requestId: 'steady-door-run',
+    signal: new AbortController().signal, context: {}, orientationText: '' } as never);
+  expect(plotRun).toHaveBeenCalledTimes(1);
+  const fact = outcome.handler_facts.find(item => item.fact_type === 'run_analysis');
+  expect(fact).toMatchObject({ noop: false });
+  if (fact === undefined || fact.fact_type !== 'run_analysis') throw new Error('real Run emitted no fact');
+  await w.store.append({ scenario_id: SCENARIO, turn_id: TURN, turn_class: 'handler',
+    handler_id: 'run_analysis', request_hash: 'steady-door-run', handler_facts: [fact],
+    response_emitted: false, llm_calls_used: 0, duration_ms: 0 });
+  // Canonical reload reads the JSON-persisted Run, independently of the hot fact window.
+  w.store.readScenarioRunAnalysisFactsFor = async () => ({ total_count: 1, facts: [{
+    fact: clone(w.writes.at(-1)!.handler_facts[0]!), fact_row_id: 'steady-run',
+    fact_created_at: '2026-10-09T00:00:00.000Z',
+  }] });
+  return fact;
+}
+
+async function pressSteadyB2(w: ReturnType<typeof world>, goalId: string) {
+  activeStore = w.store;
+  expect(goalOf(w.read(), goalId).goal_horizon_months).toBe(9);
+  expect(w.read().nodes.some((node: Rec) => node.nonlinear_identity?.operation === 'accumulation')).toBe(false);
+  const pressed = await commitOptionLevelsInProcess({ scenario_id: SCENARIO, turn_id: TURN,
+    base_graph_hash: computeAnalysisAffectingGraphHash(w.read() as never)!, levels: [], links: [],
+    goal_steady: { goal_id: goalId, months: 9 } }, 'steady-door-press');
+  expect(pressed.status).toBe('committed');
+  expect(horizonSteadyAttested(w.read())).toBe(true);
+}
+
 describe('S5 r4 prepared candidate hashes and cold Run', () => {
   it.each(['omitted', 'forged'])('D1b direct commit prepares the %s candidate before hashing and appending', async variant => {
     const { commitDirectAnswer } = await import('../../commit.js');
@@ -814,8 +893,118 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     expect(reloaded.current_read.figures).toEqual([]);
   });
 
-  it.todo('DL condition (1) PENDING #2895/P45 rebase: Run loaded with horizonSteadyAttested=true licenses the goal chance for the attested months and removes the untested-horizon withhold');
-  it.todo('DL condition (2) PENDING #2895 rebase: supported attested Run -> restore pre-attestation version removes answer -> reload read-time goalHorizonVerdict withholds the former horizon chance');
+  it('Run loaded with horizonSteadyAttested=true licenses the goal chance for the attested months and removes the untested-horizon withhold', async () => {
+    const { graph, body, goalId } = steadyB2(), w = world(graph);
+    await pressSteadyB2(w, goalId);
+    const run = await storedSteadyRun(w, body), result = buildAnalysisResultBlock(run);
+    expect(goalHorizonVerdict(w.read(), run.result.enrichment)).toBe('steady_attested');
+    const warnings = (run.result.enrichment as Rec).inference_warnings;
+    expect(warnings.some((warning: Rec) => warning.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED')).toBe(false);
+    const licence = goalChanceLicenceForAgent(result);
+    expect(licence?.option_ids).toEqual(graph.nodes.filter((node: Rec) => node.kind === 'option').map((node: Rec) => node.id));
+    const chanceRecords = warnings.filter((warning: Rec) => warning.code === 'GOAL_CHANCE_LICENSED');
+    expect(chanceRecords).toHaveLength(1);
+    expect(chanceRecords[0].pct_by_option).toEqual({ raise_prices_10: 46, launch_starter_tier: 99, keep_current_pricing: 15 });
+    const why = goalHorizonSteadyWhyLine(w.read());
+    expect(why).toBe('You said ‘monthly recurring revenue’ stays about where it is over 9 months unless you act, so this is its chance once each option is in effect.');
+    expect(warnings.filter((warning: Rec) => warning.code === GOAL_HORIZON_STEADY_ATTESTED))
+      .toEqual([{ code: GOAL_HORIZON_STEADY_ATTESTED, severity: 'info', message: why, node_ids: [goalId] }]);
+    expect(JSON.stringify(result).split(why!).length - 1).toBe(1);
+    expect(goalOf(w.read(), goalId).horizon_basis).toMatchObject({ basis: 'steady_attested', source: 'user_stated', bound_months: 9 });
+
+    const contrast = await storedSteadyRun(world(graph), body);
+    expect(goalHorizonVerdict(graph, contrast.result.enrichment)).toBe('withhold');
+    expect((contrast.result.enrichment as Rec).inference_warnings).toContainEqual(expect.objectContaining({
+      code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', option_ids: expect.arrayContaining(licence!.option_ids),
+    }));
+    expect(goalChanceLicenceForAgent(buildAnalysisResultBlock(contrast))).toBeUndefined();
+    expect((contrast.result.enrichment as Rec).option_comparison.every((row: Rec) => row.probability_of_goal === undefined)).toBe(true);
+  });
+
+  it('real Run, mixed cause (held month + missing current level) -> no steady card; horizon as sole cause -> card (DL 58e392 #2903 P1)', async () => {
+    const { steadyHorizonCard } = await import('../../agent-lane/steady-horizon-card.js');
+    const { graph, body } = steadyB2();
+    const card = (result: unknown) => steadyHorizonCard({ graph, graphHash: computeAnalysisAffectingGraphHash(graph as never) ?? undefined,
+      scenarioId: SCENARIO, userId: null, runReply: true, runResult: result, approvalHeld: false });
+    const codesOf = (result: Rec) => ((result.enrichment as Rec).inference_warnings as Rec[]).map(w => w.code);
+    const mixedBody = clone(body);
+    mixedBody.inference_warnings = [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', message: 'Threshold not convertible.',
+      severity: 'warning', detail: { reason: 'missing_goal_baseline' } }];
+    const mixed = buildAnalysisResultBlock(await storedSteadyRun(world(graph), mixedBody)) as Rec;
+    expect(codesOf(mixed)).toEqual(expect.arrayContaining(['GOAL_FIGURES_MISSING_CURRENT_LEVEL', 'GOAL_FIGURES_HORIZON_NOT_TESTED']));
+    expect(card(mixed)).toBeNull();
+    const horizonOnly = buildAnalysisResultBlock(await storedSteadyRun(world(graph), body)) as Rec;
+    expect(codesOf(horizonOnly)).toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
+    expect(codesOf(horizonOnly)).not.toContain('GOAL_FIGURES_MISSING_CURRENT_LEVEL');
+    expect(card(horizonOnly)?.chip.label).toBe('It stays about the same unless we act');
+  });
+
+  it('supported attested Run -> restore pre-attestation version removes answer -> reload read-time goalHorizonVerdict withholds the former horizon chance', async () => {
+    const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
+    const { default: versionsRoute } = await import('../../../routes/assist.v1.scenario-versions.js');
+    const management = await import('../../model-management/index.js');
+    const { graph, body, goalId } = steadyB2(), w = world(graph);
+    await pressSteadyB2(w, goalId);
+    const run = await storedSteadyRun(w, body), storedBytes = JSON.stringify(run);
+    const supportedGraph = clone(w.read());
+    const supported = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: w.read(), requestId: 'steady-supported' });
+    expect(supported.canonical_analysis_view.options).toHaveLength(3);
+    expect(supported.canonical_analysis_view.options.every(row => row.cell.kind === 'figure')).toBe(true);
+    const versionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const undoId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const mutationId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    const identity = computeGraphIdentityHash(graph as never)!;
+    const target = { id: versionId, scenario_id: SCENARIO, graph,
+      graph_identity_hash: identity.value, hash_algorithm: identity.algorithm,
+      identity_projection_version: identity.projection_version, identity_normaliser_version: identity.normaliser_version,
+      graph_schema_version: identity.graph_schema_version,
+      analysis_affecting_hash: computeVersionAnalysisAffectingHashRecord(graph as never)!.value };
+    const restore = vi.fn(async (write: Rec) => {
+      expect(write.current_graph).toEqual(w.read());
+      expect(write.version_id).toBe(versionId);
+      expect(write.expected_revision).toBe(31);
+      expect(goalOf(write.graph, goalId)).not.toHaveProperty('horizon_basis');
+      w.restoreGraph(write.graph);
+      return { status: 'ok', value: { ...target, mutation_id: mutationId,
+        version_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', version_number: 4,
+        restored_from_version_id: versionId, undo_version_id: undoId, parent_version_id: undoId, root_version_id: versionId,
+        actor_kind: 'known', authored_by: 'owner', creation_kind: 'restore', source_version_id: versionId,
+        source_turn_id: null, graph: w.read(), deduped: false, replayed: false,
+        analysis_invalidated_at: null, event_id: 'steady-version-restored' } };
+    });
+    const service = vi.spyOn(management, 'getModelManagementService').mockReturnValue({
+      getVersion: vi.fn(async () => ({ status: 'ok', value: target })),
+      getCurrentVersion: vi.fn(async () => ({ status: 'ok', value: null })), restoreVersionAtomic: restore,
+    } as never);
+    // #2920 (revision CAS): the real restore reads the current graph + revision from the scenario snapshot.
+    w.store.readExistingScenario = vi.fn(async () => ({ graph: w.read(), briefText: null, revision: 31, owner: null } as never));
+    const app = Fastify();
+    try {
+      await versionsRoute(app);
+      const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/versions/restore`,
+        payload: { version_id: versionId, mutation_id: mutationId,
+          expected_graph_identity_hash: computeGraphIdentityHash(w.read() as never)!.value } });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(restore).toHaveBeenCalledTimes(1);
+      expect(goalOf(w.read(), goalId)).not.toHaveProperty('horizon_basis');
+      expect(horizonSteadyAttested(w.read())).toBe(false);
+      expect(goalHorizonVerdict(w.read(), run.result.enrichment)).toBe('withhold');
+      const reloaded = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: w.read(), requestId: 'steady-restored-reload' });
+      // horizon_basis is analysis-affecting (graph-hash), so the restore makes the attested Run stale: canonical reload
+      // serves no figure cell at all. Any boundary that still shows the historical Run passes the read-time gate below.
+      expect(reloaded.canonical_analysis_view.options.some(row => row.cell.kind === 'figure')).toBe(false);
+      expect(reloaded.current_read.figures).toEqual([]);
+      const gated = withReadTimeHorizonGate(clone(run.result), w.read()) as Rec;
+      expect(gated.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
+        code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', option_ids: expect.arrayContaining(['raise_prices_10', 'launch_starter_tier', 'keep_current_pricing']),
+      }));
+      expect(gated.enrichment.option_comparison.every((row: Rec) => row.probability_of_goal === undefined)).toBe(true);
+      expect(JSON.stringify(gated)).not.toMatch(/pct_by_option|GOAL_CHANCE_LICENSED/);
+      expect(withReadTimeHorizonGate(clone(run.result), supportedGraph)).toEqual(run.result);
+      expect(JSON.stringify(reloaded)).not.toMatch(/probability_of_goal|pct_by_option|GOAL_CHANCE_LICENSED/);
+      expect(JSON.stringify(w.writes.at(-1)!.handler_facts[0])).toBe(storedBytes);
+    } finally { await app.close(); service.mockRestore(); }
+  });
 });
 
 
@@ -1105,9 +1294,10 @@ describe('S5 r8 server proof', () => {
     if (variant === 'wrong') goalOf(snapshot).horizon_basis.proof = '0'.repeat(64);
     const version = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const rpc = vi.fn(async (name: string, args: Rec) => {
-      expect(name).toBe('restore_model_version_atomic_v1');
+      expect(name).toBe('restore_model_version_atomic_cas_v1');
       expect(args.p_scenario_id).toBe(SCENARIO);
       expect(args.p_version_id).toBe(version);
+      expect(args.p_expected_revision).toBe(31);
       expect(args.p_graph).toEqual(snapshot);
       await w.store.append(doorWrite(args.p_graph)); // SQL replacement double, bypassing the append door.
       return { error: null, data: { mutation_id: TURN, version_id: version, version_number: 2,
@@ -1121,7 +1311,7 @@ describe('S5 r8 server proof', () => {
     });
     const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc } as never),
       isEnabled: () => true, eventSink: { emit: vi.fn() } as never });
-    const result = await service.restoreVersionAtomic({ scenario_id: SCENARIO, version_id: version,
+    const result = await service.restoreVersionAtomic({ expected_revision: 31, scenario_id: SCENARIO, version_id: version,
       mutation_id: TURN, graph: snapshot, current_graph: seed(), expected_graph_identity_hash: null,
       source_graph_identity_hash: computeGraphIdentityHash(snapshot as never)!.value });
     expect(result.status).toBe('ok');
