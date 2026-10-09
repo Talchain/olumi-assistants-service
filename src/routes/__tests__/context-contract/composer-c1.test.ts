@@ -115,7 +115,7 @@ it.each([['W6', 'RC-WIDEN', 'W6'], ['P4', 'RC-PREMORTEM', null], ['S1', 'RC-STRE
     vi.restoreAllMocks();
   });
 describe('A6 persistence', () => {
-  let first: Awaited<ReturnType<typeof run>>, loaded: Awaited<ReturnType<typeof run>>, saved: Obj;
+  let first: Awaited<ReturnType<typeof run>>, loaded: Awaited<ReturnType<typeof run>>, saved: Obj, history: Obj;
   beforeAll(async () => {
   const rows = new Map<string, Obj>();
   const storage = {
@@ -130,13 +130,21 @@ describe('A6 persistence', () => {
   first = await run('W6', { storage, payload });
   saved = rows.get(payload.turn_id)!;
   loaded = await run('W6', { storage, payload, expectedCalls: 0 });
+  history = object(await storage.readGuidanceHistory());
   if (process.env.S8_CAPTURE_DIR) writeFileSync(`${process.env.S8_CAPTURE_DIR}/conversation-A6.json`, JSON.stringify({ shown: first.response, saved, reloaded: loaded.response, reload_provider_calls: loaded.calls.length }, null, 2));
   });
   it('A6-text shown = saved = reloaded', () => {
     assertShape(first.response); expect(saved.assistant_message).toBe(first.response.assistant_text);
     assertShape(loaded.response); expect(loaded.response.assistant_text).toBe(saved.assistant_message);
   });
-  it.fails('GAP: replayed guidance row needs a persisted carrier (Lane 3: CommittedTurnRecord session/store.ts:302 + supabase-store.ts:2011 carry no guidance row)', () => {
+  it('A6-history committed guidance policy id matches the pre-reply selection and round-trips through readGuidanceHistory', () => {
+    const policyId = String(object(carriers(first)[0]).policy_id);
+    expect(policyId).toBe('RC-WIDEN');
+    const event = object(object(saved.agent_guidance).entries)[policyId];
+    expect(event).toMatchObject({ status: 'offered' });
+    expect(history[policyId]).toEqual(event);
+  });
+  it.fails('GAP: the guidance variant and replayed chip are not persisted; the policy id round-trips only through the guidance history (owner: unassigned, candidate Lane 3)', () => {
     expect(object(object(loaded.response.guidance).slot1)).toMatchObject({ policy_id: 'RC-WIDEN', variant: 'W6' });
   });
 });
