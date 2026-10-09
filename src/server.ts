@@ -3,7 +3,7 @@
 import "dotenv/config";
 import { markDraftGraphWriteFailed } from './orchestrator-v5/build-turn-context.js';
 import { currentTurnFenceSlot } from './orchestrator-v5/session/turn-fence.js';
-import { ModelWriteOwnershipRefused } from "./orchestrator-v5/ownership/door-ownership.js";
+import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY } from "./orchestrator-v5/ownership/door-ownership.js";
 import { startSessionAnalysisRunSweeper } from "./orchestrator-v5/session/index.js";
 
 import { env } from "node:process";
@@ -679,7 +679,7 @@ app.setErrorHandler((error, request, reply) => {
     // Best-effort terminal mark (the helper never throws); the handler stays synchronous for every other error.
     const slot = currentTurnFenceSlot();
     if (slot?.handle) void markDraftGraphWriteFailed(slot.scenarioId, slot.turnId, error.code, getRequestId(request), 'turn_dead_only');
-    return reply.code(403).send({ error: error.code });
+    return reply.code(403).send(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[error.reason]);
   }
   // ROADMAP 1.16i (CEE half) — client aborts are not server errors. One
   // aborted browser request used to produce four error-class log lines and

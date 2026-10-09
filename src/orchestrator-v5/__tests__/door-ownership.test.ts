@@ -176,7 +176,11 @@ it('real route: verified owner inherits the binding and commits through the real
 it.each([false, true])('real route: ownership changes/read failures at the door surface as 403, reader fails %s', async failRead => {
   const { response, append, appendIfLatest, fence, store } = await realRegistration('u-other', failRead);
   expect(response.statusCode, response.payload).toBe(403);
-  expect(response.json()).toEqual({ error: 'model_write_ownership_refused' });
+  expect(response.json()).toEqual({ error: 'model_write_ownership_refused',
+    message: failRead
+      ? "Nothing was saved. I couldn't check access to this model. Try again."
+      : "Nothing was saved. You don't have access to change this model.",
+  });
   expect(response.payload).not.toContain('revision');
   expect(append).not.toHaveBeenCalled(); expect(appendIfLatest).not.toHaveBeenCalled();
   expect(fence.rows).toHaveLength(1);

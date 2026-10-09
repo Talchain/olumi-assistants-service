@@ -135,7 +135,7 @@ import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { parseGuidedSizingPress, guidedSizingWireAction, guidedSizingOnWire, type GuidedSizing } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
-import { ModelWriteOwnershipRefused } from '../orchestrator-v5/ownership/door-ownership.js';
+import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY } from '../orchestrator-v5/ownership/door-ownership.js';
 import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
 import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
 // ⚠ The ADAPTER and the MINTER, not the writer beneath them. The
@@ -8779,12 +8779,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     } catch (error) {
       if (error instanceof ModelWriteOwnershipRefused) {
         await markDraftGraphWriteFailed(ingress.scenario_id, ingress.turn_id, error.code, requestId, 'turn_dead_only');
-        return reply.code(403).send({
-          error: error.code,
-          message: error.reason === 'not_owner'
-            ? "Nothing was saved. You don't have access to change this model."
-            : "Nothing was saved. I couldn't check access to this model. Try again.",
-        });
+        return reply.code(403).send(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[error.reason]);
       }
       throw error;
     }
