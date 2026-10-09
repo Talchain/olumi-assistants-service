@@ -33,7 +33,6 @@ import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, r
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
-import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
 const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
@@ -71,9 +70,7 @@ import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { createAgentCapabilities, withNonlinearIdentity, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
-import { goalCertaintyForAgent } from '../orchestrator-v5/agent-lane/goal-certainty-for-agent.js';
-import { savedRunContextFacts } from '../orchestrator-v5/agent-lane/saved-run-context-facts.js';
+import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-read-deadline.js';
@@ -135,7 +132,7 @@ import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDeriv
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
-import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
+import { runToolOutputLicensesLeader } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
@@ -3101,36 +3098,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(history ?? []),
         { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
       ];
-      // Only the current reader's selected result, never an earlier tool output from history.
-      const canonicalAfterRun = {
-        analysis_state: st.analysisState,
-        analysis_ready: st.analysisReady,
-        ...(currentRead?.run_delta !== undefined ? { run_delta: currentRead.run_delta } : {}),
-        option_display_names: [...optionNameAliases(st.graph).values()].map((a) => a.display),
-      };
-      // The interpreter reads the LICENSED run (`licensed-run-view.ts`, PR-L1), exactly as the Agent loop's model does.
-      const permissionsNow = claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true });
-      const selectedPermissions = st.analysisResult !== undefined && permissionsNow.leader_may_be_named !== true && st.graph !== undefined
-        ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow;
-      const factsNow = savedRunContextFacts(scenarioId, {
-        graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
-        option_participation: st.optionParticipation, run_option_set: st.runOptionSet,
-        identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
-      }, selectedPermissions);
-      // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
-      const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult, st.graph);
+      // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
+      const canonicalAfterRun = await capabilities.getCanonicalState(toolCtx);
+      const selectedRun = canonicalAfterRun.analysis as Record<string, unknown> | undefined;
+      // ⭐ NEVER RE-ASK (G1b d4): retain the Explain path's asked-once handling on the canonical finding.
+      const goalChanceRead = selectedRun?.goal_chance as { say: string } | undefined;
       const goalChanceAskedOnce = goalChanceRead === undefined ? ''
         : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], historyReader, scenarioId, undefined));
       const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
-      const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
-        { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
-          ...(st.goalCertainty !== undefined ? { goal_certainty: st.goalCertainty } : {}) });
-      const selectedRun = { result: analysisResultForAgent(st.analysisResult, undefined, true, st.graph), claim_permissions: selectedPermissions, ...factsNow,
-        ...(goalChanceNow !== undefined ? { goal_chance: goalChanceNow } : {}),
-        ...(goalCertaintyNow !== undefined ? { goal_certainty: goalCertaintyNow } : {}) };
-      const runForInterpreter = runToolOutputLicensesLeader(selectedRun)
-        ? { ...selectedRun, canonical_state: canonicalAfterRun }
-        : { ...modelFacingToolResult('run_analysis', selectedRun), canonical_state: withoutLeaderDesignations(canonicalAfterRun) };
+      const runForInterpreter = { canonical_state: goalChanceNow === undefined ? canonicalAfterRun
+        : { ...canonicalAfterRun, analysis: { ...selectedRun, goal_chance: goalChanceNow } } };
       const explanationInput = [...recentRunExplanationConversation(history ?? []), { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];
