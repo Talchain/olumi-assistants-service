@@ -188,3 +188,42 @@ it.each([false, true])('real route: ownership changes/read failures at the door 
     graph_write_failure_reason: 'model_write_ownership_refused', graph_loss_disclosable_at: null });
   await expect(store.hasOtherAdmittedLiveTurn!(SID, 'next-registration')).resolves.toBe(false);
 });
+
+it('history effects are inert without context and aggregate separately from durable saves through parents', () => {
+  door!.recordUnsavableEffect();
+  expect(door!.readUnsavableEffects()).toBe(0);
+  expect(door!.readSuccessfulDoorEntries()).toBe(0);
+  const parent = {};
+  const child = {};
+  door!.bindWriteCaller(verified, () => {
+    door!.recordSuccessfulSave();
+    door!.bindWriteCaller(verified, () => {
+      door!.recordUnsavableEffect(); door!.recordUnsavableEffect();
+      expect(door!.readUnsavableEffects(child)).toBe(2);
+      expect(door!.readUnsavableEffects(parent)).toBe(2);
+      expect(door!.readSuccessfulDoorEntries(child)).toBe(0);
+      expect(door!.readSuccessfulDoorEntries(parent)).toBe(1);
+    }, child);
+    expect(door!.readUnsavableEffects()).toBe(2);
+    expect(door!.readSuccessfulDoorEntries()).toBe(1);
+  }, parent);
+  expect(door!.readUnsavableEffects()).toBe(0);
+});
+
+it('a released own claim discounts one durable entry through parents without discounting history or other saves', () => {
+  door!.recordReleasedTurnClaim();
+  expect(door!.readSuccessfulDoorEntries()).toBe(0);
+  const parent = {};
+  door!.bindWriteCaller(verified, () => {
+    door!.recordSuccessfulSave(); // Provisioning survives the child claim release.
+    door!.bindWriteCaller(verified, () => {
+      door!.recordSuccessfulSave(); door!.recordUnsavableEffect();
+      door!.recordReleasedTurnClaim();
+      expect(door!.readSuccessfulDoorEntries()).toBe(0);
+      expect(door!.readSuccessfulDoorEntries(parent)).toBe(1);
+      expect(door!.readUnsavableEffects()).toBe(1);
+      expect(door!.readUnsavableEffects(parent)).toBe(1);
+    });
+    expect(door!.readSuccessfulDoorEntries()).toBe(1);
+  }, parent);
+});

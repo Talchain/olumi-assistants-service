@@ -85,6 +85,7 @@ const BYTES = {
   not_owner: JSON.stringify({ error: 'model_write_ownership_refused', message: "Nothing was saved. You don't have access to change this model." }),
   owner_unreadable: JSON.stringify({ error: 'model_write_ownership_refused', message: "Nothing was saved. I couldn't check access to this model. Try again." }),
 };
+const CODE_ONLY = '{"error":"model_write_ownership_refused"}';
 function payload(family: string) {
   if (family === 'system_event' || family === 'sse') return { kind: 'system_event', scenario_id: SID, turn_id: TID,
     stage: 'analyse', event: { kind: 'factor_value_edit', target_id: 'factor', value: 0.65 } };
@@ -150,6 +151,7 @@ function inject(h: Awaited<ReturnType<typeof harness>>, family: string) {
     : family === 'agent' || family === 'adoption' ? '/agent/v1/turn' : '/orchestrate/v2/turn', headers: { 'x-request-id': 'prop-request' }, payload: payload(family) });
 }
 it.each(['system_event', 'chip', 'draft', 'adoption', 'agent', 'sse'])('refusal propagation: %s', async family => {
+  const warn = vi.spyOn(log, 'warn');
   const adoptionDoor = vi.spyOn(adoption, 'commitOlumiOptionAdoptionInProcess');
   const h = await harness(family);
   try {
@@ -168,7 +170,9 @@ it.each(['system_event', 'chip', 'draft', 'adoption', 'agent', 'sse'])('refusal 
       expect(terminal).toHaveLength(1); expect(terminal[0].status_code).toBe(403);
       bytes = JSON.stringify(terminal[0].payload);
     } else expect(r.statusCode, r.payload).toBe(403);
-    expect(bytes).toBe(BYTES.not_owner);
+    // Adoption publishes session history before its final refusal; it cannot claim no save.
+    expect(bytes).toBe(family === 'adoption' ? CODE_ONLY : BYTES.not_owner);
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
     // The approved literal itself says "saved". Forbid success claims and flattened outcomes, not that refusal sentence.
     expect(bytes.replace('Nothing was saved.', '')).not.toMatch(/saved|revision|unconfirmed/i);
     expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
@@ -275,12 +279,15 @@ it('P1 ambient context: early inner admission/validation bytes ignore an outer l
   } finally { await h.app.close(); }
 });
 it('P1 fence identity: real Agent adoption marks its captured in-process fence, never an ambient decoy', async () => {
+  const warn = vi.spyOn(log, 'warn');
   const h = await harness('adoption');
   try {
     const decoy = await h.fence.store.claimTurnFence(DECOY_SID, DECOY_TID);
     expect(decoy).not.toBeNull();
     const r = await runWithTurnFence(decoy!, () => inject(h, 'adoption'));
-    expect(r.statusCode).toBe(403); expect(r.payload).toBe(BYTES.not_owner);
+    expect(r.statusCode).toBe(403); expect(r.payload).toBe(CODE_ONLY);
+    expect(r.payload).not.toContain('Nothing was saved');
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
     const adoptionTurn = authorisationTurnId(adoptionProposal().proposal_id);
     expect(h.markGraphWriteFailed).toHaveBeenCalledExactlyOnceWith(SID, adoptionTurn, 'model_write_ownership_refused', 'turn_dead_only');
     expect(h.fence.rows.find(row => row.scenario_id === SID)).toMatchObject({ turn_id: adoptionTurn,
