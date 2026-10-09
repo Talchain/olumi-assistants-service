@@ -1,5 +1,5 @@
 {
-  "source_sha": "9aafea573f9a4e82327ff4a13ac2a6ceec660052",
+  "source_sha": "46196cb3ed9bc73a419fb686534168014fcf03d2",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -172,7 +172,7 @@
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 2,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-direction.ts": 7,
+      "src/orchestrator-v5/goal-target/goal-direction.ts": 6,
       "src/orchestrator-v5/goal-target/goal-level-reading.ts": 1,
       "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 3,
@@ -781,7 +781,7 @@
     "goalUnitOf": 5,
     "goal_constraints": 435,
     "goal_deadline_as_stated": 9,
-    "goal_direction": 96,
+    "goal_direction": 95,
     "goal_horizon": 52,
     "goal_horizon_months": 34,
     "goal_level_reading": 18,
@@ -808,7 +808,7 @@
     "threshold_source": 33,
     "unit_reading": 79
   },
-  "total_references": 2343,
+  "total_references": 2342,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
