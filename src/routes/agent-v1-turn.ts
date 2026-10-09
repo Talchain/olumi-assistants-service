@@ -55,7 +55,7 @@ import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
-import { ModelWriteOwnershipRefused } from '../orchestrator-v5/ownership/door-ownership.js';
+import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readSuccessfulDoorEntries, readUnsavableEffects, recordUnsavableEffect, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
@@ -2105,6 +2105,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...histories.get(sessionId),
           { role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${narration}` }] },
         ]);
+        recordUnsavableEffect();
       }
       return reply.code(forwarded.status).send({
         ...forwardedBody,
@@ -2578,6 +2579,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     // Set only when THIS request owns the turn — used to release it if nothing ran.
     let claimHash: string | undefined;
+    let claimAppendSucceeded = false;
+    let claimReleaseRecorded = false;
     if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
       const readAnswer = (): Promise<CommittedTurnRecord | null> => store.readCommittedTurn!(scenarioId, turnId);
       let prior: CommittedTurnRecord | null;
@@ -2618,9 +2621,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             handler_facts: [],
           },
         });
+        claimAppendSucceeded = true;
         owner = await store.readCommittedTurn(scenarioId, claimTurnId);
       } catch (err) {
-        if (err instanceof ModelWriteOwnershipRefused) return reply.code(403).send({ error: err.code });
+        if (err instanceof ModelWriteOwnershipRefused) {
+          if (readSuccessfulDoorEntries() > 0 || readUnsavableEffects() > 0) return reply.code(403).send({ error: err.code });
+          const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
+          return reply.code(403).send({ error: refusalBody.error, message: refusalBody.message });
+        }
         log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
       }
@@ -2686,7 +2694,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     const releaseUnwrittenTurnClaim = async (): Promise<boolean> => {
       if (turnId === undefined || claimHash === undefined || writesDispatched !== 0 || typeof store.releaseTurnClaim !== 'function') return false;
-      try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); return true; }
+      try {
+        await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash);
+        if (claimAppendSucceeded && !claimReleaseRecorded) {
+          recordReleasedTurnClaim();
+          claimReleaseRecorded = true;
+        }
+        return true;
+      }
       catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: claim release failed'); return false; }
     };
     /**
@@ -2846,7 +2861,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const durableSeedRows = await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ);
         recentRowsForEgress = durableSeedRows;
         const durable = historyFromDurableTurns(durableSeedRows);
-        if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+        if (durable.length > 0) {
+          // Seeding reuses already-saved rows and held history; it is not an effect of this turn.
+          histories.set(sessionId, [...durable, ...held]);
+        }
         earlierWordsKnown = true;
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
@@ -2886,6 +2904,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
     const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
+    // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
+    if (typedNow !== null) recordUnsavableEffect();
 
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
@@ -5096,6 +5116,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? methodTurnItems(history, message, sentText)
       : historyWithSentText(result.items, sentText);
     histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
+    // Published to in-memory session history, not a durable save; no-save copy is now false.
+    recordUnsavableEffect();
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
@@ -5212,7 +5234,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         carriedProposals.persisted(approveKey, approvalCarrier);
       } catch (err) {
         if (err instanceof ModelWriteOwnershipRefused) {
-          await releaseUnwrittenTurnClaim();
+          const released = await releaseUnwrittenTurnClaim();
+          // A released claim is discounted for this request and its parents. Other durable
+          // entries survive, and in-memory history publication is a separate effect.
+          const successfulDoorEntries = readSuccessfulDoorEntries();
+          if (successfulDoorEntries === 0 && readUnsavableEffects() === 0 && (!claimAppendSucceeded || released)) {
+            const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
+            return reply.code(403).send({ error: refusalBody.error, message: refusalBody.message });
+          }
+          if (successfulDoorEntries > 0) {
+            log.warn({ event: 'model_write.ownership_refused_after_commit', reason: err.reason,
+              request_id: String(req.id), successful_door_entries: successfulDoorEntries },
+            'Model write ownership refused after an earlier successful door entry');
+          }
           return reply.code(403).send({ error: err.code });
         }
         // The answer is real and the writes already happened; hiding it would be
