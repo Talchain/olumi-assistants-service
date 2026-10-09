@@ -509,6 +509,11 @@ function executableWaitingProposalIds(scenarioId: string, userId: string | null,
   }).status === 'execute' && identityProposalOfferable(proposals.get(id), graph));
 }
 
+/** The steady-state card is a Run-reply answer, not a held change: it never counts as an approval awaiting a yes. */
+function isSteadyCardProposal(id: string | undefined): boolean {
+  return id !== undefined && proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') === true;
+}
+
 /** The offered actions with each id once, the FIRST kept, in order (R3 5910885689: the same card offered twice). */
 export function firstOfEachId<T extends { readonly id: string }>(offered: readonly T[]): T[] {
   const seen = new Set<string>();
@@ -2341,8 +2346,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
-          const atRest = { awaitingApproval: executableWaitingProposalIds(scenarioId, userId, state.graphHash, state.graph)
-            .some(id => !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady')), builtOrRan: true,
+          const waitingId = executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph);
+          const atRest = { awaitingApproval: waitingId !== undefined && !isSteadyCardProposal(waitingId), builtOrRan: true,
             chanceCells: replayChanceCells };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           let say = goalChanceLineOwed([{ ok: true, ran: true,
@@ -2478,7 +2483,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const replayControlQuestions = replayActions
         .filter(action => {
           const id = typedApprovalOf({ chip: { id: action.id } });
-          return id === undefined || !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady');
+          return !isSteadyCardProposal(id);
         })
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
       const replayHorizon = replayObligations === undefined || !replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
@@ -4597,11 +4602,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
-      awaitingApproval: offeredNow.some(a => {
-        const id = typedApprovalOf({ chip: { id: a.id } });
-        return id !== undefined && !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady');
-      }) || executableWaitingProposalIds(scenarioId, userId, graphHash, readbackGraph)
-        .some(id => !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady')),
+      // Otherwise exactly the turn's rule: an offered approve chip, or the ONE executable waiting proposal.
+      awaitingApproval: offeredNow.some(a => { const id = typedApprovalOf({ chip: { id: a.id } }); return id !== undefined && !isSteadyCardProposal(id); })
+        || (() => { const id = executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph); return id !== undefined && !isSteadyCardProposal(id); })(),
       chanceCells,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
@@ -5065,7 +5068,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const typedControlQuestions = controlsOnReply.filter((action) => {
         const id = typedApprovalOf({ chip: { id: action.id } });
         // This question lives in its card detail; it does not reshape the Run's existing prose.
-        return id !== undefined && !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady');
+        return id !== undefined && !isSteadyCardProposal(id);
       })
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
       for (const pending of durablePending) {

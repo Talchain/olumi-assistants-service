@@ -1,4 +1,4 @@
-import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_FIGURES_WITHHELD_CODES } from '../../orchestrator/context/option-result-source.js';
 import { goalHorizonVerdict, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { approvalChipIdFor } from './approval-chips.js';
 import { createProposal, type StructuredProposal } from './proposal.js';
@@ -8,24 +8,31 @@ export const STEADY_HORIZON_ANSWER = 'It stays about the same unless we act';
 const recordOf = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
-/** True only when this Run withheld its goal chance because the goal's month is untested (§(ad)), not for any other cause. */
-function runWithheldForUntestedHorizon(result: unknown): boolean {
+/**
+ * True only when the untested month (§(ad)) is the SOLE goal-figures withhold cause on this Run. The producer stacks
+ * causes (a held month with a missing current level carries both), and the card would then lead the chips and displace
+ * the other cause's own next step, e.g. "Set current level" (DL 58e392 #2903 P1).
+ */
+function runWithheldOnlyForUntestedHorizon(result: unknown): boolean {
   const block = recordOf(result);
-  return [block?.inference_warnings, recordOf(block?.enrichment)?.inference_warnings]
+  const causes = new Set([block?.inference_warnings, recordOf(block?.enrichment)?.inference_warnings]
     .flatMap(value => Array.isArray(value) ? value : [])
-    .some(warning => recordOf(warning)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+    .map(warning => recordOf(warning)?.code)
+    .filter((code): code is string => typeof code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(code)));
+  return causes.size === 1 && causes.has(GOAL_FIGURES_HORIZON_NOT_TESTED);
 }
 
 /**
- * Offer only on a Run reply whose Run withheld the goal chance for an untested month; the route also excludes any other
- * held approval. A Run withheld for another cause (e.g. a missing current level) keeps that cause's own next step.
+ * Offer only on a Run reply whose Run withheld the goal chance for an untested month and for no other cause; the route
+ * also excludes any other held approval. A Run withheld for another cause too (e.g. a missing current level) keeps that
+ * cause's own next step.
  * No goal is changed here.
  */
 export function steadyHorizonCard(input: {
   graph: unknown; graphHash: string | undefined; scenarioId: string; userId: string | null;
   runReply: boolean; runResult: unknown; approvalHeld: boolean;
 }): { proposal: StructuredProposal; chip: { id: string; label: string; message: string; detail: string } } | null {
-  if (!input.runReply || input.approvalHeld || !input.graphHash || !runWithheldForUntestedHorizon(input.runResult)
+  if (!input.runReply || input.approvalHeld || !input.graphHash || !runWithheldOnlyForUntestedHorizon(input.runResult)
     || input.graph === null || typeof input.graph !== 'object' || Array.isArray(input.graph)) return null;
   const graph = input.graph as { nodes?: unknown };
   if (!Array.isArray(graph.nodes)) return null;

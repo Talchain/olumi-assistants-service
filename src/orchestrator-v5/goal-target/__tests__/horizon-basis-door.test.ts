@@ -921,6 +921,24 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     expect((contrast.result.enrichment as Rec).option_comparison.every((row: Rec) => row.probability_of_goal === undefined)).toBe(true);
   });
 
+  it('real Run, mixed cause (held month + missing current level) -> no steady card; horizon as sole cause -> card (DL 58e392 #2903 P1)', async () => {
+    const { steadyHorizonCard } = await import('../../agent-lane/steady-horizon-card.js');
+    const { graph, body } = steadyB2();
+    const card = (result: unknown) => steadyHorizonCard({ graph, graphHash: computeAnalysisAffectingGraphHash(graph as never) ?? undefined,
+      scenarioId: SCENARIO, userId: null, runReply: true, runResult: result, approvalHeld: false });
+    const codesOf = (result: Rec) => ((result.enrichment as Rec).inference_warnings as Rec[]).map(w => w.code);
+    const mixedBody = clone(body);
+    mixedBody.inference_warnings = [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', message: 'Threshold not convertible.',
+      severity: 'warning', detail: { reason: 'missing_goal_baseline' } }];
+    const mixed = buildAnalysisResultBlock(await storedSteadyRun(world(graph), mixedBody)) as Rec;
+    expect(codesOf(mixed)).toEqual(expect.arrayContaining(['GOAL_FIGURES_MISSING_CURRENT_LEVEL', 'GOAL_FIGURES_HORIZON_NOT_TESTED']));
+    expect(card(mixed)).toBeNull();
+    const horizonOnly = buildAnalysisResultBlock(await storedSteadyRun(world(graph), body)) as Rec;
+    expect(codesOf(horizonOnly)).toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
+    expect(codesOf(horizonOnly)).not.toContain('GOAL_FIGURES_MISSING_CURRENT_LEVEL');
+    expect(card(horizonOnly)?.chip.label).toBe('It stays about the same unless we act');
+  });
+
   it('supported attested Run -> restore pre-attestation version removes answer -> reload read-time goalHorizonVerdict withholds the former horizon chance', async () => {
     const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
     const { default: versionsRoute } = await import('../../../routes/assist.v1.scenario-versions.js');
