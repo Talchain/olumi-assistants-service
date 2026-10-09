@@ -24,6 +24,7 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { assertDoorOwnership } from "../orchestrator-v5/ownership/door-ownership.js";
 import {
   getModelManagementService,
   MODEL_VERSION_LIST_DEFAULT_LIMIT,
@@ -763,6 +764,7 @@ export default async function route(app: FastifyInstance) {
         return unavailable(reply, requestId, "The version could not be saved right now.");
       }
 
+      await assertDoorOwnership(store, ctx.scenarioId, "version_save");
       const result = await service.saveVersion({
         expected_revision: expectedRevision,
         scenario_id: ctx.scenarioId,
@@ -1126,6 +1128,7 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
+      await assertDoorOwnership(store, ctx.scenarioId, "version_restore");
       const restored = await service.restoreVersionAtomic({
         expected_revision: expectedRevision,
         scenario_id: ctx.scenarioId,

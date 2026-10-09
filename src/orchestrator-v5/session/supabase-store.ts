@@ -239,6 +239,7 @@ export interface AnalysisRunDerivationPort {
   storeTypedAnalysisRun(args: {
     p_fact_id: string; p_run: Omit<TypedRunRows, 'options'>; p_options: readonly TypedRunOptionRow[];
   }): AnalysisRunRpcResult;
+  markAnalysisFactUnattributable(args: { p_fact_id: string; p_reason: 'run_id_absent' }): AnalysisRunRpcResult;
   quarantineAnalysisFact(args: { p_fact_id: string; p_reason: string; p_detail: string | null }): AnalysisRunRpcResult;
   recordAnalysisRunFailure(args: { p_fact_id: string; p_error_code: string; p_detail: string }): AnalysisRunRpcResult;
   finishAnalysisRunSweep(args: { p_lease_id: string }): AnalysisRunRpcResult;
@@ -295,6 +296,7 @@ let conditionalAppendMissingLogged = false;
 export interface AnalysisRunDrainResult {
   derived: number;
   quarantined: number;
+  unattributable: number;
   skipped: number;
   failed: number;
   attempts: number;
@@ -474,7 +476,7 @@ export class SupabaseSessionStore implements SessionStore {
   /** Sanctioned write door; single-flight across interval, nudges and operator calls. */
   async deriveAnalysisRuns(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
     if (!this.options.analysisRunDerivation || this.analysisSweeperClosed) {
-      return { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
+      return { derived: 0, quarantined: 0, unattributable: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
     }
     const mode = opts.mode ?? 'sweep';
     if (this.analysisSweepFlight) {
@@ -491,10 +493,21 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   private async performAnalysisRunSweep(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' }): Promise<AnalysisRunDrainResult> {
-    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
+    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, unattributable: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
       depthEstimate: null, oldestPendingAgeSeconds: null };
     const port = this.options.analysisRunDerivation!;
     let leaseId: string | undefined;
+    let rpcUnavailableLogged = false;
+    const reportRpcUnavailable = (error: unknown): void => {
+      if (rpcUnavailableLogged) return;
+      rpcUnavailableLogged = true;
+      // Infrastructure failure, once per sweep; the operator stops rather than
+      // spinning on the same window. No fact consumes a durable poison attempt.
+      counts.failed += 1;
+      log.warn({ event: 'analysis_run.rpc_unavailable', rpc_code: errCode(error), mode: opts.mode ?? 'sweep' },
+        'Analysis Run RPC unavailable; apply the migration before draining');
+    };
+    const missingRpc = (error: unknown): boolean => errCode(error) === 'PGRST202' || errCode(error) === '42883';
     try {
       const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
       const { data, error } = opts.mode === 'reconcile'
@@ -526,15 +539,25 @@ export class SupabaseSessionStore implements SessionStore {
               else counts.skipped += 1;
             } else if (stored.data === true) counts.derived += 1;
             else counts.skipped += 1;
+          } else if ('unattributable' in mapped) {
+            const marked = await port.markAnalysisFactUnattributable({ p_fact_id: row.fact_id, p_reason: mapped.unattributable });
+            if (marked.error) throw marked.error;
+            if (marked.data === true) counts.unattributable += 1;
+            else counts.skipped += 1;
           } else {
-            const skipped = !('quarantine' in mapped);
-            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal' in mapped ? 'skipped_refusal' : 'skipped_legacy';
+            const skipped = 'skipped_refusal' in mapped;
+            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal';
             const quarantined = await port.quarantineAnalysisFact({ p_fact_id: row.fact_id, p_reason: reason, p_detail: null });
             if (quarantined.error) throw quarantined.error;
             if (skipped || quarantined.data !== true) counts.skipped += 1;
             else counts.quarantined += 1;
           }
         } catch (error) {
+          if (missingRpc(error)) {
+            counts.skipped += 1;
+            reportRpcUnavailable(error);
+            continue;
+          }
           counts.failed += 1;
           if (typeof row?.fact_id === 'string' && errCode(error) !== '23505') {
             try {
@@ -544,31 +567,39 @@ export class SupabaseSessionStore implements SessionStore {
               if (recorded.error) throw recorded.error;
               if (recorded.data === true) counts.quarantined += 1;
             } catch (recordError) {
-              log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
+              if (missingRpc(recordError)) reportRpcUnavailable(recordError);
+              else log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
             }
           }
         }
       }
     } catch (error) {
-      counts.failed += 1;
-      log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+      if (missingRpc(error)) reportRpcUnavailable(error);
+      else {
+        counts.failed += 1;
+        log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+      }
     } finally {
       if (leaseId) {
         try {
           const finished = await port.finishAnalysisRunSweep({ p_lease_id: leaseId });
-          if (finished.error) {
+          if (finished.error && missingRpc(finished.error)) reportRpcUnavailable(finished.error);
+          else if (finished.error) {
             counts.failed += 1;
             log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(finished.error) }, 'Watermark retained; lease expiry permits recovery');
           }
         } catch (error) {
-          counts.failed += 1;
-          log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+          if (missingRpc(error)) reportRpcUnavailable(error);
+          else {
+            counts.failed += 1;
+            log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+          }
         }
       }
     }
     log.info({ event: 'analysis_run.drain', mode: opts.mode ?? 'sweep', depth_estimate: counts.depthEstimate,
       oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, attempts: counts.attempts, scanned: counts.scanned,
-      derived: counts.derived, quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
+      derived: counts.derived, quarantined: counts.quarantined, unattributable: counts.unattributable, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
     return counts;
   }
 
