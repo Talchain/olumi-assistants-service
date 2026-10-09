@@ -113,6 +113,16 @@ export default [
       'no-restricted-syntax': 'off',
     },
   },
+  // S7 structural lock (DL 87114 on #2894): ONE admission path. Production code reaches candidate admission only through
+  // build-model's admitForBuild (injected where needed); importing the raw admitters anywhere else fails lint.
+  {
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/__tests__/**', 'src/**/*.test.ts', 'src/orchestrator-v5/agent-lane/admit-model.ts', 'src/orchestrator-v5/agent-lane/runtime/build-model.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [{ group: ['**/admit-model', '**/admit-model.js'], importNames: ['admitCandidateModel', 'admitOrdinaryCandidateModel'],
+        message: 'S7: one admission path. Admit through build-model admitForBuild (inject it), never the raw admitter.' }] }],
+    },
+  },
   // Structural guard: route-v2.ts must invoke the three shared pre-flight
   // primitives (validateIngress, parseRequestExtensions, preflightEnsureScenario)
   // ONLY via the runPreFlight helper in route-v2-preflight.ts. This keeps the
