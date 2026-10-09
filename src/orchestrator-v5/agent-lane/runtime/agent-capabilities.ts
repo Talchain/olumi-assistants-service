@@ -844,7 +844,7 @@ function heldFigureOwner(node: { observed_state?: unknown; extractionType?: unkn
   if (os === undefined || os === null) return undefined;
   if (isAcceptedOlumiEstimate(os)) return 'olumi_accepted';
   const display = observedValueAuthorship(os)?.provenance ?? nodeProvenanceDisplay(os.extractionType ?? node?.extractionType);
-  return display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
+  return display === 'unverified_brief' ? 'unverified_brief' : display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
 }
 
 function valuesNotSaved(

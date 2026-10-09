@@ -288,7 +288,7 @@ export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value);
   } catch (err) {
     log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
-      'agent-lane: a stated factor level could not be verified on a malformed draft; it stays Olumi\'s estimate');
+      'agent-lane: a stated factor level could not be verified on a malformed draft; credit is withheld');
     return false;
   }
 }

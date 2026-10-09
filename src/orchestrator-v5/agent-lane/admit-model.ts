@@ -76,6 +76,7 @@ import {
 } from './admit-constraint.js';
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
+import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { verifiedFactorLevel } from './verified-option-setting.js';
 
 const MAX_ID = 100;
@@ -484,7 +485,7 @@ export interface AdmittedNode {
    * type was the reason three test files failed the typecheck ratchet while
    * `tsconfig.build.json` — which excludes tests — reported clean.
    */
-  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
+  observed_state?: { value: number; unit?: string; source?: string; extractionType?: 'explicit' | 'inferred' | 'range' | 'observed'; user_material_unverified?: true; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
   /**
    * `cee-v3.ts` `scale_frame`: the divisor this factor's levels are stated
    * on, for a factor with no baseline. The declared carrier; see the write site.
@@ -517,7 +518,7 @@ export interface AdmittedNode {
    * `structural-add-edge.ts:233` treats as CORRUPTION — so every write to the
    * scenario returned 500 until this was fixed.
    */
-  provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  provenance?: ProvenanceDisplay;
   draft_widening?: DraftWideningT;
   proposed_by?: 'olumi';
   analysis_participation?: 'included' | 'retained_excluded';
@@ -782,7 +783,7 @@ function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_f
 
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
-}, verifiedCurrentLevel = false): Record<string, unknown> {
+}, verifiedCurrentLevel = false, userMaterialUnverified = false): Record<string, unknown> {
   const raw = f.baseline_value as number;
   // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
   // eng-hiring (`2d0df14`) left salary spend and both headcounts unauthored: "I supplied N values" skipped them and
@@ -792,6 +793,8 @@ export function framedObservedState(f: {
   const base = {
     ...(f.unit ? { unit: f.unit } : {}),
     source: verifiedCurrentLevel ? 'brief_extraction' : 'cee_inference',
+    extractionType: verifiedCurrentLevel ? 'explicit' : 'inferred',
+    ...(userMaterialUnverified ? { user_material_unverified: true as const } : {}),
   };
   const cap = f.plausible_max;
   // Already a proportion, or no usable range: leave it exactly as it was. A
@@ -3633,13 +3636,13 @@ function admitOnce(
         // it is the latter that `src/cee/provenance/money-invariant.ts:211` reads
         // to decide whether to audit the figure against the brief. Correcting only
         // the entity stamp left the figure unaudited; measured, not assumed.
-        ...((f.baseline_known || verifiedLevels.has(f)) && typeof f.baseline_value === 'number'
-          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f)) }
+        ...((f.baseline_known || verifiedLevels.has(f) || f.provenance === 'explicit' || f.provenance === 'from_brief') && typeof f.baseline_value === 'number'
+          ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f), !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief')) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
         // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
         ...((): Record<string, unknown> => {
-          const os = verifiedLevels.has(f) ? null : estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
+          const os = verifiedLevels.has(f) || f.provenance === 'explicit' || f.provenance === 'from_brief' ? null : estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
           return os === null ? {} : { observed_state: os };
         })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
@@ -3678,7 +3681,7 @@ function admitOnce(
         ...((): Record<string, number> => {
           const c = capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
-          if ((f.baseline_known || verifiedLevels.has(f)) && typeof f.baseline_value === 'number') {
+          if ((f.baseline_known || verifiedLevels.has(f) || f.provenance === 'explicit' || f.provenance === 'from_brief') && typeof f.baseline_value === 'number') {
             const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
             // Already framed inside `observed_state` — a second carrier could
             // disagree with it, so do not write one.
@@ -3783,7 +3786,8 @@ function admitOnce(
       kind: e.kind,
       label,
       ...(label !== e.label ? { description: e.label } : {}),
-      provenance: displayProvenanceFor(e.provenance),
+      provenance: isUnverifiedUserMaterial(e.node?.observed_state)
+        ? nodeProvenanceDisplay(undefined, e.node?.observed_state) : displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
   }

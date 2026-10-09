@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../transforms/provenance-display.js';
 /**
  * ⭐ THE MAGNITUDE CONTRACT — a causal link's size, read on its TARGET's own frame.
  *
@@ -145,7 +146,7 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
  */
 export function knownBaseline(node: MagnitudeNode): number | undefined {
   const os = node.observed_state;
-  if (os === undefined || os.source === 'cee_inference' || os.extractionType === 'inferred') return undefined;
+  if (os === undefined || isUnverifiedUserMaterial(os) || os.source === 'cee_inference' || os.extractionType === 'inferred') return undefined;
   if (finite(os.baseline)) return os.baseline;
   return finite(os.value) ? os.value : undefined;
 }

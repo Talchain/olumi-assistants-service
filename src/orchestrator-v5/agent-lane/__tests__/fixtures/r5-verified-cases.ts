@@ -49,7 +49,8 @@ export function assertCell(m: CandidateModel, brief: string, option: string, fac
   assert.equal(cell.source, expected === 'explicit' ? 'brief_extraction' : 'cee_hypothesis');
   assert.ok(!JSON.stringify(cell).includes('stated_evidence'));
 }
-const supportedProbes = new Set(['N0', 'N1a', 'N3', 'N5', 'N10c', 'B-N0']);
+// N1a formerly borrowed a text-search baseline upgrade; without a current-level receipt it conservatively refuses.
+const supportedProbes = new Set(['N0', 'N3', 'N5', 'N10c', 'B-N0']);
 export const censusRows: Row[] = census.map((c, index) => {
   const underCredit = (c.sc === 'ca2cc3ca' && c.factor === 'Starter tier monthly price')
     || (c.sc === 'b7398aad' && c.factor === 'Starter-tier price');

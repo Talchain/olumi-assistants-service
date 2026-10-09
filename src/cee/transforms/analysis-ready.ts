@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from './provenance-display.js';
 /**
  * Analysis-Ready Transformer
  *
@@ -500,6 +501,7 @@ export interface InterventionDetail {
  * (`classifyValueSource`); Olumi's (`ai_drafted`, `system_repaired`) is labelled, every other level reads as before.
  */
 function isOlumisLevel(factorNode: NodeV3T): boolean {
+  if (isUnverifiedUserMaterial(factorNode.observed_state)) return false;
   const owner = classifyValueSource((factorNode.observed_state as { source?: unknown } | undefined)?.source);
   return owner === "ai_drafted" || owner === "system_repaired";
 }

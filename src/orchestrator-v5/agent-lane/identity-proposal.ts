@@ -1,3 +1,4 @@
+import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
 import { goalStockAccumulationOf, goalStockNetReadingLine } from '../goal-target/goal-horizon-detail.js';
 import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
 /**
@@ -60,7 +61,7 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.tri
  */
 function usersLevel(node: Rec): { value: number; unit: string } | null {
   const os = node.observed_state;
-  if (!isRec(os) || classifyValueSource(os.source) !== 'user_stated') return null;
+  if (!isRec(os) || isUnverifiedUserMaterial(os) || classifyValueSource(os.source) !== 'user_stated') return null;
   const value = os.raw_value;
   const unit = text(os.unit);
   if (typeof value !== 'number' || !Number.isFinite(value) || value === 0 || unit === undefined) return null;
@@ -82,7 +83,7 @@ function otherParent(node: Rec | undefined, goal: { code: string; period: 'month
   const m = money && goal !== null ? readMoneyTotal(unit, text(node?.label) ?? '') : null;
   const inGoalTerms = m !== null && m.code === goal!.code && m.period === goal!.period;
   const figure = typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) ? os.raw_value : null;
-  return { figure, money, inGoalTerms, users: figure !== null && classifyValueSource(os?.source) === 'user_stated' };
+  return { figure, money, inGoalTerms, users: figure !== null && !isUnverifiedUserMaterial(os) && classifyValueSource(os?.source) === 'user_stated' };
 }
 
 const carriesIdentity = (node: Rec): boolean => node.nonlinear_identity !== undefined && node.nonlinear_identity !== null;
