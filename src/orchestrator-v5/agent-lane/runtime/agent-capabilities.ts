@@ -63,7 +63,7 @@ import { identityConfirmBaseIsWritable } from '../../system-events/editable-grap
 import { goalStockAccumulationOf } from '../../goal-target/goal-horizon-detail.js';
 import { identityReceiptWords, proposeProductIdentity, type IdentityPartLevel, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
-import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { canonicaliseUnitForDisplay, ratePeriodOf, ratePeriodWord, unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
@@ -106,6 +106,32 @@ const DIRECTION_CONFLICT_NOTE =
 const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
+
+/** A level in a different unit is left out before its authorship is read. */
+export const UNIT_DIFFERS_FROM_DECLARED_DETAIL = (option: string, declaredUnit: string, sentUnit: string): string =>
+  `Send ${option}'s figure exactly as the user wrote it, in ${declaredUnit} (the factor's unit); it was sent in ${sentUnit}. Nothing was changed.`;
+
+/** Compare only units the existing readers recognise; descriptive model units keep the base behaviour. */
+function recognisedLevelUnitKey(unit: string | undefined): string | undefined {
+  const display = canonicaliseUnitForDisplay(unit);
+  if (display === undefined) return undefined;
+  // The closed period table owns both recognition and singular/plural equality.
+  if (ratePeriodWord(display) !== null) return unitComparisonKey(display);
+  const reading = readUnit(display);
+  if (reading.kind !== 'plain') {
+    // The amount reader owns currency scale and percent aliases; never convert the figure.
+    return JSON.stringify({ kind: reading.kind, code: reading.currencyCode, scale: reading.multiplier });
+  }
+  if (unitPhraseTail(display) === '' && unitPhraseFamily(display) !== null) return unitComparisonKey(display);
+  const period = ratePeriodOf(display);
+  const head = unitPhraseHead(display);
+  // A recognised numerator and a closed period, with no descriptive words left over.
+  if (period !== null && head !== null && unitComparisonKey(display) === `${unitComparisonKey(head)}/${period}`) {
+    const numerator = recognisedLevelUnitKey(head);
+    return numerator === undefined ? undefined : `${numerator}/${period}`;
+  }
+  return undefined;
+}
 
 /** What the Agent says about a keep proposal (52f8cd, lease #75 5925744661): the figure is unchanged and stays Olumi's. */
 const KEEP_NOTE =
@@ -184,7 +210,7 @@ import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '.
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
-import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
@@ -195,7 +221,7 @@ import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
-import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { factorUnitOf, unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from '../unit-conflict.js';
 import { inShareFrame, isShareFactor, relativeFigureAgainst } from '../relative-figure.js';
 import { newFactorScopeIn } from '../figure-scope.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
@@ -5412,6 +5438,7 @@ export function createAgentCapabilities(
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
       /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
+      const unitDiffers: { option: string; factor: string; value: unknown; declared_unit: string; sent_unit: string; detail: string }[] = [];
       const rangesNotRecorded: { option: string; factor: string; reason: string }[] = [];
       const seen = new Set<string>();
       const set: {
@@ -5503,6 +5530,16 @@ export function createAgentCapabilities(
         // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
         // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
         const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
+        const declaredUnit = factorUnitOf(g.raw, factor);
+        const sentUnitKey = recognisedLevelUnitKey(statedUnit);
+        const declaredUnitKey = recognisedLevelUnitKey(declaredUnit);
+        if (statedUnit !== undefined && declaredUnit !== undefined
+          && sentUnitKey !== undefined && declaredUnitKey !== undefined && sentUnitKey !== declaredUnitKey) {
+          unitDiffers.push({ option: option.label, factor: factor.label, value: i?.value,
+            declared_unit: declaredUnit, sent_unit: statedUnit,
+            detail: UNIT_DIFFERS_FROM_DECLARED_DETAIL(option.label, declaredUnit, statedUnit) });
+          continue;
+        }
         const raw = Number(i?.value);
         /**
          * TEMPORAL (B6's ask, #2384; R3 #75 5914230653): the user's LIKELY RANGE for this level, decided from the TYPED
@@ -5680,7 +5717,8 @@ export function createAgentCapabilities(
       });
       if (changed.length === 0) {
         return {
-          ok: false, mutated: false, refusal: 'nothing_to_set',
+          ok: false, mutated: false, refusal: unitDiffers.length > 0 ? 'unit_differs_from_declared' : 'nothing_to_set',
+          ...(unitDiffers.length > 0 ? { unit_differs: unitDiffers } : {}),
           ...(unresolved.length > 0 ? { unresolved } : {}),
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
@@ -5688,7 +5726,8 @@ export function createAgentCapabilities(
           ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           ...(rangesNotRecorded.length > 0 ? { ranges_not_recorded: rangesNotRecorded } : {}),
-          detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.'
+          detail: (unitDiffers.length > 0 ? unitDiffers.map(r => r.detail).join(' ')
+            : 'Nothing could be recorded. Tell the user exactly which of these it was and why.')
             + rangesNotRecorded.map(r => ` ${r.option} / ${r.factor}: ${r.reason}`).join(''),
         };
       }
@@ -5758,6 +5797,10 @@ export function createAgentCapabilities(
         ...(rangesNotRecorded.length > 0 ? {
           ranges_not_recorded: rangesNotRecorded,
           detail: rangesNotRecorded.map(r => `${r.option} / ${r.factor}: ${r.reason}`).join(' '),
+        } : {}),
+        ...(unitDiffers.length > 0 ? {
+          unit_differs: unitDiffers,
+          detail: [...unitDiffers.map(r => r.detail), ...rangesNotRecorded.map(r => `${r.option} / ${r.factor}: ${r.reason}`)].join(' '),
         } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
