@@ -111,6 +111,7 @@ import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshS
 import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { assertDoorProvenance } from './goal-target/horizon-basis-provenance.js';
 import { log } from '../utils/telemetry.js';
+import { assertDoorOwnership } from './ownership/door-ownership.js';
 
 import {
   checkPersistedGraphInvariants,
@@ -390,6 +391,7 @@ export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
   const { store, writesGraph, source } = params;
+  await assertDoorOwnership(store, params.write.scenario_id, source);
   for (let attempt = 0; ; attempt += 1) {
     // Always reconcile the ORIGINAL request against each fresh row. Reusing the
     // previous attempt would retain obsolete scope issues or permanently drop holds.

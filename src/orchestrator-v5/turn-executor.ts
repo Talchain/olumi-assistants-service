@@ -98,6 +98,7 @@ import {
   type SelectionHonesty,
 } from './build-turn-context.js';
 import { TurnFenceRejectedError } from './session/turn-fence.js';
+import { ModelWriteOwnershipRefused } from './ownership/door-ownership.js';
 import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
 import { readRevisionConflictDetails } from './graph-revision-conflict.js';
 import { useAppendV6 } from './append-v6-flag.js';
@@ -1363,6 +1364,7 @@ export async function runTurnExecutor(
   // Pinned RED-first by tests/integration/turn-fence-hoisted-conflict-
   // mapping.test.ts (pre-hoist: `expected 500 to be 409` on a non-A2 path).
   let lastCommitConflictError: TurnFenceRejectedError | GraphStaleWriteError | null = null;
+  let lastCommitOwnershipError: ModelWriteOwnershipRefused | null = null;
   // True only after a commit persisted the zero-resolved projection. The
   // finaliser then preserves any legitimate commit-layer adjustment (for
   // example a held-change lapse notice) instead of re-projecting different
@@ -1790,6 +1792,7 @@ export async function runTurnExecutor(
     // conflict thrown by THIS append before rethrowing to the call site's
     // own catch ladder.
     lastCommitConflictError = null;
+    lastCommitOwnershipError = null;
     zeroResolvedSelectionGuardAppliedAtCommit = false;
     zeroResolvedSelectionMutationReceiptPersistedAtCommit = false;
     const projectionStateBeforeCommit = {
@@ -1901,6 +1904,7 @@ export async function runTurnExecutor(
       ) {
         lastCommitConflictError = error;
       }
+      if (error instanceof ModelWriteOwnershipRefused) lastCommitOwnershipError = error;
       throw error;
     }
     pendingLifecycleForRun = result.pendingLifecycle;
@@ -16507,6 +16511,8 @@ export async function runTurnExecutor(
   }
 
   function finalizeRun(): TurnExecutorRunResult {
+    // Preserve a door refusal across existing commit-failure catches for HTTP/SSE mapping.
+    if (lastCommitOwnershipError) throw lastCommitOwnershipError;
     // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
     // Runs FIRST, before the egress guards below, so the remapped envelope
     // is subject to them exactly as the A2 branch's envelope is. Fires ONLY
