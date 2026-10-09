@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { SupabaseSessionStore } from '../../src/orchestrator-v5/session/supabase-store.js';
+import { createAnalysisRunDerivationPort } from '../../src/orchestrator-v5/session/index.js';
 import { SessionLRUCache } from '../../src/orchestrator-v5/session/cache.js';
 
 export async function backfillTypedRuns(): Promise<void> {
@@ -10,7 +11,7 @@ export async function backfillTypedRuns(): Promise<void> {
   const url = process.env.SUPABASE_URL; const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 1, maxTurnsPerScenario: 1 }), { defaultReadLimit: 20, analysisRunDerivation: { rpc: (name, args) => client.rpc(name, args) } });
+  const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 1, maxTurnsPerScenario: 1 }), { defaultReadLimit: 20, analysisRunDerivation: createAnalysisRunDerivationPort(client) });
   // The durable watermark starts at -infinity and visits historical facts in
   // capped indexed windows. No extra writer or secondary mapper is involved.
   for (;;) {

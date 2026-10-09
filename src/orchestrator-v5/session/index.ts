@@ -22,10 +22,10 @@
  * (deviation 3). See Paul's 2026-04-18 refinement note.
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { SessionLRUCache } from './cache.js';
-import { SupabaseSessionStore } from './supabase-store.js';
+import { SupabaseSessionStore, type AnalysisRunDerivationPort } from './supabase-store.js';
 import type { SessionStore } from './store.js';
 import { config as appConfig } from '../../config/index.js';
 
@@ -43,6 +43,17 @@ export const SESSION_CACHE_MAX_TURNS_PER_SCENARIO_DEFAULT = 50;
 
 let cachedInstance: SessionStore | null = null;
 
+/** Explicit production port: one literal call site per typed-analysis RPC. */
+export function createAnalysisRunDerivationPort(client: Pick<SupabaseClient, 'rpc'>): AnalysisRunDerivationPort {
+  return {
+    claimAnalysisRunWindow: args => client.rpc('claim_analysis_run_facts', args),
+    storeTypedAnalysisRun: args => client.rpc('store_typed_analysis_run', args),
+    quarantineAnalysisFact: args => client.rpc('quarantine_analysis_fact', args),
+    recordAnalysisRunFailure: args => client.rpc('record_analysis_run_failure', args),
+    finishAnalysisRunSweep: args => client.rpc('finish_analysis_run_sweep', args),
+  };
+}
+
 export function getSessionStore(): SessionStore {
   if (cachedInstance) return cachedInstance;
   const config = readConfig();
@@ -55,7 +66,7 @@ export function getSessionStore(): SessionStore {
   });
   cachedInstance = new SupabaseSessionStore(client, cache, {
     defaultReadLimit: config.readWindow,
-    analysisRunDerivation: { rpc: (name, args) => client.rpc(name, args) },
+    analysisRunDerivation: createAnalysisRunDerivationPort(client),
     // A3 graph CAS observe-mode (CEE_V5_GRAPH_CAS_MODE via the central Zod
     // config, which owns the off|observe|enforce parse + the prod
     // enforce→observe downgrade). Default 'off' — zero behavioural change.

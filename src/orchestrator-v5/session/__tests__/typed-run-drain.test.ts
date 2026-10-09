@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { loadCorpus } from '../../../../scripts/phase2/parity-2b.js';
 import { SupabaseSessionStore } from '../supabase-store.js';
+import { createAnalysisRunDerivationPort } from '../index.js';
 import type { SessionTurnWrite } from '../store.js';
 import { log } from '../../../utils/telemetry.js';
 
@@ -40,7 +41,7 @@ function fixture() {
   const query = { select: vi.fn(() => query), eq: vi.fn(() => query),
     returns: vi.fn(async () => ({ data: [...pending.keys()].map(id => ({ id })), error: null })) };
   const client = { rpc, from: vi.fn(() => query) };
-  const store = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20, analysisRunDerivation: { rpc } });
+  const store = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20, analysisRunDerivation: createAnalysisRunDerivationPort(client as never) });
   return { store, client, rpc, pending, stored, quarantine, failStore, attempts, storeErrors };
 }
 function turn(): SessionTurnWrite {

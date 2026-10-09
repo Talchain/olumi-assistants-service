@@ -1,4 +1,4 @@
-import { toTypedRunRows } from '../runs/typed-run-rows.js';
+import { toTypedRunRows, type TypedRunRows, type TypedRunOptionRow } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
 import type { LegacyAnalysisEditFacts } from '../types/handler-fact.js';
@@ -228,12 +228,23 @@ function errCode(e: unknown): string | undefined {
   return (e as SupabaseErrorLike | null)?.code ?? undefined;
 }
 
+type AnalysisRunRpcResult = PromiseLike<{ data: unknown; error: unknown }>;
+
+/** Named capabilities keep each storage RPC visible to the migration census. */
+export interface AnalysisRunDerivationPort {
+  claimAnalysisRunWindow(args: { p_sweep_limit: number }): AnalysisRunRpcResult;
+  storeTypedAnalysisRun(args: {
+    p_fact_id: string; p_run: Omit<TypedRunRows, 'options'>; p_options: readonly TypedRunOptionRow[];
+  }): AnalysisRunRpcResult;
+  quarantineAnalysisFact(args: { p_fact_id: string; p_reason: string; p_detail: string | null }): AnalysisRunRpcResult;
+  recordAnalysisRunFailure(args: { p_fact_id: string; p_error_code: string; p_detail: string }): AnalysisRunRpcResult;
+  finishAnalysisRunSweep(args: { p_lease_id: string }): AnalysisRunRpcResult;
+}
+
 export interface SupabaseSessionStoreOptions {
   readonly defaultReadLimit: number;
   /** Explicit capability: append-only transports must never receive derivation RPCs. */
-  readonly analysisRunDerivation?: {
-    rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
-  };
+  readonly analysisRunDerivation?: AnalysisRunDerivationPort;
   /**
    * A3 graph CAS observe-mode (`CEE_V5_GRAPH_CAS_MODE`). Absent → 'off'
    * (zero SELECTs, byte-identical write path). See `evaluateGraphCas` and
@@ -466,7 +477,7 @@ export class SupabaseSessionStore implements SessionStore {
     let leaseId: string | undefined;
     try {
       const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
-      const { data, error } = await port.rpc('claim_analysis_run_facts', { p_sweep_limit: limit });
+      const { data, error } = await port.claimAnalysisRunWindow({ p_sweep_limit: limit });
       if (error) throw error;
       const envelope = drainRecord(data);
       if (!envelope || !Array.isArray(envelope.facts)) throw new Error('Invalid analysis claim receipt');
@@ -482,10 +493,10 @@ export class SupabaseSessionStore implements SessionStore {
           const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, { scenarioId: row.scenario_id });
           if ('ok' in mapped) {
             const { options, ...run } = mapped.ok;
-            const stored = await port.rpc('store_typed_analysis_run', { p_fact_id: row.fact_id, p_run: run, p_options: options });
+            const stored = await port.storeTypedAnalysisRun({ p_fact_id: row.fact_id, p_run: run, p_options: options });
             if (stored.error) {
               if (errCode(stored.error) !== '23505') throw stored.error;
-              const quarantined = await port.rpc('quarantine_analysis_fact', {
+              const quarantined = await port.quarantineAnalysisFact({
                 p_fact_id: row.fact_id, p_reason: 'duplicate_run_id', p_detail: '23505',
               });
               if (quarantined.error) throw quarantined.error;
@@ -496,7 +507,7 @@ export class SupabaseSessionStore implements SessionStore {
           } else {
             const skipped = !('quarantine' in mapped);
             const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal' in mapped ? 'skipped_refusal' : 'skipped_legacy';
-            const quarantined = await port.rpc('quarantine_analysis_fact', { p_fact_id: row.fact_id, p_reason: reason, p_detail: null });
+            const quarantined = await port.quarantineAnalysisFact({ p_fact_id: row.fact_id, p_reason: reason, p_detail: null });
             if (quarantined.error) throw quarantined.error;
             if (skipped || quarantined.data !== true) counts.skipped += 1;
             else counts.quarantined += 1;
@@ -505,7 +516,7 @@ export class SupabaseSessionStore implements SessionStore {
           counts.failed += 1;
           if (typeof row?.fact_id === 'string' && errCode(error) !== '23505') {
             try {
-              const recorded = await port.rpc('record_analysis_run_failure', {
+              const recorded = await port.recordAnalysisRunFailure({
                 p_fact_id: row.fact_id, p_error_code: errCode(error) ?? 'unknown', p_detail: errMessage(error).slice(0, 1000),
               });
               if (recorded.error) throw recorded.error;
@@ -522,7 +533,7 @@ export class SupabaseSessionStore implements SessionStore {
     } finally {
       if (leaseId) {
         try {
-          const finished = await port.rpc('finish_analysis_run_sweep', { p_lease_id: leaseId });
+          const finished = await port.finishAnalysisRunSweep({ p_lease_id: leaseId });
           if (finished.error) {
             counts.failed += 1;
             log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(finished.error) }, 'Watermark retained; lease expiry permits recovery');
