@@ -230,6 +230,8 @@ export interface AgentTurnResult {
     proposal_id?: string; outcome?: string; refusal?: string;
     /** A refused call's conflict fields — which parts of what the model sent fired (names only, never the figure). */
     conflict_fields?: readonly string[];
+    /** Per-level authorship from successful proposal results; no figures or arguments. */
+    levels?: readonly { option: string; factor: string; stated_by: 'user' | 'olumi_estimate' }[];
     /** A refused switch level's entries AS SENT — option, factor, value, unit, estimate; bounded (`rejectedLevelsOf`). */
     rejected_levels?: readonly RejectedLevel[];
     /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
@@ -373,6 +375,37 @@ const conflictFieldsOf = (result: ToolResult): { conflict_fields?: readonly stri
   return names.length > 0 ? { conflict_fields: names } : {};
 };
 
+/** Project only typed option-level authorship, including joined and new-option proposals. */
+const levelsOf = (tool: string, result: ToolResult): Pick<AgentTurnResult['tool_calls'][number], 'levels'> => {
+  if (!tool.startsWith('propose_') || result.ok !== true || typeof result.refusal === 'string') return {};
+  const rows: NonNullable<AgentTurnResult['tool_calls'][number]['levels']>[number][] = [];
+  const collect = (entries: unknown, option?: unknown): void => {
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const level = entry as { option?: unknown; factor?: unknown; stated_by?: unknown };
+      const label = level.option ?? option;
+      if (typeof label === 'string' && typeof level.factor === 'string'
+        && (level.stated_by === 'user' || level.stated_by === 'olumi_estimate')) {
+        rows.push({ option: label, factor: level.factor, stated_by: level.stated_by });
+      }
+    }
+  };
+  collect(result.interventions);
+  collect(result.option_levels);
+  const option = result.option as { label?: unknown } | undefined;
+  collect(result.levels, option?.label);
+  if (Array.isArray(result.options)) {
+    for (const option of result.options) {
+      if (option !== null && typeof option === 'object') {
+        const described = option as { label?: unknown; levels?: unknown };
+        collect(described.levels, described.label);
+      }
+    }
+  }
+  return rows.length > 0 ? { levels: rows } : {};
+};
+
 /**
  * Opens the state item a fresh packet puts into a turn's input (and marks it, so history never keeps one).
  *
@@ -430,7 +463,7 @@ export async function runAgentTurn(
   /** What this turn hands on as history: everything but the state and the selection it was given. */
   const handedOn = (): unknown[] => (stateItem === undefined && selectionItem === undefined
     ? items : items.filter((i) => i !== stateItem && i !== selectionItem));
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
+  const toolCalls: AgentTurnResult['tool_calls'][number][] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   const now = input.now ?? (() => Date.now());
@@ -724,6 +757,7 @@ export async function runAgentTurn(
         // ⭐ What a REFUSED call sent, by field name (OpenAI Runtime #70 5859406197 item 3: the served artefacts keep no
         // tool arguments, so which part of a refused level fired could not be told). Names only, bounded.
         ...conflictFieldsOf(result),
+        ...levelsOf(String(call.name), result),
         ...rejectedLevelsOf(result),
         ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });

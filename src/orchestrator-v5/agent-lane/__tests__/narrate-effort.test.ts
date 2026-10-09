@@ -329,7 +329,11 @@ describe('narration recovery from the known held result', () => {
     }
     expect(r.stopped_reason).toBe('answered');
     expect(callModel).toHaveBeenCalledTimes(2);
-    expect(r.tool_calls).toEqual([{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: HELD_OPTION.proposal_id }]);
+    expect(r.tool_calls).toEqual([{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: HELD_OPTION.proposal_id,
+      levels: [
+        { option: 'Hire one senior and two juniors', factor: 'New senior engineers hired', stated_by: 'user' },
+        { option: 'Hire one senior and two juniors', factor: 'New junior engineers hired', stated_by: 'user' },
+      ] }]);
     expect(r.tool_results).toEqual([HELD_OPTION]);
     expect(r.mutated).toBe(false);
     expect(approvalChipsFor(r.tool_calls).map((chip) => chip.id)).toContain(`agent-approve-proposal:${HELD_OPTION.proposal_id}`);
