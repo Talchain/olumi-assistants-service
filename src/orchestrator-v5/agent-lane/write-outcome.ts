@@ -425,7 +425,8 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
       && r.refusal === 'not_verified' && typeof r.detail === 'string') return r.detail;
     if (typeof r.follow_up === 'string') return withoutAgentDirections(r.follow_up).text;
-    if (r.refusal === 'partially_applied' && Array.isArray(r.ranges_added_for_analysis)) {
+    if (String(r.outcome).startsWith('range_saved_levels_')
+      && r.refusal === 'partially_applied' && Array.isArray(r.ranges_added_for_analysis)) {
       const ranges = (r.ranges_added_for_analysis as { factor: string; range: number }[])
         .map(f => `${f.factor} 0 to ${f.range}`).join(', ');
       return `Partly saved: this approval attached a range (${ranges}), but none of the levels were recorded. Read the model again before describing it.`;

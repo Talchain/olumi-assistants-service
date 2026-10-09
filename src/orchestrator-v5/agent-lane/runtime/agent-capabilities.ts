@@ -6081,7 +6081,9 @@ export function createAgentCapabilities(
             const detail = `${targetSaid} Its level today (${todaySaid}) was not recorded. What is its level today?`;
             return { ok: false, mutated: true, applied: false, refusal: 'partially_applied',
               proposal_id: decision.proposal.proposal_id, receipts: [...receipts],
-              outcome: 'target_saved_level_refused', level_not_recorded: true, detail, follow_up: detail };
+              outcome: 'target_saved_level_refused', level_not_recorded: true, detail, follow_up: detail,
+              note: `The target is set. Today's level was NOT recorded (${String(why ?? 'refused')}). Say both plainly, and never say today's level was saved.`,
+            };
           }
           return {
             ...partialWriteOutcome(decision.proposal.proposal_id, receipts,
@@ -6742,6 +6744,7 @@ export function createAgentCapabilities(
          * refusal into "Saved", and the old value read back became the "recorded" figure.
          */
         const ownWrite = new Map<string, boolean>();
+        let valueWriteCommitted = false;
         /** What THIS approval's own committed write stored, per target — the historical fact. */
         const ownNative = new Map<string, number>();
         /** The frame the factor already carries, read from the pre-write state. */
@@ -6793,6 +6796,7 @@ export function createAgentCapabilities(
           // 5810763729 item 4). A later read cannot tell "my write landed" from "the old
           // number was already there" or "someone else wrote it".
           const own = valueWriteCommittedByThisRequest(r, o.path);
+          valueWriteCommitted ||= own;
           if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
           else if (!own) {
             // A 200 that is not this op's committed write: a refusal (committed as a turn,
@@ -6814,10 +6818,14 @@ export function createAgentCapabilities(
         // (unit caps, percent-vs-fraction), so the recorded number is read back
         // and reported EVEN WHEN it differs from the one the user approved —
         // that difference is exactly the thing a user must not discover later.
+        const valueSaveCommitted = receipts.length > 0 || valueWriteCommitted;
         let afterSet: GraphRead | null;
         try { afterSet = await readGraph(ctx.scenario_id); }
         catch (error) {
-          if (![...ownWrite.values()].some(Boolean)) throw error;
+          if (!valueSaveCommitted) throw error;
+          return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed');
+        }
+        if (afterSet === null && valueSaveCommitted) {
           return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed');
         }
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));

@@ -74,10 +74,16 @@ const codes: Record<Site, readonly [string, string]> = {
   target_level: ['target_saved_level_not_saved', 'target_saved_level_refused'],
 };
 
-function world(site: Site, refusal: Refusal) {
+function world(site: Site, refusal: Refusal, options: {
+  readAfterValues?: '503' | 'throw';
+  firstValueRefused?: boolean;
+  noReceipt?: boolean;
+  repeatedTarget?: boolean;
+  rangeAfterFailedValue?: boolean;
+} = {}) {
   let graph = buildD1Fixture();
   const factor = graph.nodes.find(n => n.id === 'f-budget')!;
-  factor.observed_state = site === 'values_loop'
+  factor.observed_state = site === 'values_loop' && !options.rangeAfterFailedValue
     ? { value: 0.4, raw_value: 40, cap: 100, unit: '£', source: 'explicit' }
     : { value: 40, unit: '£', source: 'explicit' };
   const goal = graph.nodes.find(n => n.kind === 'goal')!;
@@ -107,9 +113,13 @@ function world(site: Site, refusal: Refusal) {
   const persist = () => { revision += 1; saved.push(structuredClone(graph)); };
   const dispatch: InternalDispatch = async (path, rawBody) => {
     const body = rawBody as Record<string, unknown>;
-    if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(graph), graph_hash: computeAnalysisAffectingGraphHash(graph) } };
+    if (path.endsWith('/graph')) {
+      if (attempts >= 2 && options.readAfterValues === '503') return { status: 503, json: {} };
+      if (attempts >= 2 && options.readAfterValues === 'throw') throw new Error('final model read unavailable');
+      return { status: 200, json: { graph: structuredClone(graph), graph_hash: computeAnalysisAffectingGraphHash(graph) } };
+    }
     attempts += 1;
-    if (attempts > 1) return fail();
+    if (attempts > 1 && !(options.rangeAfterFailedValue && path.endsWith('/graph/register'))) return fail();
     if (path.endsWith('/graph/register')) {
       graph = structuredClone(body.graph) as typeof graph;
       persist();
@@ -117,17 +127,18 @@ function world(site: Site, refusal: Refusal) {
     }
     const event = body.event as { kind: string; target_id?: string; value?: number; raw_value?: number };
     if (event.kind === 'factor_value_edit') {
+      if (options.firstValueRefused) return fail();
       const node = graph.nodes.find(n => n.id === event.target_id)!;
       node.observed_state = { ...node.observed_state, value: event.value!,
         ...(event.raw_value !== undefined ? { raw_value: event.raw_value } : {}), unit: '£', source: 'explicit' };
       persist();
       return { status: 200, json: { graph_hash: computeAnalysisAffectingGraphHash(graph),
         blocks: [{ type: 'graph_patch', operation: 'set_factor_value', target_id: event.target_id, status: 'applied', after: { value: event.value } }],
-        model_version_receipt: { schema: 'model_version_mutation_receipt.v1', scenario_id: SID, mutation_id: SID,
+        ...(!options.noReceipt ? { model_version_receipt: { schema: 'model_version_mutation_receipt.v1', scenario_id: SID, mutation_id: SID,
           version_id: SID, sequence: 1, graph, full_hash: 'a'.repeat(64), hash_algorithm: 'sha256',
           identity_projection_version: 'identity.v1', identity_normaliser_version: '1', graph_schema_version: 'graph_v3',
           analysis_affecting_hash: 'b'.repeat(64), actor: { kind: 'unknown' }, creation: { kind: 'committed_mutation' },
-          source_turn_id: String(body.turn_id), lineage: { kind: 'unknown' }, undo_version_id: null, event_id: 'value-first' } } };
+          source_turn_id: String(body.turn_id), lineage: { kind: 'unknown' }, undo_version_id: null, event_id: 'value-first' } } : {}) } };
     }
     if (event.kind === 'goal_target_edit') {
       goal.goal_threshold_raw = 90;
@@ -145,7 +156,7 @@ function world(site: Site, refusal: Refusal) {
   const ops: Record<Site, ProposalOperation[]> = {
     range_levels: [{ op: 'set_option_intervention', path: `${option.id}::${factor.id}`, value: { raw: 360, normalised: 0.72, derived_frame: 500 } }],
     values_loop: [{ op: 'set_factor_value', path: factor.id, value: { value: 40, unit: '£' } },
-      { op: 'set_factor_value', path: 'f-quality', value: { value: 50, unit: '£' } }],
+      { op: 'set_factor_value', path: options.repeatedTarget ? factor.id : 'f-quality', value: { value: 50, unit: '£' } }],
     values_range: [{ op: 'set_factor_value', path: factor.id, value: { value: 40, unit: '£' } }],
     target_level: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: 'at_least', raw_value: 90, unit: '£',
       current_level: { value: 20, unit: '£', quote: `Our ${goal.label} today is £20.` } } }],
@@ -189,6 +200,55 @@ beforeEach(() => __setUseAppendV6ForTest(true));
 afterEach(() => __setUseAppendV6ForTest(true));
 
 describe('every multi-save capability keeps save 1 after save 2 is refused', () => {
+  it.each([
+    { proof: 'receipt and own write', readAfterValues: '503', noReceipt: false, repeatedTarget: false },
+    { proof: 'guest own write without a receipt', readAfterValues: '503', noReceipt: true, repeatedTarget: false },
+    { proof: 'guest own write after a later refusal for the same target', readAfterValues: '503', noReceipt: true, repeatedTarget: true },
+    { proof: 'receipt after a later refusal overwrites the same target own-write flag', readAfterValues: '503', noReceipt: false, repeatedTarget: true },
+    { proof: 'receipt after a later refusal and a thrown read', readAfterValues: 'throw', noReceipt: false, repeatedTarget: true },
+  ] as const)('BFIX6 P1: $proof survives a $readAfterValues final read', async options => {
+    const w = world('values_loop', 'returned', options);
+    const result = await w.caps.authoriseChange(ctx, { proposal_id: w.proposal.proposal_id });
+    expect(w.saved).toHaveLength(1);
+    expect(w.attempts()).toBe(2);
+    expect(result).toMatchObject({ ok: false, mutated: true, applied: false, outcome: 'values_saved_read_unconfirmed' });
+    expect(result.receipts).toEqual(options.noReceipt ? [] : [expect.objectContaining({ version: 1, version_id: SID })]);
+    const words = WORDS.values_saved_read_unconfirmed;
+    expect(result.detail).toBe(words.text);
+    const narrated = narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]);
+    expect(narrated.status).toBe(words.text);
+    expect(createHash('sha256').update(String(result.detail)).digest('hex')).toBe(words.sha256);
+    expect(createHash('sha256').update(narrated.status!).digest('hex')).toBe(words.sha256);
+    expect(`${result.detail} ${narrated.status} ${narrated.text}`).not.toMatch(/unchanged|None of the values/);
+    expect(w.proposals.outstanding(SID, null).map(p => p.proposal_id)).toContain(w.proposal.proposal_id);
+  });
+
+  it('BFIX6 P1 contrast: no value committed and a 503 final read keeps the existing no-write words', async () => {
+    const w = world('values_loop', 'returned', { readAfterValues: '503', firstValueRefused: true });
+    const result = await w.caps.authoriseChange(ctx, { proposal_id: w.proposal.proposal_id });
+    expect(w.saved).toHaveLength(0);
+    expect(w.attempts()).toBe(2);
+    expect(result).toMatchObject({ ok: false, mutated: false, applied: false, refusal: 'not_applied' });
+    expect(result.receipts).toBeUndefined();
+    expect(result.detail).toBe('None of the values were recorded, so this approval left the model unchanged. Read the model again before describing it: someone else may have changed it meanwhile.');
+    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status).toBe('Not saved: none of it was applied.');
+  });
+
+  it('BFIX6 P2: a saved value and its saved range never narrate a values approval as levels', async () => {
+    const w = world('values_loop', 'returned', { rangeAfterFailedValue: true });
+    const result = await w.caps.authoriseChange(ctx, { proposal_id: w.proposal.proposal_id });
+    expect(w.saved).toHaveLength(2);
+    expect(w.attempts()).toBe(3);
+    expect(result).toMatchObject({ mutated: true, applied: false, refusal: 'partially_applied',
+      outcome: 'values_saved_remaining_values_refused', adopted_count: 1, requested_count: 2,
+      ranges_added_for_analysis: [{ factor: 'Marketing budget', value: 40, range: 100 }],
+      receipts: [expect.objectContaining({ version_id: SID }), expect.objectContaining({ version_id: SID })] });
+    const narrated = narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]);
+    expect(result.detail).toBe(WORDS.values_saved_remaining_values_refused.text);
+    expect(narrated.status).toBe(WORDS.values_saved_remaining_values_refused.text);
+    expect(`${result.detail} ${narrated.status} ${narrated.text}`).not.toMatch(/levels/i);
+  });
+
   it.each(['range_levels', 'values_loop', 'values_range', 'target_level'] as const)('%s: real revision change between saves', async site => {
     const w = world(site, 'race');
     const result = await w.caps.authoriseChange(ctx, { proposal_id: w.proposal.proposal_id });
