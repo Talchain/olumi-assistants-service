@@ -556,6 +556,9 @@ async function residualAgentRows(run: (real: FastifyInstance, rows: Map<string, 
     state.writes(write);
     return { id: key };
   };
+  const readOwner = session.getScenarioOwner.getMockImplementation()!;
+  // Admission and the writer door read the same authoritative fixture row.
+  session.getScenarioOwner.mockImplementation(async id => rows.get(id) ?? null);
   const read = session.readExistingScenario.getMockImplementation()!;
   const ensure = session.ensureScenarioExists.getMockImplementation()!;
   session.readExistingScenario.mockImplementation(async id => rows.has(id)
@@ -568,6 +571,7 @@ async function residualAgentRows(run: (real: FastifyInstance, rows: Map<string, 
   try { await run(real, rows, creates); }
   finally {
     await real.close(); session.readExistingScenario.mockImplementation(read); session.ensureScenarioExists.mockImplementation(ensure);
+    session.getScenarioOwner.mockImplementation(readOwner);
     store.append = append; store.readCommittedTurn = readTurn;
   }
 }

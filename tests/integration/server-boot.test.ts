@@ -1,3 +1,7 @@
+import { claimingTurnFenceStore } from '../utils/claiming-turn-fence-store.js';
+import { createMockSessionStore } from '../utils/mock-session-store.js';
+import { ModelWriteOwnershipRefused } from '../../src/orchestrator-v5/ownership/door-ownership.js';
+import { admitCurrentTurnFence, turnFencePreHandler } from '../../src/orchestrator/turn-fence-prehandler.js';
 import { installOwnershipHarness } from '../utils/ownership-route-harness.js';
 /**
  * Server-boot test — verifies /orchestrate/v2/turn route registration.
@@ -80,9 +84,10 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', async (importOriginal) => {
   };
 });
 
+let fenceTestStore: ReturnType<typeof createMockSessionStore> | undefined;
 // v5-maintenance: mock session store so commit succeeds without Supabase.
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
+  getSessionStore: () => fenceTestStore ?? ({
     scenarioExists: async () => true,
     getScenarioOwner: async () => null,
     append: async () => ({ id: 'boot-mock-row' }),
@@ -150,3 +155,38 @@ describe('server-boot: /orchestrate/v2/turn registration is unconditional', () =
     }
   });
 });
+
+it.each(['admitted', 'no_claim', 'mark_throws'] as const)('central ownership 403 closes only an admitted fence (%s)', async mode => {
+  vi.stubEnv('LLM_PROVIDER', 'fixtures');
+  const fence = claimingTurnFenceStore();
+  const append = vi.fn(async () => ({ id: 'must-not-append' }));
+  const markGraphWriteFailed = vi.fn(async (...args: Parameters<typeof fence.store.markGraphWriteFailed>) => {
+    if (mode === 'mark_throws') throw new Error('failure mark unavailable');
+    await fence.store.markGraphWriteFailed(...args);
+  });
+  fenceTestStore = createMockSessionStore({ append,
+    claimTurnFence: fence.store.claimTurnFence.bind(fence.store), markGraphWriteFailed });
+  const { build } = await import('../../src/server.js');
+  const app = await build();
+  try {
+    app.post('/door-refusal-fence', { config: { scenarioId: { from: 'body', key: 'scenario_id' } },
+      preHandler: turnFencePreHandler }, async () => {
+      if (mode !== 'no_claim') await admitCurrentTurnFence();
+      throw new ModelWriteOwnershipRefused('owner_unreadable');
+    });
+    const response = await app.inject({ method: 'POST', url: '/door-refusal-fence', payload: VALID_PAYLOAD });
+    expect(response.statusCode, response.payload).toBe(403);
+    expect(response.json()).toEqual({ error: 'model_write_ownership_refused' });
+    expect(append).not.toHaveBeenCalled();
+    if (mode === 'no_claim') {
+      expect(fence.rows).toHaveLength(0); expect(markGraphWriteFailed).not.toHaveBeenCalled();
+    } else {
+      expect(markGraphWriteFailed).toHaveBeenCalledExactlyOnceWith(VALID_PAYLOAD.scenario_id, VALID_PAYLOAD.turn_id,
+        'model_write_ownership_refused', 'turn_dead_only');
+      if (mode === 'admitted') {
+        expect(fence.rows[0]).toMatchObject({ graph_write_failed_at: expect.any(String), graph_loss_disclosable_at: null });
+        await expect(fence.store.hasOtherAdmittedLiveTurn(VALID_PAYLOAD.scenario_id, 'different-turn')).resolves.toBe(false);
+      }
+    }
+  } finally { await app.close(); fenceTestStore = undefined; vi.unstubAllEnvs(); }
+}, 60_000);
