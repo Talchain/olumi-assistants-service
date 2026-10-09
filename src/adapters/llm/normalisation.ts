@@ -169,10 +169,10 @@ export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
   }
 }
 
-/** §(ad) attestation: no draft or register caller can author this field. */
-const PARKED_HORIZON_ATTESTATION_FIELDS = ['horizon_basis'] as const;
+/** Parked §(ad) attestation: no draft or register caller can author these fields. */
+const PARKED_HORIZON_ATTESTATION_FIELDS = ['horizon_basis', 'horizon_basis_source', 'horizon_basis_months'] as const;
 
-/** Strip caller-authored attestation at register ingress; preparation carries the stored basis back. */
+/** Strip only the parked attestation at register ingress; retain the goal's stated target and horizon. */
 export function withoutParkedHorizonAttestations<T>(graph: T): T {
   if (graph === null || typeof graph !== 'object') return graph;
   const raw = graph as Record<string, unknown>;

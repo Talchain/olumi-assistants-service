@@ -109,8 +109,10 @@ describe('the 24 zero-reader smuggle names — enumerated at the bytes', () => {
       // + MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
       'goal_scope',
       'goal_sense_reading',
-      // S5 2b: user attestation, pipeline-owned so an LLM add cannot smuggle it.
+      // S4 §(ad): the horizon basis stamps are CEE-owned.
       'horizon_basis',
+      'horizon_basis_months',
+      'horizon_basis_source',
       // + the three saved-example stamps, CEE-owned since the writer audit (2026-09-27): declared on
       // NodeV3 so writes keep them, so a producer must never be able to set them.
       'interventionkeys',
@@ -134,15 +136,10 @@ describe('the 24 zero-reader smuggle names — enumerated at the bytes', () => {
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the union adds six MORE names the same screen now kills (28 total: 22 smuggle names + five J2 names + event_risk)', () => {
+  it('the union adds six MORE names the same screen now kills (30 total: 24 smuggle names + five J2 names + event_risk)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
-    // 14 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps
-    // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`
-    // + #2306's `goal_sense_reading` + AIQ (b)'s `goal_level_reading` + F1 T6's option lifecycle `proposed_by` /
-    // `option_status` / `analysis_participation`) + the 5 J2 names + event_risk.v1 slice 2a's `event_risk` (added to the
-    // union directly: only CEE's validated hold stamp may author the block) + RC3's `relies_on` server stamp.
-    // S5 2b: +1 horizon_basis, the user attestation screened above.
-    expect(all.length).toBe(28);
+    // 24 CEE-owned smuggle names, including the three S4 horizon-basis stamps, plus five J2 names and event_risk.
+    expect(all.length).toBe(30);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

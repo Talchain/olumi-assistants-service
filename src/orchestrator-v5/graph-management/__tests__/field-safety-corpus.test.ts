@@ -124,8 +124,10 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
       'goal_scope',
       'goal_sense_reading',
-      // S5 2b: user attestation, pipeline-owned so an LLM edit cannot forge it.
+      // S4 §(ad): the horizon basis stamps are CEE-owned.
       'horizon_basis',
+      'horizon_basis_months',
+      'horizon_basis_source',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
       'option_status',
@@ -140,7 +142,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
 });
 
 // ---------------------------------------------------------------------------
-// B. THE 22 SMUGGLE NAMES, SPELLED OUT BY HAND
+// B. THE 24 SMUGGLE NAMES, SPELLED OUT BY HAND
 // ---------------------------------------------------------------------------
 
 /**
@@ -174,10 +176,12 @@ const SMUGGLE_NAMES = [
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
   'goal_scope',
   'goal_sense_reading',
+  // S4 §(ad): the horizon basis stamps are CEE-owned.
+  'horizon_basis',
+  'horizon_basis_source',
+  'horizon_basis_months',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',
-  // S5 2b: user attestation, pipeline-owned so an LLM add cannot smuggle it.
-  'horizon_basis',
   // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority (proposed_by / option_status / participation).
   'proposed_by',
   'option_status',
@@ -185,7 +189,7 @@ const SMUGGLE_NAMES = [
   'relies_on',
 ] as const;
 
-describe('corpus B — the 22 smuggle names, hand-written', () => {
+describe('corpus B — the 24 smuggle names, hand-written', () => {
   it('each is owned by CEE and is NOT an intervention contract key', () => {
     for (const name of SMUGGLE_NAMES) {
       expect(PIPELINE_OWNED_ROOTS.has(name), `${name} owned`).toBe(true);
