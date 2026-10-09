@@ -120,8 +120,10 @@ function refuse(req: FastifyRequest, reply: FastifyReply, scenarioId: string, re
  * Normalize the complete input class before either admission or handler use. */
 export function canonicalScenarioId(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
+  // Outer whitespace trimming is an application normalisation convenience.
   let value = raw.trim();
   if (value.startsWith('{') && value.endsWith('}')) value = value.slice(1, -1);
+  if (!/^(?:[0-9a-f]{4}-?){7}[0-9a-f]{4}$/i.test(value)) return null;
   value = value.replaceAll('-', '');
   if (!/^[0-9a-f]{32}$/i.test(value)) return null;
   const hex = value.toLowerCase();
