@@ -4,7 +4,6 @@ import { bindWriteCaller, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readWriteRefusal, 
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteOptions } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import { currentTurnFenceSlot } from '../orchestrator-v5/session/turn-fence.js';
 import { markDraftGraphWriteFailed, preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveOwnershipAuthority, OWNERSHIP_CLAIM_CARVE_OUTS } from '../orchestrator/ownership-authority.js';
@@ -282,9 +281,9 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
   // Complete untouched responses synchronously. An unconditional async hook
   // delays reply.sent on admission refusals and can let the handler continue.
   app.addHook('onSend', (req, reply, payload, done) => {
-    const refusal = readWriteRefusal();
+    const refusal = readWriteRefusal(req);
     if (!refusal) { done(null, payload); return; }
-    if (readSuccessfulDoorEntries() > 0) {
+    if (readSuccessfulDoorEntries(req) > 0) {
       log.warn({ event: 'model_write.ownership_refused_after_commit', reason: refusal.reason,
         request_id: getOrGenerateRequestId(req), route_family: family(req) },
       'Model write ownership refused after an earlier successful door entry');
@@ -299,12 +298,12 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
       reply.removeHeader('content-length');
       done(null, body);
     };
-    const slot = currentTurnFenceSlot();
-    if (slot?.handle) {
-      void markDraftGraphWriteFailed(slot.scenarioId, slot.turnId,
-        'model_write_ownership_refused', getOrGenerateRequestId(req), 'turn_dead_only').then(replace);
+    const fence = refusal.fence;
+    if (fence) {
+      void markDraftGraphWriteFailed(fence.scenarioId, fence.turnId,
+        'model_write_ownership_refused', getOrGenerateRequestId(req), 'turn_dead_only').then(replace, replace);
     } else replace();
   });
   app.addHook('preHandler', (req, _reply, done) =>
-    bindWriteCaller(req.scenarioAccess?.caller ?? { userId: null, verified: false }, done));
+    bindWriteCaller(req.scenarioAccess?.caller ?? { userId: null, verified: false }, done, req));
 }, { name: 'scenario-ownership' });

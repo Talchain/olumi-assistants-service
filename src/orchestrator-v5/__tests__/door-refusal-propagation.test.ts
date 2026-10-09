@@ -1,5 +1,5 @@
 /** Real executor/HTTP/SSE paths; only the provider and persistence ports are doubles. */
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
 import type { SessionStore } from '../session/store.js';
@@ -47,6 +47,12 @@ import { computeProposalId, type StructuredProposal } from '../agent-lane/propos
 import { proposalPendingAction } from '../agent-lane/durable-proposal.js';
 import { approvalChipIdFor } from '../agent-lane/approval-chips.js';
 import * as adoption from '../system-events/olumi-option-adoption.js';
+import { assertDoorOwnership, bindWriteCaller, readWriteRefusal, readSuccessfulDoorEntries } from '../ownership/door-ownership.js';
+import { runFencedInProcessWrite } from '../../orchestrator/turn-fence-prehandler.js';
+import { runWithTurnFence } from '../session/turn-fence.js';
+import { authorisationTurnId } from '../agent-lane/runtime/agent-capabilities.js';
+import { TURN_RESPONSE_HEADROOM_MS } from '../../config/timeouts.js';
+import { markDraftGraphWriteFailed } from '../build-turn-context.js';
 import { log } from '../../utils/telemetry.js';
 const provider = vi.hoisted(() => ({ draft: vi.fn() }));
 vi.mock('../../orchestrator/tools/draft-graph.js', async load => ({
@@ -97,7 +103,9 @@ function adoptionProposal(): StructuredProposal {
   return { ...base, proposal_id: computeProposalId(base) };
 }
 function adoptionChip() { return { id: approvalChipIdFor(adoptionProposal().proposal_id), label: 'Include this suggestion', message: 'Yes, include that suggestion.' }; }
-async function harness(family: string, afterCommit = false, hanging = false) {
+async function harness(family: string, afterCommit = false, hanging = false, options: {
+  mark?: NonNullable<SessionStore['markGraphWriteFailed']>; configure?: (app: FastifyInstance) => void;
+} = {}) {
   const append = vi.fn(async () => ({ id: 'row' }));
   const appendIfLatest = vi.fn(async () => ({ id: 'row' }));
   let release!: (owner: string | null) => void;
@@ -107,7 +115,7 @@ async function harness(family: string, afterCommit = false, hanging = false) {
     return 'u-other';
   });
   const fence = claimingTurnFenceStore();
-  const markGraphWriteFailed = vi.fn(fence.store.markGraphWriteFailed.bind(fence.store));
+  const markGraphWriteFailed = vi.fn(options.mark ?? fence.store.markGraphWriteFailed.bind(fence.store));
   const graph = family === 'draft' ? null : GRAPH;
   state.store = createMockSessionStore({ append, appendIfLatest, getScenarioOwner,
     claimTurnFence: fence.store.claimTurnFence.bind(fence.store), markGraphWriteFailed,
@@ -125,6 +133,7 @@ async function harness(family: string, afterCommit = false, hanging = false) {
     } });
   });
   await ceeOrchestratorRouteV2(app); await streamRoute(app); await agentV1TurnRoute(app); await graphRoute(app);
+  options.configure?.(app);
   await app.ready();
   return { app, append, appendIfLatest, getScenarioOwner, fence, markGraphWriteFailed, release: () => release?.(OWNER) };
 }
@@ -164,8 +173,9 @@ it.each(['system_event', 'chip', 'draft', 'adoption', 'agent', 'sse'])('refusal 
     expect(bytes.replace('Nothing was saved.', '')).not.toMatch(/saved|revision|unconfirmed/i);
     expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
     expect(h.getScenarioOwner).toHaveBeenCalled();
-    if (!['agent', 'adoption'].includes(family)) {
-      expect(h.fence.rows[0]).toMatchObject({ graph_write_failed_at: expect.any(String), graph_loss_disclosable_at: null,
+    if (family !== 'agent') {
+      expect(h.fence.rows[0]).toMatchObject({ scenario_id: SID,
+        turn_id: family === 'adoption' ? authorisationTurnId(adoptionProposal().proposal_id) : TID, graph_write_failed_at: expect.any(String), graph_loss_disclosable_at: null,
         graph_write_failure_reason: 'model_write_ownership_refused' });
       await expect(state.store!.hasOtherAdmittedLiveTurn!(SID, 'another')).resolves.toBe(false);
     }
@@ -204,3 +214,119 @@ it('never-settling owner read refuses at the session-read deadline and ignores a
     expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
   } finally { h.release(); vi.useRealTimers(); await h.app.close(); }
 }, 10_000);
+
+const MARK_BUDGET = Math.min(ANALYSIS_REREAD_TIMEOUT_MS, TURN_RESPONSE_HEADROOM_MS);
+const DECOY_SID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const DECOY_TID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+it('P1 composition: unnamed nested-inject success protects the composing response from a later refusal', async () => {
+  const warn = vi.spyOn(log, 'warn');
+  let countAfterInner = -1;
+  const h = await harness('system_event', false, false, { configure: app => {
+    app.post('/composition-probe', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async (_req, reply) => {
+      const inner = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payload('system_event') });
+      expect(inner.statusCode, inner.payload).toBe(200);
+      countAfterInner = readSuccessfulDoorEntries();
+      const hashes = computeExpectedGraphCasHashes(GRAPH);
+      const outcome = await runFencedInProcessWrite(SID, 'composition-adoption', () => adoption.commitOlumiOptionAdoptionInProcess({
+        scenario_id: SID, turn_id: 'composition-adoption', option_id: 'suggested', expected_label: 'Expand',
+        expected_interventions: { factor: 0.8 }, base_graph_hash: hashes.expectedGraphAnalysisHash!,
+        expected_graph_identity_hash: hashes.expectedGraphIdentityHash!,
+      }, 'composition-probe'), () => ({ status: 'stale' as const }), () => ({ status: 'stale' as const }));
+      return reply.code(200).send(outcome);
+    });
+  } });
+  h.getScenarioOwner.mockResolvedValueOnce(OWNER);
+  try {
+    const r = await h.app.inject({ method: 'POST', url: '/composition-probe', payload: { scenario_id: SID } });
+    process.stdout.write(`R2_COMPOSITION ${r.statusCode} ${r.payload} appends=${h.append.mock.calls.length} count=${countAfterInner}\n`);
+    expect(h.append).toHaveBeenCalledOnce(); expect(h.appendIfLatest).not.toHaveBeenCalled();
+    expect(countAfterInner).toBe(1);
+    expect(r.statusCode, r.payload).toBe(200); expect(r.payload).toBe('{"status":"unconfirmed"}');
+    expect(r.payload).not.toContain('Nothing was saved');
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
+    expect(h.markGraphWriteFailed).not.toHaveBeenCalled();
+  } finally { await h.app.close(); }
+});
+it('P1 ambient context: early inner admission/validation bytes ignore an outer latch; child latches stay separate', async () => {
+  const earlyBody = { error: 'early_admission_refused' };
+  const h = await harness('system_event', false, false, { configure: app => {
+    app.post('/early-admission', { config: { scenarioId: 'none' },
+      onRequest: (_req, reply) => { reply.code(401).send(earlyBody); } }, async () => { throw new Error('must not reach handler'); });
+    app.post('/early-validation', { config: { scenarioId: 'none' },
+      schema: { body: { type: 'object', required: ['must'] } } }, async () => { throw new Error('must not reach handler'); });
+  } });
+  try {
+    await bindWriteCaller({ userId: OWNER, verified: true }, async () => {
+      await expect(assertDoorOwnership(state.store!, SID)).rejects.toMatchObject({ reason: 'not_owner' });
+      const early = await h.app.inject({ method: 'POST', url: '/early-admission', payload: {} });
+      expect(early.statusCode, early.payload).toBe(401); expect(early.payload).toBe(JSON.stringify(earlyBody));
+      const invalid = await h.app.inject({ method: 'POST', url: '/early-validation', payload: {} });
+      expect(invalid.statusCode, invalid.payload).toBe(400);
+      expect(invalid.payload).toBe(JSON.stringify({ statusCode: 400, code: 'FST_ERR_VALIDATION', error: 'Bad Request', message: "body must have required property 'must'" }));
+      expect(readWriteRefusal()).toMatchObject({ reason: 'not_owner' });
+    });
+    // Reverse isolation: a child HTTP refusal never populates its parent's latch.
+    await bindWriteCaller({ userId: OWNER, verified: true }, async () => {
+      const child = await inject(h, 'system_event');
+      expect(child.statusCode).toBe(403); expect(child.payload).toBe(BYTES.not_owner);
+      expect(readWriteRefusal()).toBeUndefined(); expect(readSuccessfulDoorEntries()).toBe(0);
+    });
+    expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
+  } finally { await h.app.close(); }
+});
+it('P1 fence identity: real Agent adoption marks its captured in-process fence, never an ambient decoy', async () => {
+  const h = await harness('adoption');
+  try {
+    const decoy = await h.fence.store.claimTurnFence(DECOY_SID, DECOY_TID);
+    expect(decoy).not.toBeNull();
+    const r = await runWithTurnFence(decoy!, () => inject(h, 'adoption'));
+    expect(r.statusCode).toBe(403); expect(r.payload).toBe(BYTES.not_owner);
+    const adoptionTurn = authorisationTurnId(adoptionProposal().proposal_id);
+    expect(h.markGraphWriteFailed).toHaveBeenCalledExactlyOnceWith(SID, adoptionTurn, 'model_write_ownership_refused', 'turn_dead_only');
+    expect(h.fence.rows.find(row => row.scenario_id === SID)).toMatchObject({ turn_id: adoptionTurn,
+      graph_write_failed_at: expect.any(String), graph_write_failure_reason: 'model_write_ownership_refused', graph_loss_disclosable_at: null });
+    expect(h.fence.rows.find(row => row.scenario_id === DECOY_SID)).toMatchObject({ graph_write_failed_at: null, graph_loss_disclosable_at: null });
+    await expect(state.store!.hasOtherAdmittedLiveTurn!(SID, 'next-admitted-turn')).resolves.toBe(false);
+    expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
+  } finally { await h.app.close(); }
+});
+it('captured refusal never reclassifies an unrelated draft loss', async () => {
+  const h = await harness('system_event');
+  try {
+    await bindWriteCaller({ userId: OWNER, verified: true }, async () => {
+      await expect(runFencedInProcessWrite(SID, TID, () => assertDoorOwnership(state.store!, SID),
+        () => undefined, () => undefined)).rejects.toMatchObject({ reason: 'not_owner' });
+      await markDraftGraphWriteFailed(DECOY_SID, DECOY_TID, 'draft_graph_pipeline_threw_after_preview', 'different-request', 'draft_loss');
+    });
+    expect(h.markGraphWriteFailed).toHaveBeenCalledExactlyOnceWith(DECOY_SID, DECOY_TID, 'draft_graph_pipeline_threw_after_preview', 'draft_loss');
+  } finally { await h.app.close(); }
+});
+it.each(['resolve', 'reject'] as const)('P1 mark bound: never-settling mark delivers once; late %s cannot replace again', async late => {
+  let release!: () => void;
+  let getReplacements = () => 0;
+  const mark = vi.fn(() => new Promise<void>((resolve, reject) => {
+    release = late === 'resolve' ? resolve : () => reject(new Error('late mark failure'));
+  }));
+  const h = await harness('system_event', false, false, { mark, configure: app => {
+    app.addHook('preHandler', (_req, reply, done) => {
+      const code = vi.spyOn(reply, 'code');
+      getReplacements = () => code.mock.calls.filter(([status]) => status === 403).length;
+      done();
+    });
+  } });
+  let started: ReturnType<typeof inject> | undefined;
+  try {
+    vi.useFakeTimers();
+    let response: Awaited<ReturnType<typeof inject>> | undefined;
+    started = inject(h, 'system_event').then(r => { response = r; return r; });
+    await vi.waitFor(() => expect(mark).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(MARK_BUDGET);
+    await vi.waitFor(() => expect(response, 'best-effort mark deadline did not settle').toBeDefined(), { timeout: 1_000 });
+    const r = await started;
+    expect(r.statusCode).toBe(403); expect(r.payload).toBe(BYTES.not_owner);
+    expect(getReplacements()).toBe(1);
+    release(); await vi.advanceTimersByTimeAsync(1);
+    expect(getReplacements()).toBe(1); expect(r.payload).toBe(BYTES.not_owner);
+    expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
+  } finally { release?.(); vi.useRealTimers(); await started; await h.app.close(); }
+}, 15_000);
