@@ -75,3 +75,17 @@ The repo normally ignores `scripts/**` in ESLint. For this requested check, the 
 Full TypeScript result: `NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit` completed in **165.900 s**, exit **2**, with **284 diagnostics in 99 other files and 0 diagnostics in changed files**. The wrapper set `NODE_OPTIONS` to the requested value for this process. This is not a claim that full typechecking is green or that the other diagnostics were introduced in this slice. [tsc-full.log](tsc-full.log) preserves all output; [static-summary.json](static-summary.json) records the changed-file comparison.
 
 Regenerate a shrinking baseline with `node scripts/ci/goal-record-census.mjs --write`, then run the guard. A newly justified site also requires explicit review of the regenerated file sets; the script cannot judge that justification. No product source remains changed, nothing under `supabase/` was changed, and no tracked directory was removed.
+
+## r1 (after Codex r1 FAIL @a42b8338: 4 × P2, 0 P0/P1)
+
+- **Class change: occurrences, not presence.**
+  - The baseline is now `references[token][file] = count`. 2,334 occurrences at src 8cb73b9e.
+  - A second read in an already-listed file now fails.
+- **Files come from `git ls-files src`.**
+  - Gitignored `src/generated/*` is out, so `--check` is reproducible on a clean clone.
+  - Tracked symlinks are read; a symlinked directory fails closed.
+- **Any `*.test.*` basename is excluded.**
+- **Mutant pair on committed state:**
+  - A: a second `goal_threshold_raw` in goal-chance-licence.ts → RED (`--check` rc 1, guard 2 failed). Restored with `git checkout HEAD --`.
+  - B: an untracked `src/generated/mutantB.ts` → GREEN (rc 0, 5/5).
+- **Guard:** 5/5 under `vitest.required.config.ts` (1.39 s).
