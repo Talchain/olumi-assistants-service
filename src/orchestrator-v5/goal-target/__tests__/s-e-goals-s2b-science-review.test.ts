@@ -11,7 +11,7 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { GOAL_FIGURES_SHARE_APPROXIMATION } from '../../../orchestrator/context/option-result-source.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 
 type Rec = Record<string, any>;
 const UNIT = '% of the feature launch';
@@ -323,7 +323,7 @@ describe('SCIENCE review rows and controls', () => {
     const out = withShareByDateChanceGate(result(), graph(4, 8), 'goal');
     expect(out.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_RANGE)?.range_by_option.carry).toMatchObject({ low: 0, high: 1 });
   });
-  it('L1-LAUNCH-WORDS-SCALING: 20k to 160k whitespace scales below 22x', () => {
+  timingIt('L1-LAUNCH-WORDS-SCALING: 20k to 160k whitespace scales below 22x', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     const inputs = [20000, 160000].map(n => ' '.repeat(n));
     const m = scalingRatio(() => shareGoalChanceWords(inputs[0]!, DEADLINE), () => shareGoalChanceWords(inputs[1]!, DEADLINE));
