@@ -301,6 +301,23 @@ it('captured refusal never reclassifies an unrelated draft loss', async () => {
     expect(h.markGraphWriteFailed).toHaveBeenCalledExactlyOnceWith(DECOY_SID, DECOY_TID, 'draft_graph_pipeline_threw_after_preview', 'draft_loss');
   } finally { await h.app.close(); }
 });
+it('an ordinary draft_loss mark is never bounded: the helper waits for its UPDATE to finish', async () => {
+  let release!: () => void;
+  const mark = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));
+  const h = await harness('system_event', false, false, { mark });
+  try {
+    vi.useFakeTimers();
+    let settled = false;
+    const pending = markDraftGraphWriteFailed(DECOY_SID, DECOY_TID, 'draft_graph_pipeline_threw_after_preview', 'loss-request', 'draft_loss')
+      .then(() => { settled = true; });
+    await vi.waitFor(() => expect(mark).toHaveBeenCalledOnce());
+    expect(mark).toHaveBeenCalledWith(DECOY_SID, DECOY_TID, 'draft_graph_pipeline_threw_after_preview', 'draft_loss');
+    await vi.advanceTimersByTimeAsync(MARK_BUDGET * 3);
+    expect(settled, 'a draft_loss mark must not be abandoned at the ownership deadline').toBe(false);
+    release(); await pending;
+    expect(settled).toBe(true);
+  } finally { release?.(); vi.useRealTimers(); await h.app.close(); }
+}, 15_000);
 it.each(['resolve', 'reject'] as const)('P1 mark bound: never-settling mark delivers once; late %s cannot replace again', async late => {
   let release!: () => void;
   let getReplacements = () => 0;

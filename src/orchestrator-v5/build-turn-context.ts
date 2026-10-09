@@ -1867,6 +1867,13 @@ export async function markDraftGraphWriteFailed(
   if (!store?.markGraphWriteFailed) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    // Only an ownership refusal's mark is bounded (it gates the refusal response). Every other
+    // mark stays awaited to completion: a late draft_loss mark could otherwise land after a
+    // later successful graph commit has resolved losses, and stand unresolved.
+    if (reason !== 'model_write_ownership_refused') {
+      await store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure);
+      return;
+    }
     // A late completion/rejection can settle only the losing promise, never the response callback again.
     await Promise.race([
       store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure),
