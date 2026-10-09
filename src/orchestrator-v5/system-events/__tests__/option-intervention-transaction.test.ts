@@ -1,3 +1,9 @@
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 import { legacyRun } from '../../context/__tests__/legacy-gap-projection.fixture.js';
 import { deriveAnalysisFreshness } from '../../context/freshness.js';
 import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';

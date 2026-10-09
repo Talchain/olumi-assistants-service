@@ -13,10 +13,13 @@
  * a write of a DIFFERENT number from the one the user approved.
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+
+afterEach(() => __setUseAppendV6ForTest(true));
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -291,6 +294,9 @@ describe('a value adopted onto an unframed factor gets a range, or the analysis 
   });
 
   it('reports honestly when the range could not be attached', async () => {
+    // Legacy OFF contract: the returned range refusal kept ok:true after the value save.
+    // CAS ON reports incomplete approval; covered in adopt-assumptions.cas-on.test.ts.
+    __setUseAppendV6ForTest(false);
     const p = fakeProduct({ registerFails: true });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, ASK);

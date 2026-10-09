@@ -1,3 +1,9 @@
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../../orchestrator-v5/append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ROADMAP 2.467 — `POST /assist/v1/scenarios/:scenario_id/graph/register`.

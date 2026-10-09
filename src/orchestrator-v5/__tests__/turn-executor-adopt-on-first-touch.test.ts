@@ -1,4 +1,10 @@
 import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 /**
  * ROADMAP 1.192 leg 2 — ADOPT-ON-FIRST-TOUCH.
  *

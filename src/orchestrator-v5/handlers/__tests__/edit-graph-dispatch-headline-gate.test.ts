@@ -68,7 +68,10 @@ vi.mock('../../commit.js', () => ({
 vi.mock('../../../adapters/llm/router.js', () => ({ getAdapter: vi.fn().mockReturnValue({}) }));
 vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
-  return { ...actual, loadPersistedGraphStrict: vi.fn().mockResolvedValue(null) };
+  return { ...actual,
+    // B-FIX1: the combined read follows the existing graph double.
+    loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
+    loadPersistedGraphStrict: vi.fn().mockResolvedValue(null) };
 });
 vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();

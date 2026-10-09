@@ -170,6 +170,7 @@ describe('revision CAS wire refusal', () => {
     });
     const res = await app.inject({ method: 'POST', url: '/revision-write' });
     expect(res.statusCode).toBe(409);
+    expect(res.json().message).toBe('The scenario changed while I was saving, so nothing was saved. Try again.');
     expect(res.json()).toMatchObject({ code: 'revision_conflict', expected: 0, current: 1,
       details: { code: 'revision_conflict', expected: 0, current: 1 } });
   });
