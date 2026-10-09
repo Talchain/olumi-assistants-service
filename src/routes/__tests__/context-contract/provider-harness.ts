@@ -26,7 +26,8 @@ export interface Expectations {
   probability: number; synthetic_scenario_revision: number; synthetic_run_revision: number;
 }
 export type Turn = 'ordinary-converse' | 'selected-converse' | 'chip-converse' | 'drawn-link' | 'pre-mortem' | 'widen-options' | 'widen-risks' | 'Run-explanation' | 'tool-continuation';
-export type Variant = 'run1' | 'run2' | 'withheld' | 'unlicensed-driver' | 'raw-probe' | 'stale' | 'current';
+export type Variant = 'run1' | 'run2' | 'withheld' | 'unlicensed-driver' | 'raw-probe' | 'stale' | 'current'
+  | 'flip-unavailable' | 'flip-no-pair' | 'horizon-absent' | 'leader-withheld' | 'meaning';
 export interface Captured { sentBody: string; sha256: string; body: Obj; payloads: unknown[] }
 export interface Witness { calls: Captured[]; state: Obj; response: Obj; seed: Seed; variant: Variant }
 const ports = vi.hoisted(() => ({ store: {} as Obj }));
@@ -62,8 +63,8 @@ export function findState(payloads: unknown[]): Obj {
     const nested = object(value.canonical_state);
     if ('entities' in nested) return nested;
   }
-  // Explain uses the selected Run's own projection, with a different input envelope.
-  return object(payloads.find(p => 'request' in object(p) && 'result' in object(p)));
+  // A refused stale Explain has no request; a noncanonical packet cannot satisfy the contract.
+  return {};
 }
 export function keysDeep(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(keysDeep);
@@ -77,7 +78,14 @@ export function valueAt(payloads: unknown[], key: string): unknown[] {
   return [];
 }
 
-function fixture(variant: Variant): Seed {
+export const meaning = {
+  question_id: 'gmh_abcdefabcdef',
+  question: 'May we retain the assumption that monthly churn stays at 3%?',
+  reasoning_id: 'pro_price',
+  reasoning: 'Paul assumes renewal churn stays at 3%; Maya disagrees because price resistance has not been tested.',
+} as const;
+
+export function fixture(variant: Variant): Seed {
   const seed = structuredClone(seedOf(variant === 'run1' ? 'run1' : 'run2'));
   const s = seed.snapshot, e = s.analysis_result.enrichment;
   // These identity carriers are deliberately SYNTHETIC contract probes, not captured DB facts.
@@ -98,12 +106,30 @@ function fixture(variant: Variant): Seed {
     licence.no_driver_by_option = { keep_49_price: 'below_resolution', raise_price_to_59: 'none' };
     // Raw resolved rows remain in option_comparison: they may not become a licensed sentence.
   }
-  if (variant === 'raw-probe' || variant === 'current' || variant === 'stale') {
+  if (variant === 'raw-probe' || variant === 'current' || variant === 'stale'
+    || variant === 'flip-unavailable' || variant === 'flip-no-pair') {
     e.pct_by_option = { raise_price_to_59: 987654321 };
     e.driver_by_option = { raise_price_to_59: 'CONTRACT_RAW_DRIVER_987654321' };
     e.warnings = [{ message: 'CONTRACT_RAW_WARNING_987654321' }];
     e.flip_thresholds = [{ factor_id: 'monthly_pro_churn', factor_label: 'Monthly Pro churn', current_value: 3, flip_value: 4.2, value_scale: 'display', unit: '%' }];
     e.flip_thresholds_status = 'computed';
+  }
+  if (variant === 'flip-unavailable') e.flip_thresholds_status = 'unavailable';
+  if (variant === 'flip-no-pair') e.flip_thresholds = [];
+  if (variant === 'horizon-absent') {
+    e.inference_warnings = array(e.inference_warnings).filter(w => object(w).code !== 'GOAL_HORIZON_NOT_TESTED');
+    for (const warning of array(e.inference_warnings).map(object)) {
+      delete warning.horizon_line;
+      delete warning.horizon_untested;
+    }
+  }
+  if (variant === 'leader-withheld') {
+    s.analysis_state.leader_claim = { permitted: false, separation: 'overlapping', reason: 'no_separation' };
+  }
+  if (variant === 'meaning') {
+    const node = s.graph.nodes.find(n => n.id === meaning.reasoning_id);
+    if (!node) throw new Error('meaning fixture factor absent');
+    node.description = meaning.reasoning;
   }
   if (variant === 'stale') {
     // A genuinely changed analysis-affecting graph (not a swapped hash string alone).
@@ -122,6 +148,10 @@ export async function capture(turn: Turn, variant: Variant, options: {
   expectedProviderCalls?: number;
   storage?: Obj;
   readSnapshot?: (snapshot: Snapshot) => Promise<Obj>;
+  payload?: Obj;
+  providerReply?: (body: Obj, index: number) => Obj;
+  expectedCalls?: number | null;
+  evidenceLabel?: string;
 } = {}): Promise<Witness> {
   vi.resetModules();
   const { config } = await import('../../../config/index.js');
@@ -141,25 +171,48 @@ export async function capture(turn: Turn, variant: Variant, options: {
     expect(snapshot.analysis_result.computed_against_hash).toBe(seed.revision);
   }
   const read = <T>(value: T) => vi.fn(async () => structuredClone(value));
+  const { parsePendingAction } = await import('../../../orchestrator-v5/session/pending-action.js');
+  const question = variant === 'meaning' ? parsePendingAction({
+    id: '22222222-2222-4222-8222-222222222222', scenario_id: seed.scenario_id,
+    chip_id: meaning.question_id,
+    action: { kind: 'apply_proposed_change', proposal_ref: meaning.question_id,
+      public_label: meaning.question, public_message: 'Yes, retain that assumption.',
+      inline_patch: { handler_id: 'graph_management_held_v1', apply_wiring: 'held_execute_v1', operations: [
+        { op: 'add_node', path: 'retained_assumption', value: { id: 'retained_assumption', kind: 'factor', label: 'Renewal assumption' } },
+      ] } },
+    preconditions: { graph_hash: snapshot.graph_hash }, expires_at_turn_count: 24,
+    expires_at_iso: '2099-01-01T00:00:00.000Z', emitted_at_iso: seed.computed_at,
+  }) : undefined;
+  if (variant === 'meaning' && question == null) throw new Error('synthetic open offer is not a valid pending action');
   ports.store = {
     readRecent: read([]), readFactsFor: read([]), readFactsWithTurnFor: read([]),
     readScenarioRunAnalysisFactsFor: read({ facts: [], total_count: 0 }),
-    readMostRecentPendingActions: read([]), readLatestAnswerOffers: read(null),
+    readMostRecentPendingActions: read(question == null ? [] : [question]), readLatestAnswerOffers: read(null),
     readCommittedTurn: read(null), readGuidanceHistory: read({}),
     readExistingScenario: read({ userId: null, graph: snapshot.graph, briefText: null, analysisInvalidatedAt: null, revision: snapshot.scenario_revision }),
     append: read({ id: 'context-contract-memory-only' }),
     ...options.storage,
   };
   const calls: Captured[] = [];
+  // Persist at the actual fetch boundary, including calls that later fail contract assertions.
+  // Evidence is opt-in (S8_CAPTURE_DIR); CI writes nothing.
+  const dir = captureDir === undefined ? undefined : `${captureDir}/provider/${options.evidenceLabel ?? turn}/${variant}`;
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init: { body?: unknown } | undefined) => {
     if (String(url) !== 'https://api.openai.com/v1/responses') throw new Error(`NETWORK FORBIDDEN: ${String(url)}`);
     if (typeof init?.body !== 'string') throw new Error('expected exact serialized body');
     const sentBody = init.body, body = JSON.parse(sentBody) as Obj;
-    calls.push({ sentBody, sha256: sha(sentBody), body, payloads: payloadsOf(body) });
+    const call = { sentBody, sha256: sha(sentBody), body, payloads: payloadsOf(body) };
+    calls.push(call);
+    if (dir !== undefined) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(`${dir}/${calls.length}.sentBody.json`, call.sentBody);
+      writeFileSync(`${dir}/${calls.length}.sha256`, `${call.sha256}\n`);
+    }
     const output = turn === 'tool-continuation' && calls.length === 1
       ? [{ type: 'function_call', call_id: 'contract-read-1', name: 'get_canonical_state', arguments: '{}' }]
       : [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Offline contract reply.' }] }];
-    return new Response(JSON.stringify({ status: 'completed', output }), { status: 200 });
+    const reply = options.providerReply?.(body, calls.length) ?? { status: 'completed', output };
+    return new Response(JSON.stringify(reply), { status: 200 });
   }));
   const app = Fastify({ logger: false });
   app.post('/assist/v1/scenarios/:scenario/graph', async req => {
@@ -175,20 +228,16 @@ export async function capture(turn: Turn, variant: Variant, options: {
   if (turn === 'widen-options') { payload.chip = { id: 'ask:widen' }; payload.message = 'What other ways could we reach the goal?'; }
   if (turn === 'widen-risks') { payload.chip = { id: 'ask:risks' }; payload.message = 'What risks should we consider?'; }
   if (turn === 'Run-explanation') { payload.chip = { id: seed.captured_run_reference }; payload.message = 'Explain this result'; }
+  Object.assign(payload, options.payload);
   try {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
     expect(res.statusCode, res.body).toBe(200);
     const response = JSON.parse(res.body) as Obj;
     if (turn === 'Run-explanation' && variant === 'stale') expect(calls).toHaveLength(0);
-    else expect(calls).toHaveLength(options.expectedProviderCalls ?? (turn === 'tool-continuation' ? 2 : 1));
-    // Evidence capture is opt-in (S8_CAPTURE_DIR); CI writes nothing.
-    const dir = captureDir === undefined ? undefined : `${captureDir}/provider/${turn}/${variant}`;
-    if (dir !== undefined) mkdirSync(dir, { recursive: true });
-    calls.forEach((c, i) => {
-      if (dir !== undefined) {
-        writeFileSync(`${dir}/${i + 1}.sentBody.json`, c.sentBody);
-        writeFileSync(`${dir}/${i + 1}.sha256`, `${c.sha256}\n`);
-      }
+    else if (options.expectedCalls !== null) {
+      expect(calls).toHaveLength(options.expectedCalls ?? options.expectedProviderCalls ?? (turn === 'tool-continuation' ? 2 : 1));
+    }
+    calls.forEach(c => {
       expect(JSON.parse(c.sentBody)).toEqual(c.body);
       expect(c.sha256).toMatch(/^[a-f0-9]{64}$/);
     });
