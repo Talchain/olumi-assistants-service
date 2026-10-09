@@ -1,3 +1,4 @@
+import { GOAL_HORIZON_STEADY_ATTESTED } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 /** Agent-only readers of the selected Run's licences. No inference from figures or prose. */
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -285,7 +286,7 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
     ? shareGoalChanceWords(target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), target.by_date) : undefined;
   const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};
   const hasRange = Object.keys(rangeDisplay).length > 0;
-  const horizon = warningsOf(result).filter((w) => w.code === GOAL_HORIZON_NOT_TESTED);
+  const horizon = warningsOf(result).filter((w) => (w.code === GOAL_HORIZON_NOT_TESTED || w.code === GOAL_HORIZON_STEADY_ATTESTED));
   const line = horizon.length === 1 && horizon[0]!.severity === 'info' && id(horizon[0]!.message) ? horizon[0]!.message : undefined;
   return {
     ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),

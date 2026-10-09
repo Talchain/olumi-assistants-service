@@ -277,6 +277,12 @@ describe('canonical view on the same-page turn wire', () => {
 
   it.each(PRODUCER_CAPTURES)('RELOAD EQUALITY / REAL EGRESS: %s uses unchanged producer cells and licensed drivers', async (name, capture) => {
     useProducerCapture(capture);
+    // DL 87114 (A), NON-TIME: transport/driver parity shares this current graph
+    // on turn and reload; the captured Run and all captured numbers stay unchanged.
+    if (name === 'point-driver') for (const node of snapshot.graph.nodes) if (node.kind === 'goal') {
+      delete node.goal_horizon_months;
+      delete node.goal_deadline_as_stated;
+    }
     const response = await run();
     expect(response.statusCode, response.body).toBe(200);
     const turn = response.json();

@@ -76,11 +76,15 @@ function reload(turn: Turn): Promise<Witness> {
     // Exercise the real saved-fact selector/read assembler, instead of returning the captured analysis packet.
     const { readScenarioAnalysis } = await import('../../scenario-graph-analysis-read.js');
     const { runExplanationChip } = await import('../../../orchestrator-v5/agent-lane/run-explanation.js');
-    const saved = await readScenarioAnalysis({ scenarioId: seed.scenario_id, graph: snapshot.graph,
+    // §(ad) S4: horizon removed from the current graph — this row's claim is not about time (the reload contract).
+    // One current graph serves both the read and the turn's snapshot.
+    const graph = structuredClone(snapshot.graph) as { nodes?: Array<Record<string, unknown>> };
+    for (const node of graph.nodes ?? []) if (node.kind === 'goal') { delete node.goal_horizon_months; delete node.goal_deadline_as_stated; }
+    const saved = await readScenarioAnalysis({ scenarioId: seed.scenario_id, graph,
       requestId: 's8-reload', analysisInvalidatedAt: null });
     expect(runExplanationChip(seed.scenario_id, { graphHash: seed.revision,
       analysisState: saved.analysis_state, analysisResult: saved.analysis_result })?.id).toBe(seed.captured_run_reference);
-    return { ...snapshot, ...saved };
+    return { ...snapshot, graph, ...saved };
   } }).then(w => {
     expect(storage.readScenarioRunAnalysisFactsFor).toHaveBeenCalled();
     expect(storage.readFactsWithTurnFor).toHaveBeenCalledWith([rowId]);
