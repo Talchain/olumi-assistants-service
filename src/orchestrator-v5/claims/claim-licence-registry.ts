@@ -16,7 +16,7 @@ export const CLASS_MARKERS = {
  * Catalogue only; production enforcement belongs to P45 S4 #2895. Target: zero gaps. */
 export const OBLIGATIONS = {
   HORIZON_LIMIT_STATED: {
-    trigger: 'goal_horizon_months held && no carrier at H',
+    trigger: 'goal horizon H held && no carrier at H',
     surfaces: ['face', 'detail', 'withhold_line'],
     owners: [
       'src/orchestrator-v5/agent-lane/decision-input-ask.ts#untestedHorizonLineForCells', // host A7
@@ -54,5 +54,5 @@ export type ClaimLicenceEntry = {
 //   readerSubjectParameter: 'factorId', licence: 'hasMeasuredFlipThreshold(enrichment, factorId)',
 //   evidenceRow: 'flip_threshold.dominant_driver.subject' },
 
-/** The 402 owner rows live in scripts/ci/claim-licence-registry.json (CI data, not src): their review hashes and owner paths
+/** The 402 owner rows live in the CI data file beside the census discovery script (JSON, outside src): their review hashes and owner paths
  * are literals that src-wide scan guards (yardstick drift pin, consent-coverage manifest) would otherwise read as mirrors. */
