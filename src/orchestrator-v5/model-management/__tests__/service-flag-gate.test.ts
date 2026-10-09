@@ -58,7 +58,7 @@ describe('ModelManagementService — flag OFF is a typed fail-closed no-op at EV
     });
 
     const results = [
-      await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH }),
+      await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH }),
       await service.listVersions(SCENARIO),
       await service.getVersion(SCENARIO, VERSION_A),
       await service.getVersionForCommittedTurn(SCENARIO, 'source-turn', 'mutation-id'),
