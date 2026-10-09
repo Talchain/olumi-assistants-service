@@ -8,6 +8,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
+import { installOwnershipHarness } from '../../../tests/utils/ownership-route-harness.js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -176,6 +177,8 @@ beforeEach(() => {
 
 async function http(method: 'GET' | 'POST', suffix: string, payload?: Row) {
   const app = Fastify();
+  // The signed ES256 token below verifies OWNER through the real admission hook.
+  await installOwnershipHarness(app);
   await app.register(versionsRoute);
   try {
     return await app.inject({ method, url: `/assist/v1/scenarios/${SCENARIO}/versions${suffix}`,

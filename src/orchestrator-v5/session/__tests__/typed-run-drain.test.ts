@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { loadCorpus } from '../../../../scripts/phase2/parity-2b.js';
@@ -19,22 +20,30 @@ function importedFact(sequence: number) {
   return { fact_id: `f2a00000-0000-4000-8000-${sequence.toString().padStart(12, '0')}`, scenario_id: source.scenario_id,
     payload: { ...fact, result: { ...result, run_id: `reconciliation-${sequence}` } }, noop: false, created_at: '2026-10-08T00:00:00Z' };
 }
-function fixture() {
+// Model the storage receipt using the finisher's declared terminal capability.
+// The full SQL body is checked independently; rehearse-c-legacy executes it.
+const finisherSql = readFileSync(new URL('../../../../supabase/migrations/20261009040000_phase2_a_legacy_unattributable.sql', import.meta.url), 'utf8')
+  .match(/CREATE OR REPLACE FUNCTION public\.finish_analysis_run_sweep\([\s\S]*?\$\$;/)?.[0] ?? '';
+const unattributableTerminal = finisherSql.includes('OR EXISTS (SELECT 1 FROM public.analysis_run_unattributable u WHERE u.fact_id = h.id) AS terminal');
+function fixture(opts: { oldFinisher?: boolean } = {}) {
   const pending = new Map(eligible.map(c => [c.fact_id, { fact_id: c.fact_id, scenario_id: c.scenario_id, payload: c.fact, noop: false, created_at: '2026-10-09T00:00:00Z' }]));
-  const watermark = { value: '' };
+  const watermark = { value: '', id: '' };
   let claimed: Array<(typeof pending extends Map<string, infer Row> ? Row : never)> = [];
   let reconciliation = false;
   const stored = new Set<string>();
   const quarantine = new Set<string>();
+  const unattributable = new Set<string>();
   const failStore = new Set<string>();
   const storeErrors = new Map<string, { code: string; message: string }>();
   const attempts = new Map<string, number>();
+  const markErrors = new Map<string, { code: string; message: string }>();
   const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
     if (name.startsWith('append_')) return { data: 'committed-turn', error: null };
     if (name === 'finish_analysis_run_sweep') {
       if (!reconciliation) for (const row of claimed) {
-        if (!stored.has(row.fact_id) && !quarantine.has(row.fact_id)) break;
-        watermark.value = row.created_at;
+        if (!stored.has(row.fact_id) && !quarantine.has(row.fact_id)
+          && !(unattributableTerminal && !opts.oldFinisher && unattributable.has(row.fact_id))) break;
+        watermark.value = row.created_at; watermark.id = row.fact_id;
       }
       return { data: true, error: null };
     }
@@ -45,7 +54,8 @@ function fixture() {
     }
     if (name === 'claim_analysis_run_facts' || name === 'claim_analysis_run_reconciliation') {
       reconciliation = name === 'claim_analysis_run_reconciliation';
-      claimed = [...pending.values()].filter(row => reconciliation || row.created_at > watermark.value)
+      claimed = [...pending.values()].filter(row => reconciliation || row.created_at > watermark.value
+          || (row.created_at === watermark.value && row.fact_id > watermark.id))
         .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.fact_id.localeCompare(b.fact_id)).slice(0, args.p_sweep_limit);
       return { data: { facts: claimed, lease_id: 'lease', depth_estimate: claimed.length, oldest_pending_age_seconds: 12 }, error: null };
     }
@@ -53,6 +63,12 @@ function fixture() {
       if (failStore.has(args.p_fact_id)) return { data: null, error: storeErrors.get(args.p_fact_id) ?? { code: '55P03', message: 'held storage lock' } };
       const existed = stored.has(args.p_fact_id);
       stored.add(args.p_fact_id); pending.delete(args.p_fact_id);
+      return { data: !existed, error: null };
+    }
+    if (name === 'mark_analysis_fact_unattributable') {
+      if (markErrors.has(args.p_fact_id)) return { data: null, error: markErrors.get(args.p_fact_id)! };
+      const existed = unattributable.has(args.p_fact_id);
+      unattributable.add(args.p_fact_id); pending.delete(args.p_fact_id);
       return { data: !existed, error: null };
     }
     if (name === 'quarantine_analysis_fact') {
@@ -65,7 +81,7 @@ function fixture() {
     returns: vi.fn(async () => ({ data: [...pending.keys()].map(id => ({ id })), error: null })) };
   const client = { rpc, from: vi.fn(() => query) };
   const store = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20, analysisRunDerivation: createAnalysisRunDerivationPort(client as never) });
-  return { store, client, rpc, pending, stored, quarantine, failStore, attempts, storeErrors, watermark };
+  return { store, client, rpc, pending, stored, quarantine, unattributable, failStore, attempts, storeErrors, watermark, markErrors };
 }
 function turn(): SessionTurnWrite {
   return { scenario_id: eligible[0]!.scenario_id, turn_id: 'run-turn', turn_class: 'handler', handler_id: 'run_analysis',
@@ -97,6 +113,103 @@ describe('typed Run drain outside the turn transaction', () => {
     await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, quarantined: 1 });
     const call = f.rpc.mock.calls.find(([name]) => name === 'quarantine_analysis_fact')!;
     expect(call[1]).toEqual({ p_fact_id: row.fact_id, p_reason: expect.stringContaining('input_snapshot.options.0'), p_detail: null });
+  });
+  it.each(['sweep', 'reconcile'] as const)('splits legacy and malformed counts in %s, with literal RPCs and idempotent legacy marking', async mode => {
+    const f = fixture();
+    const legacyIds: string[] = [];
+    for (const [index, shape] of ['missing', 'null'].entries()) {
+      const row = importedFact(100 + index);
+      const payload = structuredClone(row.payload) as Record<string, any>;
+      if (shape === 'missing') delete payload.result.run_id;
+      else payload.result.run_id = null;
+      f.pending.set(row.fact_id, { ...row, payload });
+      legacyIds.push(row.fact_id);
+    }
+    const malformed = importedFact(102);
+    const payload: Record<string, any> = structuredClone(malformed.payload);
+    payload.result.input_snapshot.options = [null];
+    f.pending.set(malformed.fact_id, { ...malformed, payload });
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20, mode })).resolves.toMatchObject({
+      derived: 2, unattributable: 2, quarantined: 1, skipped: 0, failed: 0, attempts: 5,
+    });
+    expect([...f.unattributable]).toEqual(legacyIds);
+    expect([...f.quarantine]).toEqual([malformed.fact_id]);
+    for (const factId of legacyIds) {
+      expect(f.rpc).toHaveBeenCalledWith('mark_analysis_fact_unattributable', { p_fact_id: factId, p_reason: 'run_id_absent' });
+      expect(f.rpc).not.toHaveBeenCalledWith('quarantine_analysis_fact', expect.objectContaining({ p_fact_id: factId }));
+    }
+    expect(log.info).toHaveBeenCalledWith(expect.objectContaining({ event: 'analysis_run.drain', mode,
+      derived: 2, unattributable: 2, quarantined: 1, skipped: 0, failed: 0 }), expect.any(String));
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20, mode })).resolves.toMatchObject({
+      derived: 0, unattributable: 0, quarantined: 0, failed: 0, scanned: 0,
+    });
+  });
+  it.each([false, true])('legacy-only window finishes with cursor progress (old finisher=%s)', async oldFinisher => {
+    const f = fixture({ oldFinisher });
+    f.pending.clear();
+    f.watermark.value = '2026-10-07T00:00:00Z';
+    f.watermark.id = '00000000-0000-0000-0000-000000000000';
+    const before = { ...f.watermark };
+    const rows = Array.from({ length: 20 }, (_, i) => {
+      const row = importedFact(200 + i);
+      const payload = structuredClone(row.payload);
+      delete (payload.result as Record<string, unknown>).run_id;
+      return { ...row, payload };
+    });
+    for (const row of rows) f.pending.set(row.fact_id, row);
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({
+      derived: 0, unattributable: 20, quarantined: 0, skipped: 0, failed: 0, attempts: 20,
+    });
+    expect(f.unattributable.size).toBe(20);
+    expect(f.quarantine.size).toBe(0);
+    const finishIndex = f.rpc.mock.calls.findIndex(([name]) => name === 'finish_analysis_run_sweep');
+    expect(finishIndex).toBeGreaterThan(0);
+    expect(f.rpc.mock.calls.slice(0, finishIndex).filter(([name]) => name === 'mark_analysis_fact_unattributable')).toHaveLength(20);
+    expect(f.rpc).toHaveBeenCalledWith('finish_analysis_run_sweep', { p_lease_id: 'lease' });
+    expect(await f.rpc.mock.results[finishIndex]!.value).toEqual({ data: true, error: null });
+    const last = rows.at(-1)!;
+    expect(f.watermark).toEqual(oldFinisher ? before : { value: last.created_at, id: last.fact_id });
+  });
+  it.each(['PGRST202', '42883'])('five missing mark-RPC passes (%s) preserve durable attempts and warn once per sweep', async code => {
+    const f = fixture(); f.pending.clear();
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const row = importedFact(400 + i);
+      delete (row.payload.result as Record<string, unknown>).run_id;
+      f.pending.set(row.fact_id, row); ids.push(row.fact_id);
+      f.attempts.set(row.fact_id, 2);
+      f.markErrors.set(row.fact_id, { code, message: 'RPC unavailable' });
+    }
+    for (let pass = 0; pass < 5; pass++) {
+      const receipt = await f.store.deriveAnalysisRuns();
+      expect(ids.map(id => f.attempts.get(id))).toEqual([2, 2]);
+      expect(receipt).toMatchObject({ skipped: 2, failed: 1, quarantined: 0, unattributable: 0 });
+      expect(f.quarantine.size).toBe(0);
+      expect(f.pending.size).toBe(2);
+    }
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'record_analysis_run_failure')).toHaveLength(0);
+    expect(vi.mocked(log.warn).mock.calls.filter(([entry]) => (entry as { event?: string }).event === 'analysis_run.rpc_unavailable')).toHaveLength(5);
+    expect(log.warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'analysis_run.rpc_unavailable', rpc_code: code }), expect.any(String));
+  });
+  it('a real per-fact mark failure still consumes a durable attempt', async () => {
+    const f = fixture(); f.pending.clear();
+    const row = importedFact(402);
+    delete (row.payload.result as Record<string, unknown>).run_id;
+    f.pending.set(row.fact_id, row); f.attempts.set(row.fact_id, 2);
+    f.markErrors.set(row.fact_id, { code: '55P03', message: 'lock unavailable' });
+    await expect(f.store.deriveAnalysisRuns()).resolves.toMatchObject({ failed: 1, quarantined: 0 });
+    expect(f.attempts.get(row.fact_id)).toBe(3);
+    expect(f.rpc).toHaveBeenCalledWith('record_analysis_run_failure', expect.objectContaining({ p_fact_id: row.fact_id, p_error_code: '55P03' }));
+    expect(vi.mocked(log.warn).mock.calls.filter(([entry]) => (entry as { event?: string }).event === 'analysis_run.rpc_unavailable')).toHaveLength(0);
+  });
+  it('counts an idempotent unattributable receipt as skipped, never quarantined', async () => {
+    const f = fixture();
+    const row = f.pending.get(eligible[0]!.fact_id)!;
+    const payload = structuredClone(row.payload) as Record<string, any>;
+    delete payload.result.run_id;
+    row.payload = payload;
+    f.unattributable.add(row.fact_id);
+    await expect(f.store.deriveAnalysisRuns()).resolves.toMatchObject({ derived: 1, unattributable: 0, quarantined: 0, skipped: 1, failed: 0 });
   });
   it('marks a refusal as terminal skipped work, so it cannot starve later sweeps', async () => {
     const f = fixture();
@@ -240,7 +353,7 @@ describe('typed Run drain outside the turn transaction', () => {
   it('operator --reconcile loops capped reconciliation passes until empty without starting a timer', async () => {
     vi.useFakeTimers();
     vi.stubEnv('CI', ''); vi.stubEnv('SUPABASE_URL', 'http://127.0.0.1:54321'); vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'operator-test-key');
-    const receipt = { derived: 20, quarantined: 0, skipped: 0, failed: 0, attempts: 20, scanned: 20, depthEstimate: 20, oldestPendingAgeSeconds: 10 };
+    const receipt = { derived: 20, quarantined: 0, unattributable: 0, skipped: 0, failed: 0, attempts: 20, scanned: 20, depthEstimate: 20, oldestPendingAgeSeconds: 10 };
     const drain = vi.spyOn(SupabaseSessionStore.prototype, 'deriveAnalysisRuns')
       .mockResolvedValueOnce(receipt).mockResolvedValueOnce({ ...receipt, derived: 5, attempts: 5, scanned: 5, depthEstimate: 5 })
       .mockResolvedValueOnce({ ...receipt, derived: 0, attempts: 0, scanned: 0, depthEstimate: 0 });

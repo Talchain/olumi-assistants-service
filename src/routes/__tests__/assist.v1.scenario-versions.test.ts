@@ -172,6 +172,7 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
 });
 
 import scenarioVersionsRoute from "../assist.v1.scenario-versions.js";
+import { ModelManagementService, SupabaseModelVersionStore } from "../../orchestrator-v5/model-management/index.js";
 // The REAL identity authority — the return-leg fixtures build the head's
 // envelope with the same function the route compares against, so the fixture
 // cannot drift away from the production hash. Not mocked anywhere in this file.
@@ -1843,4 +1844,100 @@ describe("version revision CAS through the RPC boundary", () => {
       expect((await post(app, `/versions/${operation}`, operation === "save" ? {} : { version_id: VERSION_A })).statusCode).toBe(503);
     } finally { await app.close(); }
   });
+});
+
+// Admission's snapshot remains owned by the caller. Only the fresh door reader
+// changes: exercise the real service + adapter writes, never a mocked verdict.
+describe("version write-time ownership — real adapter RPC", () => {
+  const writePost = (app: FastifyInstance, operation: "save" | "restore") => app.inject({
+    method: "POST",
+    url: `/assist/v1/scenarios/${SCENARIO}/versions/${operation}`,
+    headers: { "x-request-id": `vown-${operation}` },
+    payload: operation === "restore" ? {
+      version_id: VERSION_A, mutation_id: MUTATION_ID,
+      expected_graph_identity_hash: HASH_B,
+    } : {},
+  });
+  const refusalBytes = {
+    not_owner: '{"error":"model_write_ownership_refused","message":"Nothing was saved. You don\'t have access to change this model."}',
+    owner_unreadable: '{"error":"model_write_ownership_refused","message":"Nothing was saved. I couldn\'t check access to this model. Try again."}',
+  };
+
+  function realWrites() {
+    const state = {
+      graph: structuredClone(CURRENT_GRAPH) as unknown,
+      revision: 7,
+      head: VERSION_B,
+      versions: [VERSION_A, VERSION_B],
+      events: [] as string[],
+    };
+    readExistingScenario.mockImplementation(async () => ({
+      userId: OWNER, graph: structuredClone(state.graph), briefText: null,
+      analysisInvalidatedAt: null, revision: state.revision,
+    }));
+    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      expect(args.p_scenario_id).toBe(SCENARIO);
+      expect(args.p_expected_revision).toBe(7);
+      const restoring = name === "restore_model_version_atomic_cas_v1";
+      expect(name).toBe(restoring ? "restore_model_version_atomic_cas_v1" : "create_model_version_cas_v1");
+      state.revision += 1;
+      state.head = restoring ? RESTORED_VERSION : SNAPSHOT_VERSION;
+      state.versions.push(state.head);
+      state.events.push(restoring ? "restored" : "saved");
+      if (restoring) state.graph = structuredClone(args.p_graph);
+      return { error: null, data: restoring ? atomicRestoreOk().value : {
+        version_id: SNAPSHOT_VERSION, version_number: 3,
+        graph_identity_hash: HASH_SNAPSHOT, deduped: false, event_id: "evt-snap",
+      } };
+    });
+    const service = new ModelManagementService({
+      store: new SupabaseModelVersionStore({ rpc } as never),
+      isEnabled: () => true,
+      eventSink: { emit: vi.fn() },
+    });
+    saveVersion.mockImplementation(request => service.saveVersion(request));
+    restoreVersionAtomic.mockImplementation(request => service.restoreVersionAtomic(request));
+    return { rpc, state };
+  }
+
+  for (const operation of ["save", "restore"] as const) {
+    for (const reason of ["not_owner", "owner_unreadable"] as const) {
+      it(`${operation}: ${reason} at the door → canonical 403, zero RPC, unchanged store`, async () => {
+        const { rpc, state } = realWrites();
+        const before = structuredClone(state);
+        if (reason === "not_owner") getScenarioOwner.mockResolvedValue(OTHER_USER);
+        else getScenarioOwner.mockRejectedValue(new Error("owner reader unavailable"));
+        const app = await buildApp();
+        try {
+          const res = await writePost(app, operation);
+          expect(res.statusCode).toBe(403);
+          expect(res.body).toBe(refusalBytes[reason]);
+          expect(getScenarioOwner.mock.calls).toEqual([[SCENARIO]]);
+          expect(rpc).not.toHaveBeenCalled();
+          expect(saveVersion).not.toHaveBeenCalled();
+          expect(restoreVersionAtomic).not.toHaveBeenCalled();
+          expect(appendSpy).not.toHaveBeenCalled();
+          expect(ensureScenarioExists).not.toHaveBeenCalled();
+          expect(state).toEqual(before);
+        } finally { await app.close(); }
+      });
+    }
+
+    it(`${operation}: owner at the door → 200, exactly one owner read and one RPC`, async () => {
+      const { rpc, state } = realWrites();
+      const app = await buildApp();
+      try {
+        const res = await writePost(app, operation);
+        expect(res.statusCode).toBe(200);
+        expect(getScenarioOwner.mock.calls).toEqual([[SCENARIO]]);
+        expect(rpc).toHaveBeenCalledTimes(1);
+        expect(readExistingScenario.mock.invocationCallOrder.at(-1)).toBeLessThan(getScenarioOwner.mock.invocationCallOrder[0]);
+        expect(getScenarioOwner.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[0]);
+        expect(rpc.mock.calls[0][0]).toBe(operation === "save" ? "create_model_version_cas_v1" : "restore_model_version_atomic_cas_v1");
+        expect(state.revision).toBe(8);
+        expect(state.events).toEqual([operation === "save" ? "saved" : "restored"]);
+        expect(res.json().schema).toBe(operation === "save" ? "model_version_save.v1" : "model_version_restore.v2");
+      } finally { await app.close(); }
+    });
+  }
 });
