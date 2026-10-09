@@ -627,3 +627,30 @@ describe('FR buddy r2: a shadowed carrier never blocks a quantity-preserving edi
     expect(() => assertUntouchedLevelQuantities(before, projectGraphForPersistence(after))).not.toThrow();
   });
 });
+
+describe('FR follow-up: a level whose carrier remains but the engine can no longer read it', () => {
+  const rawOnly = (g: Graph): Graph => {
+    const next = structuredClone(g);
+    (next.nodes.find(n => n.id === 'full') as unknown as { interventions: Record<string, unknown> }).interventions = { duration: { raw_value: 20, cap: 100 } };
+    return next;
+  };
+  it('door refuses when the carrier still holds the factor but no readable value remains', () => {
+    const before = graph(100, 0.2);
+    expect(quantity(before)).toBe(20);
+    expect(() => assertUntouchedLevelQuantities(before, rawOnly(before))).toThrow(UntouchedLevelRescaledError);
+  });
+  it('CONTRAST: door passes a real removal (the key gone from every carrier)', () => {
+    const before = graph(100, 0.2);
+    const removed = structuredClone(before);
+    (removed.nodes.find(n => n.id === 'full') as unknown as { interventions: Record<string, unknown> }).interventions = {};
+    expect(() => assertUntouchedLevelQuantities(before, removed)).not.toThrow();
+  });
+  it('owner re-encodes a raw-only after-image on a frame change so the engine still reads 20', () => {
+    const before = graph(100, 0.2);
+    const out = preserveSiblingQuantities(before, rawOnly(reframe(before, 200)), []);
+    expect(out.kind).toBe('preserved');
+    if (out.kind !== 'preserved') throw new Error('Expected preservation');
+    expect(quantity(out.graph as Graph)).toBe(20);
+    expect(() => assertUntouchedLevelQuantities(before, out.graph)).not.toThrow();
+  });
+});
