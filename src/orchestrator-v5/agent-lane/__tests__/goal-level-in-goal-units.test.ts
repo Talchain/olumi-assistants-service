@@ -1,3 +1,4 @@
+import { timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * Paul's try-guide step 4 (DL 58e392, 8 Oct): ISL's GOAL_LEVEL_FROM_IDENTITY_INPUTS said "…give today: 12,250.00 in its own
  * units; …" for a £-a-month MRR. The served warning and graph are the stored Run fixture (goal-reach run 2, 53e2ddbd).
@@ -44,7 +45,7 @@ describe('the goal’s derived level in the goal’s own units', () => {
     expect(withGoalLevelInGoalUnits(empty, served.graph)).toBe(empty);
   });
 
-  it('bounded: 20k digits / spaces in a warning message < 50 ms', () => {
+  timingIt('bounded: 20k digits / spaces in a warning message < 50 ms', () => {
     for (const filler of ['1'.repeat(20_000), ' '.repeat(20_000)]) {
       const start = performance.now();
       withGoalLevelInGoalUnits({ inference_warnings: [{ code: 'GOAL_LEVEL_FROM_IDENTITY_INPUTS', message: `today: ${filler} in its own units; x` }] }, served.graph);

@@ -23,6 +23,8 @@
  * Tightening the source (AIQ's F_S floor, 5894561359) is not built in v1: on `c96` it makes two new cuts (AIQ).
  * PURE: the input graph is never mutated.
  */
+import { clearPlaceholderMarker } from '../../cee/magnitude/link-sizing.js';
+
 type Rec = Record<string, any>;
 
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -39,7 +41,7 @@ export interface FrameRefit {
 }
 export interface FrameRefusal {
   readonly link: string;
-  readonly reason: 'no_frame' | 'not_the_goal' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale';
+  readonly reason: 'no_frame' | 'not_the_goal' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale' | 'ambiguous_pair';
   /** For `new_cut`: the link that would be cut instead. */
   readonly detail?: string;
 }
@@ -195,6 +197,13 @@ function reframed(graph: Rec, id: string, F: number): Rec {
     if (num(e.strength?.std)) e.strength.std *= scale;
     const ne = e.provenance?.natural_effect;
     if (ne !== undefined && num(ne.strength_mean)) ne.strength_mean *= scale;
+    // Pending estimates follow the same units when the user's pass moves their frames first.
+    const candidate = e.provenance?.olumi_fit_candidate;
+    if (candidate !== undefined) {
+      candidate.strength_mean *= scale;
+      candidate.strength_std *= scale;
+      if (num(candidate.natural_effect?.strength_mean)) candidate.natural_effect.strength_mean *= scale;
+    }
   }
   return g;
 }
@@ -300,6 +309,83 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
     refits.push(...chain);
   }
   return { graph: g, refits, refused };
+}
+
+/** User levels and ranges bind their frames. A goal's raw target alone does not. */
+function olumiMayReframe(node: Rec, edges: readonly Rec[]): boolean {
+  return !usersLevel(node) && !edges.some((e) => (e.from === node.id || e.to === node.id)
+    && userStated(e) && e.provenance?.natural_effect?.stated_range !== undefined);
+}
+
+/** Fit only pending Olumi estimates, after the user's pass. PURE; refusals leave only the old placeholder. */
+export function refitFramesForOlumiEstimates(graph: Rec): {
+  readonly graph: Rec; readonly fitted: string[]; readonly refused: FrameRefusal[];
+} {
+  if (!(graph.edges as Rec[]).some((e) => e.provenance?.olumi_fit_candidate !== undefined)) {
+    return { graph, fitted: [], refused: [] };
+  }
+  let g = structuredClone(graph);
+  const fitted: string[] = [];
+  const refused: FrameRefusal[] = [];
+  const goals = new Set((g.nodes as Rec[]).filter((n) => n.kind === 'goal').map((n) => n.id));
+  const pending = (g.edges as Rec[]).filter((e) => e.provenance?.olumi_fit_candidate !== undefined)
+    .sort((a, b) => Number(goals.has(b.to)) - Number(goals.has(a.to))).map(key);
+  for (const link of pending) {
+    // Endpoint identity must name exactly one edge, including non-candidate neighbours.
+    const matching = (g.edges as Rec[]).filter((e) => key(e) === link);
+    if (matching.length !== 1) {
+      refused.push({ link, reason: 'ambiguous_pair' });
+      for (const e of matching) delete e.provenance?.olumi_fit_candidate;
+      continue;
+    }
+    const before = g;
+    let next = structuredClone(before);
+    const edge = (next.edges as Rec[]).find((e) => key(e) === link)!;
+    const candidate = edge.provenance.olumi_fit_candidate;
+    edge.strength = { mean: candidate.strength_mean, std: candidate.strength_std };
+    edge.provenance.magnitude = 'olumi_estimate';
+    if (candidate.natural_effect !== undefined) edge.provenance.natural_effect = structuredClone(candidate.natural_effect);
+    else delete edge.provenance.natural_effect;
+    clearPlaceholderMarker(edge);
+    delete edge.provenance.olumi_fit_candidate;
+    const moved = new Set<string>();
+    let reason: FrameRefusal['reason'] | undefined;
+    // The minimum nice frame fits every cut into a node at once. Larger frames can only increase its outgoing cuts,
+    // so this monotone cascade moves the fewest possible nodes, including a goal-only fit when one suffices.
+    for (;;) {
+      const cut = cuts(next).find((e) => key(e) === link) ?? cuts(next)[0];
+      if (cut === undefined) break;
+      const target = (next.nodes as Rec[]).find((n) => n.id === cut.to);
+      const Fold = frameOf(target);
+      if (target === undefined || Fold === undefined) { reason = 'no_frame'; break; }
+      if (moved.has(target.id) || (key(cut) !== link && !moved.has(cut.from))) { reason = 'new_cut'; break; }
+      const into = cuts(next).filter((e) => e.to === target.id);
+      const F = niceFrameAtLeast(Math.max(...into.map((e) => Math.abs(e.strength.mean))) * Fold);
+      reason = widenRefusal(next, target, Fold, F, { goalOwnRows: true });
+      if (reason === undefined && !olumiMayReframe(target, next.edges)) reason = 'levels_set_on_node';
+      if (reason !== undefined) break;
+      next = reframed(next, target.id, F);
+      moved.add(target.id);
+    }
+    // Missing frames must not let an out-of-contract candidate escape the cascade.
+    if (reason === undefined && (next.edges as Rec[]).some((e) => !num(e.strength?.mean) || Math.abs(e.strength.mean) > 1 + TOL)) reason = 'new_cut';
+    if (reason === undefined && !refitKeepsOtherLinks(before, next, new Set([link]))) reason = 'new_cut';
+    if (reason !== undefined) {
+      refused.push({ link, reason });
+      // Exact rollback, then remove only the transient carrier.
+      delete (g.edges as Rec[]).find((e) => key(e) === link)!.provenance.olumi_fit_candidate;
+      continue;
+    }
+    if (candidate.basis !== undefined) (next.edges as Rec[]).find((e) => key(e) === link)!.provenance.basis = candidate.basis;
+    for (const node of next.nodes as Rec[]) {
+      if (moved.has(node.id) && num(node.observed_state?.std) && node.observed_state.std > 0) {
+        node.observed_state.std_source = 'frame_carried';
+      }
+    }
+    g = next;
+    fitted.push(link);
+  }
+  return { graph: g, fitted, refused };
 }
 
 /** Why `target` may not be widened from `Fold` to `F` (v1's guards, one per node, the cascade's included), else undefined. */

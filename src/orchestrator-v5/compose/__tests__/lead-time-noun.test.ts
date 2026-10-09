@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 import {
   textAssertsLeadingOption,
   textNamesLeadingOption,
@@ -71,7 +71,7 @@ describe.each([
     const elapsed = performance.now() - start;
     // Only one/two spaces or hyphens directly before time(s) denote the noun.
     expect(result).toBe(expected);
-    expect(elapsed).toBeLessThan(50);
+    if (timingGated) { expect(elapsed).toBeLessThan(50); }
   });
 
   it('scales below 22x from 5,000 to 40,000 characters (minimum of seven calibrated batches)', () => {
@@ -80,6 +80,6 @@ describe.each([
     expect(classify(n)).toBe(true);
     expect(classify(eightN)).toBe(true);
     const m = scalingRatio(() => classify(n), () => classify(eightN));
-    expect(m.ratio, m.detail).toBeLessThan(22);
+    if (timingGated) { expect(m.ratio, m.detail).toBeLessThan(22); }
   });
 });

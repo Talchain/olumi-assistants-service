@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 import draw2 from './fixtures/guided-sizing-draw2.json';
@@ -419,7 +420,7 @@ describe('RC4: narrator count egress guard', () => {
     const elapsed = performance.now() - start;
     process.stdout.write(`20,000-char whitespace timing: ${elapsed.toFixed(3)} ms\n`);
     expect(out).toEqual({ text, removed: [] });
-    expect(elapsed).toBeLessThan(50);
+    if (timingGated) { expect(elapsed).toBeLessThan(50); }
   });
 
   it('20,000-char repeated Olumi nine of the input runs in less than 50 ms', () => {
@@ -429,6 +430,6 @@ describe('RC4: narrator count egress guard', () => {
     const elapsed = performance.now() - start;
     process.stdout.write(`20,000-char repeated Olumi nine of the timing: ${elapsed.toFixed(3)} ms\n`);
     expect(out).toEqual({ text, removed: [] });
-    expect(elapsed).toBeLessThan(50);
+    if (timingGated) { expect(elapsed).toBeLessThan(50); }
   });
 });

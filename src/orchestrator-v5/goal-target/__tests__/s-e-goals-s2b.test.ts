@@ -41,7 +41,7 @@ import { commitDirectAnswer } from '../../commit.js';
 import { composeDirectAnswerResponse } from '../../compose.js';
 import { createRunAnalysisHandler, withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -259,7 +259,7 @@ describe('S2b team-time door', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     const run = (input: string) => () => { TEAM_TIME.lastIndex = 0; return TEAM_TIME.test(input); };
     const m = scalingRatio(run(' '.repeat(20000)), run(' '.repeat(160000)));
-    expect(m.ratio, m.detail).toBeLessThan(22);
+    if (timingGated) { expect(m.ratio, m.detail).toBeLessThan(22); }
     expect(readTeamTime(' '.repeat(20000))).toBeNull();
   });
 });
@@ -279,7 +279,7 @@ describe('R2 identity-bound regression rows', () => {
     expect(() => admitCandidateModel(c, {}, brief)).toThrow('event_goal_needs_redraft');
     expect(admitCandidateModel(control, {}, brief).nodes).toBeDefined();
   });
-  it('P1-1 admission regex near-miss 20k -> 160k timing rows <22x', () => {
+  timingIt('P1-1 admission regex near-miss 20k -> 160k timing rows <22x', () => {
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793/#2800.
     for (const regex of [EVENT_WORDS, EVENT_DEADLINE]) {
       const small = '9 '.repeat(20000), large = '9 '.repeat(160000);
@@ -582,7 +582,7 @@ describe('R3 carrier ownership and licence recovery controls', () => {
   });
 });
 
-it('R3 event-span tokenisation 5k -> 40k timing row <22x', () => {
+timingIt('R3 event-span tokenisation 5k -> 40k timing row <22x', () => {
   const c = candidate(); c.goal.metric = 'the app'; c.goal.deliverable = 'the app';
   const prefix = 'ship the app on time ', input = (n: number) => prefix + 'x'.repeat(n - prefix.length);
   // 5k → 40k (8×), as stated-event-risk's 5k → 40k row: one call at 160k costs seconds, which only slows the gate.

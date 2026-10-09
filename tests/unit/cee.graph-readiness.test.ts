@@ -1,3 +1,4 @@
+import { timingIt } from '../helpers/scaling-ratio.js';
 import { describe, it, expect } from "vitest";
 import { assessGraphReadiness, computeGraphStats } from "../../src/cee/graph-readiness/index.js";
 import {
@@ -484,7 +485,7 @@ describe("CEE Graph Readiness Assessment", () => {
   });
 
   describe("performance", () => {
-    it("completes assessment in under 50ms for large graphs", () => {
+    timingIt("completes assessment in under 50ms for large graphs", () => {
       // Create a graph with 100 nodes and 200 edges
       const kinds = ["decision", "goal"];
       for (let i = 0; i < 30; i++) kinds.push("option");

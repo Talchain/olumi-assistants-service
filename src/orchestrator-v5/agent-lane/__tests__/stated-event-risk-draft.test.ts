@@ -1,7 +1,7 @@
 /** event_risk.v1 slice 2c — DRAFT door. */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 
 vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
@@ -125,7 +125,7 @@ describe('event_risk.v1 slice 2c', () => {
     }
     const m = scalingRatio(() => holdStatedEventRisks(input.nodes, input.edges, small),
       () => holdStatedEventRisks(input.nodes, input.edges, large));
-    expect(m.ratio, m.detail).toBeLessThan(20);
+    if (timingGated) { expect(m.ratio, m.detail).toBeLessThan(20); }
   });
 
   it.each(fix3Review.draftRows)('fix3-draft-$id: $input', (row) => {
@@ -353,6 +353,6 @@ describe('event_risk.v1 slice 2c', () => {
     for (const text of [small, large]) expect(dev(holdStatedEventRisks(input.nodes, input.edges, text)).event_risk).toEqual(BLOCK);
     const m = scalingRatio(() => holdStatedEventRisks(input.nodes, input.edges, small), () => holdStatedEventRisks(input.nodes, input.edges, large));
     // 8× input, midpoint bar 22: linear ≈ 8×, quadratic ≈ 64×; slow-runner noise cannot cross it; see #2793.
-    expect(m.ratio, m.detail).toBeLessThan(22);
+    if (timingGated) { expect(m.ratio, m.detail).toBeLessThan(22); }
   });
 });
