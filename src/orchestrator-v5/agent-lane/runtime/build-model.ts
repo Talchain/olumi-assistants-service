@@ -1,6 +1,6 @@
 import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
-import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
+import { goalIdentityScopeIsMaterial, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -2199,9 +2199,12 @@ export async function buildModelFromBrief(
     const scopeAsked = scopeLoss !== undefined && !plainTotal
       ? { question: scopeLoss.reason, assumption: typeof scopeLoss.after === 'string' ? scopeLoss.after : undefined }
       : null;
+    const identityScopeMaterial = goalIdentityScopeIsMaterial(readsAsTotal, candidate, admitted);
+    let retainedScopeQuestion: string | null = null;
     if (readsAsTotal && candidate.goal.scope) {
       // The drafter's own restatement of the part-or-whole question (Codex buddy r1 P2: it carried the C46 "… for the Pro plan
-      // only. Which did you mean?" through `unknowns`): the goal now reads as the total, so it is not asked beside the reading.
+      // only. Which did you mean?" through `unknowns`): keep it when the goal identity makes scope material;
+      // otherwise the goal now reads as the total, so it is not asked beside the reading.
       // A restatement names the goal AND both readings AND asks which: an evidence question about the two populations ("can
       // the Pro plan only estimate apply to all plans together?") names no goal and stays (Codex buddy r2 P2).
       const [modelled, alternative, metric] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative, candidate.goal.metric]
@@ -2209,17 +2212,20 @@ export async function buildModelFromBrief(
       for (let i = openQuestions.length - 1; i >= 0; i--) {
         const q = openQuestions[i]!.toLowerCase();
         if (modelled !== '' && alternative !== '' && metric !== '' && q.includes(modelled) && q.includes(alternative) && q.includes(metric)
-          && /\b(or|whether|which)\b/.test(q)) openQuestions.splice(i, 1);
+          && /\b(or|whether|which)\b/.test(q)) {
+          if (identityScopeMaterial && retainedScopeQuestion === null) retainedScopeQuestion = openQuestions[i]!;
+          else openQuestions.splice(i, 1);
+        }
       }
     }
-    const untypedScopeWords = scopeAsked !== null ? scopeAsked.question
-      : readsAsTotal && scopeGoal !== undefined
+    const untypedScopeWords = retainedScopeQuestion ?? (scopeAsked !== null ? scopeAsked.question
+      : readsAsTotal && !identityScopeMaterial && scopeGoal !== undefined
         ? (() => {
           const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);
           return components.length > 0 ? untypedScopeDisclosure(candidate.goal.metric, components) : null;
         })()
-        : null;
-    if (untypedScopeWords !== null) openQuestions.unshift(untypedScopeWords);
+        : null);
+    if (untypedScopeWords !== null && !openQuestions.includes(untypedScopeWords)) openQuestions.unshift(untypedScopeWords);
 
     // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
     // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's

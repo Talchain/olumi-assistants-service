@@ -4,6 +4,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose, sameUnit, readMoneyTotal } from './reconciling-product.js';
 import { figureTheUserWrote } from './stated-by-user.js';
+import type { AdmittedModel, CandidateModel } from './admit-model.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { isPendingActionExpired, PENDING_KIND_CLAIMS_BARE_NUMBER } from '../session/pending-action.js';
 
@@ -182,6 +183,25 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
     for (const entry of entries) { const label = byId.get(entry)?.label; if (typeof label === 'string' && !components.includes(label)) components.push(label); }
   }
   return components;
+}
+
+/**
+ * The declaration's `modelled` is the scope this model measures (GoalScopeDeclaration), so an admitted
+ * identity ON its goal binds the operand quantities to that declared reading. Identity membership is
+ * held as node ids; no population is inferred from an operand's label. A plain-total reading makes
+ * that declaration material even when no option creates a new component (`untypedScopeComponents`).
+ */
+export function goalIdentityScopeIsMaterial(
+  readsAsTotal: boolean,
+  candidate: Pick<CandidateModel, 'goal'>,
+  admitted: Pick<AdmittedModel, 'nodes'>,
+): boolean {
+  if (!readsAsTotal || !candidate.goal.scope?.modelled.trim()) return false;
+  const goal = admitted.nodes.find(n => n.kind === 'goal');
+  const identity = goal?.nonlinear_identity;
+  if (!identity || new Set(identity.factor_ids).size < 2) return false;
+  return identity.factor_ids.every(id => admitted.nodes.some(n => n.id === id && n.id !== goal!.id
+    && (n.kind === 'factor' || n.kind === 'outcome' || n.kind === 'goal')));
 }
 
 /** Science d5's words, verbatim; several components by the list rule (three named, then " and N more"). */
