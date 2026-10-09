@@ -492,3 +492,140 @@ it('R5 malformed ask id with otherwise valid payload refuses before the session 
     const cache = await import('../services/session-cache.js'); expect(cache.retrieveSession).not.toHaveBeenCalled(); expect(cache.appendTurn).not.toHaveBeenCalled(); expect(state.writes).not.toHaveBeenCalled();
   } finally { await real.close(); }
 });
+
+
+const malformedSeparators = [
+  ['leading hyphen', `-${SID}`],
+  ['trailing hyphen', `${SID}-`],
+  ['doubled hyphen', SID.replace('-', '--')],
+  ['hyphen after three digits', `ccc-ccccc-cccc-4ccc-8ccc-cccccccccccc`],
+] as const;
+it.each(malformedSeparators)('F1 canonicaliser rejects %s', async (_name, raw) => {
+  const { canonicalScenarioId } = await import('../plugins/scenario-ownership.js');
+  expect(canonicalScenarioId(raw)).toBeNull();
+});
+for (const [name, raw] of malformedSeparators) {
+  it.each([
+    ['/agent/v1/turn', 'agent-v1-turn'],
+    ['/assist/v1/graph-readiness', 'assist.v1.graph-readiness'],
+  ])(`F1 real handler %s rejects ${name} with exact bytes and no store read`, async (path, module) => {
+    const real = await businessApp(module);
+    try {
+      const r = await real.inject({ method: 'POST', url: path,
+        headers: { 'x-request-id': 'row', authorization: `Bearer ${tokenA}` },
+        payload: { ...spellingPayload(path, raw), turn_id: RID } });
+      expect(r.statusCode).toBe(404);
+      expect(r.payload).toBe(JSON.stringify(spellingRefusal(path === '/agent/v1/turn' ? 'agent turn' : 'graph-readiness', false).body));
+      expect(session.readExistingScenario).not.toHaveBeenCalled();
+      expect(session.getScenarioOwner).not.toHaveBeenCalled();
+      expect(session.scenarioExists).not.toHaveBeenCalled();
+      expect(session.readRecent).not.toHaveBeenCalled();
+      expect(session.loadGraphAndBriefText).not.toHaveBeenCalled();
+      expect(session.loadGraph).not.toHaveBeenCalled();
+      expect(session.ensureScenarioExists).not.toHaveBeenCalled();
+      expect(state.writes).not.toHaveBeenCalled();
+    } finally { await real.close(); }
+  });
+}
+it('F1 real readiness admits mixed four-digit boundaries and reads the canonical id', async () => {
+  const real = await businessApp('assist.v1.graph-readiness');
+  try {
+    const r = await real.inject({ method: 'POST', url: '/assist/v1/graph-readiness',
+      headers: { authorization: `Bearer ${tokenA}` },
+      payload: { scenario_id: '{cccccccc-cccc4ccc-8ccccccc-cccccccc}', graph: { nodes: [], edges: [] } } });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['x-handler-scenario']).toBe(SID);
+    expect(session.readExistingScenario).toHaveBeenCalledWith(SID);
+    expect(session.loadGraphAndBriefText).toHaveBeenCalledWith(SID);
+  } finally { await real.close(); }
+});
+
+// ID-sensitive durable-row fixture: CREATEs are separate from Agent answer writes.
+async function residualAgentRows(run: (real: FastifyInstance, rows: Map<string, string | null>, creates: string[]) => Promise<void>) {
+  const rows = new Map<string, string | null>();
+  const creates: string[] = [];
+  const turns = new Map<string, import('../orchestrator-v5/session/store.js').CommittedTurnRecord>();
+  const store = (await import('../orchestrator-v5/session/index.js')).getSessionStore();
+  const readTurn = store.readCommittedTurn;
+  const append = store.append;
+  store.readCommittedTurn = async (id, turnId) => turns.get(`${id}:${turnId}`) ?? null;
+  store.append = async write => {
+    const key = `${write.scenario_id}:${write.turn_id}`;
+    if (!turns.has(key)) turns.set(key, { id: key, request_hash: write.request_hash,
+      assistant_message: write.assistantMessage ?? null, user_message: write.userMessage ?? null, llm_calls_used: write.llm_calls_used });
+    state.writes(write);
+    return { id: key };
+  };
+  const read = session.readExistingScenario.getMockImplementation()!;
+  const ensure = session.ensureScenarioExists.getMockImplementation()!;
+  session.readExistingScenario.mockImplementation(async id => rows.has(id)
+    ? { userId: rows.get(id)!, graph: null, briefText: null, analysisInvalidatedAt: null } : null);
+  session.ensureScenarioExists.mockImplementation(async (id, caller) => {
+    if (!rows.has(id)) { creates.push(id); rows.set(id, caller); }
+    return { user_id: rows.get(id)! };
+  });
+  const real = await businessApp('agent-v1-turn');
+  try { await run(real, rows, creates); }
+  finally {
+    await real.close(); session.readExistingScenario.mockImplementation(read); session.ensureScenarioExists.mockImplementation(ensure);
+    store.append = append; store.readCommittedTurn = readTurn;
+  }
+}
+function residualAgentRequest(real: FastifyInstance, scenarioId: string, sessionId: string, token = tokenA) {
+  return real.inject({ method: 'POST', url: '/agent/v1/turn', headers: { authorization: `Bearer ${token}` },
+    payload: { scenario_id: scenarioId, agent_session_id: sessionId, message: 'What should we consider?', turn_id: RID } });
+}
+it.each(['scenario', 'user'] as const)('F2a refused session bound to another %s creates no fresh Y row', async mismatch => {
+  await residualAgentRows(async (real, rows, creates) => {
+    const sessionId = `f2-refused-${++agentRequestSequence}`;
+    rows.set(SID, mismatch === 'user' ? B : A);
+    const bound = await residualAgentRequest(real, SID, sessionId, mismatch === 'user' ? tokenB : tokenA);
+    expect(bound.statusCode, bound.payload).toBe(200);
+    expect(creates).toEqual([]);
+    const denied = await residualAgentRequest(real, OTHER_SID, sessionId);
+    expect(denied.statusCode).toBe(404);
+    expect(denied.payload).toBe('{"error":"NOT_FOUND","detail":"No readable conversation for that scenario."}');
+    expect(creates).toEqual([]);
+    expect(rows.has(OTHER_SID)).toBe(false);
+    expect(session.ensureScenarioExists).not.toHaveBeenCalled();
+  });
+});
+it('F2b CONTRAST fresh session and fresh Y provisions exactly once, then binds', async () => {
+  await residualAgentRows(async (real, rows, creates) => {
+    const { SessionBindingRegistry } = await import('../orchestrator-v5/agent-lane/session-binding.js');
+    const bind = vi.spyOn(SessionBindingRegistry.prototype, 'bind');
+    const sessionId = `f2-fresh-${++agentRequestSequence}`;
+    try {
+      const admitted = await residualAgentRequest(real, OTHER_SID, sessionId);
+      expect(admitted.statusCode, admitted.payload).toBe(200);
+      expect(creates).toEqual([OTHER_SID]);
+      expect(rows.get(OTHER_SID)).toBe(A);
+      expect(session.ensureScenarioExists).toHaveBeenCalledExactlyOnceWith(OTHER_SID, A);
+      expect(bind).toHaveBeenCalledExactlyOnceWith(sessionId, A, OTHER_SID);
+      expect(session.ensureScenarioExists.mock.invocationCallOrder[0]).toBeLessThan(bind.mock.invocationCallOrder[0]);
+      // Reuse against X witnesses that Y binding persisted, without mocking check().
+      rows.set(SID, A);
+      const refused = await residualAgentRequest(real, SID, sessionId);
+      expect(refused.statusCode).toBe(404);
+      expect(refused.payload).toBe('{"error":"NOT_FOUND","detail":"No readable conversation for that scenario."}');
+      expect(creates).toEqual([OTHER_SID]);
+    } finally { bind.mockRestore(); }
+  });
+});
+it('F2c matching session and existing Y is admitted with no CREATE', async () => {
+  await residualAgentRows(async (real, rows, creates) => {
+    rows.set(OTHER_SID, A);
+    const sessionId = `f2-matching-${++agentRequestSequence}`;
+    const first = await residualAgentRequest(real, OTHER_SID, sessionId);
+    expect(first.statusCode, first.payload).toBe(200);
+    const { SessionBindingRegistry } = await import('../orchestrator-v5/agent-lane/session-binding.js');
+    const bind = vi.spyOn(SessionBindingRegistry.prototype, 'bind');
+    try {
+      const matching = await residualAgentRequest(real, OTHER_SID, sessionId);
+      expect(matching.statusCode, matching.payload).toBe(200);
+      expect(creates).toEqual([]);
+      expect(session.ensureScenarioExists).not.toHaveBeenCalled();
+      expect(bind).not.toHaveBeenCalled();
+    } finally { bind.mockRestore(); }
+  });
+});
