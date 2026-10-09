@@ -1,6 +1,6 @@
 /** One HTTP scenario admission authority. Registered after service/HMAC authentication. */
 import fp from 'fastify-plugin';
-import { bindWriteCaller, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readWriteRefusal, readSuccessfulDoorEntries } from '../orchestrator-v5/ownership/door-ownership.js';
+import { bindWriteCaller, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readWriteRefusal, readSuccessfulDoorEntries, recordSuccessfulSave } from '../orchestrator-v5/ownership/door-ownership.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteOptions } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -259,6 +259,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
             req.scenarioAccess.provisionIfMissing = () => provisioning ??= (async () => {
               const created = await preflightEnsureScenario(checkedId, callerUserId, requestId, store);
               if (!created.ok) { refuse(req, reply, checkedId, created.reason, created.reason === 'scenario_ownership_unverifiable'); return false; }
+              if (!created.skipped) recordSuccessfulSave();
               return admitOwner(created.ownerUserId ?? null);
             })();
             return;

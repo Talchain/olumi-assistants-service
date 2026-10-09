@@ -413,6 +413,20 @@ export class HistoryStore {
     return this.items.has(sessionId);
   }
 
+  /** Undo this turn's publication, including typed words and words moved beyond the window. */
+  checkpoint(sessionId: string): () => void {
+    const items = this.items.get(sessionId)?.slice();
+    const typed = this.typed.get(sessionId)?.slice();
+    const older = this.older.get(sessionId)?.slice();
+    return () => {
+      const restore = <T>(map: Map<string, T[]>, previous: T[] | undefined): void => {
+        if (previous === undefined) map.delete(sessionId);
+        else map.set(sessionId, previous);
+      };
+      restore(this.items, items); restore(this.typed, typed); restore(this.older, older);
+    };
+  }
+
   set(sessionId: string, next: readonly unknown[]): void {
     // Refresh recency: re-inserting moves it to the end of the Map's order.
     this.items.delete(sessionId);

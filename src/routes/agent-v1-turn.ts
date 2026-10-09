@@ -2617,7 +2617,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         claimAppendSucceeded = true;
         owner = await store.readCommittedTurn(scenarioId, claimTurnId);
       } catch (err) {
-        if (err instanceof ModelWriteOwnershipRefused) return reply.code(403).send(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason]);
+        if (err instanceof ModelWriteOwnershipRefused) {
+          if (readSuccessfulDoorEntries() > 0) return reply.code(403).send({ error: err.code });
+          const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
+          return reply.code(403).send({ error: refusalBody.error, message: refusalBody.message });
+        }
         log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
       }
@@ -2834,6 +2838,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // from the durable conversation, ahead of whatever is already held — see
     // `historyFromDurableTurns`. A failed read degrades to no history; it never
     // fails the turn.
+    const restoreHistory = histories.checkpoint(sessionId);
     const held = histories.get(sessionId);
     /** T1 (a): this conversation's earlier words are KNOWN — held in-process, or read durably. A failed or absent read leaves them unknown. */
     let earlierWordsKnown = !needsDurableSeed(held);
@@ -5209,7 +5214,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const successfulDoorEntries = readSuccessfulDoorEntries();
           const otherDoorEntries = successfulDoorEntries - (claimAppendSucceeded ? 1 : 0);
           if (otherDoorEntries === 0 && claimAppendSucceeded && released) {
-            return reply.code(403).send(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason]);
+            restoreHistory();
+            const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
+            return reply.code(403).send({ error: refusalBody.error, message: refusalBody.message });
           }
           if (otherDoorEntries > 0) {
             log.warn({ event: 'model_write.ownership_refused_after_commit', reason: err.reason,

@@ -64,6 +64,32 @@ describe('trimToRecentTurns', () => {
 });
 
 describe('HistoryStore', () => {
+  it('checkpoint restores items, typed and older words after trimming a refused turn', () => {
+    const store = new HistoryStore(10, 1);
+    store.recordTyped('session', 'q0'); store.recordTyped('session', 'q1');
+    store.set('session', [...turn(0), ...turn(1)]);
+    const before = store.get('session');
+    expect(JSON.stringify(before)).toContain('q0'); // Already beyond the recent window.
+    const restore = store.checkpoint('session');
+    store.recordTyped('session', 'q2'); store.set('session', [...store.get('session'), ...turn(2)]);
+    expect(JSON.stringify(store.get('session'))).toContain('q2');
+    restore();
+    expect(store.get('session')).toEqual(before);
+    expect(store.typedWords('session')).toEqual(['q0', 'q1']);
+    store.recordTyped('session', 'q3'); store.set('session', [...store.get('session'), ...turn(3)]);
+    expect(JSON.stringify(store.get('session'))).not.toContain('q2');
+    expect(JSON.stringify(store.get('session'))).toContain('q0');
+    expect(JSON.stringify(store.get('session'))).toContain('q1');
+  });
+
+  it('checkpoint restores absence in all three maps for a newly refused session', () => {
+    const store = new HistoryStore(10, 1);
+    const restore = store.checkpoint('new');
+    store.recordTyped('new', 'q0'); store.recordTyped('new', 'q1'); store.set('new', [...turn(0), ...turn(1)]);
+    restore();
+    expect(store.has('new')).toBe(false); expect(store.get('new')).toEqual([]); expect(store.typedWords('new')).toEqual([]);
+  });
+
   it('evicts the oldest session rather than growing without bound', () => {
     const store = new HistoryStore(3, 24);
     for (const id of ['a', 'b', 'c', 'd']) store.set(id, turn(1));
