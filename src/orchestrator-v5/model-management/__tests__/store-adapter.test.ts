@@ -7,6 +7,7 @@
  * mapping (MV001/MV404/MV409), row parsing, ordering and pointer reads.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { VersionRevisionConflictError } from '../types.js';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CARRIERS, legacyGraph, legacyRun, SCENARIO as LEGACY_SCENARIO } from '../../context/__tests__/legacy-gap-projection.fixture.js';
@@ -28,8 +29,8 @@ const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 
 interface MockConfig {
-  rpcResult?: { data?: unknown; error?: { message: string; code?: string } | null };
-  selectResult?: { data?: unknown; error?: { message: string; code?: string } | null };
+  rpcResult?: { data?: unknown; error?: { message: string; code?: string; details?: string } | null };
+  selectResult?: { data?: unknown; error?: { message: string; code?: string; details?: string } | null };
 }
 
 function makeClient(cfg: MockConfig = {}): {
@@ -124,6 +125,7 @@ function summaryRow(overrides: Record<string, unknown> = {}) {
 }
 
 const SAVE_WRITE = {
+  expected_revision: 7,
   scenario_id: SCENARIO,
   graph: { nodes: [{ id: 'n1' }], edges: [] },
   graph_identity_hash: HASH_A,
@@ -163,6 +165,7 @@ function atomicRestoreOutcome(overrides: Record<string, unknown> = {}) {
 }
 
 const ATOMIC_RESTORE_WRITE = {
+  expected_revision: 7,
   scenario_id: SCENARIO,
   version_id: VERSION_ID,
   mutation_id: '22222222-2222-4222-8222-222222222222',
@@ -184,7 +187,7 @@ const ATOMIC_RESTORE_WRITE = {
 };
 
 describe('SupabaseModelVersionStore.saveVersion', () => {
-  it('calls create_model_version with ALL named args (identity envelope stored verbatim)', async () => {
+  it('calls create_model_version_cas_v1 with ALL named args (identity envelope stored verbatim)', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseModelVersionStore(client);
 
@@ -196,8 +199,9 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
     });
 
     expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0]!.fn).toBe('create_model_version');
+    expect(rpcCalls[0]!.fn).toBe('create_model_version_cas_v1');
     expect(rpcCalls[0]!.args).toEqual({
+      p_expected_revision: 7,
       p_scenario_id: SCENARIO,
       p_graph: SAVE_WRITE.graph,
       p_graph_identity_hash: HASH_A,
@@ -209,6 +213,9 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
       p_provenance: 'user_save',
       p_event_id: null,
       p_expected_graph_identity_hash: HASH_B,
+      p_base_known: false,
+      p_expected_head_version_id: null,
+      p_expected_working_graph_identity_hash: null,
     });
     expect(outcome).toEqual(defaultOutcome());
   });
@@ -220,6 +227,9 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
     expect(rpcCalls[0]!.args.p_label).toBeNull();
     expect(rpcCalls[0]!.args.p_provenance).toBeNull();
     expect(rpcCalls[0]!.args.p_expected_graph_identity_hash).toBeNull();
+    expect(rpcCalls[0]!.args.p_base_known).toBe(false);
+    expect(rpcCalls[0]!.args.p_expected_head_version_id).toBeNull();
+    expect(rpcCalls[0]!.args.p_expected_working_graph_identity_hash).toBeNull();
   });
 
   it('surfaces deduped outcomes verbatim (no event, head returned)', async () => {
@@ -280,11 +290,13 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
 
 describe('SupabaseModelVersionStore.restoreVersionAtomic', () => {
   it('accepts an attested known actor from the guarded restore RPC', async () => {
-    const { client } = makeClient({
+    const { client, rpcCalls } = makeClient({
       rpcResult: { data: atomicRestoreOutcome(), error: null },
     });
     const store = new SupabaseModelVersionStore(client);
     const result = await store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE);
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0]?.fn).toBe('restore_model_version_atomic_cas_v1');
     expect(result.actor_kind).toBe('known');
     expect(result.authored_by).toBe('owner');
   });
@@ -595,5 +607,60 @@ describe('SupabaseModelVersionStore.getCurrentVersionId (pointer semantics)', ()
     });
     const store = new SupabaseModelVersionStore(client);
     expect(await store.getCurrentVersionId(SCENARIO)).toBeNull();
+  });
+});
+
+
+describe('required revision guard', () => {
+  it.each(['save', 'restore'] as const)('%s refuses an invalid expected_revision without calling RPC', async operation => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseModelVersionStore(client);
+    for (const revision of [undefined, null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, '7']) {
+      const write = operation === 'save' ? { ...SAVE_WRITE } : { ...ATOMIC_RESTORE_WRITE };
+      // Model untyped/malformed runtime callers without relaxing the production port.
+      Reflect.set(write, 'expected_revision', revision);
+      await expect(operation === 'save' ? store.saveVersion(write) : store.restoreVersionAtomic({ ...ATOMIC_RESTORE_WRITE, expected_revision: write.expected_revision }))
+        .rejects.toBeInstanceOf(ModelVersionStoreError);
+      expect(rpcCalls).toHaveLength(0);
+    }
+  });
+  it('restore passes the required revision, including zero', async () => {
+    const { client, rpcCalls } = makeClient({ rpcResult: { data: atomicRestoreOutcome(), error: null } });
+    await new SupabaseModelVersionStore(client).restoreVersionAtomic({ ...ATOMIC_RESTORE_WRITE, expected_revision: 0 });
+    expect(rpcCalls[0]?.args.p_expected_revision).toBe(0);
+  });
+});
+
+
+describe('OLRV1 adapter classification', () => {
+  it.each(['save', 'restore'] as const)('%s preserves the original measured refusal as cause, without retry', async operation => {
+    const error = { message: 'revision_conflict', code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) };
+    const { client, rpcCalls } = makeClient({ rpcResult: { data: null, error } });
+    const store = new SupabaseModelVersionStore(client);
+    const promise = operation === 'save' ? store.saveVersion(SAVE_WRITE) : store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE);
+    await expect(promise).rejects.toBeInstanceOf(VersionRevisionConflictError);
+    await expect(promise).rejects.toMatchObject({ expected: 7, current: 8, cause: error });
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0]?.fn).toBe(operation === 'save' ? 'create_model_version_cas_v1' : 'restore_model_version_atomic_cas_v1');
+  });
+});
+
+
+describe('OLRV1 unreadable DETAIL', () => {
+  it.each(['save', 'restore'] as const)('%s retains the request revision and unknown current without flattening the refusal', async operation => {
+    for (const details of [undefined, 'not JSON', JSON.stringify(null), JSON.stringify([]),
+      JSON.stringify({ reason: 'wrong', expected: 7, current: 8 }),
+      JSON.stringify({ reason: 'revision_conflict', expected: -1, current: 8 }),
+      JSON.stringify({ reason: 'revision_conflict', expected: 7, current: '8' }),
+      JSON.stringify({ reason: 'revision_conflict', expected: 7, current: Number.MAX_SAFE_INTEGER + 1 })]) {
+      const error = { code: 'OLRV1', message: 'revision_conflict', ...(details !== undefined ? { details } : {}) };
+      const { client, rpcCalls } = makeClient({ rpcResult: { data: null, error } });
+      const store = new SupabaseModelVersionStore(client);
+      const promise = operation === 'save' ? store.saveVersion({ ...SAVE_WRITE, expected_revision: 19 })
+        : store.restoreVersionAtomic({ ...ATOMIC_RESTORE_WRITE, expected_revision: 19 });
+      await expect(promise).rejects.toBeInstanceOf(VersionRevisionConflictError);
+      await expect(promise).rejects.toMatchObject({ expected: 19, current: null, cause: error });
+      expect(rpcCalls).toHaveLength(1);
+    }
   });
 });
