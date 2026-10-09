@@ -693,7 +693,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_response_emitted: write.response_emitted,
       p_llm_calls_used: write.llm_calls_used,
       p_duration_ms: write.duration_ms,
-      p_handler_facts: serialiseHandlerFacts(write.handler_facts),
+      p_handler_facts: serialiseHandlerFacts(write.handler_facts, write.run_evaluated_revisions),
       p_graph: write.graph ?? null,
       p_brief_text: write.briefText ?? null,
       p_pending_actions: write.pending_actions ?? [],
@@ -3193,13 +3193,21 @@ export class SupabaseSessionStore implements SessionStore {
  */
 function serialiseHandlerFacts(
   facts: readonly HandlerFact[],
-): Array<{ handler_id: string; action_type: string; noop: boolean; payload: unknown }> {
-  return facts.map((f) => ({
-    handler_id: f.fact_type,
-    action_type: f.fact_type,
-    noop: f.noop,
-    payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
-  }));
+  runEvaluatedRevisions?: Readonly<Record<string, number>>,
+): Array<{ handler_id: string; action_type: string; noop: boolean; payload: unknown; evaluated_scenario_revision?: number }> {
+  return facts.map((f) => {
+    const runId = f.fact_type === 'run_analysis' ? f.result.run_id : undefined;
+    const revision = typeof runId === 'string' && runEvaluatedRevisions !== undefined
+      && Object.hasOwn(runEvaluatedRevisions, runId) ? runEvaluatedRevisions[runId] : undefined;
+    return {
+      handler_id: f.fact_type,
+      action_type: f.fact_type,
+      noop: f.noop,
+      payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
+      ...(typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0
+        ? { evaluated_scenario_revision: revision } : {}),
+    };
+  });
 }
 
 /** Shared strict parser for the durable page and the bounded currentness read. */

@@ -2329,6 +2329,10 @@ export async function dispatchChipClickRunAnalysis(
         llm_calls_used: outcome.llm_calls_used,
         duration_ms: Date.now() - startedAt,
         handler_facts: enrichedFacts,
+        ...(outcome.__run_evaluated_revision !== undefined && enrichedFacts.some(f =>
+          f.fact_type === 'run_analysis' && f.result.run_id === outcome.__run_evaluated_revision?.run_id)
+          ? { run_evaluated_revisions: { [outcome.__run_evaluated_revision.run_id]: outcome.__run_evaluated_revision.revision } }
+          : {}),
         // V5 Stage 2B-1b: persist the turn-start (pre-dispatch) coaching snapshot.
         coaching_state: context.coaching_state,
         // V5 Conversation Context Reliability: persist the user's turn text;
