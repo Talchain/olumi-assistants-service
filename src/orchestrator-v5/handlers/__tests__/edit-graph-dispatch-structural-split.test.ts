@@ -37,6 +37,8 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
   return {
     ...actual,
+    // B-FIX1: the combined read follows the existing graph double.
+    loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
     loadPersistedGraphStrict: vi.fn(),
     loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
     // Mockable so ONE test can inject a prior run_analysis fact. Every other
@@ -94,7 +96,7 @@ const GRAPH = {
     { id: 'fac_spend', kind: 'factor', label: 'Marketing spend' },
     { id: 'fac_reach', kind: 'factor', label: 'Audience reach' },
   ],
-  edges: [{ from: 'dec_plan', to: 'goal_profit' }],
+  edges: [{ from: 'dec_plan', to: 'goal_profit', ...CAUSAL_BELIEF }],
 };
 
 const DRIVERS = [

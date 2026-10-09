@@ -1897,3 +1897,9 @@ describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
     expect(result.response.assistant_text).toContain(MODEL_VARIANCE_NOTE);
   });
 });
+
+// B-FIX1: an empty successful scenario read permits first-touch adoption on CAS ON.
+vi.mock('../../build-turn-context.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
+}));

@@ -35,6 +35,7 @@ import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { ModelReadFailedError } from '../graph-revision-conflict.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
 import { useAppendV6 } from '../append-v6-flag.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
@@ -138,6 +139,8 @@ import type {
   V2RunResponseEnvelope,
 } from '../../orchestrator/types.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
+import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../../validators/numeric-bounds.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import type {
   AnalysisStateIngress,
   GraphStateIngress,
@@ -1065,6 +1068,7 @@ function structuralEditDeclineResult(
 }
 
 async function tryStructuralEditTool(input: {
+  readonly persistedBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>;
   readonly editResult: EditGraphResult;
   readonly context: ConversationContext;
   readonly adapter: ReturnType<typeof getAdapter>;
@@ -1105,6 +1109,7 @@ async function tryStructuralEditTool(input: {
 }
 
 async function runStructuralEditTool(input: {
+  readonly persistedBase?: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>>;
   readonly editResult: EditGraphResult;
   readonly context: ConversationContext;
   readonly adapter: ReturnType<typeof getAdapter>;
@@ -1165,7 +1170,7 @@ async function runStructuralEditTool(input: {
 
   let persisted: unknown = null;
   try {
-    persisted = await loadPersistedGraphStrict(payload.scenario_id);
+    persisted = useAppendV6() ? input.persistedBase?.graph : await loadPersistedGraphStrict(payload.scenario_id);
   } catch (err) {
     log.warn(
       {
@@ -1927,9 +1932,25 @@ function editResultToOlumiResponse(
 function graphStateToGraphV3WithParseResult(
   graphState: GraphStateIngress,
   requestId: string,
+  sanctionedPersisted = false,
 ): { graph: GraphV3T; strict: boolean } {
-  const parsed = GraphV3.safeParse(graphState);
+  const parsed = GraphV3.safeParse(sanctionedPersisted ? floorGraphSigmaForCompute(graphState).graph : graphState);
   if (parsed.success) {
+    // The sanctioned projection is a validity gate only. Preserve stored
+    // sigma bytes in the provider/merge graph, just as the atomic version gate
+    // preserves them in hashes and persistence.
+    if (sanctionedPersisted) {
+      parsed.data.edges.forEach((edge, index) => {
+        const strength = graphState.edges[index]?.strength;
+        const std = strength && typeof strength === 'object' && 'std' in strength ? strength.std : undefined;
+        if (typeof std === 'number' && std <= 0 && edge.strength) edge.strength.std = std;
+      });
+      parsed.data.nodes.forEach((node, index) => {
+        const observed = graphState.nodes[index]?.observed_state;
+        const std = observed && typeof observed === 'object' && 'std' in observed ? observed.std : undefined;
+        if (typeof std === 'number' && std <= 0 && node.observed_state) node.observed_state.std = std;
+      });
+    }
     return { graph: parsed.data, strict: true };
   }
   return { graph: buildStructuralFallback(graphState, requestId, parsed.error), strict: false };
@@ -2278,7 +2299,7 @@ export async function dispatchEditGraph(
   params: DispatchEditGraphParams,
 ): Promise<DispatchEditGraphResult> {
   const { payload, requestId, analysisState } = params;
-  const graphState = params.graphState == null ? params.graphState : structuredClone(params.graphState);
+  let graphState = params.graphState == null ? params.graphState : structuredClone(params.graphState);
   const startedAt = Date.now();
   // ROADMAP 2.684 — the deadline baseline. `routeStartedAt` when the route
   // threaded it (the live path); the dispatcher's own start otherwise, which
@@ -2286,8 +2307,26 @@ export async function dispatchEditGraph(
   // the `requestStartMs` jsdoc on DispatchEditGraphParams.
   const requestStartMs = params.requestStartMs ?? startedAt;
 
+  // The provider and merge share one trusted graph/revision snapshot. Only
+  // a successful empty read permits first-touch adoption of the ingress graph.
+  let editBase: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> | undefined;
+  if (useAppendV6()) {
+    try {
+      editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
+      if (!Number.isSafeInteger(editBase.revision) || (editBase.revision ?? -1) < 0) throw new Error('Invalid revision');
+      if (editBase.graph !== null) {
+        if (!assertIngressGraphNumericBounds(editBase.graph).ok) throw new Error('Invalid server graph');
+        const parsed = GraphV3.safeParse(floorGraphSigmaForCompute(editBase.graph).graph);
+        if (!parsed.success) throw new Error('Invalid server graph');
+        graphState = GraphStateIngressSchema.parse(editBase.graph);
+      }
+    } catch (cause) {
+      throw new ModelReadFailedError(cause);
+    }
+  }
+
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
-    graphStateToGraphV3WithParseResult(graphState, requestId);
+    graphStateToGraphV3WithParseResult(graphState, requestId, editBase?.graph != null);
   let recordedAnswer: RecordedEffectAnswer | null = null;
   if (params.recordedEffectAnswer !== undefined) {
     const resolved = resolveRecordedOptionEffectAnswer({
@@ -2329,11 +2368,9 @@ export async function dispatchEditGraph(
   // serialiser (serialiseEditContextForLLMWithMeta, called from edit-graph.ts
   // for edit + repair), so it cannot leak into any other lane.
   let editBriefSlice: ConversationContext['brief'] = null;
-  let editBase: Awaited<ReturnType<typeof loadPersistedScenarioStateStrict>> | undefined;
   try {
     if (useAppendV6()) {
-      editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
-      editBriefSlice = projectBriefForEdit(editBase.briefText);
+      editBriefSlice = projectBriefForEdit(editBase!.briefText);
     } else {
       const briefText = await loadScenarioBriefText(payload.scenario_id, requestId);
       editBriefSlice = projectBriefForEdit(briefText);
@@ -3053,6 +3090,7 @@ export async function dispatchEditGraph(
         const toolOutcome = optionEffectWrite !== null
           ? null
           : await tryStructuralEditTool({
+            ...(useAppendV6() ? { persistedBase: editBase } : {}),
               editResult,
               context,
               adapter,
@@ -3251,9 +3289,7 @@ export async function dispatchEditGraph(
     let strictBase: unknown;
     try {
       if (useAppendV6()) {
-        // A failed brief read does not poison the save: retry the strict read.
-        editBase ??= await loadPersistedScenarioStateStrict(payload.scenario_id);
-        strictBase = editBase.graph;
+        strictBase = editBase!.graph;
       } else {
         strictBase = await loadPersistedGraphStrict(payload.scenario_id);
       }

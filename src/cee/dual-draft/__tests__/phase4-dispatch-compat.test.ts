@@ -274,3 +274,9 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
     expect(metadata.graph).toEqual(M1_GRAPH);
   });
 });
+
+// B-FIX1: an empty successful scenario read permits first-touch adoption on CAS ON.
+vi.mock('../../../orchestrator-v5/build-turn-context.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../orchestrator-v5/build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
+}));

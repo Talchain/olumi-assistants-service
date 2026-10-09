@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest, useAppendV6 } from '../../../src/orchestrator-v5/append-v6-flag.js';
 /**
  * ROADMAP 2.308 / S1 — route-level pin for the configure-option label anchor.
  *
@@ -24,7 +25,7 @@
  * Harness modelled on `route-v2-edit-graph-recovery.test.ts` (same mocks, same
  * telemetry capture).
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
@@ -46,7 +47,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
     storeDraftGraph: async () => undefined,
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraphAndBriefText: async (scenarioId: string) => ({ revision: 7, graph: useAppendV6() ? await loadGraphMock(scenarioId) : null, briefText: null }),
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
@@ -230,6 +231,8 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
 
   // ─── One read per turn (the diagnosis's explicit performance instruction) ──
   it('reads the persisted graph exactly ONCE across the anchor and the edit-lane reload', async () => {
+    // A2: the rollback graph-only reader census; CAS ON additionally captures a combined context snapshot.
+    __setUseAppendV6ForTest(false);
     dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
     await app.inject({
       method: 'POST',
@@ -248,6 +251,8 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
 
   // ─── The read is not added to turns it cannot help ────────────────────
   it('does NOT read the persisted graph for a turn with no configure-shaped payload', async () => {
+    // A2: the rollback graph-only reader census; CAS ON additionally captures a combined context snapshot.
+    __setUseAppendV6ForTest(false);
     await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -281,6 +286,8 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
 
   // ─── A failing labels read must never fail a turn ─────────────────────
   it('a session-store failure during the anchor read degrades, it does not 500 the turn', async () => {
+    // A2: the rollback graph-only reader census; CAS ON additionally captures a combined context snapshot.
+    __setUseAppendV6ForTest(false);
     loadGraphMock.mockRejectedValue(new Error('supabase down'));
     const res = await app.inject({
       method: 'POST',
@@ -303,3 +310,5 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
     });
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

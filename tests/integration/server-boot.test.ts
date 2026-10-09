@@ -1,6 +1,6 @@
 import { claimingTurnFenceStore } from '../utils/claiming-turn-fence-store.js';
 import { createMockSessionStore } from '../utils/mock-session-store.js';
-import { ModelWriteOwnershipRefused } from '../../src/orchestrator-v5/ownership/door-ownership.js';
+import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY } from '../../src/orchestrator-v5/ownership/door-ownership.js';
 import { admitCurrentTurnFence, turnFencePreHandler } from '../../src/orchestrator/turn-fence-prehandler.js';
 import { installOwnershipHarness } from '../utils/ownership-route-harness.js';
 /**
@@ -176,7 +176,7 @@ it.each(['admitted', 'no_claim', 'mark_throws'] as const)('central ownership 403
     });
     const response = await app.inject({ method: 'POST', url: '/door-refusal-fence', payload: VALID_PAYLOAD });
     expect(response.statusCode, response.payload).toBe(403);
-    expect(response.json()).toEqual({ error: 'model_write_ownership_refused' });
+    expect(response.json()).toEqual(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY.owner_unreadable);
     expect(append).not.toHaveBeenCalled();
     if (mode === 'no_claim') {
       expect(fence.rows).toHaveLength(0); expect(markGraphWriteFailed).not.toHaveBeenCalled();

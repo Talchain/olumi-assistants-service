@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../utils/revision-store-double.js';
 /**
  * Full-chain integration test for the V5 draft_graph typed-error envelope.
  *
@@ -38,14 +39,14 @@ vi.mock('../../../src/cee/unified-pipeline/index.js', () => ({
 // these modules at startup; route-v2 won't compile without them.
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
+  getSessionStore: () => withScenarioRevision(({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
+  })),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));
