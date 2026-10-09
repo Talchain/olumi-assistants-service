@@ -211,12 +211,13 @@ describe('DOMINANT_DRIVER measured-threshold licence', () => {
     });
     otherRun.result.run_id = 'other-measured-run';
     otherRun.result.computed_at = '2026-10-08T19:48:25.836Z';
-    const record = {
+    const record = RunDeliveredRecordSchema.parse({
       record_version: 1,
       run_id: capture.run_metadata.run_id,
       graph_hash: capture.run_metadata.graph_hash_at_run,
       phase3_blocks: [block],
-    };
+    });
+    const saved = JSON.parse(JSON.stringify(record)) as RunDeliveredRecord;
     store.readScenarioRunAnalysisFactsFor.mockResolvedValue({
       facts: [
         { fact, fact_row_id: 's3-row', fact_created_at: fact.result.computed_at },
@@ -226,7 +227,7 @@ describe('DOMINANT_DRIVER measured-threshold licence', () => {
     store.readNewestRunDeliveryFor.mockClear();
     store.readNewestRunDeliveryFor.mockImplementation(async (_scenarioId, runId) => runId === record.run_id ? ({
       fact_type: 'run_delivery', fact_version: 1, noop: false,
-      result: { run_id: record.run_id, record: JSON.parse(JSON.stringify(record)) },
+      result: { run_id: record.run_id, record: saved },
     }) : null);
     const read = await readScenarioAnalysis({
       scenarioId: capture.run_metadata.scenario_id,
@@ -237,11 +238,23 @@ describe('DOMINANT_DRIVER measured-threshold licence', () => {
     expect(store.readNewestRunDeliveryFor.mock.calls).toEqual([[capture.run_metadata.scenario_id, record.run_id]]);
     expect(read.current_read.delivered_record).toBeDefined();
     const reloaded = read.current_read.delivered_record!.phase3_blocks;
-    // This producer currently emits no typed subject for this lens. Even a
-    // measured Run cannot license a legacy saved block with target_refs: [].
-    const reloadBody = control.name === 'Leeds dominant POSITIVE' ? LEEDS_GROUNDED : control.body;
-    expect(JSON.stringify(reloaded)).toBe(JSON.stringify([{ ...block, body: reloadBody }]));
-    expect.soft(reloaded[0]).toMatchObject({ body: reloadBody });
+    expect(JSON.stringify(reloaded)).toBe(JSON.stringify(saved.phase3_blocks));
+    const reloadedBlock = reloaded[0];
+    if (reloadedBlock.type !== 'coaching') throw new Error('Expected the saved coaching block');
+    expect(reloadedBlock.body).toBe(block.body);
+    expect(reloadedBlock.body).toBe(control.body);
+    if (control.name === 'Leeds dominant POSITIVE') {
+      expect(block.target_refs).toEqual([
+        { kind: 'factor', id: LEEDS_ID, label: 'Leeds Site Activation' },
+      ]);
+      expect(saved.phase3_blocks[0].target_refs[0].id).toBe(control.subject);
+      expect(reloadedBlock.target_refs[0].id).toBe(control.subject);
+      expect(block.body).toContain(THRESHOLD);
+      expect(reloadedBlock.body).toContain(THRESHOLD);
+    } else if (control.rationale === 'DOMINANT_DRIVER') {
+      expect(block.body).not.toContain(THRESHOLD);
+      expect(reloadedBlock.body).not.toContain(THRESHOLD);
+    }
     if (read.analysis_result?.type !== 'analysis_result') throw new Error('Expected the selected Run analysis result');
     expect(read.analysis_result.enrichment?.flip_thresholds).toEqual(fact.result.enrichment?.flip_thresholds);
     expect(goalChanceDriverDisplayForAgent(read.analysis_result, capture.canonical_graph))
@@ -301,14 +314,28 @@ describe('legacy saved DOMINANT_DRIVER reload licence', () => {
     expectOnlyTailDropped(saved, reloaded, GROUNDED);
   });
 
-  it('reload row 2: r2 matched Leeds pair and typed saved factor reload unchanged', async () => {
+  it('reload row 2: composer persists matched Leeds subject and reload is unchanged', async () => {
     const enrichment = matchedThresholdEnrichment();
     const block = buildLensSuggestionCoachingBlock(makeFact(enrichment), CTX, null)!;
-    const { saved, reloaded } = await reloadSaved(enrichment, {
-      ...block, target_refs: [{ kind: 'factor', id: LEEDS_ID, label: 'Leeds Site Activation' }],
-    });
+    expect(block.target_refs[0]).toEqual({ kind: 'factor', id: LEEDS_ID, label: 'Leeds Site Activation' });
+    const { saved, reloaded } = await reloadSaved(enrichment, block);
     expect(JSON.stringify(reloaded)).toBe(JSON.stringify(saved));
     expect(reloaded.phase3_blocks[0]).toMatchObject({ body: `${LEEDS_GROUNDED} ${THRESHOLD}` });
+  });
+
+  it('reload row 2b: a LICENSED but ungrounded block drops the tail on the turn too, so turn === reload (no typed subject, no tail)', async () => {
+    const enrichment = matchedThresholdEnrichment();
+    enrichment.factor_sensitivity = enrichment.factor_sensitivity.map((row: Record<string, unknown>) =>
+      row.factor_id === LEEDS_ID ? { ...row, influence_rank: undefined } : row);
+    const fact = makeFact(enrichment);
+    expect(selectLens(fact)?.subjectRef?.id, 'still the Leeds subject').toBe(LEEDS_ID);
+    expect(selectLens(fact)?.body, 'the selection is still licensed').toBe(`${QUALITATIVE} ${THRESHOLD}`);
+    const block = buildLensSuggestionCoachingBlock(fact, CTX, null)!;
+    expect(block.target_refs, 'grounding refused (no influence_rank, as the refusal row above) → no typed subject').toEqual([]);
+    expect(block.body.endsWith(THRESHOLD), 'no tail without its persisted subject').toBe(false);
+    // Saved under the Run's own (valid, licensed) enrichment: the stored rank gap only refuses grounding at compose time.
+    const { saved, reloaded } = await reloadSaved(matchedThresholdEnrichment(), block);
+    expect(JSON.stringify(reloaded)).toBe(JSON.stringify(saved));
   });
 
   it.each([

@@ -162,6 +162,7 @@ export {
 import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
 import {
+  DOMINANT_DRIVER_MEASURED_TAIL,
   LENS_DSK_PROVENANCE,
   rankInterventions,
   whatIfSuggestionExecutorAvailable,
@@ -1936,6 +1937,20 @@ export function buildLensSurface(
         )
       : null;
 
+  // Persist the same selected factor and producer label used in the named
+  // DOMINANT_DRIVER sentence. The saved-Run reader licenses its measured tail
+  // from this typed subject, never by matching words in the body.
+  const dominantDriverTarget = selection.rationaleCode === 'DOMINANT_DRIVER'
+    ? groundedSensitivity?.grounded
+    : null;
+  // The measured tail ships only with its persisted typed subject: an ungrounded DOMINANT_DRIVER (no producer label, so no
+  // target_ref) says the qualitative sentence on the turn too, so the turn and the reload never differ.
+  const sensitivityBody = groundedSensitivity?.grounded?.body ?? selection.body;
+  const measuredTail = ` ${DOMINANT_DRIVER_MEASURED_TAIL}`;
+  const dominantDriverBody = selection.rationaleCode === 'DOMINANT_DRIVER' && dominantDriverTarget == null
+    && sensitivityBody.endsWith(measuredTail)
+    ? sensitivityBody.slice(0, -measuredTail.length) : sensitivityBody;
+
   const candidate = {
     ...commonMetadata(`coach:lens:${selection.lens}`, selection.lens, ctx),
     type: 'coaching' as const,
@@ -1945,15 +1960,16 @@ export function buildLensSurface(
       judgementOffer?.body ??
         statedDissentOffer?.body ??
         offer?.body ??
-        groundedSensitivity?.grounded?.body ??
-        selection.body,
+        dominantDriverBody,
       BODY_MAX,
     ),
     source: 'deterministic_signal' as const,
     target_refs: (judgementOffer?.targetRefs ??
       statedDissentOffer?.targetRefs ??
       offer?.targetRefs ??
-      []) as readonly TargetRef[],
+      (dominantDriverTarget != null
+        ? [{ kind: 'factor', id: dominantDriverTarget.factorId, label: dominantDriverTarget.factorLabel }]
+        : [])) as readonly TargetRef[],
     priority_rank: 15,
     // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
     // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM)
