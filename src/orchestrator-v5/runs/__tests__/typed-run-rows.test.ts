@@ -118,7 +118,7 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
   });
 
   it.each([
-    ['missing run_id', (fact: Json) => { delete fact.result.run_id; }, /run_id/],
+    ['invalid run_id', (fact: Json) => { fact.result.run_id = ''; }, /run_id/],
     ['non-numeric chance', (fact: Json) => { fact.result.enrichment.option_comparison[0].probability_of_goal = '0.5'; }, /chance|probability_of_goal/],
     ['chance above one', (fact: Json) => { fact.result.enrichment.option_comparison[0].probability_of_goal = 1.1; }, /chance|probability_of_goal/],
     ['invalid precision', (fact: Json) => { fact.result.enrichment.option_comparison[0].probability_of_goal_precision.interval_lower = 2; }, /precision|interval/],
@@ -141,7 +141,7 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
   it('one bad fact among N preserves every other mapped fact', () => {
     const first = factFromRead(succeeded);
     const bad = factFromRead(succeeded);
-    delete bad.result.run_id;
+    bad.result.run_id = '';
     const last = factFromRead(secondSucceeded);
     const mapped = [first, bad, last].map(mapFact);
     expect(mapped.filter(result => 'quarantine' in result)).toHaveLength(1);
@@ -155,13 +155,13 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     expect(mapped).toEqual({ quarantine: 'scenario_id_mismatch' });
   });
 
-  it.each(['missing', 'null'] as const)('skips %s legacy identity only in backfill, before current result shape requirements', shape => {
+  it.each(['missing', 'null'] as const)('marks %s legacy identity unattributable in both modes, before current result shape requirements', shape => {
     const fact = factFromRead(succeeded);
     const scenarioId = fact.result.scenario_id;
     fact.result = shape === 'missing' ? {} : { run_id: null };
-    expect(toTypedRunRows(fact, { scenarioId, mode: 'backfill' })).toEqual({ skipped_legacy: true });
-    expect(toTypedRunRows(fact, { scenarioId })).toEqual({ quarantine: 'run_id_absent' });
-    expect(toTypedRunRows(fact, { scenarioId, mode: 'live' })).toEqual({ quarantine: 'run_id_absent' });
+    expect(toTypedRunRows(fact, { scenarioId, mode: 'backfill' })).toEqual({ unattributable: 'run_id_absent' });
+    expect(toTypedRunRows(fact, { scenarioId })).toEqual({ unattributable: 'run_id_absent' });
+    expect(toTypedRunRows(fact, { scenarioId, mode: 'live' })).toEqual({ unattributable: 'run_id_absent' });
   });
 
   it.each(['missing', 'null'] as const)('skips a built refusal marker with %s run identity in both modes without quarantine', shape => {
@@ -194,7 +194,6 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
   it.each([
     ['another fact type', (fact: Json) => { fact.fact_type = 'create_scenario'; }],
     ['noop', (fact: Json) => { fact.noop = true; }],
-    ['another status', (fact: Json) => { fact.result.enrichment.analysis_status = 'blocked'; }],
   ] as const)('does not classify %s as a refusal marker', (_name, change) => {
     const fact: Json = clone(buildAnalysisRefusalFact({
       scenarioId: succeeded.scenario_id, reasonCode: 'analysis_not_ready',
@@ -203,11 +202,20 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'live' })).toHaveProperty('quarantine');
   });
 
-  it('quarantines a computed fact without run_id in live mode', () => {
+  it.each(['live', 'backfill'] as const)('a non-refusal legacy status is unattributable in %s; malformed with run_id stays quarantined', mode => {
+    const fact: Json = clone(buildAnalysisRefusalFact({ scenarioId: succeeded.scenario_id, reasonCode: 'analysis_not_ready' }));
+    fact.result.enrichment.analysis_status = 'blocked';
+    expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode })).toEqual({ unattributable: 'run_id_absent' });
+    const malformed = factFromRead(succeeded);
+    malformed.result.input_snapshot.options = [null];
+    expect(toTypedRunRows(malformed, { scenarioId: malformed.result.scenario_id, mode })).toHaveProperty('quarantine', expect.stringContaining('input_snapshot.options.0'));
+  });
+
+  it('marks a computed fact without run_id unattributable in live mode', () => {
     const fact = factFromRead(succeeded);
     delete fact.result.run_id;
     expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'live' }))
-      .toEqual({ quarantine: 'run_id_absent' });
+      .toEqual({ unattributable: 'run_id_absent' });
   });
 
   it('maps a refusal carrying a run_id through the normal withheld Run path', () => {
@@ -274,6 +282,48 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     const mapped = mapFact(fact);
     expect(mapped).toHaveProperty('ok');
     if ('ok' in mapped) expect(mapped.ok).toMatchObject({ leading_option_id: null, constraint_may_name_leading_option: null });
+  });
+
+  it('slice C replaces three functions: only claim anti-joins and finisher terminal check; rollback exact', () => {
+    const slice = readFileSync(new URL('../../../../supabase/migrations/20261009040000_phase2_a_legacy_unattributable.sql', import.meta.url), 'utf8');
+    const rollback = readFileSync(new URL('../../../../supabase/migrations/rollback/20261009040000_phase2_a_legacy_unattributable_rollback.sql.do-not-apply', import.meta.url), 'utf8');
+    expect(slice.match(/CREATE OR REPLACE FUNCTION/g)).toHaveLength(3);
+    for (const name of ['claim_analysis_run_facts', 'claim_analysis_run_reconciliation', 'finish_analysis_run_sweep']) {
+      const pattern = new RegExp('CREATE (?:OR REPLACE )?FUNCTION public\\.' + name + '\\([\\s\\S]*?\\$\\$;');
+      const original = migration.match(pattern)?.[0]?.replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION');
+      const changed = slice.match(pattern)?.[0];
+      expect(original).toBeDefined();
+      const expected = name === 'finish_analysis_run_sweep'
+        ? original?.replace(
+          '      OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = h.id) AS terminal',
+          '      OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = h.id)\n'
+            + '      OR EXISTS (SELECT 1 FROM public.analysis_run_unattributable u WHERE u.fact_id = h.id) AS terminal')
+        : original?.replace(
+          '      AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = h.id)\n',
+          '      AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = h.id)\n'
+            + '      AND NOT EXISTS (SELECT 1 FROM public.analysis_run_unattributable u WHERE u.fact_id = h.id)\n');
+      expect(changed).toBe(expected);
+      expect(rollback.match(pattern)?.[0]).toBe(original);
+    }
+    for (const sql of [slice, rollback]) {
+      expect(sql.replace(/^--.*$/gm, '').trim().split(';')[0]).toBe("SET lock_timeout = '3s'");
+      expect(sql).toMatch(/BEGIN;[\s\S]*COMMIT;/);
+    }
+    expect(slice).not.toMatch(/REFERENCES\s+public\.v5_handler_facts|CREATE\s+TRIGGER/i);
+    const outsideBodies = slice.replace(/AS \$\$[\s\S]*?\$\$;/g, '');
+    expect(outsideBodies).not.toMatch(/\b(?:FROM|JOIN|ALTER TABLE|LOCK TABLE)\s+public\.v5_handler_facts/i);
+    expect(slice).toContain("reason TEXT NOT NULL CHECK (reason IN ('run_id_absent'))");
+    expect(slice).toContain('ALTER TABLE public.analysis_run_unattributable ENABLE ROW LEVEL SECURITY');
+    expect(slice).toContain('REVOKE ALL ON TABLE public.analysis_run_unattributable FROM PUBLIC, anon, authenticated');
+    expect(slice).toContain('REVOKE ALL ON FUNCTION public.mark_analysis_fact_unattributable(uuid,text) FROM PUBLIC, anon, authenticated');
+    // DL ruling: the already-quarantined legacy move stays in the migration; it reads only the quarantine table.
+    expect(slice).toContain('SELECT fact_id, reason, seen_at FROM public.analysis_run_quarantine');
+    expect(slice).toContain('ON CONFLICT (fact_id) DO NOTHING');
+    const marker = slice.match(/CREATE FUNCTION public\.mark_analysis_fact_unattributable\([\s\S]*?\$\$;/)?.[0];
+    expect(marker).toContain('SECURITY DEFINER');
+    expect(marker).toContain('SET search_path = pg_catalog, public');
+    expect(marker).toContain('FROM public.analysis_run_attempts WHERE fact_id = p_fact_id FOR UPDATE');
+    expect(marker).toContain('FROM public.analysis_run_unattributable WHERE fact_id = p_fact_id');
   });
 
   it('reconciliation uses the indexed anti-join without a watermark and releases the shared lease without advancing it', () => {
@@ -378,6 +428,10 @@ describe('S1 TS golden corpus and dormant typed reader', () => {
     const rows = parity2b();
     expect(rows.find(row => row.case_id === '30-huge-100-options')?.options).toHaveLength(100);
     expect(rows.find(row => row.case_id === '26-duplicate-run-id')?.quarantine?.reason).toBe('duplicate_run_id');
+    for (const caseId of ['02-legacy-missing-run', '03-legacy-null-run']) {
+      expect(rows.find(row => row.case_id === caseId)).toMatchObject({ disposition: 'unattributable', quarantine: null,
+        unattributable: { reason: 'run_id_absent' } });
+    }
     expect(rows.find(row => row.case_id === '04-refusal-marker')?.disposition).toBe('skipped_refusal');
     expect(rows.find(row => row.case_id === '31-null-input-option')?.quarantine?.reason).toBe('input_snapshot_invalid');
     expect(rows.filter(row => row.run !== null).every(row => row.run?.scenario_revision === null && row.run.revision_source === 'legacy_unknown')).toBe(true);
