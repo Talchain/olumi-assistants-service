@@ -6731,7 +6731,52 @@ export function createAgentCapabilities(
          */
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
-        const receipts: ReceiptSummary[] = [];
+        type CommittedValueFact = { operation: number; target: string; native?: number; receipt?: ReceiptSummary };
+        type CommittedRangeFact = { ranges: { id: string; range: number; value: number }[]; receipt?: ReceiptSummary };
+        const committed: (CommittedValueFact | CommittedRangeFact)[] = [];
+        let finalState: GraphRead | null = null;
+        // Guest commits have facts but no version receipt. Never manufacture a receipt for them.
+        const receiptsOf = (facts: typeof committed): ReceiptSummary[] => facts.flatMap(f => f.receipt ? [f.receipt] : []);
+        const readValueChain = async (): Promise<GraphRead | null> => {
+          finalState = null;
+          const state = await readGraph(ctx.scenario_id);
+          if (state === null || !Array.isArray(state.raw.nodes) || state.nodes.length === 0 || !Array.isArray(state.raw.edges)) return null;
+          finalState = state;
+          return state;
+        };
+        const finishValueChain = (committed: (CommittedValueFact | CommittedRangeFact)[], outcome: ToolResult | string): ToolResult => {
+          const receipts = receiptsOf(committed);
+          const result = typeof outcome === 'string'
+            ? partialWriteOutcome(decision.proposal.proposal_id, receipts, outcome) : outcome;
+          if (committed.length === 0) return result;
+          const valueFacts = committed.filter((f): f is CommittedValueFact => 'operation' in f);
+          const allValuesRead = finalState !== null && ops.every((o, i) => {
+            if (!valueFacts.some(f => f.operation === i)) return false;
+            const last = valueFacts.filter(f => f.target === o.path).at(-1)!;
+            const node = finalState!.nodes.find(n => n.id === o.path);
+            const os = node?.observed_state;
+            const native = typeof os?.raw_value === 'number' ? os.raw_value
+              : typeof os?.value === 'number' && typeof os.cap === 'number' ? os.value * os.cap : os?.value;
+            return typeof native === 'number' && Number.isFinite(native) && (last.native === undefined || native === last.native);
+          });
+          const allRangesRead = finalState !== null && committed.every(f => !('ranges' in f) || f.ranges.every(range => {
+            const os = finalState!.nodes.find(n => n.id === range.id)?.observed_state;
+            return os?.cap === range.range && os.raw_value === range.value && os.value === range.value / range.range;
+          }));
+          const unconfirmed = finalState === null || ((result.ok === true || result.applied === true) && (!allValuesRead || !allRangesRead));
+          const finished: ToolResult = unconfirmed && (typeof outcome !== 'string' || outcome === 'values_saved_read_unconfirmed')
+            ? { ...result, ...partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed'), current_state_unknown: true }
+            : { ...result, mutated: true, receipts };
+          // A historical commit can never leave through the no-write branch.
+          if (finished.refusal === 'not_applied') {
+            return { ...finished, ...partialWriteOutcome(decision.proposal.proposal_id, receipts,
+              finalState === null ? 'values_saved_read_unconfirmed' : 'values_saved_remaining_values_refused') };
+          }
+          if (finished.ok === true && finished.applied === true && allValuesRead && allRangesRead && result.partially_applied !== true) {
+            proposals.markApplied(decision.proposal.proposal_id, receipts);
+          }
+          return finished;
+        };
         /**
          * Did THIS approval's own write for that factor actually land? Decided per
          * operation by `valueWriteCommittedByThisRequest` — see its docblock for what the
@@ -6743,10 +6788,6 @@ export function createAgentCapabilities(
          * moves for ANY writer — so an unrelated edit landing in the same window turned a
          * refusal into "Saved", and the old value read back became the "recorded" figure.
          */
-        const ownWrite = new Map<string, boolean>();
-        let valueWriteCommitted = false;
-        /** What THIS approval's own committed write stored, per target — the historical fact. */
-        const ownNative = new Map<string, number>();
         /** The frame the factor already carries, read from the pre-write state. */
         const beforeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
         const capOf = (id: string): number | undefined => {
@@ -6782,21 +6823,22 @@ export function createAgentCapabilities(
           // (a revision they named, even inside a proposal that also holds Olumi's figures —
           // `valueOpAuthor`) sends no context: the writer's own stamp is the truth.
           let r: Awaited<ReturnType<InternalDispatch>>;
+          finalState = null;
           try {
             r = valueOpAuthor(o, decision.proposal) === 'model_proposed'
               ? await runWithApprovedAdoption(
                 { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, targetId: o.path, rawValue: approvedValue }, send)
               : await send();
+            r = { ...r, json: r.json ?? {} };
           } catch (error) {
-            if (![...ownWrite.values()].some(Boolean)) throw error;
-            return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+            if (committed.length === 0) throw error;
+            return finishValueChain(committed,
               laterSaveConflict(error) ? 'values_saved_remaining_values_not_saved' : 'values_saved_remaining_values_unconfirmed');
           }
           // ⛔ OWN-WRITE EVIDENCE, PER OP, FROM THIS REQUEST'S OWN RESPONSE (Codex
           // 5810763729 item 4). A later read cannot tell "my write landed" from "the old
           // number was already there" or "someone else wrote it".
           const own = valueWriteCommittedByThisRequest(r, o.path);
-          valueWriteCommitted ||= own;
           if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
           else if (!own) {
             // A 200 that is not this op's committed write: a refusal (committed as a turn,
@@ -6807,30 +6849,29 @@ export function createAgentCapabilities(
           const rc = receiptSummaryOf(r.json);
           // A receipt is reported only alongside this op's own committed write, so the
           // result can never pair "not recorded" with "saved as version N".
-          if (own && rc.summary !== null) receipts.push(rc.summary);
+          if (own) committed.push({ operation: i, target: o.path, native: ownCommittedNative(r, o.path),
+            ...(rc.summary !== null ? { receipt: rc.summary } : {}) });
           if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
-          ownWrite.set(o.path, own);
-          const mine = ownCommittedNative(r, o.path);
-          if (mine !== undefined) ownNative.set(o.path, mine);
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
         // (unit caps, percent-vs-fraction), so the recorded number is read back
         // and reported EVEN WHEN it differs from the one the user approved —
         // that difference is exactly the thing a user must not discover later.
-        const valueSaveCommitted = receipts.length > 0 || valueWriteCommitted;
+        const valueSaveCommitted = committed.length > 0;
         let afterSet: GraphRead | null;
-        try { afterSet = await readGraph(ctx.scenario_id); }
+        try { afterSet = await readValueChain(); }
         catch (error) {
           if (!valueSaveCommitted) throw error;
-          return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed');
+          return finishValueChain(committed, 'values_saved_read_unconfirmed');
         }
         if (afterSet === null && valueSaveCommitted) {
-          return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed');
+          return finishValueChain(committed, 'values_saved_read_unconfirmed');
         }
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
         const superseded: { id: string; factor: string; saved: number; now: number }[] = [];
-        for (const o of ops) {
+        for (const [i, o] of ops.entries()) {
+          const own = committed.some(f => 'operation' in f && f.operation === i);
           const node = byId.get(o.path);
           const sos = (node?.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
           const sCap = typeof sos.cap === 'number' && sos.cap > 0 ? sos.cap : undefined;
@@ -6845,7 +6886,7 @@ export function createAgentCapabilities(
            * reported as "Saved", and the number shown was the model's divisor rather than
            * the user's own. So: read the native figure (`raw_value`, else the model value
            * scaled back up by the cap), and require THIS operation's own committed write
-           * (`ownWrite`, from its own response — never a receipt-or-hash guess).
+           * (`committed`, from its own response — never a receipt-or-hash guess).
            *
            * ⚠ A RESCALE IS STILL REPORTED, NOT SUPPRESSED. When the handler stores a
            * different number from the one approved, `recorded` carries what is actually
@@ -6871,7 +6912,7 @@ export function createAgentCapabilities(
             // shape: "expected [{…(3)},{…(4)}] to deeply equal [{…(3)},{…(3)}]". `recorded:
             // null` already carries the whole meaning, so the diagnostic key is dropped
             // rather than the contract widened.
-            recorded: ownWrite.get(o.path) === true && storedNative !== undefined ? storedNative : null,
+            recorded: own && storedNative !== undefined ? storedNative : null,
           });
           /**
            * ⛔ SAVED BY US, THEN CHANGED BY SOMEONE ELSE (Codex pre-review of #1851, 5825735512).
@@ -6881,9 +6922,9 @@ export function createAgentCapabilities(
            * "rescale" — and the present state is reported separately. Nothing after this point
            * frames, re-reads or describes that target as this approval's.
            */
-          const mine = ownNative.get(o.path);
+          const mine = committed.filter((f): f is CommittedValueFact => 'operation' in f && f.target === o.path).at(-1)?.native;
           const last = applied[applied.length - 1]!;
-          if (ownWrite.get(o.path) === true && mine !== undefined && storedNative !== undefined && storedNative !== mine) {
+          if (own && mine !== undefined && storedNative !== undefined && storedNative !== mine) {
             last.recorded = mine;
             superseded.push({ id: o.path, factor: last.factor, saved: mine, now: storedNative });
           }
@@ -6902,7 +6943,7 @@ export function createAgentCapabilities(
           .filter((_, i) => applied[i] === undefined || applied[i]!.recorded === null)
           .map((o) => beforeById.get(o.path)?.label ?? o.path);
         if (landed.length === 0) {
-          return {
+          return finishValueChain(committed, {
             ok: false, mutated: false, applied: false, refusal: 'not_applied',
             // ⛔ NOT "the model is unchanged": a refusal proves only that THIS approval
             // wrote nothing. Another writer may have changed the model in the same window.
@@ -6910,7 +6951,7 @@ export function createAgentCapabilities(
               'None of the values were recorded, so this approval left the model unchanged. Read the model again ' +
               'before describing it: someone else may have changed it meanwhile.',
             failures, values: applied,
-          };
+          });
         }
 
         /**
@@ -7031,14 +7072,14 @@ export function createAgentCapabilities(
              * already carries a usable frame in the fresh read is left alone. If
              * that leaves nothing to do, no write is attempted at all.
              *
-             * A failed re-read falls back to the earlier read: degrading to
-             * today's behaviour is right, because refusing the whole authorisation
-             * because a READ failed would lose work the user already approved.
+             * A failed re-read exits with the historical commits; stale bytes cannot
+             * establish the current model or authorise the next whole-graph write.
              */
             let nowRead: GraphRead | null;
-            try { nowRead = await readGraph(ctx.scenario_id); }
-            catch { return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed'); }
-            const base = nowRead ?? afterSet;
+            try { nowRead = await readValueChain(); }
+            catch { return finishValueChain(committed, 'values_saved_read_unconfirmed'); }
+            if (nowRead === null) return finishValueChain(committed, 'values_saved_read_unconfirmed');
+            const base = nowRead;
             const stillNeeds = new Map<string, number>();
             for (const [id, range] of frameById) {
               const node = base.nodes.find((n) => n.id === id);
@@ -7095,6 +7136,7 @@ export function createAgentCapabilities(
              */
             let reg: { status: number; json: Record<string, unknown> };
             try {
+              if (stillNeeds.size > 0) finalState = null;
               reg = stillNeeds.size === 0
               ? { status: 200, json: {} }
               : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
@@ -7123,8 +7165,9 @@ export function createAgentCapabilities(
                 ? { expected_graph_identity_hash: base.graph_identity_hash }
                 : {}),
             });
+              reg = { ...reg, json: reg.json ?? {} };
             } catch (error) {
-              return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+              return finishValueChain(committed,
                 laterSaveConflict(error) ? 'values_saved_range_not_saved' : 'values_saved_range_unconfirmed');
             }
             if (reg.status !== 200) {
@@ -7164,7 +7207,7 @@ export function createAgentCapabilities(
                  * the current state is unknown — never advise on a state we could
                  * not observe.
                  */
-                const fresh = await readGraph(ctx.scenario_id).catch(() => null);
+                const fresh = await readValueChain().catch(() => null);
                 if (fresh === null) {
                   // Nothing here is verified, so nothing is claimed: the list is
                   // dropped and the unknown marker travels in its place.
@@ -7243,6 +7286,8 @@ export function createAgentCapabilities(
                   });
                 }
               } else {
+                const fresh = await readValueChain().catch(() => null);
+                if (fresh === null) currentStateUnknown = true;
                 failures.push({
                   factor: 'scale_frame',
                   detail: `could not attach a range: http ${reg.status}`,
@@ -7252,15 +7297,14 @@ export function createAgentCapabilities(
             }
             if (reg.status === 200 && stillNeeds.size > 0) {
               const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
-              if (typeof mv?.version_id === 'string' && typeof mv.version_number === 'number') {
-                receipts.push({ version: mv.version_number, version_id: mv.version_id,
-                  mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '', source_turn_id: '' });
-              }
+              committed.push({ ranges: framed.map(f => ({ id: f.id, range: f.range, value: f.value })),
+                ...(typeof mv?.version_id === 'string' && typeof mv.version_number === 'number'
+                  ? { receipt: { version: mv.version_number, version_id: mv.version_id,
+                    mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '', source_turn_id: '' } } : {}) });
             }
 
           }
         }
-        if (landed.length === applied.length && (partialOutcome === undefined || !useAppendV6())) proposals.markApplied(decision.proposal.proposal_id, receipts);
         /**
          * ⛔⛔ RE-DERIVE THE SUBSTITUTION FROM THE FINAL WRITE, NOT THE FIRST ONE.
          *
@@ -7280,17 +7324,15 @@ export function createAgentCapabilities(
          * No consumer could recover it, because the fact was never emitted.
          *
          * So the recorded side is re-read from the bytes that actually landed. A
-         * failed re-read does not fabricate one: it falls back to the arithmetic
-         * we know we sent (`raw / range`, on a register that returned 200) and
-         * `frame_derivation_unread` records that it was derived rather than
-         * observed.
+         * failed re-read exits through the same door with the committed facts and
+         * the ACKed read-unconfirmed outcome.
          */
         let recordedUnread = false;
         if (framed.length > 0) {
-          const finalRead = await readGraph(ctx.scenario_id);
+          const finalRead = await readValueChain().catch(() => null);
+          if (finalRead === null) return finishValueChain(committed, 'values_saved_read_unconfirmed');
           const finalById = new Map((finalRead?.nodes ?? []).map((n) => [n.id, n]));
           const framedRangeByLabel = new Map(framed.map((f) => [f.factor, f.range]));
-          if (finalRead === null) recordedUnread = true;
           for (let i = 0; i < ops.length; i += 1) {
             const row = applied[i];
             if (row === undefined || row.recorded === null || supersededIds.has(ops[i].path)) continue;
@@ -7310,13 +7352,12 @@ export function createAgentCapabilities(
         }
         const rescaled = landed.filter((a) => a.recorded !== a.requested);
         const incomplete = partialOutcome !== undefined || landed.length < applied.length;
-        return {
+        return finishValueChain(committed, {
           ok: !incomplete || !useAppendV6(), mutated: true, applied: !incomplete || !useAppendV6(),
           ...(incomplete && useAppendV6() ? { refusal: 'partially_applied', partially_applied: true,
             outcome: partialOutcome ?? 'values_saved_remaining_values_refused',
             detail: PARTIAL_WRITE_MESSAGES[partialOutcome ?? 'values_saved_remaining_values_refused'] } : {}),
           proposal_id: decision.proposal.proposal_id,
-          receipts,
           adopted_count: landed.length,
           requested_count: applied.length,
           values: applied,
@@ -7396,7 +7437,7 @@ export function createAgentCapabilities(
                   : '') +
                 'The user should be told and invited to correct any range that is wrong.'
               : ''),
-        };
+        });
       }
 
       const op = ops[0];
