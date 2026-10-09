@@ -2903,10 +2903,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
     const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
-    if (typedNow !== null) {
-      histories.recordTyped(sessionId, typedNow);
-      recordUnsavableEffect();
-    }
+    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
+    // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
+    if (typedNow !== null) recordUnsavableEffect();
 
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
