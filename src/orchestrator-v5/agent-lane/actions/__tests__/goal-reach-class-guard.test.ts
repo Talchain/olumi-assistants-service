@@ -9,14 +9,14 @@ import { describe, expect, it } from 'vitest';
 import paulStored from '../../__tests__/fixtures/goal-reach-paul-graph-632b92b9.json';
 import {
   GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH,
-  GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL,
+  GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_HORIZON_NOT_TESTED,
   GOAL_FIGURES_SHARE_APPROXIMATION, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_FIGURES_WITHHELD_CODES, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   readOptionResultSources,
 } from '../../../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { GOAL_FIGURES_NO_STATED_TARGET, withholdUnusableGoalChances } from '../../../goal-target/goal-chance-gate.js';
-import { withholdGoalFiguresForChanceGoal, withholdGoalFiguresForMissingCurrentLevel, withholdGoalFiguresForUntestableTarget } from '../../../tools/handlers/run-analysis.js';
+import { withholdGoalFiguresForChanceGoal, withholdGoalFiguresForMissingCurrentLevel, withholdGoalFiguresForUntestedHorizon, withholdGoalFiguresForUntestableTarget } from '../../../tools/handlers/run-analysis.js';
 import { detectIdenticalArms } from '../../../tools/handlers/identical-arms.js';
 import { goalChanceWithheldForAgent } from '../../goal-chance-withheld.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../goal-certainty.js';
@@ -43,6 +43,8 @@ const IDENTITY = GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED;
  * coherent identity row. Remove an entry when its actual bar recovery is delivered.
  */
 export const KNOWN_GAPS = new Set<string>([
+  // P45 supplies Add monthly changes; Science §(o′) forbids a control before its writer serves.
+  GOAL_FIGURES_HORIZON_NOT_TESTED,
   // PLoT's scale-cut reason needs a rescale/correct-size door on the bar.
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   // Identical arms need a control that changes/adopts the actual option levels.
@@ -168,6 +170,11 @@ const INVENTORY: Readonly<Record<string, { make: () => Fixture; resolves: readon
     const fixture = thresholdFixture('missing_goal_baseline');
     return { ...fixture, result: withholdGoalFiguresForMissingCurrentLevel(fixture.result, fixture.graph) };
   }, resolves: ['set_current_level'] },
+  // P45 owns the monthly-changes writer; this slice deliberately offers no inert control.
+  [GOAL_FIGURES_HORIZON_NOT_TESTED]: { make: () => {
+    const graph = twoParentGraph(); goalOf(graph).goal_horizon_months = 9;
+    return { graph, result: withholdGoalFiguresForUntestedHorizon(baselineResult(), graph) };
+  }, resolves: [] },
   [GOAL_FIGURES_OPTIONS_IDENTICAL]: { make: identicalOptions, resolves: [] },
   [GOAL_FIGURES_PROBABILITY_UNUSABLE]: { make: () => {
     const graph = twoParentGraph(); const result = baselineResult();

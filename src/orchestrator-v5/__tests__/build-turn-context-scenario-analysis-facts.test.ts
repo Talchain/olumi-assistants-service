@@ -298,3 +298,29 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
     }
   });
 });
+
+// DL 87114: both persisted fact pages enter reasoning with the graph from this storage read.
+it('stored hot and durable chances are withheld after H=12 is added, with a no-H contrast', async () => {
+  const run = analysisFact('stored');
+  if (run.fact_type !== 'run_analysis') throw new Error('Run fixture');
+  run.result.enrichment = { analysis_status: 'completed',
+    option_comparison: [{ option_id: 'option-stored', probability_of_goal: .63, win_probability: .8 }],
+    inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
+      option_ids: ['option-stored'], pct_by_option: { 'option-stored': 63 } }] };
+  const graph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue' }], edges: [] };
+  const bytes = JSON.stringify(run);
+  const load = () => buildTurnContext(PAYLOAD, 'stored-boundary', { sessionStore: createNoopSessionStore({
+    priorTurns: [priorTurn()], facts: [run], scenarioAnalysisFacts: [run], loadGraphResult: graph,
+  }) });
+  const before = await load();
+  expect(JSON.stringify(before.prior_facts)).toContain('probability_of_goal');
+  Object.assign(graph.nodes[0]!, { goal_horizon_months: 12 });
+  const after = await load();
+  for (const facts of [after.prior_facts, after.scenario_analysis_fact_set?.facts]) {
+    expect(JSON.stringify(facts)).toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
+    expect(JSON.stringify(facts)).not.toContain('probability_of_goal');
+    expect(JSON.stringify(facts)).not.toContain('GOAL_CHANCE_LICENSED');
+    expect(JSON.stringify(facts)).toContain('win_probability');
+  }
+  expect(JSON.stringify(run)).toBe(bytes);
+});

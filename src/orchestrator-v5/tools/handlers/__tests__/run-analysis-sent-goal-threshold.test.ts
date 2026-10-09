@@ -39,6 +39,11 @@ describe('Run handler records the sent goal threshold on its stored licence', ()
         exists_probability: 1, effect_direction: 'positive', provenance: { source: 'user_specified',
           natural_effect: { amount: 1200, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: 'count',
             strength_mean: 0.6, strength_mean_frame: 'edge_strength' } } }] };
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of graph.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
     graph.nodes[0].goal_threshold = 0.8;
     if (attested) {
       graph.nodes[0].goal_horizon_months = 9;

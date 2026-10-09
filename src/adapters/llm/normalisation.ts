@@ -169,6 +169,27 @@ export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
   }
 }
 
+/** §(ad) attestation: no draft or register caller can author this field. */
+const PARKED_HORIZON_ATTESTATION_FIELDS = ['horizon_basis'] as const;
+
+/** Strip caller-authored attestation at register ingress; preparation carries the stored basis back. */
+export function withoutParkedHorizonAttestations<T>(graph: T): T {
+  if (graph === null || typeof graph !== 'object') return graph;
+  const raw = graph as Record<string, unknown>;
+  if (!Array.isArray(raw.nodes)) return graph;
+  let changed = false;
+  const nodes = raw.nodes.map((node: unknown) => {
+    if (node === null || typeof node !== 'object' || Array.isArray(node)) return node;
+    const row = node as Record<string, unknown>;
+    if (!PARKED_HORIZON_ATTESTATION_FIELDS.some(field => field in row)) return node;
+    const clean = { ...row };
+    for (const field of PARKED_HORIZON_ATTESTATION_FIELDS) delete clean[field];
+    changed = true;
+    return clean;
+  });
+  return changed ? { ...graph, nodes } : graph;
+}
+
 /**
  * Every field of the goal-threshold contract CEE mints for itself (ROADMAP
  * 2.281). The quad the draft grammar used to declare, PLUS the attestation
@@ -191,6 +212,8 @@ export const CEE_MINTED_GOAL_FIELDS = [
   'goal_baseline',
   'goal_baseline_raw',
 ] as const;
+
+export const MODEL_AUTHORED_GOAL_FIELDS_TO_STRIP = [...CEE_MINTED_GOAL_FIELDS, ...PARKED_HORIZON_ATTESTATION_FIELDS] as const;
 
 /** What a strip actually removed — returned so the caller can log it, never silent. */
 export interface GoalThresholdStripResult {
@@ -245,7 +268,7 @@ export function stripModelAuthoredGoalThreshold(raw: unknown): GoalThresholdStri
   for (const node of nodes as any[]) {
     if (!node || typeof node !== 'object') continue;
     let touched = false;
-    for (const field of CEE_MINTED_GOAL_FIELDS) {
+    for (const field of MODEL_AUTHORED_GOAL_FIELDS_TO_STRIP) {
       // `in`, not a truthiness check: an explicit `null` (the shape the old
       // nullable grammar taught) is still a model-authored key, and 0 is a
       // legitimate threshold value that a truthiness test would skip.

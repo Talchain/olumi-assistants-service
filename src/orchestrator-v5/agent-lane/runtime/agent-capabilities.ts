@@ -2247,6 +2247,7 @@ export function createAgentCapabilities(
         ? { constraint_verdict_state: r.json.analysis_constraint_verdict_state } : {}),
       ...(() => { const risks = r.json.analysis_leader_limit_risks;
         return risks === null || Array.isArray(risks) ? { leader_limit_risks: risks } : {}; })(),
+      // /graph is the canonical storage read; JSON decoding must not gate its safe projection again.
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
       ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),

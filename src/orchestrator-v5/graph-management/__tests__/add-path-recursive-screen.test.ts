@@ -65,7 +65,7 @@ function nodeUpdate(field: string, to: unknown) {
 }
 
 /**
- * THE SIX ZERO-READER SMUGGLE NAMES, DERIVED — not listed.
+ * THE 24 ZERO-READER SMUGGLE NAMES, DERIVED — not listed.
  *
  *   CEE_ANALYSIS_OWNED_ROOTS \ INTERVENTION_CONTRACT_KEYS
  *
@@ -75,12 +75,11 @@ function nodeUpdate(field: string, to: unknown) {
  * contract keys (`InterventionV3.shape`), which is why the exemption exists at
  * all and why the live option-configure write still works.
  *
- * The J2 union adds five MORE names the tunnel would also have carried
+ * The J2 union adds five more names the tunnel would also have carried
  * (`threshold_source` + the four edge `*Source` stamps) — asserted separately
- * below so "six" stays the historical, reviewable figure rather than a number
- * that silently drifts with the union.
+ * below; the six original names are historical, while the current smuggle set has 24 names.
  *
- * The corpus half spells the same six out by hand
+ * The corpus half spells the same 24 out by hand
  * (`field-safety-corpus.test.ts`) — deriving them here proves the screen and
  * the contract agree; spelling them there is what would notice the CONTRACT
  * itself changing shape underneath.
@@ -89,7 +88,7 @@ const SMUGGLE_NAMES = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
   .filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k))
   .sort();
 
-describe('the six zero-reader smuggle names — enumerated at the bytes', () => {
+describe('the 24 zero-reader smuggle names — enumerated at the bytes', () => {
   it('is exactly the CEE-owned names that are NOT intervention contract keys', () => {
     // Six at 2.478; A6e adds `exists_defaulted` (Canonical #70 5855416983), a CEE-owned edge stamp;
     // A6f adds `std_defaulted` (AIQ N1 on #2096), the same stamp for the spread.
@@ -135,7 +134,7 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the J2 union adds five MORE names the same screen now kills (24 total with A6e + A5 + A6f + G1 + E-A2 + #2306 + AIQ (b) + F1 T6, not 13)', () => {
+  it('the union adds six MORE names the same screen now kills (28 total: 22 smuggle names + five J2 names + event_risk)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
     // 14 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps
     // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`
@@ -178,7 +177,7 @@ describe('2.478 — the add path screen is RECURSIVE (the nested spelling is the
     expect(v.blocker?.code).toBe(PIPELINE_OWNED_FIELD);
   });
 
-  it('every one of the six smuggle names is refused on the add path, nested', () => {
+  it('every one of the 24 smuggle names is refused on the add path, nested', () => {
     for (const name of SMUGGLE_NAMES) {
       const v = addNode({ observed_state: { value: 1, [name]: 'x' } });
       expect(v.blocker?.code, `nested add smuggle: ${name}`).toBe(PIPELINE_OWNED_FIELD);

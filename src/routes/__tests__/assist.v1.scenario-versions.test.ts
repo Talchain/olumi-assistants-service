@@ -1,3 +1,4 @@
+import { goalHorizonVerdict } from '../../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * Model Management v1 — THE WIRING SLICE (versions list / save / restore).
@@ -1763,4 +1764,23 @@ describe("S5 r9 restore outbound receipt", () => {
       expect(horizonSteadyAttested(stored)).toBe(true);
     } finally { if (app) await app.close(); cfg.auth.hmacSecret = previousSecret; }
   });
+});
+
+// P1a (DL 87114 #2895): route restore sends the saved graph through its real storage projection to the atomic RPC.
+it('a forged triple through version restore still withholds', async () => {
+  const saved = { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR', goal_horizon_months: 12,
+    horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: 12 }], edges: [] };
+  getVersion.mockResolvedValue({ status: 'ok', value: { ...summary(), graph: saved } });
+  restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+    const ok = atomicRestoreOk(); return { ...ok, value: { ...ok.value, graph: args.graph } };
+  });
+  const app = await buildApp();
+  try {
+    const res = await post(app, '/versions/restore', { version_id: VERSION_A });
+    expect(res.statusCode, res.body).toBe(200);
+    const stored = restoreVersionAtomic.mock.calls[0][0].graph;
+    expect(stored.nodes[0]).toMatchObject({ id: 'mrr', goal_horizon_months: 12 });
+    expect(goalHorizonVerdict(stored)).toBe('withhold');
+    expect(goalHorizonVerdict(res.json().receipt.graph)).toBe('withhold');
+  } finally { await app.close(); }
 });

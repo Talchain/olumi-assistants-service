@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { log } from '../../../utils/telemetry.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { markerForDisclosure, sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
+import { CHANCE_FREE_HORIZON_PREFIX } from '../decision-input-ask.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { actionFactsOf } from '../actions/state.js';
 import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
@@ -243,6 +244,20 @@ describe('ONE reply contract through the build route', () => {
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
+  it('Q-c build: H>0 with no carrier and no Run owes chance-free A7 exactly once', async () => {
+    currentRead = structuredClone(FX.read);
+    const goal = currentRead.graph.nodes.find(node => node.kind === 'goal')!;
+    goal.goal_horizon_months = 9;
+    expect(currentRead.graph.nodes.every(node => (node.nonlinear_identity as Rec | undefined)?.operation !== 'accumulation')).toBe(true);
+    withoutRun = true;
+    narrator = 'Olumi built your model.';
+    const body = await buildTurn();
+    expect((lastComposeInput as ReplyComposeInput).chanceCells).toEqual([]);
+    expect(count(body.assistant_text, `${CHANCE_FREE_HORIZON_PREFIX} within 9 months.`)).toBe(1);
+    expect(rows.get(String(lastBuildPayload.turn_id))?.assistant_message).toBe(body.assistant_text);
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape!));
+  });
+
   it('FU1 B1 no-Run draft: served widened risks keep the receipt and relies-on words, without chance copy; replay identical', async () => {
     currentRead = { ...structuredClone(FX.read), graph: structuredClone(B1_WIDENED) };
     currentRead.graph_hash = computeAnalysisAffectingGraphHash(currentRead.graph as never)!.slice(0, 16);
@@ -275,11 +290,12 @@ describe('ONE reply contract through the build route', () => {
   it('r13 draft without widened: omitted and zero typed counts keep the existing reply byte-identical', async () => {
     narrator = 'Olumi built your pricing model.';
     const body = await buildTurn();
-    // Captured from this same route/harness before r13's wiring, including the exact display grammar.
-    expect(body.assistant_text, 'no widening is byte-identical to the original route').toBe([
+    // The historical capture retains its display grammar, with §(ad)'s retired chance-free horizon clause removed.
+    expect(body.assistant_text, 'no widening preserves the existing reply apart from the retired horizon clause').toBe([
       "Not shown: how MRR is worked out isn't confirmed",
       "• Olumi's estimates: 3, see Check estimates.",
       'Olumi built your pricing model.',
+      // Q-c (DL 87114): one horizon-limit statement per surface.
       "This model doesn't yet say whether any option gets there within 12 months.",
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from. The rest of this Run's results still stand.",
       GOAL_CHANCE_CAPTURE,
@@ -388,7 +404,7 @@ describe('ONE reply contract through the build route', () => {
     expect(replayInput.widenedRiskMarker).toBe(input.widenedRiskMarker);
   });
 
-  it('r11b B1 automatic first Run: exact pilot face/detail uses one cell marker and the chance-free horizon', async () => {
+  it('r11b B1 automatic first Run: exact pilot face/detail uses one cell marker without the retired horizon clause', async () => {
     currentRead = { ...structuredClone(B1), current_read: { analysis_ready: structuredClone(B1.analysis_ready),
       computed_against_hash: B1.graph_hash, current_analysis_hash: B1.graph_hash, run_id: 'fixture-head-b1' } };
     buildBrief = B1.brief;
@@ -406,6 +422,7 @@ describe('ONE reply contract through the build route', () => {
     expect(shown).toContain('How likely or how large is "Price-rise cancellation risk" today?');
     expect(shown).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
     expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     for (const sentence of [
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
@@ -438,6 +455,7 @@ describe('ONE reply contract through the build route', () => {
       "Not shown: how MRR is worked out isn't confirmed",
     ]);
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
     expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     await expectStoredAndReplayed(body, lastBuildPayload);
   });

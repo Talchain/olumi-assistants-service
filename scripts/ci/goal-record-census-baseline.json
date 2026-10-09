@@ -1,5 +1,5 @@
 {
-  "source_sha": "337c4dc3b9017ff0fb61b49960dd45fc3733bbc1",
+  "source_sha": "88e8f6705cd51d37fb58762449ae1cf76e56dba8",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -40,6 +40,7 @@
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 2,
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
+      "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 2,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 2
     },
@@ -212,6 +213,7 @@
       "src/orchestrator-v5/agent-lane/turn-context/selector-signals.ts": 3,
       "src/orchestrator-v5/goal-target/deadline-date.ts": 1,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 2,
       "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 5,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 4,
       "src/orchestrator-v5/goal-target/goal-record.ts": 6,
@@ -223,12 +225,12 @@
       "src/orchestrator-v5/admission/target-testability.ts": 1,
       "src/orchestrator-v5/agent-lane/accumulation-identity.ts": 3,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 1,
-      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 6,
+      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/horizon-attestation.ts": 1,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 2,
       "src/orchestrator-v5/context/graph-hash.ts": 1,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 1,
       "src/orchestrator-v5/goal-target/goal-record.ts": 9,
       "src/orchestrator-v5/goal-target/goal-steady-write.ts": 2,
       "src/orchestrator-v5/goal-target/horizon-basis.ts": 5,
@@ -795,13 +797,13 @@
     "findSoleGoalNode": 3,
     "goalChanceTargetCause": 7,
     "goalDeadlineOf": 35,
-    "goalKindOf": 19,
+    "goalKindOf": 21,
     "goalUnitOf": 5,
     "goal_constraints": 435,
     "goal_deadline_as_stated": 9,
     "goal_direction": 95,
-    "goal_horizon": 56,
-    "goal_horizon_months": 42,
+    "goal_horizon": 58,
+    "goal_horizon_months": 37,
     "goal_level_reading": 18,
     "goal_node_id": 280,
     "goal_period": 3,
@@ -826,7 +828,7 @@
     "threshold_source": 33,
     "unit_reading": 79
   },
-  "total_references": 2390,
+  "total_references": 2389,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

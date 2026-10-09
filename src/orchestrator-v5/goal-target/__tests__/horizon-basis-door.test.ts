@@ -293,8 +293,11 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
     expect(goalOf(r.graph, 'b')).not.toHaveProperty('horizon_basis');
     expect(goalOf(r.graph).horizon_basis).toEqual(goalOf(g).horizon_basis);
   });
-  it('R5 draft normalisation leaves forged basis for write preparation to drop', () => {
+  it('R5 draft normalisation strips forged basis and write preparation independently drops it', () => {
     const g = attested(); stripModelAuthoredGoalThreshold(g);
+    expect(goalOf(g)).not.toHaveProperty('horizon_basis');
+    // KEEP-strips: independently prove preparation still rejects a bypassed normaliser.
+    goalOf(g).horizon_basis = goalOf(attested()).horizon_basis;
     expect(goalOf(g)).toHaveProperty('horizon_basis');
     prepareHorizonBasisForWrite(g, null, SCENARIO);
     expect(goalOf(g)).not.toHaveProperty('horizon_basis');
@@ -307,7 +310,10 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
     expect(sdk.calls).toBeGreaterThan(0);
     const nodes = (result.graph as Rec).nodes as Rec[];
     expect(nodes.some(n => n.id === 'goal')).toBe(true);
-    // Positive control: forged bytes reach the candidate; the stored-result assertion below tests preparation.
+    // KEEP-strips: the real adapter strips the model's basis at ingress.
+    expect(goalOf(result.graph as Rec)).not.toHaveProperty('horizon_basis');
+    // Reintroduce the forgery after ingress to retain the independent preparation witness.
+    goalOf(result.graph as Rec).horizon_basis = goalOf(g).horizon_basis;
     expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
     const w = world(seed()); activeStore = w.store;
     vi.mocked(handleDraftGraph).mockResolvedValue({ blocks: [], assistantText: 'Drafted the model.', latencyMs: 0,

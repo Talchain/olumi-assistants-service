@@ -206,6 +206,7 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_level_reading',
   'goal_scope',
   'goal_horizon_months',
+  // §(ad): only the approved S5 door may mint an attestation; no producer may forge it.
   'horizon_basis',
   // The deadline in the brief's own words (PJ-E-A2 part 2): the same G1 class, written only by construction.
   'goal_deadline_as_stated',
