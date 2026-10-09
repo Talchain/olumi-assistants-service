@@ -2,6 +2,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CommittedTurnRecord, SessionStore, SessionTurnWrite } from '../session/store.js';
+import type { SessionTurnWithContent } from '../session/conversation-content.js';
+import { DURABLE_SEED_ROWS_READ, HistoryStore } from '../agent-lane/history-store.js';
 import { createMockSessionStore } from '../../../tests/utils/mock-session-store.js';
 import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
 import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
@@ -55,13 +57,19 @@ const BYTES = {
   owner_unreadable: '{"error":"model_write_ownership_refused","message":"Nothing was saved. I couldn\'t check access to this model. Try again."}',
 };
 const CODE_ONLY = '{"error":"model_write_ownership_refused"}';
+const SEED_ROW: SessionTurnWithContent = {
+  id: 'c1111111-1111-4111-8111-111111111111', scenario_id: SID, user_id: null, turn_id: 'previous-answer',
+  turn_class: 'direct_answer', handler_id: null, request_hash: 'agent_turn:previous-answer', response_emitted: true,
+  llm_calls_used: 1, duration_ms: 0, created_at: '2026-10-08T12:00:00.000Z',
+  user_message: 'Previously saved saffron reasoning.', assistant_message: 'Previously saved saffron answer.',
+};
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); state.store = undefined; state.tool = undefined; });
 
 async function harness(options: {
-  reason?: keyof typeof BYTES; atClaim?: boolean; tool?: 'in_process' | 'child'; release?: 'throws' | 'absent';
-  missing?: boolean; guidance?: boolean;
+  reason?: keyof typeof BYTES; atClaim?: boolean; tool?: 'in_process' | 'child' | 'refused'; release?: 'throws' | 'absent';
+  missing?: boolean; guidance?: boolean; seed?: boolean;
 } = {}) {
   const graph = options.guidance ? legacyDoorGraph(served.cases.find(c => c.id === 'D1-sprint-run')!.graph) : GRAPH;
   const routeBodies: string[] = [];
@@ -87,8 +95,9 @@ async function harness(options: {
     if (options.release === 'throws') throw new Error('claim release unavailable');
     if (rows.get(tid)?.request_hash === hash) rows.delete(tid);
   });
+  const readRecent = vi.fn<SessionStore['readRecent']>(async () => options.seed ? [SEED_ROW] : []);
   const ensureScenarioExists = vi.fn(async () => { scenarioExists = true; return { user_id: OWNER }; });
-  state.store = createMockSessionStore({ append, getScenarioOwner, releaseTurnClaim, ensureScenarioExists,
+  state.store = createMockSessionStore({ append, getScenarioOwner, releaseTurnClaim, ensureScenarioExists, readRecent,
     scenarioExists: async () => scenarioExists,
     readCommittedTurn: async (_sid, tid) => rows.get(tid) ?? null,
     claimTurnFence: fence.store.claimTurnFence.bind(fence.store),
@@ -128,10 +137,13 @@ async function harness(options: {
   const fetch = vi.fn(async (_url: unknown, init?: Parameters<typeof globalThis.fetch>[1]) => {
     providerInputs.push(String(init?.body));
     calls += 1;
-    if (options.tool && calls === 1) return new Response(JSON.stringify({ output: [{
-      type: 'function_call', name: 'authorise_change', call_id: 'tool-fixture',
-      arguments: JSON.stringify({ proposal_id: 'prop_0123456789abcdef0123456789abcdef' }),
-    }] }), { status: 200 });
+    if (options.tool && calls === 1) {
+      if (options.tool === 'refused') flipped = true;
+      return new Response(JSON.stringify({ output: [{
+        type: 'function_call', name: 'authorise_change', call_id: 'tool-fixture',
+        arguments: JSON.stringify({ proposal_id: 'prop_0123456789abcdef0123456789abcdef' }),
+      }] }), { status: 200 });
+    }
     // Both the claim and the optional tool have finished before the final append.
     flipped = true;
     return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Consider the assumptions together.' }] }] }), { status: 200 });
@@ -141,7 +153,7 @@ async function harness(options: {
   await ceeOrchestratorRouteV2(app);
   const inject = (payload = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-request-id': 'midturn-request' },
     payload: { scenario_id: SID, turn_id: TID, message: 'Consider the strategic framing.', ...payload } });
-  return { app, rows, fence, append, releaseTurnClaim, fetch, inject, providerInputs, ensureScenarioExists, routeBodies,
+  return { app, rows, fence, append, releaseTurnClaim, fetch, inject, providerInputs, ensureScenarioExists, routeBodies, readRecent,
     scenarioExists: () => scenarioExists, countAtRefusal: () => countAtRefusal, effectsAtRefusal: () => effectsAtRefusal,
   };
 }
@@ -280,6 +292,37 @@ it('(f) v2 provisioning survives a door refusal without an onSend no-save overri
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
   } finally { await h.app.close(); }
 });
+
+it.each(['not_owner', 'owner_unreadable'] as const)('(h) durable seed alone is not an effect before a mid-loop %s tool refusal', async reason => {
+  const get = vi.spyOn(HistoryStore.prototype, 'get');
+  const set = vi.spyOn(HistoryStore.prototype, 'set');
+  const typed = vi.spyOn(HistoryStore.prototype, 'recordTyped');
+  const warn = vi.spyOn(log, 'warn');
+  const h = await harness({ reason, seed: true, tool: 'refused' });
+  const sessionId = `seed-refusal-${reason}`;
+  try {
+    const r = await h.inject({ agent_session_id: sessionId, turn_id: undefined, source: 'chip_click' });
+    process.stdout.write(`MIDTURN_R4_BYTES h/${reason} ${r.statusCode} ${r.payload} durable=${h.countAtRefusal()} effects=${h.effectsAtRefusal()}\n`);
+    expect(get.mock.calls[0]).toEqual([sessionId]); expect(get.mock.results[0]!.value).toEqual([]);
+    expect(h.readRecent).toHaveBeenCalledWith(SID, DURABLE_SEED_ROWS_READ);
+    // Only the existing durable pair was set; no answer items from this turn were published.
+    expect(set).toHaveBeenCalledExactlyOnceWith(sessionId, [
+      { role: 'user', content: [{ type: 'input_text', text: SEED_ROW.user_message }] },
+      { role: 'assistant', content: SEED_ROW.assistant_message },
+    ]);
+    expect(typed).not.toHaveBeenCalled();
+    expect(h.providerInputs).toHaveLength(1);
+    expect(h.providerInputs[0]).toContain(SEED_ROW.user_message!);
+    expect(h.providerInputs[0]).toContain(SEED_ROW.assistant_message!);
+    expect(h.fetch).toHaveBeenCalledOnce();
+    expect(h.ensureScenarioExists).not.toHaveBeenCalled();
+    expect(h.append).not.toHaveBeenCalled(); expect(h.releaseTurnClaim).not.toHaveBeenCalled();
+    expect(h.rows.size).toBe(0); expect(h.fence.rows).toHaveLength(0);
+    expect(r.statusCode).toBe(403); expect(r.payload).toBe(BYTES[reason]);
+    expect(h.countAtRefusal()).toBe(0); expect(h.effectsAtRefusal()).toBe(0);
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
+  } finally { await h.app.close(); }
+}, 30_000);
 
 it('explicit saves are inert without context and aggregate through the same child/parent chain as door entries', () => {
   recordSuccessfulSave(); expect(readSuccessfulDoorEntries()).toBe(0);

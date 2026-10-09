@@ -2862,8 +2862,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         recentRowsForEgress = durableSeedRows;
         const durable = historyFromDurableTurns(durableSeedRows);
         if (durable.length > 0) {
+          // Seeding reuses already-saved rows and held history; it is not an effect of this turn.
           histories.set(sessionId, [...durable, ...held]);
-          recordUnsavableEffect();
         }
         earlierWordsKnown = true;
       } catch (err) {
