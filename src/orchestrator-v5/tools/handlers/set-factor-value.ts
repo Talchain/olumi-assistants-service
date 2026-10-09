@@ -59,7 +59,7 @@ import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 // than restated so the two cannot answer "is this factor's recorded scale
 // usable?" differently — see the derivation beside its call site below.
 import { findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
-import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
+import { preserveSiblingQuantities } from '../../agent-lane/level-batch-frame.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
 import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
@@ -946,19 +946,6 @@ export function createSetFactorValueHandler(): HandlerFn {
       // the node-level spelling to decide. See the block above.
       delete (node as { extractionType?: unknown }).extractionType;
 
-      // 1.16 item A2 — preserve option-intervention absolutes across the
-      // cap change. Runs inside the mutation clone so the rewritten
-      // option NODES flow through the same nodes-stamping persistence
-      // merges as the factor mutation itself.
-      if (capChanged) {
-        rescaledInterventionCount = renormaliseOptionInterventionsForCapChange(
-          clone,
-          targetId,
-          before.cap,
-          after.cap,
-        );
-      }
-
       // ⭐ A LEVEL THAT ARRIVES AFTER CONSTRUCTION SIZES OLUMI'S OWN LINKS ON IT (C, DL #70 5849216942). Admission sized
       // them once, when this factor held no level, so they kept the ±0.5 default. Served (`f-20260926T190952Z`): churn
       // got 5% from the approved starting point, both links stayed ±0.5, and every option was withheld as out of
@@ -973,6 +960,15 @@ export function createSetFactorValueHandler(): HandlerFn {
 
       return { before, after };
     });
+
+    const preserved = preserveSiblingQuantities(rawGraph, result.mutatedGraph, []);
+    if (preserved.kind === 'refused') {
+      throw new D1HandlerError('GRAPH_INVARIANT_VIOLATED', preserved.reason, {
+        details: { reason: preserved.reason }, userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+      });
+    }
+    Object.assign(result.mutatedGraph, preserved.graph);
+    rescaledInterventionCount = preserved.reencoded.length;
 
     // ⚠ COMPARED ON THE FOLDED KEY, NOT STRICTLY. `noop` is a THIRD reader of the
     // "are these the same unit?" question that `unitComparisonKey` owns; leaving it

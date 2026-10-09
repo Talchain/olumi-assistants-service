@@ -1,3 +1,4 @@
+import { sameEngineQuantity } from '../untouched-level-invariant.js';
 import { isDeepStrictEqual } from 'node:util';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { defaultFrameFor } from './admit-model.js';
@@ -48,27 +49,30 @@ function frameOf(node: Dict): number | undefined {
 }
 
 /**
- * Plan the approval's range attachment and sibling preservation together, before
- * any write. Resolve on the PRE-attachment graph with PLoT's egress owner.
+ * Plan the approval's frame transition and sibling preservation together, before
+ * any write. Resolve on the trusted preimage with PLoT's egress owner.
  * Encoded codes are the sole exception: the resolver proves frames never scale
  * them. An unresolved cell refuses the whole plan; neither input is mutated.
  */
 export function preserveSiblingQuantities<T>(before: unknown, after: T,
   targets: readonly { optionId: string; factorId: string }[]):
   | { kind: 'preserved'; graph: T; reencoded: ReencodedSibling[] }
-  | { kind: 'refused'; reason: 'sibling_level_unresolvable' | 'level_frame_mismatch' } {
+  | { kind: 'refused'; reason: 'sibling_level_unresolvable' | 'level_frame_mismatch' | 'untouched_level_rescaled' } {
   const prior = before as { nodes?: Dict[]; options?: Dict[] };
   const result = structuredClone(after) as T & { nodes?: Dict[]; options?: Dict[] };
   if (!Array.isArray(prior.nodes) || !Array.isArray(result.nodes)) return { kind: 'preserved', graph: after, reencoded: [] };
-  const attached = new Map<string, { cap: number; label: string }>();
+  const attached = new Map<string, { cap: number; label: string; initial: boolean }>();
   for (const node of result.nodes) {
     if (node.kind !== 'factor' || typeof node.id !== 'string') continue;
     const was = prior.nodes.find(n => n.id === node.id);
     const cap = frameOf(node);
-    if (was !== undefined && frameOf(was) === undefined && cap !== undefined) attached.set(node.id, { cap, label: String(node.label ?? node.id) });
+    if (was !== undefined && frameOf(was) !== cap && cap !== undefined) {
+      attached.set(node.id, { cap, label: String(node.label ?? node.id), initial: frameOf(was) === undefined });
+    }
   }
   if (attached.size === 0) return { kind: 'preserved', graph: after, reencoded: [] };
   const scales = buildFactorScaleMap(prior.nodes);
+  const finalScales = buildFactorScaleMap(result.nodes);
   const selected = new Set(targets.map(t => `${t.optionId}::${t.factorId}`));
   const reencoded = new Map<string, ReencodedSibling>();
   const collections = [
@@ -80,7 +84,7 @@ export function preserveSiblingQuantities<T>(before: unknown, after: T,
     if (was === undefined) continue;
     const carriers = [option.interventions, (option.data as Dict | undefined)?.interventions]
       .filter((c): c is Dict => c !== null && typeof c === 'object');
-    for (const [factorId, { cap, label }] of attached) {
+    for (const [factorId, { cap, label, initial }] of attached) {
       const key = `${option.id}::${factorId}`;
       if (selected.has(key)) continue;
       const cells = [...carriers.filter(c => Object.hasOwn(c, factorId)).map(c => ({ carrier: c, key: factorId })),
@@ -90,10 +94,26 @@ export function preserveSiblingQuantities<T>(before: unknown, after: T,
       if (resolved.value === null) return { kind: 'refused', reason: SIBLING_LEVEL_UNRESOLVABLE };
       if (resolved.codeNotMagnitude) continue;
       const quantity = resolved.value;
+      const nextResolved = resolveRawInterventionValue(mergeInterventionSourceObjects(option)[factorId], finalScales.get(factorId));
+      const held = mergeInterventionSourceObjects(was)[factorId];
+      const rawPair = held !== null && typeof held === 'object' ? held as Dict : undefined;
+      // Keep existing writer representations: initial attachment re-encodes
+      // siblings (including scale_frame-only factors); cap edits refresh
+      // consistent numeric raw pairs. Native-looking passthrough stays native.
+      const refreshPair = typeof rawPair?.raw_value === 'number' && Number.isFinite(rawPair.raw_value)
+        && resolved.rule === 'raw_value_used' && resolved.unitIntervalEquivalent !== undefined;
+      const initialEncoding = initial && (resolved.rule === 'raw_value_used'
+        || (resolved.inputValue !== null && resolved.inputValue >= 0 && resolved.inputValue <= 1));
+      if (sameEngineQuantity(quantity, nextResolved.value) && !refreshPair && !initialEncoding) continue;
       if (!Number.isFinite(quantity) || quantity < 0 || quantity > cap) return { kind: 'refused', reason: 'level_frame_mismatch' };
       for (const { carrier, key: cellKey } of cells) {
         const cell = carrier[cellKey];
         const next = { ...(typeof cell === 'object' && cell !== null ? cell : {}), value: quantity / cap, raw_value: quantity, cap };
+        if (typeof cell === 'object' && cell !== null && Object.hasOwn(cell, 'raw_value')) {
+          Object.assign(next, { raw_value: (cell as Dict).raw_value });
+        }
+        const check = resolveRawInterventionValue(next, finalScales.get(factorId));
+        if (!sameEngineQuantity(quantity, check.value)) return { kind: 'refused', reason: 'untouched_level_rescaled' };
         if (isDeepStrictEqual(cell, next)) continue;
         carrier[cellKey] = next;
         const optionLabel = String(option.label ?? option.id);
