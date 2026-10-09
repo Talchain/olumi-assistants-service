@@ -609,11 +609,15 @@ function switchFactorIds(factorNodeMap: ReadonlyMap<string, NodeV3T>, options: r
  * @param factorNode - Optional factor node from the V3 graph
  * @returns An InterventionDetail entry
  */
-function buildInterventionDetail(
+export function buildInterventionDetail(
   factorId: string,
   normalisedValue: number,
-  factorNode: NodeV3T | undefined,
-  intervention: OptionV3T["interventions"][string] | undefined,
+  factorNode: (Partial<Pick<NodeV3T, "label" | "display_value" | "factor_type" | "scale_frame">> & {
+    observed_state?: Partial<Pick<NonNullable<NodeV3T["observed_state"]>, "value" | "raw_value" | "cap" | "unit">> & {
+      factor_type?: string;
+    };
+  }) | undefined,
+  intervention: Pick<OptionV3T["interventions"][string], "unit" | "display_value"> | undefined,
   carriedRawValue: number | string | boolean | undefined,
   isSwitchFactor: boolean,
 ): InterventionDetail {

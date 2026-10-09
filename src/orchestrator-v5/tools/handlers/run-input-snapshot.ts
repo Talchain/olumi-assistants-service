@@ -13,7 +13,8 @@
  *
  * RULES (AIQ 5914731075, P0 SHARED DATA 5914750268):
  *   - a member the Run was not sent is ABSENT — never inferred or defaulted (a missing unit never becomes GBP);
- *   - `raw` + `unit` are the AUTHORED figure (`raw_value` / `goal_threshold_raw` / `goal_threshold_unit` as stored);
+ *   - `raw` + `unit` are the figure on the user's frame (option settings use the canonical intervention receipt;
+ *     other quantities retain `raw_value` / `goal_threshold_raw` / `goal_threshold_unit` as stored);
  *     `encoded` is the number PLoT received;
  *   - bounded: if the request exceeds a contract bound, NO snapshot is recorded (a truncated list would read as
  *     complete) — the Run is unaffected and its delta reports `not_recorded`.
@@ -30,6 +31,7 @@ import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/ed
 import { factorAuthorshipDigest, linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
 import { STATED_LEVEL_STD } from './stated-level-spread.js';
 import { effectiveLinkExistenceProbability } from '../../goal-target/held-user-links.js';
+import { buildInterventionDetail } from '../../../cee/transforms/analysis-ready.js';
 
 type Rec = Record<string, unknown>;
 
@@ -158,7 +160,34 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
         if (encoded === undefined) return [];
         const obj = raws[factorId];
         const o = isRec(obj) ? obj : {};
-        const raw = finite(o.raw_value) ?? text(o.display_value) ?? (typeof o.value === 'boolean' ? o.value : undefined);
+        const factor = nodeById.get(factorId);
+        const os = isRec(factor?.observed_state) ? factor.observed_state : {};
+        // Only the receipt's metadata is needed here, not V3 source/readiness fields that never went on the wire.
+        const factorDisplay = {
+          label: label(factor?.label),
+          display_value: text(factor?.display_value),
+          factor_type: text(factor?.factor_type),
+          scale_frame: finite(factor?.scale_frame),
+          observed_state: {
+            value: finite(os.value), raw_value: finite(os.raw_value), cap: finite(os.cap),
+            unit: typeof os.unit === 'string' ? os.unit : undefined,
+            factor_type: text(os.factor_type),
+          },
+        };
+        const interventionDisplay = {
+          unit: typeof o.unit === 'string' ? o.unit : undefined,
+          display_value: typeof o.display_value === 'string' ? o.display_value : undefined,
+        };
+        const modelValue = finite(o.value) ?? encoded;
+        const carriedRaw = finite(o.raw_value);
+        // No-range edits can store raw_value === value, so that carrier is still on the model scale. Ask the
+        // canonical reader for the factor-frame amount first; if it cannot derive one, retain the authored carrier.
+        const derived = carriedRaw === modelValue
+          ? buildInterventionDetail(factorId, modelValue, factorDisplay, interventionDisplay, undefined, false)
+          : undefined;
+        const detail = derived?.raw_value !== undefined ? derived
+          : buildInterventionDetail(factorId, modelValue, factorDisplay, interventionDisplay, carriedRaw, false);
+        const raw = finite(detail.raw_value) ?? text(o.display_value) ?? (typeof o.value === 'boolean' ? o.value : undefined);
         // The range AS SENT ({low, high, meaning}), carrying its author from the option's own stated range object.
         const sentRange = sentRanges[factorId];
         let range: ReturnType<typeof InterventionRangeSchema.parse> | undefined;
@@ -176,7 +205,7 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
           factor_id: factorId,
           ...(label(nodeById.get(factorId)?.label) !== undefined ? { label: label(nodeById.get(factorId)?.label) } : {}),
           ...(raw !== undefined ? { raw } : {}),
-          ...(text(o.unit, 64) !== undefined ? { unit: text(o.unit, 64) } : {}),
+          ...(text(detail.unit, 64) !== undefined ? { unit: text(detail.unit, 64) } : {}),
           encoded,
           ...(held?.has(factorId) ? { held: true as const } : {}),
           ...(range !== undefined ? { range } : {}),
