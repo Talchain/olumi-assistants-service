@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * B3 joined registration regression — serialized offline route witness.
  * Round2 #2543 @481e14e1: a whole-graph replacement drops every gap carrier,
@@ -25,7 +26,7 @@ const store = { append, loadGraph, ensureScenarioExists: vi.fn(), getScenarioOwn
   scenarioExists: vi.fn(), readCommittedTurn: vi.fn(), readMostRecentPendingActions: vi.fn() };
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
 vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => ({

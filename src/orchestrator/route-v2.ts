@@ -159,7 +159,7 @@ import {
 } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { GraphStaleWriteError } from '../orchestrator-v5/build-turn-context.js';
-import { isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
+import { ModelReadFailedError, modelReadFailedWire, isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
 import type { GraphConflictFailureDetails } from '../orchestrator-v5/graph-conflict-recovery-keys.js';
 import { useAppendV6 } from '../orchestrator-v5/append-v6-flag.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
@@ -2913,6 +2913,7 @@ export type V5RouteReply = {
   409: BoundaryError;
   422: BoundaryError;
   500: BoundaryError;
+  503: ReturnType<typeof modelReadFailedWire>;
 };
 
 /**
@@ -4609,7 +4610,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             value: await loadPersistedScenarioStateStrict(ingress.scenario_id),
           };
         } catch (err) {
-          persistedScenarioStateMemo = { ok: false, error: err };
+          persistedScenarioStateMemo = { ok: false, error: new ModelReadFailedError(err) };
         }
       }
       if (!persistedScenarioStateMemo.ok) throw persistedScenarioStateMemo.error;
@@ -7642,7 +7643,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
     let resolvedGraphState: GraphStateIngress | null = recordedEffectGraph;
     if (editIntentDetected) {
-      if (extensions.graphState != null) {
+      if (!useAppendV6() && extensions.graphState != null) {
         emit(TelemetryEvents.V5EditGraphGraphStatePresent, {
           request_id: requestId,
           scenario_id: ingress.scenario_id,
@@ -7676,6 +7677,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph graphState reload failed — returning typed recovery',
           );
+          if (useAppendV6()) {
+            return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
+          }
           return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
         if (persisted == null) {
@@ -7732,7 +7736,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           //
           // The counter moves with the behaviour rather than disappearing: a
           // class that stops erroring must not also stop being measurable.
-          if (ingress.stage !== 'frame') {
+          if (ingress.stage !== 'frame' && !(useAppendV6() && extensions.graphState != null)) {
             return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
           }
           emit(TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough, {
@@ -7764,6 +7768,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               },
               'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
             );
+            if (useAppendV6()) {
+              return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
+            }
             return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
           }
           resolvedGraphState = parsed.data;
@@ -8297,7 +8304,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           graphState: effectiveGraphState!,
           // ON only: graph and revision come from the same server snapshot.
           // OFF passes exactly staging's dispatcher arguments.
-          ...(useAppendV6() && resolvedGraphState !== null
+          ...(useAppendV6()
             ? { persistedEditBase: await loadPersistedScenarioStateOnce() }
             : {}),
           analysisState: extensions.analysisState ?? null,
@@ -8418,6 +8425,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
         }
       } catch (err) {
+        if (err instanceof ModelReadFailedError) {
+          return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
+        }
         if (isRevisionConflict(err)) {
           const recovery = { conflict_category: err.conflict_category, ...readRevisionConflictDetails(err) };
           return reply.code(409).send(withRevisionConflictWire(buildCommitFailureBoundaryError({

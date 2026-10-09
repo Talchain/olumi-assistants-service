@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * GOAL-REACH rows 0 and 2: the real Agent and scenario-read routes over an in-memory database transport.
  * The first run uses untouched agent-v1-turn.ts. The second may explicitly select the owner-facing
@@ -39,7 +40,7 @@ const { port, source } = vi.hoisted(() => ({
     invalidateScoped: vi.fn(), invalidateAll: vi.fn(), claimTurnFence: vi.fn() },
   source: { graph: {} as Record<string, any>, analysis: {} as Record<string, unknown> },
 }));
-vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => port, resetSessionStoreForTests: () => {},
+vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => withScenarioRevision(port), resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {} }));
 vi.mock('../../config/index.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../config/index.js')>();
@@ -71,6 +72,7 @@ let scenario: string;
 let table: Record<string, any>[];
 let realStore: SupabaseSessionStore;
 let modelCalls: number;
+let revision = 7;
 let graphWrites: number;
 let fenceGenerations: Map<string, number>;
 let runRequests: Record<string, any>[];
@@ -101,6 +103,8 @@ const client = {
       if (!fenceGenerations.has(key)) fenceGenerations.set(key, fenceGenerations.size + 1);
       return { data: fenceGenerations.get(key), error: null };
     }
+    const revisionChecked = name === 'append_turn_atomic_v4r' || name === 'append_turn_atomic_v6';
+    if (revisionChecked && args.p_expected_revision !== revision) return { data: null, error: { code: 'OLRV1', details: JSON.stringify({ expected: args.p_expected_revision, current: revision }) } };
     const prior = table.find(r => r.scenario_id === args.p_scenario_id && r.turn_id === args.p_turn_id);
     const id = prior?.id ?? `11111111-1111-4111-8111-${String(table.length + 1).padStart(12, '0')}`;
     if (!prior) {
@@ -112,8 +116,9 @@ const client = {
         pending_actions: args.p_pending_actions, coaching_state: args.p_coaching_state,
         agent_guidance: args.p_agent_guidance ?? null, suggested_actions: args.p_suggested_actions ?? null,
         suggested_actions_run_key: args.p_suggested_actions_run_key ?? null });
-      if (args.p_graph !== null && args.p_graph !== undefined) { source.graph = structuredClone(args.p_graph); graphWrites += 1; }
+      if (args.p_graph !== null && args.p_graph !== undefined) { source.graph = structuredClone(args.p_graph); graphWrites += 1; revision += 1; }
     }
+    if (revisionChecked) return { data: { turn_row_id: id, revision }, error: null };
     return { data: name === 'append_agent_answer_with_offers' || name === 'append_agent_answer_with_guidance'
       ? { id, replayed_prior_turn: !!prior && prior.request_hash === args.p_request_hash,
         prior_turn_conflict: !!prior && prior.request_hash !== args.p_request_hash } : id, error: null };
@@ -129,6 +134,7 @@ function setWithheld(graph: Record<string, any> = structuredClone(paul)): void {
     analysis_result: result, current_read: { analysis_ready: READY, result }, analysis_constraint_verdict_state: null };
 }
 function bindStore(): void {
+  revision = 7;
   realStore = new SupabaseSessionStore(client as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 });
   port.append.mockImplementation((w: SessionTurnWrite) => realStore.append(w));
   port.claimTurnFence.mockImplementation((s: string, t: string) => realStore.claimTurnFence(s, t));
@@ -138,8 +144,8 @@ function bindStore(): void {
   port.readGuidanceHistory.mockImplementation((s: string) => realStore.readGuidanceHistory(s));
   port.readMostRecentPendingActions.mockImplementation((s: string) => realStore.readMostRecentPendingActions(s, { validation: 'strict' }));
   port.loadGraph.mockImplementation(async () => structuredClone(source.graph));
-  port.loadGraphAndBriefText.mockImplementation(async () => ({ graph: structuredClone(source.graph), briefText: null }));
-  port.readExistingScenario.mockImplementation(async () => ({ userId: OWNER, graph: structuredClone(source.graph), briefText: null, analysisInvalidatedAt: null }));
+  port.loadGraphAndBriefText.mockImplementation(async () => ({ revision, graph: structuredClone(source.graph), briefText: null }));
+  port.readExistingScenario.mockImplementation(async () => ({ revision: 7, userId: OWNER, graph: structuredClone(source.graph), briefText: null, analysisInvalidatedAt: null }));
   const factOf = (raw: { payload: Record<string, unknown>; noop: boolean }) => ({ ...raw.payload, noop: raw.noop });
   port.readFactsFor.mockImplementation(async () => table.flatMap(row => (row.handler_facts ?? []).map(factOf)));
   port.readFactsWithTurnFor.mockImplementation(async (ids: readonly string[]) => table.filter(row => ids.includes(row.id))

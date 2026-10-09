@@ -83,7 +83,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     // shared rule, dispatch.ts `deriveWriteReplyFreshness`).
     readScenarioRunAnalysisFactsFor: readScenarioRunAnalysisFactsForMock,
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
+    loadGraphAndBriefText: async (scenarioId: string) => ({ revision: 7, graph: await loadGraphMock(scenarioId), briefText: null }),
     invalidateScoped: async (_scenarioId: string, scope: unknown) => ({
       scope,
       entries_invalidated: [],

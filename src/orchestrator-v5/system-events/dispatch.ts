@@ -63,7 +63,7 @@ import { getSessionStore } from '../session/index.js';
 import { useAppendV6 } from '../append-v6-flag.js';
 import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
-import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict } from '../graph-revision-conflict.js';
+import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
@@ -1158,6 +1158,9 @@ export async function dispatchSystemEvent(
     result = { response: buildAcknowledgementResponse(params.payload), commitPerformed: false, graph: null,
       graphConflict: { recovery_action: 'refresh_and_reconfirm', conflict_category: err.conflict_category,
         expected_base_graph_hash: null, ...readRevisionConflictDetails(err) } };
+  }
+  if (result.graphConflict?.conflict_category === 'revision_conflict') {
+    result = { ...result, response: { ...result.response, assistant_text: REVISION_CONFLICT_MESSAGE } };
   }
   // A writer's post-commit verdict stays authoritative. Acknowledgements and
   // uncommitted refusals retain their existing return shape.

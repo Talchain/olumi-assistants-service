@@ -89,6 +89,8 @@ vi.mock('../../build-turn-context.js', () => ({
   // feed. Empty — this suite exercises the early-emit authoritative-source
   // contract, not conversation history.
   loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
+
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
 }));
 
 const emitMock = vi.fn();

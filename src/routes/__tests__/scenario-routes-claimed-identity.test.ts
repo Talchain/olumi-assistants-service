@@ -135,7 +135,7 @@ async function read(app: FastifyInstance, body: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   scenarioExists.mockResolvedValue(true);
-  loadGraphAndBriefText.mockResolvedValue({ graph: GRAPH, briefText: "Should I take the job?" });
+  loadGraphAndBriefText.mockImplementation(async (scenarioId: string) => ({ revision: 7, graph: await loadGraph(scenarioId), briefText: "Should I take the job?" }));
   // The scenario has a stored owner. That is what makes the pairs below
   // discriminating: an unowned scenario would admit everyone.
   ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
