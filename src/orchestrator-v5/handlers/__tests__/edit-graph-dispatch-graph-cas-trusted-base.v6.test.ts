@@ -374,7 +374,7 @@ describe('Addendum 17 — append-v6 coverage', () => {
 
     it('ON: a failed initial combined read refuses before the provider or commit, without retry', async () => {
       vi.mocked(loadPersistedScenarioStateStrict).mockRejectedValueOnce(new Error('temporary outage'));
-      await expect(runDispatch()).rejects.toMatchObject({ conflict_category: 'revision_conflict' });
+      await expect(runDispatch()).rejects.toMatchObject({ name: 'ModelReadFailedError', code: 'model_read_failed', statusCode: 503, retryable: true });
       expect(loadPersistedScenarioStateStrict).toHaveBeenCalledOnce();
       expect(handleEditGraph).not.toHaveBeenCalled();
       expect(commitDirectAnswer).not.toHaveBeenCalled();

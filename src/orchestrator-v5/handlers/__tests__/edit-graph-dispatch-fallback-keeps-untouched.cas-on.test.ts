@@ -99,7 +99,7 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   loadMostRecentPendingActions: vi.fn(async () => []),
 }));
 
-import { GraphStaleWriteError } from '../../session/store.js';
+import { ModelReadFailedError } from '../../graph-revision-conflict.js';
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { type GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -299,7 +299,7 @@ describe('controls', () => {
     else edge.strength[field] = value;
     await expect(runEdit(stored,
       renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), 'Rename Monthly churn to Monthly churn rate', 'invalid-number'))
-      .rejects.toBeInstanceOf(GraphStaleWriteError);
+      .rejects.toBeInstanceOf(ModelReadFailedError);
     expect(llmChatMock).not.toHaveBeenCalled();
     expect(commitDirectAnswer).not.toHaveBeenCalled();
     expect(storedGraphRef.current).toBe(stored);

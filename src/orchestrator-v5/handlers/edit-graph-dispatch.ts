@@ -34,7 +34,7 @@ import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
-import { logGraphRevisionConflict } from '../graph-revision-conflict-event.js';
+import { ModelReadFailedError } from '../graph-revision-conflict.js';
 import { isRevisionConflict } from '../graph-revision-conflict.js';
 import { useAppendV6 } from '../append-v6-flag.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
@@ -153,7 +153,6 @@ import {
   loadMostRecentPendingActions,
   loadPersistedGraphStrict,
   loadPersistedScenarioStateStrict,
-  GraphStaleWriteError,
   loadRecentConversationTurns,
   loadScenarioBriefText,
 } from '../build-turn-context.js';
@@ -2321,12 +2320,7 @@ export async function dispatchEditGraph(
         graphState = GraphStateIngressSchema.parse(editBase.graph);
       }
     } catch (cause) {
-      logGraphRevisionConflict({ scenario_id: payload.scenario_id, turn_id: payload.turn_id,
-        handler_id: 'edit_graph', expected_revision: editBase?.revision,
-        rpc: config.cee.modelVersionsEnabled ? 'v6' : 'v4r' }, cause);
-      throw new GraphStaleWriteError('The current model could not be read. This edit was not saved; refresh and try again.', {
-        conflict_category: 'revision_conflict', cause,
-      });
+      throw new ModelReadFailedError(cause);
     }
   }
 

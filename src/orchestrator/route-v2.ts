@@ -158,8 +158,7 @@ import {
 } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { GraphStaleWriteError } from '../orchestrator-v5/build-turn-context.js';
-import { logGraphRevisionConflict } from '../orchestrator-v5/graph-revision-conflict-event.js';
-import { isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
+import { ModelReadFailedError, modelReadFailedWire, isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
 import type { GraphConflictFailureDetails } from '../orchestrator-v5/graph-conflict-recovery-keys.js';
 import { useAppendV6 } from '../orchestrator-v5/append-v6-flag.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
@@ -2912,6 +2911,7 @@ export type V5RouteReply = {
   409: BoundaryError;
   422: BoundaryError;
   500: BoundaryError;
+  503: ReturnType<typeof modelReadFailedWire>;
 };
 
 /**
@@ -4608,7 +4608,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             value: await loadPersistedScenarioStateStrict(ingress.scenario_id),
           };
         } catch (err) {
-          persistedScenarioStateMemo = { ok: false, error: err };
+          persistedScenarioStateMemo = { ok: false, error: new ModelReadFailedError(err) };
         }
       }
       if (!persistedScenarioStateMemo.ok) throw persistedScenarioStateMemo.error;
@@ -7676,13 +7676,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             'V5 edit_graph graphState reload failed — returning typed recovery',
           );
           if (useAppendV6()) {
-            logGraphRevisionConflict({ scenario_id: ingress.scenario_id, turn_id: ingress.turn_id,
-              handler_id: 'edit_graph', rpc: config.cee.modelVersionsEnabled ? 'v6' : 'v4r',
-              expected_revision: null }, err);
-            return reply.code(409).send(withRevisionConflictWire(buildCommitFailureBoundaryError({
-              validator: 'edit_graph_reload', reason: 'server_graph_unavailable', retryable: false,
-              requestId, stage: ingress.stage, errorCode: 'GRAPH_DIVERGED',
-            }), { conflict_category: 'revision_conflict' }));
+            return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
           }
           return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
@@ -7773,13 +7767,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
             );
             if (useAppendV6()) {
-              logGraphRevisionConflict({ scenario_id: ingress.scenario_id, turn_id: ingress.turn_id,
-                handler_id: 'edit_graph', rpc: config.cee.modelVersionsEnabled ? 'v6' : 'v4r',
-                expected_revision: (await loadPersistedScenarioStateOnce()).revision });
-              return reply.code(409).send(withRevisionConflictWire(buildCommitFailureBoundaryError({
-                validator: 'edit_graph_reload', reason: 'server_graph_invalid', retryable: false,
-                requestId, stage: ingress.stage, errorCode: 'GRAPH_DIVERGED',
-              }), { conflict_category: 'revision_conflict' }));
+              return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
             }
             return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
           }
@@ -8435,6 +8423,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
         }
       } catch (err) {
+        if (err instanceof ModelReadFailedError) {
+          return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
+        }
         if (isRevisionConflict(err)) {
           const recovery = { conflict_category: err.conflict_category, ...readRevisionConflictDetails(err) };
           return reply.code(409).send(withRevisionConflictWire(buildCommitFailureBoundaryError({

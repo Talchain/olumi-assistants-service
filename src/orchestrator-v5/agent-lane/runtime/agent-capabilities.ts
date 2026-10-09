@@ -244,7 +244,7 @@ import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
+import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -2016,6 +2016,19 @@ function ambiguousClause(ambiguous: readonly AmbiguousTarget[]): string {
 function heldLevelOf(g: GraphRead, optionId: string, factorId: string): unknown {
   const held = g.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
   return typeof held === 'number' ? held : held?.value;
+}
+
+/** A later refusal cannot erase an earlier committed save or its receipts. */
+function partialWriteOutcome(proposalId: string, receipts: readonly ReceiptSummary[], outcome: string): ToolResult {
+  return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed',
+    proposal_id: proposalId, receipts: [...receipts], outcome, detail: PARTIAL_WRITE_MESSAGES[outcome] };
+}
+
+function laterSaveConflict(error: unknown): boolean {
+  if (isRevisionConflict(error)) return true;
+  if (error === null || typeof error !== 'object') return false;
+  const response = error as { status?: unknown; json?: { code?: unknown; details?: { code?: unknown } } };
+  return response.status === 409 && ['revision_conflict', 'GRAPH_STALE'].includes(String(response.json?.code ?? response.json?.details?.code));
 }
 
 export function createAgentCapabilities(
@@ -6042,7 +6055,6 @@ export function createAgentCapabilities(
         }
         const receipt = receiptSummaryOf(res.json);
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
-        proposals.markApplied(decision.proposal.proposal_id, receipts);
         const goalLabel = String(after!.nodes.find((x) => x.id === op.path)?.label ?? 'the goal');
         const targetSaid = `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`;
         const applied = {
@@ -6057,27 +6069,41 @@ export function createAgentCapabilities(
          * writer set them. Either write failing is said by name: the target stays set, the level is not recorded.
          */
         const level = (op.value as { current_level?: { value: number; unit: string; quote: string } }).current_level;
-        if (level === undefined) return applied;
+        if (level === undefined) {
+          proposals.markApplied(decision.proposal.proposal_id, receipts);
+          return applied;
+        }
         const todaySaid = targetFigure(level.value, level.unit);
         const notRecorded = (why: unknown): ToolResult => ({
-          ...applied,
-          follow_up: `${targetSaid} Its level today (${todaySaid}) was not recorded, so nothing about today’s level changed.`,
+          ...partialWriteOutcome(decision.proposal.proposal_id, receipts,
+            laterSaveConflict(why) ? 'target_saved_level_not_saved'
+              : why instanceof Error || why === 'not_confirmed' || why === 'not_verified' ? 'target_saved_level_unconfirmed' : 'target_saved_level_refused'),
           level_not_recorded: true,
-          note: `The target is set. Today's level was NOT recorded (${String(why ?? 'refused')}). Say both plainly, and never say today's level was saved.`,
         });
         const levelCtx = { ...ctx, user_text: level.quote, user_turn_text: level.quote };
-        const prepared = await proposeGoalCurrentLevel({ readGraph: async () => after, proposals }, levelCtx, {
-          goal_label: goalLabel, value: level.value, unit: level.unit, goal_is: v.constraint_type, user_stated: true,
-        });
+        let prepared: ToolResult;
+        try {
+          prepared = await proposeGoalCurrentLevel({ readGraph: async () => after, proposals }, levelCtx, {
+            goal_label: goalLabel, value: level.value, unit: level.unit, goal_is: v.constraint_type, user_stated: true,
+          });
+        } catch (error) { return notRecorded(error); }
         const levelProposal = prepared.ok && typeof prepared.proposal_id === 'string' ? proposals.get(prepared.proposal_id) : undefined;
         if (levelProposal === undefined) return notRecorded(prepared.refusal);
-        const written = await applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, levelProposal, after!);
+        let written: ToolResult;
+        try {
+          written = await applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, levelProposal, after!);
+        } catch (error) {
+          proposals.discard(levelProposal.proposal_id);
+          return notRecorded(error);
+        }
         if (written.ok !== true || written.applied !== true) {
           // ⛔ P0 PARTNER CR on #2373 (5914335527): the level proposal this branch made internally was never shown as a
           // card, so it must not stay outstanding — the next "yes" would record what this reply says was not recorded.
           proposals.discard(levelProposal.proposal_id);
-          return notRecorded(written.refusal);
+          return { ...notRecorded(written.refusal),
+            receipts: [...receipts, ...((written.receipts as ReceiptSummary[] | undefined) ?? [])] };
         }
+        proposals.markApplied(decision.proposal.proposal_id, receipts);
         return {
           ...applied,
           receipts: [...receipts, ...((written.receipts as ReceiptSummary[] | undefined) ?? [])],
@@ -6423,7 +6449,13 @@ export function createAgentCapabilities(
             }
           }
         }
-        const rebased = framedHere.length > 0 ? await readGraph(ctx.scenario_id) : null;
+        let rebased: GraphRead | null;
+        try { rebased = framedHere.length > 0 ? await readGraph(ctx.scenario_id) : null; }
+        catch (error) {
+          if (framedHere.length === 0) throw error;
+          return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+            laterSaveConflict(error) ? 'range_saved_levels_not_saved' : 'range_saved_levels_unconfirmed');
+        }
         let baseHash = rebased?.graph_hash ?? before.graph_hash;
         /** The levels THIS approval's own writes committed — see the read-back below. */
         const ownLevelWrite = new Set<string>();
@@ -6436,16 +6468,28 @@ export function createAgentCapabilities(
          * on the approved revision (or the one our range write produced) — any pair refused means none committed. Its one
          * committed revision is OUR revision for every level; the read-back below still decides what the model holds.
          */
-        const res = await opts.commitOptionLevels({
+        let res: CommitOptionLevelsResult;
+        try {
+          res = await opts.commitOptionLevels({
           scenario_id: ctx.scenario_id,
           base_graph_hash: baseHash,
           turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
           links: [],
           levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
         });
+        } catch (error) {
+          if (framedHere.length === 0) throw error;
+          return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+            laterSaveConflict(error) ? 'range_saved_levels_not_saved' : 'range_saved_levels_unconfirmed');
+        }
+        if (framedHere.length > 0 && res.status !== 'committed') {
+          return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+            res.status === 'stale' ? 'range_saved_levels_not_saved'
+              : res.status === 'unconfirmed' ? 'range_saved_levels_unconfirmed' : 'range_saved_levels_refused');
+        }
         if (res.status === 'unconfirmed') {
           return {
-            ok: false, mutated: true, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
+            ok: false, mutated: true, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed', receipts,
             detail: 'The option levels were sent as one change, but Olumi could not read the model back to confirm them. Say exactly that; never say they were saved or not saved.',
           };
         }
@@ -6728,16 +6772,25 @@ export function createAgentCapabilities(
           // `user_assumption` for exactly this target and value. A value the USER authored
           // (a revision they named, even inside a proposal that also holds Olumi's figures —
           // `valueOpAuthor`) sends no context: the writer's own stamp is the truth.
-          const r = valueOpAuthor(o, decision.proposal) === 'model_proposed'
-            ? await runWithApprovedAdoption(
-              { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, targetId: o.path, rawValue: approvedValue },
-              send,
-            )
-            : await send();
+          let r: Awaited<ReturnType<InternalDispatch>>;
+          try {
+            r = valueOpAuthor(o, decision.proposal) === 'model_proposed'
+              ? await runWithApprovedAdoption(
+                { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, targetId: o.path, rawValue: approvedValue }, send)
+              : await send();
+          } catch (error) {
+            if (![...ownWrite.values()].some(Boolean)) throw error;
+            return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+              laterSaveConflict(error) ? 'values_saved_remaining_values_not_saved' : 'values_saved_remaining_values_unconfirmed');
+          }
           // ⛔ OWN-WRITE EVIDENCE, PER OP, FROM THIS REQUEST'S OWN RESPONSE (Codex
           // 5810763729 item 4). A later read cannot tell "my write landed" from "the old
           // number was already there" or "someone else wrote it".
           const own = valueWriteCommittedByThisRequest(r, o.path);
+          if (!own && [...ownWrite.values()].some(Boolean)) {
+            return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+              laterSaveConflict(r) ? 'values_saved_remaining_values_not_saved' : 'values_saved_remaining_values_refused');
+          }
           if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
           else if (!own) {
             // A 200 that is not this op's committed write: a refusal (committed as a turn,
@@ -6759,7 +6812,12 @@ export function createAgentCapabilities(
         // (unit caps, percent-vs-fraction), so the recorded number is read back
         // and reported EVEN WHEN it differs from the one the user approved —
         // that difference is exactly the thing a user must not discover later.
-        const afterSet = await readGraph(ctx.scenario_id);
+        let afterSet: GraphRead | null;
+        try { afterSet = await readGraph(ctx.scenario_id); }
+        catch (error) {
+          if (![...ownWrite.values()].some(Boolean)) throw error;
+          return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed');
+        }
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
         const superseded: { id: string; factor: string; saved: number; now: number }[] = [];
         for (const o of ops) {
@@ -6966,7 +7024,9 @@ export function createAgentCapabilities(
              * today's behaviour is right, because refusing the whole authorisation
              * because a READ failed would lose work the user already approved.
              */
-            const nowRead = await readGraph(ctx.scenario_id);
+            let nowRead: GraphRead | null;
+            try { nowRead = await readGraph(ctx.scenario_id); }
+            catch { return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'values_saved_read_unconfirmed'); }
             const base = nowRead ?? afterSet;
             const stillNeeds = new Map<string, number>();
             for (const [id, range] of frameById) {
@@ -7022,7 +7082,9 @@ export function createAgentCapabilities(
              * the `stillNeeds` loop, so it is empty here and
              * `ranges_added_for_analysis` is omitted. No claim, because no write.
              */
-            const reg: { status: number; json: Record<string, unknown> } = stillNeeds.size === 0
+            let reg: { status: number; json: Record<string, unknown> };
+            try {
+              reg = stillNeeds.size === 0
               ? { status: 200, json: {} }
               : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
               // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
@@ -7050,128 +7112,22 @@ export function createAgentCapabilities(
                 ? { expected_graph_identity_hash: base.graph_identity_hash }
                 : {}),
             });
-            if (reg.status !== 200) {
-              const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
-              /**
-               * ⛔⛔ "NOTHING WAS WRITTEN" WAS UNTRUE HERE, AND IT IS THE WORST
-               * KIND OF UNTRUE: the values were already saved, in their own
-               * registration, BEFORE this frame write was attempted. Telling the
-               * user nothing landed invites them to redo a write that succeeded.
-               *
-               * The two outcomes are now reported SEPARATELY — what was saved,
-               * and what was not attached — because they are separately true.
-               * The unattached list is captured before `framed` is cleared;
-               * clearing it was itself losing the only record of which factors
-               * still have no range.
-               */
-              rangesNotAttached = [...framed];
-              const savedSomething = landed.length > 0;
-              if (code === 'GRAPH_STALE') {
-                /**
-                 * ⛔⛔ THE REFUSAL ESTABLISHES ONE THING ONLY: *THIS* FRAME WRITE
-                 * DID NOT LAND. It establishes nothing about the current model.
-                 *
-                 * ⚠ CHANGES_REQUIRED on a6dc18be, accepted in full. My previous
-                 * wording asserted that the approved values were "unchanged",
-                 * that "only the range" was missing, and that the analysis was
-                 * "still blocked" — then told the user not to re-enter anything.
-                 * But GRAPH_STALE means a COMPETING WRITER moved the canonical
-                 * graph after the `afterSet` read. That writer may have changed a
-                 * value, attached a range, or removed the factor. Every one of
-                 * those sentences was authority the stale read cannot support,
-                 * and the last one is advice that could lose the user's work.
-                 *
-                 * So: RE-READ, and describe only what the fresh read shows. When
-                 * the read is unavailable, report the HISTORICAL EVENT and say
-                 * the current state is unknown — never advise on a state we could
-                 * not observe.
-                 */
-                const fresh = await readGraph(ctx.scenario_id);
-                if (fresh === null) {
-                  // Nothing here is verified, so nothing is claimed: the list is
-                  // dropped and the unknown marker travels in its place.
-                  rangesNotAttached = [];
-                  currentStateUnknown = true;
-                  failures.push({
-                    factor: 'scale_frame',
-                    detail: savedSomething
-                      ? /**
-                       * ⚠ THE HISTORICAL FACT IS BOUND TO ITS OWN TENSE. I asked
-                       * the reviewer whether to withhold it entirely; on
-                       * reflection that is my call, and withholding it is worse —
-                       * it is the one thing that stops a user redoing a write
-                       * that was accepted. What matters is that it cannot be
-                       * READ as a current-state claim, so the sentence says the
-                       * writes were accepted AT THE TIME and that whether those
-                       * values are still in the model is unknown, rather than
-                       * stating a fact and an UNKNOWN side by side.
-                       */
-                      'the model changed while the range was being attached, and it could not be read back afterwards. This turn\u2019s value writes were accepted AT THE TIME, and its range write was refused. Whether those values are still in the model, whether they now carry a range, and whether the analysis can run are ALL UNKNOWN, because the model could not be read. Read it again before describing or advising anything \u2014 and do not tell the user their figures are safe.'
-                      : 'the model changed while this was being prepared and could not be read back. No range was attached by this turn; the current state is unknown — read it again and propose afresh.',
-                  });
-                } else {
-                  // Derived from the FRESH read, never from what we intended:
-                  // a competing writer may already have supplied a range.
-                  /**
-                   * ⭐⭐ KEYED ON `id`, WHICH IS THE ONLY KEY THAT CANNOT COLLIDE.
-                   *
-                   * A label join silently resolved one factor to a DIFFERENT factor
-                   * sharing its label (see the `IntendedFrame` note above), and it
-                   * could not find a renamed one at all. An id join answers both:
-                   * present-and-framed, present-and-still-unranged, or absent.
-                   *
-                   * ⚠ And the message is built from the FRESH node's label, not the
-                   * one this turn remembered — after a rename the user is shown the
-                   * name the model now uses, not a name that no longer exists.
-                   */
-                  const byId = new Map<string, GraphRead['nodes'][number]>();
-                  for (const n of fresh.nodes) {
-                    const id = String((n as { id?: unknown }).id ?? '');
-                    if (id !== '') byId.set(id, n);
-                  }
-                  /**
-                   * ⛔⛔ AND A LABEL THAT IS NOT IN THE FRESH READ PROVES NOTHING.
-                   * The join is on `label`, so a factor a competing writer RENAMED
-                   * — the exact case GRAPH_STALE fires for — is simply absent from
-                   * `byLabel`. `frameOf(undefined)` is null, so it survived the
-                   * filter and was then printed BY ITS OLD LABEL as "still has no
-                   * range": a present-state claim about a name the model no longer
-                   * uses, from a read that never saw it. That is the same
-                   * fabrication as the refusal copy this block was written to fix.
-                   *
-                   * So the three cases are separated. Found and unranged → named.
-                   * Found and framed → dropped, someone supplied one. NOT FOUND →
-                   * dropped from the named list and disclosed as unaccounted for,
-                   * without asserting anything about it.
-                   */
-                  const unaccounted = rangesNotAttached.filter((f) => byId.get(f.id) === undefined);
-                  const stillUnranged = rangesNotAttached
-                    .filter((f) => byId.get(f.id) !== undefined && frameOf(byId.get(f.id)) === null)
-                    // ⭐ The CURRENT label, from the fresh read. A factor renamed by
-                    // a competing writer is named as the model now names it.
-                    .map((f) => ({ ...f, factor: String((byId.get(f.id) as { label?: unknown }).label ?? f.factor) }));
-                  rangesNotAttached = stillUnranged;
-                  failures.push({
-                    factor: 'scale_frame',
-                    detail: savedSomething
-                      ? 'the model changed while the range was being attached, so this turn attached none. Read back afterwards, ' +
-                        (stillUnranged.length > 0
-                          ? `these still have no range: ${stillUnranged.map((f) => f.factor).join(', ')}. Describe the values from that read, not from what was approved — someone else may have changed them.`
-                          : 'every factor that could be found now has a range, so someone else supplied one. Describe the model from that read before advising anything.')
-                        + (unaccounted.length > 0
-                          ? ` ⚠ ${unaccounted.length} factor(s) this turn tried to frame could not be found in that read at all — they may have been renamed or removed, so nothing is claimed about them; read the model as it now stands.`
-                          : '')
-                      : 'the model changed while this was being prepared, so this turn attached no range. Read the model as it now stands before proposing again.',
-                  });
-                }
-              } else {
-                failures.push({
-                  factor: 'scale_frame',
-                  detail: `could not attach a range: http ${reg.status}`,
-                });
-              }
-              framed.length = 0;
+            } catch (error) {
+              return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+                laterSaveConflict(error) ? 'values_saved_range_not_saved' : 'values_saved_range_unconfirmed');
             }
+            if (reg.status !== 200) {
+              return partialWriteOutcome(decision.proposal.proposal_id, receipts,
+                laterSaveConflict(reg) ? 'values_saved_range_not_saved' : 'values_saved_range_refused');
+            }
+            if (stillNeeds.size > 0) {
+              const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+              if (typeof mv?.version_id === 'string' && typeof mv.version_number === 'number') {
+                receipts.push({ version: mv.version_number, version_id: mv.version_id,
+                  mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '', source_turn_id: '' });
+              }
+            }
+
           }
         }
         if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id, receipts);
@@ -7421,6 +7377,10 @@ export function createAgentCapabilities(
           }
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
             detail: 'The link was added, but recording its accepted Olumi estimate could not be confirmed. Check the saved model before continuing.' };
+        }
+        if (estimate.status === 'stale' || estimate.status === 'refused') {
+          return partialWriteOutcome(decision.proposal.proposal_id, edgeReceipts,
+            estimate.status === 'stale' ? 'link_saved_estimate_not_saved' : 'link_saved_estimate_refused');
         }
         const checked = await readGraph(ctx.scenario_id);
         const edge = checked?.edges.find(e => e.from === fromId && e.to === toId);

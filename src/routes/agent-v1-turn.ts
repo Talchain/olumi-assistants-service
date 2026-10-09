@@ -53,7 +53,7 @@ import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runt
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
-import { isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
+import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
@@ -3787,6 +3787,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // No possible writes remain: release the claim, so a retry of the SAME
       // turn_id can run. Earlier writes or unknown outcomes keep the claim.
       const released = await releaseUnwrittenTurnClaim();
+      if (err instanceof ModelReadFailedError) {
+        return reply.code(503).send(toErrorV1(err, req));
+      }
       if (isRevisionConflict(err)) {
         const refusal = { error: {
           ...toErrorV1(err, req),
