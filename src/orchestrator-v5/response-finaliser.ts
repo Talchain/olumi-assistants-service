@@ -688,6 +688,7 @@ function attachAnalysisState(
       runFactBinding: {
         scenarioId: ctx.scenarioId,
         selectedResult: selectedRun?.fact.result,
+        selectedFact: selectedRun?.fact,
       },
     }),
     // ROADMAP 2.1271 — passed through verbatim; the composer owns the arm's

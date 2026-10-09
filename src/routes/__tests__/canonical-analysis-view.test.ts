@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence } from '../../orchestrator-v5/types/handler-fact.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -127,4 +128,14 @@ describe('canonical analysis view — one stored Run and the existing licences',
     expect(view.options).toEqual([]);
     expect(view.staleness.stale).toBeNull();
   });
+});
+
+
+it('C2 projection refuses another row’s provenance even when its recorded number matches', async () => {
+  const selected = fact(); const foreign = fact();
+  bindRunAnalysisOccurrence({ fact: selected, fact_row_id: 'selected-row', evaluated_scenario_revision: 7 });
+  bindRunAnalysisOccurrence({ fact: foreign, fact_row_id: 'foreign-row', evaluated_scenario_revision: 7 });
+  const derivation = deriveAnalysisFreshness([foreign], foreign.result.graph_hash_at_run!);
+  const view = await project(input({ runFact: selected, derivation }));
+  expect(view.staleness).toMatchObject({ run_revision: null, run_revision_source: 'legacy_unknown' });
 });

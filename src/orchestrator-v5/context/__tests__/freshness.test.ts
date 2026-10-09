@@ -1,3 +1,4 @@
+import { bindRunAnalysisOccurrence } from '../../types/handler-fact.js';
 import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 /**
  * Unit tests for deriveAnalysisFreshness — V5 state-trust freshness
@@ -858,5 +859,39 @@ describe('deriveAnalysisFreshness — option-identity guard', () => {
     } finally {
       setTestSink(null);
     }
+  });
+});
+
+
+describe('C2 occurrence revision fallback and scientific guards', () => {
+  function recorded(hash: string | null, revision = 4) {
+    const fact = mkRunAnalysisFact({ graph_hash_at_run: hash, computed_at: '2026-04-30T00:00:00.000Z' });
+    bindRunAnalysisOccurrence({ fact, fact_row_id: 'c2-row', evaluated_scenario_revision: revision });
+    return fact;
+  }
+  it.each([undefined, null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('invalid/absent current revision %s cannot prove a no-hash Run fresh', current => {
+    const derivation = deriveAnalysisFreshness([recorded(null)], 'current', undefined, { currentScenarioRevision: current });
+    expect(derivation.freshness).toBe('unknown');
+    expect(derivation.run_revision).toEqual({ value: 4, source: 'recorded' });
+  });
+  it('zero is a valid recorded value only when it was actually supplied', () => {
+    const derivation = deriveAnalysisFreshness([recorded(null, 0)], null, undefined, { currentScenarioRevision: 0 });
+    expect(derivation.freshness).toBe('fresh');
+    expect(derivation.basis).toBe('recorded_run_revision');
+    expect(derivation.run_revision).toEqual({ value: 0, source: 'recorded' });
+  });
+  it('restore still rejects a no-hash recorded match', () => {
+    const derivation = deriveAnalysisFreshness([recorded(null)], null, undefined, {
+      currentScenarioRevision: 4, analysisInvalidatedAt: '2026-05-01T00:00:00.000Z',
+    });
+    expect(derivation.freshness).toBe('stale');
+    expect(derivation.reason).toBe('model_restored_after_analysis');
+    expect(derivation.run_revision?.value).toBe(4);
+  });
+  it('a replacement Run id cannot inherit the original row’s revision', () => {
+    const fact = recorded(null); fact.result.run_id = 'a-different-run';
+    const derivation = deriveAnalysisFreshness([fact], null, undefined, { currentScenarioRevision: 4 });
+    expect(derivation.freshness).toBe('unknown');
+    expect(derivation.run_revision).toEqual({ value: null, source: 'legacy_unknown' });
   });
 });

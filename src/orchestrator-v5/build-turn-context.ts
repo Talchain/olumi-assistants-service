@@ -1049,6 +1049,7 @@ export async function buildTurnContext(
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
     { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph,
+      currentScenarioRevision: scenarioState.read.status === 'ok_present' ? scenarioState.revision : undefined,
       analysisInvalidatedAt: analysisInvalidatedAtRead, priorFactsWithTurn,
       legacyEditFacts: legacyEditFactsForFreshness(scenarioAnalysisFactSet) },
   );
@@ -1942,7 +1943,7 @@ async function fetchPersistedScenarioState(
         : { status: 'ok_absent' };
     return {
       graph: result.graph, briefText: result.briefText, read,
-      ...(result.revision !== undefined ? { revision: result.revision } : {}),
+      ...(read.status === 'ok_present' && result.revision !== undefined ? { revision: result.revision } : {}),
     };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
