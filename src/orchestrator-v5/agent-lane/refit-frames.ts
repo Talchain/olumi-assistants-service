@@ -39,7 +39,7 @@ export interface FrameRefit {
 }
 export interface FrameRefusal {
   readonly link: string;
-  readonly reason: 'no_frame' | 'not_the_goal' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale';
+  readonly reason: 'no_frame' | 'not_the_goal' | 'levels_set_on_node' | 'new_cut' | 'spread_would_move' | 'bounded_scale' | 'ambiguous_pair';
   /** For `new_cut`: the link that would be cut instead. */
   readonly detail?: string;
 }
@@ -329,6 +329,13 @@ export function refitFramesForOlumiEstimates(graph: Rec): {
   const pending = (g.edges as Rec[]).filter((e) => e.provenance?.olumi_fit_candidate !== undefined)
     .sort((a, b) => Number(goals.has(b.to)) - Number(goals.has(a.to))).map(key);
   for (const link of pending) {
+    // Endpoint identity must name exactly one edge, including non-candidate neighbours.
+    const matching = (g.edges as Rec[]).filter((e) => key(e) === link);
+    if (matching.length !== 1) {
+      refused.push({ link, reason: 'ambiguous_pair' });
+      for (const e of matching) delete e.provenance?.olumi_fit_candidate;
+      continue;
+    }
     const before = g;
     let next = structuredClone(before);
     const edge = (next.edges as Rec[]).find((e) => key(e) === link)!;

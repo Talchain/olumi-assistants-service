@@ -380,7 +380,7 @@ function levelWords(level: number, target: MagnitudeNode, frame: number): string
   return `${fmt(raw)}${unit === undefined ? '' : ` ${unit}`}`;
 }
 
-function statementWords(
+export function statementWords(
   amount: number, perSourceChange: number, source: MagnitudeNode, target: MagnitudeNode,
   sourceFrame: number | undefined, targetFrame: number | undefined,
 ): string {

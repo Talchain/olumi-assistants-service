@@ -4396,10 +4396,7 @@ function admitOnce(
       ? framed : sizeLink(statement, source, unframed));
   }
 
-  const linkResult = admitCandidateLinks(resolvable, sizing);
-  for (const e of linkResult.edges) {
-    if (basisDroppedBySign.has(`${e.from}::${e.to}`)) delete (e.provenance as { basis?: string }).basis;
-  }
+  const linkResult = admitCandidateLinks(resolvable, sizing, basisDroppedBySign);
   // Reviewed Fi writer: carry the very sentence C2/W3/C1/SIGN-1 validated, through
   // the existing stored statement field. User edits retain their own provenance.
   for (const [link, sentence] of boundByLink) {

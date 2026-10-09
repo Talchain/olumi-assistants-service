@@ -2,9 +2,15 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { expect, it, vi } from 'vitest';
 import { sizeLink, NOT_REPRESENTABLE, type MagnitudeNode } from '../../../cee/magnitude/link-effect.js';
-import { admitCandidateLinks } from '../admit-candidate.js';
+import { admitCandidateLinks, SET_ASIDE_ESTIMATE_LABEL } from '../admit-candidate.js';
+import { createAddConstraintHandler } from '../../tools/handlers/add-constraint.js';
+import type { HandlerInvocation } from '../../tools/registry.js';
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { dispatchTool } from '../runtime/agent-tools.js';
+import { ProposalStore } from '../proposal.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import * as frames from '../refit-frames.js';
+import { rederiveGoalInLinks, retireNormalisingGoalFrame } from '../normalising-goal-frame.js';
 
 type Rec = Record<string, any>;
 type Row = { id: string; brief: string; drafter_texts: string[] };
@@ -223,6 +229,222 @@ it('cascade preserves natural spreads, marks frame_carried only in Olumi pass, a
   expect(naturalSize(result.graph, edge(result.graph, 'y→z'))).toBeCloseTo(0.3, 9);
   expect(JSON.stringify(graph)).toBe(snapshot);
   noCandidates(result.graph);
+});
+
+it('row (h): duplicate x→y candidates are both refused without throwing; a unique pair fits', () => {
+  const { graph } = admitted();
+  graph.edges.push(structuredClone(edge(graph, 'x→y')));
+  const snapshot = JSON.stringify(graph);
+  const result = frames.refitFramesForOlumiEstimates(graph);
+  expect(result.fitted).toEqual([]);
+  expect(result.refused).toEqual([
+    { link: 'x→y', reason: 'ambiguous_pair' },
+    { link: 'x→y', reason: 'ambiguous_pair' },
+  ]);
+  expect(result.graph.edges.filter((e: Rec) => `${e.from}→${e.to}` === 'x→y')).toHaveLength(2);
+  expect(result.graph).toEqual(withoutCandidates(graph));
+  expect(JSON.stringify(graph)).toBe(snapshot);
+  noCandidates(result.graph);
+  const unique = frames.refitFramesForOlumiEstimates(admitted().graph);
+  expect(unique.fitted).toEqual(['x→y']);
+  expect(edge(unique.graph, 'x→y').provenance.magnitude).toBe('olumi_estimate');
+  noCandidates(unique.graph);
+});
+
+it('row (h) mixed pair: a candidate beside a non-candidate edge is ambiguous too', () => {
+  const { graph } = admitted();
+  graph.edges.unshift(structuredClone(withoutCandidates(graph).edges[0]));
+  const result = frames.refitFramesForOlumiEstimates(graph);
+  expect(result.fitted).toEqual([]);
+  expect(result.refused).toEqual([{ link: 'x→y', reason: 'ambiguous_pair' }]);
+  expect(result.graph).toEqual(withoutCandidates(graph));
+  noCandidates(result.graph);
+});
+
+it('row (i): fitted-link disclosures retire in every reader; refused-link disclosures remain', async () => {
+  const row = servedRow();
+  const c = JSON.parse(row.drafter_texts[0]!);
+  Object.assign(c.links.find((l: Rec) => l.from === 'Pro plan price' && l.to === 'Monthly Pro churn'),
+    { to: 'Pro subscribers today', effect_amount: 100000, effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: false });
+  row.drafter_texts = [JSON.stringify(c)];
+  const before = await replay(row, true);
+  const after = await replay(row);
+  const fittedId = 'pro_plan_price→mrr';
+  const refusedId = 'pro_plan_price→pro_subscribers_today';
+  expect(edge(after.graph, fittedId).provenance.magnitude).toBe('olumi_estimate');
+  expect(edge(after.graph, refusedId).provenance.magnitude).toBe('olumi_placeholder');
+  for (const id of [fittedId, refusedId]) {
+    const [from, to] = id.split('→');
+    const estimate = before.result.set_aside_estimates.find((s: Rec) => s.from === from && s.to === to);
+    expect(estimate, id).toBeDefined();
+    const disclosures = before.result.not_represented.filter((s: string) => s.includes(estimate.estimate) && s.includes('NOT in the model'));
+    expect(disclosures, id).toHaveLength(1);
+    const questions = before.result.open_questions.filter((q: string) => q.includes(estimate.estimate) && q.includes(NOT_REPRESENTABLE));
+    expect(questions, id).toHaveLength(1);
+    const remains = id === refusedId;
+    expect(after.result.set_aside_estimates.some((s: Rec) => s.from === from && s.to === to), id).toBe(remains);
+    for (const sentence of disclosures) expect(after.result.not_represented.includes(sentence), id).toBe(remains);
+    for (const question of questions) expect(after.result.open_questions.includes(question), id).toBe(remains);
+    const label = node(after.graph, to).label;
+    expect(after.result.not_represented.some((s: string) => s.includes(label) && /NOT in the model|carries a placeholder|no result rests/.test(s)), id).toBe(remains);
+  }
+});
+
+it('row (j): completed fit drops a sign-corrected basis; an agreeing-sign control keeps it', async () => {
+  const basis = 'Higher price increases MRR';
+  for (const direction of ['negative', 'positive']) {
+    const row = servedRow();
+    const c = JSON.parse(row.drafter_texts[0]!);
+    Object.assign(c.links.find((l: Rec) => l.from === 'Pro plan price' && l.to === 'MRR'), { direction, basis });
+    row.drafter_texts = [JSON.stringify(c)];
+    const before = await replay(row, true);
+    expect(edge(before.graph, 'pro_plan_price→mrr').provenance.magnitude).toBe('olumi_placeholder');
+    const after = await replay(row);
+    const e = edge(after.graph, 'pro_plan_price→mrr');
+    expect(e.provenance.magnitude).toBe('olumi_estimate');
+    expect(Math.sign(e.strength.mean)).toBe(direction === 'negative' ? -1 : 1);
+    if (direction === 'negative') expect(e.provenance).not.toHaveProperty('basis');
+    else expect(e.provenance.basis).toBe(basis);
+    noCandidates(after.graph);
+  }
+});
+
+it('row (k): doubling the goal frame after fitting keeps £3/item and amount; a placeholder keeps β', () => {
+  const { graph } = admitted();
+  graph.nodes.push({ id: 'z', label: 'Z', kind: 'factor', scale_frame: 100 });
+  graph.edges.push({ from: 'z', to: 'y', strength: { mean: 0.2, std: 0.1 },
+    provenance: { magnitude: 'olumi_placeholder' } });
+  const fitted = frames.refitFramesForOlumiEstimates(graph);
+  expect(fitted.fitted).toEqual(['x→y']);
+  const from = frames.frameOf(node(fitted.graph, 'y'))!;
+  expect(from).toBe(500);
+  expect(frames.frameOf(node(fitted.graph, 'x'))).toBe(100);
+  const size = naturalSize(fitted.graph, edge(fitted.graph, 'x→y'));
+  expect(size).toBeCloseTo(3, 12);
+  const written = structuredClone(fitted.graph);
+  delete node(written, 'y').scale_frame;
+  node(written, 'y').goal_threshold_cap = from * 2;
+  const snapshot = JSON.stringify(written);
+  const after = rederiveGoalInLinks(written, 'y', from);
+  const e = edge(after, 'x→y');
+  expect(Math.abs(naturalSize(after, e) - size)).toBeLessThanOrEqual(1e-9);
+  expect(e.provenance.natural_effect.amount).toBe(3);
+  expect(e.provenance.natural_effect.strength_mean).toBe(e.strength.mean);
+  expect(e.strength.std).toBe(edge(fitted.graph, 'x→y').strength.std / 2);
+  expect(edge(after, 'z→y').strength).toEqual(edge(fitted.graph, 'z→y').strength);
+  expect(JSON.stringify(written)).toBe(snapshot);
+});
+
+it('row (k) class controls: ordinary estimates rescale in both readers; stale/missing sizes and placeholders keep β', () => {
+  for (const retire of [false, true]) {
+    const graph: Rec = { nodes: [
+      { id: 'x', kind: 'factor', scale_frame: 100 },
+      { id: 'y', kind: 'goal', goal_threshold_raw: 800, goal_threshold_cap: 1000, ...(retire ? { scale_frame: 500 } : {}) },
+    ], edges: [] };
+    for (const [id, magnitude, strength_mean] of [
+      ['ordinary', 'olumi_estimate', 0.6], ['within_tolerance', 'olumi_estimate', 0.6 * (1 + 5e-10)],
+      ['stale', 'olumi_estimate', 0.6 * (1 + 2e-9)], ['missing', 'olumi_estimate', undefined],
+      ['placeholder', 'olumi_placeholder', 0.6],
+    ] as const) {
+      graph.nodes.push({ id, kind: 'factor', scale_frame: 100 });
+      graph.edges.push({ from: id, to: 'y', strength: { mean: 0.6, std: 0.3 },
+        provenance: { magnitude, ...(strength_mean === undefined ? {} : { natural_effect: { amount: 3, strength_mean } }) } });
+    }
+    const after = retire ? retireNormalisingGoalFrame(graph) : rederiveGoalInLinks(graph, 'y', 500);
+    for (const id of ['ordinary', 'within_tolerance']) {
+      expect(edge(after, `${id}→y`).strength.mean).toBe(0.3);
+      expect(edge(after, `${id}→y`).provenance.natural_effect.amount).toBe(3);
+    }
+    for (const id of ['stale', 'missing', 'placeholder']) expect(edge(after, `${id}→y`).strength.mean).toBe(0.6);
+  }
+});
+
+/** A fitted or ordinary estimate, and a user link on the same frame. An option fixes the goal's frame against refit. */
+function goalEditGraph(fitted: boolean, negative: boolean, retire: boolean): Rec {
+  const { graph } = admitted();
+  const start = fitted ? frames.refitFramesForOlumiEstimates(graph).graph : {
+    nodes: graph.nodes, edges: [{ from: 'x', to: 'y', strength: { mean: 0.6, std: 0.3 }, exists_probability: 0.8,
+      effect_direction: 'positive', provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate',
+        natural_effect: { amount: 3, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'items', strength_mean: 0.6, strength_mean_frame: 'edge_strength' } } }],
+  };
+  const e = edge(start, 'x→y');
+  if (negative) {
+    e.effect_direction = 'negative'; e.strength.mean *= -1;
+    e.provenance.natural_effect.amount *= -1; e.provenance.natural_effect.strength_mean *= -1;
+  }
+  e.provenance.basis = 'A reason for the estimate';
+  const goal = node(start, 'y');
+  if (retire) goal.scale_frame = 500; else delete goal.scale_frame;
+  delete goal.goal_threshold_cap;
+  goal.observed_state = { value: 0.08, baseline: 0.08, raw_value: 40, cap: 500, unit: '£', source: 'brief_extraction' };
+  start.nodes.push({ id: 'u', label: 'U', kind: 'factor', scale_frame: 100, unit: 'items' },
+    { id: 'hold', label: 'Hold', kind: 'option', interventions: { y: 0 } });
+  start.edges.push({ from: 'u', to: 'y', strength: { mean: 0.6, std: 0.3 }, exists_probability: 0.8, effect_direction: 'positive',
+    provenance: { source: 'brief_extraction', magnitude: 'user_stated', natural_effect: {
+      amount: 3, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'items', strength_mean: 0.6, strength_mean_frame: 'edge_strength' } } });
+  return start;
+}
+
+function assertGoalEditSetAside(start: Rec, after: Rec, disclosure: string, negative: boolean): void {
+  const estimate = edge(after, 'x→y');
+  const placeholder = admitCandidateLinks([{ from: 'x', to: 'y', direction: negative ? 'negative' : 'positive',
+    provenance: 'ai_proposed', existence_probability: edge(start, 'x→y').exists_probability }]).edges[0]!;
+  expect(estimate).toEqual(placeholder);
+  expect(estimate.provenance).not.toHaveProperty('clamped_from');
+  expect(estimate.provenance).not.toHaveProperty('natural_effect');
+  expect(estimate.provenance).not.toHaveProperty('basis');
+  const admission = admitted().loss.find(l => l.field_path === 'edges[x::y].set_aside_estimate')!;
+  const statement = (admission.after as { estimate: string }).estimate.replace('raises', negative ? 'lowers' : 'raises');
+  expect(disclosure).toContain(`${SET_ASIDE_ESTIMATE_LABEL}: ${statement}`);
+  const user = edge(after, 'u→y');
+  expect(user.strength).toEqual({ mean: 1, std: 0.5 });
+  expect(user.provenance.clamped_from).toBe(3);
+  expect(user.provenance.natural_effect).toEqual({ ...edge(start, 'u→y').provenance.natural_effect, strength_mean: 3 });
+  expect(user.provenance.magnitude).toBe('user_stated');
+  expect(frames.frameOf(node(after, 'y'))).toBe(100);
+  noCandidates(after);
+}
+
+it.each([
+  [true, false, true], [true, true, true], [false, false, true], [false, true, true],
+  [true, false, false], [true, true, false], [false, false, false], [false, true, false],
+])('row (l): goal edit → estimate set aside, not clamped; add_constraint fitted=%s negative=%s retire=%s', async (fitted, negative, retire) => {
+  const graph = goalEditGraph(fitted, negative, retire);
+  const snapshot = JSON.stringify(graph);
+  const proposal = { handler_id: 'add_constraint', entity: { id: 'y', kind: 'goal', resolution_status: 'resolved', resolution_method: 'id_match' },
+    parameters: [{ name: 'constraint_type', value: 'at_least', source: 'user_explicit' },
+      { name: 'value', value: 80, source: 'user_explicit' }, { name: 'unit', value: '£', source: 'user_explicit' }], cited_context_fields: [] };
+  const out = await createAddConstraintHandler()({
+    context: { session_id: 'scn-edit', stage: 'frame', request_id: 'req-edit', prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+    payload: { kind: 'message', scenario_id: 'scn-edit', turn_id: 'turn-edit', stage: 'frame', message: 'Make the target at least £80' },
+    requestId: 'req-edit', signal: new AbortController().signal, orientationText: '', proposal, graphForTurn: graph,
+  } as unknown as HandlerInvocation);
+  assertGoalEditSetAside(graph, out.mutated_graph as Rec, out.assistant_text, negative);
+  expect(JSON.stringify(graph)).toBe(snapshot);
+});
+
+it.each([true, false])('row (l): goal edit → estimate set aside, not clamped; goal_current_level retire=%s', async retire => {
+  const start = goalEditGraph(true, true, retire);
+  Object.assign(node(start, 'y'), { goal_threshold_raw: 80, goal_threshold_cap: 100, goal_threshold: 0.8,
+    goal_threshold_unit: '£', goal_threshold_frame: 'level', goal_direction: '<=' });
+  start.goal_constraints = [{ constraint_id: 'ceiling', node_id: 'y', label: 'Y at most £80', operator: '<=', value: 80, unit: '£', provenance: 'explicit', value_frame: 'level' }];
+  let stored = structuredClone(start);
+  const registrations: Rec[] = [];
+  const dispatch: InternalDispatch = async (path, body) => {
+    if (path.endsWith('/graph/register')) {
+      stored = structuredClone((body as { graph: Rec }).graph); registrations.push(stored);
+      return { status: 200, json: { model_version: { version_number: 2 } } };
+    }
+    return { status: 200, json: { graph: structuredClone(stored), graph_hash: registrations.length ? 'h1' : 'h0' } };
+  };
+  const caps = createAgentCapabilities(dispatch, new ProposalStore());
+  const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400cc', authenticated_user_id: null, request_id: 'req-edit', user_text: 'Our Y is £80 today.' };
+  const proposed = await dispatchTool('propose_goal_current_level', JSON.stringify({ goal_label: 'Y', value: 80, unit: '£', goal_is: 'at_most', user_stated: true }), ctx, caps) as Rec;
+  expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+  const out = await dispatchTool('authorise_change', JSON.stringify({ proposal_id: proposed.proposal_id }), ctx, caps) as Rec;
+  expect(out.ok, JSON.stringify(out)).toBe(true);
+  expect(registrations).toHaveLength(1);
+  assertGoalEditSetAside(start, stored, out.not_represented, true);
 });
 
 it('served census: 116 corpus + 8 R2; fewer not_representable set-asides and goal-path placeholders', async () => {

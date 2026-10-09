@@ -268,6 +268,7 @@ export function definitionalLink(link: CandidateLink, sized: LinkSizing): boolea
 export function admitCandidateLinks(
   links: readonly CandidateLink[],
   sizing: ReadonlyMap<string, LinkSizing> = new Map(),
+  basisDroppedBySign: ReadonlySet<string> = new Set(),
 ): AdmissionResult {
   const edges: AdmittedEdge[] = [];
   const loss: RepairEntry[] = [];
@@ -278,10 +279,13 @@ export function admitCandidateLinks(
   for (const link of links) {
     const fieldPath = `edges[${link.from}::${link.to}]`;
     const sized = typeof link.strength_mean === 'number' ? undefined : sizing.get(`${link.from}::${link.to}`);
+    // Direct and pending estimates share one basis door, including admission's sign correction.
+    const estimateMagnitude = sized?.fit_candidate !== undefined ? 'olumi_estimate' : sized?.magnitude;
+    const basis = estimateMagnitude === 'olumi_estimate' && !basisDroppedBySign.has(`${link.from}::${link.to}`)
+      && typeof link.basis === 'string' && link.basis.trim() !== '' ? link.basis.trim().slice(0, 300) : undefined;
     const fitCandidate = sized?.fit_candidate === undefined ? undefined : {
       ...sized.fit_candidate,
-      ...(typeof link.basis === 'string' && link.basis.trim() !== ''
-        ? { basis: link.basis.trim().slice(0, 300) } : {}),
+      ...(basis !== undefined ? { basis } : {}),
     };
 
     if (link.direction === 'unknown') {
@@ -324,8 +328,7 @@ export function admitCandidateLinks(
           ...(fitCandidate !== undefined ? { olumi_fit_candidate: fitCandidate } : {}),
           ...(definitionalLink(link, sized) ? { definitional: true as const } : {}),
           // Science §(p)(1): Olumi's own size carries the one-line reason it holds (never on a user's size or a placeholder).
-          ...(sized.magnitude === 'olumi_estimate' && typeof link.basis === 'string' && link.basis.trim() !== ''
-            ? { basis: link.basis.trim().slice(0, 300) } : {}),
+          ...(sized.magnitude === 'olumi_estimate' && basis !== undefined ? { basis } : {}),
         },
       };
       projected_fields[key] = projected;

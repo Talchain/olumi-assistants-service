@@ -100,7 +100,7 @@ import {
 import { ADD_CONSTRAINT_USER_GUIDANCE,
   SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from './d1-shared/user-guidance.js';
-import { retireNormalisingGoalFrame, rederiveGoalInLinks } from '../../agent-lane/normalising-goal-frame.js';
+import { retireNormalisingGoalFrameWithSetAside, rederiveGoalInLinksWithSetAside, setAsideEstimateDisclosure, type SetAsideEstimate } from '../../agent-lane/normalising-goal-frame.js';
 import { frameOf } from '../../agent-lane/refit-frames.js';
 import { pairGoalCeiling } from '../../goal-target/goal-ceiling-pair.js';
 
@@ -1375,6 +1375,7 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
+      const setAside: SetAsideEstimate[] = [];
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         // F8 backfill residual (self-review hardening): when there is no
@@ -1591,12 +1592,16 @@ export function createAddConstraintHandler(): HandlerFn {
         // ⭐ D1 B (DL #85 5930770727): the level moved the goal's frame above, so every user-sized or definitional link into
         // the goal is re-derived onto the new frame from its unchanged natural size — the F4 rule, from the old frame.
         if (levelFrameMovedFrom !== undefined) {
-          const moved = rederiveGoalInLinks(clone, targetId, levelFrameMovedFrom);
+          const rederived = rederiveGoalInLinksWithSetAside(clone, targetId, levelFrameMovedFrom);
+          setAside.push(...rederived.setAside);
+          const moved = rederived.graph;
           if (moved !== clone) { clone.nodes = moved.nodes; clone.edges = moved.edges; }
         }
         // ⭐ F4 (R3 #75 5922368144): a target or level landing on a goal read on a normalising frame retires that frame
         // and re-derives the user's own sizes into it, so the analysis is the same as a build with this target present.
-        const retired = retireNormalisingGoalFrame(clone);
+        const retirement = retireNormalisingGoalFrameWithSetAside(clone);
+        setAside.push(...retirement.setAside);
+        const retired = retirement.graph;
         if (retired !== clone) { clone.nodes = retired.nodes; clone.edges = retired.edges; }
         return {
           // ⛔ ON A CORRECTION `before` IS THE SOURCE ROW (Codex CX-195). It
@@ -1779,7 +1784,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // thing, which is what put the limit on the wrong node in the first
       // place. `null` ⇒ nothing was offered ⇒ no pending (fail closed).
       let alternativeForCorrection: ReturnType<typeof findConstraintTargetAlternative> = null;
-      const fragments: string[] = [constraintText];
+      const fragments: string[] = [constraintText, ...setAside.map(setAsideEstimateDisclosure)];
       if (unevaluatedDurationSpan !== null) {
         fragments.push(
           formatConstraintDurationNotEvaluated({ span: unevaluatedDurationSpan }),

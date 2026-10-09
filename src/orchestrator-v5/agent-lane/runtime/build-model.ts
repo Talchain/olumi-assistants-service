@@ -2109,11 +2109,42 @@ export async function buildModelFromBrief(
         : n))
       : statedGoal.nodes;
 
+    // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
+    // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
+    // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
+    // target, a spread would move, a new link would be cut, or the target is a bounded scale.
+    // ⭐ CLAMP AT PERSIST (DL 5924108406): a link no refit could fit is stored at ±1 with its full β marked (`refit-frames.ts`).
+    // ⭐ CEE #4 (Science goals §(v)): a stock worked out to the goal's deadline is carried only on the HELD deadline
+    // (`goal_horizon_months`, set above where the brief attests it), so it is admitted here, after the hold. Each refusal
+    // is said; a model with no accumulation declared is byte-identical.
+    const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, candidate.identities);
+    if (accumulation.loss.length > 0) {
+      admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
+    }
+    const statedFitGraph = refitFramesForStatedEffects({
+      // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
+      // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
+      nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
+      edges: admitted.edges,
+      ...(admitted.goal_constraints.length > 0
+        ? { goal_constraints: admitted.goal_constraints }
+        : {}),
+    } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+    const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
+    const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
+    // Retire every obsolete disclosure for fitted endpoint identities at their one source of truth.
+    const fittedOlumiFields = new Set(olumiFit.fitted.flatMap((link) => {
+      const path = `edges[${link.replace('→', '::')}]`;
+      return [`${path}.set_aside_estimate`, `${path}.magnitude_question`];
+    }));
+    admitted = { ...admitted, loss: admitted.loss.filter((l) => !fittedOlumiFields.has(l.field_path)) };
+    const graph = clampForPersist(prePersistGraph);
+
     const parked = (candidate as { unknowns?: unknown }).unknowns;
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
     // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
     // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
-    let setAside = setAsideEstimatesOf(admitted.loss);
+    const setAside = setAsideEstimatesOf(admitted.loss);
     const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
@@ -2239,39 +2270,9 @@ export async function buildModelFromBrief(
         : null);
     if (untypedScopeWords !== null && !openQuestions.includes(untypedScopeWords)) openQuestions.unshift(untypedScopeWords);
 
-    // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
-    // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
-    // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
-    // target, a spread would move, a new link would be cut, or the target is a bounded scale.
-    // ⭐ CLAMP AT PERSIST (DL 5924108406): a link no refit could fit is stored at ±1 with its full β marked (`refit-frames.ts`).
-    // ⭐ CEE #4 (Science goals §(v)): a stock worked out to the goal's deadline is carried only on the HELD deadline
-    // (`goal_horizon_months`, set above where the brief attests it), so it is admitted here, after the hold. Each refusal
-    // is said; a model with no accumulation declared is byte-identical.
-    const accumulation = admitAccumulationIdentities(goalNodes, admitted.edges, candidate.identities);
-    if (accumulation.loss.length > 0) {
-      admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
-    }
-    const statedFitGraph = refitFramesForStatedEffects({
-      // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
-      // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-      nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
-      edges: admitted.edges,
-      ...(admitted.goal_constraints.length > 0
-        ? { goal_constraints: admitted.goal_constraints }
-        : {}),
-    } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
-    const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
-    const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
-    const fittedOlumi = new Set(olumiFit.fitted);
-    setAside = setAside.filter((e) => !fittedOlumi.has(`${e.from}→${e.to}`));
-    const fittedOlumiQuestions = new Set(admitted.loss
-      .filter((l) => olumiFit.fitted.some((link) => l.field_path === `edges[${link.replace('→', '::')}].magnitude_question`))
-      .map((l) => l.reason));
-    for (let i = openQuestions.length - 1; i >= 0; i--) if (fittedOlumiQuestions.has(openQuestions[i]!)) openQuestions.splice(i, 1);
-    const graph = clampForPersist(prePersistGraph);
     // ⭐ A4f (AIQ 5923220559): the user's size was asked about as "would be cut short" when it was sized, BEFORE the refit
     // above. Where the refit made it fit, that question is no longer true, so it is not asked. Only the user's own sizes:
-    // Olumi's set-aside estimate quotes the same words but its link holds a placeholder, never the size.
+    // Remaining Olumi set-aside estimates quote the same words, but their links still hold placeholders.
     const fitted = new Set(graph.edges
       // A clamped link (its full β marked) is still cut in the analysis: its question stays (CODEX 5924186955).
       .filter((e) => e.provenance?.magnitude === 'user_stated' && typeof e.strength?.mean === 'number' && Math.abs(e.strength.mean) <= 1

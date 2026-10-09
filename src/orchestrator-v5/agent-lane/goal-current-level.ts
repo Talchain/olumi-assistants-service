@@ -60,7 +60,7 @@ import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel, admitStatedGoalLevelOnScale, isChangeOwnPercent } from './admit-model.js';
 import { readPercentUnit } from './same-unit.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
-import { retireNormalisingGoalFrame, rederiveGoalInLinks } from './normalising-goal-frame.js';
+import { retireNormalisingGoalFrameWithSetAside, rederiveGoalInLinksWithSetAside, setAsideEstimateDisclosure } from './normalising-goal-frame.js';
 import { frameOf } from './refit-frames.js';
 import { figureTheUserWrote, sameWord, wordsOf } from './stated-by-user.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
@@ -1393,7 +1393,8 @@ export async function applyGoalCurrentLevel(
   // Read BEFORE this write: the frame every sized link into the goal was sized on.
   const frameBefore = frameOf(approved.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
   const unretired = { ...approved.raw, nodes } as Record<string, unknown> & { nodes: typeof nodes };
-  const retiredOrSame = retireNormalisingGoalFrame(unretired);
+  const retirement = retireNormalisingGoalFrameWithSetAside(unretired);
+  const retiredOrSame = retirement.graph;
   // ⭐ D3 step 1: a goal ceiling is (re)paired on the level this write carries, in this same write (Science #87
   // 6005138341): the ceiling came first (rt10b's order) or an earlier level framed it, so the new level renormalises it.
   const ceilingPaired = holdsPairableCeiling(retiredOrSame, op.path)
@@ -1402,8 +1403,10 @@ export async function applyGoalCurrentLevel(
   // ⭐ …and the renormalised frame carries the links sized on the old one (Codex buddy r1 F3 on #2618): every user-sized or
   // definitional link into the goal is re-derived onto the new frame from its unchanged natural size, as the target
   // writer does when it moves the level frame (`add-constraint.ts`, D1 B). A retirement above has already re-derived.
-  const graph = ceilingPaired && !retired && frameBefore !== undefined
-    ? rederiveGoalInLinks(retiredOrSame, op.path, frameBefore) : retiredOrSame;
+  const rederived = ceilingPaired && !retired && frameBefore !== undefined
+    ? rederiveGoalInLinksWithSetAside(retiredOrSame, op.path, frameBefore) : { graph: retiredOrSame, setAside: [] };
+  const graph = rederived.graph;
+  const setAside = [...retirement.setAside, ...rederived.setAside];
   const writtenGoal = (graph.nodes as readonly Record<string, unknown>[]).find((n) => n.id === op.path);
   const writtenOs = (writtenGoal?.observed_state ?? os) as { baseline?: unknown };
   const reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
@@ -1482,6 +1485,7 @@ export async function applyGoalCurrentLevel(
           `${sayPartLevel(part.was, part.unit)}), derived from the user's figures so that the product holds; say it is ` +
           "still Olumi's estimate, never the user's. "
         : '') +
-      'An analysis the user asks for can now compare it with the target.',
+      'An analysis the user asks for can now compare it with the target.' +
+      setAside.map(s => ` ${setAsideEstimateDisclosure(s)}`).join(''),
   };
 }
