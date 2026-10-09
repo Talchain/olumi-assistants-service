@@ -1,13 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
-import { loadCorpus } from '../../../../scripts/phase2/parity-2b.js';
+import { readFileSync } from 'node:fs';
 import { SessionLRUCache } from '../../session/cache.js';
 import { SupabaseSessionStore } from '../../session/supabase-store.js';
 import type { SessionStore } from '../../session/store.js';
 
 export const ANCHOR_SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 export function anchorFact(runId: string, computedAt: string | undefined, status = 'computed'): HandlerFact {
-  const source = structuredClone(loadCorpus()[0]!.fact) as { result: Record<string, unknown> };
+  const source = JSON.parse(readFileSync(
+    new URL('./fixtures/anchor-run-fact.json', import.meta.url), 'utf8',
+  )) as { result: Record<string, unknown> };
   source.result.scenario_id = ANCHOR_SCENARIO;
   source.result.run_id = runId;
   source.result.graph_hash_at_run = `hash-${runId}`;
