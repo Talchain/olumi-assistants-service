@@ -130,7 +130,6 @@ vi.mock('../../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => null,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => (SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH),
     loadGraphAndBriefText: async () => ({
       graph: SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH,

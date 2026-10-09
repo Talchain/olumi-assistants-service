@@ -16,7 +16,6 @@ import { versionRecord } from './fixtures.js';
 
 import {
   ModelVersionCasConflictError,
-  ModelVersionNotFoundError,
   ModelVersionSignInRequiredError,
   ModelVersionStoreError,
   SupabaseModelVersionStore,
@@ -276,52 +275,6 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
     const { client } = makeClient({ rpcResult: { data: { nope: true }, error: null } });
     const store = new SupabaseModelVersionStore(client);
     await expect(store.saveVersion(SAVE_WRITE)).rejects.toBeInstanceOf(ModelVersionStoreError);
-  });
-});
-
-describe('SupabaseModelVersionStore.restoreVersion', () => {
-  it('calls restore_model_version with all named args and parses restored_from lineage', async () => {
-    const { client, rpcCalls } = makeClient({
-      rpcResult: {
-        data: {
-          version_id: '33333333-3333-4333-8333-333333333333',
-          version_number: 4,
-          graph_identity_hash: HASH_B,
-          restored_from_version_id: VERSION_ID,
-          deduped: false,
-          event_id: 'model_version_restored_33333333-3333-4333-8333-333333333333',
-        },
-        error: null,
-      },
-    });
-    const store = new SupabaseModelVersionStore(client);
-    const outcome = await store.restoreVersion({
-      scenario_id: SCENARIO,
-      version_id: VERSION_ID,
-    });
-
-    expect(rpcCalls[0]!.fn).toBe('restore_model_version');
-    expect(rpcCalls[0]!.args).toEqual({
-      p_scenario_id: SCENARIO,
-      p_version_id: VERSION_ID,
-      p_label: null,
-      p_event_id: null,
-      p_expected_graph_identity_hash: null,
-    });
-    // Restore creates a NEW version: new id, next number, lineage recorded.
-    expect(outcome.version_id).not.toBe(VERSION_ID);
-    expect(outcome.version_number).toBe(4);
-    expect(outcome.restored_from_version_id).toBe(VERSION_ID);
-  });
-
-  it('maps MV404 → ModelVersionNotFoundError', async () => {
-    const { client } = makeClient({
-      rpcResult: { data: null, error: { message: 'missing', code: 'MV404' } },
-    });
-    const store = new SupabaseModelVersionStore(client);
-    await expect(
-      store.restoreVersion({ scenario_id: SCENARIO, version_id: VERSION_ID }),
-    ).rejects.toBeInstanceOf(ModelVersionNotFoundError);
   });
 });
 

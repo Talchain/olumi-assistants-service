@@ -46,9 +46,6 @@ function buildCapturingStore(): CapturingStore {
     async invalidateAll() {
       return { caches_invalidated: 0, scoped_to: 'session' };
     },
-    async storeDraftGraph() {
-      return;
-    },
     async loadGraph() {
       return null;
     },

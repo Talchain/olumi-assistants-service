@@ -92,13 +92,6 @@ export interface SaveVersionRequest {
   readonly event_id?: string;
 }
 
-export interface RestoreVersionRequest {
-  readonly scenario_id: string;
-  readonly version_id: string;
-  readonly label?: string;
-  readonly expected_graph_identity_hash?: string;
-}
-
 export interface AtomicRestoreVersionRequest {
   readonly scenario_id: string;
   readonly version_id: string;
@@ -181,22 +174,6 @@ export class ModelManagementService {
             }
           : {}),
         ...(request.event_id !== undefined ? { event_id: request.event_id } : {}),
-      }),
-    );
-  }
-
-  async restoreVersion(
-    request: RestoreVersionRequest,
-  ): Promise<ModelManagementResult<VersionWriteOutcome>> {
-    if (!this.isEnabled()) return { status: 'disabled' };
-    return this.runWrite('model_version_restored', request.scenario_id, () =>
-      this.store.restoreVersion({
-        scenario_id: request.scenario_id,
-        version_id: request.version_id,
-        ...(request.label !== undefined ? { label: request.label } : {}),
-        ...(request.expected_graph_identity_hash !== undefined
-          ? { expected_graph_identity_hash: request.expected_graph_identity_hash }
-          : {}),
       }),
     );
   }

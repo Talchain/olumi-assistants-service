@@ -143,7 +143,6 @@ export function createMockSessionStore(
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async (scenarioId) => ({
       graph: await store.loadGraph(scenarioId), briefText: null, revision: 7,

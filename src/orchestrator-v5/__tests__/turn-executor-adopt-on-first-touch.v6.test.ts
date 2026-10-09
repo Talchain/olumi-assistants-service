@@ -96,7 +96,6 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async (scenarioId: string) => {
       graphReadScenarios.push(scenarioId);
       if (failLoadGraph) {

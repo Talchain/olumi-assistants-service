@@ -658,17 +658,8 @@ export interface SessionStore {
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**
-   * Persist a draft graph to the scenarios.graph column via the
-   * store_draft_graph RPC. Not on the critical V5 path — graph persistence
-   * now happens atomically inside append_turn_atomic via SessionTurnWrite.graph.
-   * Retained for out-of-band use (admin tooling, migrations). Throws
-   * StateCommitFailedError on RPC failure.
-   */
-  storeDraftGraph(scenarioId: string, graph: unknown): Promise<void>;
-  /**
    * Load the persisted graph from scenarios.graph for a given scenario.
    * Returns null if no graph is stored. Throws SessionReadError on DB/RPC failure.
-   * Uses the same service-role client access pattern as storeDraftGraph (bypasses RLS).
    * Used by follow-up turns when the UI does not send graph_state in the
    * request body.
    *
