@@ -1695,6 +1695,8 @@ export async function buildModelFromBrief(
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
   let admitted = admitForBuild(firstIdentity.model, candidate);
+  // Widening must attest levels against the same candidate as the adopted base admission.
+  let admissionLevelCandidate = candidate;
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1891,6 +1893,7 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admissionCandidate = retryIdentity.model;
           admitted = retryAdmitted;
+          admissionLevelCandidate = retryCandidate;
           // #2854 sets admissionCandidate here
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
@@ -2261,7 +2264,7 @@ export async function buildModelFromBrief(
     return final;
   };
   finalFor(admitted);
-  const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model);
+  const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model, admissionLevelCandidate);
   observeAdmissionForTests?.({ candidate: admissionCandidate, admitted, admit: admitWidened, admitBase: admitForBuild });
   // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
