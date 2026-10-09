@@ -2142,16 +2142,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(422).send({ error: 'BAD_INPUT', detail: '`turn_id` must be a UUID when supplied.' });
     }
 
-    if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
-    // Verified identity and deferred scenario provisioning came from the ownership hook.
+    // Verified identity came from the ownership hook.
     const userId = req.scenarioAccess?.callerUserId ?? null;
 
     // A session is a correlation token: bound once, verified every time.
     const refusal = sessions.check(sessionId, userId, scenarioId);
-    if (refusal === 'unknown_session') sessions.bind(sessionId, userId, scenarioId);
-    else if (refusal !== null) {
+    if (refusal !== null && refusal !== 'unknown_session') {
       return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
     }
+    // A refused session must not provision a scenario or acquire a new binding.
+    if (req.scenarioAccess?.provisionIfMissing && !await req.scenarioAccess.provisionIfMissing()) return;
+    if (refusal === 'unknown_session') sessions.bind(sessionId, userId, scenarioId);
 
     const store = getSessionStore();
     let recentRowsForEgress: RecentTextRows | undefined;
