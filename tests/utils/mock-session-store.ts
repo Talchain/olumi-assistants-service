@@ -145,7 +145,9 @@ export function createMockSessionStore(
     }),
     storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraphAndBriefText: async (scenarioId) => ({
+      graph: await store.loadGraph(scenarioId), briefText: null, revision: 7,
+    }),
     // T1(d)'s optional snapshot reads still participate in the exhaustive
     // Required<SessionStore> alarm. The default scenario exists (above), is
     // unowned and has no graph/brief/restore marker; the empty fact reads

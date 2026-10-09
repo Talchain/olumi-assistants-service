@@ -97,7 +97,7 @@ vi.mock('../../session/index.js', () => ({
     readFactsFor: readFactsForMock,
     readMostRecentPendingActions: async () => [],
     loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    loadGraphAndBriefText: async () => ({ revision: 7, graph: null, briefText: null }),
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
@@ -127,6 +127,8 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
   return {
     ...actual,
+    // B-FIX1: the combined read follows the existing graph double.
+    loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
     loadPersistedGraphStrict: vi.fn().mockResolvedValue(null),
   };
 });

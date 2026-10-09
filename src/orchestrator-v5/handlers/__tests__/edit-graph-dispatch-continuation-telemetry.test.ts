@@ -85,6 +85,8 @@ vi.mock('../../build-turn-context.js', () => ({
   // feed. Empty — this suite exercises continuation telemetry, not
   // conversation history.
   loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
+
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
 }));
 
 const emitMock = vi.fn();

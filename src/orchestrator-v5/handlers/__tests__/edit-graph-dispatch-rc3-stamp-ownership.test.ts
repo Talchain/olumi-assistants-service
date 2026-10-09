@@ -30,6 +30,8 @@ vi.mock('../../commit.js', async (importOriginal) => ({
 vi.mock('../../../adapters/llm/router.js', () => ({ getAdapter: vi.fn().mockReturnValue({ name: 'mock' }) }));
 vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../build-turn-context.js')>()),
+  // B-FIX1: the combined read follows the existing graph double.
+  loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
   loadPersistedGraphStrict: vi.fn(async () => persisted.graph),
   loadMostRecentPendingActions: vi.fn(async () => []),
   buildTurnContext: vi.fn(async () => ({ prior_facts: [], prior_turns: [], most_recent_pending_actions: [] })),

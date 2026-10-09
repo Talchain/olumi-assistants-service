@@ -95,8 +95,8 @@ describe('scenario revision — public append_turn_atomic_v6 path', () => {
   beforeEach(() => __setUseAppendV6ForTest(true));
   afterEach(() => __setUseAppendV6ForTest(false));
 
-  it('ships disabled and the enabled test seam sends the original revision to v6, never v5', async () => {
-    expect(USE_APPEND_V6).toBe(false);
+  it('ships enabled and the enabled test seam sends the original revision to v6, never v5', async () => {
+    expect(USE_APPEND_V6).toBe(true);
     expect(useAppendV6()).toBe(true);
     await expect(store().append(write())).resolves.toEqual({ id: 'turn-row', revision: 8 });
     expect(rpc).toHaveBeenCalledTimes(1);
@@ -282,7 +282,7 @@ describe('scenario revision — flag-off staging parity', () => {
   });
 
   it('uses v5 without an expected revision or added revision read, and calls the combined reader with false', async () => {
-    expect(USE_APPEND_V6).toBe(false);
+    expect(USE_APPEND_V6).toBe(true);
     expect(useAppendV6()).toBe(false);
     scenarioRow = { graph: GRAPH, brief_text: 'Synthetic brief' };
     const sessionStore = store();

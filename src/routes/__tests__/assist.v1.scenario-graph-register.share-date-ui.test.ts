@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /** Lens3 P1-1: DGAI buildRegistrationGraph omits provenance on every edge. */
 import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +12,7 @@ vi.mock('../../config/index.js', async original => {
   return { ...actual, config: { ...actual.config, auth: { ...actual.config.auth, requireUserJwt: false } } };
 });
 vi.mock('../../orchestrator-v5/session/index.js', async original => ({
-  ...(await original<typeof import('../../orchestrator-v5/session/index.js')>()), getSessionStore: () => store,
+  ...(await original<typeof import('../../orchestrator-v5/session/index.js')>()), getSessionStore: () => withScenarioRevision(store),
 }));
 vi.mock('../../orchestrator/user-identity.js', async original => ({
   ...(await original<typeof import('../../orchestrator/user-identity.js')>()),
