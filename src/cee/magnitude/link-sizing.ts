@@ -36,6 +36,24 @@ export const PLACEHOLDER_MAGNITUDE = 'olumi_placeholder';
 /** The literal an approval writes on a placeholder whose band the user approved: Olumi's size, now chosen. */
 export const ESTIMATE_MAGNITUDE = 'olumi_estimate';
 
+/** Mark a projected mean at the writer seam. An authored spread may keep its existing magnitude eligibility. */
+export function markPlaceholder<E extends { provenance?: object; defaulted?: boolean }>(
+  edge: E, { tagMagnitude = true }: { tagMagnitude?: boolean } = {},
+): E {
+  const p = (edge.provenance ??= {}) as Rec;
+  p.mean_projected = true;
+  if (tagMagnitude) p.magnitude = PLACEHOLDER_MAGNITUDE;
+  edge.defaulted = true;
+  return edge;
+}
+
+/** A real size replaces the projected mean; the caller writes its magnitude and natural effect together. */
+export function clearPlaceholderMarker<E extends { provenance?: object; defaulted?: boolean }>(edge: E): E {
+  if (edge.provenance !== undefined) delete (edge.provenance as Rec).mean_projected;
+  delete edge.defaulted;
+  return edge;
+}
+
 function reviewedByUser(p: Rec): boolean {
   const r = p.reviewed_by_user;
   return isRec(r) && r.intent === 'confirm';
