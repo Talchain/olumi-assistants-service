@@ -34,7 +34,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { loadScenarioAnalysisFactsForRead } from '../build-turn-context.js';
+import type { loadScenarioAnalysisAnchorFactsForRead } from '../build-turn-context.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 
@@ -471,7 +471,7 @@ function errCode(e: unknown): string | undefined {
 export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   constructor(
     private readonly client: SupabaseClient,
-    private readonly analysisSessionStore?: Parameters<typeof loadScenarioAnalysisFactsForRead>[2],
+    private readonly analysisSessionStore?: Parameters<typeof loadScenarioAnalysisAnchorFactsForRead>[2],
   ) {}
 
   async createRecord(write: CreateDecisionRecordWrite): Promise<DecisionRecordWriteOutcome> {
@@ -681,12 +681,12 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
 
   async readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null> {
     try {
-      // Anchor-only loader option isolates corrupt rows without weakening the
+      // Anchor-only loader isolates corrupt rows without weakening the
       // reasoning/claim-safety page contract. Dynamic import keeps the capture-only
       // adapter free of turn-context initialisation until this read is needed.
-      const { loadScenarioAnalysisFactsForRead } = await import('../build-turn-context.js');
-      const page = await withAnalysisReadDeadline(() => loadScenarioAnalysisFactsForRead(
-        scenarioId, 'decision-record-anchor', this.analysisSessionStore, { malformedRows: 'isolate-for-anchor' },
+      const { loadScenarioAnalysisAnchorFactsForRead } = await import('../build-turn-context.js');
+      const page = await withAnalysisReadDeadline(() => loadScenarioAnalysisAnchorFactsForRead(
+        scenarioId, 'decision-record-anchor', this.analysisSessionStore,
       ));
       const selected = selectRunAnalysisFact(page.facts);
       if (selected === null) {
