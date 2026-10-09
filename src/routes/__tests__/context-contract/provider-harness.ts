@@ -119,6 +119,7 @@ function fixture(variant: Variant): Seed {
 }
 
 export async function capture(turn: Turn, variant: Variant, options: {
+  expectedProviderCalls?: number;
   storage?: Obj;
   readSnapshot?: (snapshot: Snapshot) => Promise<Obj>;
 } = {}): Promise<Witness> {
@@ -179,7 +180,7 @@ export async function capture(turn: Turn, variant: Variant, options: {
     expect(res.statusCode, res.body).toBe(200);
     const response = JSON.parse(res.body) as Obj;
     if (turn === 'Run-explanation' && variant === 'stale') expect(calls).toHaveLength(0);
-    else expect(calls).toHaveLength(turn === 'tool-continuation' ? 2 : 1);
+    else expect(calls).toHaveLength(options.expectedProviderCalls ?? (turn === 'tool-continuation' ? 2 : 1));
     // Evidence capture is opt-in (S8_CAPTURE_DIR); CI writes nothing.
     const dir = captureDir === undefined ? undefined : `${captureDir}/provider/${turn}/${variant}`;
     if (dir !== undefined) mkdirSync(dir, { recursive: true });

@@ -3092,14 +3092,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       explanationBriefText = typeof selectedRead.json.brief_text === 'string' ? selectedRead.json.brief_text : null;
       const currentRead = selectedRead.status === 200
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
-      const matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
+      let matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
         && runExplanationMatches(explanationId, scenarioId, st);
       const priorAndRun = [
         ...(history ?? []),
         { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
       ];
       // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
-      const canonicalAfterRun = await capabilities.getCanonicalState(toolCtx);
+      const canonicalAfterRun = await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' });
+      // A refused canonical read follows the same early refusal as an unmatched Explain control.
+      if (canonicalAfterRun.ok !== true) matches = false;
       const selectedRun = canonicalAfterRun.analysis as Record<string, unknown> | undefined;
       // ⭐ NEVER RE-ASK (G1b d4): retain the Explain path's asked-once handling on the canonical finding.
       const goalChanceRead = selectedRun?.goal_chance as { say: string } | undefined;

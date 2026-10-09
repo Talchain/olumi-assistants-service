@@ -1,15 +1,23 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { capture, captureDir, findState, expected, keysDeep, object, valueAt, seedOf, type Turn, type Witness } from './provider-harness.js';
 
 describe('Explain uses the canonical assembly (serialized provider bytes)', () => {
-  it('run2 Explain carries exactly the canonical state ordinary converse carries', async () => {
+  it('run2 Explain minus its licensed section equals ordinary converse state', async () => {
     const ordinary = await capture('ordinary-converse', 'run2');
     const explain = await capture('Run-explanation', 'run2');
     const ordinaryState = findState(ordinary.calls[0].payloads);
     expect(Object.keys(ordinaryState).length, 'ordinary state decoded').toBeGreaterThan(0);
-    for (const c of explain.calls) expect(findState(c.payloads)).toEqual(ordinaryState);
+    for (const c of explain.calls) {
+      const { run_explanation: section, ...base } = findState(c.payloads);
+      expect(base).toEqual(ordinaryState);
+      expect(Object.keys(object(section)).sort()).toEqual(['claim_permissions', 'leading_option_id', 'warning_codes']);
+      expect(object(section).leading_option_id).toBe(explain.seed.snapshot.analysis_result.leading_option_id);
+      expect(object(section).claim_permissions).toEqual(object(ordinaryState.analysis).claim_permissions);
+      expect(c.body.instructions).toBeDefined();
+    }
   }, 60000);
   it('run2 Explain excludes raw claims and enrichment', async () => {
     const w = await capture('Run-explanation', 'run2');
@@ -132,4 +140,47 @@ describe('saved Run reload: serialized provider contract', () => {
       expect(assistant).toEqual([{ role: 'assistant', content: row.assistant_message }]);
     }
   }, 60000);
+});
+
+const refusal = vi.hoisted(() => ({ enabled: false }));
+vi.mock('../../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js', async original => {
+  const actual = await original<typeof import('../../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js')>();
+  return { ...actual, createAgentCapabilities: (...args: Parameters<typeof actual.createAgentCapabilities>) => {
+    const caps = actual.createAgentCapabilities(...args);
+    const read = caps.getCanonicalState;
+    caps.getCanonicalState = (ctx, options) => refusal.enabled && options?.section === 'run_explanation'
+      ? Promise.resolve({ ok: false, mutated: false, refusal: 'not_found' }) : read(ctx, options);
+    return caps;
+  } };
+});
+
+describe('Explain scoped assembly safety', () => {
+  it('refused canonical read makes zero provider calls, like an unmatched Explain', async () => {
+    refusal.enabled = true;
+    try {
+      const w = await capture('Run-explanation', 'run2', { expectedProviderCalls: 0 });
+      expect(w.calls).toHaveLength(0);
+      expect(object(w.response.narration).status).toBe('stale');
+    } finally { refusal.enabled = false; }
+  },60000);
+  it('measured comparison sensitivity preserves the exact factor and its own range provenance', async () => {
+    const w = await capture('Run-explanation', 'run2', { readSnapshot: async snapshot => {
+      const e = snapshot.analysis_result.enrichment;
+      e.factor_evppi = [{ factor_id: 'monthly_pro_churn', evppi: 0.5, status: 'resolved', spread_source: 'template' }];
+      e.factor_sensitivity = [{ factor_id: 'monthly_pro_churn', factor_label: 'Monthly Pro churn' }];
+      return snapshot;
+    } });
+    for (const c of w.calls) {
+      expect(object(object(findState(c.payloads).run_explanation).decision_sensitivity)).toEqual({
+        status: 'measured', most_sensitive: { factor_id: 'monthly_pro_churn', label: 'Monthly Pro churn', range: 'olumi_assumed' },
+        say: 'Within the range Olumi assumed for Monthly Pro churn, Monthly Pro churn could change how the options compare. Do you know Monthly Pro churn more precisely?',
+      });
+      expect(keysDeep(c.payloads)).not.toContain('factor_evppi');
+    }
+  },60000);
+  it('Explain instruction bytes retain the approved sha256', async () => {
+    const w = await capture('Run-explanation','run2');
+    expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
+      .toBe('53448d8ae84858e9f8fa84215d9aa85589b0d117dbdb7f783a6cf708f4f9d83c');
+  },60000);
 });

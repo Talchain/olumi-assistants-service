@@ -5,7 +5,7 @@ import { asVerdictState, type StoredLimitVerdicts } from '../../orchestrator/con
 import { analysisResultForAgent } from './decision-sensitivity.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from './limit-checks.js';
 import { runExplanationChip } from './run-explanation.js';
-import { runToolOutputLicensesLeader } from './licensed-run-view.js';
+import { isCodeShaped, runToolOutputLicensesLeader } from './licensed-run-view.js';
 import { runOptionSetForCopy, type RecordedRunOptionSet, type StoredOptionParticipation } from '../tools/handlers/option-participation.js';
 
 export interface SavedRunContextFactsRead {
@@ -60,5 +60,37 @@ export function savedRunContextFacts(
     ...(read.leader_limit_risks === null || Array.isArray(read.leader_limit_risks)
       ? { leader_limit_risks: read.leader_limit_risks } : {}),
     ...(checks !== undefined ? { limit_checks: { limits: checks, note: LIMIT_CHECKS_NOTE } } : {}),
+  };
+}
+
+/** Only CEE-owned licensed members of the selected Run, inside the opt-in canonical section. */
+export function runExplanationContextFacts(
+  scenarioId: string, read: SavedRunContextFactsRead,
+  analysis: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (analysis === undefined || runExplanationChip(scenarioId, {
+    graphHash: read.graph_hash, analysisState: read.analysis_state, analysisResult: read.analysis_result,
+  }) === null) return {};
+  const projected = analysisResultForAgent(read.analysis_result, read.raw, true) as Record<string, unknown>;
+  const warnings = (projected.enrichment as { inference_warnings?: unknown } | undefined)?.inference_warnings;
+  const rows = Array.isArray(warnings) ? warnings.filter((v): v is Record<string, unknown> =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)) : [];
+  const target = rows.find(w => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+  const leaderId = (read.analysis_result as { leading_option_id?: unknown } | undefined)?.leading_option_id;
+  return {
+    claim_permissions: analysis.claim_permissions,
+    ...(runToolOutputLicensesLeader(analysis) && (leaderId === null || typeof leaderId === 'string')
+      ? { leading_option_id: leaderId } : {}),
+    ...(projected.decision_sensitivity === undefined ? {} : { decision_sensitivity: projected.decision_sensitivity }),
+    ...(target === undefined ? {} : { target_testability: {
+      code: target.code,
+      ...(typeof target.say === 'string' ? { say: target.say } : {}),
+      ...(typeof target.message === 'string' ? { say: target.message } : {}),
+    } }),
+    warning_codes: [...rows, ...(() => {
+      const brief = (projected.enrichment as { decision_brief?: { warnings?: unknown } } | undefined)?.decision_brief;
+      return Array.isArray(brief?.warnings) ? brief.warnings.filter((w): w is Record<string, unknown> =>
+        w !== null && typeof w === 'object' && !Array.isArray(w)) : [];
+    })()].flatMap(w => typeof w.code === 'string' && isCodeShaped(w.code) ? [w.code] : []),
   };
 }
