@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { admitCandidateModel, canonicalLabel, type AdmittedModel, type CandidateModel } from '../admit-model.js';
+import { canonicalLabel, type AdmittedModel, type CandidateModel } from '../admit-model.js';
 import type { CallStructuredModel } from './build-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { log } from '../../../utils/telemetry.js';
@@ -12,7 +12,6 @@ import { doorLevelOf, estimateLevelPersists } from './agent-capabilities.js';
 import { readIsBaseline } from '../../../cee/baseline-identity.js';
 import { WIDENED_RISK_MARKER_DOWN, WIDENED_RISK_MARKER_MOVE } from '../widened-risk-markers.js';
 
-type AdmissionArgs = Parameters<typeof admitCandidateModel>;
 interface FinalGraph {
   readonly nodes: readonly { readonly id: string }[];
   readonly edges: readonly { readonly id?: string; readonly from: string; readonly to: string }[];
@@ -28,8 +27,8 @@ export interface WidenDraftInput {
   clock?: () => number;
   /** The same pure path used for persistence, including occurrence binding and refit, before clamp. */
   finalGraph?: (admitted: AdmittedModel) => FinalGraph;
-  admissionArgs?: [goalLevelStated?: AdmissionArgs[3], targetFigureWrittenAgain?: AdmissionArgs[4],
-    goalLevelFromBrief?: AdmissionArgs[5], sizeWritten?: AdmissionArgs[6], sizeRangeEnd?: AdmissionArgs[7]];
+  /** The build owns candidate admission, including construction context and fallback. */
+  admit: (candidate: CandidateModel) => AdmittedModel;
   /** PARKED (DL 6065138437: 0 options kept from 1 live trigger, pure latency on B1). The served seam never sets it, so
    *  an options-only deficiency is diagnosed and logged but makes no call. Kept for the word-rule follow-up. */
   optionsArm?: boolean;
@@ -265,7 +264,7 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
               affects: risk.affects, mechanism: risk.mechanism, relies_on: risk.relies_on, watch_for: risk.watch_for },
           }))] };
         try {
-          let admitted = admitCandidateModel(merged, {}, input.brief, ...(input.admissionArgs ?? []));
+          let admitted = input.admit(merged);
           admitted = { ...admitted, nodes: admitted.nodes.map(n => oldIds.has(n.id) ? n : markOlumiOptions([n], merged, input.brief)[0]!) };
           if (!existingUnchanged(input.admitted, admitted)) { outcome = 'existing_changed'; return null; }
           if (finalBefore !== undefined && input.finalGraph !== undefined) {
