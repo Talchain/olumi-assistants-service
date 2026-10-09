@@ -18,7 +18,7 @@
  *   · Optional estimates and whatChanges demote in that order over 80 visible words. Chance findings, their own
  *     notes, horizon, matching figure disclosures and the next step stay; mandatory overflow is counted.
  *   · Ordinary coaching retains the three-bullet pool, small-detail/short-reply passthrough and whole-reply exits.
- *   · The existing method_step, proposal, leader_free_envelope and host_composed whole-reply paths are unchanged.
+ *   · Proposal bodies stay whole, with only an eligible action/Why suffix; other whole-reply paths are unchanged.
  *   · `_answer_shape` and assistant_text have one identity: deriveAnswerTextFromShape(shape). RC6 removes only its
  *     recorded whole-sentence copies; every other sentence is conserved. Open questions belong to detail.
  *
@@ -626,6 +626,9 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const composed = composeNormalReplyShape(input);
+  if (input.eligibleIntervention !== undefined && composed.reason === 'proposal') {
+    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true);
+  }
   if (input.eligibleIntervention !== undefined && (input.profile ?? 'coaching') === 'coaching') {
     return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, input.faceContract !== undefined);
   }
