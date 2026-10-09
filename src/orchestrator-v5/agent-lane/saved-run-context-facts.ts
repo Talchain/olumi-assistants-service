@@ -84,8 +84,9 @@ export function runExplanationContextFacts(
     ...(projected.decision_sensitivity === undefined ? {} : { decision_sensitivity: projected.decision_sensitivity }),
     ...(target === undefined ? {} : { target_testability: {
       code: target.code,
-      ...(typeof target.say === 'string' ? { say: target.say } : {}),
-      ...(typeof target.message === 'string' ? { say: target.message } : {}),
+      // Never the warning's own `say`: it repeats analysis.goal_chance.say WITH its question, and only that copy is
+      // filtered by the asked-once rule (never-reask-closed.route.test.ts).
+      ...(typeof target.message === 'string' ? { message: target.message } : {}),
     } }),
     warning_codes: [...rows, ...(() => {
       const brief = (projected.enrichment as { decision_brief?: { warnings?: unknown } } | undefined)?.decision_brief;
