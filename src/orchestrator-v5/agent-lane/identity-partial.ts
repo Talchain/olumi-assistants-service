@@ -55,7 +55,7 @@ function briefProduct(nodes: readonly AdmittedNode[], operands: readonly string[
   if (a === null || b === null || a === undefined || b === undefined) return false;
   const between = brief.slice(a.end, b.start);
   // A relation between the two credited figures in one clause: customers paying a rate, or explicit multiplication.
-  return !/[.!?;\n]/u.test(between) && /\b(?:pay(?:s|ing)?|at|times|multiplied\s+by)\b|[×*]/iu.test(between);
+  return !/[.!?;\n]/u.test(between) && /(?:\bpay(?:s|ing)?|\bat|\btimes|\bmultiplied\s+by|[×*])\s*$/iu.test(between);
 }
 
 /** Admission's final product carrier owns this marker. Stated cause→effect sizes retain the existing user path. */

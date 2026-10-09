@@ -4,6 +4,7 @@ import { beforeAll, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import type { CandidateModel } from '../admit-model.js';
 import { markIdentityPartials, naturalSizeReceipt } from '../identity-partial.js';
+import { figureTheUserWroteForSpan } from '../stated-by-user.js';
 import { howStronglyWords, whoSized, IDENTITY_ONLY, IDENTITY_PART } from '../strength-authorship-words.js';
 import { linkSizing, isPlaceholderLink, isSizedOnlyByOlumi, approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { EdgeProvenanceV3 } from '../../../schemas/cee-v3.js';
@@ -206,10 +207,16 @@ it('a sum definition never writes a partial; a rejected product stays unchanged'
   const rejected = markIdentityPartials(g.nodes as never, edges as never, row.brief, new Set());
   expect(edge({ ...g, edges: rejected }, partials[0][0])).toEqual(edge({ ...g, edges }, partials[0][0]));
 });
-it('confirmed identity words use the same exact template and current operand', () => {
+it('confirmed identity words credit the relation and read the current operand', () => {
   const e = structuredClone(edge(graph, partials[0][0]));
   e.provenance.identity_partial.authored_by = 'user_confirmed';
-  expect(howStronglyWords([e], graph)).toBe(howStronglyWords([edge(graph, partials[0][0])], graph));
+  const edited = structuredClone(graph);
+  node(edited, 'existing_customer_monthly_price').observed_state.raw_value = 320;
+  const words = howStronglyWords([e], edited);
+  expect(words).toContain('as you confirmed');
+  expect(words).toContain('£320');
+  expect(words).not.toContain('your two figures');
+  expect(words).not.toBe(howStronglyWords([edge(graph, partials[0][0])], edited));
 });
 
 it('an approval card records user_confirmed only on its existing partials', () => {
@@ -263,7 +270,31 @@ it('a money-rate source cannot borrow its subscribers’ per-one amount', () => 
     'Support cost per starter subscriber', 'Starter support cost', ['Support cost per starter subscriber', 'Starter support cost'], 'GBP/subscriber/month')).toBeNull();
 });
 
-it('the reverted at-payment widening conservatively leaves the product Olumi’s', async () => {
-  const g = await replay(row.brief.replace('from 400 customers paying £300 a month', 'from 400 customers at £300 a month'));
-  expect(edge(g, partials[0][0]).provenance.identity_partial.authored_by).toBe('olumi');
+it.each([
+  ['paying', '400 customers paying £300 average price', 'brief'],
+  ['at', '400 customers at £300 average price', 'brief'],
+  ['×', '400 customers × £300 average price', 'brief'],
+  ['multiplied', '400 customers multiplied by £300 average price', 'brief'],
+  ['at our largest site', '400 customers at our largest site, and £300 average price', 'olumi'],
+  ['Price is', '400 customers, Price is £300 average price', 'olumi'],
+  ['who pay roughly', '400 customers who pay roughly £300 average price', 'olumi'],
+] as const)('Science 93 relation: %s', (id, text, authored_by) => {
+  // Name each figure independently so this row isolates relation authorship
+  // from the historical fixture's baseline-payment paraphrase reader.
+  const nodes = [
+    { id: 'customers', kind: 'factor', label: 'Customers', observed_state: { raw_value: 400, unit: 'customers' } },
+    { id: 'price', kind: 'factor', label: 'Average price', observed_state: { raw_value: 300, unit: '£' } },
+    { id: 'revenue', kind: 'outcome', label: 'Revenue', nonlinear_identity: { operation: 'product', factor_ids: ['customers', 'price'] } },
+  ];
+  const edges = ['customers', 'price'].map(from => ({ from, to: 'revenue', provenance: { source: 'cee_hypothesis' } }));
+  for (const n of nodes.slice(0, 2)) {
+    expect(figureTheUserWroteForSpan(n.observed_state!.raw_value, n.observed_state!.unit, text, {
+      target: [n.label], others: nodes.filter(other => other.id !== n.id).map(other => other.label),
+      currentLevel: true, strict: true,
+    }), `${id}: independently credited ${n.label}`).not.toBeNull();
+  }
+  const marked = markIdentityPartials(nodes as never, edges as never, text, new Set());
+  expect(marked).toHaveLength(2);
+  for (const e of marked) expect(e.provenance!.identity_partial!.authored_by).toBe(authored_by);
+  process.stdout.write(`SCIENCE93 RELATION ${JSON.stringify({ id, text, authored_by })}\n`);
 });

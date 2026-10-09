@@ -30,10 +30,12 @@ export function whoSized(edge: EdgeLike): Who {
 export const IDENTITY_ONLY = {
   brief: 'how strongly follows from your two figures: ‘{outcome}’ is ‘{operandA}’ × ‘{operandB}’, at today’s ‘{other operand}’.',
   olumi: 'how strongly is by Olumi’s reading: ‘{outcome}’ = ‘{operandA}’ × ‘{operandB}’. Confirm it.',
+  user_confirmed: 'how strongly follows from ‘{outcome}’ = ‘{operandA}’ × ‘{operandB}’, as you confirmed, at today’s ‘{other operand}’.',
 } as const;
 export const IDENTITY_PART = {
   brief: 'following from your two figures',
   olumi: 'by Olumi’s reading of ‘{outcome}’',
+  user_confirmed: 'as you confirmed',
 } as const;
 
 function identityWords(edge: EdgeLike, graph: GraphLike | undefined, part: boolean): string {
@@ -49,7 +51,7 @@ function identityWords(edge: EdgeLike, graph: GraphLike | undefined, part: boole
     outcome: label(i.outcome), operandA: label(i.operand_ids[0] ?? ''), operandB: label(i.operand_ids[1] ?? ''),
     'other operand': `${label(otherId)}${typeof amount === 'number' ? `: ${sayFigure(amount, os?.unit ?? other?.unit ?? '')}` : ''}`,
   };
-  const who = i.authored_by === 'olumi' ? 'olumi' : 'brief';
+  const who = i.authored_by === 'brief' ? 'brief' : i.authored_by === 'user_confirmed' ? 'user_confirmed' : 'olumi';
   return (part ? IDENTITY_PART[who] : IDENTITY_ONLY[who]).replace(/\{([^}]+)\}/gu, (_, key: string) => values[key] ?? key);
 }
 
