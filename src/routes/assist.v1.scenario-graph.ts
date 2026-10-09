@@ -4,6 +4,7 @@
  * Reads never create scenarios; unknown/non-owner ids share the same 404 envelope.
  * The handler retains payload validation, persisted-graph fidelity and analysis projection. */
 
+import { withoutHorizonBasisProof } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 
@@ -508,7 +509,9 @@ export default async function route(app: FastifyInstance) {
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
         ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
-        graph: graphPresent ? graph : null,
+        graph: graphPresent && typeof graph === "object" && Array.isArray((graph as Record<string, unknown>).nodes)
+          ? { ...(graph as Record<string, unknown>), nodes: withoutHorizonBasisProof((graph as { nodes: unknown[] }).nodes) }
+          : graphPresent ? graph : null,
         graph_present: graphPresent,
         brief_text: briefText,
         // identity.v1, from the single normaliser authority. Null when the

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import * as graphHashes from '../../context/graph-hash.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -36,6 +36,7 @@ vi.mock('../../../orchestrator/tools/edit-graph.js', async original => ({
 vi.mock('../../../orchestrator/tools/draft-graph.js', async original => ({
   ...await original<typeof import('../../../orchestrator/tools/draft-graph.js')>(), handleDraftGraph: vi.fn(),
 }));
+const proofConfig = vi.hoisted(() => ({ secret: 's5-r8-test-only-secret' as string | undefined }));
 const sdk = vi.hoisted(() => ({ draft: '', calls: 0 }));
 vi.mock('openai', () => ({ default: class {
   chat = { completions: { create: async () => {
@@ -49,7 +50,7 @@ vi.mock('../../../config/index.js', async original => {
   const actual = await original<typeof import('../../../config/index.js')>();
   return { ...actual, config: new Proxy(actual.config, { get(target, key) {
     if (key === 'llm') return { ...target.llm, openaiApiKey: 's5-sdk-double' };
-    if (key === 'auth') return { ...target.auth, requireUserJwt: false };
+    if (key === 'auth') return { ...target.auth, requireUserJwt: false, hmacSecret: proofConfig.secret };
     return Reflect.get(target, key);
   } }) };
 });
@@ -78,6 +79,7 @@ const seed = (): Rec => projectGraphForPersistence(GraphV3.parse({
   edges: [['option', 'factor'], ['factor', 'goal']].map(([from, to]) => ({ from, to,
     strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' })),
 })) as Rec;
+const publicBasis = (basis: Rec): Rec => { const out = clone(basis); delete out.proof; return out; };
 const goalOf = (g: Rec, id = 'goal'): Rec => g.nodes.find((n: Rec) => n.id === id);
 const metric = (g: Rec, id = 'goal') => {
   const goal = goalOf(g, id);
@@ -86,8 +88,9 @@ const metric = (g: Rec, id = 'goal') => {
 };
 const attested = (): Rec => {
   const g = seed();
-  goalOf(g).horizon_basis = { basis: 'steady_attested', source: 'user_stated', bound_months: 9, metric: metric(g) };
-  return g;
+  const issued = applyGoalSteadyEdit(g, { goal_id: 'goal', months: 9 }, SCENARIO);
+  if (issued.kind !== 'mutated') throw new Error('fixture mint refused');
+  return issued.mutatedGraph;
 };
 function world(initial: unknown) {
   let bytes = JSON.stringify(initial);
@@ -119,6 +122,7 @@ function world(initial: unknown) {
 }
 let activeStore = world(null).store;
 beforeEach(() => {
+  proofConfig.secret = 's5-r8-test-only-secret';
   vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'live');
   _resetConfigCache();
   __setUseAppendV6ForTest(false);
@@ -136,6 +140,7 @@ async function register(g: Rec, w: ReturnType<typeof world>) {
   try {
     const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph: g } });
     expect(res.statusCode, res.body).toBe(200);
+    expect(res.body).not.toContain('"proof"');
     expect(w.writes).toHaveLength(1);
     expect(res.json().graph_hash).toBe(computeAnalysisAffectingGraphHash(w.read() as never));
     return w.read();
@@ -464,7 +469,7 @@ describe('S5 r1 append-door provenance', () => {
     expect(result.commitPerformed).toBe(true);
     expect(w.writes).toHaveLength(1);
     expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
-    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(publicBasis(goalOf(g).horizon_basis));
     expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
     expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
   });
@@ -476,7 +481,7 @@ describe('S5 r1 append-door provenance', () => {
       draftWarnings: [], graphOutput: redraft } as never);
     const result = await dispatchDraftGraph({ payload: payload('Build the model again'), requestId: 'r1-redraft', request: {} as never });
     expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
-    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(publicBasis(goalOf(g).horizon_basis));
     expect(w.writes).toHaveLength(1);
     expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
     expect(horizonSteadyAttested(w.read())).toBe(!changed);
@@ -956,4 +961,171 @@ it('R5 residual edge: CAS off/v6 off redraft carries stored basis at the single 
   expect(question).toBeDefined();
   expect(question.preconditions.graph_hash).toBe(computeAnalysisAffectingGraphHash(seed() as never));
   expect(question.preconditions.graph_hash).not.toBe(computeAnalysisAffectingGraphHash(w.read() as never));
+});
+
+// S5 r8/r8b: these non-door paths may store bytes, but cannot mint their warrant.
+describe('S5 r8 server proof', () => {
+  const oracle = (g: Rec) => {
+    const goal = goalOf(g), b = goal.horizon_basis;
+    const key = Buffer.from(hkdfSync('sha256', proofConfig.secret!, '', 'olumi/s5/horizon_basis/v1', 32));
+    return createHmac('sha256', key).update(JSON.stringify([goal.id, b.bound_months, b.metric, b.basis, b.source])).digest('hex');
+  };
+  it.each(['missing', 'wrong'])('non-door session append stores a %s proof forgery but never attests it', async variant => {
+    const g = attested(), w = world(seed());
+    if (variant === 'missing') delete goalOf(g).horizon_basis.proof;
+    else goalOf(g).horizon_basis.proof = '0'.repeat(64);
+    await w.store.append(doorWrite(g));
+    expect(w.writes).toHaveLength(1);
+    expect(w.read()).toEqual(g);
+    expect(horizonSteadyAttested(w.read())).toBe(false);
+  });
+  it.each(['missing', 'wrong'])('register drops a %s proof forgery', async variant => {
+    const g = attested(), w = world(seed());
+    if (variant === 'missing') delete goalOf(g).horizon_basis.proof;
+    else goalOf(g).horizon_basis.proof = '0'.repeat(64);
+    expect(horizonSteadyAttested(g)).toBe(false);
+    expect(horizonSteadyAttested(await register(g, w))).toBe(false);
+    expect(goalOf(w.read())).not.toHaveProperty('horizon_basis');
+  });
+  it.each(['missing', 'wrong', 'valid'])('version restore RPC passthrough stores the snapshot with %s proof', async variant => {
+    const { ModelManagementService } = await import('../../model-management/service.js');
+    const { SupabaseModelVersionStore } = await import('../../model-management/store-adapter.js');
+    const snapshot = attested(), w = world(seed());
+    if (variant === 'missing') delete goalOf(snapshot).horizon_basis.proof;
+    if (variant === 'wrong') goalOf(snapshot).horizon_basis.proof = '0'.repeat(64);
+    const version = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const rpc = vi.fn(async (name: string, args: Rec) => {
+      expect(name).toBe('restore_model_version_atomic_v1');
+      expect(args.p_scenario_id).toBe(SCENARIO);
+      expect(args.p_version_id).toBe(version);
+      expect(args.p_graph).toEqual(snapshot);
+      await w.store.append(doorWrite(args.p_graph)); // SQL replacement double, bypassing the append door.
+      return { error: null, data: { mutation_id: TURN, version_id: version, version_number: 2,
+        graph_identity_hash: args.p_graph_identity_hash, analysis_affecting_hash: args.p_analysis_affecting_hash,
+        hash_algorithm: args.p_hash_algorithm, identity_projection_version: args.p_projection_version,
+        identity_normaliser_version: args.p_normaliser_version, graph_schema_version: args.p_graph_schema_version,
+        restored_from_version_id: version, undo_version_id: null, parent_version_id: null, root_version_id: null,
+        actor_kind: 'unknown', authored_by: null, creation_kind: 'restore', source_version_id: version,
+        source_turn_id: null, graph: w.read(), deduped: false, replayed: false,
+        analysis_invalidated_at: '2026-10-09T00:00:00.000Z', event_id: 'restore-event' } };
+    });
+    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc } as never),
+      isEnabled: () => true, eventSink: { emit: vi.fn() } as never });
+    const result = await service.restoreVersionAtomic({ scenario_id: SCENARIO, version_id: version,
+      mutation_id: TURN, graph: snapshot, current_graph: seed(), expected_graph_identity_hash: null,
+      source_graph_identity_hash: computeGraphIdentityHash(snapshot as never)!.value });
+    expect(result.status).toBe('ok');
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(w.read()).toEqual(snapshot);
+    expect(horizonSteadyAttested(w.read())).toBe(variant === 'valid');
+  });
+  it.each(['bound_months', 'metric', 'goal_id'])('original proof cannot attest tampered %s', field => {
+    const g = attested(), original = goalOf(g).horizon_basis.proof;
+    // Independent full-tuple oracle pins the mint even if metric/equality gates mask a proof mutant.
+    expect(original).toBe(oracle(g));
+    if (field === 'bound_months') goalOf(g).horizon_basis.bound_months = 12;
+    if (field === 'metric') goalOf(g).horizon_basis.metric = 'f'.repeat(32);
+    if (field === 'goal_id') goalOf(g).id = 'another-goal';
+    expect(goalOf(g, field === 'goal_id' ? 'another-goal' : 'goal').horizon_basis.proof).toBe(original);
+    expect(horizonSteadyAttested(g)).toBe(false);
+  });
+  it.each([['unset', undefined], ['empty', ''], ['whitespace', '  ']])('%s config secret fails closed for predicate and mint, without an append', async (_name, secret) => {
+    const g = attested(), w = world(seed());
+    proofConfig.secret = secret;
+    expect(horizonSteadyAttested(g)).toBe(false);
+    expect(applyGoalSteadyEdit(seed(), { goal_id: 'goal', months: 9 }, SCENARIO))
+      .toEqual({ kind: 'refused', reason: 'horizon_basis_key_unavailable' });
+    expect(await executeOptionInterventionBatch(input(seed()), w.store))
+      .toMatchObject({ kind: 'refused', reason: 'horizon_basis_key_unavailable' });
+    expect(w.writes).toHaveLength(0);
+    expect(w.read()).toEqual(seed());
+  });
+  it('A applied graph and canonical receipt omit proof while stored hashes and bytes stay unchanged', async () => {
+    const { buildAppliedGraphWireField, buildCanonicalCommittedGraphReceipt } = await import('../../compose/applied-graph-emit.js');
+    const g = seed(), w = world(g);
+    expect((await executeOptionInterventionBatch(input(g), w.store)).kind).toBe('committed');
+    const stored = w.read(), before = JSON.stringify(stored), hash = computeAnalysisAffectingGraphHash(stored as never);
+    expect(horizonSteadyAttested(stored)).toBe(true);
+    expect(goalOf(stored).horizon_basis.proof).toBe(oracle(stored));
+    for (const out of [buildAppliedGraphWireField(stored as never),
+      buildCanonicalCommittedGraphReceipt(stored as never, { options: [], goal_node_id: 'goal' })]) {
+      expect(JSON.stringify(out)).not.toContain('"proof"');
+      expect(goalOf(out as Rec).horizon_basis).toEqual(publicBasis(goalOf(stored).horizon_basis));
+    }
+    expect(JSON.stringify(stored)).toBe(before);
+    expect(JSON.stringify(w.read())).toBe(before);
+    expect(computeAnalysisAffectingGraphHash(stored as never)).toBe(hash);
+  });
+  it('B real scenario read omits proof while stored bytes and response hash keep it', async () => {
+    const { default: readRoute } = await import('../../../routes/assist.v1.scenario-graph.js');
+    const g = attested(), w = world(g); activeStore = w.store;
+    w.store.readExistingScenario = vi.fn(async () => ({ graph: w.read(), briefText: null, revision: 31, owner: null } as never));
+    const app = Fastify(); await readRoute(app);
+    try {
+      const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.body).not.toContain('"proof"');
+      expect(goalOf(res.json().graph).horizon_basis).toEqual(publicBasis(goalOf(g).horizon_basis));
+      expect(res.json().graph_hash).toBe(computeAnalysisAffectingGraphHash(g as never));
+      expect(w.read()).toEqual(g);
+      expect(horizonSteadyAttested(w.read())).toBe(true);
+    } finally { await app.close(); }
+  });
+  it('proof-free wire echo preserves stored proof through live CAS and real edit', async () => {
+    const { buildAppliedGraphWireField } = await import('../../compose/applied-graph-emit.js');
+    const g = attested(), w = world(g); activeStore = w.store;
+    const client = JSON.parse(JSON.stringify(buildAppliedGraphWireField(g as never)));
+    expect(JSON.stringify(client)).not.toContain('"proof"');
+    const boundary = parseRequestExtensions({ graph_state: client }, 'r8-wire-echo');
+    if (!boundary.ok) throw new Error('invalid client');
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
+      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
+      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
+    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
+      requestId: 'r8-wire-echo', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
+    expect(result.commitPerformed).toBe(true);
+    expect(JSON.stringify(result.response)).not.toContain('"proof"');
+    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
+    expect(w.writes).toHaveLength(1);
+    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
+    expect(horizonSteadyAttested(w.read())).toBe(true);
+  });
+  it('C conventional draft real dispatch from a stored attested base omits proof', async () => {
+    vi.stubEnv('CEE_V5_GRAPH_CAS_MODE', 'observe'); _resetConfigCache();
+    const g = attested(), w = world(g); activeStore = w.store;
+    vi.mocked(handleDraftGraph).mockResolvedValue({ blocks: [], assistantText: 'Drafted the model.', latencyMs: 0,
+      strengthenItems: [], coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null,
+      draftWarnings: [], graphOutput: seed() } as never);
+    const result = await dispatchDraftGraph({ payload: payload('Build the model again'), requestId: 'r8-conventional', request: {} as never });
+    expect(result.commitPerformed).toBe(true);
+    expect(w.writes).toHaveLength(1);
+    expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(JSON.stringify(result.response)).not.toContain('"proof"');
+    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(publicBasis(goalOf(g).horizon_basis));
+    expect(horizonSteadyAttested(w.read())).toBe(true);
+  });
+  it('guest-copy ruled residual: copy_guest_scenario inherits valid proof and remains attested', async () => {
+    const { SupabaseGuestCopyStore } = await import('../../guest-copy/index.js');
+    const { DEPLOYED_ONLY_RPCS } = await import('../../../../scripts/census/model-writer-census.mjs');
+    // Pin the reviewed SQL, so refreshing this definition after a strip migration makes this residual RED.
+    expect(DEPLOYED_ONLY_RPCS.copy_guest_scenario.statement).toBe(
+      'INSERT INTO public.scenarios (user_id, title, graph, source_scenario_id) VALUES (p_user_id, v_title, v_graph, p_source_scenario_id)');
+    const g = attested(), source = JSON.stringify(g), copyId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    let copied: Rec | undefined;
+    // CURRENT SQL: SELECT s.graph INTO v_graph; INSERT ... VALUES (..., v_graph, ...).
+    // DL 87114 rules this residual; the reviewed SQL identity above and inherited-proof assertion pin it.
+    const rpc = vi.fn(async (name: string, args: Rec) => {
+      expect(name).toBe('copy_guest_scenario');
+      expect(args).toEqual({ p_source_scenario_id: SCENARIO, p_user_id: 'u-1' });
+      copied = JSON.parse(source);
+      return { error: null, data: { scenario_id: copyId, created: true } };
+    });
+    expect(await new SupabaseGuestCopyStore({ rpc } as never).copyGuestScenario(SCENARIO, 'u-1'))
+      .toEqual({ kind: 'copied', scenarioId: copyId, created: true });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(copied).toEqual(g);
+    expect(horizonSteadyAttested(copied)).toBe(true);
+    expect(applyGoalSteadyEdit(copied, { goal_id: 'goal', months: 9 }, copyId)).toEqual({ kind: 'unchanged' });
+  });
 });

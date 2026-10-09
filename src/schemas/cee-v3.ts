@@ -348,6 +348,7 @@ export const NodeV3 = z.object({
     source: z.literal('user_stated'),
     bound_months: z.number().int().positive(),
     metric: z.string(),
+    proof: z.string(),
   }).strict().optional().catch(undefined),
   /**
    * ⛔ THE DEADLINE AS THE BRIEF STATES IT (goal nodes only; PJ-E-A2 part 2, MG #72 5867208469, Canonical 5867397963).

@@ -48,3 +48,16 @@ export function assertDoorProvenance(
     }
   }
 }
+
+/** Outbound nodes only: never change the stored/hash input or its nested basis. */
+export function withoutHorizonBasisProof<T>(nodes: readonly T[]): T[] {
+  return nodes.map(node => {
+    if (node === null || typeof node !== 'object' || Array.isArray(node)) return node;
+    const value = node as Record<string, unknown>;
+    const basis = value.horizon_basis;
+    if (basis === null || typeof basis !== 'object' || Array.isArray(basis) || !Object.hasOwn(basis, 'proof')) return node;
+    const publicBasis = { ...basis };
+    delete (publicBasis as Record<string, unknown>).proof;
+    return { ...value, horizon_basis: publicBasis } as T;
+  });
+}

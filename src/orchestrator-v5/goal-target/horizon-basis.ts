@@ -1,8 +1,15 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
+import { config } from '../../config/index.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 
 type Rec = Record<string, unknown>;
 const record = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Server-only key; existing config resolves CEE_HMAC_SECRET ?? HMAC_SECRET. */
+export function horizonBasisProofKey(): Buffer | null {
+  const secret = config.auth.hmacSecret;
+  return typeof secret !== "string" || secret.trim() === "" ? null : Buffer.from(hkdfSync('sha256', secret, '', 'olumi/s5/horizon_basis/v1', 32));
+}
 
 /** S5 2b r7 (a2): bind the user's judgement to the goal's trajectory; their model copy keeps it. */
 export function horizonBasisMetricKey(goal: Rec): string {
@@ -22,7 +29,12 @@ export function horizonSteadyAttested(graph: unknown): boolean {
   if (goals.length !== 1) return false;
   const goal = goals[0]!;
   const basis = NodeV3.shape.horizon_basis.parse(goal.horizon_basis);
-  return typeof goal.id === 'string' && typeof goal.label === 'string'
+  const key = horizonBasisProofKey();
+  if (key === null || basis === undefined || !/^[0-9a-f]{64}$/.test(basis.proof)) return false;
+  const expected = createHmac('sha256', key).update(JSON.stringify([
+    goal.id, basis.bound_months, basis.metric, basis.basis, basis.source,
+  ])).digest();
+  return timingSafeEqual(expected, Buffer.from(basis.proof, 'hex')) && typeof goal.id === 'string' && typeof goal.label === 'string'
     && typeof goal.goal_horizon_months === 'number' && Number.isInteger(goal.goal_horizon_months) && goal.goal_horizon_months > 0
     && basis !== undefined && basis.bound_months === goal.goal_horizon_months
     && basis.metric === horizonBasisMetricKey(goal);

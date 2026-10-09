@@ -1,8 +1,9 @@
+import { createHmac } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { NodeV3T } from '../../schemas/cee-v3.js';
 import { EditGraphHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { horizonSteadyAttested, horizonBasisMetricKey } from './horizon-basis.js';
+import { horizonSteadyAttested, horizonBasisMetricKey, horizonBasisProofKey } from './horizon-basis.js';
 
 type Rec = Record<string, unknown>;
 const record = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -45,12 +46,18 @@ export function applyGoalSteadyEdit(persistedGraph: unknown, approved: ApprovedG
   if (!Number.isInteger(approved.months) || approved.months <= 0 || approved.months !== goal.goal_horizon_months) {
     return { kind: 'refused', reason: 'goal_month_changed' };
   }
+  const key = horizonBasisProofKey();
+  if (key === null) return { kind: 'refused', reason: 'horizon_basis_key_unavailable' };
   if (horizonSteadyAttested(persistedGraph)) return { kind: 'unchanged' };
   const graph = structuredClone(persistedGraph);
   const written = (graph.nodes as Rec[]).find(n => n.id === approved.goal_id)!;
   // Stamp authorship here, never copy a producer's source from the operation.
+  const metric = horizonBasisMetricKey(goal);
   written.horizon_basis = { basis: 'steady_attested', source: 'user_stated',
-    bound_months: approved.months, metric: horizonBasisMetricKey(goal) };
+    bound_months: approved.months, metric,
+    proof: createHmac('sha256', key).update(JSON.stringify([
+      approved.goal_id, approved.months, metric, 'steady_attested', 'user_stated',
+    ])).digest('hex') };
   const horizonBasisWrite = { goal_id: approved.goal_id, value: structuredClone(written.horizon_basis) } as HorizonBasisWrite;
   authorisedWrites.set(horizonBasisWrite, { goal_id: approved.goal_id, value: structuredClone(horizonBasisWrite.value), scenarioId });
   const label = String(goal.label ?? 'the goal');
