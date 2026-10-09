@@ -239,6 +239,7 @@ export interface AnalysisRunDerivationPort {
   storeTypedAnalysisRun(args: {
     p_fact_id: string; p_run: Omit<TypedRunRows, 'options'>; p_options: readonly TypedRunOptionRow[];
   }): AnalysisRunRpcResult;
+  markAnalysisFactUnattributable(args: { p_fact_id: string; p_reason: 'run_id_absent' }): AnalysisRunRpcResult;
   quarantineAnalysisFact(args: { p_fact_id: string; p_reason: string; p_detail: string | null }): AnalysisRunRpcResult;
   recordAnalysisRunFailure(args: { p_fact_id: string; p_error_code: string; p_detail: string }): AnalysisRunRpcResult;
   finishAnalysisRunSweep(args: { p_lease_id: string }): AnalysisRunRpcResult;
@@ -295,6 +296,7 @@ let conditionalAppendMissingLogged = false;
 export interface AnalysisRunDrainResult {
   derived: number;
   quarantined: number;
+  unattributable: number;
   skipped: number;
   failed: number;
   attempts: number;
@@ -474,7 +476,7 @@ export class SupabaseSessionStore implements SessionStore {
   /** Sanctioned write door; single-flight across interval, nudges and operator calls. */
   async deriveAnalysisRuns(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
     if (!this.options.analysisRunDerivation || this.analysisSweeperClosed) {
-      return { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
+      return { derived: 0, quarantined: 0, unattributable: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
     }
     const mode = opts.mode ?? 'sweep';
     if (this.analysisSweepFlight) {
@@ -491,7 +493,7 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   private async performAnalysisRunSweep(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' }): Promise<AnalysisRunDrainResult> {
-    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
+    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, unattributable: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
       depthEstimate: null, oldestPendingAgeSeconds: null };
     const port = this.options.analysisRunDerivation!;
     let leaseId: string | undefined;
@@ -526,9 +528,14 @@ export class SupabaseSessionStore implements SessionStore {
               else counts.skipped += 1;
             } else if (stored.data === true) counts.derived += 1;
             else counts.skipped += 1;
+          } else if ('unattributable' in mapped) {
+            const marked = await port.markAnalysisFactUnattributable({ p_fact_id: row.fact_id, p_reason: mapped.unattributable });
+            if (marked.error) throw marked.error;
+            if (marked.data === true) counts.unattributable += 1;
+            else counts.skipped += 1;
           } else {
-            const skipped = !('quarantine' in mapped);
-            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal' in mapped ? 'skipped_refusal' : 'skipped_legacy';
+            const skipped = 'skipped_refusal' in mapped;
+            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal';
             const quarantined = await port.quarantineAnalysisFact({ p_fact_id: row.fact_id, p_reason: reason, p_detail: null });
             if (quarantined.error) throw quarantined.error;
             if (skipped || quarantined.data !== true) counts.skipped += 1;
@@ -568,7 +575,7 @@ export class SupabaseSessionStore implements SessionStore {
     }
     log.info({ event: 'analysis_run.drain', mode: opts.mode ?? 'sweep', depth_estimate: counts.depthEstimate,
       oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, attempts: counts.attempts, scanned: counts.scanned,
-      derived: counts.derived, quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
+      derived: counts.derived, quarantined: counts.quarantined, unattributable: counts.unattributable, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
     return counts;
   }
 
