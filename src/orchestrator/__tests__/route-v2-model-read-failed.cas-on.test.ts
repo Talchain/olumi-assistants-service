@@ -63,7 +63,6 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => {
       loadGraphCalls += 1;
       if (loadGraphThrows) throw new Error('simulated session store failure');

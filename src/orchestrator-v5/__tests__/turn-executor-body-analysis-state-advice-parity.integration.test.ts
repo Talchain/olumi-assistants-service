@@ -95,7 +95,6 @@ const mockState: {
   persistedGraphReadError: Error | null;
   appendWrites: Array<Record<string, unknown>>;
   invalidationCalls: number;
-  storeDraftGraphCalls: number;
 } = {
   priorTurns: [],
   priorFacts: [],
@@ -108,7 +107,6 @@ const mockState: {
   persistedGraphReadError: null,
   appendWrites: [],
   invalidationCalls: 0,
-  storeDraftGraphCalls: 0,
 };
 
 vi.mock('../session/index.js', () => ({
@@ -183,9 +181,6 @@ vi.mock('../session/index.js', () => ({
         scope: { kind: 'structural' as const },
         entries_invalidated: [],
       };
-    },
-    storeDraftGraph: async () => {
-      mockState.storeDraftGraphCalls += 1;
     },
     loadGraph: async () => {
       if (mockState.persistedGraphReadError)
@@ -609,7 +604,6 @@ function capturedRoutingPrompt(
 }
 
 function expectNoCanonicalAuthorityWrite(): void {
-  expect(mockState.storeDraftGraphCalls).toBe(0);
   expect(mockState.invalidationCalls).toBe(0);
   expect(
     mockState.appendWrites.length,
@@ -675,7 +669,6 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     mockState.persistedGraphReadError = null;
     mockState.appendWrites = [];
     mockState.invalidationCalls = 0;
-    mockState.storeDraftGraphCalls = 0;
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
   });
 

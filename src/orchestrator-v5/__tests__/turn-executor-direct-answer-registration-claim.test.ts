@@ -56,7 +56,6 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => currentPersistedGraph,
     loadGraphAndBriefText: async () => ({
       graph: currentPersistedGraph,

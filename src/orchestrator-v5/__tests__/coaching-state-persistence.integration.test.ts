@@ -77,7 +77,6 @@ function makeStatefulStore(): { store: SessionStore; snaps: Array<CoachingStateS
     readFactsWithTurnFor: async () => [],
     invalidateScoped: async () => ({ scenario_id: SCENARIO_ID, evicted: 0 }),
     invalidateAll: async () => ({ scenario_id: SCENARIO_ID, evicted: 0 }),
-    storeDraftGraph: async () => {},
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),

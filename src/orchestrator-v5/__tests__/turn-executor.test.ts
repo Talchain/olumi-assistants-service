@@ -87,10 +87,6 @@ vi.mock('../session/index.js', () => ({
     },
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    storeDraftGraph: async (_scenarioId: string, graph: unknown) => {
-      (global as any).__test_storeDraftGraph_calls = (global as any).__test_storeDraftGraph_calls || [];
-      (global as any).__test_storeDraftGraph_calls.push(graph);
-    },
     loadGraph: async (scenarioId: string) => {
       // V5 Phase 1 brief persistence: production loadPersistedGraph now
       // delegates to loadPersistedScenarioState which calls
@@ -120,7 +116,6 @@ vi.mock('../session/index.js', () => ({
   }),
   resetSessionStoreForTests: () => {
     delete (global as any).__test_append_calls;
-    delete (global as any).__test_storeDraftGraph_calls;
     delete (global as any).__test_loadGraph_calls;
     delete (global as any).__test_persisted_graph;
     delete (global as any).__test_persisted_brief_text;
