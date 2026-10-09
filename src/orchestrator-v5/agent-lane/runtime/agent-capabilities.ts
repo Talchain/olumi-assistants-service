@@ -210,6 +210,7 @@ import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadi
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
+import { proposedFrameForLevels, levelOnFinalFrame } from '../level-batch-frame.js';
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { meetsLimit } from '../limit-operator-words.js';
@@ -900,27 +901,24 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
 /**
  * ⭐ THE FIGURE A LEVEL WAS READ FROM, KEPT ON ITS CELL (AI Conversation #70 5848429576; the door, #2024). A level on a
  * NEW factor with no range was stored as a bare 0.1: the user's "£10 per month" and the range it was read against were
- * gone. The proposal already holds both, so the writer is handed them to keep on the cell in the same commit. Only when
- * they reproduce the stored level exactly: an op whose `normalised` is not `raw / cap` passes no figure (the writer would
- * refuse the whole batch as `level_frame_mismatch`).
+ * gone. Carry every known native point to the final-frame seam, including capless figures and figures whose
+ * proposal coordinate frame differs from the range this approval settles. The transaction re-encodes them together.
  */
 /** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
 function likelyBound(n: number, unit: string): string {
   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
 }
 
-function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
-  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
+function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: number; unit?: string; likely_range?: { low: number; high: number } } {
+  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; derived_frame?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
   // TEMPORAL: the user's likely range rides with their figure (proposed only beside a level they gave).
   const r = v.likely_range;
   const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
   if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw)) return {};
-  // An unscaled level needs no cap. Carry its approved range without inventing a scale frame.
-  if (v.cap == null && v.raw === v.normalised) return likely !== undefined ? { raw_value: v.raw,
+  const cap = v.cap ?? v.derived_frame;
+  return { raw_value: v.raw,
+    ...(typeof cap === 'number' && Number.isFinite(cap) && cap > 0 ? { cap } : {}),
     ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
-    likely_range: likely } : {};
-  if (typeof v.cap !== 'number' || !(v.cap > 0) || Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
-  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
     ...(likely !== undefined ? { likely_range: likely } : {}) };
 }
 
@@ -2705,9 +2703,10 @@ export function createAgentCapabilities(
     // Derived level frames on factors that hold a value and still have no
     // range — the same attachment the single-kind level path makes.
     workingNodes = workingNodes.map((n) => {
-      const op = levelOps.find((o) => o.path.split('::')[1] === n.id && typeof ((o.value ?? {}) as { derived_frame?: unknown }).derived_frame === 'number');
-      if (op === undefined || frameOf(n) !== null) return n;
-      const range = ((op.value ?? {}) as { derived_frame: number }).derived_frame;
+      const cohort = levelOps.filter(o => o.path.split('::')[1] === n.id);
+      if (!cohort.some(o => typeof ((o.value ?? {}) as { derived_frame?: unknown }).derived_frame === 'number') || frameOf(n) !== null) return n;
+      const range = proposedFrameForLevels(cohort.map(levelFigureOf));
+      if (range === null) return n;
       const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
       const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
       if (typeof raw !== 'number' || range <= 1) return n;
@@ -2774,7 +2773,7 @@ export function createAgentCapabilities(
     const pairWords = (p: { option_id: string; factor_id: string }): string => `${labelOf(p.option_id)} \u2192 ${labelOf(p.factor_id)}`;
     if (levelInputs.length + linkOps.length + values.length + frames.length > 0) {
       const links = linkOps.map((o) => pairOf(o.path));
-      const levels = levelInputs.map((l) => ({ ...l, value: l.value as number }));
+      const levels = levelInputs.map(l => levelOnFinalFrame({ ...l, value: l.value as number }, frameOf(workingNodes.find(n => n.id === l.factor_id))));
       const res = await opts.commitOptionLevels!({
         scenario_id: ctx.scenario_id,
         base_graph_hash: carried,
@@ -6315,9 +6314,11 @@ export function createAgentCapabilities(
          */
         const framedHere: { factor: string; range: number }[] = [];
         const frames = new Map<string, number>();
-        for (const o of ops) {
-          const f = ((o.value ?? {}) as { derived_frame?: number | null }).derived_frame;
-          if (typeof f === 'number' && f > 1) frames.set(o.path.split('::')[1], f);
+        for (const factorId of new Set(ops.map(o => o.path.split('::')[1]))) {
+          const cohort = ops.filter(o => o.path.split('::')[1] === factorId);
+          if (!cohort.some(o => typeof ((o.value ?? {}) as { derived_frame?: unknown }).derived_frame === 'number')) continue;
+          const range = proposedFrameForLevels(cohort.map(levelFigureOf));
+          if (range !== null && range > 1) frames.set(factorId, range);
         }
         if (frames.size > 0) {
           /**
@@ -6481,6 +6482,13 @@ export function createAgentCapabilities(
           return partialWriteOutcome(decision.proposal.proposal_id, receipts,
             laterSaveConflict(error) ? 'range_saved_levels_not_saved' : 'range_saved_levels_unconfirmed');
         }
+        // Keep sent coordinates for truthful readback; the proposal's native point remains unchanged.
+        for (const l of levelInputs) {
+          const encoded = levelOnFinalFrame({ value: l.value as number, ...l.figure },
+            frameOf((rebased ?? before).nodes.find(n => n.id === l.factor_id)));
+          l.value = encoded.value;
+          l.figure = { ...l.figure, ...(encoded.cap !== undefined ? { cap: encoded.cap } : {}) };
+        }
         let baseHash = rebased?.graph_hash ?? before.graph_hash;
         /** The levels THIS approval's own writes committed — see the read-back below. */
         const ownLevelWrite = new Set<string>();
@@ -6500,7 +6508,7 @@ export function createAgentCapabilities(
           base_graph_hash: baseHash,
           turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
           links: [],
-          levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
+          levels: levelInputs.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
         });
         } catch (error) {
           if (framedHere.length === 0) throw error;
@@ -6577,7 +6585,8 @@ export function createAgentCapabilities(
           if (ownLevelWrite.has(o.path) && mine !== undefined) {
             // The op's `cap` is the range the level was divided by (stated, or derived from the figure); none ⇒ already 0–1.
             const opv = (o.value ?? {}) as { cap?: unknown; normalised?: unknown };
-            const cap = typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined;
+            const sent = levelInputs.find(l => l.path === o.path);
+            const cap = sent?.figure.cap ?? (typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined);
             /**
              * ⛔ COMPARE UN-ROUNDED; ROUND ONLY WHAT IS REPORTED (review of #1881 at 6868825f, 5827673705). A 6-figure round
              * (6 significant figures) applied before the comparison made a precise figure — £1,234,567 — never equal
@@ -6585,7 +6594,7 @@ export function createAgentCapabilities(
              */
             const toAbs = (x: number): number => (cap !== undefined ? x * cap : x);
             // What we saved, as the user said it: their own figure when the write committed exactly what was sent.
-            const savedAsSent = typeof opv.normalised === 'number' && mine === opv.normalised && Number.isFinite(row.requested);
+            const savedAsSent = mine === sent?.value && Number.isFinite(row.requested);
             // Compared against the EXACT committed level in its range, so the only difference left is scale-step noise.
             const savedAbs = toAbs(mine);
             const savedUser = savedAsSent ? row.requested : quotable(savedAbs);

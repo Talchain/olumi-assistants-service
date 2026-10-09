@@ -94,6 +94,7 @@ import {
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
+import { readCommittedOptionEffect } from '../routing/option-effect-write.js';
 import { applyPriorRangeEdit } from './prior-range-edit.js';
 import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
 import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
@@ -3088,7 +3089,7 @@ export async function dispatchOptionLevelsBatch(
     && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
-    ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
+    ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
       getSessionStore())
     : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
@@ -3534,16 +3535,26 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(frame !== undefined ? { frame: { factor_id: frame.factor_id } } : {}),
       ...(link !== undefined ? { link: { from: link.from, to: link.to } } : {}) };
   }
-  const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value }));
+  let committedGraph: unknown = r.graph;
+  if (r.commitSkippedReason === 'verified_no_op' && input.levels.length > 0) {
+    try {
+      committedGraph = await getSessionStore().loadGraph(input.scenario_id);
+      if (computeAnalysisAffectingGraphHash(committedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) !== input.base_graph_hash) return { status: 'stale' };
+    } catch { return { status: 'unconfirmed' }; }
+  }
+  const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id,
+    value: readCommittedOptionEffect(committedGraph, l.option_id, l.factor_id) }));
+  if (committedLevels.some(l => l.value === undefined)) return { status: 'unconfirmed' };
+  const verifiedLevels = committedLevels.map(l => ({ ...l, value: l.value! }));
   if (r.commitSkippedReason === 'verified_no_op') {
-    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: committedLevels,
+    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: verifiedLevels,
       links_resized: [] };
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
   // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
   const receipt = r.committedVersion ?? null;
-  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels,
+  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: verifiedLevels,
     links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })) };
 }
 

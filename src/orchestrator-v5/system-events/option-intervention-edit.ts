@@ -1,3 +1,4 @@
+import { proposedFrameForLevels, levelOnFinalFrame } from '../agent-lane/level-batch-frame.js';
 import { applyTeamShareEdit, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { withApprovedShareByDateWrite } from '../goal-target/share-by-date-carrier.js';
 import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
@@ -265,9 +266,9 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
   | OptionInterventionCandidate
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string } {
-  const { optionId, factorId, modelValue, source, ...rest } = input;
+  const { optionId, factorId, modelValue, source, figure, ...rest } = input;
   const result = applyOptionInterventionBatch({ ...rest,
-    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source } : {}) }] });
+    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source } : {}), ...(figure !== undefined ? { figure } : {}) }] });
   return result.kind === 'refused' ? { kind: 'refused', reason: result.reason } : result;
 }
 
@@ -510,9 +511,10 @@ async function applyApprovedFactorValues(
     const os = (node.observed_state ?? {}) as Record<string, unknown>;
     const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
     // Only a bare amount with no range of its own: a factor that already declares one is never re-read on another.
-    if (typeof raw !== 'number' || !Number.isFinite(raw) || typeof os.cap === 'number'
+    if ((raw !== undefined && (typeof raw !== 'number' || !Number.isFinite(raw))) || typeof os.cap === 'number'
       || (typeof node.scale_frame === 'number' && node.scale_frame > 1)) return refuseFrame('frame_not_applicable', i);
-    (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
+    if (typeof raw === 'number') (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
+    else (node as Record<string, unknown>).scale_frame = f.cap;
   }
   // ⭐ A RANGE MOVES OLUMI'S LINKS TOO (MG #70 5849581652): the level a frame sets is a level like any other, so the
   // Olumi-sized links on that factor are re-derived on it — the same contract the value writer applies (#2033), and the
@@ -824,8 +826,8 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
   | { readonly kind: 'refused'; readonly reason: string }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
-  const { optionId, factorId, modelValue, ...rest } = input;
-  const outcome = await executeOptionInterventionBatch({ ...rest, targets: [{ optionId, factorId, modelValue }] }, store);
+  const { optionId, factorId, modelValue, figure, ...rest } = input;
+  const outcome = await executeOptionInterventionBatch({ ...rest, targets: [{ optionId, factorId, modelValue, ...(figure !== undefined ? { figure } : {}) }] }, store);
   return outcome.kind === 'refused' ? { kind: 'refused', reason: outcome.reason } : outcome;
 }
 
@@ -913,7 +915,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // ⭐ Whose level this is: Olumi's, when THIS write is the approved adoption the Agent's verified
   // proposal names (same scenario, option, factor, value); otherwise the inspector's `user_specified`.
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
-  const targets: OptionLevelTarget[] = input.targets.map(t => {
+  let targets: OptionLevelTarget[] = input.targets.map(t => {
     const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
     return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
@@ -925,7 +927,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
   const values = input.values ?? [];
-  const frames = input.frames ?? [];
+  const frames = [...(input.frames ?? [])];
   let levelBase: unknown = before;
   let levelBaseHash = input.expectedGraphHash;
   let valueFacts: readonly unknown[] = [];
@@ -951,6 +953,57 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = applied.handlerFacts;
     valueConfirmations = applied.confirmations;
     linksResized = applied.linksResized;
+  }
+  // Settle the factor once, after values and typed frames, before preparing any cell.
+  // Adoption stamps above bind to the original approved target; re-encoding keeps that stamp.
+  if (targets.some(t => t.figure?.raw_value !== undefined) && isEditableGraph(levelBase)) {
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    // A caller supplying native coordinates on an already framed factor must name that frame.
+    // Capless natives are admitted only when this approval itself establishes the range.
+    if (targets.some(t => {
+      if (t.figure?.raw_value === undefined || t.figure.cap !== undefined) return false;
+      const factor = before.nodes.find(n => n.id === t.factorId);
+      return ((factor?.observed_state as { cap?: number } | undefined)?.cap ?? 0) > 1
+        || ((factor as { scale_frame?: number } | undefined)?.scale_frame ?? 0) > 1;
+    })) return { kind: 'refused', reason: 'level_frame_mismatch' };
+    const finalCaps = new Map<string, number | null>();
+    const derivedFrames: ApprovedFactorFrame[] = [];
+    for (const factorId of new Set(targets.map(t => t.factorId))) {
+      const node = levelBase.nodes.find(n => n.id === factorId);
+      if (node === undefined || node.kind !== 'factor') continue;
+      const os = (node.observed_state ?? {}) as { cap?: unknown };
+      const scale = (node as { scale_frame?: unknown }).scale_frame;
+      const existing = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap
+        : typeof scale === 'number' && Number.isFinite(scale) && scale > 1 ? scale : null;
+      const cap = existing ?? proposedFrameForLevels(targets.filter(t => t.factorId === factorId).map(t => t.figure ?? {}));
+      finalCaps.set(factorId, cap);
+      if (existing === null && cap !== null && cap > 1) derivedFrames.push({ factorId, cap });
+    }
+    targets = targets.map(t => {
+      const cap = finalCaps.get(t.factorId) ?? null;
+      if (t.figure?.raw_value === undefined || cap === null) return t;
+      const encoded = levelOnFinalFrame({ value: t.modelValue, ...t.figure }, cap);
+      return { ...t, modelValue: encoded.value, figure: { ...t.figure, cap } };
+    });
+    if (targets.some(t => t.figure?.raw_value !== undefined
+      && (!Number.isFinite(t.modelValue) || t.modelValue < 0 || t.modelValue > 1))) {
+      return { kind: 'refused', reason: 'level_frame_mismatch' };
+    }
+    if (derivedFrames.length > 0) {
+      const applied = await applyApprovedFactorValues(levelBase, [], derivedFrames,
+        { scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId, stage: input.stage });
+      if (applied.kind === 'refused') return { kind: 'refused', reason: applied.reason };
+      frames.push(...derivedFrames);
+      levelBase = applied.graph;
+      levelBaseHash = computeAnalysisAffectingGraphHash(applied.graph)!;
+      valueFacts = [...valueFacts, ...applied.handlerFacts];
+      valueConfirmations = [...valueConfirmations, ...applied.confirmations];
+      linksResized = [...linksResized, ...applied.linksResized];
+    }
   }
   /**
    * ⭐ A SET OF LINK STRENGTHS (seam Canonical #72 5871633483): the values' own shape — applied in memory on the
@@ -1222,7 +1275,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     // CommitResult.persistedGraph is projected INPUT, not DB readback. A
     // duplicate turn may return an older row without applying new request bytes.
     if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, plan.graph) || (optionGaps.length > 0 && !optionGapsHeld(reloaded, optionGaps))
-      || input.targets.some(t => readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue)) {
+      || targets.some(t => readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue)) {
       return { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true };
     }
     // The graph answers "what is saved now?", not "what did this turn
@@ -1345,6 +1398,11 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     || typeof option.label !== 'string' || typeof factor.label !== 'string') {
     return refuse('unresolved_identity');
   }
+  if (figure?.raw_value !== undefined && figure.cap === undefined
+    && (((factor.observed_state as { cap?: number } | undefined)?.cap ?? 0) > 1
+      || ((factor as { scale_frame?: number }).scale_frame ?? 0) > 1)) {
+    return refuse('level_frame_mismatch');
+  }
   // Reuse the conversational writer's identity-link question, not a new
   // topology/science admission policy. Unique endpoint identity is checked
   // above; the established reader owns which factor IDs an option addresses.
@@ -1447,10 +1505,6 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
   // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
   // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
-  if (figure?.raw_value !== undefined && figure.cap === undefined
-    && figureOnFactorRange(graph, factor, existing, input.modelValue) !== undefined) {
-    return refuse('level_frame_mismatch');
-  }
   const levelFigure = figure !== undefined && typeof figure.raw_value === 'number'
     ? { raw_value: figure.raw_value, ...(figure.cap !== undefined ? { cap: figure.cap } : {}), ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
     : figureOnFactorRange(graph, factor, existing, input.modelValue);
