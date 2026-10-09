@@ -233,6 +233,7 @@ type AnalysisRunRpcResult = PromiseLike<{ data: unknown; error: unknown }>;
 /** Named capabilities keep each storage RPC visible to the migration census. */
 export interface AnalysisRunDerivationPort {
   claimAnalysisRunWindow(args: { p_sweep_limit: number }): AnalysisRunRpcResult;
+  claimAnalysisRunReconciliation(args: { p_sweep_limit: number }): AnalysisRunRpcResult;
   storeTypedAnalysisRun(args: {
     p_fact_id: string; p_run: Omit<TypedRunRows, 'options'>; p_options: readonly TypedRunOptionRow[];
   }): AnalysisRunRpcResult;
@@ -314,6 +315,7 @@ export class SupabaseSessionStore implements SessionStore {
    */
   private atomicFenceRpcUnavailable = false;
   private analysisSweepFlight?: Promise<AnalysisRunDrainResult>;
+  private analysisSweepMode?: 'sweep' | 'reconcile';
   private analysisSweepTimer?: NodeJS.Timeout;
   private analysisSweeperClosed = false;
   private readonly analysisNudges = new Set<NodeJS.Immediate>();
@@ -322,7 +324,15 @@ export class SupabaseSessionStore implements SessionStore {
   startAnalysisRunSweeper(): () => void {
     if (this.options.analysisRunDerivation && !this.analysisSweepTimer) {
       this.analysisSweeperClosed = false;
-      this.analysisSweepTimer = setInterval(() => { void this.deriveAnalysisRuns({ sweepLimit: 20 }); }, 60_000);
+      let reconcileAt = Date.now() + 3_600_000;
+      this.analysisSweepTimer = setInterval(() => {
+        // One timer and one flight: a due hourly pass waits for an idle tick,
+        // rather than joining a normal sweep and silently losing reconciliation.
+        if (this.analysisSweepFlight) return;
+        const reconcile = Date.now() >= reconcileAt;
+        if (reconcile) reconcileAt = Date.now() + 3_600_000;
+        void this.deriveAnalysisRuns({ sweepLimit: 20, mode: reconcile ? 'reconcile' : 'sweep' });
+      }, 60_000);
       this.analysisSweepTimer.unref();
     }
     return () => {
@@ -460,24 +470,34 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /** Sanctioned write door; single-flight across interval, nudges and operator calls. */
-  async deriveAnalysisRuns(opts: { sweepLimit: number } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
+  async deriveAnalysisRuns(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
     if (!this.options.analysisRunDerivation || this.analysisSweeperClosed) {
       return { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
     }
-    if (this.analysisSweepFlight) return this.analysisSweepFlight;
+    const mode = opts.mode ?? 'sweep';
+    if (this.analysisSweepFlight) {
+      if (this.analysisSweepMode === mode) return this.analysisSweepFlight;
+      // A caller requesting reconciliation must not receive a normal window's
+      // empty result and mistake it for an empty historical anti-join.
+      await this.analysisSweepFlight;
+      return this.deriveAnalysisRuns(opts);
+    }
+    this.analysisSweepMode = mode;
     this.analysisSweepFlight = this.performAnalysisRunSweep(opts);
     try { return await this.analysisSweepFlight; }
-    finally { this.analysisSweepFlight = undefined; }
+    finally { this.analysisSweepFlight = undefined; this.analysisSweepMode = undefined; }
   }
 
-  private async performAnalysisRunSweep(opts: { sweepLimit: number }): Promise<AnalysisRunDrainResult> {
+  private async performAnalysisRunSweep(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' }): Promise<AnalysisRunDrainResult> {
     const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
       depthEstimate: null, oldestPendingAgeSeconds: null };
     const port = this.options.analysisRunDerivation!;
     let leaseId: string | undefined;
     try {
       const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
-      const { data, error } = await port.claimAnalysisRunWindow({ p_sweep_limit: limit });
+      const { data, error } = opts.mode === 'reconcile'
+        ? await port.claimAnalysisRunReconciliation({ p_sweep_limit: limit })
+        : await port.claimAnalysisRunWindow({ p_sweep_limit: limit });
       if (error) throw error;
       const envelope = drainRecord(data);
       if (!envelope || !Array.isArray(envelope.facts)) throw new Error('Invalid analysis claim receipt');
@@ -544,7 +564,7 @@ export class SupabaseSessionStore implements SessionStore {
         }
       }
     }
-    log.info({ event: 'analysis_run.drain', depth_estimate: counts.depthEstimate,
+    log.info({ event: 'analysis_run.drain', mode: opts.mode ?? 'sweep', depth_estimate: counts.depthEstimate,
       oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, attempts: counts.attempts, scanned: counts.scanned,
       derived: counts.derived, quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
     return counts;

@@ -276,6 +276,20 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     if ('ok' in mapped) expect(mapped.ok).toMatchObject({ leading_option_id: null, constraint_may_name_leading_option: null });
   });
 
+  it('reconciliation uses the indexed anti-join without a watermark and releases the shared lease without advancing it', () => {
+    const body = migration.match(/CREATE FUNCTION public\.claim_analysis_run_reconciliation\([\s\S]*?AS \$\$([\s\S]*?)\$\$;/)?.[1];
+    expect(body).toBeDefined();
+    expect(body).toContain("h.action_type = 'run_analysis' AND NOT h.noop");
+    expect(body).toContain('NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = h.id)');
+    expect(body).toContain('NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = h.id)');
+    expect(body).toContain('ORDER BY h.created_at, h.id LIMIT p_sweep_limit');
+    expect(body).toContain('p_sweep_limit > 20');
+    expect(body).toContain('FOR UPDATE SKIP LOCKED');
+    expect(body).not.toMatch(/processed_at|processed_id/);
+    const releaseOnly = migration.match(/IF s\.window_last_at IS NULL THEN([\s\S]*?)END IF;/)?.[1];
+    expect(releaseOnly).toContain('lease_id = NULL');
+    expect(releaseOnly).not.toMatch(/processed_at|processed_id/);
+  });
   it('adds only objects, with compact terminal storage and bounded durable watermark ranges', () => {
     expect(migration).not.toMatch(/CREATE TRIGGER|CREATE TABLE public\.analysis_run_queue|ALTER TABLE public\.(v5_handler_facts|scenarios)/);
     expect(migration).not.toMatch(/REFERENCES public\.(v5_handler_facts|scenarios)/);

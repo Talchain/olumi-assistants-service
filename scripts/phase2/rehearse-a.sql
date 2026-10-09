@@ -36,13 +36,13 @@ SELECT pg_temp.phase2_check('all five new tables RLS; no client privileges or po
     FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
       AND c.relname IN ('analysis_runs','analysis_run_options','analysis_run_quarantine','analysis_run_attempts','analysis_run_sweep_state'))
   AND NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename LIKE 'analysis_run%'));
-SELECT pg_temp.phase2_check('five RPCs definer/pinned path; service EXECUTE only',
-  (SELECT count(*)=5 AND bool_and(p.prosecdef) AND bool_and('search_path=pg_catalog, public'=ANY(p.proconfig))
+SELECT pg_temp.phase2_check('six RPCs definer/pinned path; service EXECUTE only',
+  (SELECT count(*)=6 AND bool_and(p.prosecdef) AND bool_and('search_path=pg_catalog, public'=ANY(p.proconfig))
     AND bool_and(NOT has_function_privilege('anon',p.oid,'EXECUTE'))
     AND bool_and(NOT has_function_privilege('authenticated',p.oid,'EXECUTE'))
     AND bool_and(has_function_privilege('service_role',p.oid,'EXECUTE'))
     FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'
-      AND p.proname IN ('claim_analysis_run_facts','finish_analysis_run_sweep','store_typed_analysis_run','quarantine_analysis_fact','record_analysis_run_failure')));
+      AND p.proname IN ('claim_analysis_run_facts','claim_analysis_run_reconciliation','finish_analysis_run_sweep','store_typed_analysis_run','quarantine_analysis_fact','record_analysis_run_failure')));
 \ir rehearse-a-fixture.sql
 INSERT INTO public.scenarios(id,user_id,graph) VALUES ('f2a00000-0000-4000-8000-000000000001',NULL,NULL);
 SELECT set_config('request.jwt.claims','{"role":"service_role"}',true);
@@ -55,7 +55,7 @@ CREATE FUNCTION pg_temp.phase2_append(turn_id text,facts jsonb) RETURNS uuid LAN
     p_user_message=>NULL,p_assistant_message=>NULL,p_expected_graph_identity_hash=>NULL,
     p_incoming_graph_identity_hash=>NULL,p_cas_enforce=>false,p_fence_generation=>NULL);
 $$;
--- All fixture writes precede watermark advancement. Real writers use DEFAULT
+-- Initial fixture writes precede watermark advancement. Real writers use DEFAULT
 -- now(); the claim's open-transaction horizon protects separate writer sessions.
 SELECT pg_temp.phase2_append('phase2-a-valid',jsonb_build_array(
   jsonb_build_object('handler_id','run_analysis','action_type','run_analysis','noop',false,'payload',:'phase2_a_payload'::jsonb),
@@ -134,6 +134,37 @@ BEGIN
     AND (SELECT count(*)=2 FROM public.analysis_run_quarantine WHERE scenario_id='f2a00000-0000-4000-8000-000000000001'));
 END;
 $$;
+-- Import AFTER advancement, then backdate earlier than every local source fact
+-- so this row is deterministically within the oldest-first reconciliation cap.
+CREATE TEMP TABLE phase2_a_watermark_before AS SELECT processed_at,processed_id FROM public.analysis_run_sweep_state;
+SELECT pg_temp.phase2_append('phase2-a-backdated',jsonb_build_array(jsonb_build_object(
+  'handler_id','run_analysis','action_type','run_analysis','noop',false,'payload',
+  jsonb_set(:'phase2_a_payload'::jsonb,'{result,run_id}',to_jsonb('phase2-a-backdated'::text))))) AS backdated_turn
+\gset
+SELECT id AS backdated_fact FROM public.v5_handler_facts WHERE v5_conversation_turn_id=:'backdated_turn'
+\gset
+UPDATE public.v5_handler_facts SET created_at=(SELECT LEAST(w.processed_at,
+  (SELECT min(created_at) FROM public.v5_handler_facts))-interval '1 day' FROM phase2_a_watermark_before w)
+  WHERE id=:'backdated_fact';
+SELECT public.claim_analysis_run_facts(20) AS normal_receipt
+\gset
+SELECT pg_temp.phase2_check('normal sweep skips fact inserted behind advanced watermark',
+  (SELECT h.created_at<w.processed_at FROM public.v5_handler_facts h CROSS JOIN phase2_a_watermark_before w WHERE h.id=:'backdated_fact')
+  AND NOT (:'normal_receipt'::jsonb->'facts' @> jsonb_build_array(jsonb_build_object('fact_id',:'backdated_fact'::uuid))));
+SELECT public.finish_analysis_run_sweep((:'normal_receipt'::jsonb->>'lease_id')::uuid);
+SELECT public.claim_analysis_run_reconciliation(20) AS reconcile_receipt
+\gset
+SELECT pg_temp.phase2_check('reconciliation returns backdated fact; cap <=20; shared lease excludes normal sweep',
+  :'reconcile_receipt'::jsonb->'facts' @> jsonb_build_array(jsonb_build_object('fact_id',:'backdated_fact'::uuid))
+  AND jsonb_array_length(:'reconcile_receipt'::jsonb->'facts')<=20
+  AND jsonb_array_length(public.claim_analysis_run_facts(20)->'facts')=0);
+SELECT public.store_typed_analysis_run(:'backdated_fact',
+  jsonb_set(:'phase2_a_run'::jsonb,'{run_id}',to_jsonb('phase2-a-backdated'::text)),:'phase2_a_options'::jsonb);
+SELECT public.finish_analysis_run_sweep((:'reconcile_receipt'::jsonb->>'lease_id')::uuid);
+SELECT pg_temp.phase2_check('backdated Run stored; reconciliation leaves watermark EXACTLY unchanged',
+  EXISTS (SELECT 1 FROM public.analysis_runs WHERE fact_id=:'backdated_fact')
+  AND (SELECT (s.processed_at,s.processed_id)=(w.processed_at,w.processed_id)
+    FROM public.analysis_run_sweep_state s CROSS JOIN phase2_a_watermark_before w));
 \ir ../../supabase/migrations/rollback/20261009010000_phase2_a_typed_runs_rollback.sql.do-not-apply
 SELECT pg_temp.phase2_check('rollback restores catalogue EXACTLY',pg_temp.phase2_catalogue()=(SELECT catalogue FROM phase2_a_before));
 ROLLBACK;

@@ -2,6 +2,7 @@
 -- alone OUTSIDE a transaction. Then apply this main rollback inside an explicit transaction.
 SET LOCAL lock_timeout = '3s';
 DROP FUNCTION public.claim_analysis_run_facts(integer);
+DROP FUNCTION public.claim_analysis_run_reconciliation(integer);
 DROP FUNCTION public.finish_analysis_run_sweep(uuid);
 DROP FUNCTION public.store_typed_analysis_run(uuid,jsonb,jsonb);
 DROP FUNCTION public.quarantine_analysis_fact(uuid,text,text);

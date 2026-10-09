@@ -47,6 +47,7 @@ let cachedInstance: SessionStore | null = null;
 export function createAnalysisRunDerivationPort(client: Pick<SupabaseClient, 'rpc'>): AnalysisRunDerivationPort {
   return {
     claimAnalysisRunWindow: args => client.rpc('claim_analysis_run_facts', args),
+    claimAnalysisRunReconciliation: args => client.rpc('claim_analysis_run_reconciliation', args),
     storeTypedAnalysisRun: args => client.rpc('store_typed_analysis_run', args),
     quarantineAnalysisFact: args => client.rpc('quarantine_analysis_fact', args),
     recordAnalysisRunFailure: args => client.rpc('record_analysis_run_failure', args),

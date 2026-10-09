@@ -11,8 +11,9 @@
 -- Durable (created_at,id) watermark preserves ties; advance ONLY a fully-terminal
 -- prefix. Each range window reads <=20 facts, not the complete historical anti-join.
 -- An open/prepared-transaction horizon protects late commits with DEFAULT now()
--- timestamps. Explicitly backdated/imported created_at is outside that contract;
--- operator backfill starts at -infinity, and must precede autonomous advancement.
+-- timestamps. Hourly reconciliation and operator --reconcile recover backdated
+-- imports via an indexed anti-join WITHOUT the watermark, <=20 results per pass.
+-- Reconciliation may walk older terminal index entries; it never moves the cursor.
 -- A durable 30s sweep lease recovers crashes; source tables are never row-locked.
 SET LOCAL lock_timeout = '3s';
 
@@ -149,6 +150,13 @@ DECLARE s public.analysis_run_sweep_state; last_at TIMESTAMPTZ; last_id UUID;
 BEGIN
   SELECT * INTO s FROM public.analysis_run_sweep_state WHERE singleton FOR UPDATE;
   IF s.lease_id IS DISTINCT FROM p_lease_id THEN RETURN FALSE; END IF;
+  -- Reconciliation has no range boundary (as does an empty normal window).
+  -- Release only: neither watermark column is updated by this branch.
+  IF s.window_last_at IS NULL THEN
+    UPDATE public.analysis_run_sweep_state SET lease_id = NULL, lease_until = '-infinity',
+      window_last_id = NULL WHERE singleton;
+    RETURN TRUE;
+  END IF;
   WITH fact_window AS MATERIALIZED (
     SELECT h.id,h.created_at,
       EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = h.id)
@@ -167,6 +175,45 @@ BEGIN
     processed_id = COALESCE(last_id,processed_id), lease_id = NULL, lease_until = '-infinity',
     window_last_at = NULL, window_last_id = NULL WHERE singleton;
   RETURN TRUE;
+END;
+$$;
+
+CREATE FUNCTION public.claim_analysis_run_reconciliation(p_sweep_limit INTEGER DEFAULT 20)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public
+SET lock_timeout = '50ms'
+AS $$
+DECLARE
+  s public.analysis_run_sweep_state;
+  batch JSONB;
+  oldest_at TIMESTAMPTZ;
+  token UUID := gen_random_uuid();
+BEGIN
+  IF p_sweep_limit IS NULL OR p_sweep_limit < 1 OR p_sweep_limit > 20 THEN
+    RAISE EXCEPTION 'sweep limit must be in [1,20]' USING ERRCODE = '22023';
+  END IF;
+  -- Share the normal sweep's lease, including across processes. No source locks.
+  SELECT * INTO s FROM public.analysis_run_sweep_state WHERE singleton FOR UPDATE SKIP LOCKED;
+  IF NOT FOUND OR s.lease_until > clock_timestamp() THEN
+    RETURN jsonb_build_object('facts','[]'::jsonb,'depth_estimate',NULL,'oldest_pending_age_seconds',NULL,'window_count',0);
+  END IF;
+  WITH pending AS MATERIALIZED (
+    SELECT h.* FROM public.v5_handler_facts h
+    WHERE h.action_type = 'run_analysis' AND NOT h.noop
+      AND NOT EXISTS (SELECT 1 FROM public.analysis_runs r WHERE r.fact_id = h.id)
+      AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = h.id)
+    ORDER BY h.created_at, h.id LIMIT p_sweep_limit
+  )
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('fact_id',h.id,'scenario_id',h.scenario_id,
+    'payload',h.payload,'noop',h.noop) ORDER BY h.created_at,h.id),'[]'::jsonb), min(h.created_at)
+    INTO batch, oldest_at FROM pending h;
+  -- NULL boundary marks release-only completion: reconciliation cannot advance
+  -- the range cursor. The result cap does not bound older terminal index entries.
+  UPDATE public.analysis_run_sweep_state SET lease_id = token, lease_until = clock_timestamp()+interval '30 seconds',
+    window_last_at = NULL, window_last_id = NULL WHERE singleton;
+  RETURN jsonb_build_object('facts',batch,'lease_id',token,'window_count',jsonb_array_length(batch),
+    'depth_estimate',jsonb_array_length(batch),
+    'oldest_pending_age_seconds',EXTRACT(epoch FROM clock_timestamp()-oldest_at));
 END;
 $$;
 
@@ -246,9 +293,9 @@ BEGIN
   RETURN FALSE;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.claim_analysis_run_facts(integer), public.finish_analysis_run_sweep(uuid),
+REVOKE ALL ON FUNCTION public.claim_analysis_run_facts(integer), public.claim_analysis_run_reconciliation(integer), public.finish_analysis_run_sweep(uuid),
   public.store_typed_analysis_run(uuid,jsonb,jsonb), public.quarantine_analysis_fact(uuid,text,text),
   public.record_analysis_run_failure(uuid,text,text) FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION public.claim_analysis_run_facts(integer), public.finish_analysis_run_sweep(uuid),
+GRANT EXECUTE ON FUNCTION public.claim_analysis_run_facts(integer), public.claim_analysis_run_reconciliation(integer), public.finish_analysis_run_sweep(uuid),
   public.store_typed_analysis_run(uuid,jsonb,jsonb), public.quarantine_analysis_fact(uuid,text,text),
   public.record_analysis_run_failure(uuid,text,text) TO service_role;
