@@ -208,7 +208,7 @@ describe('source guard bypass controls', () => {
 });
 
 // Review scenario: the baseline clause has “revenue”, but no “monthly”.
-const revenueCandidate: CandidateModel = {
+const revenueCandidate: CandidateModel & { readonly unknowns: readonly unknown[] } = {
   goal: { metric: 'Monthly revenue', operator: '>=', value: 20, unit: 'GBP/month', horizon_months: null, frame: 'change_rel', baseline_known: true, baseline_value: 75000, baseline_provenance: 'explicit', provenance: 'explicit' },
   constraints: [],
   options: [
