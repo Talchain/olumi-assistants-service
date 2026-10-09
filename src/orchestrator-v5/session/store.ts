@@ -159,6 +159,16 @@ export interface ScenarioRunAnalysisFactPage {
   readonly facts: readonly IdentifiedHandlerFact[];
   readonly total_count: number;
   readonly legacy_edit_facts?: import('../types/handler-fact.js').LegacyAnalysisEditFacts;
+  /** Anchor-only isolation evidence; total_count still counts all database rows. */
+  readonly isolated_malformed_rows?: {
+    readonly read_count: number;
+    readonly ids: readonly (string | null)[];
+  };
+}
+
+export interface ScenarioRunAnalysisFactReadOptions {
+  /** Never use a filtered page as reasoning authority. Default reads remain strict. */
+  readonly malformedRows?: 'isolate-for-anchor';
 }
 
 export interface SessionTurnWrite {
@@ -616,7 +626,9 @@ export interface SessionStore {
    * the caller-supplied lookahead limit. They must validate row identity,
    * parent identity, timestamps, handler/action type, noop and strict payload
    * shape before returning. A missing/inexact count or malformed row throws;
-   * it never becomes an authoritative empty set.
+   * it never becomes an authoritative empty set. The explicit anchor-only
+   * isolation option skips malformed rows with raw-count/id evidence; such a
+   * filtered page must never be used as reconciled reasoning authority.
    *
    * Optional only for legacy test doubles. Production always implements it;
    * callers interpret omission as unavailable, never no analysis.
@@ -624,6 +636,7 @@ export interface SessionStore {
   readScenarioRunAnalysisFactsFor?(
     scenarioId: string,
     limit: number,
+    options?: ScenarioRunAnalysisFactReadOptions,
   ): Promise<ScenarioRunAnalysisFactPage>;
   /**
    * Legacy standalone newest-analysis read.
