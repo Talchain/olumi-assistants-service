@@ -10,7 +10,7 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { creditStatedFactorLevels } from '../stated-by-user.js';
+import { verifiedFactorLevel } from '../verified-option-setting.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import type { CandidateModel } from '../admit-model.js';
 
@@ -89,8 +89,8 @@ describe('a level the brief states for a factor is the user\'s, whatever the dra
 
 describe('creditStatedFactorLevels: only a figure the brief writes FOR that factor, never a limit, target or option level', () => {
   const credited = (d: CandidateModel, label: string): boolean => {
-    const f = creditStatedFactorLevels(d, MRR).factors.find((x) => x.label === label)!;
-    return f.baseline_known === true && f.provenance === 'explicit';
+    const f = d.factors.find((x) => x.label === label)!;
+    return verifiedFactorLevel(d, f, MRR);
   };
   const withFactor = (f: Rec): CandidateModel => { const d = draft(); return { ...d, factors: [...d.factors, f] } as unknown as CandidateModel; };
   it.each<[string, CandidateModel, string, boolean]>([
@@ -109,6 +109,8 @@ describe('creditStatedFactorLevels: only a figure the brief writes FOR that fact
   });
   it('nothing to credit → the same object (no churn in the hash)', () => {
     const d = draft({ baseline_known: true, provenance: 'explicit' });
-    expect(creditStatedFactorLevels(d, MRR)).toBe(d);
+    const before = structuredClone(d);
+    verifiedFactorLevel(d, d.factors[0]!, MRR);
+    expect(d).toEqual(before);
   });
 });

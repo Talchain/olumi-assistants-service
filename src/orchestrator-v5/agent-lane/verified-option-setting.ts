@@ -12,6 +12,7 @@ import { log } from '../../utils/telemetry.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
+type Factor = CandidateModel['factors'][number];
 type Assertion = { text: string; start: number; end: number };
 
 /** Linear normalization, also used for uniqueness. Paragraphs are retained separately in raw text. */
@@ -231,4 +232,63 @@ function verified(model: CandidateModel, option: Option, intervention: Intervent
   if (model.constraints.some(c => c.value === intervention.value && metricNamesLabel(c.metric, factor.label))) return false;
   if (!sameFrame(a.text, span, factor.unit)) return false;
   return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), intervention.value);
+}
+
+/** Direct reporting, rather than hearing, guessing or planning somebody else's level. */
+const STATE_VERBS = new Set(['have', 'has', 'is', 'are', 'work', 'works', 'complete', 'completes', 'run', 'runs',
+  'process', 'processes', 'handle', 'handles', 'employ', 'employs', 'pay', 'pays', 'spend', 'spends', 'earn', 'earns',
+  'receive', 'receives', 'charge', 'charges', 'produce', 'produces', 'collect', 'collects']);
+const OWN_ORGANISATION = new Set(['clinic', 'team', 'company', 'organisation', 'organization', 'business']);
+function ownsFactorLevel(before: string, factor: Factor): boolean {
+  const own = words(factor.label).concat(words(typeof factor.unit === 'string' ? factor.unit : ''));
+  const names = (w: string): boolean => own.some(v => sameName(v, w));
+  const body = (text: string): boolean => words(text).every(w => grammar(w) || w === 'off' || names(w));
+  const we = /(?:^|, )we (?:currently |now |today )?(?:(could) )?([\p{L}]{1,64})\b/iu.exec(before);
+  if (we !== null) {
+    const verb = we[2]!.toLowerCase();
+    // The count of additional hires is an owned model input even in a prospective staffing sentence.
+    const direct = we[1] === undefined ? STATE_VERBS.has(verb)
+      : readUnitParts(factor.unit)?.kind === 'count' && own.some(w => w === 'additional' || w === 'extra' || w === 'hires' || w === 'hired')
+        && ['bring', 'hire', 'add'].includes(verb);
+    return direct && body(before.slice(we.index + we[0].length));
+  }
+  if (!/^Our /iu.test(before)) return false;
+  const said = words(before); const verb = said.findIndex(w => STATE_VERBS.has(w));
+  return verb > 1 && said.slice(1, verb).every(w => grammar(w) || OWN_ORGANISATION.has(w) || names(w))
+    && said.slice(verb + 1).every(w => grammar(w) || names(w));
+}
+
+/** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
+export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  try {
+    const value = factor.baseline_value;
+    if (typeof brief !== 'string' || factor.baseline_evidence == null
+      || typeof value !== 'number' || !Number.isFinite(value)) return false;
+    const sentences = assertions(brief);
+    const a = exactEvidence(brief, factor.baseline_evidence.quote, sentences);
+    if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
+    if (model.factors.filter(f => f.label === factor.label).length !== 1) return false;
+    // The sentence holding the goal target cannot also attest a current level, even for a differently named factor.
+    if (typeof model.goal.value === 'number' && [...findStatedAmounts(a.text).map(n => n.magnitude),
+      ...words(a.text).flatMap(w => { const n = figure(w); return n === null ? [] : [n]; })].includes(model.goal.value)) return false;
+    if (model.constraints.some(c => c.value === value && metricNamesLabel(c.metric, factor.label))) return false;
+    const others = [model.goal.metric, ...model.factors.filter(f => f !== factor).map(f => f.label),
+      ...model.outcomes.map(o => o.label), ...model.risks.map(r => r.label)];
+    const parts = readUnitParts(factor.unit);
+    // As on the option path, a primitive count noun may name the factor itself; retain named scoping.
+    const unitNamesFactor = parts?.kind === 'count'
+      && labelStandsForCountUnit(parts.noun?.join(' '), factor.label, factor.unit);
+    // "Extra assessors" names the model's additional-assessor count, rather than the whole assessor headcount.
+    const target = [factor.label, factor.label.replace(/\badditional\b/giu, 'extra')];
+    const span = figureTheUserWroteForSpan(value, unitNamesFactor ? null : factor.unit, a.text,
+      { target, others, strict: true, requireNamed: true });
+    if (span === null || !sameFrame(a.text, span, factor.unit)) return false;
+    if (!ownsFactorLevel(a.text.slice(0, span.start), factor)
+      || words(a.text).some(w => BOUNDS.has(w) || ['goal', 'target', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w))) return false;
+    return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value);
+  } catch (err) {
+    log.warn({ event: 'agent_lane.stated_level_unverifiable', err: err instanceof Error ? err.message : String(err) },
+      'agent-lane: a stated factor level could not be verified on a malformed draft; it stays Olumi\'s estimate');
+    return false;
+  }
 }

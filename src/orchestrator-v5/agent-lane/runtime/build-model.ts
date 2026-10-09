@@ -70,7 +70,7 @@ import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } fr
 import { clampForPersist, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
 import { heldEventRiskLine, holdStatedEventRisks, refusedEventRiskLine } from '../stated-event-risk-draft.js';
 import { sameUnit } from '../same-unit.js';
 import { admitInterventionRange } from '../../intervention-range.js';
@@ -143,7 +143,7 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
     if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
       for (const name of Object.keys(properties)) {
-        if (!providerBoundary && name === 'stated_evidence') continue;
+        if (!providerBoundary && (name === 'stated_evidence' || name === 'baseline_evidence')) continue;
         if (!required.includes(name)) required.push(name);
       }
       out['required'] = required;
@@ -266,6 +266,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // lets admission restate a signed change as "% of today" (restateSignedPercentChanges, rows 4a/4b); the restated
       // factor carries no source, so no authority is claimed for the zero.
       baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor measured as a CHANGE FROM TODAY (e.g. "% change from the current price", "extra hires") is 0 today by definition: baseline_known true, baseline_value 0.' },
+      baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance,
       plausible_max: { type: 'number',
@@ -332,6 +333,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 export const BUILD_INSTRUCTIONS = [
   'For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month (0–100%) and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. Preserve stated limits, factors, risks, option settings and their links in their corresponding collections. Ask for the date first, then how long today’s team takes, then when new people start. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
+  'For a factor whose CURRENT level the brief states, give baseline_evidence.quote as the complete verbatim sentence that states it; null for estimates, targets, limits or ambiguous ownership.',
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
   'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
@@ -1605,8 +1607,7 @@ export async function buildModelFromBrief(
     const named = new Set(ids.flatMap((i) => [canonicalLabel(i.outcome), ...i.factors.map(canonicalLabel)]));
     return (label: string): boolean => named.has(canonicalLabel(label));
   };
-  // ⛔ A level the brief states for a factor is the user's, whatever the drafter tagged it (R3 5896630173 (2)).
-  candidate = creditStatedFactorLevels(apart.model, brief);
+  candidate = apart.model;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
   // A link size is the user's only where the brief writes it ABOUT THIS LINK (AIQ #2383 5916497454; P0 PARTNER #2389): the
@@ -1829,7 +1830,7 @@ export async function buildModelFromBrief(
         const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
           : { model: retryHeld.model, mechanisms: [], costs: [] };
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryUnsupported.model, brief), firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(retryUnsupported.model, firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
@@ -1969,7 +1970,7 @@ export async function buildModelFromBrief(
   /**
    * ⭐ THE GOAL'S STATED TARGET SOURCE, DIRECTION AND DEADLINE ARE HELD ON THE GOAL NODE, WHEN THE BRIEF STATES THEM
    * (G1; `holdStatedGoalAttributes`). A factor named in the brief is not a baseline the brief states (DL #70
-   * 5851742282): `withdrawUnstatedBaselineStamps`. What the node now holds is no longer a loss, so its ledger line —
+   * 5851742282): admission now verifies its level with `verifiedFactorLevel`; no second text reader changes that verdict. What the node now holds is no longer a loss, so its ledger line —
    * "GraphV3 has nowhere to put it" / "a consumer cannot tell a floor from a ceiling" — would be false, and goes.
    * What is NOT held keeps its line, exactly as before.
    */
@@ -2045,7 +2046,7 @@ export async function buildModelFromBrief(
         } as AdmittedModel['loss'][number]])],
       };
     }
-    let heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
