@@ -569,7 +569,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
   // Placeholder licence (P48 dry walk, 8 Oct): the receipt's BEFORE side names who sized it, so no reader turns a
-  // placeholder's prior into a band ("Strong → Moderate" on a link nobody sized). Additive: \`before\` is a record.
+  // placeholder's prior into a band ("Strong → Moderate" on a link nobody sized). Additive: `before` is a record.
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance },
     ...(isPlaceholderLink(edge) ? { sizing: 'placeholder' as const } : {}) };
   // Olumi's why, its old size, its clamp marker and its "holds by definition" claim describe OLUMI's figure, never the
