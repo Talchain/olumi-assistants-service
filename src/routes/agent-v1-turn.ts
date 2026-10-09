@@ -1,3 +1,4 @@
+import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
@@ -504,6 +505,7 @@ function executableWaitingProposalIds(scenarioId: string, userId: string | null,
   if (graphHash === undefined) return [];
   return proposals.outstanding(scenarioId, userId).map((p) => p.proposal_id).filter((id) => proposals.authorise({
     proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash,
+    ...(proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') ? { typed_approval_of: id } : {}),
   }).status === 'execute' && identityProposalOfferable(proposals.get(id), graph));
 }
 
@@ -2339,7 +2341,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
-          const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph) !== undefined, builtOrRan: true,
+          const atRest = { awaitingApproval: executableWaitingProposalIds(scenarioId, userId, state.graphHash, state.graph)
+            .some(id => !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady')), builtOrRan: true,
             chanceCells: replayChanceCells };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           let say = goalChanceLineOwed([{ ok: true, ran: true,
@@ -2473,6 +2476,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady,
         analysisResult: state.analysisResult, optionParticipation: state.optionParticipation, identityEvaluated: state.identityEvaluated }).olumiEstimates;
       const replayControlQuestions = replayActions
+        .filter(action => {
+          const id = typedApprovalOf({ chip: { id: action.id } });
+          return id === undefined || !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady');
+        })
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
       const replayHorizon = replayObligations === undefined || !replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
         ? null : untestedHorizonLineForCells(state.graph, replayChanceCells);
@@ -4220,6 +4227,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // approval is waiting (that card is the next step) and never on an unchecked verdict.
     const startingAssumptions = approvals.length === 0 && carriedApproval.length === 0
       ? startingAssumptionsChips(readbackGraph, analysisReady) : [];
+    const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId,
+      runReply: resultFirstRunCompleted || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true),
+      approvalHeld: approvals.length + carriedApproval.length + liveHolds.length + proposals.outstanding(scenarioId, userId).length > 0 });
+    if (steadyCard !== null) proposals.put(steadyCard.proposal);
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
@@ -4248,6 +4259,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
+      ...(steadyCard === null ? [] : [steadyCard.chip]),
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
@@ -4583,7 +4595,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
-      awaitingApproval,
+      // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
+      awaitingApproval: offeredNow.some(a => {
+        const id = typedApprovalOf({ chip: { id: a.id } });
+        return id !== undefined && !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady');
+      }) || executableWaitingProposalIds(scenarioId, userId, graphHash, readbackGraph)
+        .some(id => !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady')),
       chanceCells,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
@@ -5044,7 +5061,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const estimates = actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady,
         analysisResult, optionParticipation, identityEvaluated, guidance: guidanceHistory, pending: durablePending }).olumiEstimates;
       const controlsOnReply = (wireBody.suggested_actions ?? []) as readonly OfferedAction[];
-      const typedControlQuestions = controlsOnReply.filter((action) => typedApprovalOf({ chip: { id: action.id } }) !== undefined)
+      const typedControlQuestions = controlsOnReply.filter((action) => {
+        const id = typedApprovalOf({ chip: { id: action.id } });
+        // This question lives in its card detail; it does not reshape the Run's existing prose.
+        return id !== undefined && !proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady');
+      })
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
       for (const pending of durablePending) {
         const question = (pending.action as { question?: unknown }).question;
