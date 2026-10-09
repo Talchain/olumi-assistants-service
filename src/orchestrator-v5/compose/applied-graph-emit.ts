@@ -28,7 +28,7 @@
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
-import { toOutboundGraph } from '../goal-target/horizon-basis-provenance.js';
+import { toOutboundGraph } from '../goal-target/outbound-graph.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 
 /** The top-level `draft_graph` wire field (DraftGraphBlockSchema minus `type`). */

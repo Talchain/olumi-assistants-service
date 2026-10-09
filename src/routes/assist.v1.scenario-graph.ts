@@ -4,7 +4,7 @@
  * Reads never create scenarios; unknown/non-owner ids share the same 404 envelope.
  * The handler retains payload validation, persisted-graph fidelity and analysis projection. */
 
-import { toOutboundGraph } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
+import { toOutboundGraph } from '../orchestrator-v5/goal-target/outbound-graph.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 

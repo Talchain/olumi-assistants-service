@@ -4,7 +4,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { _resetConfigCache } from '../../../config/index.js';
 import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
-import { prepareHorizonBasisForWrite, assertDoorProvenance, toOutboundGraph } from '../horizon-basis-provenance.js';
+import { prepareHorizonBasisForWrite, assertDoorProvenance } from '../horizon-basis-provenance.js';
+import { toOutboundGraph } from '../outbound-graph.js';
 import { createApplyOperations, currentModelRevision } from '../../apply-operations.js';
 import { dispatchEditGraph } from '../../handlers/edit-graph-dispatch.js';
 import { dispatchDraftGraph } from '../../handlers/draft-graph-dispatch.js';
@@ -28,7 +29,7 @@ import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import { horizonBasisMetricKey, horizonSteadyAttested } from '../horizon-basis.js';
 import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, horizonBasisWriteIsAuthorised } from '../goal-steady-write.js';
-import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
+import { __setUseAppendV6ForTest, USE_APPEND_V6 } from '../../session/supabase-store.js';
 
 vi.mock('../../../orchestrator/tools/edit-graph.js', async original => ({
   ...await original<typeof import('../../../orchestrator/tools/edit-graph.js')>(), handleEditGraph: vi.fn(),
@@ -110,7 +111,7 @@ function world(initial: unknown, withReceipt = false) {
       const version = write.modelVersion;
       return { id: 'row-1', ...(withReceipt && version !== undefined ? { modelVersionReceipt: {
         ...version, graph: read(), version_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', version_number: 1,
-        parent_version_id: null, root_version_id: null, undo_version_id: null, event_id: 'r9-edit-event',
+        parent_version_id: null, root_version_id: null, undo_version_id: null, source_version_id: null, event_id: 'r9-edit-event',
       } } : {}) };
     },
     readRecent: async () => writes.map(write => makeSessionTurnRow({ id: 'row-1', scenario_id: SCENARIO,
@@ -131,7 +132,7 @@ beforeEach(() => {
   _resetConfigCache();
   __setUseAppendV6ForTest(false);
 });
-afterEach(() => { vi.unstubAllEnvs(); _resetConfigCache(); __setUseAppendV6ForTest(undefined); });
+afterEach(() => { vi.unstubAllEnvs(); _resetConfigCache(); __setUseAppendV6ForTest(USE_APPEND_V6); });
 function input(g: Rec, extra: Rec = {}) {
   return { targets: [], goalSteady: { goal_id: 'goal', months: 9 }, scenarioId: SCENARIO, turnId: TURN,
     requestId: 's5-door', stage: 'analyse' as const, requestHash: 's5-request', freshness: 'fresh' as const,
@@ -177,7 +178,7 @@ describe('S5 horizon_basis door: real ingress and commit paths, stored meaning b
   });
   it('R1 dispatch in-process goal_steady reaches the same one-commit writer', async () => {
     const g = seed(), w = world(g); activeStore = w.store;
-    const result = await commitOptionLevelsInProcess({ scenario_id: SCENARIO, turn_id: TURN, stage: 'analyse',
+    const result = await commitOptionLevelsInProcess({ scenario_id: SCENARIO, turn_id: TURN,
       base_graph_hash: computeAnalysisAffectingGraphHash(g as never)!, levels: [], links: [],
       goal_steady: { goal_id: 'goal', months: 9 } }, 's5-dispatch');
     expect(result.status).toBe('committed');
@@ -411,7 +412,7 @@ describe('S5 r1 append-door provenance', () => {
     const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
     const boundary = parseRequestExtensions({ graph_state: client }, 'r1-edit');
     if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
     vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
       wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
       appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.',
@@ -429,7 +430,7 @@ describe('S5 r1 append-door provenance', () => {
     const client = attested(), w = world(null); activeStore = w.store;
     const boundary = parseRequestExtensions({ graph_state: client }, 'r1-empty-edit');
     if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
     vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
       wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
       appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
@@ -446,7 +447,7 @@ describe('S5 r1 append-door provenance', () => {
     goalOf(client).horizon_basis.metric = 'f'.repeat(32);
     const boundary = parseRequestExtensions({ graph_state: client }, 'r1-forged-echo');
     if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
     vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
       wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
       appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
@@ -615,7 +616,7 @@ describe('S5 r2 pure append-door assertion', () => {
   it.each(['absent', 'ambiguous'])('door refuses an authorised goal that is %s without mutation or append', async mode => {
     const base = seed(), w = world(base), edit = applyGoalSteadyEdit(base, { goal_id: 'goal', months: 9 }, SCENARIO);
     if (edit.kind !== 'mutated') throw new Error('no edit');
-    const graph = clone(edit.mutatedGraph);
+    const graph: Rec = clone(edit.mutatedGraph);
     if (mode === 'absent') graph.nodes = graph.nodes.filter((n: Rec) => n.id !== 'goal');
     else graph.nodes.push(clone(goalOf(graph)));
     const before = clone(graph), capability = clone(edit.horizonBasisWrite);
@@ -1081,7 +1082,7 @@ describe('S5 r8 server proof', () => {
     expect(JSON.stringify(client)).not.toContain('"proof"');
     const boundary = parseRequestExtensions({ graph_state: client }, 'r8-wire-echo');
     if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
     vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
       wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
       appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
@@ -1110,7 +1111,8 @@ describe('S5 r8 server proof', () => {
   });
   it('guest-copy ruled residual: copy_guest_scenario inherits valid proof and remains attested', async () => {
     const { SupabaseGuestCopyStore } = await import('../../guest-copy/index.js');
-    const { DEPLOYED_ONLY_RPCS } = await import('../../../../scripts/census/model-writer-census.mjs');
+    const { DEPLOYED_ONLY_RPCS }: { DEPLOYED_ONLY_RPCS: { copy_guest_scenario: { statement: string } } }
+      = await import(new URL('../../../../scripts/census/model-writer-census.mjs', import.meta.url).href);
     // Pin the reviewed SQL, so refreshing this definition after a strip migration makes this residual RED.
     expect(DEPLOYED_ONLY_RPCS.copy_guest_scenario.statement).toBe(
       'INSERT INTO public.scenarios (user_id, title, graph, source_scenario_id) VALUES (p_user_id, v_title, v_graph, p_source_scenario_id)');

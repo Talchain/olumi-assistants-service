@@ -1,4 +1,5 @@
-import { prepareHorizonBasisForWrite, toOutboundGraph } from '../goal-target/horizon-basis-provenance.js';
+import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
+import { toOutboundGraph } from '../goal-target/outbound-graph.js';
 /**
  * V5 pre-Sonnet dispatch for draft_graph turns.
  *

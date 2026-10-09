@@ -1,4 +1,4 @@
-import { toOutboundGraph } from "../orchestrator-v5/goal-target/horizon-basis-provenance.js";
+import { toOutboundGraph } from "../orchestrator-v5/goal-target/outbound-graph.js";
 /**
  * POST /assist/v1/draft-graph/staged — STAGED SSE draft delivery.
  *

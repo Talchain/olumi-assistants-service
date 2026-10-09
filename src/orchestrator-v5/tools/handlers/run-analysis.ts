@@ -1,4 +1,4 @@
-import { toOutboundGraph } from "../../goal-target/horizon-basis-provenance.js";
+import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
 import { goalOrderedLinks } from '../../admission/target-testability.js';

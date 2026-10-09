@@ -1,7 +1,7 @@
 import { OlumiResponseSchema, type OlumiResponse } from "@talchain/schemas/boundary";
 import { z } from "zod";
 
-import { toOutboundGraph } from "../goal-target/horizon-basis-provenance.js";
+import { toOutboundGraph } from "../goal-target/outbound-graph.js";
 import { GraphV3 } from "../../schemas/cee-v3.js";
 import { floorGraphSigmaForCompute } from "../../validators/numeric-bounds.js";
 

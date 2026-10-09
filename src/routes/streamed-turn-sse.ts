@@ -1,4 +1,4 @@
-import { toOutboundGraph } from "../orchestrator-v5/goal-target/horizon-basis-provenance.js";
+import { toOutboundGraph } from "../orchestrator-v5/goal-target/outbound-graph.js";
 /**
  * Staged-SSE delivery of a V5 turn — the shared transport.
  *
