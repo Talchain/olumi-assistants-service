@@ -67,7 +67,7 @@ import { admitAccumulationIdentities, withAccumulationCarriers } from '../accumu
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
-import { clampForPersist, refitFramesForStatedEffects } from '../refit-frames.js';
+import { clampForPersist, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
 import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
@@ -2113,7 +2113,7 @@ export async function buildModelFromBrief(
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
     // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
     // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
-    const setAside = setAsideEstimatesOf(admitted.loss);
+    let setAside = setAsideEstimatesOf(admitted.loss);
     const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
@@ -2251,7 +2251,7 @@ export async function buildModelFromBrief(
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
-    const prePersistGraph = refitFramesForStatedEffects({
+    const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
       nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
@@ -2260,6 +2260,14 @@ export async function buildModelFromBrief(
         ? { goal_constraints: admitted.goal_constraints }
         : {}),
     } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+    const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
+    const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
+    const fittedOlumi = new Set(olumiFit.fitted);
+    setAside = setAside.filter((e) => !fittedOlumi.has(`${e.from}→${e.to}`));
+    const fittedOlumiQuestions = new Set(admitted.loss
+      .filter((l) => olumiFit.fitted.some((link) => l.field_path === `edges[${link.replace('→', '::')}].magnitude_question`))
+      .map((l) => l.reason));
+    for (let i = openQuestions.length - 1; i >= 0; i--) if (fittedOlumiQuestions.has(openQuestions[i]!)) openQuestions.splice(i, 1);
     const graph = clampForPersist(prePersistGraph);
     // ⭐ A4f (AIQ 5923220559): the user's size was asked about as "would be cut short" when it was sized, BEFORE the refit
     // above. Where the refit made it fit, that question is no longer true, so it is not asked. Only the user's own sizes:

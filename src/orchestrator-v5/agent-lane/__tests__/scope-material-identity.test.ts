@@ -54,8 +54,17 @@ it('row (1): B1-B keeps the exact drafter question once, on the admitted goal id
   expect(questions.filter(q => q.startsWith('I’ve read your goal'))).toEqual([]);
   expect(result.pending_action).toMatchObject({ action: { goal_id: 'mrr', question: QUESTION, expected: 'scope' } });
 });
-it('row (2): B1-A open_questions are byte-identical to base', async () => {
-  const { questions } = await replay(rowFor('R2/B1-A'));
+it('row (2): B1-A keeps pinned scope wording while fitted estimate questions retire', async () => {
+  const { graph, questions } = await replay(rowFor('R2/B1-A'));
+  // S7 2b-a: only the two obsolete not-representable questions leave the pinned list.
+  for (const [from, to, amount] of [
+    ['new_pro_subscribers_per_month', 'pro_subscribers_at_month_12', 8],
+    ['pro_subscribers_at_month_12', 'mrr', 49],
+  ] as const) {
+    expect(graph.edges.find(e => e.from === from && e.to === to)).toMatchObject({
+      provenance: { magnitude: 'olumi_estimate', natural_effect: { amount } },
+    });
+  }
   const before = JSON.parse(fs.readFileSync(new URL('./fixtures/s7-a2-b1-a-questions.json', import.meta.url), 'utf8')) as string[];
   expect(JSON.stringify(questions)).toBe(JSON.stringify(before));
 });

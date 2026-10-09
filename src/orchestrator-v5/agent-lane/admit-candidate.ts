@@ -48,7 +48,7 @@ import {
   REPAIR_CODES,
   type RepairEntry,
 } from '@talchain/schemas';
-import type { LinkSizing, MagnitudeAuthor, NaturalEffect } from '../../cee/magnitude/link-effect.js';
+import type { LinkSizing, MagnitudeAuthor, NaturalEffect, OlumiFitCandidate } from '../../cee/magnitude/link-effect.js';
 
 /**
  * A magnitude the model did not author, expressed as a projection default.
@@ -115,7 +115,7 @@ export interface AdmittedEdge {
    * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
    */
   /** `definitional`: the size holds by definition, checked (`definitionalLink`); absent on every other edge. */
-  provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true; mean_projected?: true; basis?: string };
+  provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; olumi_fit_candidate?: OlumiFitCandidate; definitional?: true; mean_projected?: true; basis?: string };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -278,6 +278,11 @@ export function admitCandidateLinks(
   for (const link of links) {
     const fieldPath = `edges[${link.from}::${link.to}]`;
     const sized = typeof link.strength_mean === 'number' ? undefined : sizing.get(`${link.from}::${link.to}`);
+    const fitCandidate = sized?.fit_candidate === undefined ? undefined : {
+      ...sized.fit_candidate,
+      ...(typeof link.basis === 'string' && link.basis.trim() !== ''
+        ? { basis: link.basis.trim().slice(0, 300) } : {}),
+    };
 
     if (link.direction === 'unknown') {
       withheld.push({
@@ -316,6 +321,7 @@ export function admitCandidateLinks(
           source: link.provenance_source ?? provenanceSourceFor(link.provenance),
           magnitude: sized.magnitude!,
           ...(sized.natural_effect !== undefined ? { natural_effect: sized.natural_effect } : {}),
+          ...(fitCandidate !== undefined ? { olumi_fit_candidate: fitCandidate } : {}),
           ...(definitionalLink(link, sized) ? { definitional: true as const } : {}),
           // Science §(p)(1): Olumi's own size carries the one-line reason it holds (never on a user's size or a placeholder).
           ...(sized.magnitude === 'olumi_estimate' && typeof link.basis === 'string' && link.basis.trim() !== ''
@@ -407,6 +413,7 @@ export function admitCandidateLinks(
         : DEFAULT_EXISTS_PROBABILITY,
       effect_direction: link.direction,
       provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance),
+        ...(fitCandidate !== undefined ? { olumi_fit_candidate: fitCandidate } : {}),
         // An authored spread keeps frame-defaulted-links' existing eligibility.
         ...(!authored ? { mean_projected: true as const, ...(!stdAuthored ? { magnitude: 'olumi_placeholder' as const } : {}) } : { magnitude: 'olumi_estimate' as const }),
       },
