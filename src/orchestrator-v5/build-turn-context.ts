@@ -1,3 +1,4 @@
+import { readWriteRefusal, readSuccessfulDoorEntries } from './ownership/door-ownership.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * Build a V5 TurnContext from an ingress payload.
@@ -1849,6 +1850,12 @@ export async function markDraftGraphWriteFailed(
   requestId: string,
   disclosure: GraphWriteFailureDisclosure,
 ): Promise<void> {
+  // Failure marks are write-once. Classify a latched refusal before any broad
+  // draft catch can mark it as a lost draft; onSend reuses this same helper.
+  if (readWriteRefusal() && readSuccessfulDoorEntries() === 0) {
+    reason = 'model_write_ownership_refused';
+    disclosure = 'turn_dead_only';
+  }
   const store = tryGetSessionStore(requestId, scenarioId);
   if (!store?.markGraphWriteFailed) return;
   try {

@@ -1,12 +1,36 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { scenarioAccessDecision } from '../agent-lane/scenario-access.js';
+import { ANALYSIS_REREAD_TIMEOUT_MS } from '../session/analysis-read-deadline.js';
 import { log } from '../../utils/telemetry.js';
 
-const writeCallerStorage = new AsyncLocalStorage<{ userId: string | null; verified: boolean }>();
+type WriteRefusal = { reason: 'not_owner' | 'owner_unreadable' };
+interface WriteCallerContext {
+  userId: string | null;
+  verified: boolean;
+  refusal?: WriteRefusal;
+  successfulDoorEntries: number;
+}
+const writeCallerStorage = new AsyncLocalStorage<WriteCallerContext>();
+
+// Reuse the existing bounded session-read budget; owner lookup is one database read.
+export const OWNER_READ_TIMEOUT_MS = ANALYSIS_REREAD_TIMEOUT_MS;
+export const MODEL_WRITE_OWNERSHIP_REFUSAL_BODY = Object.freeze({
+  not_owner: Object.freeze({ error: 'model_write_ownership_refused' as const,
+    message: "Nothing was saved. You don't have access to change this model." }),
+  owner_unreadable: Object.freeze({ error: 'model_write_ownership_refused' as const,
+    message: "Nothing was saved. I couldn't check access to this model. Try again." }),
+});
+
+export function readWriteRefusal(): Readonly<WriteRefusal> | undefined {
+  return writeCallerStorage.getStore()?.refusal;
+}
+export function readSuccessfulDoorEntries(): number {
+  return writeCallerStorage.getStore()?.successfulDoorEntries ?? 0;
+}
 
 /** Bind the admitted caller to the request's awaited writers, without signature threading. */
 export function bindWriteCaller<T>(caller: { userId: string | null; verified: boolean }, done: () => T): T {
-  return writeCallerStorage.run(caller, done);
+  return writeCallerStorage.run({ ...caller, successfulDoorEntries: 0 }, done);
 }
 
 export class ModelWriteOwnershipRefused extends Error {
@@ -23,15 +47,29 @@ type OwnerReader = { getScenarioOwner?(scenarioId: string): Promise<string | nul
 
 export async function assertDoorOwnership(store: OwnerReader, scenarioId: string, site?: string): Promise<void> {
   // Stores without this port model no ownership; production's port is pinned by a test.
-  if (typeof store.getScenarioOwner !== 'function') return;
-  const caller = writeCallerStorage.getStore() ?? { userId: null, verified: false };
+  const context = writeCallerStorage.getStore();
+  const succeed = () => { if (context) context.successfulDoorEntries += 1; };
+  if (typeof store.getScenarioOwner !== 'function') { succeed(); return; }
+  const caller = context ?? { userId: null, verified: false };
   const refuse = (reason: ModelWriteOwnershipRefused['reason']): never => {
+    if (context) context.refusal ??= { reason };
     log.warn({ event: 'model_write.ownership_refused', site, reason, scenario_id_prefix: scenarioId.slice(0, 8) },
       'Model write ownership refused');
     throw new ModelWriteOwnershipRefused(reason);
   };
   let owner: string | null;
-  try { owner = await store.getScenarioOwner(scenarioId); }
-  catch { return refuse('owner_unreadable'); }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // As with the canonical session reread, race even non-cancellable readers.
+    // Late resolutions/rejections have handlers but cannot reopen this door.
+    owner = await Promise.race([
+      store.getScenarioOwner(scenarioId),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Owner read deadline exceeded')), OWNER_READ_TIMEOUT_MS);
+      }),
+    ]);
+  } catch { return refuse('owner_unreadable'); }
+  finally { clearTimeout(timer); }
   if (scenarioAccessDecision(owner, caller.verified ? caller.userId : null) !== 'allow') refuse('not_owner');
+  succeed();
 }
