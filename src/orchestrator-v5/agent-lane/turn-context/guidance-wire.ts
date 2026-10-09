@@ -12,6 +12,7 @@
 import { selectGuidance, type GuidanceState, type Selection, type SelectedRow } from '../guidance/index.js';
 import type { LeaderLicence } from '../../compose/leader-licence.js';
 import { assembleGuidanceSignals, type GuidanceRequest } from './guidance-signals.js';
+import { POLICY } from '../guidance/policy.js';
 import { selectorSignalsOf } from './selector-signals.js';
 
 export type GuidanceItemRef =
@@ -71,6 +72,8 @@ export function guidanceRequestOf(fastPath: string | undefined, chipId: unknown,
 export const guidanceLeaderLicensed = (licence: LeaderLicence): boolean => licence === 'permitted';
 
 export interface TurnGuidanceInputs {
+  /** Reuse the host selection, including an intentionally empty selection. */
+  readonly preReplySelection?: { readonly wire: GuidanceWire | undefined };
   readonly request: GuidanceRequest;
   readonly offeredSpecific: readonly { readonly id: string }[];
   /** The reply's final text: a row rides only a turn that says something (PANEL 5940333155: empty text = `empty`). */
@@ -96,6 +99,12 @@ export interface TurnGuidanceInputs {
  */
 export function turnGuidanceFor(i: TurnGuidanceInputs): GuidanceWire | undefined {
   if (typeof i.assistantText !== 'string' || i.assistantText.trim() === '') return undefined;
+  if (i.preReplySelection !== undefined) return i.preReplySelection.wire;
+  return selectTurnGuidance(i);
+}
+
+/** The same selector inputs before or after a reply; no prose enters selection. */
+export function selectTurnGuidance(i: Omit<TurnGuidanceInputs, 'assistantText' | 'preReplySelection'>): GuidanceWire | undefined {
   if (i.guidance === null) return undefined;
   try {
     const signals = assembleGuidanceSignals({
@@ -109,4 +118,23 @@ export function turnGuidanceFor(i: TurnGuidanceInputs): GuidanceWire | undefined
   } catch {
     return undefined;
   }
+}
+
+/** One method, from the selected policy's own expert words (summary is the science_basis text). */
+export interface EligibleIntervention {
+  readonly policy_id: SelectedRow['policy_id'];
+  readonly variant_id: SelectedRow['variant'] | null;
+  readonly name: string;
+  readonly why: string;
+  readonly trigger: string;
+}
+export const ELIGIBLE_INTERVENTION_INSTRUCTION = 'Only name the scientific method in CURRENT MODEL STATE.eligible_intervention. If absent, give a direct grounded answer without a named method. Write next moves as plain action bullets of at most eight words each. Keep useful questions and user figures. Olumi supplies the Why? disclosure; do not write it.';
+export function eligibleInterventionFor(wire: GuidanceWire | undefined): EligibleIntervention | undefined {
+  const selected = wire?.slot1;
+  if (selected === undefined) return undefined;
+  const row = POLICY.rows.find(row => row.policy_id === selected.policy_id)!;
+  const variant = 'variants' in row.trigger_predicate ? row.trigger_predicate.variants.find(v => v.id === selected.variant) : undefined;
+  return { policy_id: selected.policy_id, variant_id: selected.variant ?? null,
+    name: row.name, why: row.science_basis.summary,
+    trigger: variant?.when ?? row.trigger_predicate.all.join(' AND ') };
 }
