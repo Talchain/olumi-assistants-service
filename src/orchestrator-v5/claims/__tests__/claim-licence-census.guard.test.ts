@@ -13,7 +13,7 @@ import type { HandlerInvocation } from '../../tools/registry.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import { discoverClaimOwners, claimLicenceRatchetFailures } from '../../../../scripts/ci/claim-licence-discovery.js';
-import { CLAIM_LICENCE_REGISTRY, CLASS_MARKERS } from '../claim-licence-registry.js';
+import { CLASS_MARKERS, type ClaimLicenceEntry } from '../claim-licence-registry.js';
 import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { untestedHorizonLineForCells, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
@@ -21,6 +21,9 @@ import { buildAnalysisResultHeadline } from '../../coaching/analysis-result-head
 import { tippingPointOf, decisionSensitivityOf } from '../../agent-lane/decision-sensitivity.js';
 import { tippingPointCoachingFor } from '../../agent-lane/tipping-point-coaching.js';
 import { buildWinnerNamingReplacement } from '../../compose/winner-naming-egress-guard.js';
+
+// CI data (scripts/ci), not src: see the note at the end of claim-licence-registry.ts.
+const CLAIM_LICENCE_REGISTRY = JSON.parse(readFileSync(new URL('../../../../scripts/ci/claim-licence-registry.json', import.meta.url), 'utf8')) as readonly ClaimLicenceEntry[];
 
 type Json = Record<string, unknown>;
 const root = resolve(import.meta.dirname, '../../../..');
