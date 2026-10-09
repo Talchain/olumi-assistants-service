@@ -218,6 +218,7 @@ export function createProposal(content: ProposalContent): StructuredProposal {
  * what a retry must be able to hand back unchanged.
  */
 export interface ReceiptSummary {
+  readonly reencoded_siblings?: readonly import('./level-batch-frame.js').ReencodedSibling[];
   /** The version number the user would see ("version 7"). */
   readonly version: number;
   readonly version_id: string;
