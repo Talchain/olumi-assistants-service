@@ -26,6 +26,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { GraphStaleWriteError } from '../session/store.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 
@@ -82,6 +83,8 @@ export class ModelVersionStoreError extends Error {
 // ---------------------------------------------------------------------------
 
 export interface SaveVersionWrite {
+  /** Revision from the same snapshot as the working graph; required for CAS. */
+  readonly expected_revision: number;
   readonly scenario_id: string;
   readonly graph: unknown;
   /** Group A identity envelope — computed CEE-side by the service via
@@ -105,6 +108,8 @@ export interface SaveVersionWrite {
 }
 
 export interface AtomicRestoreVersionWrite {
+  /** Revision from the same snapshot as the working graph; required for CAS. */
+  readonly expected_revision: number;
   readonly scenario_id: string;
   readonly version_id: string;
   readonly mutation_id: string;
@@ -192,10 +197,12 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
   constructor(private readonly client: SupabaseClient) {}
 
   async saveVersion(write: SaveVersionWrite): Promise<VersionWriteOutcome> {
+    requireExpectedRevision(write.expected_revision);
     // PostgREST discipline (the 20260426160532 lesson): the function name is
     // distinct (no overloads exist), and ALL named args are passed anyway as
     // defence-in-depth against any future overload reintroduction.
     const { data, error } = await this.client.rpc('create_model_version', {
+      p_expected_revision: write.expected_revision,
       p_scenario_id: write.scenario_id,
       p_graph: write.graph,
       p_graph_identity_hash: write.graph_identity_hash,
@@ -226,8 +233,10 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
   async restoreVersionAtomic(
     write: AtomicRestoreVersionWrite,
   ): Promise<AtomicRestoreVersionOutcome> {
+    requireExpectedRevision(write.expected_revision);
     const rpc = 'restore_model_version_atomic_v1';
     const { data, error } = await this.client.rpc(rpc, {
+      p_expected_revision: write.expected_revision,
       p_scenario_id: write.scenario_id,
       p_version_id: write.version_id,
       p_mutation_id: write.mutation_id,
@@ -641,10 +650,18 @@ function parseAtomicRestoreOutcome(
   };
 }
 
+function requireExpectedRevision(revision: number): void {
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new ModelVersionStoreError('expected_revision must be a non-negative safe integer');
+  }
+}
+
 function mapRpcError(rpc: string, error: unknown, expectedHash: string | null): Error {
   const code = errCode(error);
   const message = `${rpc} RPC failed: ${errMsg(error)}`;
   switch (code) {
+    case 'OLRV1':
+      return new GraphStaleWriteError(message, { conflict_category: 'revision_conflict', cause: error });
     case 'MV001':
       return new ModelVersionSignInRequiredError(message, { cause: error });
     case 'MV404':

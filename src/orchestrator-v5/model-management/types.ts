@@ -131,7 +131,9 @@ export const CAS_CONFLICT_KIND =
   'analysis_affecting_conflict' as const satisfies GraphCasConflictCategory;
 
 export interface VersionCasConflict {
-  readonly kind: typeof CAS_CONFLICT_KIND;
+  readonly kind: typeof CAS_CONFLICT_KIND | 'revision_conflict';
+  readonly expected?: number;
+  readonly current?: number;
   /** The expected head hash the caller supplied (64-hex), if known. */
   readonly expected_graph_identity_hash: string | null;
   readonly message: string;

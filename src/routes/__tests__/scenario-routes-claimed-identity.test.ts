@@ -58,6 +58,7 @@ const loadGraph = vi.fn();
 const append = vi.fn();
 const store = {
   readMostRecentPendingActions: async () => [],
+  readExistingScenario: async (scenarioId: string) => ({ userId: await getScenarioOwner(scenarioId), graph: GRAPH, briefText: null, analysisInvalidatedAt: null, revision: 7 }),
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,

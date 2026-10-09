@@ -7,6 +7,7 @@
  * mapping (MV001/MV404/MV409), row parsing, ordering and pointer reads.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { GraphStaleWriteError } from '../../session/store.js';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CARRIERS, legacyGraph, legacyRun, SCENARIO as LEGACY_SCENARIO } from '../../context/__tests__/legacy-gap-projection.fixture.js';
@@ -28,8 +29,8 @@ const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 
 interface MockConfig {
-  rpcResult?: { data?: unknown; error?: { message: string; code?: string } | null };
-  selectResult?: { data?: unknown; error?: { message: string; code?: string } | null };
+  rpcResult?: { data?: unknown; error?: { message: string; code?: string; details?: string } | null };
+  selectResult?: { data?: unknown; error?: { message: string; code?: string; details?: string } | null };
 }
 
 function makeClient(cfg: MockConfig = {}): {
@@ -124,6 +125,7 @@ function summaryRow(overrides: Record<string, unknown> = {}) {
 }
 
 const SAVE_WRITE = {
+  expected_revision: 7,
   scenario_id: SCENARIO,
   graph: { nodes: [{ id: 'n1' }], edges: [] },
   graph_identity_hash: HASH_A,
@@ -163,6 +165,7 @@ function atomicRestoreOutcome(overrides: Record<string, unknown> = {}) {
 }
 
 const ATOMIC_RESTORE_WRITE = {
+  expected_revision: 7,
   scenario_id: SCENARIO,
   version_id: VERSION_ID,
   mutation_id: '22222222-2222-4222-8222-222222222222',
@@ -198,6 +201,7 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
     expect(rpcCalls).toHaveLength(1);
     expect(rpcCalls[0]!.fn).toBe('create_model_version');
     expect(rpcCalls[0]!.args).toEqual({
+      p_expected_revision: 7,
       p_scenario_id: SCENARIO,
       p_graph: SAVE_WRITE.graph,
       p_graph_identity_hash: HASH_A,
@@ -595,5 +599,39 @@ describe('SupabaseModelVersionStore.getCurrentVersionId (pointer semantics)', ()
     });
     const store = new SupabaseModelVersionStore(client);
     expect(await store.getCurrentVersionId(SCENARIO)).toBeNull();
+  });
+});
+
+
+describe('required revision guard', () => {
+  it.each(['save', 'restore'] as const)('%s refuses an invalid expected_revision without calling RPC', async operation => {
+    const { client, rpcCalls } = makeClient();
+    const store = new SupabaseModelVersionStore(client);
+    for (const revision of [undefined, null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, '7']) {
+      const write = operation === 'save' ? { ...SAVE_WRITE } : { ...ATOMIC_RESTORE_WRITE };
+      // Model untyped/malformed runtime callers without relaxing the production port.
+      Reflect.set(write, 'expected_revision', revision);
+      await expect(operation === 'save' ? store.saveVersion(write) : store.restoreVersionAtomic({ ...ATOMIC_RESTORE_WRITE, expected_revision: write.expected_revision }))
+        .rejects.toBeInstanceOf(ModelVersionStoreError);
+      expect(rpcCalls).toHaveLength(0);
+    }
+  });
+  it('restore passes the required revision, including zero', async () => {
+    const { client, rpcCalls } = makeClient({ rpcResult: { data: atomicRestoreOutcome(), error: null } });
+    await new SupabaseModelVersionStore(client).restoreVersionAtomic({ ...ATOMIC_RESTORE_WRITE, expected_revision: 0 });
+    expect(rpcCalls[0]?.args.p_expected_revision).toBe(0);
+  });
+});
+
+
+describe('OLRV1 adapter classification', () => {
+  it.each(['save', 'restore'] as const)('%s preserves the original measured refusal as cause, without retry', async operation => {
+    const error = { message: 'revision_conflict', code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) };
+    const { client, rpcCalls } = makeClient({ rpcResult: { data: null, error } });
+    const store = new SupabaseModelVersionStore(client);
+    const promise = operation === 'save' ? store.saveVersion(SAVE_WRITE) : store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE);
+    await expect(promise).rejects.toBeInstanceOf(GraphStaleWriteError);
+    await expect(promise).rejects.toMatchObject({ conflict_category: 'revision_conflict', cause: error });
+    expect(rpcCalls).toHaveLength(1);
   });
 });

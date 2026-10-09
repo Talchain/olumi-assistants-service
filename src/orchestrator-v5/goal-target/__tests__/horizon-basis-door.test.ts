@@ -1108,6 +1108,7 @@ describe('S5 r8 server proof', () => {
       expect(name).toBe('restore_model_version_atomic_v1');
       expect(args.p_scenario_id).toBe(SCENARIO);
       expect(args.p_version_id).toBe(version);
+      expect(args.p_expected_revision).toBe(31);
       expect(args.p_graph).toEqual(snapshot);
       await w.store.append(doorWrite(args.p_graph)); // SQL replacement double, bypassing the append door.
       return { error: null, data: { mutation_id: TURN, version_id: version, version_number: 2,
@@ -1121,7 +1122,7 @@ describe('S5 r8 server proof', () => {
     });
     const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc } as never),
       isEnabled: () => true, eventSink: { emit: vi.fn() } as never });
-    const result = await service.restoreVersionAtomic({ scenario_id: SCENARIO, version_id: version,
+    const result = await service.restoreVersionAtomic({ expected_revision: 31, scenario_id: SCENARIO, version_id: version,
       mutation_id: TURN, graph: snapshot, current_graph: seed(), expected_graph_identity_hash: null,
       source_graph_identity_hash: computeGraphIdentityHash(snapshot as never)!.value });
     expect(result.status).toBe('ok');

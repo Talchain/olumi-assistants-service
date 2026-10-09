@@ -127,6 +127,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     const service = makeService(store);
 
     const result = await service.saveVersion({
+      expected_revision: 7,
       scenario_id: SCENARIO,
       graph: GRAPH,
       label: 'v-label',
@@ -141,6 +142,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     // The hash must be EXACTLY what the sanctioned Group A module computes.
     const expected = computeGraphIdentityHash(GRAPH as unknown as GraphStateIngress);
     expect(expected).not.toBeNull();
+    expect(write.expected_revision).toBe(7);
     expect(write.graph_identity_hash).toBe(expected!.value);
     expect(write.graph_identity_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(write.hash_algorithm).toBe('sha256');
@@ -157,7 +159,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     const service = makeService(store);
 
     for (const graph of [null, undefined, {}, { nodes: [], edges: [] }]) {
-      const result = await service.saveVersion({ scenario_id: SCENARIO, graph });
+      const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph });
       expect(result).toEqual({
         status: 'error',
         error: {
@@ -175,6 +177,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     const service = makeService(store);
     const expectedHash = 'd'.repeat(64);
     await service.saveVersion({
+      expected_revision: 7,
       scenario_id: SCENARIO,
       graph: GRAPH,
       expected_graph_identity_hash: expectedHash,
@@ -191,7 +194,7 @@ describe('typed error mapping (service never throws)', () => {
       saveVersion: vi.fn().mockRejectedValue(new ModelVersionSignInRequiredError('MV001')),
     });
     const service = makeService(store);
-    const result = await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
     expect(result).toEqual({
       status: 'error',
       error: {
@@ -232,7 +235,7 @@ describe('version event sink (contract §7.3 seam)', () => {
     const store = makeStore();
     const service = makeService(store, sink);
 
-    await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
 
     expect(sink.emit).toHaveBeenCalledTimes(1);
     const event = sink.emit.mock.calls[0]![0] as ModelVersionEvent;
@@ -250,7 +253,7 @@ describe('version event sink (contract §7.3 seam)', () => {
       saveVersion: vi.fn().mockResolvedValue(outcome({ deduped: true, event_id: null })),
     });
     const service = makeService(store, sink);
-    const result = await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
     expect(result.status).toBe('ok');
     expect(sink.emit).not.toHaveBeenCalled();
   });
@@ -259,7 +262,7 @@ describe('version event sink (contract §7.3 seam)', () => {
     const sink = { emit: vi.fn().mockRejectedValue(new Error('sink down')) };
     const store = makeStore();
     const service = makeService(store, sink);
-    const result = await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
     expect(result.status).toBe('ok');
     expect(sink.emit).toHaveBeenCalledTimes(1);
   });
