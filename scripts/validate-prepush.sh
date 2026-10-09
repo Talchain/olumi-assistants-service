@@ -476,6 +476,19 @@ check_forbidden_boundary_patterns() {
   fi
 }
 
+# S5: exact field/file baseline ratchet (both growth and stale entries fail).
+# The companion tests/contract guard also runs in Required CI.
+check_goal_record_census() {
+  local out
+  if out="$(node scripts/ci/goal-record-census.mjs --check 2>&1)"; then
+    print_check "goal-record-census" "OK"
+  else
+    print_check "goal-record-census" "FAIL"
+    printf '%s\n' "$out" | sed 's/^/      /'
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
@@ -500,6 +513,7 @@ check_handler_ownership
 check_phase_1_5_invariants
 check_response_finaliser_contract
 check_forbidden_boundary_patterns
+check_goal_record_census
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
