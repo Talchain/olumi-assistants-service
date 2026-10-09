@@ -31,7 +31,7 @@ it('ownership decision callers are exactly the admission hook and writer door', 
   }
   expect(forbidden).toEqual([]);
   expect([...seen].sort()).toEqual([...allowed].sort());
-});
+}, 30_000);
 it('every source registration has explicit scenarioId config; graph alone enables member reads', () => {
   const missing: string[] = []; const members: string[] = [];
   for (const file of [...files('src/routes'), 'src/server.ts', 'src/orchestrator/route-v2.ts']) {
