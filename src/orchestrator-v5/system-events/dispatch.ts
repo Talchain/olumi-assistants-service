@@ -3554,7 +3554,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(link !== undefined ? { link: { from: link.from, to: link.to } } : {}) };
   }
   let committedGraph: unknown = r.graph;
-  if (r.commitSkippedReason === 'verified_no_op' && input.levels.length > 0) {
+  // A goal_steady no-op (already attested, a2 #2925) reads the stored bytes too, so its read-back is never vacuous.
+  if (r.commitSkippedReason === 'verified_no_op' && (input.levels.length > 0 || input.goal_steady !== undefined)) {
     try {
       committedGraph = await getSessionStore().loadGraph(input.scenario_id);
       if (computeAnalysisAffectingGraphHash(committedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) !== input.base_graph_hash) return { status: 'stale' };
