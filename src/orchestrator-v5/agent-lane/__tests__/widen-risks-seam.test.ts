@@ -292,6 +292,28 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       return proposal?.proposal_id === id ? [proposal] : [];
     })[0];
   };
+  /** Count only the offer block's reads, including a nested resolver's second read, not unrelated route history. */
+  const constructionOfferReads = async (resolve: () => Promise<Body>) => {
+    const routeLines = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8').split('\n');
+    const blockStart = routeLines.findIndex(line => line.includes('const constructionConfirmResolved = await')) + 1;
+    const blockEnd = routeLines.findIndex((line, index) => index >= blockStart && line.includes('const thin = thinDraftOffer')) + 1;
+    expect(blockStart).toBeGreaterThan(0);
+    expect(blockEnd).toBeGreaterThan(blockStart);
+    const readRecent = store.readRecent.getMockImplementation()!;
+    const attributed: string[] = [];
+    const read = vi.spyOn(store, 'readRecent').mockImplementation(async (sid, limit = 20) => {
+      const stack = new Error().stack ?? '';
+      if ([...stack.matchAll(/agent-v1-turn\.ts:(\d+):\d+/gu)]
+        .some(match => Number(match[1]) >= blockStart && Number(match[1]) < blockEnd)) attributed.push(stack);
+      return readRecent(sid, limit);
+    });
+    try {
+      const response = await resolve();
+      return { response, reads: attributed.length, stacks: attributed };
+    } finally {
+      read.mockRestore();
+    }
+  };
 
   it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
     const t = await thinConstruction(1);
@@ -512,6 +534,69 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposal!.proposal_id }));
     expect(graphNow().nodes.filter(node => node.kind === 'risk')).toHaveLength(1);
     expectNoThinPress(t);
+  }, 120_000);
+
+  it('r6-deferred RED and first-user-turn mutant: chat A, construction deadline B, then Yes C offers thin', async () => {
+    script = [() => say('Tell me about the strategic work you want to explore.')];
+    const chat = await turn({ message: 'I would like to explore our pricing strategy.' });
+    expect(chat._agent.tool_calls).toEqual([]);
+    expect(graphOf.has(SCENARIO)).toBe(false);
+    const construction = await thinConfirmConstruction('propose_goal_deadline', { deadline_words: '12 months', rationale: 'The user stated this deadline.' });
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_deadline')!.proposal_id!;
+    const t = await pressCard(approveChipOf(construction)!);
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+    expectThinPress(t);
+  }, 120_000);
+
+  it('r6-one-read RED and proposalIssuers mutant: a qualifying resolution adds exactly one offer history read', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_deadline', { deadline_words: '12 months', rationale: 'The user stated this deadline.' });
+    const { response: t, reads, stacks } = await constructionOfferReads(() => pressCard(approveChipOf(construction)!));
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expectThinPress(t);
+    expect(reads, stacks.join('\n\n')).toBe(1);
+  }, 120_000);
+
+  it('r6-nonthin RED: resolving a construction identity on a three-risk graph adds zero offer history reads', async () => {
+    const construction = await thinIdentityConstruction(3);
+    const { response: t, reads, stacks } = await constructionOfferReads(() => pressCard(approveChipOf(construction)!));
+    expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(graphNow().nodes.filter(node => node.kind === 'risk')).toHaveLength(3);
+    expectNoThinPress(t);
+    expect(reads, stacks.join('\n\n')).toBe(0);
+  }, 120_000);
+
+  it('r6-expiry RED: a card live at turn start and approved before its hold expires still offers thin', async () => {
+    const construction = await thinConfirmConstruction('propose_goal_deadline', { deadline_words: '12 months', rationale: 'The user stated this deadline.' });
+    const approve = approveChipOf(construction)!;
+    const proposalId = construction._agent.tool_calls.find(c => c.name === 'propose_goal_deadline')!.proposal_id!;
+    const expiresAt = Date.now() + 4000;
+    const hold = latestRow()!.pending_actions.find(raw => (raw as { chip_id?: string }).chip_id === approve.id) as { expires_at_iso: string } | undefined;
+    expect(hold).toBeDefined();
+    hold!.expires_at_iso = new Date(expiresAt).toISOString();
+    expect(Date.now() + 3000, 'the resolving turn starts before the hold expires').toBeLessThan(expiresAt);
+    const writers = await import('../../system-events/dispatch.js');
+    const { authorisationTurnId } = await import('../runtime/agent-capabilities.js');
+    const commit = writers.commitOptionLevelsInProcess;
+    let crossedExpiry = false;
+    const write = vi.spyOn(writers, 'commitOptionLevelsInProcess').mockImplementation(async (...args) => {
+      const written = await commit(...args);
+      if (args[0].turn_id === authorisationTurnId(`${proposalId}#deadline`)) {
+        expect(written.status).toBe('committed');
+        expect(Date.now(), 'the approval writer commits while the hold is live').toBeLessThan(expiresAt);
+        vi.setSystemTime(expiresAt + 1);
+        crossedExpiry = true;
+      }
+      return written;
+    });
+    try {
+      const t = await pressCard(approve);
+      expect(crossedExpiry).toBe(true);
+      expect(Date.now()).toBeGreaterThan(expiresAt);
+      expect(t._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: proposalId }));
+      expectThinPress(t);
+    } finally {
+      write.mockRestore();
+    }
   }, 120_000);
 
   it.each(['registration', 'public user message'] as const)('r5 fail closed: a missing construction %s marker offers no thin press after identity Yes', async (marker) => {

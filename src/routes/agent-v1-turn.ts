@@ -4348,11 +4348,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
-    // A resolved construction card, whatever it confirms. The complete stored window must attest both the first
-    // public user answer and its exact-brief construction registration; neither a later card nor unknown history qualifies.
+    // A resolved construction card, whatever it confirms. The stored window must attest each issuing answer's
+    // exact-brief construction registration; neither a later card nor unknown history qualifies.
     const constructionConfirmResolved = await (async (): Promise<boolean> => {
+      if (fastPath === 'method' || thinDraftOffer(readbackGraph, true) === null
+        || heldCardOffer.length > 0 || approvals.length > 0 || carriedApproval.length > 0) return false;
       const resolved = heldAtStart.flatMap(h => {
-        const record = proposalRecord(h, undefined);
+        const record = proposalRecord(h, undefined, startedAt);
         return record !== undefined && result.tool_calls.some(c => c.ok === true && c.proposal_id === record.proposal_id
           && (c.name === 'authorise_change' || (c.name === WITHDRAW_PROPOSAL && c.proposal_id === declinedHold))) ? [record] : [];
       });
@@ -4360,17 +4362,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
         if (rows.length >= CONVERSATION_ROWS_READ) return false;
-        const construction = [...rows].reverse().find(r => !r.turn_id.endsWith(':claim')
-          && r.response_emitted === true && r.request_hash.startsWith('agent_turn:')
-          && typeof r.user_message === 'string' && r.user_message.trim().length > 0);
-        if (construction === undefined) return false;
-        const constructedAt = Date.parse(construction.created_at);
-        const registrationId = constructionRegistrationTurnId(scenarioId, construction.user_message!);
-        if (!Number.isFinite(constructedAt) || !rows.some(r => r.response_emitted === false
-          && r.turn_id === registrationId && r.request_hash.startsWith('graph_registration:')
-          && Date.parse(r.created_at) < constructedAt)) return false;
-        const issuers = await proposalIssuers(resolved, heldAtStart);
-        return resolved.some(r => issuers.get(r.revision) === construction.turn_id);
+        const issuers = await issuedTurnIdsForProposalRecords(proposalIssuances(resolved, heldAtStart), rows, CONVERSATION_ROWS_READ,
+          typeof store.readCommittedTurn === 'function' ? id => store.readCommittedTurn!(scenarioId, id) : undefined);
+        return resolved.some(record => {
+          const issuer = issuers.get(record.revision);
+          const issuerRow = rows.find(r => r.turn_id === issuer && r.response_emitted === true
+            && r.request_hash.startsWith('agent_turn:') && typeof r.user_message === 'string' && r.user_message.trim().length > 0);
+          if (issuerRow === undefined) return false;
+          const constructedAt = Date.parse(issuerRow.created_at);
+          const registrationId = constructionRegistrationTurnId(scenarioId, issuerRow.user_message!);
+          return Number.isFinite(constructedAt) && rows.some(r => r.response_emitted === false
+            && r.turn_id === registrationId && r.request_hash.startsWith('graph_registration:')
+            && Date.parse(r.created_at) < constructedAt);
+        });
       } catch (err) {
         log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: construction issuing window unreadable');
         return false;
