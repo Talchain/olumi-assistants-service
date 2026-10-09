@@ -110,6 +110,8 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
       // + MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
       'goal_scope',
       'goal_sense_reading',
+      // S5 2b: user attestation, pipeline-owned so an LLM add cannot smuggle it.
+      'horizon_basis',
       // + the three saved-example stamps, CEE-owned since the writer audit (2026-09-27): declared on
       // NodeV3 so writes keep them, so a producer must never be able to set them.
       'interventionkeys',
@@ -140,7 +142,8 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     // + #2306's `goal_sense_reading` + AIQ (b)'s `goal_level_reading` + F1 T6's option lifecycle `proposed_by` /
     // `option_status` / `analysis_participation`) + the 5 J2 names + event_risk.v1 slice 2a's `event_risk` (added to the
     // union directly: only CEE's validated hold stamp may author the block) + RC3's `relies_on` server stamp.
-    expect(all.length).toBe(27);
+    // S5 2b: +1 horizon_basis, the user attestation screened above.
+    expect(all.length).toBe(28);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

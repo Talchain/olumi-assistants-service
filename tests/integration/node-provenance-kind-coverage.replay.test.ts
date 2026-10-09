@@ -665,6 +665,10 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_threshold_frame",
       "goal_threshold_raw",
       "goal_threshold_unit",
+      // S5 2b, 9 Oct — THE VALUE-BEARING DECISION: `horizon_basis` is NOT value-bearing and joins neither
+      // `carriesValue` nor `NODE_QUANTITY_FIELDS`. It is a user attestation object; `bound_months` mirrors
+      // `goal_horizon_months` and says WHEN, with no model value or magnitude of the goal's own metric.
+      "horizon_basis",
       "id",
       "intercept",
       // Writer audit 2026-09-27 (#70 5854387709) — THE VALUE-BEARING DECISION: `interventionKeys`,

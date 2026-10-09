@@ -235,11 +235,13 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
     expect(goalOf(r.graph, 'b')).not.toHaveProperty('horizon_basis');
     expect(goalOf(r.graph).horizon_basis).toEqual(goalOf(g).horizon_basis);
   });
-  it('R5 draft normalisation strips forged basis', () => {
+  it('R5 draft normalisation leaves forged basis for write preparation to drop', () => {
     const g = attested(); stripModelAuthoredGoalThreshold(g);
+    expect(goalOf(g)).toHaveProperty('horizon_basis');
+    prepareHorizonBasisForWrite(g, null, SCENARIO);
     expect(goalOf(g)).not.toHaveProperty('horizon_basis');
   });
-  it('R5 OpenAI draft adapter entry strips the model-forged basis (SDK double, zero network)', async () => {
+  it('R5 OpenAI SDK-double draft commits with model-forged basis dropped from the stored result by preparation', async () => {
     const g = attested(); sdk.draft = JSON.stringify(g); sdk.calls = 0;
     const result = await new OpenAIAdapter('gpt-4o-mini').draftGraph({ brief: 'Improve service quality; pilot more coverage.',
       docs: [], seed: 1 }, { requestId: 's5-draft', timeoutMs: 1000, preloadedSystemPrompt: { operation: 'draft_graph', content: 'test-only draft prompt',
@@ -247,7 +249,18 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
     expect(sdk.calls).toBeGreaterThan(0);
     const nodes = (result.graph as Rec).nodes as Rec[];
     expect(nodes.some(n => n.id === 'goal')).toBe(true);
-    expect(nodes.find(n => n.id === 'goal')).not.toHaveProperty('horizon_basis');
+    // Positive control: forged bytes reach the candidate; the stored-result assertion below tests preparation.
+    expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    const w = world(seed()); activeStore = w.store;
+    vi.mocked(handleDraftGraph).mockResolvedValue({ blocks: [], assistantText: 'Drafted the model.', latencyMs: 0,
+      strengthenItems: [], coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null,
+      draftWarnings: [], graphOutput: result.graph } as never);
+    const committed = await dispatchDraftGraph({ payload: payload('Build the model again'),
+      requestId: 's5-sdk-draft-commit', request: {} as never });
+    expect(committed.commitPerformed).toBe(true);
+    expect(w.writes).toHaveLength(1);
+    expect(goalOf(w.read()).label).toBe(goalOf(result.graph as Rec).label);
+    expect(goalOf(w.read())).not.toHaveProperty('horizon_basis');
   });
   it('R5 records draft entry rebuilds goal bytes and discards model basis', () => {
     const result = projectDraftRecords({ stated_items: [
