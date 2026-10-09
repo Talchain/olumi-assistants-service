@@ -55,6 +55,7 @@ export function getSessionStore(): SessionStore {
   });
   cachedInstance = new SupabaseSessionStore(client, cache, {
     defaultReadLimit: config.readWindow,
+    analysisRunDerivation: { rpc: (name, args) => client.rpc(name, args) },
     // A3 graph CAS observe-mode (CEE_V5_GRAPH_CAS_MODE via the central Zod
     // config, which owns the off|observe|enforce parse + the prod
     // enforce→observe downgrade). Default 'off' — zero behavioural change.
@@ -118,3 +119,12 @@ export type { SessionStore, SessionTurnWrite } from './store.js';
 export { StateCommitFailedError, SessionReadError } from './store.js';
 export type { InvalidationScope, InvalidationResult } from './invalidation.js';
 export { describeScope } from './invalidation.js';
+
+/** App lifecycle door; fake SessionStores without the explicit capability stay inert. */
+export function startSessionAnalysisRunSweeper(): () => void {
+  const store = getSessionStore();
+  if ('startAnalysisRunSweeper' in store && typeof store.startAnalysisRunSweeper === 'function') {
+    return store.startAnalysisRunSweeper();
+  }
+  return () => {};
+}

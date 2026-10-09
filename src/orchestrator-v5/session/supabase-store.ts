@@ -230,6 +230,10 @@ function errCode(e: unknown): string | undefined {
 
 export interface SupabaseSessionStoreOptions {
   readonly defaultReadLimit: number;
+  /** Explicit capability: append-only transports must never receive derivation RPCs. */
+  readonly analysisRunDerivation?: {
+    rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
+  };
   /**
    * A3 graph CAS observe-mode (`CEE_V5_GRAPH_CAS_MODE`). Absent → 'off'
    * (zero SELECTs, byte-identical write path). See `evaluateGraphCas` and
@@ -279,7 +283,9 @@ export interface AnalysisRunDrainResult {
   quarantined: number;
   skipped: number;
   failed: number;
-  queueDepth: number | null;
+  attempts: number;
+  scanned: number;
+  depthEstimate: number | null;
   oldestPendingAgeSeconds: number | null;
 }
 
@@ -296,6 +302,26 @@ export class SupabaseSessionStore implements SessionStore {
    * until its next restart, stated in the fallback WARN.
    */
   private atomicFenceRpcUnavailable = false;
+  private analysisSweepFlight?: Promise<AnalysisRunDrainResult>;
+  private analysisSweepTimer?: NodeJS.Timeout;
+  private analysisSweeperClosed = false;
+  private readonly analysisNudges = new Set<NodeJS.Immediate>();
+
+  /** Explicit lifecycle; constructors/imports never start intervals (including tests). */
+  startAnalysisRunSweeper(): () => void {
+    if (this.options.analysisRunDerivation && !this.analysisSweepTimer) {
+      this.analysisSweeperClosed = false;
+      this.analysisSweepTimer = setInterval(() => { void this.deriveAnalysisRuns({ sweepLimit: 20 }); }, 60_000);
+      this.analysisSweepTimer.unref();
+    }
+    return () => {
+      this.analysisSweeperClosed = true;
+      if (this.analysisSweepTimer) clearInterval(this.analysisSweepTimer);
+      this.analysisSweepTimer = undefined;
+      for (const task of this.analysisNudges) clearImmediate(task);
+      this.analysisNudges.clear();
+    };
+  }
 
   constructor(
     private readonly client: SupabaseClient,
@@ -405,68 +431,61 @@ export class SupabaseSessionStore implements SessionStore {
     return 'new';
   }
 
-  /** The ONE completion seam: the RPC has committed before background work is scheduled. */
+  /** The ONE completion seam: the RPC has committed before a sweep is nudged. */
   private async appendThroughRpc(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
     const outcome = await this.appendThroughRpcInner(write, options);
-    if ('id' in outcome && !write.turn_id.endsWith(TURN_CLAIM_SUFFIX)) {
-      // A separate event-loop task, never awaited by the turn/response. The DB
-      // assigned the fact IDs, so resolve them after commit inside this task.
-      setImmediate(() => {
-        void this.deriveCommittedTurnAnalysisRuns(write, outcome.id).catch(() => {
+    if ('id' in outcome && !write.turn_id.endsWith(TURN_CLAIM_SUFFIX)
+      && this.options.analysisRunDerivation && !this.analysisSweeperClosed) {
+      const task = setImmediate(() => {
+        this.analysisNudges.delete(task);
+        void this.deriveAnalysisRuns({ sweepLimit: 20 }).catch(() => {
           log.warn({ event: 'analysis_run.after_commit_failed', turn_row_id: outcome.id },
             'Committed turn unchanged; a later sweep will recover pending analysis facts');
         });
       });
+      this.analysisNudges.add(task);
     }
     return outcome;
   }
 
-  private async deriveCommittedTurnAnalysisRuns(write: SessionTurnWrite, turnRowId: string): Promise<void> {
-    if (!write.handler_facts.some(f => f.fact_type === 'run_analysis' && !f.noop)) {
-      // Other completed turns still sweep missed enqueues and production work.
-      await this.deriveQueuedAnalysisRuns({ factIds: [], sweepLimit: 20 });
-      return;
+  /** Sanctioned write door; single-flight across interval, nudges and operator calls. */
+  async deriveAnalysisRuns(opts: { sweepLimit: number } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
+    if (!this.options.analysisRunDerivation || this.analysisSweeperClosed) {
+      return { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
     }
-    const { data, error } = await this.client.from('v5_handler_facts').select('id')
-      .eq('v5_conversation_turn_id', turnRowId).eq('scenario_id', write.scenario_id)
-      .eq('action_type', 'run_analysis').eq('noop', false).returns<Array<{ id: string }>>();
-    // Even a failed ID lookup can recover this turn through the facts anti-join.
-    await this.deriveQueuedAnalysisRuns({ factIds: error ? [] : (data ?? []).map(row => row.id), sweepLimit: 20 });
+    if (this.analysisSweepFlight) return this.analysisSweepFlight;
+    this.analysisSweepFlight = this.performAnalysisRunSweep(opts);
+    try { return await this.analysisSweepFlight; }
+    finally { this.analysisSweepFlight = undefined; }
   }
 
-  /**
-   * Sanctioned derivation write door. Each RPC has its own transaction, none
-   * shares the append's transaction. Transient storage failures keep the lease
-   * pending for retry; duplicate execution IDs are terminal quarantines.
-   */
-  async deriveQueuedAnalysisRuns(opts: { factIds?: string[]; sweepLimit: number } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
-    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0,
-      queueDepth: null, oldestPendingAgeSeconds: null };
+  private async performAnalysisRunSweep(opts: { sweepLimit: number }): Promise<AnalysisRunDrainResult> {
+    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
+      depthEstimate: null, oldestPendingAgeSeconds: null };
+    const port = this.options.analysisRunDerivation!;
+    let leaseId: string | undefined;
     try {
       const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
-      const { data, error } = await this.client.rpc('claim_analysis_run_facts', {
-        p_fact_ids: opts.factIds ?? [], p_sweep_limit: limit,
-      });
+      const { data, error } = await port.rpc('claim_analysis_run_facts', { p_sweep_limit: limit });
       if (error) throw error;
       const envelope = drainRecord(data);
       if (!envelope || !Array.isArray(envelope.facts)) throw new Error('Invalid analysis claim receipt');
-      counts.queueDepth = typeof envelope.queue_depth === 'number' ? envelope.queue_depth : null;
+      counts.scanned = typeof envelope.window_count === 'number' ? envelope.window_count : envelope.facts.length;
+      leaseId = typeof envelope.lease_id === 'string' ? envelope.lease_id : undefined;
+      counts.depthEstimate = typeof envelope.depth_estimate === 'number' ? envelope.depth_estimate : null;
       counts.oldestPendingAgeSeconds = typeof envelope.oldest_pending_age_seconds === 'number' ? envelope.oldest_pending_age_seconds : null;
       for (const value of envelope.facts) {
         const row = drainRecord(value);
+        counts.attempts += 1;
         try {
-          if (!row || typeof row.fact_id !== 'string' || typeof row.scenario_id !== 'string') {
-            throw new Error('Invalid claimed fact identity');
-          }
+          if (!row || typeof row.fact_id !== 'string' || typeof row.scenario_id !== 'string') throw new Error('Invalid claimed fact identity');
           const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, { scenarioId: row.scenario_id });
           if ('ok' in mapped) {
             const { options, ...run } = mapped.ok;
-            const stored = await this.client.rpc('store_typed_analysis_run', {
-              p_fact_id: row.fact_id, p_run: run, p_options: options,
-            });
+            const stored = await port.rpc('store_typed_analysis_run', { p_fact_id: row.fact_id, p_run: run, p_options: options });
             if (stored.error) {
               if (errCode(stored.error) !== '23505') throw stored.error;
-              const quarantined = await this.client.rpc('quarantine_analysis_fact', {
+              const quarantined = await port.rpc('quarantine_analysis_fact', {
                 p_fact_id: row.fact_id, p_reason: 'duplicate_run_id', p_detail: '23505',
               });
               if (quarantined.error) throw quarantined.error;
@@ -477,26 +496,46 @@ export class SupabaseSessionStore implements SessionStore {
           } else {
             const skipped = !('quarantine' in mapped);
             const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal' in mapped ? 'skipped_refusal' : 'skipped_legacy';
-            const quarantined = await this.client.rpc('quarantine_analysis_fact', {
-              p_fact_id: row.fact_id, p_reason: reason, p_detail: null,
-            });
+            const quarantined = await port.rpc('quarantine_analysis_fact', { p_fact_id: row.fact_id, p_reason: reason, p_detail: null });
             if (quarantined.error) throw quarantined.error;
             if (skipped || quarantined.data !== true) counts.skipped += 1;
             else counts.quarantined += 1;
           }
         } catch (error) {
           counts.failed += 1;
-          log.warn({ event: 'analysis_run.fact_failed', fact_id: row?.fact_id, rpc_code: errCode(error) },
-            'Analysis fact remains pending; continuing the isolated drain');
+          if (typeof row?.fact_id === 'string' && errCode(error) !== '23505') {
+            try {
+              const recorded = await port.rpc('record_analysis_run_failure', {
+                p_fact_id: row.fact_id, p_error_code: errCode(error) ?? 'unknown', p_detail: errMessage(error).slice(0, 1000),
+              });
+              if (recorded.error) throw recorded.error;
+              if (recorded.data === true) counts.quarantined += 1;
+            } catch (recordError) {
+              log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
+            }
+          }
         }
       }
     } catch (error) {
       counts.failed += 1;
       log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+    } finally {
+      if (leaseId) {
+        try {
+          const finished = await port.rpc('finish_analysis_run_sweep', { p_lease_id: leaseId });
+          if (finished.error) {
+            counts.failed += 1;
+            log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(finished.error) }, 'Watermark retained; lease expiry permits recovery');
+          }
+        } catch (error) {
+          counts.failed += 1;
+          log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+        }
+      }
     }
-    log.info({ event: 'analysis_run.drain', queue_depth: counts.queueDepth,
-      oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, derived: counts.derived,
-      quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
+    log.info({ event: 'analysis_run.drain', depth_estimate: counts.depthEstimate,
+      oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, attempts: counts.attempts, scanned: counts.scanned,
+      derived: counts.derived, quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
     return counts;
   }
 

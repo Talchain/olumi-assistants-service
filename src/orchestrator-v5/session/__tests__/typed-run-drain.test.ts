@@ -13,12 +13,20 @@ function fixture() {
   const stored = new Set<string>();
   const quarantine = new Set<string>();
   const failStore = new Set<string>();
+  const storeErrors = new Map<string, { code: string; message: string }>();
+  const attempts = new Map<string, number>();
   const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
     if (name.startsWith('append_')) return { data: 'committed-turn', error: null };
+    if (name === 'finish_analysis_run_sweep') return { data: true, error: null };
+    if (name === 'record_analysis_run_failure') {
+      const count = (attempts.get(args.p_fact_id) ?? 0) + 1; attempts.set(args.p_fact_id, count);
+      if (count >= 5) { quarantine.add(args.p_fact_id); pending.delete(args.p_fact_id); }
+      return { data: count >= 5, error: null };
+    }
     if (name === 'claim_analysis_run_facts') return { data: { facts: [...pending.values()].slice(0, args.p_sweep_limit),
-      queue_depth: pending.size, oldest_pending_age_seconds: 12 }, error: null };
+      lease_id: 'lease', depth_estimate: pending.size, oldest_pending_age_seconds: 12 }, error: null };
     if (name === 'store_typed_analysis_run') {
-      if (failStore.has(args.p_fact_id)) return { data: null, error: { code: '55P03', message: 'held storage lock' } };
+      if (failStore.has(args.p_fact_id)) return { data: null, error: storeErrors.get(args.p_fact_id) ?? { code: '55P03', message: 'held storage lock' } };
       const existed = stored.has(args.p_fact_id);
       stored.add(args.p_fact_id); pending.delete(args.p_fact_id);
       return { data: !existed, error: null };
@@ -32,8 +40,8 @@ function fixture() {
   const query = { select: vi.fn(() => query), eq: vi.fn(() => query),
     returns: vi.fn(async () => ({ data: [...pending.keys()].map(id => ({ id })), error: null })) };
   const client = { rpc, from: vi.fn(() => query) };
-  const store = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20 });
-  return { store, client, rpc, pending, stored, quarantine, failStore };
+  const store = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20, analysisRunDerivation: { rpc } });
+  return { store, client, rpc, pending, stored, quarantine, failStore, attempts, storeErrors };
 }
 function turn(): SessionTurnWrite {
   return { scenario_id: eligible[0]!.scenario_id, turn_id: 'run-turn', turn_class: 'handler', handler_id: 'run_analysis',
@@ -46,14 +54,14 @@ describe('typed Run drain outside the turn transaction', () => {
   it('isolates a failing store call and stores the other fact; next sweep recovers the pending work', async () => {
     const f = fixture();
     f.failStore.add(eligible[0]!.fact_id);
-    await expect(f.store.deriveQueuedAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, failed: 1 });
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, failed: 1 });
     expect([...f.stored]).toEqual([eligible[1]!.fact_id]);
     expect([...f.pending.keys()]).toEqual([eligible[0]!.fact_id]);
     f.failStore.clear();
-    await expect(f.store.deriveQueuedAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, failed: 0 });
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, failed: 0 });
     expect(f.pending.size).toBe(0);
     expect(log.info).toHaveBeenCalledTimes(2);
-    expect(log.info).toHaveBeenCalledWith(expect.objectContaining({ event: 'analysis_run.drain', queue_depth: 2,
+    expect(log.info).toHaveBeenCalledWith(expect.objectContaining({ event: 'analysis_run.drain', depth_estimate: 2, attempts: 2,
       oldest_pending_age_seconds: 12, derived: 1, quarantined: 0, skipped: 0, failed: 1 }), expect.any(String));
   });
   it('quarantines options=[null] with the ONE mapper reason and no payload copy', async () => {
@@ -62,54 +70,39 @@ describe('typed Run drain outside the turn transaction', () => {
     const payload = structuredClone(row.payload) as Record<string, any>;
     payload.result.input_snapshot.options = [null];
     row.payload = payload;
-    await expect(f.store.deriveQueuedAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, quarantined: 1 });
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, quarantined: 1 });
     const call = f.rpc.mock.calls.find(([name]) => name === 'quarantine_analysis_fact')!;
     expect(call[1]).toEqual({ p_fact_id: row.fact_id, p_reason: expect.stringContaining('input_snapshot.options.0'), p_detail: null });
-  });
-  it('a fresh drain recovers facts left queued when a prior worker crashed after claiming', async () => {
-    const f = fixture();
-    await f.rpc('claim_analysis_run_facts', { p_fact_ids: [], p_sweep_limit: 20 });
-    expect(f.stored.size).toBe(0); // prior worker stopped before mapping/storage
-    // Models the next DB claim after lease expiry; SQL rehearsal proves the lease.
-    const restarted = new SupabaseSessionStore(f.client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20 });
-    await expect(restarted.deriveQueuedAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 2, failed: 0 });
-    expect(f.pending.size).toBe(0);
   });
   it('marks a refusal as terminal skipped work, so it cannot starve later sweeps', async () => {
     const f = fixture();
     const refusal = corpus[3]!;
     f.pending.set(refusal.fact_id, { fact_id: refusal.fact_id, scenario_id: refusal.scenario_id, payload: refusal.fact, noop: false });
-    await expect(f.store.deriveQueuedAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 2, skipped: 1, quarantined: 0 });
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 2, skipped: 1, quarantined: 0 });
     expect(f.rpc).toHaveBeenCalledWith('quarantine_analysis_fact', { p_fact_id: refusal.fact_id, p_reason: 'skipped_refusal', p_detail: null });
-    await expect(f.store.deriveQueuedAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 0, skipped: 0 });
-  });
-  it('clears an enqueue racing with completed storage without duplicating the Run', async () => {
-    const f = fixture();
-    f.stored.add(eligible[0]!.fact_id);
-    await expect(f.store.deriveQueuedAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, skipped: 1 });
-    expect(f.stored.size).toBe(2); expect(f.pending.size).toBe(0);
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 0, skipped: 0 });
   });
   it('contains thrown transport failures and caps the sweep at 20', async () => {
     const f = fixture();
     f.rpc.mockRejectedValue(new Error('transport unavailable'));
-    await expect(f.store.deriveQueuedAnalysisRuns({ sweepLimit: 999 })).resolves.toMatchObject({ failed: 1, derived: 0 });
-    expect(f.rpc).toHaveBeenCalledWith('claim_analysis_run_facts', { p_fact_ids: [], p_sweep_limit: 20 });
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 999 })).resolves.toMatchObject({ failed: 1, derived: 0 });
+    expect(f.rpc).toHaveBeenCalledWith('claim_analysis_run_facts', { p_sweep_limit: 20 });
     expect(log.info).toHaveBeenCalledTimes(1);
   });
   it('a committed turn resolves without waiting for a drain that never settles', async () => {
     vi.useFakeTimers({ toFake: ['setImmediate'] });
     const f = fixture();
-    const drain = vi.spyOn(f.store, 'deriveQueuedAnalysisRuns').mockImplementation(() => new Promise(() => {}));
+    const drain = vi.spyOn(f.store, 'deriveAnalysisRuns').mockImplementation(() => new Promise(() => {}));
     await expect(f.store.append(turn())).resolves.toEqual({ id: 'committed-turn' });
     expect(drain).not.toHaveBeenCalled();
     await vi.runAllTimersAsync();
-    expect(drain).toHaveBeenCalledWith({ factIds: eligible.map(c => c.fact_id), sweepLimit: 20 });
-    expect(f.client.from).toHaveBeenCalledWith('v5_handler_facts');
+    expect(drain).toHaveBeenCalledWith({ sweepLimit: 20 });
+    expect(f.client.from).not.toHaveBeenCalled();
   });
   it('turn unaffected by drain failure: append receipt stays committed and resolves', async () => {
     vi.useFakeTimers({ toFake: ['setImmediate'] });
     const f = fixture();
-    vi.spyOn(f.store, 'deriveQueuedAnalysisRuns').mockRejectedValue(new Error('injected drain failure'));
+    vi.spyOn(f.store, 'deriveAnalysisRuns').mockRejectedValue(new Error('injected drain failure'));
     await expect(f.store.append(turn())).resolves.toEqual({ id: 'committed-turn' });
     await vi.runAllTimersAsync();
     expect(f.rpc.mock.calls.filter(([name]) => name.startsWith('append_'))).toHaveLength(1);
@@ -118,18 +111,74 @@ describe('typed Run drain outside the turn transaction', () => {
   it('a completed turn with no own Run still sweeps older/prod facts after responding', async () => {
     vi.useFakeTimers({ toFake: ['setImmediate'] });
     const f = fixture();
-    const drain = vi.spyOn(f.store, 'deriveQueuedAnalysisRuns');
+    const drain = vi.spyOn(f.store, 'deriveAnalysisRuns');
     await expect(f.store.append({ ...turn(), turn_class: 'direct_answer', handler_id: null, handler_facts: [] })).resolves.toEqual({ id: 'committed-turn' });
     expect(drain).not.toHaveBeenCalled();
     await vi.runAllTimersAsync();
-    expect(drain).toHaveBeenCalledWith({ factIds: [], sweepLimit: 20 });
+    expect(drain).toHaveBeenCalledWith({ sweepLimit: 20 });
     expect(f.client.from).not.toHaveBeenCalled();
     expect(f.stored.size).toBe(2);
+  });
+  it('has no autonomous timer until explicitly started; the interval derives a legacy writer fact and stops', async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.rpc).not.toHaveBeenCalled();
+    const stop = f.store.startAnalysisRunSweeper();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.stored.size).toBe(2); // no append or CEE nudge occurred
+    const calls = f.rpc.mock.calls.length;
+    stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.rpc).toHaveBeenCalledTimes(calls);
+  });
+  it('quarantines a poison fact on its fifth non-unique storage failure', async () => {
+    const f = fixture(); const id = eligible[0]!.fact_id;
+    f.failStore.add(id);
+    for (let n = 1; n <= 5; n++) {
+      await f.store.deriveAnalysisRuns({ sweepLimit: 20 });
+      expect(f.attempts.get(id)).toBe(n);
+      expect(f.quarantine.has(id)).toBe(n === 5);
+    }
+    await f.store.deriveAnalysisRuns({ sweepLimit: 20 });
+    expect(f.attempts.get(id)).toBe(5);
+    expect(f.rpc).toHaveBeenCalledWith('record_analysis_run_failure', {
+      p_fact_id: id, p_error_code: '55P03', p_detail: 'held storage lock',
+    });
+  });
+  it('a unique collision quarantines immediately without consuming poison attempts', async () => {
+    const f = fixture(); const id = eligible[0]!.fact_id;
+    f.failStore.add(id); f.storeErrors.set(id, { code: '23505', message: 'duplicate run identity' });
+    await expect(f.store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ derived: 1, quarantined: 1, failed: 0 });
+    expect(f.rpc).toHaveBeenCalledWith('quarantine_analysis_fact', { p_fact_id: id, p_reason: 'duplicate_run_id', p_detail: '23505' });
+    expect(f.attempts.size).toBe(0);
+  });
+  it('single-flights interval and post-append nudges while a claim is outstanding', async () => {
+    vi.useFakeTimers(); const f = fixture();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.rpc.mockImplementationOnce(async () => { await held; return { data: { facts: [], lease_id: 'lease', depth_estimate: 0, oldest_pending_age_seconds: 0 }, error: null }; });
+    const stop = f.store.startAnalysisRunSweeper();
+    const drain = f.store.deriveAnalysisRuns({ sweepLimit: 20 });
+    await f.store.append(turn());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'claim_analysis_run_facts')).toHaveLength(1);
+    release(); await drain; stop();
+  });
+  it('an append-only fake transport receives no derivation calls or table access', async () => {
+    vi.useFakeTimers(); const rpc = vi.fn(async () => ({ data: 'committed-turn', error: null }));
+    const client = { rpc, from: vi.fn() };
+    const store = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20 });
+    await expect(store.append(turn())).resolves.toEqual({ id: 'committed-turn' });
+    const stop = store.startAnalysisRunSweeper();
+    await vi.advanceTimersByTimeAsync(120_000); stop();
+    await expect(store.deriveAnalysisRuns({ sweepLimit: 20 })).resolves.toMatchObject({ attempts: 0, failed: 0 });
+    expect(rpc).toHaveBeenCalledTimes(1); expect(client.from).not.toHaveBeenCalled();
   });
   it('does not schedule a drain for a rejected append', async () => {
     vi.useFakeTimers({ toFake: ['setImmediate'] });
     const f = fixture();
-    const drain = vi.spyOn(f.store, 'deriveQueuedAnalysisRuns');
+    const drain = vi.spyOn(f.store, 'deriveAnalysisRuns');
     f.rpc.mockResolvedValue({ data: null, error: { code: '57014', message: 'append canceled' } });
     await expect(f.store.append(turn())).rejects.toThrow('RPC failed');
     await vi.runAllTimersAsync();

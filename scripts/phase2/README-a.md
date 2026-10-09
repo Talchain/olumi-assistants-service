@@ -1,26 +1,43 @@
 # Phase 2(a) TS derivation rehearsal
 
-These are **unexecuted proposals**. Use an isolated, quiescent local copy of the deployed V5 schema, with `append_turn_atomic_v4` present and Supabase roles defined. Phase 2(a) must be absent before each rehearsal. No Docker/shared-DB apply is performed by CEE's build.
+These are **unexecuted proposals**. Use an isolated, quiescent local copy of the deployed V5 schema with `append_turn_atomic_v4` and Supabase roles present. Phase 2(a) and its sweep index must be absent before either rehearsal. **no trigger, no write-blocking DDL; one concurrent index allowed (DL 87114 amendment)**. Apply the main migration inside an explicit transaction; apply the separate concurrent-index file alone, outside a transaction. Both only add objects. There are no foreign keys to existing tables, so adding typed records installs no automatic work on the shared writer. Source UUIDs are logical references; typed audit rows survive source deletion.
 
 ```sh
 psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 54322 -U postgres -d postgres -f scripts/phase2/rehearse-a.sql
 bash scripts/phase2/rehearse-a-lock.sh -h 127.0.0.1 -p 54322 -U postgres -d postgres
 ```
 
-Supply passwords through `PGPASSWORD`/pgpass. The SQL rehearsal applies and rolls back within one transaction. It checks RLS/ACLs, the real append's enqueue discriminator, storage/quarantine idempotence, revision nullness, expired claim recovery, cascades, and exact public-catalogue restoration. The lock rehearsal temporarily commits the migration so session 2 can see the tables. It holds ACCESS EXCLUSIVE on **queue + runs + options**, then session 1 commits a real append with statement_timeout 2s. After release, it proves the enqueue was skipped and the next anti-join sweep claims the fact, then stores the TS-generated golden row. It removes its synthetic scenario/data, applies the proposal rollback, and compares exact catalogue snapshots. Production drain code never takes those adversarial table locks. Both rehearsals fail on failed conjuncts.
+Supply passwords through `PGPASSWORD`/pgpass. The SQL rehearsal snapshots the catalogue, applies the proposal, proves every old entry is unchanged, checks RLS/grants, idempotent storage, a 25-fact historical workload, fifth-attempt poison quarantine and bounded watermark advancement, then rolls back and compares the catalogue exactly. The lock rehearsal commits the proposal temporarily, holds ACCESS EXCLUSIVE on all five new tables, and requires a real append to commit within statement_timeout 2s. It also seeds 5,000 local fact rows and ANALYZEs the source, then prints `EXPLAIN (FORMAT JSON)` of the actual stored claim query: absent-index contrast must show a facts Seq Scan; after the separate concurrent apply, the normal planner must use `analysis_run_facts_sweep_idx` and show no facts Seq Scan. No planner settings are disabled. Afterwards an anti-join finds the legacy append. It removes its synthetic scenario/data and drops the concurrent index FIRST outside a transaction, then rolls back the main proposal inside a transaction; exact catalogue comparison is required.
 
-`rehearse-a-fixture.sql` contains output of `toTypedRunRows` for corpus 01, changing only scenario/run identity to the harness fixture. It is data, not another mapper. The SQL mapper/parity script is removed. The golden TS corpus contains 31 cases (including null snapshot option) and remains pinned by the mapper test.
+The durable singleton stores `(processed_at, processed_id)`, a 30-second lease token and the current window boundary. Claims inspect at most 20 source facts after that cursor, in created_at/id order, then anti-join typed/quarantine dispositions. Finish advances only the contiguous terminal prefix; a failure retains the cursor, and a stale worker cannot finish a newer lease. A crashed worker's lease expires. Timestamp ties use UUID order. Each window and its finish inspect at most 20 source rows; depth is the pending count in that window, a lower-bound estimate, not an all-history count.
 
-For an explicitly authorised operator backfill **after applying the migration**, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, then:
+Existing append writers use DEFAULT now() timestamps. The claim horizon stops before other open transactions' start times, protecting late commits; prepared transactions pause advancement entirely. Arbitrarily backdated imports violate this ordering contract and require an operator backfill before the cursor advances. No explicit existing-table locks or writes are needed by the sweep.
+
+The ONE mapper is `typed-run-rows.ts`. Every stored Run remains `scenario_revision=NULL, revision_source='legacy_unknown'` until commit B stamps the evaluated revision. Storage RPCs only insert already-mapped values. Per-fact storage/quarantine failures increment a durable counter; the fifth non-unique failure quarantines the last compact error. Unique collisions are terminal duplicate-identity quarantines. Failure bookkeeping itself requires an available database. No payload is copied into quarantine.
+
+Only stores wired with the explicit derivation RPC port perform background work. App readiness starts the 60-second interval outside tests; app close stops it and cancels pending nudges. Constructors/imports start no timer. Interval and post-append nudges share one in-process flight; neither is awaited by turn responses. A summary event per sweep records bounded depth/oldest estimates, attempts and disposition counts.
+
+For an authorised operator backfill after applying the proposal:
 
 ```sh
-node --import tsx scripts/phase2/backfill-typed-runs.ts
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node --import tsx scripts/phase2/backfill-typed-runs.ts
 ```
 
-This job never runs in CI. It enqueues historical non-noop Run facts and drains batches of at most 20 through `SupabaseSessionStore.deriveQueuedAnalysisRuns`. Work missed by enqueue is recoverable through queued ids UNION the fact anti-join. Claims use FOR UPDATE SKIP LOCKED plus a 30-second queue lease, with no transaction held across TS mapping. Rerun after lease expiry if interrupted or a retryable storage failure occurs. Mapper skips (currently refusal markers) get compact terminal disposition reasons in quarantine, counted as skipped, so they cannot permanently occupy the oldest sweep slots. No payload is copied into quarantine.
+The job does not run in CI. It uses the same mapper and write door in capped windows from the durable cursor, whose initial value is -infinity. Rerun after transient errors/lease expiry. The 31-case TS golden corpus remains pinned; the typed reader stays dormant and shares freshness ordering.
 
-Every stored Run is `scenario_revision=NULL, revision_source='legacy_unknown'`: `RunAnalysisResultSchema` and `RunInputSnapshotSchema` contain no evaluated-revision stamp. Commit B owns that producer change. Current `scenarios.revision` is never substituted. The typed reader remains dormant; ordering calls the same freshness core, with raw producer ISO text and source fact insertion metadata preserved for exact ties. DB id ordering only paginates transport.
+DL apply order (only after explicit deployment approval; these commands are not run by CEE here):
 
-The trigger's 50ms lock timeout contains ONLY 55P03 during enqueue. It does not contain cancellation, disk/CPU/I/O failures, permission/FK failures or deadlocks; those remaining writer failure modes are stated in its comment. Storage and claim failures happen after commit and cannot change the user's turn. One summary event per sweep records depth/age at claim time plus derived/quarantined/skipped/failed counts.
+```sh
+psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 54322 -U postgres -d postgres --single-transaction -f supabase/migrations/20261009010000_phase2_a_typed_runs.sql
+psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 54322 -U postgres -d postgres -f supabase/migrations/20261009010100_phase2_a_sweep_index.sql
+psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 54322 -U postgres -d postgres -c "SELECT indisvalid FROM pg_index WHERE indexrelid = 'public.analysis_run_facts_sweep_idx'::regclass"
+```
 
-The decision adapter's read dependency is obtained through `build-turn-context`'s sanctioned read-door type. Removing its stale direct-fact-query baseline entry lowers the state-write ratchet and locks that gain.
+`indisvalid` must be true. If false, run the index rollback alone (`DROP INDEX CONCURRENTLY`), then retry the index migration and post-check. `IF NOT EXISTS` does not repair an invalid existing index. SHARE UPDATE EXCLUSIVE does not conflict with normal INSERT/UPDATE/DELETE writers; concurrent builds can wait on other maintenance/transactions. Enable sweeps only after the valid-index post-check.
+
+Rollback order:
+
+```sh
+psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 54322 -U postgres -d postgres -f supabase/migrations/rollback/20261009010100_phase2_a_sweep_index_rollback.sql.do-not-apply
+psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 54322 -U postgres -d postgres --single-transaction -f supabase/migrations/rollback/20261009010000_phase2_a_typed_runs_rollback.sql.do-not-apply
+```

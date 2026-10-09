@@ -40,7 +40,7 @@ export function quarantineCode(reason: string): string {
 export function parity2b(corpus = loadCorpus()) {
   const runIds = new Set<string>();
   return corpus.map(entry => {
-    const mapped = toTypedRunRows(entry.fact, { scenarioId: entry.scenario_id, mode: 'trigger' });
+    const mapped = toTypedRunRows(entry.fact, { scenarioId: entry.scenario_id, mode: 'live' });
     const conflict = 'ok' in mapped && runIds.has(mapped.ok.run_id);
     if ('ok' in mapped && !conflict) {
       runIds.add(mapped.ok.run_id);

@@ -161,7 +161,7 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     fact.result = shape === 'missing' ? {} : { run_id: null };
     expect(toTypedRunRows(fact, { scenarioId, mode: 'backfill' })).toEqual({ skipped_legacy: true });
     expect(toTypedRunRows(fact, { scenarioId })).toEqual({ quarantine: 'run_id_absent' });
-    expect(toTypedRunRows(fact, { scenarioId, mode: 'trigger' })).toEqual({ quarantine: 'run_id_absent' });
+    expect(toTypedRunRows(fact, { scenarioId, mode: 'live' })).toEqual({ quarantine: 'run_id_absent' });
   });
 
   it.each(['missing', 'null'] as const)('skips a built refusal marker with %s run identity in both modes without quarantine', shape => {
@@ -172,7 +172,7 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     }));
     if (shape === 'null') fact.result.run_id = null;
     const before = clone(fact);
-    for (const mode of ['trigger', 'backfill'] as const) {
+    for (const mode of ['live', 'backfill'] as const) {
       expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode })).toEqual({ skipped_refusal: true });
     }
     expect(mapFact(fact)).toEqual({ skipped_refusal: true });
@@ -186,7 +186,7 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     delete fact.fact_version;
     delete fact.result.summary;
     delete fact.result.computed_at;
-    for (const mode of ['trigger', 'backfill'] as const) {
+    for (const mode of ['live', 'backfill'] as const) {
       expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode })).toEqual({ skipped_refusal: true });
     }
   });
@@ -200,20 +200,20 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
       scenarioId: succeeded.scenario_id, reasonCode: 'analysis_not_ready',
     }));
     change(fact);
-    expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'trigger' })).toHaveProperty('quarantine');
+    expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'live' })).toHaveProperty('quarantine');
   });
 
-  it('quarantines a computed fact without run_id in trigger mode', () => {
+  it('quarantines a computed fact without run_id in live mode', () => {
     const fact = factFromRead(succeeded);
     delete fact.result.run_id;
-    expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'trigger' }))
+    expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode: 'live' }))
       .toEqual({ quarantine: 'run_id_absent' });
   });
 
   it('maps a refusal carrying a run_id through the normal withheld Run path', () => {
     const fact = factFromRead(succeeded);
     fact.result.enrichment.analysis_status = 'refused';
-    for (const mode of ['trigger', 'backfill'] as const) {
+    for (const mode of ['live', 'backfill'] as const) {
       const mapped = toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode });
       expect(mapped).toHaveProperty('ok');
       if ('ok' in mapped) {
@@ -227,7 +227,7 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
   it.each(['', ' \t\n', 0, false, [], {}])('quarantines present invalid run identity %j in both modes', runId => {
     const fact = factFromRead(succeeded);
     fact.result.run_id = runId;
-    for (const mode of ['trigger', 'backfill'] as const) {
+    for (const mode of ['live', 'backfill'] as const) {
       expect(toTypedRunRows(fact, { scenarioId: fact.result.scenario_id, mode })).toEqual({ quarantine: 'run_id_invalid' });
     }
   });
@@ -276,23 +276,32 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
     if ('ok' in mapped) expect(mapped.ok).toMatchObject({ leading_option_id: null, constraint_may_name_leading_option: null });
   });
 
-  it('pins enqueue-only bounded lock handling, compact terminal storage, and recoverable claims', () => {
-    const handlers = [...migration.matchAll(/EXCEPTION WHEN ([^\n]+) THEN/g)].map(match => match[1]);
-    expect(handlers).toEqual(['lock_not_available']);
-    const trigger = migration.match(/CREATE FUNCTION public\.v5_handler_facts_enqueue_run\(\)([\s\S]*?)\$\$;/)?.[1];
-    expect(trigger).toContain("SET lock_timeout = '50ms'");
-    expect(trigger).not.toMatch(/\bSELECT\b|analysis_runs|analysis_run_options|analysis_run_quarantine/);
-    expect(migration).toContain('FOR UPDATE OF h SKIP LOCKED');
-    expect(migration).toContain('UNION');
-    expect(migration).not.toContain('CREATE FUNCTION public.analysis_run_from_fact');
-    expect(migration).not.toContain('CREATE FUNCTION public.backfill_analysis_runs');
-    expect(migration).not.toContain('CREATE VIEW public.latest_successful_run');
+  it('adds only objects, with compact terminal storage and bounded durable watermark ranges', () => {
+    expect(migration).not.toMatch(/CREATE TRIGGER|CREATE TABLE public\.analysis_run_queue|ALTER TABLE public\.(v5_handler_facts|scenarios)/);
+    expect(migration).not.toMatch(/REFERENCES public\.(v5_handler_facts|scenarios)/);
+    expect(migration).toContain('FOR UPDATE SKIP LOCKED');
+    expect(migration).toContain('WITH fact_window AS MATERIALIZED');
+    expect(migration).toContain('(h.created_at, h.id) > (s.processed_at, s.processed_id)');
+    expect(migration).toContain('ORDER BY h.created_at, h.id LIMIT p_sweep_limit');
+    expect(migration).toContain('LEAST(failure_count+1,5)');
+    expect(migration).toContain('pg_stat_activity');
     const quarantineDefinition = migration.match(/CREATE TABLE public\.analysis_run_quarantine \(([\s\S]*?)\n\);/)?.[1];
-    expect(quarantineDefinition).toBeDefined();
     expect(quarantineDefinition).not.toMatch(/\braw\b|\bJSONB\b/i);
-    for (const column of ['fact_id', 'scenario_id', 'reason', 'detail', 'seen_at']) expect(quarantineDefinition).toContain(column);
     const rollback = readFileSync(new URL('../../../../supabase/migrations/rollback/20261009010000_phase2_a_typed_runs_rollback.sql.do-not-apply', import.meta.url), 'utf8');
-    expect(rollback.replace(/^--.*$/gm, '').trim().split(';')[0]).toBe('DROP TRIGGER v5_handler_facts_enqueue_run ON public.v5_handler_facts');
+    expect(rollback.replace(/^--.*$/gm, '').trim().split(';')[0]).toBe("SET LOCAL lock_timeout = '3s'");
+  });
+
+  it('separates the exact concurrent-index DDL and rolls it back before transactional objects', () => {
+    const index = readFileSync(new URL('../../../../supabase/migrations/20261009010100_phase2_a_sweep_index.sql', import.meta.url), 'utf8');
+    const rollback = readFileSync(new URL('../../../../supabase/migrations/rollback/20261009010100_phase2_a_sweep_index_rollback.sql.do-not-apply', import.meta.url), 'utf8');
+    const statements = (sql: string) => sql.replace(/^--.*$/gm, '').trim();
+    expect(statements(index)).toBe("SET lock_timeout = '3s';\nCREATE INDEX CONCURRENTLY IF NOT EXISTS analysis_run_facts_sweep_idx ON public.v5_handler_facts (created_at, id) WHERE action_type = 'run_analysis' AND NOT noop;");
+    expect(statements(rollback)).toBe("SET lock_timeout='3s';\nDROP INDEX CONCURRENTLY IF EXISTS public.analysis_run_facts_sweep_idx;");
+    expect(index).toContain('SELECT indisvalid FROM pg_index');
+    expect(migration).toContain('no trigger, no write-blocking DDL; one concurrent index allowed (DL 87114 amendment)');
+    expect(migration).toContain("h.action_type = 'run_analysis' AND NOT h.noop");
+    const mainRollback = readFileSync(new URL('../../../../supabase/migrations/rollback/20261009010000_phase2_a_typed_runs_rollback.sql.do-not-apply', import.meta.url), 'utf8');
+    expect(mainRollback).toContain('FIRST step: run 20261009010100_phase2_a_sweep_index_rollback.sql.do-not-apply');
   });
 
   it('options=[null] quarantines; no derivation-time revision is invented', () => {

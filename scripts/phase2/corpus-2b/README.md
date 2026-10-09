@@ -1,9 +1,11 @@
-30 ordered handler-fact payloads. `fact` is the in-memory `RunAnalysisHandlerFact` carrier; SQL removes `noop` into its real column, exactly as the production serialiser does. The envelope carries test identities, scenario revision and insertion time; those are not invented Run result fields.
+# Typed Run mapper golden corpus
 
-The base is the served `cut9-prod-p1-2-7e3f8fb-readback-run1.json` capture. Summary, probabilities, precision and licence records are retained. As in the existing mapper test/rehearsal, its missing input snapshot is explicitly upgraded with a schema-valid TEST sentinel, never reconstructed historical inputs. Cases change only their named boundary. Enrichment is the schema's unknown record; the 100-comparison stress case retains the bounded sentinel snapshot (the snapshot schema permits at most 50 sent options). It tests derivation size, not producer semantic consistency.
-
-Run `node --import tsx scripts/phase2/parity-2b.ts` to regenerate `expected.json`. From the repository root, on the local container with Phase 2(a) applied, run `psql -X -qAt -f scripts/phase2/parity-2b.sql > /tmp/parity-2b-actual.json`. Compare parsed JSON with expected.json, or canonicalise both using `jq -S .` before diffing. The SQL rolls back every corpus write and prints only the canonical result to stdout.
-
-The comparison includes all derived run/option fields except database-generated `created_at`, and all quarantine reference fields except generated `id`/`seen_at`. Diagnostic wording differs between Zod/TS and PostgreSQL; both scripts map only recognised diagnostics to explicit reason codes, and throw on anything unknown. SQL preserves the actual diagnostic in its quarantine table. Duplicate IDs are modelled in insertion order with the same all-or-nothing PK rule. Legacy missing/null identities quarantine in trigger mode; refusal markers derive and quarantine nothing. Backfill legacy policy is covered by the existing test and rehearsal.
-
-The selector parity row runs the same corpus through this quarantine/duplicate boundary and compares the surviving source facts with the typed reader. It does not assert parity for raw malformed facts: `HandlerFactSchema` accepts timestamp strings which the pure lexical selector cannot validate, whereas the mapper quarantines them. All corpus derivations share revision 7; this row does not assert that revision-first typed ordering equals timestamp-first fact selection across different revisions or tied Run IDs. The typed reader stays dormant.
+31 real HandlerFact-shaped cases feed the ONE TS mapper in `parity-2b.ts`.
+`expected.json` pins canonical rows and quarantine decisions, including null
+snapshot options. The in-process vitest row reproduces it byte for byte.
+There is no SQL mapper or SQL parity script. Database storage is rehearsed
+with TS-generated data in `rehearse-a-fixture.sql`, not another derivation.
+Duplicate run IDs follow the storage uniqueness rule. Refusal markers are
+not Runs; the sweep records a compact terminal skipped disposition so they
+cannot starve later facts. Missing legacy identity policy remains explicit
+in mapper tests. No database-derived current revision is substituted.

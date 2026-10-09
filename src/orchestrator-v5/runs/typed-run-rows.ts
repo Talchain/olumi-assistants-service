@@ -68,7 +68,7 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
 export interface TypedRunRowsContext {
   readonly scenarioId: string;
   /** Refusal markers without identity are not Runs; other absent identity quarantines live and skips backfill. */
-  readonly mode?: 'trigger' | 'backfill';
+  readonly mode?: 'live' | 'backfill';
   /** Only the identity of the graph this frozen Run evaluated, when attested by the caller. */
   readonly graphIdentityHash?: string | null;
 }
@@ -85,7 +85,7 @@ export interface TypedRunOptionRow {
   readonly driver: RecordValue | null;
 }
 
-/** Reference mapping for the SQL trigger; SQL owns scenario/user/revision/fact_id and the option rows' run_id. */
+/** The ONE mapping; storage RPCs add source identity and insertion metadata. */
 export interface TypedRunRows {
   readonly run_id: string;
   /** No evaluated revision exists in RunAnalysisResultSchema yet (commit B owns stamping it). */
