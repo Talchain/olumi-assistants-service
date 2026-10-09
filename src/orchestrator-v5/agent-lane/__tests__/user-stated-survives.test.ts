@@ -111,9 +111,7 @@ it('served property census', async () => {
   expect(corpus).toHaveLength(116); expect(r2).toHaveLength(8);
   const counts: Record<string, number> = {};
   const ids: Record<string, string[]> = {};
-  for (const row of [...r2, ...corpus]) { const s = await replay(row); ids[row.id] = losses(row, s.graph, s.result); counts[row.id] = ids[row.id]!.length; if (ids[row.id]!.length) fs.writeFileSync(`/private/tmp/s7-r3-residual-${slugId(row.id)}.json`, JSON.stringify({ row, ...s }, null, 2)); }
-  fs.writeFileSync('/private/tmp/s7-user-stated-counts.json', JSON.stringify(counts, null, 2));
-  fs.writeFileSync('/private/tmp/s7-user-stated-ids.json', JSON.stringify(ids, null, 2));
+  for (const row of [...r2, ...corpus]) { const s = await replay(row); ids[row.id] = losses(row, s.graph, s.result); counts[row.id] = ids[row.id]!.length; }
   console.log('USER-STATED LOSS', JSON.stringify(counts));
   const failing = Object.entries(counts).filter(([,n]) => n > 0).map(([id]) => id);
   const baseline = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../scripts/ci/user-stated-survives-baseline.json'), 'utf8')) as Baseline;
@@ -220,7 +218,6 @@ function additionRow(baseline: number | null, known: boolean, stock: boolean): R
 it('Science af: flow count stores 2 with no baseline ask; stock stores user 8 + 2 = 10', async () => {
   for (const stock of [false, true]) {
     const row = additionRow(stock ? 8 : 0, true, stock); const s = await replay(row);
-    fs.writeFileSync(`/private/tmp/s7-r3-${stock ? 'stock' : 'flow'}-served.json`, JSON.stringify({ row, ...s }, null, 2));
     const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
     const factorId = stock ? 'team_headcount' : 'senior_hires';
     expect((option?.interventions as Record<string, Rec>)[factorId]).toMatchObject({ raw_value: stock ? 10 : 2, source: 'brief_extraction' });
