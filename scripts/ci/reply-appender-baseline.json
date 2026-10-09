@@ -1,0 +1,1436 @@
+[
+  {
+    "name": "cantYet",
+    "key": "src/orchestrator-v5/agent-lane/actions/handlers.ts#declinedReply->cantYet",
+    "path": "live",
+    "reason": "declinedReply still consumes cantYet's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "money",
+    "key": "src/orchestrator-v5/agent-lane/break-even.ts#goalNotCheckedLine->money",
+    "path": "live",
+    "reason": "goalNotCheckedLine still consumes money's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "sayGoalChange",
+    "key": "src/orchestrator-v5/agent-lane/break-even.ts#goalNotCheckedLine->sayGoalChange",
+    "path": "live",
+    "reason": "goalNotCheckedLine still consumes sayGoalChange's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "thresholdReasonLine",
+    "key": "src/orchestrator-v5/agent-lane/break-even.ts#goalNotCheckedLine->thresholdReasonLine",
+    "path": "live",
+    "reason": "goalNotCheckedLine still consumes thresholdReasonLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "thresholdReasonSentence",
+    "key": "src/orchestrator-v5/agent-lane/break-even.ts#thresholdReasonLine->thresholdReasonSentence",
+    "path": "live",
+    "reason": "thresholdReasonLine still consumes thresholdReasonSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "breakEvenLine",
+    "key": "src/orchestrator-v5/agent-lane/break-even.ts#withBreakEvenAnswer->breakEvenLine",
+    "path": "live",
+    "reason": "withBreakEvenAnswer still consumes breakEvenLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "factorStartingValueBasis",
+    "key": "src/orchestrator-v5/agent-lane/conditional-input-basis.ts#conditionalInputBasis->factorStartingValueBasis",
+    "path": "live",
+    "reason": "conditionalInputBasis still consumes factorStartingValueBasis's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decisionInputLines",
+    "key": "src/orchestrator-v5/agent-lane/decision-input-ask.ts#withA7AfterGate->decisionInputLines",
+    "path": "live",
+    "reason": "withA7AfterGate still consumes decisionInputLines's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "agentNoLeaderSentence",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->agentNoLeaderSentence",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes agentNoLeaderSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "factorReviewPressLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->factorReviewPressLine",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes factorReviewPressLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "fragileLinkLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->fragileLinkLine",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes fragileLinkLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceWithheldForAgent",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->goalChanceWithheldForAgent",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes goalChanceWithheldForAgent's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "str",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->str",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes str's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroReplyLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->treatedAsZeroReplyLine",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes treatedAsZeroReplyLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "unnamedZeroLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->unnamedZeroLine",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes unnamedZeroLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withoutAskedQuestion",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->withoutAskedQuestion",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes withoutAskedQuestion's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "zeroFactorLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->zeroFactorLine",
+    "path": "live",
+    "reason": "decisionReviewFor still consumes zeroFactorLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "andMore",
+    "key": "src/orchestrator-v5/agent-lane/disclosure.ts#valueChangeDisclosures->andMore",
+    "path": "live",
+    "reason": "valueChangeDisclosures still consumes andMore's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "within",
+    "key": "src/orchestrator-v5/agent-lane/disclosure.ts#valueChangeDisclosures->within",
+    "path": "live",
+    "reason": "valueChangeDisclosures still consumes within's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "nameOf",
+    "key": "src/orchestrator-v5/agent-lane/display-ids.ts#withoutProposalIds->nameOf",
+    "path": "live",
+    "reason": "withoutProposalIds still consumes nameOf's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "answer",
+    "key": "src/orchestrator-v5/agent-lane/drawn-link-press.ts#drawnLinkPress->answer",
+    "path": "live",
+    "reason": "drawnLinkPress still consumes answer's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "runAgentTurn",
+    "key": "src/orchestrator-v5/agent-lane/drawn-link-press.ts#drawnLinkPress->runAgentTurn",
+    "path": "live",
+    "reason": "drawnLinkPress still consumes runAgentTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withStop",
+    "key": "src/orchestrator-v5/agent-lane/first-analysis.ts#firstAnalysisSentence->withStop",
+    "path": "live",
+    "reason": "firstAnalysisSentence still consumes withStop's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "edited",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-driver-egress.ts#withoutDriverAbsenceClaimsAtEgress->edited",
+    "path": "live",
+    "reason": "withoutDriverAbsenceClaimsAtEgress still consumes edited's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "narratorCountGuard",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts#withScreenLinesOwed->narratorCountGuard",
+    "path": "live",
+    "reason": "withScreenLinesOwed still consumes narratorCountGuard's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "outsideShortfallUnits",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts#withScreenLinesOwed->outsideShortfallUnits",
+    "path": "live",
+    "reason": "withScreenLinesOwed still consumes outsideShortfallUnits's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "removeSpread",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts#withScreenLinesOwed->removeSpread",
+    "path": "live",
+    "reason": "withScreenLinesOwed still consumes removeSpread's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceSayFromThisTurn",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceLineOwed->goalChanceSayFromThisTurn",
+    "path": "live",
+    "reason": "goalChanceLineOwed still consumes goalChanceSayFromThisTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withheldOpeningForGraph",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceLineOwed->withheldOpeningForGraph",
+    "path": "live",
+    "reason": "goalChanceLineOwed still consumes withheldOpeningForGraph's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceFromWarnings",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->goalChanceFromWarnings",
+    "path": "live",
+    "reason": "goalChanceWithheldForAgent still consumes goalChanceFromWarnings's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingReplyText",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->guidedSizingReplyText",
+    "path": "live",
+    "reason": "Guided words and progress still enter the prose carrier instead of a dedicated typed sizing input."
+  },
+  {
+    "name": "legacyGuidedSizingReplyText",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->legacyGuidedSizingReplyText",
+    "path": "live",
+    "reason": "goalChanceWithheldForAgent still consumes legacyGuidedSizingReplyText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "levelAsk",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->levelAsk",
+    "path": "live",
+    "reason": "goalChanceWithheldForAgent still consumes levelAsk's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withheldOpeningForGraph",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->withheldOpeningForGraph",
+    "path": "live",
+    "reason": "goalChanceWithheldForAgent still consumes withheldOpeningForGraph's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withoutStaleGuidedSizingWords",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->withoutStaleGuidedSizingWords",
+    "path": "live",
+    "reason": "goalChanceWithheldForAgent still consumes withoutStaleGuidedSizingWords's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingSentence",
+    "key": "src/orchestrator-v5/agent-lane/guided-sizing.ts#guidedSizingReplyText->guidedSizingSentence",
+    "path": "live",
+    "reason": "guidedSizingReplyText still consumes guidedSizingSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "knownSafeEnvelope",
+    "key": "src/orchestrator-v5/agent-lane/leader-final-egress.ts#enforceLeaderLicenceAtFinalEgress->knownSafeEnvelope",
+    "path": "live",
+    "reason": "enforceLeaderLicenceAtFinalEgress still consumes knownSafeEnvelope's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "appendLeftOutOptionCorrections",
+    "key": "src/orchestrator-v5/agent-lane/left-out-option-egress.ts#withLeftOutOptionCorrectionAtEgress->appendLeftOutOptionCorrections",
+    "path": "live",
+    "reason": "withLeftOutOptionCorrectionAtEgress still consumes appendLeftOutOptionCorrections's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "labelOf",
+    "key": "src/orchestrator-v5/agent-lane/link-size-ask.ts#linkSizeAsk->labelOf",
+    "path": "live",
+    "reason": "linkSizeAsk still consumes labelOf's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "oneSourceUnit",
+    "key": "src/orchestrator-v5/agent-lane/link-size-ask.ts#linkSizeAsk->oneSourceUnit",
+    "path": "live",
+    "reason": "linkSizeAsk still consumes oneSourceUnit's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "quoted",
+    "key": "src/orchestrator-v5/agent-lane/link-size-ask.ts#linkSizeAsk->quoted",
+    "path": "live",
+    "reason": "linkSizeAsk still consumes quoted's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "targetUnitWords",
+    "key": "src/orchestrator-v5/agent-lane/link-size-ask.ts#linkSizeAsk->targetUnitWords",
+    "path": "live",
+    "reason": "linkSizeAsk still consumes targetUnitWords's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "unavailableTurn",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/method-turn.ts#methodTurnForReadback->unavailableTurn",
+    "path": "live",
+    "reason": "methodTurnForReadback still consumes unavailableTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "composedSettle",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/method-turn.ts#settleMethodTurn->composedSettle",
+    "path": "live",
+    "reason": "settleMethodTurn still consumes composedSettle's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "fallback",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/method-turn.ts#settleMethodTurn->fallback",
+    "path": "live",
+    "reason": "settleMethodTurn still consumes fallback's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "composeStructuralChallengeReply",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.ts#structuralChallengeTurnFor->composeStructuralChallengeReply",
+    "path": "live",
+    "reason": "structuralChallengeTurnFor still consumes composeStructuralChallengeReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "structuralChallengeRefusal",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.ts#structuralChallengeTurnFor->structuralChallengeRefusal",
+    "path": "live",
+    "reason": "structuralChallengeTurnFor still consumes structuralChallengeRefusal's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "structuralChallengeTurnUnderLicence",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.ts#structuralChallengeTurnFor->structuralChallengeTurnUnderLicence",
+    "path": "live",
+    "reason": "structuralChallengeTurnFor still consumes structuralChallengeTurnUnderLicence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "composeStructuralChallengeReply",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.ts#structuralChallengeTurnUnderLicence->composeStructuralChallengeReply",
+    "path": "live",
+    "reason": "structuralChallengeTurnUnderLicence still consumes composeStructuralChallengeReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "quote",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts#riskHeldReply->quote",
+    "path": "live",
+    "reason": "riskHeldReply still consumes quote's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "risksFallbackReply",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts#settleRisksTurn->risksFallbackReply",
+    "path": "live",
+    "reason": "settleRisksTurn still consumes risksFallbackReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "questionFallbackReply",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts#settleWidenTurn->questionFallbackReply",
+    "path": "live",
+    "reason": "settleWidenTurn still consumes questionFallbackReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "questionHeadline",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts#settleWidenTurn->questionHeadline",
+    "path": "live",
+    "reason": "settleWidenTurn still consumes questionHeadline's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "widenDoorReply",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts#settleWidenTurn->widenDoorReply",
+    "path": "live",
+    "reason": "settleWidenTurn still consumes widenDoorReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "widenFallbackReply",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts#settleWidenTurn->widenFallbackReply",
+    "path": "live",
+    "reason": "settleWidenTurn still consumes widenFallbackReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "labelText",
+    "key": "src/orchestrator-v5/agent-lane/no-direct-link.ts#noDirectLinkFigureReply->labelText",
+    "path": "live",
+    "reason": "noDirectLinkFigureReply still consumes labelText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "noSuchLinkUserWords",
+    "key": "src/orchestrator-v5/agent-lane/no-direct-link.ts#noDirectLinkFigureReply->noSuchLinkUserWords",
+    "path": "live",
+    "reason": "noDirectLinkFigureReply still consumes noSuchLinkUserWords's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "heldChangeLabel",
+    "key": "src/orchestrator-v5/agent-lane/proposal-object/record.ts#heldChangeName->heldChangeLabel",
+    "path": "live",
+    "reason": "heldChangeName still consumes heldChangeLabel's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "left",
+    "key": "src/orchestrator-v5/agent-lane/proposal-object/reply.ts#userEditsReceipt->left",
+    "path": "live",
+    "reason": "userEditsReceipt still consumes left's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "sayFigureAsWritten",
+    "key": "src/orchestrator-v5/agent-lane/proposal-object/reply.ts#userEditsReceipt->sayFigureAsWritten",
+    "path": "live",
+    "reason": "userEditsReceipt still consumes sayFigureAsWritten's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "moreChangesLine",
+    "key": "src/orchestrator-v5/agent-lane/rerun-explanation.ts#rerunExplanationPlan->moreChangesLine",
+    "path": "live",
+    "reason": "rerunExplanationPlan still consumes moreChangesLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "moreRecordedLine",
+    "key": "src/orchestrator-v5/agent-lane/rerun-explanation.ts#rerunExplanationPlan->moreRecordedLine",
+    "path": "live",
+    "reason": "rerunExplanationPlan still consumes moreRecordedLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroLine",
+    "key": "src/orchestrator-v5/agent-lane/root-line.ts#treatedAsZeroReplyLine->treatedAsZeroLine",
+    "path": "live",
+    "reason": "treatedAsZeroReplyLine still consumes treatedAsZeroLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroUnnamedMany",
+    "key": "src/orchestrator-v5/agent-lane/root-line.ts#treatedAsZeroReplyLine->treatedAsZeroUnnamedMany",
+    "path": "live",
+    "reason": "treatedAsZeroReplyLine still consumes treatedAsZeroUnnamedMany's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "recoverNarration",
+    "key": "src/orchestrator-v5/agent-lane/runtime/agent-loop.ts#runAgentTurn->recoverNarration",
+    "path": "live",
+    "reason": "runAgentTurn still consumes recoverNarration's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "textOf",
+    "key": "src/orchestrator-v5/agent-lane/runtime/agent-loop.ts#runAgentTurn->textOf",
+    "path": "live",
+    "reason": "runAgentTurn still consumes textOf's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "sendableQuery",
+    "key": "src/orchestrator-v5/agent-lane/runtime/public-research.ts#approvedQueryOf->sendableQuery",
+    "path": "live",
+    "reason": "approvedQueryOf still consumes sendableQuery's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "linkSizeAsk",
+    "key": "src/orchestrator-v5/agent-lane/strengthen-press.ts#strengthenCardFor->linkSizeAsk",
+    "path": "live",
+    "reason": "strengthenCardFor still consumes linkSizeAsk's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "unmask",
+    "key": "src/orchestrator-v5/agent-lane/write-outcome.ts#withoutAgentDirections->unmask",
+    "path": "live",
+    "reason": "withoutAgentDirections still consumes unmask's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "<ArrayLiteralExpression>.filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler-><ArrayLiteralExpression>.filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes <ArrayLiteralExpression>.filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "<ArrayLiteralExpression>.filter().join",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler-><ArrayLiteralExpression>.filter().join",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes <ArrayLiteralExpression>.filter().join's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "<inline>",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler-><inline>",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes <inline>'s legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "<NewExpression>.values",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler-><NewExpression>.values",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes <NewExpression>.values's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "<TemplateExpression>.trim",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler-><TemplateExpression>.trim",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes <TemplateExpression>.trim's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "actionFactsOf",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->actionFactsOf",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes actionFactsOf's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "approvedQueryOf",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->approvedQueryOf",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes approvedQueryOf's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "callModelFor()",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->callModelFor()",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes callModelFor()'s legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "collectTurnStateFacts",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->collectTurnStateFacts",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes collectTurnStateFacts's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "composeDirectAnswerResponse",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->composeDirectAnswerResponse",
+    "path": "live",
+    "reason": "The legacy response envelope still owns reply bytes before the typed composer runs."
+  },
+  {
+    "name": "composeRerunExplanation",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->composeRerunExplanation",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes composeRerunExplanation's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "conditionalInputBasis",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->conditionalInputBasis",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes conditionalInputBasis's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decidePress",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->decidePress",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes decidePress's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decisionLines.filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->decisionLines.filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes decisionLines.filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decisionLinesAskedOnce",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->decisionLinesAskedOnce",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes decisionLinesAskedOnce's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decisionReviewFor",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->decisionReviewFor",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes decisionReviewFor's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "declinedReply",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->declinedReply",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes declinedReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "disclosuresFor",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->disclosuresFor",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes disclosuresFor's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "dispatchTool",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->dispatchTool",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes dispatchTool's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "drawnLinkPress",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->drawnLinkPress",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes drawnLinkPress's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "editsRefusedSentence",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->editsRefusedSentence",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes editsRefusedSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "enforceAgentLaneLeaderClaimsAtWire",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->enforceAgentLaneLeaderClaimsAtWire",
+    "path": "live",
+    "reason": "The wire licence gate still edits reply prose instead of producing only typed claim constraints."
+  },
+  {
+    "name": "enforceLeaderLicenceAtFinalEgress",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->enforceLeaderLicenceAtFinalEgress",
+    "path": "live",
+    "reason": "The final leader licence gate still rewrites the envelope before typed composition."
+  },
+  {
+    "name": "explainRobustnessSentence",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->explainRobustnessSentence",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes explainRobustnessSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "finaliseV5Response",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->finaliseV5Response",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes finaliseV5Response's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "firstAnalysisSentence",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->firstAnalysisSentence",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes firstAnalysisSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "freshScopeIssues.find",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->freshScopeIssues.find",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes freshScopeIssues.find's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceLineOwed",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->goalChanceLineOwed",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes goalChanceLineOwed's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceScreenLinesForAgent",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->goalChanceScreenLinesForAgent",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes goalChanceScreenLinesForAgent's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceWithheldForAgent",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->goalChanceWithheldForAgent",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes goalChanceWithheldForAgent's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalNotCheckedLine",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->goalNotCheckedLine",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes goalNotCheckedLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guarded.text.trim",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->guarded.text.trim",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes guarded.text.trim's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingForRun",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->guidedSizingForRun",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes guidedSizingForRun's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingProgress",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->guidedSizingProgress",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes guidedSizingProgress's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingReplyText",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->guidedSizingReplyText",
+    "path": "live",
+    "reason": "Guided words and progress still enter the prose carrier instead of a dedicated typed sizing input."
+  },
+  {
+    "name": "heldAtStart.filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->heldAtStart.filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes heldAtStart.filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "heldChangeLabel",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->heldChangeLabel",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes heldChangeLabel's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "heldChangeName",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->heldChangeName",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes heldChangeName's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "heldDeclineSentence",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->heldDeclineSentence",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes heldDeclineSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "heldLapseSentence",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->heldLapseSentence",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes heldLapseSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "hopLimitText",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->hopLimitText",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes hopLimitText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "identityAskLineOwed",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->identityAskLineOwed",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes identityAskLineOwed's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "identityIssuedText",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->identityIssuedText",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes identityIssuedText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "interpretationUnavailableText",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->interpretationUnavailableText",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes interpretationUnavailableText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "linkSizeAsk",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->linkSizeAsk",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes linkSizeAsk's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "liveHolds.filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->liveHolds.filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes liveHolds.filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "liveHolds.find",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->liveHolds.find",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes liveHolds.find's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "methodTurnForReadback",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->methodTurnForReadback",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes methodTurnForReadback's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "narrateWriteOutcome",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->narrateWriteOutcome",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes narrateWriteOutcome's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "narration.text.split",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->narration.text.split",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes narration.text.split's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "narration.text.split().join",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->narration.text.split().join",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes narration.text.split().join's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "noDirectLinkFigureReply",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->noDirectLinkFigureReply",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes noDirectLinkFigureReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "notAdoptedLine",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->notAdoptedLine",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes notAdoptedLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "otherHolds.slice",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->otherHolds.slice",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes otherHolds.slice's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "otherHolds.slice().map",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->otherHolds.slice().map",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes otherHolds.slice().map's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "out.filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->out.filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes out.filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "out.filter().flatMap",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->out.filter().flatMap",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes out.filter().flatMap's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "out.filter().flatMap().filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->out.filter().flatMap().filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes out.filter().flatMap().filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "out.filter().flatMap().filter().map",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->out.filter().flatMap().filter().map",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes out.filter().flatMap().filter().map's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "out.filter().flatMap().filter().map().join",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->out.filter().flatMap().filter().map().join",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes out.filter().flatMap().filter().map().join's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "placeExplainCaveat",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->placeExplainCaveat",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes placeExplainCaveat's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "postWriteAskLine",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->postWriteAskLine",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes postWriteAskLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "postWriteReadinessLine",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->postWriteReadinessLine",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes postWriteReadinessLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "press.legacyCandidates.filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->press.legacyCandidates.filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes press.legacyCandidates.filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "readPremortemProduction",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->readPremortemProduction",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes readPremortemProduction's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "readResearchResponse",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->readResearchResponse",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes readResearchResponse's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "readRunInterpretation",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->readRunInterpretation",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes readRunInterpretation's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "reconciled.lapsed.map",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->reconciled.lapsed.map",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes reconciled.lapsed.map's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "reconcileHeldProposals",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->reconcileHeldProposals",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes reconcileHeldProposals's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "replaced.map",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->replaced.map",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes replaced.map's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "rerunExplanationPlan",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->rerunExplanationPlan",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes rerunExplanationPlan's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "researchReplyText",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->researchReplyText",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes researchReplyText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "riskHeldReply",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->riskHeldReply",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes riskHeldReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "risksTurnForReadback",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->risksTurnForReadback",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes risksTurnForReadback's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "runAgentTurn",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->runAgentTurn",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes runAgentTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "setAside.map",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->setAside.map",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes setAside.map's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "settleMethodTurn",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->settleMethodTurn",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes settleMethodTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "settleRisksTurn",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->settleRisksTurn",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes settleRisksTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "settleWidenTurn",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->settleWidenTurn",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes settleWidenTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "staleResultLine",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->staleResultLine",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes staleResultLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "store.readMostRecentPendingActions",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->store.readMostRecentPendingActions",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes store.readMostRecentPendingActions's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "store.readMostRecentPendingActions().filter",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->store.readMostRecentPendingActions().filter",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes store.readMostRecentPendingActions().filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "strengthenCardFor",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->strengthenCardFor",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes strengthenCardFor's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "String",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->String",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes String's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "structuralChallengeRefusal",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->structuralChallengeRefusal",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes structuralChallengeRefusal's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "structuralChallengeTurnFor",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->structuralChallengeTurnFor",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes structuralChallengeTurnFor's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "structuralChallengeTurnUnderLicence",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->structuralChallengeTurnUnderLicence",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes structuralChallengeTurnUnderLicence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "takeOwedHeldLapses",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->takeOwedHeldLapses",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes takeOwedHeldLapses's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "text.replace",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->text.replace",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes text.replace's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "text.replace().trim",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->text.replace().trim",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes text.replace().trim's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "textAtRest",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->textAtRest",
+    "path": "live",
+    "reason": "The legacy questions-toggle grammar still extracts the at-rest prose used to rebuild this reply."
+  },
+  {
+    "name": "thresholdReasonLine",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->thresholdReasonLine",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes thresholdReasonLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroReplyLine",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->treatedAsZeroReplyLine",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes treatedAsZeroReplyLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "unfinishedAnswerText",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->unfinishedAnswerText",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes unfinishedAnswerText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "userEditsReceipt",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->userEditsReceipt",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes userEditsReceipt's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "valueChangeDisclosures",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->valueChangeDisclosures",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes valueChangeDisclosures's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "whatWouldChangeAnswer",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->whatWouldChangeAnswer",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes whatWouldChangeAnswer's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "widenedRunWordsOf",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->widenedRunWordsOf",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes widenedRunWordsOf's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withA7AfterGate",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withA7AfterGate",
+    "path": "live",
+    "reason": "A7 still folds horizon wording into prose after the gates; its typed composer obligation has not replaced that rewrite."
+  },
+  {
+    "name": "withB3LinesAtRest",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withB3LinesAtRest",
+    "path": "live",
+    "reason": "At-rest questions and basis lines still move through the legacy prose toggle before typed composition."
+  },
+  {
+    "name": "withBreakEvenAnswer",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withBreakEvenAnswer",
+    "path": "live",
+    "reason": "Break-even arithmetic still rewrites the answer prose before its face obligation is supplied."
+  },
+  {
+    "name": "withCellHorizon",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withCellHorizon",
+    "path": "live",
+    "reason": "Cell-owned horizon wording is still deduplicated in reply prose before the composer receives its typed horizon input."
+  },
+  {
+    "name": "withDecisionInputAskDisplay",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withDecisionInputAskDisplay",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes withDecisionInputAskDisplay's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withDisclosures",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withDisclosures",
+    "path": "live",
+    "reason": "Owed disclosures still join the prose carrier; their typed subjects and placement are not all composer inputs yet."
+  },
+  {
+    "name": "withEstimateGoalPointsAtEgress",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withEstimateGoalPointsAtEgress",
+    "path": "live",
+    "reason": "Estimate point classification still edits reply bytes before the composer receives typed chance cells."
+  },
+  {
+    "name": "withLeftOutOptionCorrectionAtEgress",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withLeftOutOptionCorrectionAtEgress",
+    "path": "live",
+    "reason": "Left-out option corrections still append prose instead of supplying typed correction obligations."
+  },
+  {
+    "name": "withoutAgentDirections",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withoutAgentDirections",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes withoutAgentDirections's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withoutDriverAbsenceClaimsAtEgress",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withoutDriverAbsenceClaimsAtEgress",
+    "path": "live",
+    "reason": "Driver-absence claim correction still edits prose instead of supplying a typed correction obligation."
+  },
+  {
+    "name": "withoutProposalIds",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withoutProposalIds",
+    "path": "live",
+    "reason": "Display-id removal remains a prose sanitiser upstream of the typed composer."
+  },
+  {
+    "name": "withResearchControlTruth",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withResearchControlTruth",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes withResearchControlTruth's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withRetainedScopeIssues",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withRetainedScopeIssues",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes withRetainedScopeIssues's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withRunDelta",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withRunDelta",
+    "path": "live",
+    "reason": "agentTurnHandler still consumes withRunDelta's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withScreenLinesOwed",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withScreenLinesOwed",
+    "path": "live",
+    "reason": "Screen-owned chance sentences still enter prose before the composer gets their typed evidence obligations."
+  },
+  {
+    "name": "withWriteOutcome",
+    "key": "src/routes/agent-v1-turn.ts#agentTurnHandler->withWriteOutcome",
+    "path": "live",
+    "reason": "Write status still joins the prose carrier instead of entering the composer as a typed receipt."
+  },
+  {
+    "name": "biasCheckReply",
+    "key": "src/orchestrator-v5/agent-lane/actions/handlers.ts#decidePress->biasCheckReply",
+    "path": "replay",
+    "reason": "decidePress still consumes biasCheckReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "cantYet",
+    "key": "src/orchestrator-v5/agent-lane/actions/handlers.ts#decidePress->cantYet",
+    "path": "replay",
+    "reason": "decidePress still consumes cantYet's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "estimateReply",
+    "key": "src/orchestrator-v5/agent-lane/actions/handlers.ts#decidePress->estimateReply",
+    "path": "replay",
+    "reason": "decidePress still consumes estimateReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "gapReply",
+    "key": "src/orchestrator-v5/agent-lane/actions/handlers.ts#decidePress->gapReply",
+    "path": "replay",
+    "reason": "decidePress still consumes gapReply's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "thresholdReasonSentence",
+    "key": "src/orchestrator-v5/agent-lane/break-even.ts#thresholdReasonLine->thresholdReasonSentence",
+    "path": "replay",
+    "reason": "thresholdReasonLine still consumes thresholdReasonSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "breakEvenLine",
+    "key": "src/orchestrator-v5/agent-lane/break-even.ts#withBreakEvenAnswer->breakEvenLine",
+    "path": "replay",
+    "reason": "withBreakEvenAnswer still consumes breakEvenLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "factorStartingValueBasis",
+    "key": "src/orchestrator-v5/agent-lane/conditional-input-basis.ts#conditionalInputBasis->factorStartingValueBasis",
+    "path": "replay",
+    "reason": "conditionalInputBasis still consumes factorStartingValueBasis's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decisionInputLines",
+    "key": "src/orchestrator-v5/agent-lane/decision-input-ask.ts#withA7AfterGate->decisionInputLines",
+    "path": "replay",
+    "reason": "withA7AfterGate still consumes decisionInputLines's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "agentNoLeaderSentence",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->agentNoLeaderSentence",
+    "path": "replay",
+    "reason": "decisionReviewFor still consumes agentNoLeaderSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "factorReviewPressLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->factorReviewPressLine",
+    "path": "replay",
+    "reason": "decisionReviewFor still consumes factorReviewPressLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "fragileLinkLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->fragileLinkLine",
+    "path": "replay",
+    "reason": "decisionReviewFor still consumes fragileLinkLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroReplyLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->treatedAsZeroReplyLine",
+    "path": "replay",
+    "reason": "decisionReviewFor still consumes treatedAsZeroReplyLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "unnamedZeroLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->unnamedZeroLine",
+    "path": "replay",
+    "reason": "decisionReviewFor still consumes unnamedZeroLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withoutAskedQuestion",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->withoutAskedQuestion",
+    "path": "replay",
+    "reason": "decisionReviewFor still consumes withoutAskedQuestion's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "zeroFactorLine",
+    "key": "src/orchestrator-v5/agent-lane/decision-review-press.ts#decisionReviewFor->zeroFactorLine",
+    "path": "replay",
+    "reason": "decisionReviewFor still consumes zeroFactorLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "nameOf",
+    "key": "src/orchestrator-v5/agent-lane/display-ids.ts#withoutProposalIds->nameOf",
+    "path": "replay",
+    "reason": "withoutProposalIds still consumes nameOf's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "narratorCountGuard",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts#withScreenLinesOwed->narratorCountGuard",
+    "path": "replay",
+    "reason": "withScreenLinesOwed still consumes narratorCountGuard's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "outsideShortfallUnits",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts#withScreenLinesOwed->outsideShortfallUnits",
+    "path": "replay",
+    "reason": "withScreenLinesOwed still consumes outsideShortfallUnits's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "removeSpread",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts#withScreenLinesOwed->removeSpread",
+    "path": "replay",
+    "reason": "withScreenLinesOwed still consumes removeSpread's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceSayFromThisTurn",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceLineOwed->goalChanceSayFromThisTurn",
+    "path": "replay",
+    "reason": "goalChanceLineOwed still consumes goalChanceSayFromThisTurn's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withheldOpeningForGraph",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceLineOwed->withheldOpeningForGraph",
+    "path": "replay",
+    "reason": "goalChanceLineOwed still consumes withheldOpeningForGraph's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceFromWarnings",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->goalChanceFromWarnings",
+    "path": "replay",
+    "reason": "goalChanceWithheldForAgent still consumes goalChanceFromWarnings's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingReplyText",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->guidedSizingReplyText",
+    "path": "replay",
+    "reason": "Guided words and progress still enter the prose carrier instead of a dedicated typed sizing input."
+  },
+  {
+    "name": "legacyGuidedSizingReplyText",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->legacyGuidedSizingReplyText",
+    "path": "replay",
+    "reason": "goalChanceWithheldForAgent still consumes legacyGuidedSizingReplyText's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "levelAsk",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->levelAsk",
+    "path": "replay",
+    "reason": "goalChanceWithheldForAgent still consumes levelAsk's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withheldOpeningForGraph",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->withheldOpeningForGraph",
+    "path": "replay",
+    "reason": "goalChanceWithheldForAgent still consumes withheldOpeningForGraph's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withoutStaleGuidedSizingWords",
+    "key": "src/orchestrator-v5/agent-lane/goal-chance-withheld.ts#goalChanceWithheldForAgent->withoutStaleGuidedSizingWords",
+    "path": "replay",
+    "reason": "goalChanceWithheldForAgent still consumes withoutStaleGuidedSizingWords's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingSentence",
+    "key": "src/orchestrator-v5/agent-lane/guided-sizing.ts#guidedSizingReplyText->guidedSizingSentence",
+    "path": "replay",
+    "reason": "guidedSizingReplyText still consumes guidedSizingSentence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "structuralChallengeTurnUnderLicence",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.ts#structuralChallengeReplay->structuralChallengeTurnUnderLicence",
+    "path": "replay",
+    "reason": "structuralChallengeReplay still consumes structuralChallengeTurnUnderLicence's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "unbound",
+    "key": "src/orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.ts#structuralChallengeReplay->unbound",
+    "path": "replay",
+    "reason": "structuralChallengeReplay still consumes unbound's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroLine",
+    "key": "src/orchestrator-v5/agent-lane/root-line.ts#treatedAsZeroReplyLine->treatedAsZeroLine",
+    "path": "replay",
+    "reason": "treatedAsZeroReplyLine still consumes treatedAsZeroLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroUnnamedMany",
+    "key": "src/orchestrator-v5/agent-lane/root-line.ts#treatedAsZeroReplyLine->treatedAsZeroUnnamedMany",
+    "path": "replay",
+    "reason": "treatedAsZeroReplyLine still consumes treatedAsZeroUnnamedMany's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "conditionalInputBasis",
+    "key": "src/routes/agent-v1-turn.ts#replayed->conditionalInputBasis",
+    "path": "replay",
+    "reason": "replayed still consumes conditionalInputBasis's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decidePress",
+    "key": "src/routes/agent-v1-turn.ts#replayed->decidePress",
+    "path": "replay",
+    "reason": "replayed still consumes decidePress's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decisionLinesAskedOnce",
+    "key": "src/routes/agent-v1-turn.ts#replayed->decisionLinesAskedOnce",
+    "path": "replay",
+    "reason": "replayed still consumes decisionLinesAskedOnce's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "decisionReviewFor",
+    "key": "src/routes/agent-v1-turn.ts#replayed->decisionReviewFor",
+    "path": "replay",
+    "reason": "replayed still consumes decisionReviewFor's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceLineOwed",
+    "key": "src/routes/agent-v1-turn.ts#replayed->goalChanceLineOwed",
+    "path": "replay",
+    "reason": "replayed still consumes goalChanceLineOwed's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "goalChanceWithheldForAgent",
+    "key": "src/routes/agent-v1-turn.ts#replayed->goalChanceWithheldForAgent",
+    "path": "replay",
+    "reason": "replayed still consumes goalChanceWithheldForAgent's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "guidedSizingReplyText",
+    "key": "src/routes/agent-v1-turn.ts#replayed->guidedSizingReplyText",
+    "path": "replay",
+    "reason": "Guided words and progress still enter the prose carrier instead of a dedicated typed sizing input."
+  },
+  {
+    "name": "identityAskLineFor",
+    "key": "src/routes/agent-v1-turn.ts#replayed->identityAskLineFor",
+    "path": "replay",
+    "reason": "replayed still consumes identityAskLineFor's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "indexGoalWeightsMessages",
+    "key": "src/routes/agent-v1-turn.ts#replayed->indexGoalWeightsMessages",
+    "path": "replay",
+    "reason": "replayed still consumes indexGoalWeightsMessages's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "measuredWhatChanges.get",
+    "key": "src/routes/agent-v1-turn.ts#replayed->measuredWhatChanges.get",
+    "path": "replay",
+    "reason": "replayed still consumes measuredWhatChanges.get's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "owedNow.filter",
+    "key": "src/routes/agent-v1-turn.ts#replayed->owedNow.filter",
+    "path": "replay",
+    "reason": "replayed still consumes owedNow.filter's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "presentedStructuralChallenges.get",
+    "key": "src/routes/agent-v1-turn.ts#replayed->presentedStructuralChallenges.get",
+    "path": "replay",
+    "reason": "replayed still consumes presentedStructuralChallenges.get's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "structuralChallengeReplay",
+    "key": "src/routes/agent-v1-turn.ts#replayed->structuralChallengeReplay",
+    "path": "replay",
+    "reason": "replayed still consumes structuralChallengeReplay's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "thresholdReasonLine",
+    "key": "src/routes/agent-v1-turn.ts#replayed->thresholdReasonLine",
+    "path": "replay",
+    "reason": "replayed still consumes thresholdReasonLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "treatedAsZeroReplyLine",
+    "key": "src/routes/agent-v1-turn.ts#replayed->treatedAsZeroReplyLine",
+    "path": "replay",
+    "reason": "replayed still consumes treatedAsZeroReplyLine's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "whatWouldChangeAnswer",
+    "key": "src/routes/agent-v1-turn.ts#replayed->whatWouldChangeAnswer",
+    "path": "replay",
+    "reason": "replayed still consumes whatWouldChangeAnswer's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withA7AfterGate",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withA7AfterGate",
+    "path": "replay",
+    "reason": "A7 still folds horizon wording into prose after the gates; its typed composer obligation has not replaced that rewrite."
+  },
+  {
+    "name": "withBreakEvenAnswer",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withBreakEvenAnswer",
+    "path": "replay",
+    "reason": "Break-even arithmetic still rewrites the answer prose before its face obligation is supplied."
+  },
+  {
+    "name": "withCellHorizon",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withCellHorizon",
+    "path": "replay",
+    "reason": "Cell-owned horizon wording is still deduplicated in reply prose before the composer receives its typed horizon input."
+  },
+  {
+    "name": "withDisclosures",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withDisclosures",
+    "path": "replay",
+    "reason": "Owed disclosures still join the prose carrier; their typed subjects and placement are not all composer inputs yet."
+  },
+  {
+    "name": "withoutAskedQuestion",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withoutAskedQuestion",
+    "path": "replay",
+    "reason": "replayed still consumes withoutAskedQuestion's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withoutProposalIds",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withoutProposalIds",
+    "path": "replay",
+    "reason": "Display-id removal remains a prose sanitiser upstream of the typed composer."
+  },
+  {
+    "name": "withRetainedScopeIssues",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withRetainedScopeIssues",
+    "path": "replay",
+    "reason": "replayed still consumes withRetainedScopeIssues's legacy text contribution before shaping; this path has no dedicated typed composer input yet."
+  },
+  {
+    "name": "withScreenLinesOwed",
+    "key": "src/routes/agent-v1-turn.ts#replayed->withScreenLinesOwed",
+    "path": "replay",
+    "reason": "Screen-owned chance sentences still enter prose before the composer gets their typed evidence obligations."
+  }
+]
