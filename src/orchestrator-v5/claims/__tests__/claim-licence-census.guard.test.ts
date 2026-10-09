@@ -21,6 +21,8 @@ import { buildAnalysisResultHeadline } from '../../coaching/analysis-result-head
 import { tippingPointOf, decisionSensitivityOf } from '../../agent-lane/decision-sensitivity.js';
 import { tippingPointCoachingFor } from '../../agent-lane/tipping-point-coaching.js';
 import { buildWinnerNamingReplacement } from '../../compose/winner-naming-egress-guard.js';
+import { DOMINANT_DRIVER_MEASURED_TAIL, hasMeasuredFlipThresholdFor } from '../../compose/lens-selector.js';
+import { deliveredRecordWithThresholdLicence } from '../../../routes/delivered-record-licence.js';
 
 // CI data (scripts/ci), not src: see the note at the end of claim-licence-registry.ts.
 const CLAIM_LICENCE_REGISTRY = JSON.parse(readFileSync(new URL('../../../../scripts/ci/claim-licence-registry.json', import.meta.url), 'utf8')) as readonly ClaimLicenceEntry[];
@@ -187,7 +189,30 @@ const assertOtherRunMismatch = async (): Promise<void> => {
   ] });
   expect(storedClaim(otherSubject.enrichment), 'MISMATCH: old A result cannot supply current A winner').toBe('');
 };
+// #2890: the DOMINANT_DRIVER measured tail. Real witness flip rows; the only measured pair is fac_leeds_site.
+const DD_FLIP = JSON.parse(readFileSync(resolve(root,
+  'tests/fixtures/cross-service/witness-2265-runA.flip-threshold-winner.json'), 'utf8')) as { flip_thresholds: unknown[] };
+const DD_MEASURED = 'fac_leeds_site';
+const DD_OTHER = 'monthly_new_pro_subscribers';
+const ddEnrichment = (status = 'available'): Record<string, unknown> =>
+  ({ flip_thresholds: structuredClone(DD_FLIP.flip_thresholds), flip_thresholds_status: status });
+const ddSaved = (factorId: string) => ({ phase3_blocks: [{ type: 'coaching', target_refs: [{ kind: 'factor', id: factorId, label: 'L' }],
+  body: `L is doing most of the work in this result. ${DOMINANT_DRIVER_MEASURED_TAIL}` }] }) as unknown as Parameters<typeof deliveredRecordWithThresholdLicence>[0];
+const ddReloadBody = (factorId: string, enrichment: Record<string, unknown>): string =>
+  (deliveredRecordWithThresholdLicence(ddSaved(factorId), enrichment).phase3_blocks[0] as { body: string }).body;
+const assertDominantDriverTailMismatch = () => {
+  expect(hasMeasuredFlipThresholdFor(ddEnrichment(), DD_OTHER), 'MISMATCH: a Leeds pair cannot license a subscribers tail').toBe(false);
+  expect(ddReloadBody(DD_OTHER, ddEnrichment()), 'MISMATCH on reload: tail stripped').not.toContain(DOMINANT_DRIVER_MEASURED_TAIL);
+};
 const rowTests: Record<string, () => void | Promise<void>> = {
+  'flip_threshold.dominant_driver.subject': () => {
+    expect(hasMeasuredFlipThresholdFor(ddEnrichment(), DD_MEASURED), 'MATCH: the measured subject').toBe(true);
+    expect(ddReloadBody(DD_MEASURED, ddEnrichment()), 'MATCH on reload: kept').toContain(DOMINANT_DRIVER_MEASURED_TAIL);
+    expect(hasMeasuredFlipThresholdFor(ddEnrichment('unavailable'), DD_MEASURED), 'absent: unavailable').toBe(false);
+    expect(hasMeasuredFlipThresholdFor({}, DD_MEASURED), 'absent: no rows').toBe(false);
+    expect(hasMeasuredFlipThresholdFor(ddEnrichment(), null), 'absent: no typed subject').toBe(false);
+    expect(ddReloadBody(DD_MEASURED, {}), 'absent on reload: tail stripped').not.toContain(DOMINANT_DRIVER_MEASURED_TAIL);
+  },
   'flip_threshold.record': () => {
     const served = JSON.parse(readFileSync(resolve(root,
       'tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json'), 'utf8')) as Json;
@@ -341,6 +366,7 @@ const subjectMismatchRows: Record<string, () => void | Promise<void>> = {
   'chance.record': assertChanceMismatch, 'range.record': assertRangeMismatch, 'driver.record': assertDriverMismatch,
   'horizon.cells': assertSoleGoalMismatch, 'horizon.warning': assertSoleGoalMismatch,
   'sensitivity.record': assertSensitivityMismatch, 'robustness.no_flip': assertOtherRunMismatch,
+  'flip_threshold.dominant_driver.subject': assertDominantDriverTailMismatch,
 };
 
 describe('claim licence discovery and zero-target ratchet', () => {
@@ -428,8 +454,10 @@ describe('claim licence discovery and zero-target ratchet', () => {
       expect(entry.licence, entry.id).toBeNull();
       expect(entry.readerSubjectParameter, entry.id).toBeNull();
     }
-    const dominant = CLAIM_LICENCE_REGISTRY.find(e => e.id === 'compose/lens-selector#BODY_BY_RATIONALE.DOMINANT_DRIVER');
-    expect(dominant?.licence).toBeNull(); // #2890's gate is absent on this base.
+    // #2890 landed: the measured tail is licensed by the subject + Run predicate; the qualitative driver body stays a declared gap.
+    const tail = CLAIM_LICENCE_REGISTRY.find(e => e.id === 'compose/lens-selector#DOMINANT_DRIVER_MEASURED_TAIL');
+    expect(tail?.licence).toContain('hasMeasuredFlipThresholdFor');
+    expect(CLAIM_LICENCE_REGISTRY.find(e => e.id === 'compose/lens-selector#DOMINANT_DRIVER_QUALITATIVE_BODY')?.licence).toBeNull();
   });
 
   it('the licensed headline reads the current run_analysis response, not a stored Run', () => {

@@ -39,7 +39,7 @@
     "compose/flip-threshold-card-row#flipThresholdFallbackBody",
     "compose/lens-selector#BODY_BY_RATIONALE.CLEAR_WINNER_DISCONFIRMATION",
     "compose/lens-selector#BODY_BY_RATIONALE.CONFIDENCE_NEEDS_WORK",
-    "compose/lens-selector#BODY_BY_RATIONALE.DOMINANT_DRIVER",
+    "compose/lens-selector#DOMINANT_DRIVER_QUALITATIVE_BODY",
     "compose/lens-selector#BODY_BY_RATIONALE.DOMINANT_DRIVER_NO_FLIP",
     "compose/lens-selector#BODY_BY_RATIONALE.DOMINANT_FACTOR_DISSENT",
     "compose/lens-selector#BODY_BY_RATIONALE.FLIP_RISK_CORRELATED",

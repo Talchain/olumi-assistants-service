@@ -46,13 +46,7 @@ export type ClaimLicenceEntry = {
 // A passing MISMATCH row proves keyed, sole-goal or Run binding; a parameter name proves nothing.
 // Null bindings are declared gaps, not evidence.
 // selected_current on null/non-claim entries records the required scope, not a grant.
-// TODO #2890, after its factor-bound gate lands (not licensed on this base):
-// { id: 'compose/lens-selector#BODY_BY_RATIONALE.DOMINANT_DRIVER',
-//   owner: 'src/orchestrator-v5/compose/lens-selector.ts#BODY_BY_RATIONALE.DOMINANT_DRIVER',
-//   surface: 'coaching_block', class: 'flip_threshold', subject: 'factor',
-//   binding: { subjectField: 'flip_thresholds[].factor_id', run: 'selected_current' },
-//   readerSubjectParameter: 'factorId', licence: 'hasMeasuredFlipThreshold(enrichment, factorId)',
-//   evidenceRow: 'flip_threshold.dominant_driver.subject' },
+// #2890 landed: DOMINANT_DRIVER_MEASURED_TAIL is licensed (subject + selected Run); see the flip_threshold.dominant_driver.subject row.
 
-/** The 402 owner rows live in the CI data file beside the census discovery script (JSON, outside src): their review hashes and owner paths
+/** The owner rows live in the CI data file beside the census discovery script (JSON, outside src): their review hashes and owner paths
  * are literals that src-wide scan guards (yardstick drift pin, consent-coverage manifest) would otherwise read as mirrors. */
