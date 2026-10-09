@@ -235,7 +235,8 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
   });
 
   it('user_set steady_attested is the month-H chance basis and owes no horizon disclaimer', () => {
-    const graph = graphWith({ horizon_basis: 'steady_attested', provenance: 'user_set' });
+    const graph = graphWith({ horizon_basis: 'steady_attested', provenance: 'user_set',
+      horizon_basis_source: 'user_stated', horizon_basis_months: 12 });
     expect(goalHorizonVerdict(graph)).toBe('steady_attested');
     expect(untestedHorizonLine(graph)).toBe(FULL); // Historical identity remains available to exact-copy normalization.
     expect(untestedHorizonLineForCells(graph, TWO_FIGURES)).toBeNull();
@@ -250,7 +251,8 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
   });
 
   it.each(['ai_inferred', 'from_brief', undefined])('steady_attested with %s provenance still withholds', (provenance) => {
-    const graph = graphWith({ horizon_basis: 'steady_attested', provenance });
+    const graph = graphWith({ horizon_basis: 'steady_attested', provenance,
+      horizon_basis_source: provenance, horizon_basis_months: 12 });
     expect(goalHorizonVerdict(graph)).toBe('withhold');
     expect(untestedHorizonLineForCells(graph, TWO_FIGURES)).toBeNull();
   });
