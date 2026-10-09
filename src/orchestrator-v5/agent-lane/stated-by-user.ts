@@ -167,12 +167,26 @@ export function ceilingTheUserWroteFor(
 /**
  * ⛔ A FIGURE WRITTEN ONLY AS THE GOAL'S TARGET IS NOT ALSO ITS CURRENT LEVEL (R3 #72 5885498117; DL 5885526452 (3);
  * AIQ 5885651301). A current level EQUAL to the goal's own target is the user's only when the brief writes that figure
- * AGAIN, beyond the target's own writing (≥ 2): "£85k MRR … above £85k" is; "aiming for £20,000" is not. Any other
- * level is untouched. Interim rule: the typed quote (today / target / change) is the close (AIQ).
+ * AGAIN, beyond the target's own writing: "£85k MRR … above £85k" is; "aiming for £20,000" is not. Target wording also
+ * excludes a target-only figure when the drafter supplied no target. Repeating only the target does not state today.
  */
 export function levelWrittenApartFromTarget(value: number, unit: unknown, target: unknown, userText: string | null | undefined): boolean {
+  const text = userText ?? '';
+  const writings = findStatedAmounts(text).filter(a => amountIs(a, value, unit, unitPhraseFamily(unit), text));
+  const targets = writings.filter(a => writtenAsTarget(text, a));
+  // The brief's target words are authoritative even when the drafter did not supply `target`.
+  // Two writings of the target alone still do not state a current level.
+  if (targets.length > 0) return writings.some(a => !writtenAsTarget(text, a));
   if (typeof target !== 'number' || !Number.isFinite(target) || !same(value, target)) return true;
   return timesTheUserWrote(value, unit, userText) >= 2;
+}
+
+/** A target's own writing, never today's level: read beside this amount, not across another figure or clause. */
+function writtenAsTarget(text: string, a: { readonly index: number; readonly matchedText: string }): boolean {
+  const before = text.slice(0, a.index).match(/[^.!?;,:\n\u2013\u2014]*$/u)?.[0] ?? '';
+  const after = text.slice(a.index + a.matchedText.length).match(/^[^.!?;:\n\u2013\u2014]*/u)?.[0] ?? '';
+  return /\b(?:goals?|targets?|aim(?:s|ing)?|reach(?:es|ing)?|hit(?:ting)?)\b[^\d]*$/iu.test(before)
+    || (/\bto\s*$/iu.test(before) && /^[^\d]*\bby\s+\S/iu.test(after));
 }
 
 /**
@@ -244,6 +258,7 @@ const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_F
  * Every miss under-claims: the figure reads as Olumi's.
  */
 function baselineTheBriefStates(value: number, unit: unknown, brief: string, label: unknown): boolean {
+  if (!levelWrittenApartFromTarget(value, unit, undefined, brief)) return false;
   if (figureTheUserWrote(value, unit, brief)) return true;
   if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m, label, unit));
   const family = unitPhraseFamily(unit);
@@ -357,7 +372,7 @@ export function creditStatedFactorLevels(candidate: CandidateModel, brief: strin
     const v = f.baseline_value;
     if (typeof v !== 'number' || !Number.isFinite(v) || notToday.some((w) => same(w, v))) return f;
     const others = labels.filter((l) => canonicalLabel(l) !== canonicalLabel(f.label));
-    if (!figureTheUserWroteFor(v, f.unit, brief, { target: [f.label], others })) return f;
+    if (!figureTheUserWroteFor(v, f.unit, brief, { target: [f.label], others, currentLevel: true })) return f;
     credited = true;
     return { ...f, baseline_known: true, provenance: 'explicit' };
   });
@@ -476,7 +491,7 @@ export function goalLevelTheUserWrote(
 ): ((value: number, unit: unknown) => boolean) & { span: (value: number, unit: unknown) => { start: number; end: number } | null } {
   const others = [...(model.factors ?? []), ...(model.outcomes ?? []), ...(model.risks ?? [])]
     .map((q) => q.label).filter((l) => l !== model.goal.metric);
-  const span = (value: number, unit: unknown) => figureTheUserWroteForSpan(value, unit, brief, { target: [model.goal.metric], others, strict: true });
+  const span = (value: number, unit: unknown) => figureTheUserWroteForSpan(value, unit, brief, { target: [model.goal.metric], others, strict: true, currentLevel: true });
   return Object.assign((value: number, unit: unknown) => span(value, unit) !== null, { span });
 }
 
@@ -486,6 +501,8 @@ export function goalLevelTheUserWrote(
  * factors' nouns ("Hire Two Developers" vs "Developers hired"), so they would make the target's own word ambiguous.
  */
 export interface EntityScope {
+  /** Today's level or baseline: a target writing cannot ground it. Target and option readers remain role-neutral. */
+  readonly currentLevel?: true;
   /** The asked identity figure must be exact, not an approximation such as "300-ish". Other readers keep their rule. */
   readonly exactFigure?: true;
   readonly target: readonly string[];
@@ -678,6 +695,8 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
   const matched = written.find((a) => {
     if (scope.at !== undefined && a.index !== scope.at) return false;
     if (!amountIs(a, value, unit, family, userText)) return false;
+    // Today's level cannot borrow a target's writing (#25); a separate current writing still binds.
+    if (scope.currentLevel === true && writtenAsTarget(userText, a)) return false;
     const decisiveTarget = ownKind(a.kind) ? decisiveOwnKind : decisiveAnyKind;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);

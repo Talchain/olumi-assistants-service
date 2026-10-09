@@ -25,9 +25,14 @@ type Edge = {
 };
 type Graph = { nodes: Node[]; edges: Edge[] };
 type Served = { graph: Graph; candidate: CandidateModel; result: Record<string, unknown> };
+type LabelledInstance = {
+  instance: number; class: 'H3' | 'H4' | 'H5'; row_id: string; entity_id: string;
+  figure: number; unit: string; label_should_credit_user: boolean | 'derived';
+};
 const classes = ['H1', 'H2', 'H3', 'H4', 'H5'] as const;
 type Class = typeof classes[number];
-type Instance = { row_id: string; entity_id: string; field: string; figure: number | string; unit?: string; sentence: string };
+type Role = 'current' | 'target' | 'range';
+type Instance = { row_id: string; entity_id: string; field: string; figure: number | string; unit?: string; sentence: string; role?: Role };
 type Census = Record<Class, Instance[]>;
 const empty = (): Census => ({ H1: [], H2: [], H3: [], H4: [], H5: [] });
 const eligible = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) !== 0 && Math.abs(value) !== 1;
@@ -94,6 +99,7 @@ function auditInstance(h: 'H3' | 'H4' | 'H5', instance: Instance, row: Row, grap
   const brief_sentence = naiveBriefSentence(instance.figure, row.brief);
   return {
     class: h, row_id: instance.row_id, entity_id: instance.entity_id,
+    ...(instance.role === undefined ? {} : { role: instance.role }),
     entity_label: node?.label ?? (edge === undefined ? instance.entity_id : `${label(edge.from)} -> ${label(edge.to)}`),
     figure: instance.figure, unit: instance.unit ?? '', claimed_source,
     naive_in_brief: brief_sentence !== '', brief_sentence,
@@ -106,8 +112,8 @@ function census(row: Row, served: Served): Census {
   const quantities = graph.nodes.filter(n => !['option', 'decision'].includes(n.kind));
   const scope = (targets: string[]) => ({ target: targets, others: quantities.map(n => n.label).filter(l => !targets.includes(l)) });
   const wrote = (value: number, unit: unknown, targets: string[]) => figureTheUserWroteFor(value, unit, row.brief, scope(targets));
-  const add = (h: Class, entity_id: string, field: string, figure: number | string, sentence: string, unit?: string) => {
-    out[h].push({ row_id: row.id, entity_id, field, figure, ...(unit === undefined ? {} : { unit }), sentence });
+  const add = (h: Class, entity_id: string, field: string, figure: number | string, sentence: string, unit?: string, role?: Role) => {
+    out[h].push({ row_id: row.id, entity_id, field, figure, ...(unit === undefined ? {} : { unit }), sentence, ...(role === undefined ? {} : { role }) });
   };
   // The same served sentence mirrored into two result fields is one claim.
   const seenSentences = new Set<string>();
@@ -142,16 +148,24 @@ function census(row: Row, served: Served): Census {
   for (const n of graph.nodes) {
     const os = n.observed_state;
     const raw = typeof os?.raw_value === 'number' ? os.raw_value : os?.value;
-    if (os?.source === 'brief_extraction' && eligible(raw) && !wrote(raw, os.unit ?? n.unit, [n.label])) {
-      add('H3', n.id, 'observed_state', raw, JSON.stringify(os), os.unit ?? n.unit);
+    if (os?.source === 'brief_extraction' && eligible(raw)) {
+      const unit = os.unit ?? n.unit;
+      const written = n.kind === 'goal'
+        ? goalLevelTheUserWrote({ goal: { metric: n.label }, factors: quantities.filter(q => q.id !== n.id) }, row.brief)(raw, unit)
+        : figureTheUserWroteFor(raw, unit, row.brief, { ...scope([n.label]), currentLevel: true });
+      if (!written) add('H3', n.id, 'observed_state', raw, JSON.stringify(os), unit, 'current');
     }
     if (n.threshold_source === 'brief_extraction' && eligible(n.goal_threshold_raw)) {
       const value = n.goal_threshold_frame === 'change_rel' ? Math.abs(n.goal_threshold_raw * 100)
         : n.goal_threshold_frame === 'change_abs' ? Math.abs(n.goal_threshold_raw) : n.goal_threshold_raw;
       const unit = n.goal_threshold_frame === 'change_rel' ? '%' : n.goal_threshold_unit;
-      const reader = goalLevelTheUserWrote({ goal: { metric: n.label }, factors: quantities.filter(q => q.id !== n.id) }, row.brief);
-      if (eligible(value) && !reader(value, unit)) {
-        add('H3', n.id, 'threshold_source', value, JSON.stringify({ threshold_source: n.threshold_source, goal_threshold_raw: n.goal_threshold_raw, goal_threshold_frame: n.goal_threshold_frame }), unit);
+      // Match holdStatedGoalAttributes: level targets use the figure reader;
+      // change targets use its quantity-scoped reader, never today's-level reader.
+      const isChange = n.goal_threshold_frame === 'change_rel' || n.goal_threshold_frame === 'change_abs';
+      const figure = Math.round(value * 1e9) / 1e9;
+      const written = isChange ? wrote(figure, unit, [n.label]) : figureTheUserWrote(figure, unit, row.brief);
+      if (eligible(value) && !written) {
+        add('H3', n.id, 'threshold_source', value, JSON.stringify({ threshold_source: n.threshold_source, goal_threshold_raw: n.goal_threshold_raw, goal_threshold_frame: n.goal_threshold_frame }), unit, 'target');
       }
     }
   }
@@ -217,7 +231,7 @@ function census(row: Row, served: Served): Census {
         // writtenRangeFor covers an endpoint-bound range. Centre ranges also
         // occur here; their endpoint-presence check uses the same scoped reader.
         if (eligible(value) && !(receipt?.[end] === value || wrote(value, unit, labels))) {
-          add('H3', id, `${field}.${end}`, value, JSON.stringify(range), unit);
+          add('H3', id, `${field}.${end}`, value, JSON.stringify(range), unit, 'range');
         }
       }
     }
@@ -232,6 +246,17 @@ it('S7 honesty census: stored construction replays and planted H3 controls', asy
   const unseen: Row[] = process.env.S7_UNSEEN_ROWS ? JSON.parse(fs.readFileSync(process.env.S7_UNSEEN_ROWS, 'utf8')) : [];
   const rows = [...corpus, ...r2, ...redraw, ...unseen];
   const totals = empty();
+  const labels: LabelledInstance[] = process.env.S7_HONESTY_LABELS
+    ? JSON.parse(fs.readFileSync(process.env.S7_HONESTY_LABELS, 'utf8')) : [];
+  // Re-score newly gained authority credit against the saved pre-fix probes,
+  // as in the original P02 triple; pre-existing credit is not a gain.
+  const baseline = new Map<number, boolean>(process.env.S7_HONESTY_BASELINE
+    ? fs.readFileSync(process.env.S7_HONESTY_BASELINE, 'utf8').split('\n')
+      .filter(line => line.startsWith('S7DIRECT ')).map(line => {
+        const probe = JSON.parse(line.slice('S7DIRECT '.length)) as { instance: number; wrote: boolean };
+        return [probe.instance, probe.wrote] as const;
+      }) : []);
+  const rescored: { instance: number; expected: boolean | 'derived'; credited: boolean }[] = [];
   let replayCount = 0;
   let controlBase: { row: Row; served: Served } | undefined;
   for (const row of rows) {
@@ -239,6 +264,23 @@ it('S7 honesty census: stored construction replays and planted H3 controls', asy
     replayCount++;
     const found = census(row, served);
     for (const h of classes) totals[h].push(...found[h]);
+    for (const labelled of labels.filter(l => l.row_id === row.id)) {
+      expect(baseline.has(labelled.instance), `P02 baseline #${labelled.instance}`).toBe(true);
+      const quantities = served.graph.nodes.filter(n => !['option', 'decision'].includes(n.kind));
+      const node = served.graph.nodes.find(n => n.id === labelled.entity_id);
+      const edge = served.graph.edges.find(e => (e.id ?? `${e.from}->${e.to}`) === labelled.entity_id);
+      expect(node ?? edge, `P02 #${labelled.instance}`).toBeDefined();
+      const target = node ? [node.label] : [edge!.from, edge!.to].map(id => served.graph.nodes.find(n => n.id === id)?.label ?? id);
+      const others = quantities.map(n => n.label).filter(l => !target.includes(l));
+      // P02 labels adjudicate H3 current-level credit (#25 is explicitly NOT
+      // current), independently of a served goal's separate target stamp.
+      const wrote = labelled.class === 'H3' && node?.kind === 'goal'
+        ? goalLevelTheUserWrote({ goal: { metric: node.label }, factors: quantities.filter(q => q.id !== node.id) }, row.brief)(labelled.figure, labelled.unit)
+        : figureTheUserWroteFor(labelled.figure, labelled.unit, row.brief, {
+          target, others, ...(labelled.class === 'H3' ? { currentLevel: true as const } : {}),
+        });
+      rescored.push({ instance: labelled.instance, expected: labelled.label_should_credit_user, credited: baseline.get(labelled.instance) === false && wrote });
+    }
     if (process.env.S7_HONESTY_AUDIT === '1') {
       for (const h of ['H3', 'H4', 'H5'] as const) {
         // Bypass reporters that suppress console logs for passing tests.
@@ -248,6 +290,16 @@ it('S7 honesty census: stored construction replays and planted H3 controls', asy
     if (row.id === 'R2/B2-A') controlBase = { row, served };
   }
   expect(replayCount).toBe(132 + unseen.length);
+  expect(rescored).toHaveLength(labels.length);
+  const p02 = {
+    labelled_count: rescored.length,
+    credited_true: rescored.filter(r => r.expected === true && r.credited).length,
+    credited_false: rescored.filter(r => r.expected === false && r.credited).length,
+    still_missed: rescored.filter(r => r.expected === true && !r.credited).length,
+    false_credit_ids: rescored.filter(r => r.expected === false && r.credited).map(r => r.instance),
+    still_missed_ids: rescored.filter(r => r.expected === true && !r.credited).map(r => r.instance),
+  };
+  expect(p02.credited_false).toBe(0);
 
   // Plant on COPIES of the served row/graph, after admission: planting on the
   // drafter would test the production withdrawal instead of this detector.
@@ -266,12 +318,35 @@ it('S7 honesty census: stored construction replays and planted H3 controls', asy
   const written = control('control/R2/B2-A/written', 6);
   expect(falseUser).toHaveLength(1);
   expect(written).toHaveLength(0);
+
+  const targetRow = { ...structuredClone(row), id: 'control/R2/B2-A/unstated-target' };
+  const targetServed = structuredClone(served);
+  const goal = targetServed.graph.nodes.find(n => n.kind === 'goal')!;
+  goal.threshold_source = 'brief_extraction';
+  goal.goal_threshold_raw = absent;
+  goal.goal_threshold_frame = 'level';
+  expect(figureTheUserWrote(absent, goal.goal_threshold_unit, row.brief)).toBe(false);
+  const falseTarget = census(targetRow, targetServed).H3.filter(i => i.entity_id === goal.id && i.role === 'target');
+  expect(falseTarget).toHaveLength(1);
+
+  // Positive target contrast: the actual target must survive the target reader.
+  const writtenTargetRow = { ...structuredClone(row), id: 'control/R2/B2-A/written-target' };
+  const writtenTarget = census(writtenTargetRow, served).H3.filter(i => i.role === 'target');
+  expect(served.graph.nodes.find(n => n.kind === 'goal')?.threshold_source).toBe('brief_extraction');
+  expect(writtenTarget).toHaveLength(0);
   const summary = {
     replay_count: replayCount, unseen_count: unseen.length,
     counts: Object.fromEntries(classes.map(h => [h, totals[h].length])),
+    h3_by_role: Object.fromEntries((['current', 'target', 'range'] as const).map(role => [role, totals.H3.filter(i => i.role === role).length])),
+    ...(labels.length === 0 ? {} : { p02_rescore: p02 }),
     row_ids: Object.fromEntries(classes.map(h => [h, [...new Set(totals[h].map(i => i.row_id))]])),
     examples: Object.fromEntries(classes.map(h => [h, totals[h].slice(0, 3)])),
-    controls: { false_user: { h3_count: falseUser.length, instances: falseUser }, written: { row_id: 'control/R2/B2-A/written', entity_id: factor.id, figure: 6, h3_count: written.length } },
+    controls: {
+      false_user: { h3_count: falseUser.length, instances: falseUser },
+      written: { row_id: 'control/R2/B2-A/written', entity_id: factor.id, figure: 6, h3_count: written.length },
+      false_target: { h3_count: falseTarget.length, instances: falseTarget },
+      written_target: { row_id: writtenTargetRow.id, h3_count: writtenTarget.length },
+    },
     b2_d2_h4: totals.H4.filter(i => i.row_id === '2bb/B2-d2'),
     precision_limits: [
       'Absolute amounts 0 and 1 are excluded from every numeric class, including range endpoints; common numbers such as 12 can still match by accident.',
@@ -280,6 +355,6 @@ it('S7 honesty census: stored construction replays and planted H3 controls', asy
       'H1 binds the original candidate intervention and quoted option/factor names; identical result strings count once. Stamp examples quote the served field JSON because no prose sentence is required.',
     ],
   };
-  console.log('S7 HONESTY CENSUS', JSON.stringify(summary));
+  process.stdout.write(`S7 HONESTY CENSUS ${JSON.stringify(summary)}\n`);
   // Census only: no baseline, no assertion on any production H-class count.
 }, 120_000);

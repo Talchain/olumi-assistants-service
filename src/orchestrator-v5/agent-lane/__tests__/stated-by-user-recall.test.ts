@@ -1,8 +1,27 @@
 import { expect, it } from 'vitest';
-import { figureTheUserWroteFor, type EntityScope } from '../stated-by-user.js';
+import { figureTheUserWroteFor, goalLevelTheUserWrote, levelWrittenApartFromTarget, withdrawUnstatedBaselineStamps, type EntityScope } from '../stated-by-user.js';
+
+// P02 instance #25: the complete heldout1-d1 brief and its quantity scope.
+const appointmentsBrief = "Our regional hospital's outpatient clinic completes 920 appointments each month, has 18 staff, and currently has 140 patients waiting for a first visit. Running the clinic costs roughly £48,000 per month, so additional activity needs a clear funding route. The waiting room is often quiet late in the afternoon, although reception says that transport difficulties make those slots hard to fill.\n\nOur single goal is to reach 1,100 completed appointments a month within the next 6 months. We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week. The Saturday plan would need volunteers from the existing team; longer weekdays would depend on patients accepting later slots.\n\nRecent pilots suggest each extra Saturday session adds between 14 and 18 completed appointments. Every extra nurse hour enables about 3 to 5 additional completed appointments, provided a consulting room is available. For every 100 reminder messages sent, missed appointments fall by about 7. Each Saturday session also adds £600 in staffing costs. These estimates come from local trials, and the weekday and Saturday effects should be assessed separately because they could draw on the same patients.";
+const appointmentsScope: EntityScope = { currentLevel: true, target: ['completed appointments'], others: ["Saturday sessions per month", "Extra weekday opening hours", "Extra nurse hours per month", "Consulting rooms available for extra activity", "Patient acceptance of later slots", "Reminder messages sent per month", "Existing clinic operating cost per month", "Additional staffing cost per month", "Missed appointments per month", "Transport difficulties filling late slots", "Unfunded additional activity"] };
+const appointmentsUnit = 'completed appointments per month';
 
 type Row = { name: string; value: number; unit: string; brief: string; scope: EntityScope; expected: boolean };
 const rows: Row[] = [
+  { name: 'NEGATIVE P02 #25: 1,100 is the goal target, never the current completed appointments', value: 1100, unit: appointmentsUnit,
+    brief: appointmentsBrief, scope: appointmentsScope, expected: false },
+  { name: 'P02 #25 contrast: 920 is the current completed appointments', value: 920, unit: appointmentsUnit,
+    brief: appointmentsBrief, scope: appointmentsScope, expected: true },
+  { name: 'NEGATIVE target paraphrase: aim to hit 1,100 a month never states the current level', value: 1100, unit: appointmentsUnit,
+    brief: 'Our clinic completes 920 appointments each month. We aim to hit 1,100 a month.', scope: appointmentsScope, expected: false },
+  { name: 'NEGATIVE target noun: completed appointments target 1,100 is not the current level', value: 1100, unit: appointmentsUnit,
+    brief: 'Completed appointments target 1,100 a month.', scope: appointmentsScope, expected: false },
+  { name: 'NEGATIVE target deadline: completed appointments to 1,100 by December is not current', value: 1100, unit: appointmentsUnit,
+    brief: 'Increase completed appointments to 1,100 a month by December.', scope: appointmentsScope, expected: false },
+  { name: 'NEGATIVE repeated targets: two target writings still do not state a current level', value: 1100, unit: appointmentsUnit,
+    brief: 'Our goal is to reach 1,100 completed appointments. We aim to hit 1,100 a month.', scope: appointmentsScope, expected: false },
+  { name: 'current equals target: the separately stated current figure still credits', value: 1100, unit: appointmentsUnit,
+    brief: 'Our goal is to reach 1,100 completed appointments. Our clinic completes 1,100 appointments each month.', scope: appointmentsScope, expected: true },
   { name: 'current payment: customer price is explicitly paid, not a total', value: 300, unit: 'GBP/customer/month',
     brief: '£120,000 monthly recurring revenue from 400 customers paying £300 a month.',
     scope: { target: ['Existing monthly price'], others: ['Existing customers', 'Starter monthly price', 'monthly recurring revenue'] }, expected: true },
@@ -78,4 +97,29 @@ const rows: Row[] = [
 ];
 for (const row of rows) it(row.name, () => {
   expect(figureTheUserWroteFor(row.value, row.unit, row.brief, row.scope)).toBe(row.expected);
+});
+
+it('P02 #25: current goal reader and baseline stamps exclude the target, retaining 920', () => {
+  const reader = goalLevelTheUserWrote({ goal: { metric: 'completed appointments' }, factors: appointmentsScope.others.map(label => ({ label })) }, appointmentsBrief);
+  for (const value of [1100, 920]) {
+    const expected = value === 920;
+    expect(reader(value, appointmentsUnit)).toBe(expected);
+    expect(levelWrittenApartFromTarget(value, appointmentsUnit, undefined, appointmentsBrief)).toBe(expected);
+    const node = { kind: 'factor', label: 'completed appointments', observed_state: { raw_value: value, unit: appointmentsUnit, source: 'brief_extraction' } };
+    expect(withdrawUnstatedBaselineStamps([node], appointmentsBrief)[0]!.observed_state.source).toBe(expected ? 'brief_extraction' : 'cee_inference');
+  }
+});
+
+it('repeated targets cannot stamp a baseline; a separate current writing equal to the target can', () => {
+  const targets = 'Our goal is to reach 1,100 completed appointments. We aim to hit 1,100 a month.';
+  const current = targets + ' Our clinic completes 1,100 appointments each month.';
+  const node = { kind: 'factor', label: 'completed appointments', observed_state: { raw_value: 1100, unit: appointmentsUnit, source: 'brief_extraction' } };
+  for (const [brief, expected] of [[targets, false], [current, true]] as const) {
+    expect(levelWrittenApartFromTarget(1100, appointmentsUnit, 1100, brief)).toBe(expected);
+    expect(withdrawUnstatedBaselineStamps([node], brief)[0]!.observed_state.source).toBe(expected ? 'brief_extraction' : 'cee_inference');
+  }
+});
+
+it('the target writing remains user-written in its own role', () => {
+  expect(figureTheUserWroteFor(1100, appointmentsUnit, appointmentsBrief, { ...appointmentsScope, currentLevel: undefined })).toBe(true);
 });
