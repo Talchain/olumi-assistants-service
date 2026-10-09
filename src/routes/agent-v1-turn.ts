@@ -76,6 +76,8 @@ import { goalCertaintyForAgent } from '../orchestrator-v5/agent-lane/goal-certai
 import { savedRunContextFacts } from '../orchestrator-v5/agent-lane/saved-run-context-facts.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
+import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-read-deadline.js';
+import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
@@ -653,8 +655,8 @@ function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell
 }
 
 /** The final scenario read owns the UI's cells; missing authority never licenses a substitute projection. */
-function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly OptionChanceCell[] {
-  const view = read.canonicalAnalysisView as { schema?: unknown; source?: unknown; options?: unknown } | null | undefined;
+function validCanonicalAnalysisView(value: unknown): value is { options: { option_id: string; cell: CanonicalAnalysisCell }[] } {
+  const view = value as { schema?: unknown; source?: unknown; options?: unknown } | null | undefined;
   const options = view?.options;
   const valid = view?.schema === 'canonical_analysis_view.v1' && view.source === 'stored_run_facts'
     && Array.isArray(options) && options.every(row => {
@@ -680,8 +682,12 @@ function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scena
           && typeof (reason as { code?: unknown }).code === 'string'
           && ((reason as { message?: unknown }).message === null || typeof (reason as { message?: unknown }).message === 'string'));
     });
-  if (valid) return (options as { option_id: string; cell: CanonicalAnalysisCell }[])
-    .map(row => ({ ...row.cell, option_id: row.option_id }));
+  return valid;
+}
+
+function replyChanceCells(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string): readonly OptionChanceCell[] {
+  const view = read.canonicalAnalysisView;
+  if (validCanonicalAnalysisView(view)) return view.options.map(row => ({ ...row.cell, option_id: row.option_id }));
   log.warn({ event: 'agent_lane.canonical_analysis_view_unavailable', scenario_id: scenarioId },
     'agent-lane: final scenario read has no valid canonical analysis cells');
   return [];
@@ -1316,6 +1322,21 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
+/** One uncached scenario SELECT checks the cached view's basis; an unavailable check cannot license UI cells. */
+async function canonicalViewBasisUnchanged(store: Pick<ReturnType<typeof getSessionStore>, 'readExistingScenario'>, scenarioId: string,
+  read: Awaited<ReturnType<typeof readBackState>>): Promise<boolean> {
+  if (typeof store.readExistingScenario !== 'function' || read.graphHash === undefined) return false;
+  try {
+    const current = await withAnalysisReadDeadline(() => store.readExistingScenario!(scenarioId));
+    if (current === null || (read.revision !== undefined && current.revision !== read.revision)) return false;
+    // The SAME raw analysis hash is the graph read's CAS base, not the selected Run's historical hash.
+    const currentHash = computeAnalysisAffectingGraphHash(current.graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+    return currentHash !== null && currentHash === read.graphHash;
+  } catch {
+    return false;
+  }
+}
+
 /** Compose additions AND removals through the canonical authority; a prior claim cannot license its own removal. */
 async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string, pending: readonly PendingAction[], requestId: string): Promise<typeof read> {
   const scopeInput = goalScopeClaimInput(pending.filter(p => p.scenario_id === scenarioId), read.graph);
@@ -1323,7 +1344,7 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
   if (scopeInput.issues.length === 0) {
     // Preserve ordinary permitted bytes. Only a scope-withheld verdict needs its canonical inputs reread on removal.
     if (state?.leader_claim?.withheld_reason !== WITHHELD_GOAL_SCOPE_UNRESOLVED) return read;
-    const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, goalScopeClaimInput: scopeInput });
+    const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, revision: read.revision, requestId, goalScopeClaimInput: scopeInput });
     // A different selected Run must never license the old readback's result. An unavailable/moved authority stays closed.
     if (current.analysis_state === null || JSON.stringify(current.analysis_state.run_state) !== JSON.stringify(state.run_state)) {
       return { ...read, scopeOpen: false, analysisState: { ...state,
@@ -1359,8 +1380,9 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ canonicalAnalysisView?: unknown; graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ canonicalAnalysisView?: unknown; revision?: number; graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
   let canonicalAnalysisView: unknown;
+  let revision: number | undefined;
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1429,6 +1451,9 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
     if (after.status === 200) {
       graph = after.json.graph;
       canonicalAnalysisView = after.json.canonical_analysis_view;
+      // The graph reader stamps the revision from its SAME scenario snapshot on this view.
+      const readRevision = (canonicalAnalysisView as { staleness?: { revision?: unknown } } | null | undefined)?.staleness?.revision;
+      revision = typeof readRevision === 'number' && Number.isSafeInteger(readRevision) && readRevision >= 0 ? readRevision : undefined;
       scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
@@ -1585,7 +1610,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, canonicalAnalysisView, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, canonicalAnalysisView, revision, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -4577,6 +4602,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && resultFirstRunCompleted ? 'pending' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : explanationChip?.id.slice(RUN_EXPLANATION_PREFIX.length);
+    // The turn cache sees this turn's writes only. Recheck other writers before licensing the additive UI view.
+    const canonicalViewMayShip = validCanonicalAnalysisView(composedRead.canonicalAnalysisView)
+      && await canonicalViewBasisUnchanged(store, scenarioId, composedRead);
     let wireBody = {
       ...finalised,
       ...(narrationStatus !== undefined && narrationKey !== undefined
@@ -4591,6 +4619,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The scenario-bound verdict from the FINAL readback governs; otherwise the
       // finaliser's own honest no-context verdict stays (present, never deleted).
       ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
+      // UI-only sidecar from this SAME composed read; never put it in history, Run deltas or model context.
+      ...(canonicalViewMayShip
+        ? { canonical_analysis_view: composedRead.canonicalAnalysisView } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
     } as OlumiResponse & Record<string, unknown>;
     // What changed since the last run — the run turn's own block, or why it has none — only beside that same run.
@@ -4808,7 +4839,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       leaderFreeEnvelope = finalEgress.leaderFreeEnvelope === true;
       if (finalEgress.response !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
-        wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
+        wireBody = {
+          ...(finalEgress.proseEdited ? withoutShape : finalEgress.response),
+          // The producer licenses this view (including leader_licence); turn egress must match the scenario-graph read.
+          ...(canonicalViewMayShip
+            ? { canonical_analysis_view: composedRead.canonicalAnalysisView } : {}),
+        } as OlumiResponse & Record<string, unknown>;
       }
     }
     /**
