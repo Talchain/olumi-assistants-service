@@ -1,3 +1,4 @@
+import { toTypedRunRows, type TypedRunRows, type TypedRunOptionRow } from '../runs/typed-run-rows.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
 import type { LegacyAnalysisEditFacts } from '../types/handler-fact.js';
@@ -56,6 +57,8 @@ import {
   type PendingActionReadOptions,
   type SessionAppendOutcome,
   type SessionStore,
+  type ScenarioRunAnalysisFactReadOptions,
+  type ScenarioRunAnalysisFactPage,
   type SessionTurnWrite,
 } from './store.js';
 import { parseAnswerOffers } from '../agent-lane/answer-offers-envelope.js';
@@ -228,8 +231,24 @@ function errCode(e: unknown): string | undefined {
   return (e as SupabaseErrorLike | null)?.code ?? undefined;
 }
 
+type AnalysisRunRpcResult = PromiseLike<{ data: unknown; error: unknown }>;
+
+/** Named capabilities keep each storage RPC visible to the migration census. */
+export interface AnalysisRunDerivationPort {
+  claimAnalysisRunWindow(args: { p_sweep_limit: number }): AnalysisRunRpcResult;
+  claimAnalysisRunReconciliation(args: { p_sweep_limit: number }): AnalysisRunRpcResult;
+  storeTypedAnalysisRun(args: {
+    p_fact_id: string; p_run: Omit<TypedRunRows, 'options'>; p_options: readonly TypedRunOptionRow[];
+  }): AnalysisRunRpcResult;
+  quarantineAnalysisFact(args: { p_fact_id: string; p_reason: string; p_detail: string | null }): AnalysisRunRpcResult;
+  recordAnalysisRunFailure(args: { p_fact_id: string; p_error_code: string; p_detail: string }): AnalysisRunRpcResult;
+  finishAnalysisRunSweep(args: { p_lease_id: string }): AnalysisRunRpcResult;
+}
+
 export interface SupabaseSessionStoreOptions {
   readonly defaultReadLimit: number;
+  /** Explicit capability: append-only transports must never receive derivation RPCs. */
+  readonly analysisRunDerivation?: AnalysisRunDerivationPort;
   /**
    * A3 graph CAS observe-mode (`CEE_V5_GRAPH_CAS_MODE`). Absent → 'off'
    * (zero SELECTs, byte-identical write path). See `evaluateGraphCas` and
@@ -274,6 +293,20 @@ const isMissingAppendFunction = (error: unknown): boolean =>
   errCode(error) === 'PGRST202' || errCode(error) === '42883';
 let conditionalAppendMissingLogged = false;
 
+export interface AnalysisRunDrainResult {
+  derived: number;
+  quarantined: number;
+  skipped: number;
+  failed: number;
+  attempts: number;
+  scanned: number;
+  depthEstimate: number | null;
+  oldestPendingAgeSeconds: number | null;
+}
+
+const drainRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+
 export class SupabaseSessionStore implements SessionStore {
   /**
    * 2.174 fix c — set once when `append_turn_atomic_v4` answers PGRST202
@@ -284,6 +317,35 @@ export class SupabaseSessionStore implements SessionStore {
    * until its next restart, stated in the fallback WARN.
    */
   private atomicFenceRpcUnavailable = false;
+  private analysisSweepFlight?: Promise<AnalysisRunDrainResult>;
+  private analysisSweepMode?: 'sweep' | 'reconcile';
+  private analysisSweepTimer?: NodeJS.Timeout;
+  private analysisSweeperClosed = false;
+  private readonly analysisNudges = new Set<NodeJS.Immediate>();
+
+  /** Explicit lifecycle; constructors/imports never start intervals (including tests). */
+  startAnalysisRunSweeper(): () => void {
+    if (this.options.analysisRunDerivation && !this.analysisSweepTimer) {
+      this.analysisSweeperClosed = false;
+      let reconcileAt = Date.now() + 3_600_000;
+      this.analysisSweepTimer = setInterval(() => {
+        // One timer and one flight: a due hourly pass waits for an idle tick,
+        // rather than joining a normal sweep and silently losing reconciliation.
+        if (this.analysisSweepFlight) return;
+        const reconcile = Date.now() >= reconcileAt;
+        if (reconcile) reconcileAt = Date.now() + 3_600_000;
+        void this.deriveAnalysisRuns({ sweepLimit: 20, mode: reconcile ? 'reconcile' : 'sweep' });
+      }, 60_000);
+      this.analysisSweepTimer.unref();
+    }
+    return () => {
+      this.analysisSweeperClosed = true;
+      if (this.analysisSweepTimer) clearInterval(this.analysisSweepTimer);
+      this.analysisSweepTimer = undefined;
+      for (const task of this.analysisNudges) clearImmediate(task);
+      this.analysisNudges.clear();
+    };
+  }
 
   constructor(
     private readonly client: SupabaseClient,
@@ -393,7 +455,125 @@ export class SupabaseSessionStore implements SessionStore {
     return 'new';
   }
 
+  /** The ONE completion seam: the RPC has committed before a sweep is nudged. */
   private async appendThroughRpc(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
+    const outcome = await this.appendThroughRpcInner(write, options);
+    if ('id' in outcome && !write.turn_id.endsWith(TURN_CLAIM_SUFFIX)
+      && this.options.analysisRunDerivation && !this.analysisSweeperClosed) {
+      const task = setImmediate(() => {
+        this.analysisNudges.delete(task);
+        void this.deriveAnalysisRuns({ sweepLimit: 20 }).catch(() => {
+          log.warn({ event: 'analysis_run.after_commit_failed', turn_row_id: outcome.id },
+            'Committed turn unchanged; a later sweep will recover pending analysis facts');
+        });
+      });
+      this.analysisNudges.add(task);
+    }
+    return outcome;
+  }
+
+  /** Sanctioned write door; single-flight across interval, nudges and operator calls. */
+  async deriveAnalysisRuns(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' } = { sweepLimit: 20 }): Promise<AnalysisRunDrainResult> {
+    if (!this.options.analysisRunDerivation || this.analysisSweeperClosed) {
+      return { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0, depthEstimate: null, oldestPendingAgeSeconds: null };
+    }
+    const mode = opts.mode ?? 'sweep';
+    if (this.analysisSweepFlight) {
+      if (this.analysisSweepMode === mode) return this.analysisSweepFlight;
+      // A caller requesting reconciliation must not receive a normal window's
+      // empty result and mistake it for an empty historical anti-join.
+      await this.analysisSweepFlight;
+      return this.deriveAnalysisRuns(opts);
+    }
+    this.analysisSweepMode = mode;
+    this.analysisSweepFlight = this.performAnalysisRunSweep(opts);
+    try { return await this.analysisSweepFlight; }
+    finally { this.analysisSweepFlight = undefined; this.analysisSweepMode = undefined; }
+  }
+
+  private async performAnalysisRunSweep(opts: { sweepLimit: number; mode?: 'sweep' | 'reconcile' }): Promise<AnalysisRunDrainResult> {
+    const counts: AnalysisRunDrainResult = { derived: 0, quarantined: 0, skipped: 0, failed: 0, attempts: 0, scanned: 0,
+      depthEstimate: null, oldestPendingAgeSeconds: null };
+    const port = this.options.analysisRunDerivation!;
+    let leaseId: string | undefined;
+    try {
+      const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
+      const { data, error } = opts.mode === 'reconcile'
+        ? await port.claimAnalysisRunReconciliation({ p_sweep_limit: limit })
+        : await port.claimAnalysisRunWindow({ p_sweep_limit: limit });
+      if (error) throw error;
+      const envelope = drainRecord(data);
+      if (!envelope || !Array.isArray(envelope.facts)) throw new Error('Invalid analysis claim receipt');
+      counts.scanned = typeof envelope.window_count === 'number' ? envelope.window_count : envelope.facts.length;
+      leaseId = typeof envelope.lease_id === 'string' ? envelope.lease_id : undefined;
+      counts.depthEstimate = typeof envelope.depth_estimate === 'number' ? envelope.depth_estimate : null;
+      counts.oldestPendingAgeSeconds = typeof envelope.oldest_pending_age_seconds === 'number' ? envelope.oldest_pending_age_seconds : null;
+      for (const value of envelope.facts) {
+        const row = drainRecord(value);
+        counts.attempts += 1;
+        try {
+          if (!row || typeof row.fact_id !== 'string' || typeof row.scenario_id !== 'string') throw new Error('Invalid claimed fact identity');
+          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, { scenarioId: row.scenario_id });
+          if ('ok' in mapped) {
+            const { options, ...run } = mapped.ok;
+            const stored = await port.storeTypedAnalysisRun({ p_fact_id: row.fact_id, p_run: run, p_options: options });
+            if (stored.error) {
+              if (errCode(stored.error) !== '23505') throw stored.error;
+              const quarantined = await port.quarantineAnalysisFact({
+                p_fact_id: row.fact_id, p_reason: 'duplicate_run_id', p_detail: '23505',
+              });
+              if (quarantined.error) throw quarantined.error;
+              if (quarantined.data === true) counts.quarantined += 1;
+              else counts.skipped += 1;
+            } else if (stored.data === true) counts.derived += 1;
+            else counts.skipped += 1;
+          } else {
+            const skipped = !('quarantine' in mapped);
+            const reason = 'quarantine' in mapped ? mapped.quarantine : 'skipped_refusal' in mapped ? 'skipped_refusal' : 'skipped_legacy';
+            const quarantined = await port.quarantineAnalysisFact({ p_fact_id: row.fact_id, p_reason: reason, p_detail: null });
+            if (quarantined.error) throw quarantined.error;
+            if (skipped || quarantined.data !== true) counts.skipped += 1;
+            else counts.quarantined += 1;
+          }
+        } catch (error) {
+          counts.failed += 1;
+          if (typeof row?.fact_id === 'string' && errCode(error) !== '23505') {
+            try {
+              const recorded = await port.recordAnalysisRunFailure({
+                p_fact_id: row.fact_id, p_error_code: errCode(error) ?? 'unknown', p_detail: errMessage(error).slice(0, 1000),
+              });
+              if (recorded.error) throw recorded.error;
+              if (recorded.data === true) counts.quarantined += 1;
+            } catch (recordError) {
+              log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
+            }
+          }
+        }
+      }
+    } catch (error) {
+      counts.failed += 1;
+      log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+    } finally {
+      if (leaseId) {
+        try {
+          const finished = await port.finishAnalysisRunSweep({ p_lease_id: leaseId });
+          if (finished.error) {
+            counts.failed += 1;
+            log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(finished.error) }, 'Watermark retained; lease expiry permits recovery');
+          }
+        } catch (error) {
+          counts.failed += 1;
+          log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+        }
+      }
+    }
+    log.info({ event: 'analysis_run.drain', mode: opts.mode ?? 'sweep', depth_estimate: counts.depthEstimate,
+      oldest_pending_age_seconds: counts.oldestPendingAgeSeconds, attempts: counts.attempts, scanned: counts.scanned,
+      derived: counts.derived, quarantined: counts.quarantined, skipped: counts.skipped, failed: counts.failed }, 'Bounded analysis Run sweep');
+    return counts;
+  }
+
+  private async appendThroughRpcInner(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
     if (options !== undefined && (write.graph != null || write.modelVersion !== undefined || write.briefText != null
       || write.coaching_state != null || write.turn_class !== 'direct_answer' || write.handler_id !== null
       || !write.response_emitted || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {
@@ -2388,11 +2568,8 @@ export class SupabaseSessionStore implements SessionStore {
   async readScenarioRunAnalysisFactsFor(
     scenarioId: string,
     limit: number,
-  ): Promise<{
-    readonly facts: readonly IdentifiedHandlerFact[];
-    readonly total_count: number;
-    readonly legacy_edit_facts?: LegacyAnalysisEditFacts;
-  }> {
+    options?: ScenarioRunAnalysisFactReadOptions,
+  ): Promise<ScenarioRunAnalysisFactPage> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new SessionReadError(
         'Scenario analysis-fact lookahead limit is invalid',
@@ -2436,6 +2613,26 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
+    if (options?.malformedRows === 'isolate-for-anchor') {
+      const facts: IdentifiedHandlerFact[] = [];
+      const ids: (string | null)[] = [];
+      for (const row of data) {
+        try {
+          // Reuse the strict decoder per row. Only its row-corruption refusal is isolated;
+          // a query/count failure above still fails the entire read.
+          if (row === null || typeof row !== 'object') {
+            throw new SessionReadError('Scenario analysis-fact row metadata is invalid', { code: 'analysis_fact_corrupt' });
+          }
+          facts.push(...parseScenarioRunAnalysisRows([row], scenarioId));
+        } catch (error) {
+          if (!(error instanceof SessionReadError) || error.code !== 'analysis_fact_corrupt') throw error;
+          const rawId = row !== null && typeof row === 'object' && 'id' in row ? row.id : null;
+          ids.push(typeof rawId === 'string' ? rawId : null);
+        }
+      }
+      return Object.freeze({ facts: Object.freeze(facts), total_count: count as number,
+        isolated_malformed_rows: Object.freeze({ read_count: data.length, ids: Object.freeze(ids) }) });
+    }
     const facts = parseScenarioRunAnalysisRows(data, scenarioId);
     const selected = selectRunAnalysisFact(facts.map(entry => entry.fact));
     let legacyEdits: LegacyAnalysisEditFacts | undefined;
