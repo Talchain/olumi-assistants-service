@@ -88,7 +88,7 @@ describe('S4: horizon token census', () => {
     }
     process.stdout.write(`S4 gate census: ${GATE_FILES.length} production gate files use the one verdict path\n`);
   });
-  it(`rejects every non-test src horizon-token reader outside the ${Object.keys(ALLOWLIST).length}-file reasoned allowlist`, () => {
+  it(`rejects every non-test src horizon-token reader outside the ${Object.keys(ALLOWLIST).length}-file reasoned allowlist`, { timeout: 60_000 }, () => {  // whole-src TypeScript AST walk: 2.5 s locally, >5 s on CI runners
     const files = walk(ROOT).map(path => ({ path: relative(ROOT, path), text: readFileSync(path, 'utf8') }));
     expect(Object.values(ALLOWLIST).every(reason => reason.trim().length > 0)).toBe(true);
     expect(referencesHorizonHelper('/** use horizonSteadyAttested(graph) */')).toBe(false);
