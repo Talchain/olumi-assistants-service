@@ -5,6 +5,7 @@ import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint
 import { GOAL_FIGURES_HORIZON_NOT_TESTED, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { goalHorizonWithholdDetail } from './goal-horizon-detail.js';
 import { horizonSteadyAttested } from './horizon-basis.js';
+import { goalKindOf } from './goal-kind.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
@@ -17,6 +18,12 @@ export const GOAL_HORIZON_STEADY_ATTESTED = 'GOAL_HORIZON_STEADY_ATTESTED';
 export function heldGoalHorizonMonths(goal: unknown): number | undefined {
   const month = recordOf(goal)?.goal_horizon_months;
   return typeof month === 'number' && Number.isInteger(month) && month > 0 ? month : undefined;
+}
+
+/** The one held-deadline accessor for horizon permission and its wording; validates the schema's date arm. */
+export function heldGoalDeadline(goal: unknown): string | undefined {
+  const horizon = NodeV3.shape.goal_horizon.safeParse(recordOf(goal)?.goal_horizon).data;
+  return horizon !== undefined && 'deadline' in horizon ? horizon.deadline : undefined;
 }
 
 /** A Run's carrier must attest the declared positional inputs and the goal's own month. */
@@ -49,7 +56,10 @@ export function goalHorizonVerdict(graph: unknown, envelope?: unknown): GoalHori
   const goals = Array.isArray(rawNodes) ? rawNodes.map(recordOf).filter((node): node is Rec =>
     node !== undefined && node.kind === 'goal') : [];
   const goal = goals.length === 1 ? goals[0] : undefined;
-  if (heldGoalHorizonMonths(goal) === undefined) return 'no_horizon';
+  if (heldGoalHorizonMonths(goal) === undefined) {
+    // Calendar dates have no bound carrier today; share-by-date's event chances already model time.
+    return heldGoalDeadline(goal) !== undefined && goalKindOf(graph) !== 'share_by_date' ? 'withhold' : 'no_horizon';
+  }
   if (accumulationTestedAtGoalHorizon(graph, envelope)) return 'computed_at_h';
   return horizonSteadyAttested(goal) ? 'steady_attested' : 'withhold';
 }

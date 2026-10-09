@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 // DL #2895 P2: explicit file/reason pairs, never broad directory exemptions.
 const ALLOWLIST: Readonly<Record<string, string>> = {
-  "orchestrator-v5/goal-target/goal-horizon-verdict.ts": "The sole goal-chance horizon verdict and read-time gate.",
+  "orchestrator-v5/goal-target/goal-horizon-verdict.ts": "The sole goal-chance horizon verdict and read-time gate; heldGoalDeadline is the one schema-validated calendar deadline accessor for this permission and wording.",
   "orchestrator-v5/goal-target/goal-record.ts": "S5 sole typed goal record reads protected goal fields; no chance permission.",
   "orchestrator-v5/goal-target/horizon-basis.ts": "Parked attestation predicate; always false until S5 2b provenance enforcement.",
   "schemas/cee-v3.ts": "Declares goal-month schema and protected stored attestation fields.",

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { goalHorizonWithholdDetail, goalHorizonSteadyWhyLine } from '../goal-horizon-detail.js';
+import { heldGoalDeadline, goalHorizonVerdict } from '../goal-horizon-verdict.js';
+import { sayDate } from '../deadline-date.js';
 import { goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
 import { enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../../agent-lane/withheld-leader-fail-closed.js';
 import { WITHHELD_SEPARATION_UNAVAILABLE } from '../../compose/analysis-state-v1.js';
@@ -10,6 +12,24 @@ const horizonWarning = { code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', severity: 'war
   message: opening, say: opening, option_ids: ['raise', 'keep'] };
 
 describe('Science §(o′)/(ad) typed horizon detail and existing narrator egress', () => {
+  it('deadline-only detail uses the calendar card date without a carrier or slot sentence', () => {
+    const deadline = '2027-03-31';
+    const datedGoal = { ...goal, goal_horizon_months: undefined, goal_horizon: { deadline } };
+    expect(heldGoalDeadline(datedGoal)).toBe(deadline);
+    expect(goalHorizonWithholdDetail({ nodes: [datedGoal] }))
+      .toBe(`Your goal is for ${sayDate(deadline)}, and this model only has today's numbers.`);
+    expect(goalHorizonSteadyWhyLine({ nodes: [datedGoal] })).toBeNull();
+    expect(goalHorizonWithholdDetail({ nodes: [{ ...datedGoal, goal_horizon_months: 9 }] })).toBe(opening);
+  });
+
+  it.each([undefined, null, {}, { deadline: 'March' }, { deadline: '2027-3-31' },
+    { deadline: 20270331 }, { deadline: '2027-03-31', months: 6 }, { months: 6 }])('a malformed or non-deadline schema arm supplies no calendar horizon: %j', horizon => {
+    const undatedGoal = { ...goal, goal_horizon_months: undefined, goal_horizon: horizon };
+    expect(heldGoalDeadline(undatedGoal)).toBeUndefined();
+    expect(goalHorizonVerdict({ nodes: [undatedGoal] })).toBe('no_horizon');
+    expect(goalHorizonWithholdDetail({ nodes: [undatedGoal] })).toBeNull();
+  });
+
   it('no typed accumulation operands means the sentence without invented slots', () => {
     expect(goalHorizonWithholdDetail({ nodes: [goal, { id: 'count', kind: 'factor', label: 'Subscribers' }] })).toBe(opening);
     expect(goalHorizonWithholdDetail({ nodes: [{ ...goal, goal_horizon_months: undefined }] })).toBeNull();

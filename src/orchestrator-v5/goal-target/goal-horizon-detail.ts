@@ -1,19 +1,21 @@
 /** Science §(o′)/(ad): exact horizon detail, populated only by typed graph facts. */
-import { heldGoalHorizonMonths } from './goal-horizon-verdict.js';
+import { heldGoalDeadline, heldGoalHorizonMonths } from './goal-horizon-verdict.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
+import { sayDate } from './deadline-date.js';
 
 type Rec = Record<string, unknown>;
 const rec = (value: unknown): Rec | undefined => value !== null && typeof value === 'object'
   && !Array.isArray(value) ? value as Rec : undefined;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
-function horizonGoal(graph: unknown): { goal: Rec; nodes: Rec[]; month: number } | undefined {
+function horizonGoal(graph: unknown): { goal: Rec; nodes: Rec[]; month: number | undefined; deadline: string | undefined } | undefined {
   const rawNodes = rec(graph)?.nodes;
   const nodes = Array.isArray(rawNodes) ? rawNodes.map(rec).filter((node): node is Rec => node !== undefined) : [];
   const goals = nodes.filter(node => node.kind === 'goal');
   const month = heldGoalHorizonMonths(goals[0]);
-  return goals.length === 1 && month !== undefined
-    ? { goal: goals[0]!, nodes, month } : undefined;
+  const deadline = heldGoalDeadline(goals[0]);
+  return goals.length === 1 && (month !== undefined || deadline !== undefined)
+    ? { goal: goals[0]!, nodes, month, deadline } : undefined;
 }
 
 /**
@@ -23,7 +25,8 @@ function horizonGoal(graph: unknown): { goal: Rec; nodes: Rec[]; month: number }
 export function goalHorizonWithholdDetail(graph: unknown): string | null {
   const held = horizonGoal(graph);
   if (held === undefined) return null;
-  const { goal, nodes, month } = held;
+  const { goal, nodes, month, deadline } = held;
+  if (month === undefined) return `Your goal is for ${sayDate(deadline!)}, and this model only has today's numbers.`;
   const opening = `Your goal is for month ${month}, and this model only has today's numbers.`;
   const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
   if (product?.operation !== 'product' || !Array.isArray(product.factor_ids)) return opening;
@@ -56,6 +59,6 @@ export function goalHorizonWithholdDetail(graph: unknown): string | null {
 /** User attestation is licensed by goalHorizonVerdict; this helper owns its verbatim Why? sentence. */
 export function goalHorizonSteadyWhyLine(graph: unknown): string | null {
   const held = horizonGoal(graph);
-  if (held === undefined || typeof held.goal.label !== 'string' || held.goal.label.trim() === '') return null;
+  if (held === undefined || held.month === undefined || typeof held.goal.label !== 'string' || held.goal.label.trim() === '') return null;
   return `You said ‘${held.goal.label.trim()}’ stays about where it is over ${held.month} months unless you act, so this is its chance once each option is in effect.`;
 }

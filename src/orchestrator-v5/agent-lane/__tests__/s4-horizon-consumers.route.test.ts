@@ -12,8 +12,11 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
-import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
-import { CHANCE_FREE_HORIZON_PREFIX, withUntestedHorizonWarning } from '../decision-input-ask.js';
+import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
+import { goalKindOf } from '../../goal-target/goal-kind.js';
+import { sayDate } from '../../goal-target/deadline-date.js';
+import { teamShareMoments } from '../../goal-target/event-by-date-share.js';
+import { CHANCE_FREE_HORIZON_PREFIX, untestedHorizonLineForCells, withUntestedHorizonWarning } from '../decision-input-ask.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
@@ -215,6 +218,74 @@ describe('Science §(ad) through the producer and reply route', () => {
   });
   beforeEach(() => { currentFact = undefined; storedRunJson = undefined; rows.clear(); script = [];
     distinctWins = false; });
+
+  it('by March, no month or carrier: producer and canonical reload withhold every goal chance and retain Q-a ordering', async () => {
+    graph = sizedB2(); distinctWins = true;
+    delete goal(graph).goal_horizon_months;
+    const deadline = '2027-03-31';
+    goal(graph).goal_horizon = { deadline };
+    const detail = `Your goal is for ${sayDate(deadline)}, and this model only has today's numbers.`;
+    expect(graph.nodes.every((node: Rec) => node.nonlinear_identity === undefined)).toBe(true);
+    // A7 without a month retains only its existing opener when no cell supplies the detail.
+    expect(untestedHorizonLineForCells({ ...graph, goal_constraints: [] }, [])).toBe(`${CHANCE_FREE_HORIZON_PREFIX}.`);
+    currentResult = { type: 'analysis_result', summary: 'Awaiting this Run.', enrichment: { option_comparison: [], inference_warnings: [] } };
+    const body = await turn();
+    const storedRun = JSON.parse(storedRunJson!) as Rec;
+    const storedResult = buildAnalysisResultBlock(storedRun as never) as Rec;
+    const reload = projectCanonicalAnalysisView({ graph, runFact: storedRun as never,
+      currentResult: storedResult as never, analysisState: B2_READ.analysis_state as never, analysisReady: B2_READ.analysis_ready });
+    const expectedLeader = optionIds(graph).at(-1)!;
+    for (const fact of [currentFact!, storedRun]) {
+      expect(goalHorizonVerdict(graph, fact.result.enrichment)).toBe('withhold');
+      expect(fact.result.leading_option_id).toBe(expectedLeader);
+      const enrichment = fact.result.enrichment;
+      expect(enrichment.results).toEqual(plotBody().results);
+      for (const id of optionIds(graph)) {
+        expect(enrichment.option_comparison.find((row: Rec) => row.option_id === id)).not.toHaveProperty('probability_of_goal');
+        expect(enrichment.inference_warnings).toContainEqual(expect.objectContaining({
+          code: HORIZON_WITHHOLD, message: detail, say: detail, option_ids: expect.arrayContaining([id]),
+        }));
+      }
+    }
+    expect(currentResult.leading_option_id).toBe(expectedLeader);
+    expect(storedResult.leading_option_id).toBe(expectedLeader);
+    expect(reload.options).toEqual(lastView.options);
+    expect(reload.options).toHaveLength(optionIds(graph).length);
+    for (const row of reload.options) expect(row.cell).toMatchObject({ kind: 'withheld',
+      reasons: expect.arrayContaining([expect.objectContaining({ code: HORIZON_WITHHOLD, message: detail })]) });
+    expect(body._answer_shape.detail).toContain(detail);
+    expect(body.assistant_text).not.toContain('%');
+  }, 60_000);
+
+  it('CONTROL: share-by-date with a calendar deadline keeps its event chance outside §(ad)', () => {
+    const deadline = '2027-04-07';
+    const unit = '% of launch';
+    const moments = teamShareMoments(6, 6, 10);
+    const shareGraph = { nodes: [
+      { id: 'launch', kind: 'goal', label: 'Launch share', goal_horizon: { deadline }, goal_threshold_frame: 'level',
+        goal_threshold: 1, goal_threshold_raw: 100, goal_threshold_cap: 100, goal_threshold_unit: unit, goal_direction: '>=' },
+      { id: 'team', kind: 'factor', label: 'Team launch share', category: 'observable',
+        observed_state: { value: moments.mean, std: moments.sd, unit, cap: 100, source: 'user_override',
+        stated_time: { quantity: 'months_to_finish', low: 6, high: 10, unit: 'months', deadline, reference_date: '2026-10-07' } } },
+      { id: 'keep', kind: 'option' },
+    ], edges: [{ from: 'team', to: 'launch', strength: { mean: 1, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive',
+      provenance: { source: 'cee_hypothesis', definitional: true, natural_effect: {
+        amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
+        strength_mean: 1, strength_mean_frame: 'edge_strength' } } }] };
+    expect(goalKindOf(shareGraph)).toBe('share_by_date');
+    expect(goalHorizonVerdict(shareGraph)).toBe('no_horizon');
+    const envelope = { option_comparison: [{ option_id: 'keep', probability_of_goal: 0.4 }] };
+    expect(withholdGoalFiguresForUntestedHorizon(envelope, shareGraph)).toBe(envelope);
+  });
+
+  it('CONTROL: no deadline and no months is no_horizon', async () => {
+    graph = sizedB2();
+    delete goal(graph).goal_horizon_months;
+    delete goal(graph).goal_horizon;
+    expect(goalHorizonVerdict(graph)).toBe('no_horizon');
+    const fact = await realRun(graph);
+    expect(fact.result.enrichment.inference_warnings.some((warning: Rec) => warning.code === HORIZON_WITHHOLD)).toBe(false);
+  });
 
   it('Q-a B2: withheld goal chances retain the leader and win shares without horizon claims, narrator included', async () => {
     graph = sizedB2(); distinctWins = true;

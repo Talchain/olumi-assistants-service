@@ -14,7 +14,7 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
-import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
+import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict, heldGoalDeadline, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { goalHorizonSteadyWhyLine } from '../goal-target/goal-horizon-detail.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
@@ -223,7 +223,8 @@ export function untestedHorizonLineForCells(
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const within = withinMonths(goal);
-  return within !== '' && !hasDurationLimit(graph) ? `${CHANCE_FREE_HORIZON_PREFIX}${within}.` : null;
+  return (within !== '' || heldGoalDeadline(goal) !== undefined) && !hasDurationLimit(graph)
+    ? `${CHANCE_FREE_HORIZON_PREFIX}${within}.` : null;
 }
 
 /** The single goal's stated target in the user's unit, shared by the horizon and withheld-chance sentences. */

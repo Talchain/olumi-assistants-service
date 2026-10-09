@@ -57,6 +57,23 @@ beforeEach(() => {
 });
 
 describe('stored supported chance re-licensed against the current graph', () => {
+  it('no H Run → by March without months or a carrier → canonical reload withholds and preserves ordering', async () => {
+    const g = graph(), run = fact(g), storedBytes = JSON.stringify(run);
+    expect((await reload(run, g)).canonical_analysis_view.options.map((r: Rec) => r.cell.kind)).toEqual(['figure', 'figure']);
+    g.nodes.find((n: Rec) => n.kind === 'goal').goal_horizon = { deadline: '2027-03-31' };
+    expect(computeAnalysisAffectingGraphHash(g as never)).toBe(run.result.graph_hash_at_run);
+    const after = await reload(run, g);
+    expect(after.analysis_state.run_state.kind).toBe('complete_current');
+    expect(after.canonical_analysis_view.options).toHaveLength(2);
+    for (const row of after.canonical_analysis_view.options) expect(row.cell).toMatchObject({ kind: 'withheld',
+      reasons: [{ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', message: "Your goal is for 31 March 2027, and this model only has today's numbers." }] });
+    const projected = analysisResultForAgent(after.analysis_result, undefined, true, g) as Rec;
+    expect(JSON.stringify(projected)).not.toMatch(/probability_of_goal|pct_by_option|GOAL_CHANCE_LICENSED/);
+    expect(projected.enrichment.option_comparison.map((r: Rec) => r.win_probability)).toEqual([.8, .2]);
+    expect(after.analysis_result.leading_option_id).toBe('a');
+    expect(JSON.stringify(run)).toBe(storedBytes);
+  });
+
   it('stored delivered chance prose is omitted alongside the horizon-held cells rather than rewritten', async () => {
     const g = graph(), run = fact(g);
     run.result.run_id = 'stored-no-h-run';
