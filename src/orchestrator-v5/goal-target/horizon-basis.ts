@@ -27,16 +27,3 @@ export function horizonSteadyAttested(graph: unknown, scenarioId: string | undef
     && basis !== undefined && basis.bound_months === goal.goal_horizon_months
     && basis.metric === horizonBasisMetricKey(goal, scenarioId);
 }
-
-/** Drop client answers and restore only server-held bytes for the same goal id. No new basis is minted here. */
-export function stripHorizonBasis(graph: unknown, stored?: unknown): void {
-  if (!record(graph) || !Array.isArray(graph.nodes)) return;
-  const storedNodes = record(stored) && Array.isArray(stored.nodes) ? stored.nodes.filter(record) : [];
-  const field = 'horizon_basis';
-  for (const node of graph.nodes) {
-    if (!record(node)) continue;
-    delete node[field];
-    const kept = storedNodes.find(n => n.id === node.id && n.kind === 'goal' && node.kind === 'goal');
-    if (kept !== undefined && kept[field] !== undefined) node[field] = structuredClone(kept[field]);
-  }
-}

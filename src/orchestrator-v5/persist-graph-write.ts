@@ -109,6 +109,7 @@
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
 import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
+import { assertDoorProvenance } from './goal-target/horizon-basis-provenance.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -149,6 +150,8 @@ export interface CheckedGraphAppendParams {
   readonly write: SessionTurnWrite;
   /** The store to append through. Callers resolve their own. */
   readonly store: SessionStore;
+  readonly horizonBasisWrite?: import('./goal-target/goal-steady-write.js').HorizonBasisWrite;
+  readonly storedGraphForHorizonBasis?: unknown;
   /**
    * Whether this write carries a graph. Gates the NON-FATAL reporting only —
    * the fatal refusal below is deliberately NOT gated on it, preserving
@@ -440,6 +443,7 @@ export async function appendCheckedGraphWrite(
 
     // The check runs on `write.graph` — the same object handed to `store.append`
     // on the last line of this function, with nothing between them.
+    assertDoorProvenance(write.graph, params.storedGraphForHorizonBasis !== undefined ? params.storedGraphForHorizonBasis : params.baseGraphForInvariants, write.scenario_id, params.horizonBasisWrite);
     assertNoIntroducedGraphViolations({
       graph: write.graph,
       identity: {

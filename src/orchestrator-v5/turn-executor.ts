@@ -1,4 +1,3 @@
-import { stripHorizonBasis } from './goal-target/horizon-basis.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 TurnExecutor (Phase 1 — tool-use routing spine).
@@ -1167,12 +1166,6 @@ export async function runTurnExecutor(
   requestId: string,
   options: RunTurnExecutorOptions = {},
 ): Promise<TurnExecutorRunResult> {
-  // Direct callers must obey the same client-graph boundary as /orchestrate/v2/turn.
-  if (options.graphState != null) {
-    const graphState = structuredClone(options.graphState);
-    stripHorizonBasis(graphState);
-    options = { ...options, graphState };
-  }
   const startedAt = Date.now();
   const stagesCompleted: string[] = [];
 

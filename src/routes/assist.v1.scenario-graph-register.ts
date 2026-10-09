@@ -1,9 +1,9 @@
+import { prepareHorizonBasisForWrite } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
 /** Register a scenario graph through the existing CAS/atomic-write boundary.
  * Central ownership admission uses the declared path id and verified caller.
  * Only valid initial imports may create a scenario; deleted-scenario fencing remains.
  * Payload, CAS, stored-fact carry and write-error contracts remain in this handler. */
 
-import { stripHorizonBasis } from '../orchestrator-v5/goal-target/horizon-basis.js';
 import { assertShareByDatePreserved, ShareByDateOwnershipError } from '../orchestrator-v5/goal-target/share-by-date-carrier.js';
 import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -765,7 +765,6 @@ export default async function route(app: FastifyInstance) {
           withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
           baseGraphForInvariants,
         ), baseGraphForInvariants), baseGraphForInvariants);
-        stripHorizonBasis(graphToRegister, baseGraphForInvariants);
         // The canvas omits edge provenance; verify the postimage after restoring unchanged held facts.
         assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
       } catch (err) {
@@ -1051,6 +1050,7 @@ export default async function route(app: FastifyInstance) {
           scenarioId, turnClass: "direct_answer", source: "graph_registration",
         }));
 
+      prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);
       // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds

@@ -1,10 +1,19 @@
 import { createHash } from 'node:crypto';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
+import { _resetConfigCache } from '../../../config/index.js';
+import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
+import { prepareHorizonBasisForWrite, assertDoorProvenance } from '../horizon-basis-provenance.js';
+import { createApplyOperations, currentModelRevision } from '../../apply-operations.js';
+import { dispatchEditGraph } from '../../handlers/edit-graph-dispatch.js';
+import { dispatchDraftGraph } from '../../handlers/draft-graph-dispatch.js';
+import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
+import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { GraphV3, NodeV3 } from '../../../schemas/cee-v3.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { computeGraphIdentityHash, computeVersionAnalysisAffectingHashRecord } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { parseRequestExtensions } from '../../boundary/request-extensions.js';
 import { OpenAIAdapter } from '../../../adapters/llm/openai.js';
@@ -20,6 +29,12 @@ import { horizonBasisMetricKey, horizonSteadyAttested } from '../horizon-basis.j
 import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped } from '../goal-steady-write.js';
 import { __setUseAppendV6ForTest } from '../../session/supabase-store.js';
 
+vi.mock('../../../orchestrator/tools/edit-graph.js', async original => ({
+  ...await original<typeof import('../../../orchestrator/tools/edit-graph.js')>(), handleEditGraph: vi.fn(),
+}));
+vi.mock('../../../orchestrator/tools/draft-graph.js', async original => ({
+  ...await original<typeof import('../../../orchestrator/tools/draft-graph.js')>(), handleDraftGraph: vi.fn(),
+}));
 const sdk = vi.hoisted(() => ({ draft: '', calls: 0 }));
 vi.mock('openai', () => ({ default: class {
   chat = { completions: { create: async () => {
@@ -31,7 +46,11 @@ vi.mock('openai', () => ({ default: class {
 // Real entry functions; only storage/auth/telemetry and the model adapter are doubles.
 vi.mock('../../../config/index.js', async original => {
   const actual = await original<typeof import('../../../config/index.js')>();
-  return { ...actual, config: { ...actual.config, llm: { ...actual.config.llm, openaiApiKey: 's5-sdk-double' }, auth: { ...actual.config.auth, requireUserJwt: false } } };
+  return { ...actual, config: new Proxy(actual.config, { get(target, key) {
+    if (key === 'llm') return { ...target.llm, openaiApiKey: 's5-sdk-double' };
+    if (key === 'auth') return { ...target.auth, requireUserJwt: false };
+    return Reflect.get(target, key);
+  } }) };
 });
 vi.mock('../../../utils/telemetry.js', async original => ({
   ...await original<typeof import('../../../utils/telemetry.js')>(),
@@ -78,6 +97,10 @@ function world(initial: unknown) {
     loadGraphAndBriefText: async () => ({ graph: read(), briefText: null, revision: 31 }),
     append: async write => {
       expect(write.scenario_id).toBe(SCENARIO);
+      if (write.modelVersion !== undefined) {
+        expect(write.modelVersion.graph_identity_hash).toBe(computeGraphIdentityHash(write.graph as never)?.value);
+        expect(write.modelVersion.analysis_affecting_hash).toBe(computeVersionAnalysisAffectingHashRecord(write.graph as never)?.value);
+      }
       writes.push(clone(write));
       if (write.graph != null) bytes = JSON.stringify(write.graph);
       return { id: 'row-1' };
@@ -96,9 +119,10 @@ function world(initial: unknown) {
 let activeStore = world(null).store;
 beforeEach(() => {
   vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'live');
+  _resetConfigCache();
   __setUseAppendV6ForTest(false);
 });
-afterEach(() => { vi.unstubAllEnvs(); __setUseAppendV6ForTest(undefined); });
+afterEach(() => { vi.unstubAllEnvs(); _resetConfigCache(); __setUseAppendV6ForTest(undefined); });
 function input(g: Rec, extra: Rec = {}) {
   return { targets: [], goalSteady: { goal_id: 'goal', months: 9 }, scenarioId: SCENARIO, turnId: TURN,
     requestId: 's5-door', stage: 'analyse' as const, requestHash: 's5-request', freshness: 'fresh' as const,
@@ -112,6 +136,7 @@ async function register(g: Rec, w: ReturnType<typeof world>) {
     const res = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph: g } });
     expect(res.statusCode, res.body).toBe(200);
     expect(w.writes).toHaveLength(1);
+    expect(res.json().graph_hash).toBe(computeAnalysisAffectingGraphHash(w.read() as never));
     return w.read();
   } finally { await app.close(); }
 }
@@ -186,12 +211,12 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
     expect(horizonSteadyAttested(g, SCENARIO)).toBe(true);
     expect(goalOf(await register(g, w))).not.toHaveProperty('horizon_basis');
   });
-  it('R5 graph_state boundary drops client basis without changing caller bytes', () => {
+  it('R5 graph_state boundary echoes client basis without changing caller bytes', () => {
     const g = attested(), before = clone(g);
     const parsed = parseRequestExtensions({ graph_state: g }, 's5-boundary');
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) throw new Error('boundary refused');
-    expect(goalOf(parsed.value.graphState!)).not.toHaveProperty('horizon_basis');
+    expect(goalOf(parsed.value.graphState!).horizon_basis).toEqual(goalOf(g).horizon_basis);
     expect(g).toEqual(before);
   });
   it('R5 first-touch executor cannot persist forged basis even when boundary is bypassed', async () => {
@@ -309,5 +334,252 @@ describe('S5 horizon_basis door: real ingress and commit paths, bound to goal + 
     expect(horizonSteadyAttested(attested(), undefined)).toBe(false);
     const carrier = attested(); carrier.nodes.push({ id: 'stock', nonlinear_identity: { operation: 'accumulation' } });
     expect(horizonSteadyAttested(carrier, SCENARIO)).toBe(false);
+  });
+});
+
+
+function doorWrite(graph: Rec): SessionTurnWrite {
+  return { scenario_id: SCENARIO, turn_id: TURN, turn_class: 'direct_answer', handler_id: null,
+    request_hash: 'door-unit', response_emitted: false, llm_calls_used: 0, duration_ms: 0, handler_facts: [], graph };
+}
+const payload = (message: string) => ({ kind: 'message' as const, source: 'composer' as const,
+  turn_id: TURN, scenario_id: SCENARIO, message, turn_class: 'frame' as const, stage: 'analyse' as const });
+
+describe('S5 r1 append-door provenance', () => {
+  it.each(['update_node', 'add_node'])('P1-1 generic approval %s cannot forge a correctly bound basis', async op => {
+    const g = seed(), w = world(g);
+    const forged = clone(goalOf(attested()));
+    if (op === 'add_node') { forged.id = 'b'; forged.horizon_basis.metric = horizonBasisMetricKey(forged, SCENARIO); }
+    const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'r1-approval', store: w.store });
+    const pendingResult = apply({ proposalId: 'r1-forge', idempotencyKey: TURN,
+      modelRevision: (await currentModelRevision(SCENARIO, { store: w.store }))!,
+      operations: [{ kind: 'edit_graph', summary: 'Approved update', detail: { operations: [
+        { op, path: op === 'add_node' ? 'b' : 'goal', value: op === 'add_node' ? forged : { horizon_basis: forged.horizon_basis } },
+      ] } }] });
+    if (op === 'add_node') {
+      // 99d1a77f already adds refs only inside commit, then reports a readback mismatch.
+      // Keep provenance coverage through the real append without repairing that separate defect.
+      await expect(pendingResult).rejects.toThrow('committed_graph_mismatch');
+    } else {
+      const result = await pendingResult;
+      expect(result).toMatchObject({ ok: true });
+      if (result.ok) expect(result.newModelRevision).toBe(computeAnalysisAffectingGraphHash(w.read() as never));
+    }
+    expect(w.writes).toHaveLength(1);
+    expect(goalOf(w.read(), op === 'add_node' ? 'b' : 'goal')).not.toHaveProperty('horizon_basis');
+  });
+  it.each(['live', 'off', 'shadow'])('P1-2 echoed basis survives an unrelated real edit in %s mode', async mode => {
+    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode); _resetConfigCache();
+    const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
+    const boundary = parseRequestExtensions({ graph_state: client }, 'r1-edit');
+    if (!boundary.ok) throw new Error('invalid client');
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
+      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
+      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.',
+        changes: [{ label: 'Coverage', description: 'Renamed.', element_ref: 'factor' }], rerun_recommended: false } } as never);
+    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
+      requestId: 'r1-edit', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
+    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
+    expect(w.writes).toHaveLength(1);
+    expect(w.writes[0]!.graph).toBeDefined();
+    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
+    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
+  });
+  it.each(['live', 'off', 'shadow'])('P1-1 empty-store real edit cannot promote client basis to stored authority in %s mode', async mode => {
+    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode); _resetConfigCache();
+    const client = attested(), w = world(null); activeStore = w.store;
+    const boundary = parseRequestExtensions({ graph_state: client }, 'r1-empty-edit');
+    if (!boundary.ok) throw new Error('invalid client');
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
+      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
+      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
+    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
+      requestId: 'r1-empty-edit', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
+    expect(result.commitPerformed).toBe(true);
+    expect(w.writes).toHaveLength(1);
+    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
+    expect(goalOf(w.read())).not.toHaveProperty('horizon_basis');
+    expect(goalOf(result.response.draft_graph as Rec)).not.toHaveProperty('horizon_basis');
+  });
+  it('P1-2 forged graph_state correctly diverges in live mode without changing the stored answer', async () => {
+    const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
+    goalOf(client).horizon_basis.metric = 'f'.repeat(32);
+    const boundary = parseRequestExtensions({ graph_state: client }, 'r1-forged-echo');
+    if (!boundary.ok) throw new Error('invalid client');
+    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
+      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
+      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
+    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
+      requestId: 'r1-forged-echo', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
+    expect(JSON.stringify(result)).toContain('BASE_HASH_DIVERGED');
+    expect(result.graph).toBeNull();
+    expect(w.writes).toHaveLength(1);
+    expect(w.writes[0]!.graph).toBeUndefined();
+    expect(w.read()).toEqual(g);
+  });
+  it.each(['off', 'shadow'])('P1-2b omitted basis survives the real edit path in %s mode', async mode => {
+    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode); _resetConfigCache();
+    const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
+    delete goalOf(client).horizon_basis;
+    const after = clone(client); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
+      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
+      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
+    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'), requestId: 'r1-omit',
+      request: {} as never, graphState: client as never, analysisState: null });
+    expect(w.writes).toHaveLength(1);
+    expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
+    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
+  });
+  it.each([false, true])('P1-3 real redraft carries by id; changed meaning voids the read (%s)', async changed => {
+    const g = attested(), w = world(g), redraft = seed(); activeStore = w.store;
+    if (changed) goalOf(redraft).label = 'Annual revenue';
+    vi.mocked(handleDraftGraph).mockResolvedValue({ blocks: [], assistantText: 'Drafted the model.', latencyMs: 0,
+      strengthenItems: [], coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null,
+      draftWarnings: [], graphOutput: redraft } as never);
+    const result = await dispatchDraftGraph({ payload: payload('Build the model again'), requestId: 'r1-redraft', request: {} as never });
+    expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(w.writes).toHaveLength(1);
+    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
+    expect(horizonSteadyAttested(w.read(), SCENARIO)).toBe(!changed);
+  });
+  it.each(['changed', 'removed'])('caller preparation restores stored value when unauthorised write %s it', async mode => {
+    const g = attested(), proposed = clone(g), w = world(g);
+    if (mode === 'removed') delete goalOf(proposed).horizon_basis;
+    else goalOf(proposed).horizon_basis.metric = 'f'.repeat(32);
+    prepareHorizonBasisForWrite(proposed, g, SCENARIO);
+    const beforeDoor = clone(proposed);
+    const result = await appendCheckedGraphWrite({ store: w.store, write: doorWrite(proposed), writesGraph: true, baseGraphForInvariants: g });
+    expect(result).toEqual({ id: 'row-1' });
+    expect(proposed).toEqual(beforeDoor);
+    expect(w.read()).toEqual(beforeDoor);
+    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
+  });
+  it('door authorisation is scoped to B; forged A is replaced with stored A', async () => {
+    const g = attested(); g.nodes.push({ ...clone(goalOf(seed())), id: 'b' });
+    const edit = applyGoalSteadyEdit(g, { goal_id: 'b', months: 9 }, SCENARIO);
+    if (edit.kind !== 'mutated') throw new Error('no edit');
+    const proposed = clone(edit.mutatedGraph);
+    goalOf(proposed).horizon_basis.metric = 'f'.repeat(32);
+    const w = world(g);
+    prepareHorizonBasisForWrite(proposed, g, SCENARIO, edit.horizonBasisWrite);
+    await appendCheckedGraphWrite({ store: w.store, write: doorWrite(proposed), writesGraph: true,
+      baseGraphForInvariants: g, horizonBasisWrite: edit.horizonBasisWrite });
+    expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(g).horizon_basis);
+    expect(goalOf(w.read(), 'b').horizon_basis).toEqual(goalOf(edit.mutatedGraph, 'b').horizon_basis);
+  });
+  it('door refuses a tampered authorisation value before append', async () => {
+    const g = seed(), w = world(g), edit = applyGoalSteadyEdit(g, { goal_id: 'goal', months: 9 }, SCENARIO);
+    if (edit.kind !== 'mutated') throw new Error('no edit');
+    const authorisation = (edit as Rec).horizonBasisWrite ?? { goal_id: 'goal', value: goalOf(edit.mutatedGraph).horizon_basis };
+    authorisation.value = { ...authorisation.value, metric: 'f'.repeat(32) };
+    await expect(appendCheckedGraphWrite({ store: w.store, write: doorWrite(edit.mutatedGraph), writesGraph: true,
+      baseGraphForInvariants: g, horizonBasisWrite: authorisation } as never)).rejects.toThrow('horizon_basis');
+    expect(w.writes).toHaveLength(0);
+  });
+  it('door keeps a basis when the graph and stored base share an object', async () => {
+    const g = attested(), expected = clone(goalOf(g).horizon_basis), w = world(g);
+    await appendCheckedGraphWrite({ store: w.store, write: doorWrite(g), writesGraph: true, baseGraphForInvariants: g });
+    expect(goalOf(w.read()).horizon_basis).toEqual(expected);
+  });
+  it('door rejects a plain wire-shaped authorisation even with the correct value', async () => {
+    const g = seed(), w = world(g);
+    await expect(appendCheckedGraphWrite({ store: w.store, write: doorWrite(attested()), writesGraph: true,
+      baseGraphForInvariants: g, horizonBasisWrite: { goal_id: 'goal', value: goalOf(attested()).horizon_basis } } as never))
+      .rejects.toThrow('horizon_basis');
+    expect(w.writes).toHaveLength(0);
+  });
+  it.each([true, false])('door fails closed without a stored base (writesGraph: %s)', async writesGraph => {
+    const proposed = attested(), w = world(proposed);
+    const unchanged = clone(proposed);
+    await expect(appendCheckedGraphWrite({ store: w.store, write: doorWrite(proposed), writesGraph })).rejects.toThrow('horizon_basis');
+    expect(w.writes).toHaveLength(0);
+    expect(proposed).toEqual(unchanged);
+    prepareHorizonBasisForWrite(proposed, undefined, SCENARIO);
+    await appendCheckedGraphWrite({ store: w.store, write: doorWrite(proposed), writesGraph });
+    expect(goalOf(w.read())).not.toHaveProperty('horizon_basis');
+  });
+  it('P45 unconfirmed accumulation carrier refuses attestation', () => {
+    const g = attested();
+    g.nodes.push({ id: 'stock', kind: 'factor', label: 'Stock', nonlinear_identity: {
+      operation: 'accumulation', confirmed: false } });
+    expect(horizonSteadyAttested(g, SCENARIO)).toBe(false);
+  });
+});
+
+
+// Baseline diagnostic: no horizon basis or preparation needed.
+describe('S5 r2 reference allocation finding', () => {
+  it('pre-existing plain add_node readback mismatch remains out of scope', async () => {
+    const g = seed(), w = world(g);
+    const added = { id: 'new_factor', kind: 'factor', label: 'Plain new factor' };
+    const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'r2-plain-add', store: w.store });
+    const result = apply({ proposalId: 'r2-plain-add', idempotencyKey: TURN,
+      modelRevision: (await currentModelRevision(SCENARIO, { store: w.store }))!,
+      operations: [{ kind: 'edit_graph', summary: 'Add a factor', detail: { operations: [
+        { op: 'add_node', path: added.id, value: added },
+      ] } }] });
+    await expect(result).rejects.toThrow('committed_graph_mismatch');
+    expect(w.writes).toHaveLength(1);
+    expect(w.read().nodes.find((n: Rec) => n.id === added.id)).toMatchObject({ ...added, ref: 'F1' });
+  });
+});
+
+
+describe('S5 r2 pure append-door assertion', () => {
+  it('direct door refuses unprepared forged basis without append; prepared bytes append', async () => {
+    const base = seed(), proposed = attested(), w = world(base), before = clone(proposed);
+    await expect(appendCheckedGraphWrite({ store: w.store, write: doorWrite(proposed), writesGraph: true,
+      baseGraphForInvariants: base })).rejects.toThrow('horizon_basis');
+    expect(w.writes).toHaveLength(0);
+    expect(proposed).toEqual(before);
+    prepareHorizonBasisForWrite(proposed, base, SCENARIO);
+    const prepared = clone(proposed);
+    await appendCheckedGraphWrite({ store: w.store, write: doorWrite(proposed), writesGraph: true,
+      baseGraphForInvariants: base });
+    expect(w.writes).toHaveLength(1);
+    expect(w.read()).toEqual(prepared);
+    expect(proposed).toEqual(prepared);
+  });
+  it.each(['prepared', 'forged', 'omitted', 'no-base', 'non-goal'])('door assert is pure on %s graph bytes', mode => {
+    const base = attested(), graph = clone(base);
+    if (mode === 'forged') goalOf(graph).horizon_basis.metric = 'f'.repeat(32);
+    if (mode === 'omitted') delete goalOf(graph).horizon_basis;
+    if (mode === 'non-goal') graph.nodes.find((n: Rec) => n.id === 'factor').horizon_basis = clone(goalOf(base).horizon_basis);
+    const beforeGraph = clone(graph), beforeBase = clone(base), bytes = JSON.stringify(graph);
+    const call = () => assertDoorProvenance(graph, mode === 'no-base' ? undefined : base, SCENARIO);
+    if (mode === 'prepared') expect(call).not.toThrow();
+    else expect(call).toThrow('horizon_basis');
+    expect(graph).toEqual(beforeGraph);
+    expect(base).toEqual(beforeBase);
+    expect(JSON.stringify(graph)).toBe(bytes);
+  });
+  it.each(['absent', 'ambiguous'])('door refuses an authorised goal that is %s without mutation or append', async mode => {
+    const base = seed(), w = world(base), edit = applyGoalSteadyEdit(base, { goal_id: 'goal', months: 9 }, SCENARIO);
+    if (edit.kind !== 'mutated') throw new Error('no edit');
+    const graph = clone(edit.mutatedGraph);
+    if (mode === 'absent') graph.nodes = graph.nodes.filter((n: Rec) => n.id !== 'goal');
+    else graph.nodes.push(clone(goalOf(graph)));
+    const before = clone(graph), capability = clone(edit.horizonBasisWrite);
+    await expect(appendCheckedGraphWrite({ store: w.store, write: doorWrite(graph), writesGraph: true,
+      baseGraphForInvariants: base, horizonBasisWrite: edit.horizonBasisWrite })).rejects.toThrow('horizon_basis authorised goal');
+    expect(graph).toEqual(before);
+    expect(edit.horizonBasisWrite).toEqual(capability);
+    expect(w.writes).toHaveLength(0);
+  });
+  it('door assert is pure for a valid authorised write', () => {
+    const base = seed(), edit = applyGoalSteadyEdit(base, { goal_id: 'goal', months: 9 }, SCENARIO);
+    if (edit.kind !== 'mutated') throw new Error('no edit');
+    const before = clone(edit.mutatedGraph), originalBase = clone(base), capability = clone(edit.horizonBasisWrite);
+    expect(() => assertDoorProvenance(edit.mutatedGraph, base, SCENARIO, edit.horizonBasisWrite)).not.toThrow();
+    expect(edit.mutatedGraph).toEqual(before);
+    expect(base).toEqual(originalBase);
+    expect(edit.horizonBasisWrite).toEqual(capability);
   });
 });

@@ -93,7 +93,7 @@ import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-readi
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
-import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, type ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
+import { applyGoalSteadyEdit, goalSteadyPostimageIsScoped, type ApprovedGoalSteady, type HorizonBasisWrite } from '../goal-target/goal-steady-write.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { goalDeadlineOf } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -1112,6 +1112,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueFacts = written.handlerFacts;
     valueConfirmations = [written.confirmation];
   }
+  let horizonBasisWrite: HorizonBasisWrite | undefined;
   const goalSteady = input.goalSteady;
   if (goalSteady !== undefined) {
     if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
@@ -1120,6 +1121,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyGoalSteadyEdit(before, goalSteady, input.scenarioId);
     if (written.kind !== 'mutated') return written;
+    horizonBasisWrite = written.horizonBasisWrite;
     const graph = projectGraphForPersistence(written.mutatedGraph);
     if (!isEditableGraph(graph) || !goalSteadyPostimageIsScoped(before, graph, goalSteady, input.scenarioId)) {
       return { kind: 'refused', reason: 'goal_steady_scope_mismatch' };
@@ -1230,6 +1232,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       turn_class: 'direct_answer', handler_id: null, llm_calls_used: 0, duration_ms: 0,
       handler_facts: plan.handlerFacts as never, graph: plan.graph, contentGraph: plan.graph,
       baseGraphForInvariants: before, ...computeExpectedGraphCasHashes(before),
+      ...(horizonBasisWrite !== undefined ? { horizonBasisWrite } : {}),
       graph_hash: plan.analysisGraphHash, priorPendingActions: holds.threaded,
       ...(expectedRevision !== undefined ? { expectedRevision } : {}),
     }, store);

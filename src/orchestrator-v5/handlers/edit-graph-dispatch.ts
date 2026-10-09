@@ -3232,6 +3232,9 @@ export async function dispatchEditGraph(
   // gate — the strict persisted read when available, else the ingress echo
   // (the same fallback rule the persistence merge applies).
   let gmFrameBase: unknown = graphState;
+  // Structural checks may fall back to ingress on an empty scenario. Basis
+  // provenance may only come from the actual server read, including its null.
+  let storedGraphForHorizonBasis: unknown;
   if (successfulAppliedMutation) {
     let strictBase: unknown;
     try {
@@ -3273,6 +3276,7 @@ export async function dispatchEditGraph(
     if (config.features.graphCas.requiresExpectedHash) {
       expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
     }
+    storedGraphForHorizonBasis = strictBase ?? null;
     gmFrameBase = strictBase ?? graphState;
     // Design §3.2 — PROJECT INTO THE PERSISTED FORM HERE, before anything in
     // this dispatch derives a hash from it. `commitDirectAnswer` applies the
@@ -5752,7 +5756,7 @@ export async function dispatchEditGraph(
       // editable (`edit-graph.ts:2750-2755`). Omitted on a non-writing turn,
       // where there is nothing to check.
       ...(graphForCommit !== undefined
-        ? { baseGraphForInvariants: gmFrameBase }
+        ? { baseGraphForInvariants: gmFrameBase, storedGraphForHorizonBasis }
         : {}),
       // A3 graph CAS: expected-base hashes from the strict server read above
       // (undefined when no applied mutation / mode off — the CAS hook only
