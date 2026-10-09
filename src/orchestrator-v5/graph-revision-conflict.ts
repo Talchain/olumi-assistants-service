@@ -1,5 +1,7 @@
 import { GraphStaleWriteError } from './build-turn-context.js';
 
+export const REVISION_CONFLICT_MESSAGE = 'The scenario changed while I was saving, so nothing was saved. Try again.';
+
 type RevisionDetails = { readonly expected?: number; readonly current?: number };
 type RevisionConflict = RevisionDetails & { readonly conflict_category: string };
 
@@ -53,7 +55,7 @@ export function readRevisionConflictDetails(error: GraphStaleWriteError): Revisi
 export function withRevisionConflictWire<T extends { details?: Record<string, unknown> }>(
   body: T,
   conflict: RevisionConflict,
-): T | (Omit<T, 'code'> & { code: 'revision_conflict'; expected?: number; current?: number }) {
+): T | (Omit<T, 'code'> & { code: 'revision_conflict'; message: string; expected?: number; current?: number }) {
   if (conflict.conflict_category !== 'revision_conflict') return body;
   const revisions = isRevision(conflict.expected) && isRevision(conflict.current)
     ? { expected: conflict.expected, current: conflict.current }
@@ -61,6 +63,7 @@ export function withRevisionConflictWire<T extends { details?: Record<string, un
   return {
     ...body,
     code: 'revision_conflict',
+    message: REVISION_CONFLICT_MESSAGE,
     ...revisions,
     details: { ...body.details, code: 'revision_conflict', ...revisions },
   };

@@ -1,6 +1,7 @@
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
 import type { LegacyAnalysisEditFacts } from '../types/handler-fact.js';
+import { logGraphRevisionConflict } from '../graph-revision-conflict-event.js';
 import { useAppendV6 } from '../append-v6-flag.js';
 export { USE_APPEND_V6, useAppendV6, __setUseAppendV6ForTest } from '../append-v6-flag.js';
 /**
@@ -596,6 +597,9 @@ export class SupabaseSessionStore implements SessionStore {
     baseRpcArgs: Record<string, unknown>,
     rpcMode: GraphCasRpcMode,
   ): Promise<SessionAppendOutcome> {
+    if (useAppendV6() && write.graph != null) {
+      return this.appendAtomicFenced(write, baseRpcArgs, rpcMode, null);
+    }
     const useV3 = rpcMode !== 'off' && write.graph != null;
     const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
     const rpcName = useV3 ? 'append_turn_atomic_v3'
@@ -1358,8 +1362,8 @@ export class SupabaseSessionStore implements SessionStore {
     write: SessionTurnWrite,
     baseRpcArgs: Record<string, unknown>,
     rpcMode: GraphCasRpcMode,
-    generation: number,
-  ): Promise<{ id: string }> {
+    generation: number | null,
+  ): Promise<SessionAppendOutcome> {
     // CAS args mirror EXACTLY what the pre-v4 dispatch sends per mode:
     // 'off' → the v2 shape (no hashes, no stamp, no compare); shadow/enforce
     // → the v3 shape. v4's CAS block is v3's verbatim, so mode semantics are
@@ -1378,13 +1382,30 @@ export class SupabaseSessionStore implements SessionStore {
             p_cas_enforce: false,
           };
 
-    const { data, error } = await this.client.rpc('append_turn_atomic_v4', {
+    const revisionChecked = useAppendV6();
+    const rpcName = revisionChecked ? 'append_turn_atomic_v4r' : 'append_turn_atomic_v4';
+    if (revisionChecked && !isScenarioRevision(write.expectedRevision)) {
+      throw new StateCommitFailedError('append_turn_atomic_v4r requires a non-negative safe-integer revision from the original graph read');
+    }
+    const { data, error } = await this.client.rpc(rpcName, {
       ...baseRpcArgs,
       ...casArgs,
       p_fence_generation: generation,
+      ...(revisionChecked ? { p_expected_revision: write.expectedRevision } : {}),
     });
 
     if (error) {
+      if (revisionChecked && errCode(error) === 'OLRV1') {
+        logGraphRevisionConflict({ scenario_id: write.scenario_id, turn_id: write.turn_id,
+          handler_id: write.handler_id, expected_revision: write.expectedRevision, rpc: 'v4r' }, error);
+        throw new GraphStaleWriteError('The model changed while this edit was being saved; refresh and reconfirm.', {
+          conflict_category: 'revision_conflict', cause: error,
+        });
+      }
+      if (revisionChecked && errCode(error) === 'PGRST202') {
+        throw new StateCommitFailedError('append_turn_atomic_v4r is not present in this database (PGRST202). Execute migration 20261008200000_phase2_c_v4_revision_cas.sql; nothing was written.',
+          { cause: error, rpc_code: errCode(error) });
+      }
       if (errCode(error) === 'PGRST202') {
         // v4 is not migrated on this database. Remember it (per instance),
         // say so once, and re-run this append through the pre-v4 two-step
@@ -1452,22 +1473,25 @@ export class SupabaseSessionStore implements SessionStore {
         { cause: error, rpc_code: errCode(error) },
       );
     }
-    if (typeof data !== 'string') {
+    const id = revisionChecked ? data?.turn_row_id : data;
+    if (typeof id !== 'string' || id.length === 0 || (revisionChecked && !isScenarioRevision(data?.revision))) {
       throw new StateCommitFailedError(
-        `append_turn_atomic_v4 returned non-string id: ${JSON.stringify(data)}`,
+        revisionChecked
+          ? `${rpcName} returned malformed receipt: ${JSON.stringify(data)}`
+          : `append_turn_atomic_v4 returned non-string id: ${JSON.stringify(data)}`,
       );
     }
 
     // The in-transaction verdict was `current` — emit it on the same
     // telemetry contract as the pre-RPC evaluation (max_generation is not
     // returned by a successful v4; the reason names the channel).
-    this.emitFenceEvaluated(write, 'current', generation, null, 'atomic_append');
+    if (generation !== null) this.emitFenceEvaluated(write, 'current', generation, null, 'atomic_append');
 
     // Commit ordering — identical to the pre-v4 path: RPC success → cache
     // evict → return.
     this.cache.invalidateAll(write.scenario_id);
     await this.resolveDraftLossAfterGraphCommit(write);
-    return { id: data };
+    return revisionChecked ? { id, revision: data.revision } : { id };
   }
 
   /** Version-bearing canonical append. No legacy fallback is safe. */
@@ -1662,7 +1686,8 @@ export class SupabaseSessionStore implements SessionStore {
     // handlers in appendAtomicVersioned; all other RPC errors pass through.
     if (errCode(result.error) === 'OLRV1') {
       // One line per refusal so the post-flip conflict rate can be read per scenario/handler (de, 8 Oct pricing).
-      log.warn({ event: 'graph_revision_conflict', scenario_id: write.scenario_id, turn_id: write.turn_id, handler_id: write.handler_id, expected_revision: write.expectedRevision }, 'append_turn_atomic_v6 refused a stale revision');
+      logGraphRevisionConflict({ scenario_id: write.scenario_id, turn_id: write.turn_id,
+        handler_id: write.handler_id, expected_revision: write.expectedRevision, rpc: 'v6' }, result.error);
       throw new GraphStaleWriteError(
         `append_turn_atomic_v6 rejected a stale revision for scenario ${write.scenario_id}; refresh and reconfirm.`,
         {

@@ -1,6 +1,5 @@
-// Slice ii-a ships the existing v5 path. Commit B flips this one constant;
-// tests exercise the dormant revision read and RPC through the same reader.
-export const USE_APPEND_V6 = false;
+// Revision CAS ships for every graph-bearing append; the seam retains legacy coverage.
+export const USE_APPEND_V6 = true;
 let appendV6Enabled: boolean = USE_APPEND_V6;
 
 export function useAppendV6(): boolean {

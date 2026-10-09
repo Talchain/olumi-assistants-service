@@ -7,8 +7,8 @@
  * A CAS that validates the write against itself always "matches" and is
  * worthless; this test makes that regression loud.
  *
- * Addendum 7 restores the staging path with v6 OFF. ON retains only
- * combined-read revision transport; identity refusal belongs to commit B.
+ * OFF preserves staging read order. ON binds provider and save to one strict
+ * server graph/revision read; a failed read refuses before the provider.
  *
  * Setup mirrors `edit-graph-dispatch-fact-emission.test.ts`: mocked
  * `handleEditGraph` (applied mutation), mocked `commitDirectAnswer`
@@ -372,12 +372,12 @@ describe('Addendum 17 — append-v6 coverage', () => {
       });
     });
 
-    it('ON: a failed initial combined read is retried for an applied save', async () => {
+    it('ON: a failed initial combined read refuses before the provider or commit, without retry', async () => {
       vi.mocked(loadPersistedScenarioStateStrict).mockRejectedValueOnce(new Error('temporary outage'));
-      const metadata = await runDispatch();
-      expect(loadPersistedScenarioStateStrict).toHaveBeenCalledTimes(2);
-      expect(metadata.expectedRevision).toBe(7);
-      expect(metadata.baseGraphForInvariants).toBe(PERSISTED_SERVER_GRAPH);
+      await expect(runDispatch()).rejects.toMatchObject({ conflict_category: 'revision_conflict' });
+      expect(loadPersistedScenarioStateStrict).toHaveBeenCalledOnce();
+      expect(handleEditGraph).not.toHaveBeenCalled();
+      expect(commitDirectAnswer).not.toHaveBeenCalled();
     });
 
   });

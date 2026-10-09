@@ -112,7 +112,7 @@ export interface AtomicCommittedModelVersionReceipt {
 export interface SessionAppendOutcome {
   readonly id: string;
   readonly modelVersionReceipt?: AtomicCommittedModelVersionReceipt;
-  /** Present only on the Phase 2 v6 path; includes accepted replays. */
+  /** Present on revision-checked v6/v4r appends; includes accepted replays. */
   readonly revision?: number;
   /**
    * TRUE when this append REPLAYED an already-committed turn — i.e. the RPC

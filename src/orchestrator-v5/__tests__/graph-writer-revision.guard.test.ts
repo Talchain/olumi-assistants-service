@@ -160,7 +160,7 @@ function revisionDoors(file: ts.SourceFile): RevisionDoor[] {
           // A graph-bearing commit can build the version carrier. A direct
           // floor caller reaches v5/v6 only when it supplies that carrier.
           const versioned = name === 'commitDirectAnswer' ? mightSupply(write, 'graph')
-            : mightSupply(write, 'modelVersion');
+            : mightSupply(write, 'graph');
           if (versioned) doors.push({
             path: file.fileName,
             line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
@@ -344,5 +344,84 @@ describe('versioned graph writer revision propagation', () => {
     visit(floor);
     expect(forwarded).toEqual(['params.write.expectedRevision']);
     expect(appendArguments).toEqual(['storedWrite', 'storedWrite']);
+  });
+});
+
+/** Resolve local RPC aliases/conditional names without accepting comments as code. */
+function rpcNames(expression: ts.Expression, scope: ts.Node, seen = new Set<string>()): string[] {
+  const value = unwrap(expression);
+  if (ts.isStringLiteral(value)) return [value.text];
+  if (ts.isConditionalExpression(value)) return [...rpcNames(value.whenTrue, scope, seen), ...rpcNames(value.whenFalse, scope, seen)];
+  if (!ts.isIdentifier(value) || seen.has(value.text)) return [];
+  const next = new Set(seen).add(value.text);
+  let initializer: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === value.text) initializer = node.initializer;
+    ts.forEachChild(node, visit);
+  };
+  visit(scope);
+  return initializer ? rpcNames(initializer, scope, next) : [];
+}
+
+function hasRevisionFencedSelector(method: ts.MethodDeclaration): boolean {
+  const declarations = new Map<string, ts.Expression>();
+  for (const statement of method.body?.statements ?? []) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) declarations.set(declaration.name.text, unwrap(declaration.initializer));
+    }
+  }
+  const flag = declarations.get('revisionChecked');
+  const selector = declarations.get('rpcName');
+  return flag !== undefined && ts.isCallExpression(flag) && flag.expression.getText() === 'useAppendV6' && flag.arguments.length === 0
+    && selector !== undefined && ts.isConditionalExpression(selector) && selector.condition.getText() === 'revisionChecked'
+    && ts.isStringLiteral(selector.whenTrue) && selector.whenTrue.text === 'append_turn_atomic_v4r'
+    && ts.isStringLiteral(selector.whenFalse) && selector.whenFalse.text === 'append_turn_atomic_v4';
+}
+
+/** Legacy RPCs are permitted only after the graph-bearing ON branch returns. */
+function legacyGraphRpcEscapes(file: ts.SourceFile): string[] {
+  const failures: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'rpc' && node.arguments[0]) {
+      let owner: ts.Node | undefined = node.parent;
+      while (owner && !ts.isMethodDeclaration(owner)) owner = owner.parent;
+      const method = owner && ts.isMethodDeclaration(owner) ? owner : undefined;
+      const names = rpcNames(node.arguments[0], method ?? file);
+      const legacy = names.filter(name => /^append_turn_atomic_v[234]$/.test(name));
+      if (legacy.length > 0) {
+        const gate = method?.body?.statements[0];
+        const protectedDispatch = method?.name.getText(file) === 'dispatchCheckedAppend'
+          && gate && ts.isIfStatement(gate)
+          && gate.expression.getText(file) === 'useAppendV6() && write.graph != null'
+          && ts.isBlock(gate.thenStatement) && gate.thenStatement.statements.length === 1
+          && ts.isReturnStatement(gate.thenStatement.statements[0]!)
+          && gate.thenStatement.statements[0]!.getText(file).includes('this.appendAtomicFenced(write, baseRpcArgs, rpcMode, null)');
+        const protectedFenced = method?.name.getText(file) === 'appendAtomicFenced'
+          && hasRevisionFencedSelector(method) && node.arguments[0].getText(file) === 'rpcName';
+        if (!protectedDispatch && !protectedFenced) failures.push(`${file.fileName} ${legacy.join(',')}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return failures;
+}
+
+describe('flag-ON graph append RPC closure', () => {
+  it('every legacy graph RPC is dominated by the revision dispatch gate', () => {
+    expect(CORPUS.flatMap(legacyGraphRpcEscapes)).toEqual([]);
+  });
+  it('PLANTED MUTANTS: a direct v2/v3/v4 graph RPC and either removed gate are RED', () => {
+    for (const rpc of ['v2', 'v3', 'v4']) {
+      expect(legacyGraphRpcEscapes(parse('mutant.ts', `client.rpc('append_turn_atomic_${rpc}', { p_graph: graph });`))).toHaveLength(1);
+      expect(legacyGraphRpcEscapes(parse('mutant.ts', `const name = 'append_turn_atomic_${rpc}'; client.rpc(name, { p_graph: graph });`))).toHaveLength(1);
+    }
+    const store = CORPUS.find(file => file.fileName === 'orchestrator-v5/session/supabase-store.ts')!;
+    expect(legacyGraphRpcEscapes(parse(store.fileName, store.text.replace(
+      'useAppendV6() && write.graph != null', 'false && write.graph != null')))).not.toEqual([]);
+    expect(legacyGraphRpcEscapes(parse(store.fileName, store.text.replace(
+      "revisionChecked ? 'append_turn_atomic_v4r' : 'append_turn_atomic_v4'", "'append_turn_atomic_v4'") + "\n// const rpcName = revisionChecked ? 'append_turn_atomic_v4r' : 'append_turn_atomic_v4';\n"))).not.toEqual([]);
   });
 });
