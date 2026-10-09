@@ -681,22 +681,20 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
 
   async readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null> {
     try {
-      // Reuse the existing scenario loader/reconciler. No analysis_runs read:
-      // those tables are not yet applied. Dynamic import keeps the capture-only
+      // Anchor-only loader option isolates corrupt rows without weakening the
+      // reasoning/claim-safety page contract. Dynamic import keeps the capture-only
       // adapter free of turn-context initialisation until this read is needed.
       const { loadScenarioAnalysisFactsForRead } = await import('../build-turn-context.js');
-      const { factSet } = await withAnalysisReadDeadline(() => loadScenarioAnalysisFactsForRead(
-        scenarioId, 'decision-record-anchor', this.analysisSessionStore,
+      const page = await withAnalysisReadDeadline(() => loadScenarioAnalysisFactsForRead(
+        scenarioId, 'decision-record-anchor', this.analysisSessionStore, { malformedRows: 'isolate-for-anchor' },
       ));
-      if (factSet.status === 'degraded') throw new AnalysisAnchorUnavailableError();
-      const selected = selectRunAnalysisFact(factSet.facts);
+      const selected = selectRunAnalysisFact(page.facts);
       if (selected === null) {
-        if (factSet.status === 'capped') throw new AnalysisAnchorUnavailableError();
+        if (page.malformed_row_count > 0 || page.capped) throw new AnalysisAnchorUnavailableError();
         return null;
       }
       const hash = selected.graph_hash_at_run;
-      // A selected but unrecorded/malformed anchor is unavailable. Never pick
-      // another Run simply because it has more convenient anchor fields.
+      // Defensive check after the loader has isolated unrecorded/malformed rows.
       if (typeof hash !== 'string' || hash.trim() === ''
         || (selected.computed_at !== null && !Number.isFinite(Date.parse(selected.computed_at)))) {
         throw new AnalysisAnchorUnavailableError();

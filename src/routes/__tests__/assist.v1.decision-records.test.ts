@@ -1155,6 +1155,27 @@ describe('S1 user-commit route — persisted anchor equals the selected successf
       expect(fixture.queries).not.toContain('analysis_runs');
     } finally { await app.close(); }
   });
+  it.each(['older', 'newest'] as const)('malformed %s row does not 503 a commit with a valid success', async malformedPosition => {
+    const early = '2026-10-09T10:00:00.000Z';
+    const late = '2026-10-09T12:00:00.000Z';
+    const validAt = malformedPosition === 'older' ? late : early;
+    const fixture = anchorFixture([
+      anchorRow({ fact_type: 'run_analysis', result: [] }, 2, malformedPosition === 'older' ? early : late),
+      anchorRow(anchorFact('valid-anchor', validAt), 1, validAt),
+    ]);
+    const adapter = new SupabaseDecisionRecordStore(fixture.client, fixture.sessionStore);
+    const { store, createRecord } = makeStore();
+    store.readNewestAnalysisAnchor = adapter.readNewestAnalysisAnchor.bind(adapter);
+    const app = await buildApp(store);
+    try {
+      const res = await app.inject({ method: 'POST', url: '/assist/v1/decision-records/commit',
+        headers: { authorization: `Bearer ${token}` }, payload: COMMIT_BODY });
+      expect(res.statusCode).toBe(201);
+      expect(createRecord).toHaveBeenCalledTimes(1);
+      expect(createRecord.mock.calls[0]?.[0].decision.graph_hash)
+        .toBe(`${AAG_V1_GRAPH_HASH_PREFIX}hash-valid-anchor`);
+    } finally { await app.close(); }
+  });
   it.each(['capped', 'malformed', 'failed'] as const)('%s history is explicit unavailable and writes nothing', async mode => {
     const late = '2026-10-09T12:00:00.000Z';
     const rows = mode === 'capped'

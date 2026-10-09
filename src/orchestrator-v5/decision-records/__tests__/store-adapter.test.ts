@@ -354,11 +354,53 @@ describe('S1 user-commit anchor — canonical successful Run', () => {
       graphHashAtRun: 'hash-timestamped', computedAt: EARLY,
     });
   });
-  it('a malformed stored row is unavailable, never absence or a fabricated anchor', async () => {
-    const fixture = anchorFixture([anchorRow({ fact_type: 'run_analysis', fact_version: 1, result: [] }, 2, LATE),
-      anchorRow(anchorFact('valid', EARLY), 1, EARLY)]);
-    await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO))
-      .rejects.toThrow('analysis_anchor_unavailable');
+  it.each(['older', 'newest'] as const)('isolates a malformed %s row and anchors the valid success', async malformedPosition => {
+    const malformed = anchorRow({ fact_type: 'run_analysis', fact_version: 1, result: [] }, 2,
+      malformedPosition === 'older' ? EARLY : LATE);
+    const validAt = malformedPosition === 'older' ? LATE : EARLY;
+    const fixture = anchorFixture([malformed, anchorRow(anchorFact('valid', validAt), 1, validAt)]);
+    const warn = vi.spyOn(telemetry.log, 'warn').mockImplementation(() => undefined);
+    try {
+      // Choosing the older valid success when the newest row is malformed is intentional.
+      await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+        graphHashAtRun: 'hash-valid', computedAt: validAt,
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toEqual({
+        event: 'v5.decision_record.anchor_rows_isolated', request_id: 'decision-record-anchor',
+        scenario_id: ANCHOR_SCENARIO, malformed_row_count: 1, malformed_row_ids: [malformed.id],
+      });
+    } finally { warn.mockRestore(); }
+  });
+  it.each(['empty-hash', 'invalid-time'] as const)('isolates a schema-valid row with %s anchor fields', async invalid => {
+    const malformed = anchorFact('malformed-anchor', LATE);
+    if (malformed.fact_type !== 'run_analysis') throw new Error('Fixture must be a Run');
+    if (invalid === 'empty-hash') malformed.result.graph_hash_at_run = '';
+    else malformed.result.computed_at = 'not-an-instant';
+    const fixture = anchorFixture([anchorRow(malformed, 2, LATE), anchorRow(anchorFact('valid', EARLY), 1, EARLY)]);
+    await expect(anchorStore(fixture).readNewestAnalysisAnchor(ANCHOR_SCENARIO)).resolves.toEqual({
+      graphHashAtRun: 'hash-valid', computedAt: EARLY,
+    });
+  });
+  it('all malformed rows are unavailable and emit one payload-free isolation event', async () => {
+    const rows = [anchorRow({ fact_type: 'run_analysis', result: [] }, 2, LATE),
+      anchorRow({ fact_type: 'run_analysis', result: null }, 1, EARLY)];
+    const warn = vi.spyOn(telemetry.log, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(anchorStore(anchorFixture(rows)).readNewestAnalysisAnchor(ANCHOR_SCENARIO))
+        .rejects.toThrow('analysis_anchor_unavailable');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toEqual({
+        event: 'v5.decision_record.anchor_rows_isolated', request_id: 'decision-record-anchor',
+        scenario_id: ANCHOR_SCENARIO, malformed_row_count: 2, malformed_row_ids: rows.map(row => row.id),
+      });
+    } finally { warn.mockRestore(); }
+  });
+  it('other readers still reject a page containing a malformed row', async () => {
+    const fixture = anchorFixture([anchorRow({ fact_type: 'run_analysis', result: [] }, 2, EARLY),
+      anchorRow(anchorFact('valid', LATE), 1, LATE)]);
+    await expect(fixture.sessionStore.readScenarioRunAnalysisFactsFor!(ANCHOR_SCENARIO, 21))
+      .rejects.toMatchObject({ code: 'analysis_fact_corrupt' });
   });
   it('capped page with no successful Run is explicitly unavailable', async () => {
     const rows = Array.from({ length: 21 }, (_, i) => anchorRow(anchorFact(`refused-${i}`, LATE, 'refused'), i + 1, LATE));
