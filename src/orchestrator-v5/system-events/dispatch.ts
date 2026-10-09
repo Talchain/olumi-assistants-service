@@ -3430,6 +3430,7 @@ export type CommitOptionLevelsInput = {
    * `reason: 'identity_<reason>'`; nothing is written.
    */
   readonly identity_confirm?: {
+    readonly choice?: 'one_off';
     readonly outcome_id: string;
     readonly factor_ids: readonly string[];
     /** The card's displayed sentence. */
@@ -3445,7 +3446,7 @@ export type CommitOptionLevelsInput = {
    * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
-  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string };
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string; readonly stated_months?: number };
   readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
@@ -3545,12 +3546,12 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
-      reading_token: input.identity_confirm.reading_token,
+      reading_token: input.identity_confirm.reading_token, choice: input.identity_confirm.choice,
       ...(input.identity_confirm.part_levels !== undefined ? { part_levels: input.identity_confirm.part_levels } : {}) } } : {}),
     ...(input.goal_steady !== undefined ? { goalSteady: input.goal_steady } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
-      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),
+      expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date, stated_months: input.goal_horizon.stated_months } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) {
     rethrowRevisionConflict(r.graphConflict);

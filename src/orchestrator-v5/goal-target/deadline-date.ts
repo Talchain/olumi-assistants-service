@@ -147,7 +147,8 @@ export function readStatedDeadline(phrase: string, today: string): StatedDeadlin
   const plain = words.toLowerCase().replace(/[‘’]/g, "'").replace(/[–—]/g, '-').replace(/[ \t]{2,}/g, ' ').replace(/[.!?,;:]+$/, '').trim();
   let body = plain;
   for (let i = 0; i <= 10 && body !== ''; i += 1) {
-    const placed = placeDeadline(body, words, today);
+    const countBody = body.replace(/^(?:end of (?:the )?)?month (\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)$/i, '$1 months');
+    const placed = placeDeadline(countBody, words, today);
     if (placed !== undefined) return placed;
     const lead = LEAD_TOKEN.exec(body);
     if (lead === null) return null;

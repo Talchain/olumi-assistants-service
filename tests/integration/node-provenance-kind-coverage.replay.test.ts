@@ -648,6 +648,10 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_direction",
       "goal_horizon",
       "goal_horizon_months",
+      // NOT value-bearing: goal_horizon_reference_date mirrors goal_horizon, a WHEN frame with no magnitude of the goal metric.
+      "goal_horizon_reference_date",
+      // NOT value-bearing: goal_horizon_stated_months mirrors goal_horizon_months, the stated WHEN count rather than a metric level.
+      "goal_horizon_stated_months",
       // MG, 29 Sep (R3-B #72 5893233864, AIQ 5893340150 / 5893587951) — THE VALUE-BEARING DECISION: `goal_sense_reading`
       // is NOT value-bearing. It is Olumi's reading of the goal's SENSE (minimise) and the words that say so; its
       // `threshold` is a staleness key copied from `goal_threshold_raw`, never a level of the goal metric of its own.
@@ -659,6 +663,8 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "goal_scope",
       "goal_sense_reading",
       "goal_stated_as",
+      // NOT value-bearing: goal_stock_reading mirrors goal_level_reading, a confirmed reading whose figures remain on their value-bearing fields.
+      "goal_stock_reading",
       "goal_threshold",
       "goal_threshold_cap",
       "goal_threshold_cap_provenance",

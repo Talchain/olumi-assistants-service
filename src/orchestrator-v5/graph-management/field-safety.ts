@@ -206,6 +206,10 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_level_reading',
   'goal_scope',
   'goal_horizon_months',
+  // The S4 deadline door and the one-off door are the only writers of these pipeline-owned fields.
+  'goal_horizon_reference_date',
+  'goal_horizon_stated_months',
+  'goal_stock_reading',
   // §(ad): the user unlock is parked; no producer may forge a horizon attestation.
   'horizon_basis',
   'horizon_basis_source',

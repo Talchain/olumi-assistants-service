@@ -1,5 +1,5 @@
 {
-  "source_sha": "d065ffc06234c449724359c1a552b7dcf1bd0b80",
+  "source_sha": "5404dff6077ffc86765e60f04a15ecba63123253",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -201,30 +201,29 @@
       "src/orchestrator-v5/agent-lane/turn-context/selector-signals.ts": 3,
       "src/orchestrator-v5/goal-target/deadline-date.ts": 1,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 1,
-      "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 5,
+      "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 4,
       "src/orchestrator-v5/goal-target/goal-record.ts": 6,
-      "src/orchestrator-v5/system-events/dispatch.ts": 11,
+      "src/orchestrator-v5/system-events/dispatch.ts": 12,
       "src/orchestrator-v5/system-events/option-intervention-edit.ts": 2,
       "src/schemas/cee-v3.ts": 1
     },
     "goal_horizon_months": {
       "src/orchestrator-v5/admission/target-testability.ts": 1,
-      "src/orchestrator-v5/agent-lane/accumulation-identity.ts": 3,
+      "src/orchestrator-v5/agent-lane/accumulation-identity.ts": 2,
       "src/orchestrator-v5/agent-lane/admit-model.ts": 1,
       "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/horizon-attestation.ts": 1,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 2,
       "src/orchestrator-v5/context/graph-hash.ts": 1,
-      "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 2,
       "src/orchestrator-v5/goal-target/goal-record.ts": 9,
       "src/orchestrator-v5/goal-target/goal-steady-write.ts": 2,
       "src/orchestrator-v5/goal-target/horizon-basis.ts": 5,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 3,
       "src/schemas/cee-v3.ts": 4,
-      "src/schemas/value-warrant-guard.ts": 2
+      "src/schemas/value-warrant-guard.ts": 3
     },
     "goal_level_reading": {
       "src/orchestrator-v5/agent-lane/admit-model.ts": 6,
@@ -442,6 +441,7 @@
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 1,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/system-events/structural-rename.ts": 1,
       "src/orchestrator-v5/tools/handlers/add-constraint.ts": 9,
       "src/orchestrator-v5/tools/handlers/level-limit-baseline.ts": 10,
@@ -789,8 +789,8 @@
     "goal_constraints": 435,
     "goal_deadline_as_stated": 9,
     "goal_direction": 95,
-    "goal_horizon": 54,
-    "goal_horizon_months": 38,
+    "goal_horizon": 52,
+    "goal_horizon_months": 39,
     "goal_level_reading": 18,
     "goal_node_id": 280,
     "goal_period": 3,
@@ -798,7 +798,7 @@
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
     "goal_threshold": 247,
-    "goal_threshold_cap": 157,
+    "goal_threshold_cap": 162,
     "goal_threshold_cap_provenance": 36,
     "goal_threshold_frame": 135,
     "goal_threshold_raw": 238,
@@ -815,7 +815,7 @@
     "threshold_source": 33,
     "unit_reading": 79
   },
-  "total_references": 2352,
+  "total_references": 2356,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
