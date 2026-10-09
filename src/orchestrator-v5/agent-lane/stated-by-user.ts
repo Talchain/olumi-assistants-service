@@ -39,7 +39,7 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { readUnitParts, sameUnit } from './same-unit.js';
+import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
@@ -655,6 +655,7 @@ export function sentenceNamesOtherQuantity(sentence: string, _unit: unknown, sco
 export function figureTheUserWroteForSpan(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
   const family = unitPhraseFamily(unit);
+  const parts = readUnitParts(unit);
   const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
   const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
   const rivalWords = scope.rivals === undefined ? otherWords : [...new Set(scope.rivals.flatMap(wordsOf))];
@@ -665,7 +666,10 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
   const ownKind = (kind: string): boolean => (family === 'currency' ? kind === 'currency' : family === 'percent' ? kind === 'percent' : true);
   const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
   // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
-  const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
+  // A distinct unit noun names its entity too. Explicitly named settings still
+  // require a label beyond the unit; period words name neither; shared nouns still need their qualifier check.
+  const unitWords = typeof unit === 'string' ? wordsOf(unit).filter(w =>
+    scope.requireNamed === true || NOT_A_NAME.has(w) || !targetWords.some(t => sameWord(t, w))) : [];
   const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null =>
     quantityMentionOf(w, unitWords, decisiveTarget, decisiveOther);
   const strict = scope.strict === true;
@@ -679,6 +683,28 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const before = userText.slice(0, a.index);
     const after = userText.slice(amountEnd);
     if (scope.exactFigure === true && hasApproximateFigureQualifier(before, after)) return false;
+    // A present payment explicitly writes both today's customer count and its
+    // price: "400 customers paying £300 a month". Bind only the baseline labels
+    // and the declared payer noun, never a different segment or a derived total.
+    if (scope.requireNamed !== true && scope.target.length === 1) {
+      const label = wordsOf(scope.target[0]!);
+      const baseline = label.some(w => /^(?:existing|current)$/.test(w));
+      const payerWordsFor = (noun: readonly string[]): boolean => noun.length > 0
+        && noun.every(w => label.some(t => sameWord(t, w)) || parts?.per?.some(t => sameWord(t, w)) || parts?.noun?.some(t => sameWord(t, w)));
+      if (baseline && parts?.kind === 'currency' && label.includes('price')
+        && label.every(w => /^(?:existing|current|plan|monthly|price)$/.test(w) || parts.per?.some(t => sameWord(t, w)))) {
+        const payer = written.filter(x => x.kind === 'plain' && x.index + x.matchedText.length < a.index).at(-1);
+        const payment = payer === undefined ? null : /^\s+([\p{L} -]+?)\s+paying\s*$/iu.exec(userText.slice(payer.index + payer.matchedText.length, a.index));
+        if (a.kind === 'currency' && payment !== null && parts.per?.length)
+          return statedTailParts(userText, a)?.period === parts.period && payerWordsFor(wordsOf(payment[1]!));
+      }
+      if (a.kind === 'plain' && parts?.kind === 'count' && baseline
+        && label.every(w => /^(?:existing|current)$/.test(w) || parts.noun?.some(t => sameWord(t, w)))) {
+        const payment = /^\s+([\p{L} -]+?)\s+paying\s*[£$€]/iu.exec(after);
+        if (payment !== null) return payerWordsFor(wordsOf(payment[1]!));
+      }
+    }
+
     const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
     const endAt = after.search(/[.!?;,:\n\u2013\u2014]/);
     const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;
@@ -705,7 +731,12 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     const targetLabelWords = labelWords(scope.target);
     const rivalLabelWords = labelWords(scope.rivals ?? scope.others);
     const targetHoldsShared = (w: string): boolean => {
-      if (!strict || !targetWords.some((t) => sameWord(t, w))) return false;
+      // Counts and money can name a quantity shared with a qualified sibling,
+      // using the same qualifier refusal as the strict reading. Named settings
+      // retain their stricter rule; a bare count cannot lend a name to money.
+      const namedKind = (family === 'currency' && a.kind === 'currency')
+        || (parts?.kind === 'count' && a.kind === 'plain');
+      if ((!strict && (!namedKind || scope.requireNamed === true)) || !targetWords.some((t) => sameWord(t, w))) return false;
       const rivalsWithW = rivalLabelWords.filter((r) => r.some((x) => sameWord(x, w)));
       if (rivalsWithW.length === 0) return false;
       return rivalsWithW.every((r) => targetLabelWords.some((t) => {
@@ -744,7 +775,15 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     // item, never what this figure was written about (PJ-E-FIG, DL CR on #2235: "Seniors are £120k and juniors £65k" read
     // £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words after the
     // conjunction still count last. Opt-in (DL ruling (a)): every other door reads the two words after it, as before.
-    const rightAfter = strict && /^(?:and|or|but|plus|while|whereas)$/.test(afterRate[0] ?? '') ? [] : afterRate.slice(0, 2);
+    // Money's adjacent noun phrase can follow a rate and a preposition:
+    // "£1,200 a month to monthly recurring revenue". Stop at a new amount,
+    // conjunction or preposition; do not take a later quantity's name.
+    const moneyNounPhrase = family === 'currency' && scope.requireNamed !== true
+      && /^(?:in|of|to)$/.test(afterRate[0] ?? '')
+      ? afterRate.slice(0, 5).findIndex((w, i) => i > 0 && (/^\d/.test(w) || PHRASE_BREAK.has(w))) : -1;
+    const nearWords = family === 'currency' && scope.requireNamed !== true && /^(?:in|of|to)$/.test(afterRate[0] ?? '')
+      ? afterRate.slice(0, moneyNounPhrase < 0 ? 5 : moneyNounPhrase) : afterRate.slice(0, 2);
+    const rightAfter = strict && /^(?:and|or|but|plus|while|whereas)$/.test(afterRate[0] ?? '') ? [] : nearWords;
     if (a.kind === 'words') {
       // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
       // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
@@ -755,7 +794,24 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     // `nearOnly` skips the far words ONLY when a comparator opens them (R3 CR on #2330): "25% cheaper THAN AWS for our
     // workload" names what the figure is compared with; "3% for our enterprise customers" still names its owner.
     const comparatorOpens = afterRate.slice(0, rightAfter.length + 1).some((w) => /^(?:than|versus|vs|compared)$/.test(w));
-    const about = firstMention(rightAfter) ?? firstMention([...left].reverse())
+    // For an explicit per-one effect, the widened destination phrase must not
+    // credit a different source: "each capacity rise adds ... revenue" is not
+    // a price-rise link. Read the source with the existing scoped word matcher.
+    const perOne = nearWords.length > 2 && scope.target.length === 2 && scope.requireNamed !== true ? /\b(?:each|every)\s+(?:1(?:\.0+)?\s*%?\s+)?([\p{L} -]+?)\s+(?:also\s+)?(?:adds?|costs?|removes?|loses?)\s*(?:(?:about|around|roughly|approximately)\s*)?$/iu.exec(userText.slice(clauseStart, a.index)) : null;
+    if (perOne !== null) {
+        const sourceName = (label: string): string => wordsOf(label).filter(w => !MOVEMENT_WORD.test(w) && !NOT_A_NAME.has(w)).join(' ');
+        const named = sourceName(perOne[1]!);
+        const source = sourceName(scope.target[0]!);
+        if (!wordsOf(source).some(t => wordsOf(named).some(w => sameWord(t, w)))
+          || leftNamesAnotherQuantity(named, { target: [source], others: scope.others.map(sourceName) })) return false;
+    }
+    const leftAbout = firstMention([...left].reverse());
+    const rightAbout = firstMention(rightAfter);
+    // Widen recall without disowning an already named source in favour of a
+    // later quantity: "each lost customer removes £300 ... of revenue".
+    const nearby = perOne !== null && rightAbout === 'other' && leftAbout === 'target'
+      && firstMention(afterRate.slice(0, 2)) === null ? null : rightAbout;
+    const about = nearby ?? leftAbout
       ?? (scope.nearOnly === true && comparatorOpens ? null : firstMention(afterRate.slice(rightAfter.length)));
     // ⛔ STRICT, FAIL CLOSED (DL ruling (b)): among two figures or more, one no label word attributes is nobody's, never
     // "the user's, for any target" — that fallthrough let a SWAP through the door. The user is asked.
