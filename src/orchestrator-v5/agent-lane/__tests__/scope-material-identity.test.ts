@@ -132,7 +132,6 @@ it('served census: 116 corpus + all 8 R2 cells', async () => {
     rows.push({ id: row.id, material: Boolean(material), missing: Boolean(material && !reached), questions, goal, graph_sha256: createHash('sha256').update(JSON.stringify(graph)).digest('hex') });
   }
   const missing = rows.filter(r => r.missing).map(r => r.id);
-  fs.writeFileSync(baseline ? 'S7-A2-before.json' : 'S7-A2-after.json', JSON.stringify({ count: missing.length, missing, rows }, null, 2) + '\n');
   console.log('S7 A2 CENSUS', JSON.stringify({ count: missing.length, missing }));
   if (!baseline) expect(missing).toEqual([]);
 }, 120_000);
