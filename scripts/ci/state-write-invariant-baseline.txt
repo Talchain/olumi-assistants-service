@@ -12,7 +12,6 @@
 # down means routing each through a SessionStore-owning adapter (commit.ts /
 # build-turn-context.ts / apply-operations.ts), a behaviour-bearing refactor
 # that is out of scope for the PR that restores the gate.
-table	src/orchestrator-v5/decision-records/store-adapter.ts	.from('v5_handler_facts')	direct read in decision-record adapter (added #850, 10 Jul 2026, calibration R0); needs a SessionStore read method
 import	src/orchestrator/turn-fence-prehandler.ts	import { getSessionStore } from '../orchestrator-v5/session/index.js';	stop-fence prehandler resolves the store (added 30 Jul 2026)
 import	src/orchestrator-v5/agent-lane/answer-offers-reload.ts	import type { AnswerOffersRead } from '../session/store.js';	type-only import (added 6 Oct 2026, X4)
 import	src/orchestrator-v5/agent-lane/run-currentness.ts	import type { SessionStore } from '../session/store.js';	type-only import (added #2501, 2 Oct 2026)
