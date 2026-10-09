@@ -130,6 +130,19 @@ export interface AtomicRestoreVersionOutcome extends VersionWriteOutcome {
 export const CAS_CONFLICT_KIND =
   'analysis_affecting_conflict' as const satisfies GraphCasConflictCategory;
 
+/** Module-local OLRV1 refusal; null current means the measured DETAIL was unreadable. */
+export class VersionRevisionConflictError extends Error {
+  readonly expected: number;
+  readonly current: number | null;
+
+  constructor(message: string, revisions: { expected: number; current: number | null }, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'VersionRevisionConflictError';
+    this.expected = revisions.expected;
+    this.current = revisions.current;
+  }
+}
+
 export interface VersionCasConflict {
   readonly kind: typeof CAS_CONFLICT_KIND | 'revision_conflict';
   readonly expected?: number;

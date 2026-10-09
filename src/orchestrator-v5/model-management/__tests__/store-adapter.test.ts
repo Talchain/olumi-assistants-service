@@ -7,7 +7,7 @@
  * mapping (MV001/MV404/MV409), row parsing, ordering and pointer reads.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { GraphStaleWriteError } from '../../session/store.js';
+import { VersionRevisionConflictError } from '../types.js';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CARRIERS, legacyGraph, legacyRun, SCENARIO as LEGACY_SCENARIO } from '../../context/__tests__/legacy-gap-projection.fixture.js';
@@ -638,9 +638,29 @@ describe('OLRV1 adapter classification', () => {
     const { client, rpcCalls } = makeClient({ rpcResult: { data: null, error } });
     const store = new SupabaseModelVersionStore(client);
     const promise = operation === 'save' ? store.saveVersion(SAVE_WRITE) : store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE);
-    await expect(promise).rejects.toBeInstanceOf(GraphStaleWriteError);
-    await expect(promise).rejects.toMatchObject({ conflict_category: 'revision_conflict', cause: error });
+    await expect(promise).rejects.toBeInstanceOf(VersionRevisionConflictError);
+    await expect(promise).rejects.toMatchObject({ expected: 7, current: 8, cause: error });
     expect(rpcCalls).toHaveLength(1);
     expect(rpcCalls[0]?.fn).toBe(operation === 'save' ? 'create_model_version_cas_v1' : 'restore_model_version_atomic_cas_v1');
+  });
+});
+
+
+describe('OLRV1 unreadable DETAIL', () => {
+  it.each(['save', 'restore'] as const)('%s retains the request revision and unknown current without flattening the refusal', async operation => {
+    for (const details of [undefined, 'not JSON', JSON.stringify(null), JSON.stringify([]),
+      JSON.stringify({ reason: 'wrong', expected: 7, current: 8 }),
+      JSON.stringify({ reason: 'revision_conflict', expected: -1, current: 8 }),
+      JSON.stringify({ reason: 'revision_conflict', expected: 7, current: '8' }),
+      JSON.stringify({ reason: 'revision_conflict', expected: 7, current: Number.MAX_SAFE_INTEGER + 1 })]) {
+      const error = { code: 'OLRV1', message: 'revision_conflict', ...(details !== undefined ? { details } : {}) };
+      const { client, rpcCalls } = makeClient({ rpcResult: { data: null, error } });
+      const store = new SupabaseModelVersionStore(client);
+      const promise = operation === 'save' ? store.saveVersion({ ...SAVE_WRITE, expected_revision: 19 })
+        : store.restoreVersionAtomic({ ...ATOMIC_RESTORE_WRITE, expected_revision: 19 });
+      await expect(promise).rejects.toBeInstanceOf(VersionRevisionConflictError);
+      await expect(promise).rejects.toMatchObject({ expected: 19, current: null, cause: error });
+      expect(rpcCalls).toHaveLength(1);
+    }
   });
 });

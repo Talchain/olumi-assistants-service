@@ -1,4 +1,4 @@
-import { withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
+import { withRevisionConflictWire, REVISION_CONFLICT_MESSAGE } from '../orchestrator-v5/graph-revision-conflict.js';
 import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 /** List, compare, save and restore scenario versions.
  * The central ownership hook admits the verified caller before these handlers run.
@@ -364,7 +364,9 @@ export default async function route(app: FastifyInstance) {
       .send(
         withRevisionConflictWire(buildErrorV1(
           "BAD_INPUT",
-          "This model changed since you last loaded it. Refresh to see the latest, then try again.",
+          conflict.kind === "revision_conflict"
+            ? REVISION_CONFLICT_MESSAGE
+            : "This model changed since you last loaded it. Refresh to see the latest, then try again.",
           { code: "VERSION_STALE" },
           requestId,
         ), { ...conflict, conflict_category: conflict.kind }),

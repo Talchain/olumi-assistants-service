@@ -42,7 +42,6 @@
  * outcome is a typed ModelManagementResult.
  */
 
-import { isRevisionConflict, readRevisionConflictDetails, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import { config } from '../../config/index.js';
 import {
   computeGraphIdentityHash,
@@ -62,6 +61,7 @@ import {
 } from './store-adapter.js';
 import {
   CAS_CONFLICT_KIND,
+  VersionRevisionConflictError,
   SIGN_IN_REQUIRED_MESSAGE,
   type AtomicRestoreVersionOutcome,
   type ModelManagementResult,
@@ -463,14 +463,16 @@ export class ModelManagementService {
 
 /** Fail-closed typed mapping — the service never rethrows. */
 function mapThrownError<T>(err: unknown): ModelManagementResult<T> {
-  if (isRevisionConflict(err)) {
+  if (err instanceof VersionRevisionConflictError) {
     return {
       status: 'conflict',
       conflict: {
         kind: 'revision_conflict',
         expected_graph_identity_hash: null,
-        message: REVISION_CONFLICT_MESSAGE,
-        ...readRevisionConflictDetails(err),
+        // Preserve the existing result contract locally; routes own wire copy.
+        message: 'The scenario changed while I was saving, so nothing was saved. Try again.',
+        expected: err.expected,
+        ...(err.current !== null ? { current: err.current } : {}),
       },
     };
   }

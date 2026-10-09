@@ -23,10 +23,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { GraphStaleWriteError } from '../session/store.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 
+import { VersionRevisionConflictError } from './types.js';
 import type {
   AtomicRestoreVersionOutcome,
   ModelVersionRecord,
@@ -220,7 +220,7 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
       p_expected_working_graph_identity_hash: write.expected_working_graph_identity_hash ?? null,
     });
     if (error) {
-      throw mapRpcError('create_model_version_cas_v1', error, write.expected_graph_identity_hash ?? null);
+      throw mapRpcError('create_model_version_cas_v1', error, write.expected_graph_identity_hash ?? null, write.expected_revision);
     }
     return parseWriteOutcome('create_model_version_cas_v1', data);
   }
@@ -252,7 +252,7 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
       p_source_turn_id: write.source_turn_id,
       p_label: write.label ?? null,
     });
-    if (error) throw mapRpcError(rpc, error, write.expected_graph_identity_hash);
+    if (error) throw mapRpcError(rpc, error, write.expected_graph_identity_hash, write.expected_revision);
     return parseAtomicRestoreOutcome(rpc, data);
   }
 
@@ -651,12 +651,28 @@ function requireExpectedRevision(revision: number): void {
   }
 }
 
-function mapRpcError(rpc: string, error: unknown, expectedHash: string | null): Error {
+/** Same validity rules as v6 DETAIL parsing, without importing a live graph surface. */
+function readVersionRevisionConflictDetails(error: unknown, expectedRevision: number): { expected: number; current: number | null } {
+  const unreadable = { expected: expectedRevision, current: null };
+  if (error === null || typeof error !== 'object') return unreadable;
+  let detail: unknown = (error as { details?: unknown }).details;
+  if (typeof detail === 'string') {
+    try { detail = JSON.parse(detail); } catch { return unreadable; }
+  }
+  if (detail === null || typeof detail !== 'object' || Array.isArray(detail)) return unreadable;
+  const row = detail as { reason?: unknown; expected?: unknown; current?: unknown };
+  const isRevision = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  if (row.reason !== 'revision_conflict' || !isRevision(row.expected) || !isRevision(row.current)) return unreadable;
+  return { expected: row.expected, current: row.current };
+}
+
+function mapRpcError(rpc: string, error: unknown, expectedHash: string | null, expectedRevision: number): Error {
   const code = errCode(error);
   const message = `${rpc} RPC failed: ${errMsg(error)}`;
   switch (code) {
     case 'OLRV1':
-      return new GraphStaleWriteError(message, { conflict_category: 'revision_conflict', cause: error });
+      return new VersionRevisionConflictError(message, readVersionRevisionConflictDetails(error, expectedRevision), { cause: error });
     case 'MV001':
       return new ModelVersionSignInRequiredError(message, { cause: error });
     case 'MV404':
