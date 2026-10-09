@@ -512,6 +512,7 @@ export default async function route(app: FastifyInstance) {
         graph: graphPresent ? toOutboundGraph(graph) : null,
         graph_present: graphPresent,
         brief_text: briefText,
+        scenario_created_at: snapshot?.createdAt ?? null,
         // identity.v1, from the single normaliser authority. Null when the
         // graph is absent or identity-empty — there is no identity to anchor
         // to, and a hash of nothing would be a false anchor.
