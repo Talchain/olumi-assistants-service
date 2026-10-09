@@ -32,10 +32,10 @@ vi.mock('../../config/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../config/index.js')>();
   return { ...actual, config: { ...actual.config, auth: { ...actual.config.auth, requireUserJwt: false } } };
 });
-const { storeRef } = vi.hoisted(() => ({ storeRef: { value: null as unknown } }));
+const { storeRef } = vi.hoisted(() => ({ storeRef: { value: null as object | null } }));
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, getSessionStore: () => withScenarioRevision(storeRef.value) };
+  return { ...actual, getSessionStore: () => withScenarioRevision(storeRef.value!) };
 });
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
 vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => {

@@ -138,7 +138,7 @@ import type {
   V2RunResponseEnvelope,
 } from '../../orchestrator/types.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { floorGraphSigmaForCompute } from '../../validators/numeric-bounds.js';
+import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../../validators/numeric-bounds.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import type {
   AnalysisStateIngress,
@@ -2315,6 +2315,7 @@ export async function dispatchEditGraph(
       editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
       if (!Number.isSafeInteger(editBase.revision) || (editBase.revision ?? -1) < 0) throw new Error('Invalid revision');
       if (editBase.graph !== null) {
+        if (!assertIngressGraphNumericBounds(editBase.graph).ok) throw new Error('Invalid server graph');
         const parsed = GraphV3.safeParse(floorGraphSigmaForCompute(editBase.graph).graph);
         if (!parsed.success) throw new Error('Invalid server graph');
         graphState = GraphStateIngressSchema.parse(editBase.graph);

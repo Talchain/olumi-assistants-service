@@ -473,6 +473,17 @@ export function narrateWriteOutcome(
 
   const stripped: string[] = [];
   let out = text;
+  // The first link write is confirmed. These draft claims contradict that
+  // result; keep ordinary refusal narration unchanged for every other outcome.
+  const savedLinkOnly = writes.some(w => w.result.mutated === true && w.result.outcome === 'link_saved_estimate_not_saved');
+  if (savedLinkOnly) {
+    for (const claim of [
+      'The scenario changed while I was saving, so nothing was saved. Try again.',
+      UNCONFIRMED_WORDS.not_confirmed!,
+    ]) {
+      if (out.includes(claim)) { stripped.push(claim); out = out.replaceAll(claim, ''); }
+    }
+  }
   /**
    * ⛔ THE SERVER OWNS EVERY COMPLETION CLAIM ON EVERY TURN — not only when
    * nothing landed. Independent pre-read of #1712/#1720 (PR #1720 comment
@@ -483,12 +494,15 @@ export function narrateWriteOutcome(
    * from the structured results below. Non-write reasoning is kept.
    */
   {
-    out = text
+    out = out
       .split('\n')
       .map((line) => {
         const sentences = line.split(/(?<=[.!?])\s+/);
         const kept = sentences.filter((s) => {
-          if (assertsCompletedWrite(s)) { stripped.push(s.trim()); return false; }
+          if (assertsCompletedWrite(s) || (savedLinkOnly
+            && /\bnothing (?:was|has been) saved\b|\bcould not read (?:the )?model back\b/i.test(s))) {
+            stripped.push(s.trim()); return false;
+          }
           return true;
         });
         return kept.length === sentences.length ? line : kept.join(' ');

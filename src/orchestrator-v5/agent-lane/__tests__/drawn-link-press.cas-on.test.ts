@@ -100,6 +100,7 @@ describe('CAS ON: drawn-link save 2 refusal copy', () => {
     const p = await w.caps.proposeModelChange(ctx, args);
     const result = await w.caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     const line = narrateWriteOutcome('', [{ name: 'authorise_change' }], [result]).status;
+    if (line === null) throw new Error('Write status missing from the narrator');
     expect(result).toMatchObject({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed',
       outcome: 'link_saved_estimate_not_saved', receipts: [expect.objectContaining({ version: 1, version_id: SID })] });
     expect(result.detail).toBe(CONFLICT_WORDS);

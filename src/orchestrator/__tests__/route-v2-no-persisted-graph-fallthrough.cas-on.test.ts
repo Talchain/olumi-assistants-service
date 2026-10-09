@@ -17,7 +17,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
-import { setTestSink } from '../../utils/telemetry.js';
+import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
 import { _resetConfigCache } from '../../config/index.js';
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -112,9 +112,10 @@ vi.mock('../../adapters/llm/prompt-loader.js', () => ({
 
 // The production constants themselves — this file and the guard cannot drift
 // apart on the chip copy or the recovery copy (CLAUDE.md trap 12).
-const { ceeOrchestratorRouteV2 } = await import('../route-v2.js');
+const { ceeOrchestratorRouteV2, EDIT_GRAPH_RECOVERY_TEXT } = await import('../route-v2.js');
 
 const SCENARIO_ID = '23880000-2388-4388-8388-238823882388';
+const FRAME_GUARD_COPY = 'I need a single decision question to start';
 
 
 function modelRoute(route: 'start_model' | 'continue_conversation') {
@@ -154,6 +155,77 @@ function mockDraftResult(): void {
  * X2 is genuinely referent-free: "it" cannot be resolved on a fresh scenario,
  * so it should be answered with a material clarification rather than drafted.
  */
+
+function mockConversationResult(): void {
+  runtimeMocks.runTurnExecutor.mockResolvedValueOnce({
+    response: {
+      response_version: 2,
+      assistant_text: 'What does “it” refer to, and what outcome are you trying to improve?',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'frame',
+    },
+    analysisReady: undefined,
+    effectiveGraph: null,
+    answerKind: 'substantive',
+    mayNameLeadingOption: true,
+    mayNameLeadingOptionProvenance: { kind: 'no_analysis' },
+    telemetry: {
+      stages_completed: ['orient', 'compose', 'commit'],
+      response_emitted: true,
+      llm_calls_used: 1,
+      commit_performed: true,
+      failure_type: null,
+      wall_clock_ms: 5,
+      turn_class: 'explore',
+      intent_class: 'converse',
+      coaching_mode: null,
+      validation_error_code: null,
+    },
+  });
+}
+
+function mockEditResult(): void {
+  runtimeMocks.dispatchEditGraph.mockResolvedValueOnce({
+    response: {
+      response_version: 2,
+      assistant_text: 'Applied the requested change to the existing model.',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse',
+    },
+    commitPerformed: true,
+  });
+}
+
+const MEASURED_DEAD_ENDS: ReadonlyArray<
+  readonly [tag: string, message: string, expectedRoute: 'start_model' | 'continue_conversation']
+> = [
+  ['S1', 'Increase annual revenue from £4 million today to £6 million within 12 months.', 'start_model'],
+  ['S2', 'We need to reduce churn to under 5% this year.', 'start_model'],
+  ['S5', 'Add a second sales team in Berlin.', 'start_model'],
+  ['S7', 'Raise the price from £49 to £59.', 'start_model'],
+  [
+    'X1',
+    'Increase annual recurring revenue from £4 million today to £6 million within twelve months, while keeping the marketing budget flat and the engineering headcount exactly where it is right now.',
+    'start_model',
+  ],
+  ['X2', 'Launch it and add a fee.', 'continue_conversation'],
+  [
+    'X7',
+    'Our board wants us to increase annual recurring revenue to £6 million next year while reducing support costs by a fifth. Nothing else has been agreed yet.',
+    'start_model',
+  ],
+  ['X9', 'Increase revenue to £6 million? That is the plan for the year ahead.', 'start_model'],
+  [
+    'Z3',
+    'After weighing our options, we will increase annual revenue from £4 million to £6 million within 12 months.',
+    'start_model',
+  ],
+  ['Z4', 'We could increase the price from £49 to £59 to improve margins.', 'start_model'],
+];
 
 let events: Array<{ name: string; data: Record<string, unknown> }> = [];
 let priorTraceFlag: string | undefined;
@@ -208,8 +280,8 @@ describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical
     loadGraphThrows = false;
     loadGraphCalls = 0;
     combinedReadCalls = 0;
-    // A2: existing rows pin the rollback graph-only reader census and 200 recovery.
-    __setUseAppendV6ForTest(false);
+    // Shipping path uses the combined scenario snapshot.
+    __setUseAppendV6ForTest(true);
     hasPriorTurnsForRead = false;
     events = [];
     setTestSink((name, data) => {
@@ -244,5 +316,132 @@ describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical
 
 
 
+
+  it('null canonical graph + grounded edit-word goal starts the existing draft with exact user text', async () => {
+    const message = 'Increase annual revenue from £4 million today to £6 million within 12 months.';
+    modelRoute('start_model');
+    mockDraftResult();
+    const { status, body } = await turn(
+      app,
+      message,
+    );
+
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('draft_graph');
+    expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessage: message }),
+    );
+    expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
+    const dispatch = runtimeMocks.dispatchDraftGraph.mock.calls[0]![0] as {
+      payload: { message: string };
+      briefOverride?: string;
+    };
+    expect(dispatch.payload.message).toBe(message);
+    if (dispatch.briefOverride !== undefined) expect(dispatch.briefOverride).toBe(message);
+    expect(runtimeMocks.dispatchEditGraph).not.toHaveBeenCalled();
+    expect(runtimeMocks.runTurnExecutor).not.toHaveBeenCalled();
+    expect(loadGraphCalls).toBe(0);
+    expect(combinedReadCalls).toBeGreaterThanOrEqual(1);
+    expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
+    expect(body.assistant_text).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
+  it.each(MEASURED_DEAD_ENDS)(
+    '%s follows the semantic route without canned or graph-unavailable rejection',
+    async (_tag, message, expectedRoute) => {
+      modelRoute(expectedRoute);
+      if (expectedRoute === 'start_model') mockDraftResult();
+      else mockConversationResult();
+      const { status, body } = await turn(app, message);
+
+      expect(status).toBe(200);
+      expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledWith(
+        expect.objectContaining({ currentMessage: message }),
+      );
+      expect(loadGraphCalls).toBe(0);
+    expect(combinedReadCalls).toBeGreaterThanOrEqual(1);
+      expect(body.assistant_text).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
+      expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
+
+      if (expectedRoute === 'start_model') {
+        expect(exitPath(body)).toBe('draft_graph');
+        expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
+        expect(
+          (runtimeMocks.dispatchDraftGraph.mock.calls[0]![0] as { payload: { message: string } })
+            .payload.message,
+        ).toBe(message);
+        expect(runtimeMocks.runTurnExecutor).not.toHaveBeenCalled();
+      } else {
+        expect(exitPath(body)).toBe('turn_executor');
+        expect(runtimeMocks.runTurnExecutor).toHaveBeenCalledTimes(1);
+        expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
+      }
+      expect(runtimeMocks.dispatchEditGraph).not.toHaveBeenCalled();
+      expect(chatWithToolsMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('null canonical graph + referent-free edit converses after one memoised route-level strict read', async () => {
+    const message = 'Launch it and add a fee.';
+    modelRoute('continue_conversation');
+    mockConversationResult();
+
+    const { status, body } = await turn(app, message);
+
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('turn_executor');
+    expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.runTurnExecutor).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchEditGraph).not.toHaveBeenCalled();
+    expect(loadGraphCalls).toBe(0);
+    expect(combinedReadCalls).toBeGreaterThanOrEqual(1);
+    expect(
+      events.filter((e) => e.name === TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough),
+    ).toHaveLength(1);
+    expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
+    expect(body.assistant_text).not.toContain(EDIT_GRAPH_RECOVERY_TEXT);
+  });
+
+  it('continuation with no canonical model shares one route-level strict read across unstrand and intake', async () => {
+    const message = 'How can we increase enterprise conversion?';
+    hasPriorTurnsForRead = true;
+    modelRoute('start_model');
+    mockDraftResult();
+
+    const { status, body } = await turn(app, message);
+
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('draft_graph');
+    expect(runtimeMocks.understandOpenFrameIntake).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessage: message }),
+    );
+    expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
+    expect(loadGraphCalls).toBe(0);
+    expect(combinedReadCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('valid persisted graph bypasses advisory intake and reaches the canonical edit lane after one route-level strict read', async () => {
+    const persistedGraph = {
+      nodes: [{ id: 'opt-a', kind: 'option', label: 'Current approach' }],
+      edges: [],
+    };
+    persistedGraphForRead = persistedGraph;
+    mockEditResult();
+
+    const { status, body } = await turn(app, 'Add a second sales team in Berlin.');
+
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('edit_graph');
+    expect(runtimeMocks.understandOpenFrameIntake).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchDraftGraph).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchEditGraph).toHaveBeenCalledWith(
+      expect.objectContaining({ graphState: persistedGraph }),
+    );
+    expect(loadGraphCalls).toBe(0);
+    expect(combinedReadCalls).toBeGreaterThanOrEqual(1);
+    expect(body.assistant_text).toContain('Applied the requested change');
+  });
 
 });

@@ -78,7 +78,7 @@ let pendingActionsForRead: readonly PendingAction[] = [];
 let loadGraphThrows = false;
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
-const loadGraphMock = vi.fn(async () => {
+const loadGraphMock = vi.fn(async (_scenarioId: string) => {
   if (loadGraphThrows) throw new Error('session store unreachable');
   return persistedGraphForRead;
 });

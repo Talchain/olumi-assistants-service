@@ -99,6 +99,7 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   loadMostRecentPendingActions: vi.fn(async () => []),
 }));
 
+import { GraphStaleWriteError } from '../../session/store.js';
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { type GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -107,6 +108,7 @@ const SCENARIO_ID = '541c737e-225b-43ad-8d0e-82be55fa0c5f';
 const STUB_REQUEST = {} as FastifyRequest;
 
 type Json = Record<string, unknown>;
+type FixtureEdge = Json & { strength: { std: number; mean: number } };
 
 /** Real served graph; the ONE change is `decision_mrr->keep_current_pricing` std 0.01 → 0. */
 function storedInvalidGraph(): Json {
@@ -241,7 +243,7 @@ async function runEdit(stored: Json, operations: unknown[], message: string, tur
   return { result, metadata, storedAfter };
 }
 
-const nodeById = (g: Json, id: string) => (g.nodes as Json[]).find((n) => n.id === id);
+const nodeById = (g: Json, id: string) => (g.nodes as Array<Json & { observed_state: Json }>).find((n) => n.id === id);
 
 beforeEach(() => {
   llmChatMock.mockReset();
@@ -269,8 +271,39 @@ describe('controls', () => {
       renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), 'Rename Monthly churn to Monthly churn rate', 'zero-sigma');
     expect(metadata.graph).toBeDefined();
     expect(nodeById(storedAfter, 'monthly_churn')!.label).toBe('Monthly churn rate');
-    expect((storedAfter.edges as Json[])[1]!.strength.std).toBe(0);
+    expect((storedAfter.edges as FixtureEdge[])[1]!.strength.std).toBe(0);
     expect(nodeById(storedAfter, 'monthly_churn')!.observed_state.std).toBe(0);
+  });
+
+  it.each([0, -1])('CAS ON: stored std=%s preserves identity and commits', async std => {
+    __setUseAppendV6ForTest(true);
+    gmModeRef.current = 'off';
+    const stored = storedInvalidGraph();
+    (stored.edges as FixtureEdge[])[1]!.strength.std = std;
+    const { metadata, storedAfter } = await runEdit(stored,
+      renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), 'Rename Monthly churn to Monthly churn rate', `std-${std}`);
+    expect(llmChatMock).toHaveBeenCalledTimes(1);
+    expect(metadata.expectedRevision).toBe(7);
+    expect((storedAfter.edges as FixtureEdge[])[1]!.strength.std).toBe(std);
+  });
+
+  it.each([
+    ['std', Infinity], ['mean', -7], ['mean', Infinity],
+    ['mean', NaN], ['mean', -Infinity], ['exists_probability', -0.1], ['exists_probability', 1.1],
+  ] as const)('CAS ON: stored %s=%s refuses before provider or append', async (field, value) => {
+    __setUseAppendV6ForTest(true);
+    gmModeRef.current = 'off';
+    const stored = storedInvalidGraph();
+    const edge = (stored.edges as FixtureEdge[])[1]!;
+    if (field === 'exists_probability') edge[field] = value;
+    else edge.strength[field] = value;
+    await expect(runEdit(stored,
+      renameOps('monthly_churn', 'Monthly churn', 'Monthly churn rate'), 'Rename Monthly churn to Monthly churn rate', 'invalid-number'))
+      .rejects.toBeInstanceOf(GraphStaleWriteError);
+    expect(llmChatMock).not.toHaveBeenCalled();
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+    expect(storedGraphRef.current).toBe(stored);
+    expect(field === 'exists_probability' ? edge[field] : edge.strength[field]).toBe(value);
   });
 
 

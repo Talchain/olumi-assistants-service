@@ -189,6 +189,22 @@ describe('#1740 R5 — the graph handed to store.append, after the edit-path per
     } finally { config.features.graphManagementMode = oldMode; }
   });
 
+  it('CAS ON: an unrelated edit uses the stored range when the client omits its range echo', async () => {
+    __setUseAppendV6ForTest(true);
+    const oldMode = config.features.graphManagementMode;
+    config.features.graphManagementMode = 'off';
+    try {
+      persistedRef.current = rangedGraph();
+      const echo = rangedGraph();
+      delete optionCell(echo).range;
+      expect(optionCell(echo)).not.toHaveProperty('range');
+      await runRangeEdit(echo, [{ op: 'update_node', path: `/nodes/${SIBLING}/data/value`, value: 0.3 }]);
+      expect(optionCell(storedGraph()).range).toEqual(RANGE);
+      expect((nodeOf(storedGraph(), SIBLING).observed_state as Record<string, unknown>).value).toBe(0.3);
+      expect(appendMock.mock.calls.find(c => (c[0] as { graph?: unknown }).graph)?.[0]).toMatchObject({ expectedRevision: 7 });
+    } finally { config.features.graphManagementMode = oldMode; }
+  });
+
 
 
 
