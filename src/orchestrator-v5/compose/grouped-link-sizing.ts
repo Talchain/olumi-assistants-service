@@ -1,4 +1,4 @@
-import { linkSizing, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
+import { isIdentityPartialLink, linkSizing, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 
 type Rec = Record<string, unknown>;
@@ -83,6 +83,7 @@ export function groupedGoalPathLinks(input: unknown): readonly GroupedLinkSizing
     if (!reached.has(e.from) || !reached.has(e.to) || !toGoal.has(e.from) || !toGoal.has(e.to)
       || kind.get(e.from) === 'option' || kind.get(e.to) === 'option' || kind.get(e.to) === 'decision') continue;
     const sizing = linkSizing(e);
+    if (isIdentityPartialLink(e)) continue;
     if (sizing !== 'placeholder' && sizing !== 'unmarked') continue;
     const sourceUnit = units.get(String(e.from)) ?? 'one change';
     const targetUnit = units.get(String(e.to)) ?? 'the target unit';

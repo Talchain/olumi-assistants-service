@@ -113,7 +113,8 @@ const userStated = (e: Rec): boolean => e.provenance?.magnitude === 'user_stated
  * £1-per-£1 "Funding from investment firms → Funding secured" (outcome frame £3m) sat at β 2.4: PLoT clamped it and the UI
  * cold open declined the Run (CANVAS 5923984462). Its origin and its disclosure are unchanged: only frames move.
  */
-const sizedExactly = (e: Rec): boolean => userStated(e) || e.provenance?.definitional === true;
+const sizedExactly = (e: Rec): boolean => e.provenance?.identity_partial === undefined
+  && (userStated(e) || e.provenance?.definitional === true);
 
 const clampedFrom = (e: Rec): number | undefined => (num(e?.provenance?.clamped_from) ? e.provenance.clamped_from : undefined);
 

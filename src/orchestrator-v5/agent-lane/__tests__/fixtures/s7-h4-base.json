@@ -1,0 +1,684 @@
+{
+  "nodes": [
+    {
+      "id": "decision_monthly_recurring_revenue",
+      "kind": "decision",
+      "label": "Decision: monthly recurring revenue",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "monthly_recurring_revenue",
+      "kind": "goal",
+      "label": "monthly recurring revenue",
+      "provenance": "from_brief",
+      "goal_threshold_unit": "\u00a3/month",
+      "goal_threshold_frame": "level",
+      "goal_threshold_raw": 126000,
+      "goal_threshold_cap": 157500,
+      "goal_threshold_cap_provenance": "target_derived_headroom",
+      "goal_threshold": 0.8,
+      "observed_state": {
+        "value": 0.7619047619047619,
+        "baseline": 0.7619047619047619,
+        "unit": "\u00a3/month",
+        "source": "brief_extraction",
+        "raw_value": 120000,
+        "cap": 157500
+      },
+      "threshold_source": "brief_extraction",
+      "goal_direction": ">=",
+      "goal_horizon_months": 9,
+      "unit_reading": {
+        "unit": "GBP",
+        "source": "user_stated",
+        "source_quote": "Goal: reach at least \u00a3126,000 monthly recurring revenue within 9 months"
+      }
+    },
+    {
+      "id": "raise_prices_10",
+      "kind": "option",
+      "label": "Raise prices 10%",
+      "provenance": "from_brief",
+      "interventions": {
+        "price_rise": {
+          "value": 0.1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "price_rise",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "raw_value": 10,
+          "unit": "%"
+        }
+      }
+    },
+    {
+      "id": "launch_starter_tier",
+      "kind": "option",
+      "label": "Launch starter tier",
+      "provenance": "from_brief",
+      "interventions": {
+        "starter_subscribers": {
+          "value": 0.075,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "starter_subscribers",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "raw_value": 150,
+          "unit": "subscribers",
+          "range": {
+            "low": 80,
+            "high": 250,
+            "meaning": "likely_range",
+            "source": "brief_extraction",
+            "source_quote": "The starter tier would win about 150 new subscribers, between 80 and 250."
+          }
+        },
+        "starter_monthly_price": {
+          "value": 0.098,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "starter_monthly_price",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "raw_value": 49,
+          "unit": "\u00a3 per subscriber per month"
+        }
+      }
+    },
+    {
+      "id": "keep_current_pricing",
+      "kind": "option",
+      "label": "Keep current pricing",
+      "provenance": "from_brief",
+      "is_baseline": true
+    },
+    {
+      "id": "existing_customers",
+      "kind": "factor",
+      "label": "Existing customers",
+      "provenance": "from_brief",
+      "category": "observable",
+      "observed_state": {
+        "value": 0.2,
+        "raw_value": 400,
+        "cap": 2000,
+        "declared_scale": "unit_interval",
+        "unit": "customers",
+        "source": "brief_extraction"
+      }
+    },
+    {
+      "id": "existing_customer_monthly_price",
+      "kind": "factor",
+      "label": "Existing customer monthly price",
+      "provenance": "from_brief",
+      "category": "controllable",
+      "observed_state": {
+        "value": 0.3,
+        "raw_value": 300,
+        "cap": 1000,
+        "declared_scale": "unit_interval",
+        "unit": "\u00a3 per customer per month",
+        "source": "brief_extraction"
+      }
+    },
+    {
+      "id": "price_rise",
+      "kind": "factor",
+      "label": "Price rise",
+      "provenance": "from_brief",
+      "category": "controllable",
+      "observed_state": {
+        "value": 0,
+        "raw_value": 0,
+        "cap": 100,
+        "declared_scale": "unit_interval",
+        "unit": "%",
+        "source": "cee_inference"
+      }
+    },
+    {
+      "id": "customers_lost_to_price_rise",
+      "kind": "factor",
+      "label": "Customers lost to price rise",
+      "provenance": "from_brief",
+      "category": "observable",
+      "observed_state": {
+        "value": 0,
+        "raw_value": 0,
+        "cap": 1000,
+        "declared_scale": "unit_interval",
+        "unit": "customers",
+        "source": "cee_inference"
+      }
+    },
+    {
+      "id": "starter_subscribers",
+      "kind": "factor",
+      "label": "Starter subscribers",
+      "provenance": "from_brief",
+      "category": "controllable",
+      "observed_state": {
+        "value": 0,
+        "raw_value": 0,
+        "cap": 2000,
+        "declared_scale": "unit_interval",
+        "unit": "subscribers",
+        "source": "cee_inference"
+      }
+    },
+    {
+      "id": "starter_monthly_price",
+      "kind": "factor",
+      "label": "Starter monthly price",
+      "provenance": "from_brief",
+      "category": "controllable",
+      "observed_state": {
+        "value": 0,
+        "raw_value": 0,
+        "cap": 500,
+        "declared_scale": "unit_interval",
+        "unit": "\u00a3 per subscriber per month",
+        "source": "cee_inference"
+      }
+    },
+    {
+      "id": "support_cost_per_starter_subscriber",
+      "kind": "factor",
+      "label": "Support cost per starter subscriber",
+      "provenance": "from_brief",
+      "category": "observable",
+      "observed_state": {
+        "value": 0,
+        "raw_value": 0,
+        "cap": 100,
+        "declared_scale": "unit_interval",
+        "unit": "\u00a3 per subscriber per month",
+        "source": "cee_inference"
+      }
+    },
+    {
+      "id": "starter_support_burden",
+      "kind": "risk",
+      "label": "Starter support burden",
+      "provenance": "ai_inferred",
+      "scale_frame": 100000
+    },
+    {
+      "id": "existing_plan_monthly_recurring_revenue",
+      "kind": "outcome",
+      "label": "Existing-plan monthly recurring revenue",
+      "provenance": "ai_inferred",
+      "scale_frame": 1000000,
+      "nonlinear_identity": {
+        "operation": "product",
+        "factor_ids": [
+          "existing_customers",
+          "existing_customer_monthly_price"
+        ],
+        "stated_in_brief": false
+      }
+    },
+    {
+      "id": "starter_tier_monthly_recurring_revenue",
+      "kind": "outcome",
+      "label": "Starter-tier monthly recurring revenue",
+      "provenance": "ai_inferred",
+      "scale_frame": 157500,
+      "nonlinear_identity": {
+        "operation": "product",
+        "factor_ids": [
+          "starter_subscribers",
+          "starter_monthly_price"
+        ],
+        "stated_in_brief": false
+      }
+    },
+    {
+      "id": "starter_support_cost",
+      "kind": "outcome",
+      "label": "Starter support cost",
+      "provenance": "ai_inferred",
+      "scale_frame": 100000
+    }
+  ],
+  "edges": [
+    {
+      "from": "decision_monthly_recurring_revenue",
+      "to": "raise_prices_10",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "decision_monthly_recurring_revenue",
+      "to": "launch_starter_tier",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "decision_monthly_recurring_revenue",
+      "to": "keep_current_pricing",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "raise_prices_10",
+      "to": "price_rise",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "launch_starter_tier",
+      "to": "starter_subscribers",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "launch_starter_tier",
+      "to": "starter_monthly_price",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      }
+    },
+    {
+      "from": "keep_current_pricing",
+      "to": "price_rise",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "origin": "repair"
+    },
+    {
+      "from": "keep_current_pricing",
+      "to": "starter_subscribers",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "origin": "repair"
+    },
+    {
+      "from": "keep_current_pricing",
+      "to": "starter_monthly_price",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+      },
+      "origin": "repair"
+    },
+    {
+      "from": "price_rise",
+      "to": "existing_customer_monthly_price",
+      "strength": {
+        "mean": 0.3,
+        "std": 0.15
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 3,
+          "amount_unit": "\u00a3 per customer per month",
+          "per_source_change": 1,
+          "per_source_change_unit": "%",
+          "strength_mean": 0.3,
+          "strength_mean_frame": "edge_strength"
+        },
+        "basis": "Olumi calculation: 1% of the stated \u00a3300 existing-customer monthly price is \u00a33."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "price_rise",
+      "to": "customers_lost_to_price_rise",
+      "strength": {
+        "mean": 0.2,
+        "std": 0.1
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "brief_extraction",
+        "magnitude": "user_stated",
+        "natural_effect": {
+          "amount": 2,
+          "amount_unit": "customers",
+          "per_source_change": 1,
+          "per_source_change_unit": "%",
+          "strength_mean": 0.2,
+          "strength_mean_frame": "edge_strength",
+          "stated_range": {
+            "low": 1,
+            "high": 4,
+            "text": "between 1 and 4",
+            "end": "centre"
+          }
+        },
+        "source_quote": "Each 1% price rise loses about 2 customers, between 1 and 4."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "customers_lost_to_price_rise",
+      "to": "existing_customers",
+      "strength": {
+        "mean": -0.5,
+        "std": 0.25
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -1,
+          "amount_unit": "customers",
+          "per_source_change": 1,
+          "per_source_change_unit": "customers",
+          "strength_mean": -0.5,
+          "strength_mean_frame": "edge_strength"
+        },
+        "basis": "Each customer lost to the price rise reduces the existing customer count by one."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "existing_customers",
+      "to": "existing_plan_monthly_recurring_revenue",
+      "strength": {
+        "mean": 0.6,
+        "std": 0.3
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 300,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "customers",
+          "strength_mean": 0.6,
+          "strength_mean_frame": "edge_strength"
+        },
+        "basis": "Olumi calculation from the stated \u00a3300 paid per existing customer each month."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "existing_customer_monthly_price",
+      "to": "existing_plan_monthly_recurring_revenue",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.2
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 400,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "\u00a3 per customer per month",
+          "strength_mean": 0.4,
+          "strength_mean_frame": "edge_strength"
+        },
+        "basis": "Olumi calculation from the stated 400 existing customers."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "existing_plan_monthly_recurring_revenue",
+      "to": "monthly_recurring_revenue",
+      "strength": {
+        "mean": 0.19047619047619047,
+        "std": 0.09523809523809523
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_placeholder"
+      },
+      "defaulted": true
+    },
+    {
+      "from": "starter_subscribers",
+      "to": "starter_tier_monthly_recurring_revenue",
+      "strength": {
+        "mean": 0.6222222222222222,
+        "std": 0.3111111111111111
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "brief_extraction",
+        "magnitude": "user_stated",
+        "natural_effect": {
+          "amount": 49,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "subscribers",
+          "strength_mean": 0.6222222222222222,
+          "strength_mean_frame": "edge_strength"
+        }
+      },
+      "defaulted": true
+    },
+    {
+      "from": "starter_monthly_price",
+      "to": "starter_tier_monthly_recurring_revenue",
+      "strength": {
+        "mean": 0.47619047619047616,
+        "std": 0.23809523809523808
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 150,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "\u00a3 per subscriber per month",
+          "strength_mean": 0.47619047619047616,
+          "strength_mean_frame": "edge_strength"
+        },
+        "basis": "Olumi provisional calculation using the option's stated central estimate of 150 starter subscribers."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "starter_tier_monthly_recurring_revenue",
+      "to": "monthly_recurring_revenue",
+      "strength": {
+        "mean": 1,
+        "std": 0.5
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "\u00a3/month",
+          "strength_mean": 1,
+          "strength_mean_frame": "edge_strength"
+        },
+        "definitional": true,
+        "basis": "Starter-tier monthly recurring revenue is part of total monthly recurring revenue."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "starter_subscribers",
+      "to": "starter_support_cost",
+      "strength": {
+        "mean": 0.12,
+        "std": 0.06
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "brief_extraction",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 6,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "subscribers",
+          "strength_mean": 0.12,
+          "strength_mean_frame": "edge_strength"
+        }
+      },
+      "defaulted": true
+    },
+    {
+      "from": "support_cost_per_starter_subscriber",
+      "to": "starter_support_cost",
+      "strength": {
+        "mean": 0.15,
+        "std": 0.075
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 150,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "\u00a3 per subscriber per month",
+          "strength_mean": 0.15,
+          "strength_mean_frame": "edge_strength"
+        },
+        "basis": "Olumi provisional calculation using the option's stated central estimate of 150 starter subscribers."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "starter_support_cost",
+      "to": "starter_support_burden",
+      "strength": {
+        "mean": 1,
+        "std": 0.5
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "\u00a3/month",
+          "strength_mean": 1,
+          "strength_mean_frame": "edge_strength"
+        },
+        "definitional": true,
+        "basis": "The support-burden exposure is measured as the monthly starter support cost."
+      },
+      "defaulted": true
+    },
+    {
+      "from": "starter_support_burden",
+      "to": "monthly_recurring_revenue",
+      "strength": {
+        "mean": -0.15873015873015872,
+        "std": 0.07936507936507936
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -0.25,
+          "amount_unit": "\u00a3/month",
+          "per_source_change": 1,
+          "per_source_change_unit": "\u00a3/month",
+          "strength_mean": -0.15873015873015872,
+          "strength_mean_frame": "edge_strength"
+        },
+        "basis": "Olumi provisional assumption: sustained support burden can reduce revenue capacity through service and retention pressure; the size needs validation."
+      },
+      "defaulted": true
+    }
+  ]
+}

@@ -86,8 +86,15 @@ function isUntaggedDoorDefault(edge: unknown, p: Rec | undefined): boolean {
  *   3. `source: 'user_specified'`.
  *   4. the tag, the other `olumi_*` classes, then the untagged door constants ({@link DOOR_DEFAULT_CONSTANTS}).
  */
+/** An admitted product partial is arithmetic; every sizing consumer skips it. */
+export function isIdentityPartialLink(edge: unknown): boolean {
+  return isRec(edge) && isRec(edge.provenance) && isRec(edge.provenance.identity_partial);
+}
+
 export function linkSizing(edge: unknown): LinkSizing {
   const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
+  // Product partials have no stored link size; they never enter the sizing/licence census.
+  if (isIdentityPartialLink(edge)) return 'unmarked';
   if (p?.magnitude === 'user_stated') return 'user';
   if (p?.mean_projected === true) return 'placeholder';
   if (p?.source === 'user_specified') return 'user';
@@ -109,6 +116,7 @@ export function isPlaceholderLink(edge: unknown): boolean {
  */
 export function isSizedOnlyByOlumi(edge: unknown): boolean {
   const s = linkSizing(edge);
+  if (isIdentityPartialLink(edge)) return false;
   if (s === 'user') return false;
   return s === 'placeholder' || s === 'olumi_accepted' || s === 'olumi_estimate' || (isRec(edge) && edge.defaulted === true);
 }
@@ -126,6 +134,7 @@ export function isAcceptedOlumiSize(edge: unknown): boolean {
  * mark at all, `defaulted: true`, not the user's: Paul's 4 magnitude-less links approved at 09:25, `96c6f5f4`).
  */
 export function approvalSizes(edge: unknown): boolean {
+  if (isIdentityPartialLink(edge)) return false;
   const s = linkSizing(edge);
   return s === 'placeholder' || (s === 'unmarked' && isRec(edge) && edge.defaulted === true);
 }

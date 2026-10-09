@@ -754,6 +754,15 @@ export const EdgeProvenanceV3 = z.object({
    * #75 5916504679), so its size is not Olumi's guess. Only `true` or absent; anything else is dropped.
    */
   definitional: z.literal(true).optional().catch(undefined),
+  /**
+   * The link is one side of an ADMITTED product identity on `outcome` (its `nonlinear_identity`): its size is the other
+   * operand's current level, derived on read and never stored (Science §(ah) @5fccfa3b). Never `definitional` (sum parts only).
+   */
+  identity_partial: z.object({
+    outcome: z.string().min(1),
+    operand_ids: z.array(z.string().min(1)).length(2),
+    authored_by: z.enum(["brief", "user_confirmed", "olumi"]),
+  }).optional().catch(undefined),
   /** Producer projected the mean, independently of projected spread/existence. R8 predicate (c). */
   mean_projected: z.literal(true).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields

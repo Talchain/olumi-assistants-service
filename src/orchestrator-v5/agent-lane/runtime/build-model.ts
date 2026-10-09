@@ -2133,9 +2133,10 @@ export async function buildModelFromBrief(
     const olumiFit = refitFramesForOlumiEstimates(statedFitGraph);
     const prePersistGraph = olumiFit.graph as typeof statedFitGraph;
     // Retire every obsolete disclosure for fitted endpoint identities at their one source of truth.
-    const fittedOlumiFields = new Set(olumiFit.fitted.flatMap((link) => {
+    const fittedOlumiFields = new Set([...olumiFit.fitted, ...admitted.edges
+      .filter(e => e.provenance?.identity_partial !== undefined).map(e => `${e.from}→${e.to}`)].flatMap((link) => {
       const path = `edges[${link.replace('→', '::')}]`;
-      return [`${path}.set_aside_estimate`, `${path}.magnitude_question`];
+      return [`${path}.set_aside_estimate`, `${path}.magnitude_question`, `${path}.magnitude_unconvertible`];
     }));
     admitted = { ...admitted, loss: admitted.loss.filter((l) => !fittedOlumiFields.has(l.field_path)) };
     const graph = clampForPersist(prePersistGraph);

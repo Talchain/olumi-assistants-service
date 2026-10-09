@@ -116,7 +116,7 @@ export interface AdmittedEdge {
    * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
    */
   /** `definitional`: the size holds by definition, checked (`definitionalLink`); absent on every other edge. */
-  provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; olumi_fit_candidate?: OlumiFitCandidate; definitional?: true; mean_projected?: true; basis?: string };
+  provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; olumi_fit_candidate?: OlumiFitCandidate; definitional?: true; mean_projected?: true; basis?: string; identity_partial?: { outcome: string; operand_ids: string[]; authored_by: 'brief' | 'user_confirmed' | 'olumi' } };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }

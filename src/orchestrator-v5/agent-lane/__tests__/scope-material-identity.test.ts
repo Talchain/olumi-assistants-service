@@ -59,12 +59,15 @@ it('row (2): B1-A keeps pinned scope wording while fitted estimate questions ret
   // Fitted magnitude questions retire; their obsolete ledger entries no longer suppress drafter questions.
   for (const [from, to, amount] of [
     ['new_pro_subscribers_per_month', 'pro_subscribers_at_month_12', 8],
-    ['pro_subscribers_at_month_12', 'mrr', 49],
   ] as const) {
     expect(graph.edges.find(e => e.from === from && e.to === to)).toMatchObject({
       provenance: { magnitude: 'olumi_estimate', natural_effect: { amount } },
     });
   }
+  // H4: the admitted product partial has no stored £49 coefficient to fit.
+  const partial = graph.edges.find(e => e.from === 'pro_subscribers_at_month_12' && e.to === 'mrr')!;
+  expect(partial).toMatchObject({ provenance: { identity_partial: { outcome: 'mrr', operand_ids: ['pro_plan_price', 'pro_subscribers_at_month_12'], authored_by: 'olumi' } } });
+  expect((partial as { provenance?: { natural_effect?: unknown } }).provenance?.natural_effect).toBeUndefined();
   const before = JSON.parse(fs.readFileSync(new URL('./fixtures/s7-a2-b1-a-questions.json', import.meta.url), 'utf8')) as string[];
   const restored = 'What is current monthly Pro churn? The provisional model assumes 6%, below the stated 8% limit.';
   const c = JSON.parse(rowFor('R2/B1-A').drafter_texts[0]!) as { unknowns: string[] };

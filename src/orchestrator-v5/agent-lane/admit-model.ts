@@ -1,3 +1,4 @@
+import { markIdentityPartials, naturalSizeReceipt } from './identity-partial.js';
 export { reencodedSiblingDiff } from './level-batch-frame.js';
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
 export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
@@ -47,7 +48,7 @@ import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
-import { isRelativeChangePercentUnit, readPercentUnit } from './same-unit.js';
+import { isRelativeChangePercentUnit, readPercentUnit, sameUnit } from './same-unit.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
 import type { LabelHeadReading } from './label-head-unit.js';
@@ -4256,7 +4257,15 @@ function admitOnce(
     // conversation" is not located), so retiring it here would demote real user figures.
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
-    if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
+    if (source === undefined || target === undefined) return false;
+    // H4: a drafter's attribution cannot disown a natural amount the brief writes for this pair.
+    // One-for-one structural coefficients keep their existing definition/admission path.
+    if (typeof l.effect_amount === 'number'
+      && !(Math.abs(l.effect_amount) === 1 && l.effect_per_source_change === 1
+        && sameUnit(source.observed_state?.unit ?? unitById.get(source.id), target.observed_state?.unit ?? unitById.get(target.id)))
+      && naturalSizeReceipt(l.effect_amount, target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit,
+        brief, source.label, target.label, quantityLabels) !== null) return true;
+    if ((l.effect_provenance ?? l.provenance) !== 'explicit') return false;
     // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
     const levelUnit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
     return typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
@@ -4409,6 +4418,15 @@ function admitOnce(
       && edge.provenance.natural_effect !== undefined
       && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends)
         || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends))) edge.provenance.source_quote = sentence;
+  }
+
+  for (const edge of linkResult.edges) {
+    const p = edge.provenance;
+    if (p?.magnitude !== 'user_stated' || p.source_quote !== undefined || p.natural_effect === undefined) continue;
+    const source = nodeOf.get(edge.from), target = nodeOf.get(edge.to);
+    if (source === undefined || target === undefined) continue;
+    const quote = naturalSizeReceipt(p.natural_effect.amount, p.natural_effect.amount_unit, brief, source.label, target.label, quantityLabels);
+    if (quote !== null) p.source_quote = quote;
   }
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the
@@ -5235,7 +5253,8 @@ function admitOnce(
   return {
     nodes: admittedNodes,
     inference_classes,
-    edges: finalEdges,
+    edges: markIdentityPartials(admittedNodes, finalEdges, brief, new Set(resolvable.filter((l) => boundByLink.has(l))
+      .map((l) => `${l.from}::${l.to}`))),
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
     ...(products.marks.length > 0 ? { nonlinear_identities: products.marks } : {}),
     ...(products.unlevelled.length > 0 ? { unlevelled_product_parts: products.unlevelled } : {}),

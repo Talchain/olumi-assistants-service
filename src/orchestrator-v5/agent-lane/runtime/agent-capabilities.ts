@@ -2466,7 +2466,7 @@ export function createAgentCapabilities(
       const ties = [out.length > 0 ? `affecting ${out.map((e) => labelOf(e.to)).join(', ')}` : '',
         into.length > 0 ? `driven by ${into.map((e) => labelOf(e.from)).join(', ')}` : ''].filter((t) => t !== '');
       sentences.push(`Added "${String(risk.label ?? rid)}" as a risk${ties.length > 0 ? `, ${ties.join(' and ')}` : ''}`
-        + (out.length + into.length > 0 ? `; ${howStronglyWords([...out, ...into])}` : '.'));
+        + (out.length + into.length > 0 ? `; ${howStronglyWords([...out, ...into], after!)}` : '.'));
     }
     // ⭐ PJ-E-FIG: the factors the add-factor door added, each with the user's figure (`GM_HELD_USER_TODAY_KEY`).
     const userTodayMember = readUserTodayMember((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_TODAY_KEY]) ?? [];
@@ -2488,7 +2488,7 @@ export function createAgentCapabilities(
       // A1 × #2103: a committed switch already HAS its today (0, Olumi's), so it is said as that and is never in the
       // one ask for today's values; every other added factor goes to that single ask (`added-factors-receipt.ts`).
       if (committedOff) {
-        sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
+        sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing, after!)} `
           + 'Olumi takes it as off today and the option switches it on; that it is off today is Olumi\'s estimate, for you to correct.');
         continue;
       }
@@ -2499,18 +2499,18 @@ export function createAgentCapabilities(
       if (userTodayIds.has(fid) && os?.source === USER_TODAY_SOURCE && typeof statedRaw === 'number') {
         const u = (os as { unit?: unknown }).unit;
         const cap = (os as { cap?: unknown }).cap;
-        sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
+        sentences.push(`Added "${String(f.label ?? fid)}" as a factor, affecting ${changes.join(', ')}; ${howStronglyWords(outgoing, after!)} `
           + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, ${confirmedIds.has(fid) ? 'as you confirmed' : 'as you said'}.`);
         if (typeof cap === 'number' && Number.isFinite(cap) && cap > 1) rangesAdded.push({ factor: String(f.label ?? fid), value: statedRaw, range: cap });
         continue;
       }
       if (todayIds.has(fid) && os?.source === 'brief_extraction' && typeof statedRaw === 'number') {
         const u = (os as { unit?: unknown }).unit;
-        sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing)} `
+        sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; ${howStronglyWords(outgoing, after!)} `
           + `Its value today is ${statedRaw}${typeof u === 'string' && u !== '' ? ` ${u}` : ''}, as you said.`);
         continue;
       }
-      factorParts.push({ label: String(f.label ?? fid), changes, strength: howStronglyWords(outgoing) });
+      factorParts.push({ label: String(f.label ?? fid), changes, strength: howStronglyWords(outgoing, after!) });
     }
     // One ask for today's values, naming every added factor (`added-factors-receipt.ts`).
     sentences.push(...addedFactorsReceipt(factorParts));

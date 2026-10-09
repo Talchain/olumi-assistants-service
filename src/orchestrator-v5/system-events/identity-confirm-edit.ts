@@ -300,6 +300,14 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
 
   const carrier = { operation: 'product' as const, factor_ids: factorOrder, stated_in_brief: true };
   outcome.nonlinear_identity = carrier;
+  // The approved product owns its admitted partials' authorship, without storing or changing a size.
+  for (const edge of graph.edges) {
+    if (!isRec(edge) || edge.to !== outcome_id || !factorOrder.includes(String(edge.from)) || !isRec(edge.provenance)) continue;
+    const partial = edge.provenance.identity_partial;
+    if (isRec(partial) && partial.outcome === outcome_id && isDeepStrictEqual(partial.operand_ids, factorOrder)) {
+      partial.authored_by = 'user_confirmed';
+    }
+  }
   for (const id of factorOrder) {
     const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
     const today = part === undefined ? null : todaysLevelFor(params.persistedGraph, id);
@@ -380,6 +388,18 @@ export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: u
     }
     if (expected.observed_state !== undefined && isDeepStrictEqual(part.observed_state, expected.observed_state)) {
       if (Object.hasOwn(prior, 'observed_state')) part.observed_state = structuredClone(prior.observed_state); else delete part.observed_state;
+    }
+  }
+  // Exactly the approved identity's existing partial stamps may record this confirmation.
+  if (Array.isArray(before.edges) && Array.isArray(restored.edges) && isRec(confirmed) && Array.isArray(confirmed.factor_ids)) {
+    for (let i = 0; i < restored.edges.length; i++) {
+      const edge = restored.edges[i], prior = before.edges[i];
+      if (!isRec(edge) || !isRec(prior) || edge.to !== outcomeId || !confirmed.factor_ids.includes(edge.from)
+        || !isRec(edge.provenance) || !isRec(prior.provenance)) continue;
+      const partial = edge.provenance.identity_partial, old = prior.provenance.identity_partial;
+      if (isRec(partial) && isRec(old) && partial.outcome === outcomeId
+        && isDeepStrictEqual(partial.operand_ids, confirmed.factor_ids)
+        && isDeepStrictEqual(partial, { ...old, authored_by: 'user_confirmed' })) edge.provenance.identity_partial = structuredClone(old);
     }
   }
   return isDeepStrictEqual(restored, before);

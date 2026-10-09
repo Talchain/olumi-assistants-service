@@ -713,13 +713,13 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
       if (baseline && parts?.kind === 'currency' && label.includes('price')
         && label.every(w => /^(?:existing|current|plan|monthly|price)$/.test(w) || parts.per?.some(t => sameWord(t, w)))) {
         const payer = written.filter(x => x.kind === 'plain' && x.index + x.matchedText.length < a.index).at(-1);
-        const payment = payer === undefined ? null : /^\s+([\p{L} -]+?)\s+paying\s*$/iu.exec(userText.slice(payer.index + payer.matchedText.length, a.index));
+        const payment = payer === undefined ? null : /^\s+([\p{L} -]+?)\s+(?:paying|(?:who\s+)?pays?|at)\s*$/iu.exec(userText.slice(payer.index + payer.matchedText.length, a.index));
         if (a.kind === 'currency' && payment !== null && parts.per?.length)
           return statedTailParts(userText, a)?.period === parts.period && payerWordsFor(wordsOf(payment[1]!));
       }
       if (a.kind === 'plain' && parts?.kind === 'count' && baseline
         && label.every(w => /^(?:existing|current)$/.test(w) || parts.noun?.some(t => sameWord(t, w)))) {
-        const payment = /^\s+([\p{L} -]+?)\s+paying\s*[£$€]/iu.exec(after);
+        const payment = /^\s+([\p{L} -]+?)\s+(?:paying|(?:who\s+)?pays?|at)\s*[£$€]/iu.exec(after);
         if (payment !== null) return payerWordsFor(wordsOf(payment[1]!));
       }
     }

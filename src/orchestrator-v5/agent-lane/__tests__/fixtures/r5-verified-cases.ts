@@ -163,7 +163,8 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.equal(sentIntervention(oldCell), false);
     assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), true);
     const p = prepare(raw, brief); const a = admitted(p.candidate, brief);
-    const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
+    // H4 typed partials and stated-pair receipts change admitted provenance; original hashes remain retained.
+    const baseline: Record<string, string> = json('r5-h4-no-evidence-baseline.json');
     assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(a) })), baseline[c.file]);
   },
 })));
