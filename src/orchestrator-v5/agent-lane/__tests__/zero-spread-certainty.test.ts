@@ -47,10 +47,23 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     const acc = structuredClone(graph);
     acc.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').nonlinear_identity = { operation: 'accumulation',
       factor_ids: ['s0', 'monthly_churn', 'new_pro_subscribers_per_month'], horizon_months: 12, rate_scale: 0.01, stated_in_brief: true };
-    const lineOf = (g: Rec, records: Rec[]) => goalChanceLicenceOf({ option_comparison: records }, g, 'mrr', earnedBy(records))!
+    const lineOf = (g: Rec, records: Rec[], identity_evaluations: Rec[] = []) => goalChanceLicenceOf({ option_comparison: records, identity_evaluations }, g, 'mrr', earnedBy(records))!
       .withheld_reason_by_option!.keep_pro_price_at_49;
-    expect(lineOf(acc, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 a month by month 12 if today’s rates hold.' });
-    expect(lineOf(acc, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 a month by month 12 if today’s rates hold.' });
+    // Science 93 @54dbc0fe Q-b
+    expect(lineOf(acc, fixedRates)).toEqual({ reason: 'zero_spread', side: 'meets', line: 'Not shown yet: needs month-by-month changes' });
+    expect(lineOf(acc, short)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Not shown yet: needs month-by-month changes' });
+    const bound = structuredClone(acc);
+    bound.nodes.find((n: Rec) => n.id === 'mrr').nonlinear_identity = { operation: 'product',
+      factor_ids: ['pro_plan_price', 'pro_paying_subscribers'], stated_in_brief: true };
+    bound.nodes.push({ id: 's0', kind: 'factor', observed_state: { value: 300, source: 'user_confirmed' } });
+    for (const id of ['monthly_churn', 'new_pro_subscribers_per_month']) {
+      bound.nodes.find((n: Rec) => n.id === id).observed_state.source = 'user_confirmed';
+    }
+    const evaluated = bound.nodes.filter((n: Rec) => n.nonlinear_identity).map((n: Rec) => ({
+      node_id: n.id, ...n.nonlinear_identity, evaluated: true,
+    }));
+    expect(lineOf(bound, fixedRates, evaluated)).toEqual({ reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 a month by month 12 if today’s rates hold.' });
+    expect(lineOf(bound, short, evaluated)).toEqual({ reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 a month by month 12 if today’s rates hold.' });
     const noHorizon = structuredClone(graph);
     delete noHorizon.nodes.find((n: Rec) => n.id === 'mrr').goal_horizon_months;
     expect(lineOf(noHorizon, fixedRates).line).toBe('Meets £20,000 a month if today’s figures hold.');

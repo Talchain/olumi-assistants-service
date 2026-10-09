@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../../src/orchestrator-v5/append-v6-flag.js';
 /**
  * Context Architecture v2 — S2 "brief → edit/repair" (ROADMAP 1.199).
  *
@@ -46,6 +47,8 @@ vi.mock('../../src/orchestrator-v5/build-turn-context.js', async (importOriginal
   const actual = await importOriginal<typeof import('../../src/orchestrator-v5/build-turn-context.js')>();
   return {
     ...actual,
+    // B-FIX1: the combined read follows the existing graph double.
+    loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../src/orchestrator-v5/build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
     loadPersistedGraphStrict: vi.fn().mockResolvedValue(null),
     loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
     loadScenarioBriefText: vi.fn().mockResolvedValue(null),
@@ -214,6 +217,8 @@ describe('serialiseEditContextForLLM — ## Decision Brief section', () => {
 
 describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => {
   it('reads the scenario brief UNCONDITIONALLY and threads the disclosed 1,000-char slice', async () => {
+    // A2: the rollback path's separate brief reader; CAS ON carries it in the original combined snapshot.
+    __setUseAppendV6ForTest(false);
     // Mutation-check: reverting the flip (re-adding the flag guard, default
     // OFF) makes THIS assertion RED — loadScenarioBriefText would not be called
     // and context.brief would be absent.
@@ -237,6 +242,7 @@ describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => 
       original_chars: 4_000,
     });
   });
+
 
   it('ANAPHORA (S2 value): the threaded brief renders the ## Decision Brief section so a referent resolves', () => {
     // The edit LLM must SEE the decision framing to resolve "the hire option"
@@ -292,3 +298,5 @@ describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => 
     expect(context.brief ?? null).toBeNull();
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

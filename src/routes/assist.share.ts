@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../orchestrator-v5/goal-target/outbound-graph.js";
 /**
  * Share-for-Review Routes
  *
@@ -243,7 +244,7 @@ export default async function route(app: FastifyInstance) {
       return reply.code(200).send({
         schema: "share-content.v1",
         share_id: shareData.share_id,
-        graph: shareData.graph,
+        graph: toOutboundGraph(shareData.graph),
         brief: shareData.brief,
         created_at: new Date(shareData.created_at).toISOString(),
         expires_at: new Date(shareData.expires_at).toISOString(),

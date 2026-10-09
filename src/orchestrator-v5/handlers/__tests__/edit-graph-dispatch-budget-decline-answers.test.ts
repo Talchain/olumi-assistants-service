@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 /**
  * ROADMAP 2.655 — EVERY DECLINE OF THE STRUCTURAL-EDIT TOOL, AFTER A BUDGET
  * REFUSAL, MEASURED AT THE SEAM A USER READS.
@@ -70,6 +71,8 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
   return {
     ...actual,
+    // B-FIX1: the combined read follows the existing graph double.
+    loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
     loadPersistedGraphStrict: vi.fn(),
     loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
     loadMostRecentPendingActions: vi.fn().mockResolvedValue([]),
@@ -138,7 +141,7 @@ const GRAPH = {
     { id: 'fac_churn', kind: 'factor', label: 'Customer Churn Rate' },
     { id: 'fac_demand', kind: 'factor', label: 'Market Demand Conditions' },
   ],
-  edges: [{ from: 'dec_mrr', to: 'goal_mrr' }],
+  edges: [{ from: 'dec_mrr', to: 'goal_mrr', ...CAUSAL_BELIEF }],
 };
 
 const NEW_OPTIONS = [
@@ -441,6 +444,8 @@ const DECLINE_CASES: readonly DeclineCase[] = [
     exit: 'grounding_read_failed',
     expected: 'model_unreadable',
     setup: () => {
+      // A2: retains the rollback-only late grounding refusal; CAS ON validates its server base earlier.
+      __setUseAppendV6ForTest(false);
       (loadPersistedGraphStrict as MockedFunction<typeof loadPersistedGraphStrict>).mockRejectedValue(
         new Error('supabase unavailable'),
       );
@@ -461,6 +466,8 @@ const DECLINE_CASES: readonly DeclineCase[] = [
     exit: 'base_divergence',
     expected: 'model_unreadable',
     setup: () => {
+      // A2: retains the rollback-only late grounding refusal; CAS ON validates its server base earlier.
+      __setUseAppendV6ForTest(false);
       (loadPersistedGraphStrict as MockedFunction<typeof loadPersistedGraphStrict>).mockResolvedValue(
         {
           nodes: [{ id: 'dec_other', kind: 'decision', label: 'A different model' }],
@@ -784,3 +791,5 @@ describe('⭐⭐ 2.655 — the decline copy does not prescribe a futile retry', 
     expect(RETRY_INVITATION.test(text), `Copy: ${text}`).toBe(true);
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

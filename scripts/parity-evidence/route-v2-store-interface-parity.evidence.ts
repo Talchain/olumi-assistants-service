@@ -206,7 +206,6 @@ describe('Addendum 11 flag OFF — route-v2 store-interface parity', () => {
       invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
       invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
       ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-      storeDraftGraph: async () => undefined,
       loadGraph: (scenarioId: string) => publicStore.loadGraph(scenarioId),
       loadGraphAndBriefText: (scenarioId: string) => publicStore.loadGraphAndBriefText(scenarioId),
     });

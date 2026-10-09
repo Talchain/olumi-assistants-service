@@ -1,10 +1,10 @@
 /** One HTTP scenario admission authority. Registered after service/HMAC authentication. */
 import fp from 'fastify-plugin';
-import { bindWriteCaller } from '../orchestrator-v5/ownership/door-ownership.js';
+import { bindWriteCaller, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readWriteRefusal, readSuccessfulDoorEntries, readUnsavableEffects, recordSuccessfulSave } from '../orchestrator-v5/ownership/door-ownership.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteOptions } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
+import { markDraftGraphWriteFailed, preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveOwnershipAuthority, OWNERSHIP_CLAIM_CARVE_OUTS } from '../orchestrator/ownership-authority.js';
 import { buildSignInRequiredError, type UserIdentityResolution } from '../orchestrator/user-identity.js';
@@ -259,6 +259,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
             req.scenarioAccess.provisionIfMissing = () => provisioning ??= (async () => {
               const created = await preflightEnsureScenario(checkedId, callerUserId, requestId, store);
               if (!created.ok) { refuse(req, reply, checkedId, created.reason, created.reason === 'scenario_ownership_unverifiable'); return false; }
+              if (!created.skipped) recordSuccessfulSave();
               return admitOwner(created.ownerUserId ?? null);
             })();
             return;
@@ -278,6 +279,35 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
     if (ownerUserId === undefined) return refuse(req, reply, scenarioId ?? '', 'scenario_not_found');
     await admitOwner(ownerUserId, snapshot);
   });
+  // Complete untouched responses synchronously. An unconditional async hook
+  // delays reply.sent on admission refusals and can let the handler continue.
+  app.addHook('onSend', (req, reply, payload, done) => {
+    const refusal = readWriteRefusal(req);
+    if (!refusal) { done(null, payload); return; }
+    if (readSuccessfulDoorEntries(req) > 0) {
+      log.warn({ event: 'model_write.ownership_refused_after_commit', reason: refusal.reason,
+        request_id: getOrGenerateRequestId(req), route_family: family(req) },
+      'Model write ownership refused after an earlier successful door entry');
+      done(null, payload);
+      return;
+    }
+    const effects = readUnsavableEffects(req);
+    const body = JSON.stringify(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[refusal.reason]);
+    // Already mapped paths retain their bytes and their existing terminal mark.
+    if (effects === 0 && reply.statusCode === 403 && payload === body) { done(null, payload); return; }
+    const complete = () => {
+      // Preserve publication-only bytes while still retiring a captured refused fence.
+      if (effects > 0) { done(null, payload); return; }
+      reply.code(403).type('application/json; charset=utf-8');
+      reply.removeHeader('content-length');
+      done(null, body);
+    };
+    const fence = refusal.fence;
+    if (fence) {
+      void markDraftGraphWriteFailed(fence.scenarioId, fence.turnId,
+        'model_write_ownership_refused', getOrGenerateRequestId(req), 'turn_dead_only').then(complete, complete);
+    } else complete();
+  });
   app.addHook('preHandler', (req, _reply, done) =>
-    bindWriteCaller(req.scenarioAccess?.caller ?? { userId: null, verified: false }, done));
+    bindWriteCaller(req.scenarioAccess?.caller ?? { userId: null, verified: false }, done, req));
 }, { name: 'scenario-ownership' });

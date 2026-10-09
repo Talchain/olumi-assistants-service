@@ -1,3 +1,4 @@
+import { goalHorizonVerdict } from '../../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * Model Management v1 — THE WIRING SLICE (versions list / save / restore).
@@ -142,7 +143,6 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
 const listVersions = vi.fn();
 const getVersion = vi.fn();
 const saveVersion = vi.fn();
-const restoreVersion = vi.fn();
 const restoreVersionAtomic = vi.fn();
 const getCurrentVersionPointer = vi.fn();
 // The HEAD record reader — the restore path's return-leg input. Distinct from
@@ -161,7 +161,6 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       listVersions,
       getVersion,
       saveVersion,
-      restoreVersion,
       restoreVersionAtomic,
       getCurrentVersionPointer,
       getCurrentVersion,
@@ -341,17 +340,6 @@ beforeEach(() => {
       graph_identity_hash: HASH_SNAPSHOT,
       deduped: false,
       event_id: "evt-snap",
-    },
-  });
-  restoreVersion.mockResolvedValue({
-    status: "ok",
-    value: {
-      version_id: RESTORED_VERSION,
-      version_number: 4,
-      graph_identity_hash: HASH_A,
-      deduped: false,
-      event_id: "evt-restore",
-      restored_from_version_id: VERSION_A,
     },
   });
   restoreVersionAtomic.mockResolvedValue(atomicRestoreOk());
@@ -863,7 +851,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
 
     expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
     expect(saveVersion).not.toHaveBeenCalled();
-    expect(restoreVersion).not.toHaveBeenCalled();
     expect(appendSpy).not.toHaveBeenCalled();
     const write = restoreVersionAtomic.mock.calls[0][0];
     expect(write.scenario_id).toBe(SCENARIO);
@@ -1724,3 +1711,62 @@ vi.mock('../../utils/supabase-user-jwt.js', async () => ({
   looksLikeJwt: () => true,
   verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
 }));
+
+
+describe("S5 r9 restore outbound receipt", () => {
+  it("real restore route omits proof while the version and restored stored graph keep their attestation", async () => {
+    const { applyGoalSteadyEdit } = await import("../../orchestrator-v5/goal-target/goal-steady-write.js");
+    const { horizonSteadyAttested } = await import("../../orchestrator-v5/goal-target/horizon-basis.js");
+    const cfg = mockConfig.value as { auth: { hmacSecret: string | undefined } };
+    const previousSecret = cfg.auth.hmacSecret; cfg.auth.hmacSecret = "s5-r9-restore-test-only";
+    let app: FastifyInstance | undefined;
+    try {
+      const graph = { ...structuredClone(STORED_VERSION_GRAPH), nodes: [
+        ...structuredClone(STORED_VERSION_GRAPH.nodes),
+        { id: "goal", kind: "goal", label: "Service quality", goal_horizon_months: 9, goal_threshold_unit: "%" },
+      ] };
+      const issued = applyGoalSteadyEdit(graph as never, { goal_id: "goal", months: 9 }, SCENARIO);
+      if (issued.kind !== "mutated") throw new Error("r9 restore fixture mint refused");
+      const version = JSON.parse(JSON.stringify(issued.mutatedGraph));
+      const versionBytes = JSON.stringify(version); let storedBytes = JSON.stringify(CURRENT_GRAPH);
+      expect(horizonSteadyAttested(version)).toBe(true);
+      getVersion.mockResolvedValue({ status: "ok", value: { ...summary(), graph: version } });
+      loadGraph.mockImplementation(async () => JSON.parse(storedBytes));
+      restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+        storedBytes = JSON.stringify(args.graph);
+        const ok = atomicRestoreOk(); return { ...ok, value: { ...ok.value, graph: JSON.parse(storedBytes) } };
+      });
+      app = await buildApp();
+      const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+      expect(res.json().receipt).toBeDefined(); expect(res.body).not.toContain('"proof"');
+      expect(res.json().receipt.graph.nodes.find((n: { id: string }) => n.id === "goal").horizon_basis)
+        .toMatchObject({ basis: "steady_attested", source: "user_stated", bound_months: 9 });
+      expect(JSON.stringify(version)).toBe(versionBytes);
+      const stored = JSON.parse(storedBytes);
+      expect(stored.nodes.find((n: { id: string }) => n.id === "goal").horizon_basis)
+        .toEqual(version.nodes.find((n: { id: string }) => n.id === "goal").horizon_basis);
+      expect(horizonSteadyAttested(stored)).toBe(true);
+    } finally { if (app) await app.close(); cfg.auth.hmacSecret = previousSecret; }
+  });
+});
+
+// P1a (DL 87114 #2895): route restore sends the saved graph through its real storage projection to the atomic RPC.
+it('a forged triple through version restore still withholds', async () => {
+  const saved = { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR', goal_horizon_months: 12,
+    horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: 12 }], edges: [] };
+  getVersion.mockResolvedValue({ status: 'ok', value: { ...summary(), graph: saved } });
+  restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+    const ok = atomicRestoreOk(); return { ...ok, value: { ...ok.value, graph: args.graph } };
+  });
+  const app = await buildApp();
+  try {
+    const res = await post(app, '/versions/restore', { version_id: VERSION_A });
+    expect(res.statusCode, res.body).toBe(200);
+    const stored = restoreVersionAtomic.mock.calls[0][0].graph;
+    expect(stored.nodes[0]).toMatchObject({ id: 'mrr', goal_horizon_months: 12 });
+    expect(goalHorizonVerdict(stored)).toBe('withhold');
+    expect(goalHorizonVerdict(res.json().receipt.graph)).toBe('withhold');
+  } finally { await app.close(); }
+});

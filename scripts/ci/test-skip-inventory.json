@@ -13,9 +13,17 @@
       "skipIf": 1,
       "reason": "1 it.skipIf gated on M3_CENSUS_MANIFEST — a LOCAL 0-LLM evidence replay of 116 recorded drafts (the #2865 M3 census), not coverage. It needs a manifest of recorded-output files that live outside the repo, so CI cannot run it; the deterministic M3 rows in the same file run on every push."
     },
+    "src/orchestrator-v5/agent-lane/__tests__/goal-horizon-verdict.route.test.ts": {
+      "skipIf": 6,
+      "reason": "6 skipIf gated on S2_CAPTURE_BASELINE=1 \u2014 a LOCAL before/after capture mode for the \u00a7(ad) B2 face (writes b2-before.txt / b2-after.txt). The skipped rows assert the post-change behaviour, which a before-capture run by definition does not have; in CI the env is unset, so every row runs."
+    },
     "src/orchestrator-v5/compose/__tests__/graph-patch-clean-payload.test.ts": {
       "todo": 11,
       "reason": "11 it.todo placeholders enumerating planned clean-payload assertions (spec-first stubs)."
+    },
+    "src/orchestrator-v5/goal-target/__tests__/horizon-basis-door.test.ts": {
+      "todo": 2,
+      "reason": "S5 2b: attestation-aware Run licence + restore→withhold rows; need #2895 goalHorizonVerdict + P45 #2903 in one tree (DL 87114 train item)"
     },
     "src/orchestrator-v5/routing/__tests__/prompt-loader.test.ts": {
       "skipIf": 1,

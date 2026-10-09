@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
 import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
 import { goalOrderedLinks } from '../../admission/target-testability.js';
@@ -57,6 +58,8 @@ import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, G
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
+import { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
+export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
@@ -1178,7 +1181,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const plotPayload: Record<string, unknown> = {
-      graph: withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph),
+      graph: toOutboundGraph(withShareByDateFrame(rateSpreadWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph)),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -2217,6 +2220,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ] } };
     }
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
+    // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
+    // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
+    response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -2853,7 +2859,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // threshold scoring and mean both use raw samples, so this Run records the delta (samples') frame.
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
-      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
+      sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance),
+      snapshot.rawPersistedGraph ?? graphForAnalysis);
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

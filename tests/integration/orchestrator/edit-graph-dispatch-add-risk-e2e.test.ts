@@ -74,6 +74,8 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', async (importOrigi
   loadRecentConversationTurns: vi.fn(async () => []),
   // Proposal-memory continuation (PR #212): no pending actions in this suite.
   loadMostRecentPendingActions: vi.fn(async () => []),
+
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
 }));
 
 // ────────────────────────────────────────────────────────────────────

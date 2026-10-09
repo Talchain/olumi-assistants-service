@@ -28,6 +28,7 @@
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
+import { toOutboundGraph } from '../goal-target/outbound-graph.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 
 /** The top-level `draft_graph` wire field (DraftGraphBlockSchema minus `type`). */
@@ -64,7 +65,7 @@ export function buildAppliedGraphWireField(graph: GraphV3T): AppliedGraphWireFie
       : undefined;
 
   return {
-    nodes: graph.nodes as unknown[],
+    nodes: toOutboundGraph(graph).nodes as unknown[],
     edges: graph.edges as unknown[],
     node_count: graph.nodes.length,
     edge_count: graph.edges.length,
@@ -119,7 +120,7 @@ export function buildCanonicalCommittedGraphReceipt(
   canonical: { readonly options: readonly unknown[]; readonly goal_node_id?: string | null },
 ): CanonicalCommittedGraphReceipt {
   return {
-    nodes: graph.nodes as unknown[],
+    nodes: toOutboundGraph(graph).nodes as unknown[],
     edges: graph.edges as unknown[],
     // Enforced equal to the array lengths by the receipt schema's own refine —
     // taken from the SAME arrays above rather than from any carried count.

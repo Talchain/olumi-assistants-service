@@ -49,7 +49,6 @@ export { ModelManagementService } from './service.js';
 export type {
   ModelManagementServiceOptions,
   SaveVersionRequest,
-  RestoreVersionRequest,
   AtomicRestoreVersionRequest,
 } from './service.js';
 export {
@@ -64,7 +63,6 @@ export {
 export type {
   ModelVersionStorePort,
   SaveVersionWrite,
-  RestoreVersionWrite,
   AtomicRestoreVersionWrite,
 } from './store-adapter.js';
 export {

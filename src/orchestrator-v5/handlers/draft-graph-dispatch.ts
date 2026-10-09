@@ -1,3 +1,5 @@
+import { prepareHorizonBasisForWrite } from '../goal-target/horizon-basis-provenance.js';
+import { toOutboundGraph } from '../goal-target/outbound-graph.js';
 /**
  * V5 pre-Sonnet dispatch for draft_graph turns.
  *
@@ -379,7 +381,7 @@ export function draftResultToOlumiResponse(
   const draftGraphField =
     graphPersisted && result.graphOutput
       ? {
-          nodes: (result.graphOutput.nodes ?? []) as unknown[],
+          nodes: (toOutboundGraph(result.graphOutput).nodes ?? []) as unknown[],
           edges: (result.graphOutput.edges ?? []) as unknown[],
           node_count: finalNodeCount,
           edge_count: finalEdgeCount,
@@ -939,6 +941,7 @@ export async function dispatchDraftGraph(
       turnId: payload.turn_id,
       turnClass: 'direct_answer',
     });
+    prepareHorizonBasisForWrite(draftGraphForCommit, draftBase?.graph, payload.scenario_id);
     const postDraftGraphHash = ((): string | null => {
       try {
         return computeAnalysisAffectingGraphHash(
@@ -1168,6 +1171,7 @@ export async function dispatchDraftGraph(
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
         // Only graph writes carry the base; null is known first-draft absence.
+        ...(draftBase !== undefined ? { storedGraphForHorizonBasis: draftBase.graph } : {}),
         ...(draftGraphForCommit != null && expectedGraphCasHashes !== undefined && draftBase !== undefined
           ? { ...expectedGraphCasHashes, baseGraphForInvariants: draftBase.graph }
           : {}),

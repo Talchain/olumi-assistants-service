@@ -41,6 +41,12 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   };
 });
 
+// CAS/v6 reads use an explicit absent-base double; both off performs no read.
+vi.mock('../../build-turn-context.js', async original => ({
+  ...await original<typeof import('../../build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: vi.fn(async () => ({ graph: null, briefText: null })),
+}));
+
 // ── imports after mocks ───────────────────────────────────────────────────────
 
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
@@ -1891,3 +1897,9 @@ describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
     expect(result.response.assistant_text).toContain(MODEL_VARIANCE_NOTE);
   });
 });
+
+// B-FIX1: an empty successful scenario read permits first-touch adoption on CAS ON.
+vi.mock('../../build-turn-context.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
+}));

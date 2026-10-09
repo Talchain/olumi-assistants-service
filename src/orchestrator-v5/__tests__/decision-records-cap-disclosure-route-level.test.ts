@@ -96,7 +96,6 @@ vi.mock('../session/index.js', () => ({
     readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: 'Supplier decision brief.' }),
     ensureScenarioExists: async () => ({ user_id: null }),
