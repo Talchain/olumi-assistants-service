@@ -90,9 +90,9 @@ afterEach(async () => {
 });
 
 async function register() {
-  app = Fastify();
+  app = Fastify({ requestIdHeader: "x-request-id" });
   await registerRoute(app);
-  return await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, payload: { graph: GRAPH } });
+  return await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph/register`, headers: { "x-request-id": "version-cas" }, payload: { graph: GRAPH } });
 }
 
 describe('revision CAS wire refusal', () => {
@@ -200,6 +200,8 @@ describe('revision CAS wire refusal', () => {
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith('append_turn_atomic_v6', expect.objectContaining({ p_expected_revision: 7 }));
     expect(res.statusCode).toBe(409);
+    // Shared exact wire expectation reused by the version save/restore RPC rows.
+    expect(res.body).toBe('{"schema":"error.v1","code":"revision_conflict","message":"The scenario changed while I was saving, so nothing was saved. Try again.","details":{"code":"revision_conflict","expected":7,"current":8},"request_id":"version-cas","expected":7,"current":8}');
     expect(res.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8, details: { code: 'revision_conflict', expected: 7, current: 8 } });
   });
 
