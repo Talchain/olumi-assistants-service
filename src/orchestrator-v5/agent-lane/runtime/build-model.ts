@@ -1545,6 +1545,8 @@ export async function buildModelFromBrief(
   deadlineAt?: number,
   // The plain provider (never the recorder-wrapped drafter). Omitted → no widening: today's path, byte for byte.
   wideningCallStructured?: CallStructuredModel,
+  /** Test-only observer of the candidate and shared admission path at the widening boundary. */
+  observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
@@ -1693,6 +1695,8 @@ export async function buildModelFromBrief(
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
   let admitted = admitForBuild(firstIdentity.model, candidate);
+  // Widening must attest levels against the same candidate as the adopted base admission.
+  let admissionLevelCandidate = candidate;
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1889,6 +1893,7 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admissionCandidate = retryIdentity.model;
           admitted = retryAdmitted;
+          admissionLevelCandidate = retryCandidate;
           // #2854 sets admissionCandidate here
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
@@ -2259,10 +2264,12 @@ export async function buildModelFromBrief(
     return final;
   };
   finalFor(admitted);
+  const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model, admissionLevelCandidate);
+  observeAdmissionForTests?.({ candidate: admissionCandidate, admitted, admit: admitWidened, admitBase: admitForBuild });
   // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
-    admissionArgs: [goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] });
+    admit: admitWidened });
   if (widened !== null) {
     admitted = widened.admitted;
     size = assessConstructionSize(admitted);
