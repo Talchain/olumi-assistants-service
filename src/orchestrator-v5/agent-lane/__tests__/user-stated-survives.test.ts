@@ -15,11 +15,9 @@ interface Row { id: string; brief: string; drafter_texts: string[] }
 function valid(i: Iv, brief: string): boolean {
   const e = i.stated_evidence;
   if (!e || !e.quote || !e.option_quote) return false;
-  if (![e.start, e.end, e.amount_start, e.option_start, e.option_end].every(Number.isInteger)) return false;
-  if (e.start < 0 || e.end > brief.length || brief.slice(e.start, e.end) !== e.quote
-    || e.option_start < e.start || e.option_end > e.end || brief.slice(e.option_start, e.option_end) !== e.option_quote) return false;
-  return [...findStatedAmounts(brief), ...countsInWords(brief)].some(a => a.index === e.amount_start
-    && a.magnitude === i.value && a.index >= e.option_start && a.index + a.matchedText.length <= e.option_end);
+  const at = brief.indexOf(e.quote); const own = e.quote.indexOf(e.option_quote);
+  if (at < 0 || brief.indexOf(e.quote, at + 1) >= 0 || own < 0 || e.quote.indexOf(e.option_quote, own + 1) >= 0) return false;
+  return [...findStatedAmounts(e.option_quote), ...countsInWords(e.option_quote)].some(a => a.magnitude === i.value);
 }
 async function replay(row: Row) {
   let registered: Rec | null = null; let index = 0;
@@ -39,11 +37,17 @@ function losses(row: Row, graph: Rec | null, result: unknown): string[] {
   const demoted = (result as { provenance_demoted?: {option: string; factor: string}[] }).provenance_demoted ?? [];
   return draft.options.flatMap(o => (o.interventions ?? []).flatMap(i => {
     if (i.provenance !== 'explicit' || !valid(i, row.brief)) return [];
-    const option = nodes.find(n => n.id === slugId(o.label));
-    const factor = nodes.find(n => n.id === slugId(i.factor_label));
+    const option = nodes.find(n => n.label === o.label);
+    const factor = nodes.find(n => n.label === i.factor_label);
     const served = (option?.interventions as Record<string, Rec> | undefined)?.[String(factor?.id)];
+    const baseline = factor?.observed_state as Rec | undefined;
+    const unknownBaseline = !baseline || baseline.source !== 'brief_extraction';
+    if (((i as Iv & { value_kind?: string }).value_kind === 'additional') && unknownBaseline) {
+      // No typed-delta carrier exists in admission. A level or prose figure is not a typed delta.
+      return [`${String(option?.id ?? slugId(o.label))}.${String(factor?.id ?? slugId(i.factor_label))}`];
+    }
     return !served || served.source !== 'brief_extraction' || demoted.some(d => d.option === o.label && d.factor === i.factor_label)
-      ? [`${slugId(o.label)}.${slugId(i.factor_label)}`] : [];
+      ? [`${String(option?.id ?? slugId(o.label))}.${String(factor?.id ?? slugId(i.factor_label))}`] : [];
   }));
 }
 const r2 = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/s7-user-stated-r2.json'), 'utf8')) as Row[];
@@ -53,16 +57,32 @@ it('compound-A first differing intervention and identity-bound row', async () =>
   const node = (served.graph?.nodes as Rec[]).find(n => n.id === 'all_reliability');
   const intervention = (node?.interventions as Rec)?.engineers_on_reliability_work;
   fs.writeFileSync('/private/tmp/s7-first-diff.json', JSON.stringify({ raw, admitted: intervention, result: served.result }, null, 2));
-  expect(intervention).toMatchObject({ source: 'cee_hypothesis', raw_value: 6 });
-  expect((served.result as {provenance_demoted?: unknown[]}).provenance_demoted).toHaveLength(4);
+  expect(intervention).toMatchObject({ source: 'brief_extraction', raw_value: 6 });
+  for (const [optionId, factorId, value] of [
+    ['all_reliability', 'engineers_on_reliability_work', 6],
+    ['all_prototype', 'engineers_on_prototype', 6],
+    ['three_and_three_split', 'engineers_on_reliability_work', 3],
+    ['three_and_three_split', 'engineers_on_prototype', 3],
+  ] as const) {
+    const option = (served.graph?.nodes as Rec[]).find(n => n.id === optionId);
+    expect((option?.interventions as Record<string, Rec>)?.[factorId], `${optionId}.${factorId}`)
+      .toMatchObject({ source: 'brief_extraction', raw_value: value });
+  }
+  expect((served.result as {provenance_demoted?: unknown[]}).provenance_demoted ?? []).toHaveLength(0);
   expect(losses(row, served.graph, served.result)).toEqual([]);
 });
+/**
+ * - PRESERVED if the user's stated AMOUNT survives as a typed delta on that option (e.g. +2 on "Senior engineers hired") AND the build asks for the baseline (an open question / not_represented line naming that factor).
+ * - LOST if the amount is dropped (e.g. only a structural `changes` entry with no figure), or there's no baseline question.
+ */
 it('served property census', async () => {
   const corpus = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'fixtures/s7-construction-census/corpus.json.gz'))).toString()) as Row[];
   expect(corpus).toHaveLength(116); expect(r2).toHaveLength(8);
   const counts: Record<string, number> = {};
-  for (const row of [...r2, ...corpus]) { const s = await replay(row); counts[row.id] = losses(row, s.graph, s.result).length; }
+  const ids: Record<string, string[]> = {};
+  for (const row of [...r2, ...corpus]) { const s = await replay(row); ids[row.id] = losses(row, s.graph, s.result); counts[row.id] = ids[row.id]!.length; }
   fs.writeFileSync('/private/tmp/s7-user-stated-counts.json', JSON.stringify(counts, null, 2));
+  fs.writeFileSync('/private/tmp/s7-user-stated-ids.json', JSON.stringify(ids, null, 2));
   console.log('USER-STATED LOSS', JSON.stringify(counts));
   const failing = Object.entries(counts).filter(([,n]) => n > 0).map(([id]) => id);
   const baseline = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../scripts/ci/user-stated-survives-baseline.json'), 'utf8')) as Baseline;
@@ -115,13 +135,19 @@ it('planted loss is detected in the served object, including shared goal/limit w
   }
 });
 it('contrast: addition without total evidence, absent quote, amount outside own option span stay demoted by exact id', async () => {
-  for (const kind of ['addition', 'absent-quote', 'outside-option']) {
+  for (const kind of ['addition', 'absent-quote', 'outside-option', 'ambiguous-quote', 'option-outside-quote', 'ambiguous-option']) {
     const row = plantedRow(`Contrast ${kind}`);
     const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
     const iv = draft.options[0]!.interventions![0]!;
     if (kind === 'addition') { row.brief = 'Add +2 engineers to reliability.'; iv.value = 2; iv.stated_evidence = null; }
     if (kind === 'absent-quote') iv.stated_evidence = { ...iv.stated_evidence!, quote: 'Set prototype allocation to 6 engineers.' };
     if (kind === 'outside-option') iv.stated_evidence = { ...iv.stated_evidence!, option_quote: 'Set reliability allocation', option_end: 26 };
+    if (kind === 'ambiguous-quote') row.brief += ' ' + row.brief;
+    if (kind === 'option-outside-quote') iv.stated_evidence = { ...iv.stated_evidence!, quote: 'Set reliability allocation' };
+    if (kind === 'ambiguous-option') {
+      row.brief += ' ' + row.brief;
+      iv.stated_evidence = { ...iv.stated_evidence!, quote: row.brief };
+    }
     expect(userStatedOptionLevel(iv, row.brief)).toBe(false);
     expect(prepareProvisionalCandidate(draft, row.brief).provenance_demoted).toEqual([
       { option: draft.options[0]!.label, factor: iv.factor_label, value: iv.value },
@@ -131,13 +157,13 @@ it('contrast: addition without total evidence, absent quote, amount outside own 
     expect((option?.interventions as Record<string, Rec>).engineers_on_reliability_work).toMatchObject({ source: 'cee_hypothesis', raw_value: iv.value });
   }
 });
-it('shared number readers verify both digits and number words, and malformed offsets fail closed', () => {
+it('shared number readers verify both digits and number words, and offsets are ignored', () => {
   for (const word of ['6', 'six']) {
     const row = plantedRow('Allocation'); const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
     const i = draft.options[0]!.interventions![0]!; const brief = row.brief.replace('6', word);
     i.stated_evidence = { ...i.stated_evidence!, quote: brief, end: brief.length, option_quote: brief, option_end: brief.length };
     expect(valid(i, brief)).toBe(true); expect(userStatedOptionLevel(i, brief)).toBe(true);
     i.stated_evidence = { ...i.stated_evidence, amount_start: i.stated_evidence.amount_start - 1 };
-    expect(userStatedOptionLevel(i, brief)).toBe(false);
+    expect(userStatedOptionLevel(i, brief)).toBe(true);
   }
 });

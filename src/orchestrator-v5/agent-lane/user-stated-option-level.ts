@@ -4,18 +4,16 @@ import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
 type Intervention = NonNullable<CandidateModel['options'][number]['interventions']>[number];
 
-/** Verify the draft's evidence against the original UTF-16 spans; never repair offsets or infer a level. */
+/** Verify unique verbatim substrings. The shared amount readers have no text normaliser: exact match. */
 export function userStatedOptionLevel(intervention: Intervention, brief: string | undefined): boolean {
   const e = intervention.stated_evidence;
   if (typeof brief !== 'string' || e == null || typeof e.quote !== 'string' || typeof e.option_quote !== 'string'
     || e.quote === '' || e.option_quote === '') return false;
-  if (![e.start, e.end, e.amount_start, e.option_start, e.option_end].every(Number.isInteger)) return false;
-  if (e.start < 0 || e.end > brief.length || brief.slice(e.start, e.end) !== e.quote
-    || e.option_start < e.start || e.option_end > e.end
-    || brief.slice(e.option_start, e.option_end) !== e.option_quote) return false;
-  // Both readers are shared with stated-by-user.ts. Ownership here is the verified option span,
-  // including elliptical allocations ("split them three and three"); no new prose grammar.
-  return [...findStatedAmounts(e.option_quote), ...countsInWords(e.option_quote)].some(a =>
-    e.option_start + a.index === e.amount_start && a.magnitude === intervention.value
-    && e.amount_start + a.matchedText.length <= e.option_end);
+  const quoteAt = brief.indexOf(e.quote);
+  const optionAt = e.quote.indexOf(e.option_quote);
+  if (quoteAt < 0 || brief.indexOf(e.quote, quoteAt + 1) >= 0
+    || optionAt < 0 || e.quote.indexOf(e.option_quote, optionAt + 1) >= 0) return false;
+  // Same readers as stated-by-user.ts; offsets are model-written and are not evidence.
+  return [...findStatedAmounts(e.option_quote), ...countsInWords(e.option_quote)]
+    .some(a => a.magnitude === intervention.value);
 }
