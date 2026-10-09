@@ -1183,8 +1183,9 @@ export async function dispatchSystemEvent(
   // the presentation graph may have lost fields that participate in the hash.
   try {
     return await withAnalysisReadDeadline(async () => {
-      const persistedSnapshot = await loadPersistedScenarioStateStrict(params.payload.scenario_id);
-      const persistedGraph = persistedSnapshot.graph;
+      // This existing graph-only read supplies no revision. Freshness must not
+      // expand its read surface just to enable the legacy no-hash fallback.
+      const persistedGraph = await loadPersistedGraphStrict(params.payload.scenario_id);
       const parsed = GraphV3.safeParse(persistedGraph);
       if (!parsed.success) return result;
       const analysisInputs = await loadWriteReplyAnalysisInputs(params.payload.scenario_id, params.requestId);
@@ -1193,7 +1194,7 @@ export async function dispatchSystemEvent(
       );
       return { ...result, graph: parsed.data,
         analysisReady: result.analysisReady ?? buildCanonicalAnalysisReadyFromGraph(persistedGraph),
-        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph, false, persistedSnapshot.revision) };
+        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph, false, undefined) };
     });
   } catch (error) {
     // Observational only: a failed reread cannot suppress the user's answer or
@@ -3667,14 +3668,10 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   const startedAt = Date.now();
   const logBase = { request_id: requestId, scenario_id: input.scenario_id, event: 'v5.agent.add_risk_hold' };
   let persistedGraph: unknown;
-  let persistedScenarioRevision: number | undefined;
   let priorPendings: readonly PendingAction[];
   try {
     [persistedGraph, priorPendings] = await Promise.all([
-      loadPersistedScenarioStateStrict(input.scenario_id).then(snapshot => {
-        persistedScenarioRevision = snapshot.graph != null ? snapshot.revision : undefined;
-        return snapshot.graph;
-      }),
+      loadPersistedGraphStrict(input.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
     ]);
   } catch (err) {
@@ -3696,7 +3693,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, persistedScenarioRevision);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
@@ -3800,14 +3797,10 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
   const startedAt = Date.now();
   const logBase = { request_id: requestId, scenario_id: input.scenario_id, event: 'v5.agent.add_factor_hold' };
   let persistedGraph: unknown;
-  let persistedScenarioRevision: number | undefined;
   let priorPendings: readonly PendingAction[];
   try {
     [persistedGraph, priorPendings] = await Promise.all([
-      loadPersistedScenarioStateStrict(input.scenario_id).then(snapshot => {
-        persistedScenarioRevision = snapshot.graph != null ? snapshot.revision : undefined;
-        return snapshot.graph;
-      }),
+      loadPersistedGraphStrict(input.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(input.scenario_id, requestId),
     ]);
   } catch (err) {
@@ -3827,7 +3820,7 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
 
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, persistedScenarioRevision);
+    freshness = preWriteRefereeFreshness(await loadWriteReplyAnalysisInputs(input.scenario_id, requestId), currentHash, persistedGraph, undefined);
   } catch {
     freshness = 'unknown';
   }
