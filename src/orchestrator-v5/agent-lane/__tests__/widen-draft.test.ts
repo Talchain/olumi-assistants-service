@@ -26,7 +26,9 @@ const SCENARIO = '99999999-9999-4999-8999-999999999999';
 const RATIONALE = 'RATIONALE MUST NEVER REACH ANY USER VISIBLE GRAPH FIELD';
 const OPTIONS_PREAMBLE = 'Where the text asks why an option might do better, write instead how it would move the goal through a different mechanism; never use better, best, recommend, winner, or improve.';
 const PREAMBLE = "This is Olumi's own check of a first draft; the user has not asked for it. Anything you add is shown as Olumi's suggestion for the user to keep or remove. Where the text below says the user asked or will approve, read it as: Olumi is suggesting, and the user decides.";
-const WIDEN_TURN_SHA256 = '378292bd12aec3a4392ace8ede96e672a8170e0255472a2e8e2eb96ee30e4a67';
+// Re-pinned for S5 slice 4 (#2913): the only change is modelGapOf's deadline read (goalDeadlineOf(goal) →
+// goalDeadlineFromRecord(graph, goal.id)); no route directive byte changed.
+const WIDEN_TURN_SHA256 = '6bf5be56197c03c376ffd16d81c32fae8182d43c4a82e83fbe498d0219b7dce0';
 const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
 const ADMIT = admission.admitCandidateModel;
 // Unit-only injection; the served builder supplies its own construction-aware admission closure.

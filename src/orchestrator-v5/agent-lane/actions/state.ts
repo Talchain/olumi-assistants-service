@@ -16,7 +16,7 @@ import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { runExplanationChip, RUN_EXPLANATION_PREFIX } from '../run-explanation.js';
 import { strengthenCardFor } from '../strengthen-press.js';
 import { testableFragileLinkOf } from '../decision-review-press.js';
-import { soleGoalOf, goalKindOf, goalDeadlineOf, type GoalKind } from '../../goal-target/goal-kind.js';
+import { soleGoalOf, goalKindOf, goalDeadlineFromRecord, type GoalKind } from '../../goal-target/goal-kind.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 import { approvalChipIdFor, typedApprovalOf } from '../approval-chips.js';
@@ -192,7 +192,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
   const ready = rec(read.analysisReady);
   const raw = rec(read.graph);
   const goal = soleGoalOf(read.graph);
-  const deadline = goalDeadlineOf(goal) ?? null;
+  const deadline = goalDeadlineFromRecord(read.graph, goal?.id) ?? null;
   const base = {
     scenarioId: read.scenarioId, revision, stateKey: stateKeyOf(read.scenarioId, revision, deadline), runBound: runKey !== null,
     approvalWaiting: approvalWaitingOf(read.pending ?? [], read.graphHash),
