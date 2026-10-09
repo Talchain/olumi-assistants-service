@@ -204,7 +204,11 @@ describe('route-v2 pre-flight invariant — read-only ownership admission runs o
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    // One admission read, then the door's ONE owner read for this real append.
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(2);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(1, SCENARIO_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(2, SCENARIO_ID);
+    expect(appendMock).toHaveBeenCalledTimes(1);
     expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
     expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
     expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
@@ -323,7 +327,11 @@ describe('route-v2 pre-flight invariant — read-only ownership admission runs o
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(1);
+    // One admission read, then the door's ONE owner read for this real append.
+    expect(getScenarioOwnerSpy).toHaveBeenCalledTimes(2);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(1, SCENARIO_ID);
+    expect(getScenarioOwnerSpy).toHaveBeenNthCalledWith(2, SCENARIO_ID);
+    expect(appendMock).toHaveBeenCalledTimes(1);
     expect(ensureScenarioExistsSpy).not.toHaveBeenCalled();
     expect(getScenarioOwnerSpy).toHaveBeenCalledWith(SCENARIO_ID);
     expect(res.headers["x-ownership-caller"]).toBe(USER_ID);
