@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../orchestrator-v5/goal-target/horizon-basis-provenance.js";
 /**
  * POST /assist/v1/draft-graph/staged — STAGED SSE draft delivery.
  *
@@ -561,7 +562,7 @@ export default async function route(app: FastifyInstance) {
             case "GRAPH_READY":
               graphReadyAtMs = event.elapsed_ms;
               writeStage("GRAPH_READY", {
-                graph: event.graph,
+                graph: toOutboundGraph(event.graph),
                 schema_version: event.schema_version,
                 elapsed_ms: event.elapsed_ms,
               });

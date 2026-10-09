@@ -4,6 +4,9 @@ import type { GoalConstraintT } from '../../schemas/assist.js';
 import { statedOperatorOf } from '../agent-lane/limit-operator-words.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
 
+/** Well-shaped stored bytes; no verification or permission is implied. */
+export type UnverifiedHorizonBasis = Readonly<{ basis: string; source: string; bound_months: number; metric: string }>;
+
 /** A projection of held facts, bound to one goal identity. No inferred defaults. */
 export type GoalRecord = Readonly<{
   goal_id: NodeV3T['id'];
@@ -20,8 +23,8 @@ export type GoalRecord = Readonly<{
     deadline?: Extract<NonNullable<NodeV3T['goal_horizon']>, { deadline: string }>['deadline'];
     as_stated?: NodeV3T['goal_deadline_as_stated'];
   }> | null;
-  /** Absent on today's stored graphs; slice 2b adds the one authorised writer door. */
-  horizon_basis?: Readonly<{ basis: string; source: string; bound_months: number; metric: string }>;
+  /** UNVERIFIED: unverified stored bytes; callers MUST use horizonSteadyAttested(graph) for any permission */
+  horizon_basis?: UnverifiedHorizonBasis;
   provenance?: NodeV3T['provenance'] | GoalConstraintT['provenance'];
 }>;
 

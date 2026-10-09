@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../orchestrator-v5/goal-target/horizon-basis-provenance.js";
 /**
  * Staged-SSE delivery of a V5 turn — the shared transport.
  *
@@ -266,7 +267,7 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
       case "GRAPH_READY":
         graphReadyAtMs = event.elapsed_ms;
         writeStage("GRAPH_READY", {
-          graph: event.graph,
+          graph: toOutboundGraph(event.graph),
           schema_version: event.schema_version,
           elapsed_ms: event.elapsed_ms,
         });

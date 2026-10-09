@@ -4,7 +4,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { _resetConfigCache } from '../../../config/index.js';
 import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
-import { prepareHorizonBasisForWrite, assertDoorProvenance } from '../horizon-basis-provenance.js';
+import { prepareHorizonBasisForWrite, assertDoorProvenance, toOutboundGraph } from '../horizon-basis-provenance.js';
 import { createApplyOperations, currentModelRevision } from '../../apply-operations.js';
 import { dispatchEditGraph } from '../../handlers/edit-graph-dispatch.js';
 import { dispatchDraftGraph } from '../../handlers/draft-graph-dispatch.js';
@@ -92,7 +92,7 @@ const attested = (): Rec => {
   if (issued.kind !== 'mutated') throw new Error('fixture mint refused');
   return issued.mutatedGraph;
 };
-function world(initial: unknown) {
+function world(initial: unknown, withReceipt = false) {
   let bytes = JSON.stringify(initial);
   const writes: SessionTurnWrite[] = [];
   const read = () => JSON.parse(bytes) as Rec;
@@ -107,7 +107,11 @@ function world(initial: unknown) {
       }
       writes.push(clone(write));
       if (write.graph != null) bytes = JSON.stringify(write.graph);
-      return { id: 'row-1' };
+      const version = write.modelVersion;
+      return { id: 'row-1', ...(withReceipt && version !== undefined ? { modelVersionReceipt: {
+        ...version, graph: read(), version_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', version_number: 1,
+        parent_version_id: null, root_version_id: null, undo_version_id: null, event_id: 'r9-edit-event',
+      } } : {}) };
     },
     readRecent: async () => writes.map(write => makeSessionTurnRow({ id: 'row-1', scenario_id: SCENARIO,
       turn_id: write.turn_id, turn_class: write.turn_class, handler_id: write.handler_id,
@@ -1040,18 +1044,17 @@ describe('S5 r8 server proof', () => {
     expect(w.writes).toHaveLength(0);
     expect(w.read()).toEqual(seed());
   });
-  it('A applied graph and canonical receipt omit proof while stored hashes and bytes stay unchanged', async () => {
+  it.each(['applied', 'canonical'])('A %s graph receipt omits proof while stored hashes and bytes stay unchanged', async family => {
     const { buildAppliedGraphWireField, buildCanonicalCommittedGraphReceipt } = await import('../../compose/applied-graph-emit.js');
     const g = seed(), w = world(g);
     expect((await executeOptionInterventionBatch(input(g), w.store)).kind).toBe('committed');
     const stored = w.read(), before = JSON.stringify(stored), hash = computeAnalysisAffectingGraphHash(stored as never);
     expect(horizonSteadyAttested(stored)).toBe(true);
     expect(goalOf(stored).horizon_basis.proof).toBe(oracle(stored));
-    for (const out of [buildAppliedGraphWireField(stored as never),
-      buildCanonicalCommittedGraphReceipt(stored as never, { options: [], goal_node_id: 'goal' })]) {
-      expect(JSON.stringify(out)).not.toContain('"proof"');
-      expect(goalOf(out as Rec).horizon_basis).toEqual(publicBasis(goalOf(stored).horizon_basis));
-    }
+    const out = family === 'applied' ? buildAppliedGraphWireField(stored as never)
+      : buildCanonicalCommittedGraphReceipt(stored as never, { options: [], goal_node_id: 'goal' });
+    expect(JSON.stringify(out)).not.toContain('"proof"');
+    expect(goalOf(out as Rec).horizon_basis).toEqual(publicBasis(goalOf(stored).horizon_basis));
     expect(JSON.stringify(stored)).toBe(before);
     expect(JSON.stringify(w.read())).toBe(before);
     expect(computeAnalysisAffectingGraphHash(stored as never)).toBe(hash);
@@ -1127,5 +1130,42 @@ describe('S5 r8 server proof', () => {
     expect(copied).toEqual(g);
     expect(horizonSteadyAttested(copied)).toBe(true);
     expect(applyGoalSteadyEdit(copied, { goal_id: 'goal', months: 9 }, copyId)).toEqual({ kind: 'unchanged' });
+  });
+});
+
+
+describe('S5 r9 outbound receipt and graph identity', () => {
+  it('without basis or proof the graph, node array and nested objects keep identity', () => {
+    const plain = seed();
+    expect(toOutboundGraph(plain)).toBe(plain);
+    const publicGraph = clone(attested()); delete goalOf(publicGraph).horizon_basis.proof;
+    expect(toOutboundGraph(publicGraph)).toBe(publicGraph);
+    for (const value of [null, undefined, 1, [], { nodes: null }]) expect(toOutboundGraph(value)).toBe(value);
+  });
+  it('copies only the proof-carrying node and its basis, leaving stored objects intact', () => {
+    const graph = attested(), bytes = JSON.stringify(graph), out = toOutboundGraph(graph);
+    expect(out).not.toBe(graph); expect(out.nodes).not.toBe(graph.nodes);
+    expect(goalOf(out)).not.toBe(goalOf(graph));
+    expect(goalOf(out).horizon_basis).not.toBe(goalOf(graph).horizon_basis);
+    expect(out.nodes[1]).toBe(graph.nodes[1]); expect(out.edges).toBe(graph.edges);
+    expect(JSON.stringify(out)).not.toContain('"proof"');
+    expect(JSON.stringify(graph)).toBe(bytes); expect(horizonSteadyAttested(graph)).toBe(true);
+  });
+  it('a real edit turn response model_version_receipt omits proof while its stored graph retains it', async () => {
+    const graph = attested(), w = world(graph, true), graphBytes = JSON.stringify(graph); activeStore = w.store;
+    const after = clone(graph); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
+    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
+      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
+      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
+    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
+      requestId: 'r9-edit-receipt', request: {} as never, graphState: graph as never, analysisState: null });
+    expect(result.commitPerformed).toBe(true); expect(w.writes).toHaveLength(1);
+    expect(result.response.model_version_receipt).toBeDefined();
+    expect(JSON.stringify(result.response.model_version_receipt)).not.toContain('"proof"');
+    expect(JSON.stringify(result.response)).not.toContain('"proof"');
+    expect(goalOf(result.response.model_version_receipt!.graph as Rec).horizon_basis).toEqual(publicBasis(goalOf(graph).horizon_basis));
+    expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(graph).horizon_basis);
+    expect(horizonSteadyAttested(w.read())).toBe(true);
+    expect(JSON.stringify(graph)).toBe(graphBytes);
   });
 });

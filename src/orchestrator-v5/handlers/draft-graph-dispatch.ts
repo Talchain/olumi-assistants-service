@@ -1,4 +1,4 @@
-import { prepareHorizonBasisForWrite, withoutHorizonBasisProof } from '../goal-target/horizon-basis-provenance.js';
+import { prepareHorizonBasisForWrite, toOutboundGraph } from '../goal-target/horizon-basis-provenance.js';
 /**
  * V5 pre-Sonnet dispatch for draft_graph turns.
  *
@@ -380,7 +380,7 @@ export function draftResultToOlumiResponse(
   const draftGraphField =
     graphPersisted && result.graphOutput
       ? {
-          nodes: withoutHorizonBasisProof(result.graphOutput.nodes ?? []) as unknown[],
+          nodes: (toOutboundGraph(result.graphOutput).nodes ?? []) as unknown[],
           edges: (result.graphOutput.edges ?? []) as unknown[],
           node_count: finalNodeCount,
           edge_count: finalEdgeCount,

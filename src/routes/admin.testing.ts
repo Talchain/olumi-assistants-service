@@ -1,3 +1,4 @@
+import { toOutboundGraph } from "../orchestrator-v5/goal-target/horizon-basis-provenance.js";
 /**
  * Admin Prompt Testing Endpoint
  *
@@ -1467,10 +1468,10 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
           const infoCount = validationIssues.filter((i) => i.severity === 'info').length;
 
           response.result = {
-            graph: {
+            graph: toOutboundGraph({
               nodes: graphParse.graph.nodes,
               edges: graphParse.graph.edges,
-            },
+            }),
             validation: {
               passed: errorCount === 0,
               issues: validationIssues,

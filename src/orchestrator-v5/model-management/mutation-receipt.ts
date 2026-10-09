@@ -1,6 +1,7 @@
 import { OlumiResponseSchema, type OlumiResponse } from "@talchain/schemas/boundary";
 import { z } from "zod";
 
+import { toOutboundGraph } from "../goal-target/horizon-basis-provenance.js";
 import { GraphV3 } from "../../schemas/cee-v3.js";
 import { floorGraphSigmaForCompute } from "../../validators/numeric-bounds.js";
 
@@ -201,6 +202,9 @@ interface PersistedMutationReceiptCarrier {
   readonly event_id: string;
 }
 
+/** Public graph omits the server proof; hashes still identify the persisted
+ * graph. All other additive graph bytes pass through verbatim.
+ */
 export function toModelVersionMutationReceiptV1(
   scenarioId: string,
   carrier: PersistedMutationReceiptCarrier
@@ -231,7 +235,7 @@ export function toModelVersionMutationReceiptV1(
     mutation_id: carrier.mutation_id,
     version_id: carrier.version_id,
     sequence: carrier.version_number,
-    graph: carrier.graph,
+    graph: toOutboundGraph(carrier.graph),
     full_hash: carrier.graph_identity_hash,
     hash_algorithm: carrier.hash_algorithm,
     identity_projection_version: carrier.identity_projection_version,
