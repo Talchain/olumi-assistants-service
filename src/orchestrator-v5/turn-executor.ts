@@ -2702,6 +2702,7 @@ export async function runTurnExecutor(
    * source that is not request-supplied.
    */
   let handlerFactsForCommit: readonly HandlerFact[] = [];
+  let runEvaluatedRevisionForCommit: HandlerOutcome['__run_evaluated_revision'];
   /**
    * THE POST-DISPATCH FACT WINDOW, HOISTED SO `finalizeRun` CAN READ THE
    * BINDING RATHER THAN RETYPE THE LITERAL.
@@ -12382,6 +12383,7 @@ export async function runTurnExecutor(
         stagesCompleted.push('execute');
         handlerIdForCommit = proposedHandlerId;
         handlerFactsForCommit = handlerOutcome.handler_facts;
+        runEvaluatedRevisionForCommit = handlerOutcome.__run_evaluated_revision;
         // P0 V5 golden-path repair (follow-up): record graph-mutation
         // observation for turn_outcome.graph_mutated. Any non-null
         // `mutated_graph` on the handler outcome counts — handler-id
@@ -15229,6 +15231,10 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
+        ...(runEvaluatedRevisionForCommit !== undefined && handlerFactsForCommit.some(f =>
+          f.fact_type === 'run_analysis' && f.result.run_id === runEvaluatedRevisionForCommit?.run_id)
+          ? { run_evaluated_revisions: { [runEvaluatedRevisionForCommit.run_id]: runEvaluatedRevisionForCommit.revision } }
+          : {}),
         graph: graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
         ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0

@@ -1,5 +1,6 @@
 /** Science §(ad): one typed horizon verdict for the producer and every reply surface. */
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
+import { readGoalRecord } from './goal-record.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
@@ -16,14 +17,14 @@ export const GOAL_HORIZON_STEADY_ATTESTED = 'GOAL_HORIZON_STEADY_ATTESTED';
 
 /** The one held-month accessor: wording consumers do not validate/re-derive the horizon. */
 export function heldGoalHorizonMonths(goal: unknown): number | undefined {
-  const month = recordOf(goal)?.goal_horizon_months;
-  return typeof month === 'number' && Number.isInteger(month) && month > 0 ? month : undefined;
+  const node = recordOf(goal);
+  return typeof node?.id === 'string' ? readGoalRecord({ nodes: [node] }, node.id)?.horizon?.months : undefined;
 }
 
 /** The one held-deadline accessor for horizon permission and its wording; validates the schema's date arm. */
 export function heldGoalDeadline(goal: unknown): string | undefined {
-  const horizon = NodeV3.shape.goal_horizon.safeParse(recordOf(goal)?.goal_horizon).data;
-  return horizon !== undefined && 'deadline' in horizon ? horizon.deadline : undefined;
+  const node = recordOf(goal);
+  return typeof node?.id === 'string' ? readGoalRecord({ nodes: [node] }, node.id)?.horizon?.deadline : undefined;
 }
 
 /** A Run's carrier must attest the declared positional inputs and the goal's own month. */
@@ -38,6 +39,7 @@ function accumulationTestedAtGoalHorizon(graph: unknown, envelope?: unknown): bo
   if (month === undefined) return false;
   const product = NodeV3.shape.nonlinear_identity.safeParse(goal.nonlinear_identity).data;
   if (product?.operation !== 'product' && !(product?.operation === 'sum' && product.factor_ids.length === 1)) return false;
+  if (product.operation === 'sum' && product.stated_in_brief !== true) return false;
   const env = recordOf(envelope);
   const evaluations = env?.identity_evaluations;
   const evaluated = env === undefined ? undefined : evaluatedIdentityCarriers(nodes,

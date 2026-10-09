@@ -305,6 +305,10 @@ export const NodeV3 = z.object({
    */
   goal_period: GoalPeriod.optional().catch(undefined),
   goal_horizon: GoalHorizonSchema.optional().catch(undefined),
+  /** S4: the recorded draft reference and count reading, retained through reload. */
+  goal_horizon_reference_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined),
+  goal_horizon_stated_months: z.number().int().positive().optional().catch(undefined),
+  goal_stock_reading: z.literal('one_off').optional().catch(undefined),
   goal_stated_as: z.array(GoalStatedAsSchema).min(1).max(20).optional().catch(undefined),
   option_status: OptionStatus.optional().catch(undefined),
   count_noun: CountNounSchema.optional().catch(undefined),

@@ -271,6 +271,10 @@ describe('C8 — the SQL half: no NEW migration writes `scenarios.graph` unnotic
       // from the DEPLOYED body (md5 db7bdbe3 guard); graph-write bytes unchanged.
       // Only the fact INSERT stores the element's evaluated_scenario_revision (B2).
       '20261009160000_b2_fact_evaluated_revision.sql',
+      // The deployed v1/v2/v3 append writers, rebuilt behind exact body guards.
+      // Graph writes, replay and CAS bytes are unchanged from those deployed bodies.
+      // Only the fact INSERT stores evaluated_scenario_revision, as v4 already does.
+      '20261009170000_b2_fact_revision_all_appends.sql',
     ]);
   });
 

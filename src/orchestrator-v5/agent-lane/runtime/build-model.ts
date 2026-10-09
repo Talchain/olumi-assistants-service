@@ -63,7 +63,7 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
-import { admitAccumulationIdentities, withAdmittedAccumulations } from '../accumulation-identity.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructuralGoalAccumulation } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -508,6 +508,7 @@ export function constructionOperationId(scenarioId: string, brief: string): stri
 export interface ConstructionVersion {
   readonly version_id: string;
   readonly version_number: number;
+  readonly created_at?: string;
   readonly mutation_id: string | null;
   readonly creation_kind: string;
   readonly source_turn_id: string;
@@ -551,6 +552,7 @@ export async function findConstructionVersion(
       return {
         version_id: String(hit.version_id),
         version_number: Number(hit.sequence),
+        ...(typeof hit.created_at === 'string' ? { created_at: hit.created_at } : {}),
         mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null,
         creation_kind: String(creation.kind),
         // The id the ROW carries, not the one we searched for: equal under a
@@ -2124,7 +2126,8 @@ export async function buildModelFromBrief(
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
-    const accumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
+    const declaredAccumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
+    const accumulated = admitStructuralGoalAccumulation(declaredAccumulated.nodes, declaredAccumulated.edges);
     const statedFitGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
@@ -2199,7 +2202,9 @@ export async function buildModelFromBrief(
      * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
      * to the draft/Run reply and the Run's typed warning.
      */
-    const horizon = candidate.goal?.horizon_months;
+    const claimedHorizon = candidate.goal?.horizon_months;
+    const horizon = typeof claimedHorizon === 'number' && claimedHorizon > 0
+      ? statedGoal.horizon.proposed_months ?? claimedHorizon : claimedHorizon;
     // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
     // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
     // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
@@ -2207,7 +2212,7 @@ export async function buildModelFromBrief(
     // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
     if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
       openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
-    } else if (statedGoal.horizon.status === 'unresolved') {
+    } else if (statedGoal.horizon.status === 'unresolved' && statedGoal.horizon.proposed_months === undefined) {
       const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
       openQuestions.unshift(deadlineHeld
         ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`

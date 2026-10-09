@@ -1,5 +1,5 @@
 import { isUnverifiedUserMaterial } from '../../cee/transforms/provenance-display.js';
-import { goalStockAccumulationOf, goalStockNetReadingLine } from '../goal-target/goal-horizon-detail.js';
+import { goalStockAccumulationOf, goalStockNetReadingLine, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
 import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
 /**
  * ⛔ THE CARD FOR A PRODUCT THE MINT COULD NOT PROVE (DL 5888399097; AIQ 5886967509 step (2); R3 served witness 5888379558).
@@ -41,6 +41,7 @@ interface IdentityProposalBase {
   /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
   readonly part_levels?: readonly IdentityPartLevel[];
+  readonly one_off_words?: string;
 }
 
 export type IdentityProposal = IdentityProposalBase & (
@@ -156,7 +157,8 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
     const net = goalStockNetReadingLine(graph);
     const words = `Olumi reads ‘${String(stock.goal.label)}’ as ‘${String(stock.carrier.label)}’.${net === null ? '' : ` ${net}`} Is that how you work it out?`;
     return words.length > CARD_WORDS_MAX ? null : { outcome_id: String(stock.goal.id), operation: 'sum',
-      factor_ids: [String(stock.carrier.id)], words };
+      factor_ids: [String(stock.carrier.id)], words,
+      ...(goalStockOneOffChoice(graph) === null ? {} : { one_off_words: goalStockOneOffChoice(graph)! }) };
   }
   return proposeOnGoal(graph) ?? proposeOnCarrier(graph) ?? proposeOnStoredReading(graph);
 }

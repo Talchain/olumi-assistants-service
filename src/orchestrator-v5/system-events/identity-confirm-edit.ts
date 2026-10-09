@@ -22,7 +22,8 @@
  * `identity_confirm`, which commits `mutatedGraph` + `handlerFacts` on the one CAS-guarded append. Pure: the stored graph
  * is never mutated.
  */
-import { goalStockAccumulationOf } from '../goal-target/goal-horizon-detail.js';
+import { readGoalRecord } from '../goal-target/goal-record.js';
+import { goalStockAccumulationOf, goalStockOneOffChoice } from '../goal-target/goal-horizon-detail.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -75,6 +76,7 @@ export interface IdentityConfirmReading {
   readonly words: string;
   /** Every missing part's figure shown on this same card, written together only by its Yes. */
   readonly part_levels?: readonly IdentityPartLevel[];
+  readonly choice?: 'one_off';
 }
 
 export interface ApplyIdentityConfirmEditParams extends IdentityConfirmReading {
@@ -119,7 +121,8 @@ const WORDS_MAX = 400;
  */
 export function identityConfirmReadingToken(reading: IdentityConfirmReading): string {
   const bound = { outcome_id: reading.outcome_id, operation: 'product', factor_ids: [...reading.factor_ids], words: reading.words,
-    ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}) };
+    ...(reading.part_levels !== undefined ? { part_levels: reading.part_levels } : {}),
+    ...(reading.choice !== undefined ? { choice: reading.choice } : {}) };
   return `identity:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 
@@ -249,11 +252,27 @@ export function identityCardOfferable(storedGraph: unknown, partLevels?: readonl
 const refuse = (reason: IdentityConfirmRefusal, detail?: string): IdentityConfirmEditResult =>
   ({ kind: 'refused', reason, ...(detail !== undefined ? { detail } : {}) });
 
+
+function oneOffPostimage(before: Rec): Rec | null {
+  const stock = goalStockAccumulationOf(before);
+  if (stock === null || stock.netZero === null || stock.identity.stated_in_brief === true || goalStockOneOffChoice(before) === null) return null;
+  const removed = new Set([stock.carrier.id, stock.netZero.id]);
+  return { ...structuredClone(before), nodes: (before.nodes as Rec[]).filter(n => !removed.has(n.id)).map(n => {
+    if (n.id !== stock.goal.id) return structuredClone(n);
+    const { nonlinear_identity: _reading, ...plain } = structuredClone(n);
+    const observed = structuredClone(stock.stock.observed_state) as Rec;
+    const cap = readGoalRecord(before, String(stock.goal.id))?.target?.cap ?? observed.cap;
+    if (typeof cap === 'number' && typeof observed.raw_value === 'number') Object.assign(observed, { cap, value: observed.raw_value / cap, baseline: observed.raw_value / cap });
+    return { ...plain, observed_state: observed, goal_stock_reading: 'one_off' };
+  }), edges: (before.edges as Rec[]).filter(e => !removed.has(e.from) && !removed.has(e.to) || e.to === stock.carrier.id && !removed.has(e.from))
+    .map(e => ({ ...structuredClone(e), ...(e.to === stock.carrier.id ? { to: stock.goal.id } : {}) })) };
+}
+
 export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams): IdentityConfirmEditResult {
   const { outcome_id, factor_ids, words, part_levels } = params;
   if (typeof words !== 'string' || words.trim() === '' || words.length > WORDS_MAX) return refuse('words_invalid');
   if (typeof params.reading_token !== 'string'
-    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words, part_levels })) {
+    || params.reading_token !== identityConfirmReadingToken({ outcome_id, factor_ids, words, part_levels, choice: params.choice })) {
     return refuse('reading_not_confirmed');
   }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
@@ -271,6 +290,19 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   const stockCard = stock !== null && stock.goal.id === outcome_id && distinct.length === 1
     && distinct[0] === stock.carrier.id ? proposeProductIdentity(params.persistedGraph) : null;
   if (stockCard !== null && (stockCard.words !== words || part_levels !== undefined)) return refuse('reading_not_confirmed');
+  if (params.choice !== undefined) {
+    if (params.choice !== 'one_off' || stockCard === null) return refuse('reading_not_confirmed');
+    const plain = oneOffPostimage(params.persistedGraph);
+    const parsed = GraphV3.safeParse(plain);
+    if (plain === null || !parsed.success) return refuse('invalid_graph');
+    const label = String(stock!.goal.label);
+    const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+      edit_kind: 'structural', status: 'applied', operations_count: 1, affected_entities: [{ kind: 'goal', label: label.slice(0, 120) }],
+      graph_hash_before: hashBefore, graph_hash_after: computeAnalysisAffectingGraphHash(plain as never),
+      safe_summary: 'Recorded the one-off reading', impact: 'high', rerun_recommended: true,
+    } });
+    return { kind: 'mutated', mutatedGraph: plain, graph: parsed.data, handlerFacts: [fact as HandlerFact] };
+  }
   if (identityConflictsWithScope({ ...outcome, nonlinear_identity: { operation: 'product', factor_ids: distinct } })) {
     return refuse('goal_scope_conflict', 'This product covers a component of the total goal. Correct its scope before confirming an identity.');
   }
@@ -360,6 +392,8 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
 export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string, partLevels?: readonly IdentityPartLevel[]): boolean {
   const before = normaliseAbsenceOnly(storedBefore);
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
+  const afterGoal = (after.nodes as Rec[]).find(n => n.id === outcomeId);
+  if (afterGoal?.goal_stock_reading === 'one_off') return isDeepStrictEqual(oneOffPostimage(before), after);
   if (after.nodes.length !== before.nodes.length) return false;
   const restored = structuredClone(after) as Rec & { nodes: unknown[] };
   const stock = goalStockAccumulationOf(before);

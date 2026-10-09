@@ -18,7 +18,7 @@
  *   · Optional estimates and whatChanges demote in that order over 80 visible words. Chance findings, their own
  *     notes, horizon, matching figure disclosures and the next step stay; mandatory overflow is counted.
  *   · Ordinary coaching retains the three-bullet pool, small-detail/short-reply passthrough and whole-reply exits.
- *   · The existing method_step, proposal, leader_free_envelope and host_composed whole-reply paths are unchanged.
+ *   · Proposal bodies stay whole, with only an eligible action/Why suffix; other whole-reply paths are unchanged.
  *   · `_answer_shape` and assistant_text have one identity: deriveAnswerTextFromShape(shape). RC6 removes only its
  *     recorded whole-sentence copies; every other sentence is conserved. Open questions belong to detail.
  *
@@ -29,6 +29,8 @@
  * `__tests__/compose-reply.test.ts`.
  */
 import { z } from 'zod';
+import type { EligibleIntervention } from '../turn-context/guidance-wire.js';
+import { composeEligibleIntervention } from './eligible-intervention-reply.js';
 import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
@@ -145,6 +147,8 @@ export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
 export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed';
 
 export interface ReplyComposeInput {
+  readonly eligibleIntervention?: EligibleIntervention;
+  readonly interventionActionLabel?: string;
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   /** Only a typed Draft mutation or Run/Explain turn opts into the H/W/E/N face contract. */
@@ -621,6 +625,17 @@ function expectedSentences(text: string, dropped: readonly string[]): string[] |
  * Compose the reply's shape. Only recorded whole-sentence copies may be deleted; all other text is retained.
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
+  const composed = composeNormalReplyShape(input);
+  if (input.eligibleIntervention !== undefined && composed.reason === 'proposal') {
+    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, false, true);
+  }
+  if (input.eligibleIntervention !== undefined && (input.profile ?? 'coaching') === 'coaching') {
+    return composeEligibleIntervention(composed, input.eligibleIntervention, input.interventionActionLabel, input.faceContract !== undefined);
+  }
+  return composed;
+}
+
+function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const faceContract = input.faceContract !== undefined;
   const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
   const foldedInput = foldQuotes(input.text);

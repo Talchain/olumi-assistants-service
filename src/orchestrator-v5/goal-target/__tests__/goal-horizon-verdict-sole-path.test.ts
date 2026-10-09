@@ -8,6 +8,7 @@ const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 // DL #2895 P2: explicit file/reason pairs, never broad directory exemptions.
 const ALLOWLIST: Readonly<Record<string, string>> = {
   "orchestrator-v5/goal-target/goal-horizon-verdict.ts": "The sole goal-chance horizon verdict and read-time gate; heldGoalDeadline is the one schema-validated calendar deadline accessor for this permission and wording.",
+  "orchestrator-v5/goal-target/goal-horizon-write.ts": "The sole approved goal-horizon writer writes the deadline and held H, validates scoped postimages and landed retries; readGoalRecord / goalDeadlineFromRecord supply held facts, not chance permission.",
   "orchestrator-v5/goal-target/goal-record.ts": "S5 sole typed goal record reads protected goal fields; no chance permission.",
   "orchestrator-v5/goal-target/horizon-basis.ts": "S5 graph-only proof predicate; verifies door provenance and bound goal meaning.",
   "orchestrator-v5/goal-target/goal-steady-write.ts": "S5 approved door mints the proof and validates in-process write authority; not a consumer chance decision.",
