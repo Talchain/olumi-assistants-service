@@ -90,25 +90,25 @@
   },
   {
     "case_id": "02-legacy-missing-run",
-    "disposition": "quarantined",
+    "disposition": "unattributable",
     "options": [],
-    "quarantine": {
+    "quarantine": null,
+    "run": null,
+    "unattributable": {
       "fact_id": "712b0000-0000-4000-8001-000000000002",
-      "reason": "run_id_absent",
-      "scenario_id": "712b0000-0000-4000-8000-000000000001"
-    },
-    "run": null
+      "reason": "run_id_absent"
+    }
   },
   {
     "case_id": "03-legacy-null-run",
-    "disposition": "quarantined",
+    "disposition": "unattributable",
     "options": [],
-    "quarantine": {
+    "quarantine": null,
+    "run": null,
+    "unattributable": {
       "fact_id": "712b0000-0000-4000-8001-000000000003",
-      "reason": "run_id_absent",
-      "scenario_id": "712b0000-0000-4000-8000-000000000001"
-    },
-    "run": null
+      "reason": "run_id_absent"
+    }
   },
   {
     "case_id": "04-refusal-marker",

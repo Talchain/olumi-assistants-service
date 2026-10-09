@@ -67,7 +67,7 @@ export const TYPED_RUN_PAYLOAD_PATHS = [
 
 export interface TypedRunRowsContext {
   readonly scenarioId: string;
-  /** Refusal markers without identity are not Runs; other absent identity quarantines live and skips backfill. */
+  /** Refusal markers without identity are not Runs; other absent identity is unattributable in both modes. */
   readonly mode?: 'live' | 'backfill';
   /** Only the identity of the graph this frozen Run evaluated, when attested by the caller. */
   readonly graphIdentityHash?: string | null;
@@ -105,11 +105,11 @@ export interface TypedRunRows {
 export type TypedRunRowsResult = { readonly ok: TypedRunRows }
   | { readonly quarantine: string }
   | { readonly skipped_refusal: true }
-  | { readonly skipped_legacy: true };
+  | { readonly unattributable: 'run_id_absent' };
 
 /**
  * Maps ONE persisted fact. Refusal markers without a run_id derive nothing. Malformed facts quarantine
- * individually; backfill skips other pre-run-identity facts.
+ * individually; other pre-run-identity facts are unattributable in both modes.
  * Inputs are never rebuilt from the current graph. The canonical hash is the snapshot's sent_digest (the schema's
  * SHA-256 of the actual PLoT request, request ID excluded). graph_hash_at_run is an analysis-affecting currentness
  * hash, so it is deliberately NOT relabelled as graph_identity_hash.
@@ -148,7 +148,7 @@ function mapOneFact(fact: unknown, ctx: TypedRunRowsContext): TypedRunRowsResult
   if (source?.fact_type === 'run_analysis' && source.fact_version === 1 && source.noop === false) {
     if (sourceResult === undefined) return { quarantine: 'result_shape' };
     if (!Object.hasOwn(sourceResult, 'run_id') || sourceResult.run_id === null) {
-      return ctx.mode === 'backfill' ? { skipped_legacy: true } : { quarantine: 'run_id_absent' };
+      return { unattributable: 'run_id_absent' };
     }
     if (!nonEmpty(sourceResult.run_id)) return { quarantine: 'run_id_invalid' };
     if (!nonEmpty(ctx.scenarioId) || sourceResult.scenario_id !== ctx.scenarioId) {

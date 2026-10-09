@@ -49,6 +49,7 @@ export function createAnalysisRunDerivationPort(client: Pick<SupabaseClient, 'rp
     claimAnalysisRunWindow: args => client.rpc('claim_analysis_run_facts', args),
     claimAnalysisRunReconciliation: args => client.rpc('claim_analysis_run_reconciliation', args),
     storeTypedAnalysisRun: args => client.rpc('store_typed_analysis_run', args),
+    markAnalysisFactUnattributable: args => client.rpc('mark_analysis_fact_unattributable', args),
     quarantineAnalysisFact: args => client.rpc('quarantine_analysis_fact', args),
     recordAnalysisRunFailure: args => client.rpc('record_analysis_run_failure', args),
     finishAnalysisRunSweep: args => client.rpc('finish_analysis_run_sweep', args),

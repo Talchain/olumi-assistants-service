@@ -21,7 +21,7 @@ export function loadCorpus(): CorpusCase[] {
 
 /** Storage retains its SQLSTATE/message; compare explicit semantic codes, never arbitrary diagnostic wording. */
 export function quarantineCode(reason: string): string {
-  for (const code of ['result_shape', 'run_id_absent', 'run_id_invalid', 'scenario_id_mismatch',
+  for (const code of ['result_shape', 'run_id_invalid', 'scenario_id_mismatch',
     'leading_option_id_shape', 'summary_shape', 'constraint_may_name_leading_option_shape']) {
     if (reason === code) return code;
   }
@@ -41,6 +41,10 @@ export function parity2b(corpus = loadCorpus()) {
   const runIds = new Set<string>();
   return corpus.map(entry => {
     const mapped = toTypedRunRows(entry.fact, { scenarioId: entry.scenario_id, mode: 'live' });
+    if ('unattributable' in mapped) {
+      return { case_id: entry.case_id, disposition: 'unattributable', run: null, options: [], quarantine: null,
+        unattributable: { fact_id: entry.fact_id, reason: mapped.unattributable } };
+    }
     const conflict = 'ok' in mapped && runIds.has(mapped.ok.run_id);
     if ('ok' in mapped && !conflict) {
       runIds.add(mapped.ok.run_id);
