@@ -40,7 +40,7 @@ import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-exp
 import { rerunPairReadForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
+import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapOperandsAreEmpty, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
 import { runWithUserNamedOptions, type StatedTodayLevel } from '../../handlers/add-option-authorship-context.js';
@@ -5337,6 +5337,9 @@ export function createAgentCapabilities(
           const parsed = parseUnmodelledMechanisms(level?.unmodelled_mechanisms, level != null && Object.hasOwn(level, 'unmodelled_mechanisms'));
           const option = resolveNamed(optionNodes, String(level?.option_label ?? ''), () => true);
           const factor = resolveNamed(factorNodes, String(level?.factor_label ?? ''), () => true);
+          const operands = option.kind === 'one' ? optionGapOperands(read.raw, option.node.id) : null;
+          if (parsed.kind === 'valid' && parsed.mechanisms.length === 0
+            && operands !== null && optionGapOperandsAreEmpty(operands)) return [];
           return parsed.kind === 'valid' && option.kind === 'one' && factor.kind === 'one'
             ? [{ op: 'set_option_intervention', path: `${option.node.id}::${factor.node.id}`, value: { unmodelled_mechanisms: parsed.mechanisms } }] : [];
         });
@@ -5497,7 +5500,7 @@ export function createAgentCapabilities(
       }[] = [];
 
       for (const [index, i] of input.entries()) {
-        const declaration = declarations[index]!;
+        let declaration = declarations[index]!;
         const asGiven = { option: String(i?.option_label ?? ''), factor: String(i?.factor_label ?? ''), value: i?.value };
         const optionRes = resolveNamed(optionNodes, asGiven.option, () => true);
         const factorRes = resolveNamed(factorNodes, asGiven.factor, () => true);
@@ -5553,6 +5556,10 @@ export function createAgentCapabilities(
         const gapOperands = declaration.kind === 'valid' ? optionGapOperands(g.raw, option.id) : undefined;
         if (declaration.kind === 'valid') {
           if (gapOperands == null) return { ok: false, mutated: false, refusal: 'gap_operands_unavailable' };
+          // [] still clears existing gaps; against empty carriers it declares no change.
+          if (declaration.mechanisms.length === 0 && optionGapOperandsAreEmpty(gapOperands)) declaration = { kind: 'absent' };
+        }
+        if (declaration.kind === 'valid') {
           declaredOps.push({ op: 'set_option_intervention', path: `${option.id}::${factor.id}`, value: { unmodelled_mechanisms: declaration.mechanisms } });
         }
         // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
@@ -5592,8 +5599,10 @@ export function createAgentCapabilities(
          */
         const hasLow = i?.likely_low !== undefined;
         const hasHigh = i?.likely_high !== undefined;
+        const noRangeDeclared = i?.range_user_stated !== true
+          && ((!hasLow && !hasHigh) || (i?.likely_low === 0 && i?.likely_high === 0));
         let likelyRange: { low: number; high: number } | undefined;
-        if (hasLow || hasHigh || i?.range_meaning !== undefined || i?.range_user_stated === true) {
+        if (!noRangeDeclared && (hasLow || hasHigh || i?.range_meaning !== undefined || i?.range_user_stated === true)) {
           const low = Number(i?.likely_low);
           const high = Number(i?.likely_high);
           const why = !hasLow || !hasHigh ? 'a likely range needs both its low and its high end'
