@@ -277,7 +277,16 @@ export interface NaturalEffect {
 /** Why a stated size is not what the edge carries, or why it is asked about. */
 export type LinkSizeProblem = 'out_of_domain' | 'not_representable' | 'unconvertible' | 'sign_conflict' | 'target_sized';
 
+/** An Olumi size awaiting a frame fit; never an analysed size until the fit succeeds. */
+export interface OlumiFitCandidate {
+  readonly strength_mean: number;
+  readonly strength_std: number;
+  readonly natural_effect?: NaturalEffect;
+  readonly basis?: string;
+}
+
 export interface LinkSizing {
+  readonly fit_candidate?: OlumiFitCandidate;
   /**
    * `unchanged` is today's projection, ±0.5 / 0.125, written exactly as before (no stamp): D6 with nothing to check
    * against, or R6's target with no frame.
@@ -371,7 +380,7 @@ function levelWords(level: number, target: MagnitudeNode, frame: number): string
   return `${fmt(raw)}${unit === undefined ? '' : ` ${unit}`}`;
 }
 
-function statementWords(
+export function statementWords(
   amount: number, perSourceChange: number, source: MagnitudeNode, target: MagnitudeNode,
   sourceFrame: number | undefined, targetFrame: number | undefined,
 ): string {
@@ -594,6 +603,8 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     ...(problem !== undefined ? { problem } : {}),
     ...(question !== undefined ? { question } : {}),
     ...(stated && problem !== undefined && !link.user_stated ? { set_aside: true as const } : {}),
+    ...(!link.user_stated && problem === 'not_representable' && beta !== null
+      ? { fit_candidate: { strength_mean: beta, strength_std: Math.abs(beta) / 2, ...natural(beta, per as number) } } : {}),
   };
 
   if (sized) {

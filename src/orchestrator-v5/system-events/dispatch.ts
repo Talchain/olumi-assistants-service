@@ -60,6 +60,10 @@ import {
   loadScenarioAnalysisFactsForRead,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { UntouchedLevelRescaledError } from '../untouched-level-invariant.js';
+import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
+import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { getSessionStore } from '../session/index.js';
 import { useAppendV6 } from '../append-v6-flag.js';
 import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
@@ -2587,9 +2591,9 @@ async function dispatchFactorValueEdit(
   // this it passed none, and an above-cap value silently wiped every live hold
   // (#1947 review, non-blocking 1).
   const factorPriorPendings = await readPriorPendingsForMutation(payload.scenario_id, requestId, event.kind);
-  if (result.kind === 'refused') {
+  async function commitRefusal(refusal: { response: OlumiResponse; reason: string; pendingActions: readonly PendingAction[] }): Promise<DispatchSystemEventResult> {
     try {
-      await commitDirectAnswer(result.response, {
+      await commitDirectAnswer(refusal.response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
         turn_class: 'direct_answer',
@@ -2605,8 +2609,8 @@ async function dispatchFactorValueEdit(
         // encode — deriving it from the chip set would lose the cap, which is the
         // whole point of the consent. Omitted entirely when empty so the normal
         // derivation still runs for every other refusal.
-        ...(result.pendingActions.length > 0
-          ? { pending_actions: result.pendingActions }
+        ...(refusal.pendingActions.length > 0
+          ? { pending_actions: refusal.pendingActions }
           : {}),
         coaching_state: null,
       });
@@ -2616,25 +2620,27 @@ async function dispatchFactorValueEdit(
           request_id: requestId,
           event_kind: event.kind,
           scenario_id: payload.scenario_id,
-          refusal_reason: result.reason,
+          refusal_reason: refusal.reason,
           err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
         },
         'V5 factor_value_edit — refusal commit failed',
       );
-      return { response: result.response, commitPerformed: false, graph: null };
+      return { response: refusal.response, commitPerformed: false, graph: null };
     }
     log.info(
       {
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
-        refusal_reason: result.reason,
-        rescale_pendings_persisted: result.pendingActions.length,
+        refusal_reason: refusal.reason,
+        rescale_pendings_persisted: refusal.pendingActions.length,
       },
       'V5 factor_value_edit refused — committed honestly, no graph written',
     );
-    return { response: result.response, commitPerformed: true, graph: null };
+    return { response: refusal.response, commitPerformed: true, graph: null };
   }
+
+  if (result.kind === 'refused') return commitRefusal(result);
 
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
@@ -2692,6 +2698,15 @@ async function dispatchFactorValueEdit(
     persistedGraphBytes = commitResult.persistedGraph;
     committedResponse = commitResult.response;
   } catch (err) {
+    if (event.kind === 'factor_value_edit' && err instanceof UntouchedLevelRescaledError) {
+      // Reuse the handler invariant refusal verbatim. The door saved no graph;
+      // the existing refusal path records only that refusal in the transcript.
+      const composed = composeRecoverableHandlerResponse(new HandlerInvocationFailedError(err.message, {
+        cause_kind: 'graph_invariant_violated', retryable: false,
+        details: { handler_id: 'set_factor_value', reason: err.reason }, cause: err,
+      }), { handlerRegistry: HANDLER_VALIDATION_REGISTRY }, payload.stage);
+      return commitRefusal({ response: composed.response, reason: err.reason, pendingActions: [] });
+    }
     // ⭐ ANOTHER WRITER COMMITTED AFTER THIS EDIT'S BASE READ. The atomic CAS
     // refused the write, so nothing of this edit landed. That is a KNOWN
     // outcome, not an unconfirmed one, so it gets the typed conflict the

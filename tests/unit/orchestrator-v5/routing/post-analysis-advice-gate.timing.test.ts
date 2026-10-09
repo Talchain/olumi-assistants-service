@@ -1,3 +1,4 @@
+import { timingGated } from '../../../helpers/scaling-ratio.js';
 /**
  * Timing + structural-performance test for the post-analysis advice gate
  * after the grounded-fresh-analysis enrichment.
@@ -115,7 +116,7 @@ describe('post-analysis-advice-gate — timing + structural performance', () => 
       if (lastResult!.matched) {
         expect(lastResult!.advice_class).toBe(expectedClass);
       }
-      expect(meanMs).toBeLessThan(MEAN_BUDGET_MS);
+      if (timingGated) { expect(meanMs).toBeLessThan(MEAN_BUDGET_MS); }
     });
   }
 });

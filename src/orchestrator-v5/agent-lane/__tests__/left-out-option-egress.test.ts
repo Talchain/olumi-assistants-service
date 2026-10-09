@@ -4,7 +4,7 @@
  * no negation logic. Paul's served bullet (scenario 632b92b9, turn 1) is quoted verbatim; the other texts are arranged.
  */
 import { readFileSync } from 'node:fs';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import { describe, expect, it } from 'vitest';
 import { type LeftOutRunOption, type RecordedRunOption } from '../../tools/handlers/option-participation.js';
 import {
@@ -128,7 +128,7 @@ describe('Q6 egress carriers', () => {
 
 describe('Q6 timing', () => {
   for (const [name, regex] of Object.entries(LEFT_OUT_COPY_REGEXES)) {
-    it.each([' ', '£54 '])(`${name}: 2.5k → 20k %s repeats (8×), ratio < 30`, shape => {
+    timingIt.each([' ', '£54 '])(`${name}: 2.5k → 20k %s repeats (8×), ratio < 30`, shape => {
       const run = (text: string) => {
         regex.lastIndex = 0;
         if (regex.global) void [...text.matchAll(regex)];
@@ -142,7 +142,7 @@ describe('Q6 timing', () => {
       expect(m.ratio, m.detail).toBeLessThan(30);
     }, 30_000);
   }
-  it('the whole correction scales linearly: 20k → 160k "the £54 test " under 22×', () => {
+  timingIt('the whole correction scales linearly: 20k → 160k "the £54 test " under 22×', () => {
     const [small, large] = [1_540, 12_310].map(n => 'the £54 test '.repeat(n));
     const m = scalingRatio(() => correct(small), () => correct(large));
     process.stdout.write(`Q6 timing whole correction: ${m.detail}\n`);

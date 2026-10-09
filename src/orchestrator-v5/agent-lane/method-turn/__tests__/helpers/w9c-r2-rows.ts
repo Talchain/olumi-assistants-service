@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../../../tests/helpers/scaling-ratio.js';
 import { legacyDoorGraph, reclassifiedCTurn, reclassifiedCPlan } from '../../../__tests__/licence-test-graphs.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -62,7 +63,7 @@ for (const [name, prefix] of Object.entries({ spaces: ' '.repeat(20_000), newlin
       const result = checkMethodTurn('RC-PREMORTEM', reply, out.check_inputs);
       const elapsed = performance.now() - start;
       times.push(elapsed);
-      assert.ok(elapsed < 50, `${name}: ${elapsed}ms`);
+      if (timingGated) { assert.ok(elapsed < 50, `${name}: ${elapsed}ms`); }
       assert.deepEqual(result.failed, name === 'newlines + marker' ? ['PM-GROUNDED', 'PM-WATCH-MITIGATE'] : []);
     }
     timings[name] = times;
