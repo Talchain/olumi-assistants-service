@@ -2218,7 +2218,19 @@ export async function buildModelFromBrief(
         }
       }
     }
-    const untypedScopeWords = retainedScopeQuestion ?? (scopeAsked !== null ? scopeAsked.question
+    // DL 87114 on #2914: material scope with no drafter restatement to keep falls back to the existing d5 disclosure,
+    // naming the declared alternative, so the class is never silent. No new words.
+    // Not when the drafter already asks it in other words (its question names the declared modelled scope and the goal,
+    // as a question): that only gates the fallback, it never removes a question (R2 B1-A asks "…cover the Pro plan only or all plans?").
+    const scopeAlreadyAsked = candidate.goal.scope !== undefined && candidate.goal.scope !== null
+      && openQuestions.some((q) => {
+        const t = q.toLowerCase(); const [m, g] = [candidate.goal.scope!.modelled, candidate.goal.metric].map((x) => x.trim().toLowerCase());
+        return m !== '' && g !== '' && t.includes(m) && t.includes(g) && /\b(or|whether|which)\b/.test(t);
+      });
+    const materialFallback = identityScopeMaterial && retainedScopeQuestion === null && !scopeAlreadyAsked && candidate.goal.scope
+      && candidate.goal.scope.alternative.trim() !== ''
+      ? untypedScopeDisclosure(candidate.goal.metric, [candidate.goal.scope.alternative]) : null;
+    const untypedScopeWords = retainedScopeQuestion ?? materialFallback ?? (scopeAsked !== null ? scopeAsked.question
       : readsAsTotal && !identityScopeMaterial && scopeGoal !== undefined
         ? (() => {
           const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);

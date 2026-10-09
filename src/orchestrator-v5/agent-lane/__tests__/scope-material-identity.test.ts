@@ -99,6 +99,13 @@ it('material identity keeps one question when the old disclosure would also fire
   expect(questions.filter(q => q === QUESTION)).toEqual([QUESTION]);
   expect(questions.filter(q => q.startsWith('I’ve read your goal'))).toEqual([]);
 });
+it('material scope with NO drafter restatement falls back to the d5 disclosure naming the alternative (DL 87114)', async () => {
+  const row = synthetic(c => { (c as unknown as { unknowns: string[] }).unknowns = ((c as unknown as { unknowns: string[] }).unknowns ?? []).filter(q => q !== QUESTION); });
+  const { questions } = await replay(row);
+  expect(questions).not.toContain(QUESTION);
+  const disclosure = 'I’ve read your goal, ‘MRR’, as the total across every tier, including ‘all plans together’. If you meant only part of it, say which.';
+  expect(questions.filter(q => q === disclosure)).toHaveLength(1);
+});
 it('typed materiality requires the declared scope and admitted operand ids', async () => {
   const { graph, candidate } = await replay(rowFor('R2/B1-B'));
   const admitted = graph as Pick<AdmittedModel, 'nodes'>;
