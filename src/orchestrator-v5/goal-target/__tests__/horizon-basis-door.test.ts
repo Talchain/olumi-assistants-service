@@ -7,6 +7,7 @@ import { buildAnalysisResultBlock } from '../../compose.js';
 import * as graphHashes from '../../context/graph-hash.js';
 import * as graphIdentity from '../../context/graph-identity.js';
 import * as basisProvenance from '../horizon-basis-provenance.js';
+import * as steadyWrite from '../goal-steady-write.js';
 import * as turnContextReads from '../../build-turn-context.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -754,7 +755,43 @@ async function pressSteadyB2(w: ReturnType<typeof world>, goalId: string) {
     goal_steady: { goal_id: goalId, months: 9 } }, 'steady-door-press');
   expect(pressed.status).toBe('committed');
   expect(horizonSteadyAttested(w.read())).toBe(true);
+  return pressed;
 }
+
+describe('#2925 door read-back: goal_steady_attested from the committed bytes (a2 asks)', () => {
+  const press = (w: ReturnType<typeof world>, goalId: string, rid: string) => commitOptionLevelsInProcess({ scenario_id: SCENARIO,
+    turn_id: TURN, base_graph_hash: computeAnalysisAffectingGraphHash(w.read() as never)!, levels: [], links: [],
+    goal_steady: { goal_id: goalId, months: 9 } }, rid);
+  it('fresh press → committed with goal_steady_attested true; a level-only commit carries no flag', async () => {
+    const { graph, goalId } = steadyB2(), w = world(graph);
+    const pressed = await pressSteadyB2(w, goalId);
+    expect(pressed).toMatchObject({ status: 'committed', goal_steady_attested: true });
+  });
+  it('proof zeroed in the committed bytes → never committed-and-attested', async () => {
+    const { graph, goalId } = steadyB2(), w = world(graph); activeStore = w.store;
+    const real = steadyWrite.applyGoalSteadyEdit;
+    const spy = vi.spyOn(steadyWrite, 'applyGoalSteadyEdit').mockImplementation((g, approved, scenarioId) => {
+      const out = real(g, approved, scenarioId);
+      if (out.kind === 'mutated') (out.mutatedGraph.nodes as Rec[]).find(n => n.id === goalId)!.horizon_basis.proof = '0'.repeat(64);
+      return out;
+    });
+    try {
+      const pressed = await press(w, goalId, 'steady-door-zeroed');
+      expect(spy).toHaveBeenCalled();
+      expect(pressed.status === 'committed' && (pressed as { goal_steady_attested?: boolean }).goal_steady_attested === true).toBe(false);
+      if (pressed.status === 'committed') expect(pressed).toMatchObject({ goal_steady_attested: false });
+      expect(horizonSteadyAttested(w.read())).toBe(false);
+    } finally { spy.mockRestore(); }
+  });
+  it('already-attested re-press ("unchanged") never reads committed-and-not-attested', async () => {
+    const { graph, goalId } = steadyB2(), w = world(graph);
+    await pressSteadyB2(w, goalId);
+    const again = await press(w, goalId, 'steady-door-repress');
+    if (again.status === 'committed') expect(again).toMatchObject({ goal_steady_attested: true });
+    else expect(again.status).not.toBe('unconfirmed');
+    expect(horizonSteadyAttested(w.read())).toBe(true);
+  });
+});
 
 describe('S5 r4 prepared candidate hashes and cold Run', () => {
   it.each(['omitted', 'forged'])('D1b direct commit prepares the %s candidate before hashing and appending', async variant => {
