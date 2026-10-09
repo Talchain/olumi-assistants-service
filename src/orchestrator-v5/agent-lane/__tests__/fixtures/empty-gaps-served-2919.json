@@ -1,0 +1,78 @@
+{
+  "message": "Set the Duration levels for the two options. Trial takes 0.3 days, which is my own figure. For Full, use your own estimate of 20 days.",
+  "raw_arguments": "{\"interventions\":[{\"option_label\":\"Trial\",\"factor_label\":\"Duration\",\"value\":0.3,\"unit\":\"days\",\"basis\":\"Your own stated duration for Trial.\",\"unmodelled_mechanisms\":[],\"user_stated\":true,\"likely_low\":0,\"likely_high\":0,\"range_meaning\":\"other\",\"range_user_stated\":false},{\"option_label\":\"Full\",\"factor_label\":\"Duration\",\"value\":20,\"unit\":\"days\",\"basis\":\"Olumi's starting assumption for Full, at the 20 days you requested; not a measured duration.\",\"unmodelled_mechanisms\":[],\"user_stated\":false,\"likely_low\":0,\"likely_high\":0,\"range_meaning\":\"other\",\"range_user_stated\":false}],\"whole_request\":false}",
+  "graph_fixture_sha256": "e65cd4e4e49e66acbd0ab003d799ce06c1234ec5ad7344745c974b3e65d292a8",
+  "served": {
+    "scenario_id": "1d4cbd25-98fb-47db-bbe7-29d61487ab4c",
+    "graph": {
+      "edges": [
+        {
+          "to": "duration",
+          "from": "trial",
+          "strength": {
+            "std": 0.1,
+            "mean": 0.5
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "duration",
+          "from": "full",
+          "strength": {
+            "std": 0.1,
+            "mean": 0.5
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        },
+        {
+          "to": "goal",
+          "from": "duration",
+          "strength": {
+            "std": 0.1,
+            "mean": 0.5
+          },
+          "effect_direction": "positive",
+          "exists_probability": 1
+        }
+      ],
+      "nodes": [
+        {
+          "id": "goal",
+          "ref": "G1",
+          "kind": "goal",
+          "label": "Service quality"
+        },
+        {
+          "id": "duration",
+          "ref": "F1",
+          "kind": "factor",
+          "label": "Duration",
+          "observed_state": {
+            "unit": "days",
+            "value": 0.5
+          }
+        },
+        {
+          "id": "trial",
+          "ref": "O1",
+          "kind": "option",
+          "label": "Trial"
+        },
+        {
+          "id": "full",
+          "ref": "O2",
+          "kind": "option",
+          "label": "Full"
+        }
+      ],
+      "ref_high_water": {
+        "F": 1,
+        "G": 1,
+        "O": 2
+      }
+    },
+    "graph_hash": "47a9316509ef69ce"
+  }
+}

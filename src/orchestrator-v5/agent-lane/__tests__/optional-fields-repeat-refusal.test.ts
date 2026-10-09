@@ -35,7 +35,10 @@ function stable(p: NonNullable<Awaited<ReturnType<typeof proposal>>['p']>) {
 }
 
 describe('cut1 real level handler', () => {
-  it.each([{ range_meaning: 'likely_range' }, { likely_low: 0, likely_high: 0 }])('R1: stray range %j keeps BOTH id-bound levels and discloses omissions', async extra => {
+  it.each([
+    { range_meaning: 'likely_range' }, { likely_low: 0, likely_high: 0 },
+    { range_meaning: 'likely_range', range_user_stated: true }, { likely_low: 0, likely_high: 0, range_user_stated: true },
+  ])('R1: empty range %j keeps BOTH id-bound levels; only a user-stated range discloses omission', async extra => {
     const { result, p, store } = await proposal(extra);
     expect(store.outstanding(ctx.scenario_id, ctx.authenticated_user_id)).toHaveLength(1);
     expect(result.ok, JSON.stringify(result)).toBe(true);
@@ -44,8 +47,14 @@ describe('cut1 real level handler', () => {
       { path: 'trial::duration', value: { normalised: 0.003, raw: 0.3, cap: 100, basis: entries[0].basis, derived_frame: null, unit: 'days', authored_by: 'user_stated' } },
     ]);
     expect(result.refusal).toBeUndefined();
-    expect(result.detail).toContain('No likely range was recorded');
-    expect(result.ranges_not_recorded).toHaveLength(2);
+    if (extra.range_user_stated === true) {
+      expect(result.detail).toContain('No likely range was recorded');
+      expect(result.detail).toContain('Ask the user to restate their likely range in their own words');
+      expect(result.ranges_not_recorded).toHaveLength(2);
+    } else {
+      expect(result.detail).toBeUndefined();
+      expect(result.ranges_not_recorded).toBeUndefined();
+    }
   });
   it('R2: valid range proposal content is byte-identical to the base', async () => {
     const { result, p } = await proposal({ likely_low: 0.1, likely_high: 0.5, range_user_stated: true, range_meaning: 'likely_range' }, true);
@@ -154,7 +163,7 @@ describe('joined starting-point disclosures', () => {
     const caps = createAgentCapabilities(d, store);
     const r = await dispatchTool('propose_starting_point', JSON.stringify({
       assumptions: [{ factor_label: 'Additional baseline', value: 0.4, unit: 'days', basis: 'Starting estimate' }],
-      option_levels: entries.map(entry => ({ ...entry, range_meaning: 'likely_range' })),
+      option_levels: entries.map(entry => ({ ...entry, range_meaning: 'likely_range', range_user_stated: true })),
     }), ctx, caps);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.detail).toContain('No likely range was recorded');
