@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { RunDeliveredRecordSchema, type RunDeliveredRecord } from '@talchain/schemas/boundary';
 import capture from './fixtures/dominant-driver-run2.json';
 import { selectLens } from '../lens-selector.js';
 import { buildLensSuggestionCoachingBlock, type BlockBuildCtx } from '../phase3-blocks.js';
@@ -30,7 +31,11 @@ vi.mock('../../session/index.js', async (original) => ({
 
 const QUALITATIVE = 'One factor is doing most of the work in this result.';
 const GROUNDED = 'Monthly new Pro subscribers is doing most of the work in this result.';
+const LEEDS_GROUNDED = 'Leeds Site Activation is doing most of the work in this result.';
+const SUBSCRIBERS_ID = 'monthly_new_pro_subscribers';
+const LEEDS_ID = 'fac_leeds_site';
 const THRESHOLD = 'A sensitivity check shows how far it can move before the most-supported option changes.';
+const NO_FLIP_TAIL = 'The analysis swept its tested range without the ranking changing, so a sensitivity check here tells you how much of the margin it carries rather than whether the order would hold.';
 const CTX: BlockBuildCtx = {
   created_at: capture.run_metadata.computed_at,
   graph_hash_at_generation: capture.analysis_result.computed_against_hash,
@@ -58,14 +63,47 @@ function makeFact(enrichment: Enrichment = structuredClone(capture.analysis_resu
 const realFlip = JSON.parse(readFileSync(new URL(
   '../../../../tests/fixtures/cross-service/witness-2265-runA.flip-threshold-winner.json', import.meta.url,
 ), 'utf8')) as { flip_thresholds: Record<string, unknown>[] };
-// Constructed contrast: keep the captured enrichment, replace only the flip
-// rows with real measured rows from the existing flip-posture positive control,
-// and explicitly mark the probe available. This is not a new live capture.
+// NEGATIVE transplant: the only measured pair is Leeds, but the selected
+// dominant subject remains subscribers. Neither this nor the matched contrast
+// below is a new live capture.
 const realThresholdEnrichment = (): Enrichment => ({
   ...structuredClone(capture.analysis_result.enrichment),
   flip_thresholds: structuredClone(realFlip.flip_thresholds),
   flip_thresholds_status: 'available',
 });
+
+// Constructed POSITIVE: retain the real Leeds pair byte-for-byte and make Leeds
+// itself the dominant driver by replacing the captured top factor's identity
+// and label. Influence scores/ranks and all other captured signals stay intact.
+const matchedThresholdEnrichment = (): Enrichment => ({
+  ...realThresholdEnrichment(),
+  factor_sensitivity: capture.analysis_result.enrichment.factor_sensitivity.map((row) =>
+    row.factor_id === SUBSCRIBERS_ID
+      ? { ...structuredClone(row), factor_id: LEEDS_ID, factor_label: 'Leeds Site Activation' }
+      : structuredClone(row)),
+});
+
+const controls = [
+  { name: 'unavailable capture', enrichment: () => structuredClone(capture.analysis_result.enrichment),
+    subject: SUBSCRIBERS_ID, rationale: 'DOMINANT_DRIVER', generic: QUALITATIVE, body: GROUNDED },
+  { name: 'Leeds transplant NEGATIVE', enrichment: realThresholdEnrichment,
+    subject: SUBSCRIBERS_ID, rationale: 'DOMINANT_DRIVER', generic: QUALITATIVE, body: GROUNDED },
+  { name: 'Leeds dominant POSITIVE', enrichment: matchedThresholdEnrichment,
+    subject: LEEDS_ID, rationale: 'DOMINANT_DRIVER', generic: `${QUALITATIVE} ${THRESHOLD}`,
+    body: `${LEEDS_GROUNDED} ${THRESHOLD}` },
+  { name: 'matched pair but unavailable', enrichment: () => ({ ...matchedThresholdEnrichment(), flip_thresholds_status: 'unavailable' }),
+    subject: LEEDS_ID, rationale: 'DOMINANT_DRIVER', generic: QUALITATIVE, body: LEEDS_GROUNDED },
+  { name: 'available without rows', enrichment: () => ({ ...capture.analysis_result.enrichment, flip_thresholds_status: 'available' }),
+    subject: SUBSCRIBERS_ID, rationale: 'DOMINANT_DRIVER', generic: QUALITATIVE, body: GROUNDED },
+  { name: 'unusable matching row', enrichment: () => ({ ...capture.analysis_result.enrichment,
+    flip_thresholds_status: 'available', flip_thresholds: [{ factor_id: SUBSCRIBERS_ID, current_value: 25, flip_value: null }] }),
+    subject: SUBSCRIBERS_ID, rationale: 'DOMINANT_DRIVER', generic: QUALITATIVE, body: GROUNDED },
+  { name: 'attested no flip', enrichment: () => ({ ...capture.analysis_result.enrichment,
+    flip_thresholds_status: 'available', flip_thresholds: [{ factor_id: SUBSCRIBERS_ID,
+      current_value: 25, flip_value: null, flip_reason: 'no_effect_within_bounds' }] }),
+    subject: SUBSCRIBERS_ID, rationale: 'DOMINANT_DRIVER_NO_FLIP', generic: `${QUALITATIVE} ${NO_FLIP_TAIL}`,
+    body: `${GROUNDED} ${NO_FLIP_TAIL}` },
+];
 
 describe('DOMINANT_DRIVER measured-threshold licence', () => {
   it('pins the captured unavailable evidence, served/reloaded text, and source digest', () => {
@@ -105,12 +143,23 @@ describe('DOMINANT_DRIVER measured-threshold licence', () => {
     expect(JSON.stringify(fact.result)).toBe(before);
   });
 
-  it('row 2: real available threshold keeps both original sentences byte-identical', () => {
+  it('row 2: Leeds transplant NEGATIVE keeps subscribers qualitative', () => {
     const enrichment = realThresholdEnrichment();
-    expect(readTopLevelFlipRows(enrichment).some((row) => row.kind === 'flip_pair')).toBe(true);
+    expect(readTopLevelFlipRows(enrichment).filter((row) => row.kind === 'flip_pair').map((row) => row.factor_id)).toEqual([LEEDS_ID]);
     const fact = makeFact(enrichment);
+    expect(selectLens(fact)?.subjectRef?.id).toBe(SUBSCRIBERS_ID);
+    expect(selectLens(fact)?.body).toBe(QUALITATIVE);
+    expect(buildLensSuggestionCoachingBlock(fact, CTX, null)?.body).toBe(GROUNDED);
+  });
+
+  it('row 3: identity-matched Leeds POSITIVE keeps both sentences byte-identical', () => {
+    const enrichment = matchedThresholdEnrichment();
+    expect(enrichment.flip_thresholds).toEqual(realFlip.flip_thresholds);
+    expect(readTopLevelFlipRows(enrichment).filter((row) => row.kind === 'flip_pair').map((row) => row.factor_id)).toEqual([LEEDS_ID]);
+    const fact = makeFact(enrichment);
+    expect(selectLens(fact)?.subjectRef?.id).toBe(LEEDS_ID);
     expect(selectLens(fact)?.body).toBe(`${QUALITATIVE} ${THRESHOLD}`);
-    expect(buildLensSuggestionCoachingBlock(fact, CTX, null)?.body).toBe(capture.dominant_driver_block.body);
+    expect(buildLensSuggestionCoachingBlock(fact, CTX, null)?.body).toBe(`${LEEDS_GROUNDED} ${THRESHOLD}`);
   });
 
   it('nonempty measured rows with unavailable status still do not license the clause', () => {
@@ -145,9 +194,23 @@ describe('DOMINANT_DRIVER measured-threshold licence', () => {
     expect(buildLensSuggestionCoachingBlock(fact, CTX, null)?.body).toBe(QUALITATIVE);
   });
 
-  it('row 3: the actual saved-Run reader reloads the corrected block verbatim', async () => {
-    const fact = makeFact();
+  it.each(controls)('$name: composer and saved-Run reader use the selected Run evidence', async (control) => {
+    const fact = makeFact(control.enrichment());
+    const before = JSON.stringify(fact.result);
+    expect.soft(selectLens(fact)).toMatchObject({
+      rationaleCode: control.rationale, subjectRef: { id: control.subject }, body: control.generic,
+    });
     const block = buildLensSuggestionCoachingBlock(fact, CTX, null)!;
+    expect.soft(block.body).toBe(control.body);
+    // A different persisted Run carries a MATCHED measured pair for the very
+    // subject selected here. It must not license this Run's coaching/reload.
+    const otherRun = makeFact({
+      ...control.enrichment(), flip_thresholds_status: 'available',
+      flip_thresholds: realFlip.flip_thresholds.filter((row) => row.factor_id === LEEDS_ID)
+        .map((row) => ({ ...row, factor_id: control.subject })),
+    });
+    otherRun.result.run_id = 'other-measured-run';
+    otherRun.result.computed_at = '2026-10-08T19:48:25.836Z';
     const record = {
       record_version: 1,
       run_id: capture.run_metadata.run_id,
@@ -155,24 +218,110 @@ describe('DOMINANT_DRIVER measured-threshold licence', () => {
       phase3_blocks: [block],
     };
     store.readScenarioRunAnalysisFactsFor.mockResolvedValue({
-      facts: [{ fact, fact_row_id: 's3-row', fact_created_at: fact.result.computed_at }], total_count: 1,
+      facts: [
+        { fact, fact_row_id: 's3-row', fact_created_at: fact.result.computed_at },
+        { fact: otherRun, fact_row_id: 'other-row', fact_created_at: otherRun.result.computed_at },
+      ], total_count: 2,
     });
-    store.readNewestRunDeliveryFor.mockResolvedValue({
+    store.readNewestRunDeliveryFor.mockClear();
+    store.readNewestRunDeliveryFor.mockImplementation(async (_scenarioId, runId) => runId === record.run_id ? ({
       fact_type: 'run_delivery', fact_version: 1, noop: false,
       result: { run_id: record.run_id, record: JSON.parse(JSON.stringify(record)) },
-    });
+    }) : null);
     const read = await readScenarioAnalysis({
       scenarioId: capture.run_metadata.scenario_id,
       graph: capture.canonical_graph,
       requestId: 's3-dominant-driver-reload',
     });
     expect(read.current_read.run_state, JSON.stringify(read.analysis_state)).toMatchObject({ kind: 'complete_current' });
-    expect(store.readNewestRunDeliveryFor).toHaveBeenCalledWith(capture.run_metadata.scenario_id, record.run_id);
+    expect(store.readNewestRunDeliveryFor.mock.calls).toEqual([[capture.run_metadata.scenario_id, record.run_id]]);
     expect(read.current_read.delivered_record).toBeDefined();
     const reloaded = read.current_read.delivered_record!.phase3_blocks;
-    expect(JSON.stringify(reloaded)).toBe(JSON.stringify([block]));
-    expect(reloaded[0]).toMatchObject({ body: GROUNDED });
+    // This producer currently emits no typed subject for this lens. Even a
+    // measured Run cannot license a legacy saved block with target_refs: [].
+    const reloadBody = control.name === 'Leeds dominant POSITIVE' ? LEEDS_GROUNDED : control.body;
+    expect(JSON.stringify(reloaded)).toBe(JSON.stringify([{ ...block, body: reloadBody }]));
+    expect.soft(reloaded[0]).toMatchObject({ body: reloadBody });
+    if (read.analysis_result?.type !== 'analysis_result') throw new Error('Expected the selected Run analysis result');
+    expect(read.analysis_result.enrichment?.flip_thresholds).toEqual(fact.result.enrichment?.flip_thresholds);
     expect(goalChanceDriverDisplayForAgent(read.analysis_result, capture.canonical_graph))
       .toEqual(goalChanceDriverDisplayForAgent(fact.result, capture.canonical_graph));
+    expect(JSON.stringify(fact.result)).toBe(before);
+  });
+});
+
+describe('legacy saved DOMINANT_DRIVER reload licence', () => {
+  async function reloadSaved(enrichment: Enrichment, block: unknown) {
+    const fact = makeFact(enrichment);
+    const otherRun = makeFact(matchedThresholdEnrichment());
+    otherRun.result.run_id = 'other-measured-run';
+    otherRun.result.computed_at = '2026-10-08T19:48:25.836Z';
+    const record = RunDeliveredRecordSchema.parse({
+      record_version: 1,
+      run_id: capture.run_metadata.run_id,
+      graph_hash: capture.run_metadata.graph_hash_at_run,
+      phase3_blocks: [block, { ...capture.dominant_driver_block,
+        block_id: '605d7d86-5426-5d33-9f07-30950bf92fa8', body: 'Keep the reasoning visible.' }],
+    });
+    const before = JSON.stringify({ record, fact });
+    store.readScenarioRunAnalysisFactsFor.mockResolvedValue({
+      facts: [
+        { fact, fact_row_id: 'saved-row', fact_created_at: fact.result.computed_at },
+        { fact: otherRun, fact_row_id: 'other-row', fact_created_at: otherRun.result.computed_at },
+      ], total_count: 2,
+    });
+    store.readNewestRunDeliveryFor.mockClear();
+    store.readNewestRunDeliveryFor.mockResolvedValue({
+      fact_type: 'run_delivery', fact_version: 1, noop: false,
+      result: { run_id: record.run_id, record },
+    });
+    const read = await readScenarioAnalysis({
+      scenarioId: capture.run_metadata.scenario_id, graph: capture.canonical_graph,
+      requestId: 'r3-legacy-dominant-driver-reload',
+    });
+    expect(read.current_read.run_state).toMatchObject({ kind: 'complete_current' });
+    expect(store.readNewestRunDeliveryFor.mock.calls).toEqual([[capture.run_metadata.scenario_id, record.run_id]]);
+    expect(read.current_read.delivered_record).toBeDefined();
+    expect(JSON.stringify({ record, fact })).toBe(before);
+    return { saved: record, reloaded: read.current_read.delivered_record! };
+  }
+
+  function expectOnlyTailDropped(saved: RunDeliveredRecord, reloaded: RunDeliveredRecord, body: string) {
+    expect(JSON.stringify(reloaded)).toBe(JSON.stringify({
+      ...saved, phase3_blocks: [{ ...saved.phase3_blocks[0], body }, saved.phase3_blocks[1]],
+    }));
+  }
+
+  it('reload row 1: captured reload.analysis.txt:167 old false tail is removed', async () => {
+    const source = capture.provenance.analysis_text_captures.find((row) => row.source_file.endsWith('/reload.analysis.txt'))!;
+    expect(source.line).toBe(167);
+    expect(source.body).toBe(capture.dominant_driver_block.body);
+    expect(capture.dominant_driver_block.target_refs).toEqual([]);
+    const { saved, reloaded } = await reloadSaved(capture.analysis_result.enrichment, capture.dominant_driver_block);
+    expectOnlyTailDropped(saved, reloaded, GROUNDED);
+  });
+
+  it('reload row 2: r2 matched Leeds pair and typed saved factor reload unchanged', async () => {
+    const enrichment = matchedThresholdEnrichment();
+    const block = buildLensSuggestionCoachingBlock(makeFact(enrichment), CTX, null)!;
+    const { saved, reloaded } = await reloadSaved(enrichment, {
+      ...block, target_refs: [{ kind: 'factor', id: LEEDS_ID, label: 'Leeds Site Activation' }],
+    });
+    expect(JSON.stringify(reloaded)).toBe(JSON.stringify(saved));
+    expect(reloaded.phase3_blocks[0]).toMatchObject({ body: `${LEEDS_GROUNDED} ${THRESHOLD}` });
+  });
+
+  it.each([
+    { name: 'typed subject does not match the measured pair', refs: [{ kind: 'factor', id: SUBSCRIBERS_ID, label: 'Monthly new Pro subscribers' }], enrichment: matchedThresholdEnrichment },
+    { name: 'matched typed subject but selected Run is unavailable', refs: [{ kind: 'factor', id: LEEDS_ID, label: 'Leeds Site Activation' }], enrichment: () => ({ ...matchedThresholdEnrichment(), flip_thresholds_status: 'unavailable' }) },
+    { name: 'matched typed subject but only another Run measured it', refs: [{ kind: 'factor', id: LEEDS_ID, label: 'Leeds Site Activation' }], enrichment: () => ({ ...matchedThresholdEnrichment(), flip_thresholds: [] }) },
+    { name: 'matching words with no typed subject', refs: [], enrichment: matchedThresholdEnrichment },
+    { name: 'non-factor typed ref', refs: [{ kind: 'option', id: LEEDS_ID, label: 'Leeds Site Activation' }], enrichment: matchedThresholdEnrichment },
+    { name: 'ambiguous typed factor refs', refs: [{ kind: 'factor', id: LEEDS_ID, label: 'Leeds Site Activation' }, { kind: 'factor', id: SUBSCRIBERS_ID, label: 'Monthly new Pro subscribers' }], enrichment: matchedThresholdEnrichment },
+  ])('$name drops only the tail', async (control) => {
+    const { saved, reloaded } = await reloadSaved(control.enrichment(), {
+      ...capture.dominant_driver_block, body: `${LEEDS_GROUNDED} ${THRESHOLD}`, target_refs: control.refs,
+    });
+    expectOnlyTailDropped(saved, reloaded, LEEDS_GROUNDED);
   });
 });
