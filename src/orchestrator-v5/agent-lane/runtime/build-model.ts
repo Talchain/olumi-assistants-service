@@ -637,7 +637,8 @@ export function retrySchemaPinningGoal(
  * Two kinds of finding, and they are NOT the same weight:
  *
  * - `additions_without_total` — an addition that cannot become a total (no finite
- *   baseline, units that differ, an ambiguous factor, an unknown `value_kind`).
+ *   baseline, an unknown baseline on a user addition even with an AI estimate,
+ *   units that differ, an ambiguous factor, an unknown `value_kind`).
  *   ⛔ IT DEGRADES, IT NEVER REFUSES (review 5822711266, B1). Refusing gave "should we
  *   hire two more engineers?" with no team size NO model on turn 1 and a raw code. So
  *   the level is dropped — admitting "hire two" as a total of two would misstate the
@@ -816,7 +817,9 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (kind !== 'additional') { unresolved('value_kind_unknown'); continue; }
       if (factors.length === 0) { unresolved('factor_unknown'); continue; }
       if (factor === undefined) { unresolved('factor_ambiguous'); continue; }
-      if (typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
+      // Science §(af): an explicit addition needs a known baseline, never an AI starting estimate.
+      if ((intervention.provenance === 'explicit' && factor.baseline_known !== true)
+        || typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
         || !Number.isFinite(intervention.value) || !Number.isFinite(factor.baseline_value + intervention.value)) {
         unresolved('baseline_unknown'); continue;
       }

@@ -1,11 +1,49 @@
 {
-  "failing_count": 2,
+  "failing_count": 7,
   "failing_ids": [
-    "arm-mechanism-2842/B3-d3.json",
+    "compound-A",
+    "compound-B",
+    "B3-A",
+    "arm-mechanism-2842/B3-d1.json",
+    "arm-mechanism-2842/B3-d2.json",
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json",
     "p44-lab-two-risks-20261008/heldout3-d1.json"
   ],
   "loss_counts": {
-    "arm-mechanism-2842/B3-d3.json": 2,
+    "compound-A": 2,
+    "compound-B": 2,
+    "B3-A": 2,
+    "arm-mechanism-2842/B3-d1.json": 2,
+    "arm-mechanism-2842/B3-d2.json": 2,
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json": 1,
     "p44-lab-two-risks-20261008/heldout3-d1.json": 1
+  },
+  "residual_ids": {
+    "compound-A": [
+      "three_and_three_split.engineers_on_reliability_work",
+      "three_and_three_split.engineers_on_prototype"
+    ],
+    "compound-B": [
+      "three_three_split.engineers_on_reliability_work",
+      "three_three_split.engineers_on_prototype"
+    ],
+    "B3-A": [
+      "event_option_1.event_context_6",
+      "event_option_2.event_context_7"
+    ],
+    "arm-mechanism-2842/B3-d1.json": [
+      "event_option_1.senior_engineers_hired",
+      "event_option_2.junior_engineers_hired"
+    ],
+    "arm-mechanism-2842/B3-d2.json": [
+      "event_option_1.senior_engineers_hired",
+      "event_option_2.junior_engineers_hired"
+    ],
+    "p44-lab-two-risks-20261008/arm2-floor-plus-line/heldout3-d3.json": [
+      "event_option_2.event_context_8"
+    ],
+    "p44-lab-two-risks-20261008/heldout3-d1.json": [
+      "event_option_3.event_context_7"
+    ]
   }
 }

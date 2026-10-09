@@ -31,26 +31,55 @@ async function replay(row: Row) {
     (async () => ({ text: row.drafter_texts[Math.min(index++, row.drafter_texts.length - 1)]!, status: 'completed' })) as never);
   return { graph: ((registered as Rec | null)?.graph as Rec | undefined) ?? null, result };
 }
+// Explicit bench witnesses for the next reader slice, not a new prose parser.
+// Admission still uses the unchanged shared readers. Both captured splits are user-stated 3 + 3.
+function pendingAndAmount(row: Row, option: CandidateModel['options'][number], i: Iv): boolean {
+  const expected = row.id === 'compound-A' ? ['Three and three split', 'or split them three and three.']
+    : row.id === 'compound-B' ? ['Three-three split', 'split them three and three'] : undefined;
+  const e = i.stated_evidence;
+  return expected !== undefined && option.label === expected[0] && i.value === 3
+    && ['Engineers on reliability work', 'Engineers on prototype'].includes(i.factor_label)
+    && e?.option_quote === expected[1] && row.brief.indexOf(e.quote) >= 0
+    && row.brief.indexOf(e.quote) === row.brief.lastIndexOf(e.quote)
+    && e.quote.indexOf(e.option_quote) >= 0 && e.quote.indexOf(e.option_quote) === e.quote.lastIndexOf(e.option_quote);
+}
 function losses(row: Row, graph: Rec | null, result: unknown): string[] {
   const draft = JSON.parse(row.drafter_texts[0]!) as CandidateModel;
   const nodes = (graph?.nodes ?? []) as Rec[];
   const demoted = (result as { provenance_demoted?: {option: string; factor: string}[] }).provenance_demoted ?? [];
   return draft.options.flatMap(o => (o.interventions ?? []).flatMap(i => {
-    if (i.provenance !== 'explicit' || !valid(i, row.brief)) return [];
+    if (i.provenance !== 'explicit' || (!valid(i, row.brief) && !pendingAndAmount(row, o, i))) return [];
     const option = nodes.find(n => n.label === o.label);
     const factor = nodes.find(n => n.label === i.factor_label);
     const served = (option?.interventions as Record<string, Rec> | undefined)?.[String(factor?.id)];
-    const baseline = factor?.observed_state as Rec | undefined;
-    const unknownBaseline = !baseline || baseline.source !== 'brief_extraction';
-    if (((i as Iv & { value_kind?: string }).value_kind === 'additional') && unknownBaseline) {
-      // No typed-delta carrier exists in admission. A level or prose figure is not a typed delta.
-      return [`${String(option?.id ?? slugId(o.label))}.${String(factor?.id ?? slugId(i.factor_label))}`];
+    const id = `${String(option?.id ?? slugId(o.label))}.${String(factor?.id ?? slugId(i.factor_label))}`;
+    const f = draft.factors.find(f => f.label === i.factor_label);
+    const stockMember = draft.identities?.some(d => d.factors.includes(i.factor_label)
+      || (d.operation === 'accumulation' && d.outcome === i.factor_label));
+    const addition = (i as Iv & { value_kind?: string }).value_kind === 'additional';
+    if (addition) {
+      // Typed known zero licenses amount-as-level; identity/accumulation membership wins.
+      const flow = f?.baseline_known === true && f.baseline_value === 0 && !stockMember;
+      const baseline = factor?.observed_state as Rec | undefined;
+      const userBaseline = f?.baseline_known === true && f.provenance === 'explicit'
+        && baseline?.source === 'brief_extraction';
+      const r = result as { open_questions?: string[]; not_represented?: string[] };
+      const asks = [...(r.open_questions ?? []), ...(r.not_represented ?? [])]
+        .some(q => q.includes(`Tell me the current level of "${i.factor_label}"`));
+      const preserved = flow ? served?.raw_value === i.value && served.source === 'brief_extraction'
+        : userBaseline ? served?.raw_value === Number(baseline?.raw_value ?? baseline?.value) + i.value
+          && served.source === 'brief_extraction'
+        : asks && !served;
+      return preserved ? [] : [id];
     }
-    return !served || served.source !== 'brief_extraction' || demoted.some(d => d.option === o.label && d.factor === i.factor_label)
-      ? [`${String(option?.id ?? slugId(o.label))}.${String(factor?.id ?? slugId(i.factor_label))}`] : [];
+    return !served || served.source !== 'brief_extraction' || served.raw_value !== i.value
+      || demoted.some(d => d.option === o.label && d.factor === i.factor_label) ? [id] : [];
   }));
 }
 const r2 = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/s7-user-stated-r2.json'), 'utf8')) as Row[];
+/** Ship cut: all six ×2 are user-stated; the two split 3s stay demoted.
+ * Follow-up: the shared countsInWords "N and N" reader row (three and three = two amounts).
+ */
 it('compound-A first differing intervention and identity-bound row', async () => {
   const row = r2[0]!; const served = await replay(row);
   const raw = (JSON.parse(row.drafter_texts[0]!) as CandidateModel).options[0]!.interventions![0]!;
@@ -61,26 +90,34 @@ it('compound-A first differing intervention and identity-bound row', async () =>
   for (const [optionId, factorId, value] of [
     ['all_reliability', 'engineers_on_reliability_work', 6],
     ['all_prototype', 'engineers_on_prototype', 6],
-    ['three_and_three_split', 'engineers_on_reliability_work', 3],
-    ['three_and_three_split', 'engineers_on_prototype', 3],
-  ] as const) {
+      ] as const) {
     const option = (served.graph?.nodes as Rec[]).find(n => n.id === optionId);
     expect((option?.interventions as Record<string, Rec>)?.[factorId], `${optionId}.${factorId}`)
       .toMatchObject({ source: 'brief_extraction', raw_value: value });
   }
-  expect((served.result as {provenance_demoted?: unknown[]}).provenance_demoted ?? []).toHaveLength(0);
-  expect(losses(row, served.graph, served.result)).toEqual([]);
+  for (const factor of ['engineers_on_reliability_work', 'engineers_on_prototype']) {
+    const split = (served.graph?.nodes as Rec[]).find(n => n.id === 'three_and_three_split');
+    expect((split?.interventions as Record<string, Rec>)[factor]).toMatchObject({ source: 'cee_hypothesis', raw_value: 3 });
+  }
+  expect((served.result as {provenance_demoted?: unknown[]}).provenance_demoted).toEqual([
+    { option: 'Three and three split', factor: 'Engineers on reliability work', value: 3 },
+    { option: 'Three and three split', factor: 'Engineers on prototype', value: 3 },
+  ]);
+  expect(losses(row, served.graph, served.result)).toEqual([
+    'three_and_three_split.engineers_on_reliability_work', 'three_and_three_split.engineers_on_prototype',
+  ]);
 });
-/**
- * - PRESERVED if the user's stated AMOUNT survives as a typed delta on that option (e.g. +2 on "Senior engineers hired") AND the build asks for the baseline (an open question / not_represented line naming that factor).
- * - LOST if the amount is dropped (e.g. only a structural `changes` entry with no figure), or there's no baseline question.
+/** Science §(af): a flow-count addition is PRESERVED when its amount is the stored level.
+ * A stock addition is PRESERVED when stored S₀ + amount uses the user's S₀, or a baseline
+ * question names that factor and no level is invented. Otherwise LOST.
+ * Classification uses typed baseline knowledge/value/provenance and identity membership, never label words.
  */
 it('served property census', async () => {
   const corpus = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'fixtures/s7-construction-census/corpus.json.gz'))).toString()) as Row[];
   expect(corpus).toHaveLength(116); expect(r2).toHaveLength(8);
   const counts: Record<string, number> = {};
   const ids: Record<string, string[]> = {};
-  for (const row of [...r2, ...corpus]) { const s = await replay(row); ids[row.id] = losses(row, s.graph, s.result); counts[row.id] = ids[row.id]!.length; }
+  for (const row of [...r2, ...corpus]) { const s = await replay(row); ids[row.id] = losses(row, s.graph, s.result); counts[row.id] = ids[row.id]!.length; if (ids[row.id]!.length) fs.writeFileSync(`/private/tmp/s7-r3-residual-${slugId(row.id)}.json`, JSON.stringify({ row, ...s }, null, 2)); }
   fs.writeFileSync('/private/tmp/s7-user-stated-counts.json', JSON.stringify(counts, null, 2));
   fs.writeFileSync('/private/tmp/s7-user-stated-ids.json', JSON.stringify(ids, null, 2));
   console.log('USER-STATED LOSS', JSON.stringify(counts));
@@ -89,9 +126,10 @@ it('served property census', async () => {
   expect(baseline.failing_ids).toHaveLength(baseline.failing_count);
   expect(ratchet(failing, baseline)).toEqual([]);
   expect(countRegressions(counts, baseline.loss_counts ?? {})).toEqual([]);
+  expect(Object.fromEntries(Object.entries(ids).filter(([, pairs]) => pairs.length))).toEqual(baseline.residual_ids);
 }, 120_000);
 
-interface Baseline { failing_count: number; failing_ids: string[]; loss_counts?: Record<string, number> }
+interface Baseline { failing_count: number; failing_ids: string[]; loss_counts?: Record<string, number>; residual_ids?: Record<string, string[]> }
 function countRegressions(counts: Record<string, number>, baseline: Record<string, number>): string[] {
   return Object.entries(counts).filter(([id, n]) => n > (baseline[id] ?? 0)).map(([id, n]) => `${id}: losses ${n} > baseline ${baseline[id] ?? 0}`);
 }
@@ -165,5 +203,55 @@ it('shared number readers verify both digits and number words, and offsets are i
     expect(valid(i, brief)).toBe(true); expect(userStatedOptionLevel(i, brief)).toBe(true);
     i.stated_evidence = { ...i.stated_evidence, amount_start: i.stated_evidence.amount_start - 1 };
     expect(userStatedOptionLevel(i, brief)).toBe(true);
+  }
+});
+
+function additionRow(baseline: number | null, known: boolean, stock: boolean): Row {
+  const draft = JSON.parse(r2[0]!.drafter_texts[0]!) as CandidateModel;
+  const label = stock ? 'Team headcount' : 'Senior hires';
+  const brief = stock ? 'Team headcount is 8. Add +2 to team headcount.' : 'Hire two seniors.';
+  const own = stock ? 'Add +2 to team headcount.' : brief;
+  return { id: stock ? 'stock-addition' : 'flow-addition', brief, drafter_texts: [JSON.stringify({
+    ...draft, options: [{ ...draft.options[0], label: 'Add capacity', changes: [], interventions: [{
+      factor_label: label, value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit',
+      stated_evidence: { quote: brief, option_quote: own },
+    }] }, { ...draft.options[1], label: 'Keep capacity', is_status_quo: true, changes: [], interventions: [] }], factors: [{ label, role: 'controllable', baseline_known: known, baseline_value: baseline,
+      unit: 'people', provenance: known ? 'explicit' : 'ai_proposed', plausible_max: 20 }],
+    links: [{ ...draft.links[0], from: 'Add capacity', to: label }, { ...draft.links[0], from: label, to: draft.goal.metric }],
+    identities: [],
+  })] };
+}
+it('Science af: flow count stores 2 with no baseline ask; stock stores user 8 + 2 = 10', async () => {
+  for (const stock of [false, true]) {
+    const row = additionRow(stock ? 8 : 0, true, stock); const s = await replay(row);
+    fs.writeFileSync(`/private/tmp/s7-r3-${stock ? 'stock' : 'flow'}-served.json`, JSON.stringify({ row, ...s }, null, 2));
+    const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
+    const factorId = stock ? 'team_headcount' : 'senior_hires';
+    expect((option?.interventions as Record<string, Rec>)[factorId]).toMatchObject({ raw_value: stock ? 10 : 2, source: 'brief_extraction' });
+    expect(losses(row, s.graph, s.result)).toEqual([]);
+    if (!stock) expect([...(s.result as { open_questions?: string[] }).open_questions ?? [],
+      ...(s.result as { not_represented?: string[] }).not_represented ?? []]
+      .some(q => q.includes('current level of "Senior hires"'))).toBe(false);
+    if (stock) {
+      const mutant = structuredClone(s.graph)!;
+      const iv = ((mutant.nodes as Rec[]).find(n => n.id === 'add_capacity')!.interventions as Record<string, Rec>).team_headcount!;
+      iv.raw_value = 2; iv.value = 0.1;
+      expect(losses(row, mutant, s.result)).toEqual(['add_capacity.team_headcount']);
+    }
+  }
+});
+it('Science af: stock without user S0 asks its baseline and invents no level', async () => {
+  for (const estimate of [null, 4]) {
+    const row = additionRow(estimate, false, true);
+    row.brief = 'Add +2 to team headcount.';
+    const draft = JSON.parse(row.drafter_texts[0]!);
+    draft.options[0].interventions[0].stated_evidence.quote = row.brief;
+    row.drafter_texts = [JSON.stringify(draft)];
+    const s = await replay(row);
+    fs.writeFileSync(`/private/tmp/s7-r3-unknown-${estimate}-served.json`, JSON.stringify({ row, ...s }, null, 2));
+    const option = (s.graph?.nodes as Rec[]).find(n => n.id === 'add_capacity');
+    expect((option?.interventions as Record<string, Rec> | undefined)?.team_headcount).toBeUndefined();
+    expect(((s.result as { not_represented?: string[] }).not_represented ?? []).join(' ')).toContain('Tell me the current level of "Team headcount"');
+    expect(losses(row, s.graph, s.result)).toEqual([]);
   }
 });
