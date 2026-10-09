@@ -8,6 +8,11 @@ import { withScenarioRevision } from '../../../tests/utils/revision-store-double
 import { withCanonicalAnalysisView } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/canonical-analysis-read.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
+vi.mock('../../utils/supabase-user-jwt.js', async load => ({
+  ...await load<typeof import('../../utils/supabase-user-jwt.js')>(),
+  verifySupabaseUserJwt: (token: string) => verifyFixtureIdentity(token),
+}));
 import paul from '../../orchestrator-v5/agent-lane/__tests__/fixtures/goal-reach-paul-graph-632b92b9.json';
 import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js';
 import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js';
@@ -154,10 +159,12 @@ beforeEach(async () => {
   port.ensureScenarioExists.mockResolvedValue({ user_id: OWNER }); port.getScenarioOwner.mockResolvedValue(OWNER);
   port.scenarioExists.mockResolvedValue(true); port.isScenarioMember.mockResolvedValue(false);
   vi.stubGlobal('fetch', vi.fn(async () => { modelCalls += 1; throw new Error('GOAL-REACH must not call an LLM'); }));
-  app = Fastify({ logger: false }); await scenarioGraphRoute(app);
+  app = Fastify({ logger: false });
+  await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
+  await scenarioGraphRoute(app);
   // Only the analysis transport is fixed locally. The real run_analysis capability must
   // derive identity_card.available from Paul's stored graph, never from this response.
-  app.post('/orchestrate/v2/turn', async req => {
+  app.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async req => {
     runRequests.push(req.body as Record<string, any>);
     return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
       graph_hash: hashOf(source.graph), blocks: [source.analysis.analysis_result],
