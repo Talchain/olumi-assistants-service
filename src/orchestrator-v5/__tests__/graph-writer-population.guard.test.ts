@@ -267,6 +267,10 @@ describe('C8 — the SQL half: no NEW migration writes `scenarios.graph` unnotic
       // the c8 body plus `p_expected_revision` under the row lock and on every
       // scenario UPDATE. Staging TS calls only these; prod keeps the c8 function.
       '20261009100000_version_save_restore_revision_cas.sql',
+      // The same `append_turn_atomic_v4` writer through `store.append`, rebuilt
+      // from the DEPLOYED body (md5 db7bdbe3 guard); graph-write bytes unchanged.
+      // Only the fact INSERT stores the element's evaluated_scenario_revision (B2).
+      '20261009160000_b2_fact_evaluated_revision.sql',
     ]);
   });
 
