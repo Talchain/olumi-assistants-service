@@ -1,3 +1,4 @@
+import { timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 /** S-E S4, D-07 served words. Real proposer/card/approval/add_constraint/CAS
  * commit/read-back; serialised SessionStore and captured PLoT only. No services.
  */
@@ -399,7 +400,7 @@ describe('D-07: one approved limit on the quantity the user names', () => {
     expect(await apply(existing)).toMatchObject({ kind: 'refused', reason: 'existing_limit' });
     const change = model(); change.nodes[2].quantity_frame = 'change'; expect(await apply(change)).toMatchObject({ kind: 'refused', reason: 'quantity_frame_changed' });
   });
-  it('whitespace 5k → 20k timing, existing scanners only; no new regex', () => {
+  timingIt('whitespace 5k → 20k timing, existing scanners only; no new regex', () => {
     const timed = (n: number) => { const t = performance.now(); for (let i = 0; i < 80; i++) readNewLimit(model(), `we${' '.repeat(n)}only have £200,000`, 200000); return performance.now() - t; };
     timed(20000); const small = timed(5000); const large = timed(20000);
     writeFileSync('/tmp/s4-whitespace.json', JSON.stringify({ small, large, ratio: large / small }));
