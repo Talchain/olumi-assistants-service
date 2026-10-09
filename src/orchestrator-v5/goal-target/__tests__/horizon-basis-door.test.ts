@@ -1105,7 +1105,7 @@ describe('S5 r8 server proof', () => {
     if (variant === 'wrong') goalOf(snapshot).horizon_basis.proof = '0'.repeat(64);
     const version = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const rpc = vi.fn(async (name: string, args: Rec) => {
-      expect(name).toBe('restore_model_version_atomic_v1');
+      expect(name).toBe('restore_model_version_atomic_cas_v1');
       expect(args.p_scenario_id).toBe(SCENARIO);
       expect(args.p_version_id).toBe(version);
       expect(args.p_expected_revision).toBe(31);

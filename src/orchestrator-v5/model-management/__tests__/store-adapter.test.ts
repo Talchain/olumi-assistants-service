@@ -187,7 +187,7 @@ const ATOMIC_RESTORE_WRITE = {
 };
 
 describe('SupabaseModelVersionStore.saveVersion', () => {
-  it('calls create_model_version with ALL named args (identity envelope stored verbatim)', async () => {
+  it('calls create_model_version_cas_v1 with ALL named args (identity envelope stored verbatim)', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseModelVersionStore(client);
 
@@ -199,7 +199,7 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
     });
 
     expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0]!.fn).toBe('create_model_version');
+    expect(rpcCalls[0]!.fn).toBe('create_model_version_cas_v1');
     expect(rpcCalls[0]!.args).toEqual({
       p_expected_revision: 7,
       p_scenario_id: SCENARIO,
@@ -213,6 +213,9 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
       p_provenance: 'user_save',
       p_event_id: null,
       p_expected_graph_identity_hash: HASH_B,
+      p_base_known: false,
+      p_expected_head_version_id: null,
+      p_expected_working_graph_identity_hash: null,
     });
     expect(outcome).toEqual(defaultOutcome());
   });
@@ -224,6 +227,9 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
     expect(rpcCalls[0]!.args.p_label).toBeNull();
     expect(rpcCalls[0]!.args.p_provenance).toBeNull();
     expect(rpcCalls[0]!.args.p_expected_graph_identity_hash).toBeNull();
+    expect(rpcCalls[0]!.args.p_base_known).toBe(false);
+    expect(rpcCalls[0]!.args.p_expected_head_version_id).toBeNull();
+    expect(rpcCalls[0]!.args.p_expected_working_graph_identity_hash).toBeNull();
   });
 
   it('surfaces deduped outcomes verbatim (no event, head returned)', async () => {
@@ -284,11 +290,13 @@ describe('SupabaseModelVersionStore.saveVersion', () => {
 
 describe('SupabaseModelVersionStore.restoreVersionAtomic', () => {
   it('accepts an attested known actor from the guarded restore RPC', async () => {
-    const { client } = makeClient({
+    const { client, rpcCalls } = makeClient({
       rpcResult: { data: atomicRestoreOutcome(), error: null },
     });
     const store = new SupabaseModelVersionStore(client);
     const result = await store.restoreVersionAtomic(ATOMIC_RESTORE_WRITE);
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0]?.fn).toBe('restore_model_version_atomic_cas_v1');
     expect(result.actor_kind).toBe('known');
     expect(result.authored_by).toBe('owner');
   });
@@ -633,5 +641,6 @@ describe('OLRV1 adapter classification', () => {
     await expect(promise).rejects.toBeInstanceOf(GraphStaleWriteError);
     await expect(promise).rejects.toMatchObject({ conflict_category: 'revision_conflict', cause: error });
     expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0]?.fn).toBe(operation === 'save' ? 'create_model_version_cas_v1' : 'restore_model_version_atomic_cas_v1');
   });
 });

@@ -1824,7 +1824,7 @@ describe("version revision CAS through the RPC boundary", () => {
       expect(readExistingScenario).toHaveBeenCalledTimes(2); // Ownership admission, then one uncached mutation snapshot.
       expect(readExistingScenario).toHaveBeenNthCalledWith(2, SCENARIO);
       expect(loadGraph).not.toHaveBeenCalled();
-      expect(rpc).toHaveBeenCalledExactlyOnceWith(operation === "save" ? "create_model_version" : "restore_model_version_atomic_v1", expect.objectContaining({ p_expected_revision: 17 }));
+      expect(rpc).toHaveBeenCalledExactlyOnceWith(operation === "save" ? "create_model_version_cas_v1" : "restore_model_version_atomic_cas_v1", expect.objectContaining({ p_expected_revision: 17 }));
       expect(emit).toHaveBeenCalledTimes(1);
     } finally { await app.close(); }
   });

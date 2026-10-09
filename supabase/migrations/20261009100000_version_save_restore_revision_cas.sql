@@ -1,25 +1,24 @@
--- Version save/restore revision CAS. Deploy with required TS revision carriers.
+-- Additive version revision CAS: production keeps both legacy RPCs unchanged.
+-- New RPCs require every named argument, including the final expected revision.
 BEGIN;
 SET LOCAL lock_timeout = '3s';
-DROP FUNCTION public.create_model_version(uuid, jsonb, text, text, text, text, text, text, text, text, text, boolean, uuid, text);
-DROP FUNCTION public.restore_model_version_atomic_v1(uuid, uuid, uuid, jsonb, text, text, text, text, text, text, text, jsonb, text, text, text, text, text, text, text);
 
-CREATE OR REPLACE FUNCTION public.create_model_version(
+CREATE FUNCTION public.create_model_version_cas_v1(
   p_scenario_id                  UUID,
   p_graph                        JSONB,
   p_graph_identity_hash          TEXT,
   p_projection_version           TEXT,
   p_normaliser_version           TEXT,
   p_graph_schema_version         TEXT,
-  p_hash_algorithm               TEXT DEFAULT 'sha256',
-  p_label                        TEXT DEFAULT NULL,
-  p_provenance                   TEXT DEFAULT NULL,
-  p_event_id                     TEXT DEFAULT NULL,
-  p_expected_graph_identity_hash TEXT DEFAULT NULL,
-  p_base_known                   BOOLEAN DEFAULT FALSE,
-  p_expected_head_version_id     UUID DEFAULT NULL,
-  p_expected_working_graph_identity_hash TEXT DEFAULT NULL,
-  p_expected_revision BIGINT DEFAULT NULL
+  p_hash_algorithm               TEXT,
+  p_label                        TEXT,
+  p_provenance                   TEXT,
+  p_event_id                     TEXT,
+  p_expected_graph_identity_hash TEXT,
+  p_base_known                   BOOLEAN,
+  p_expected_head_version_id     UUID,
+  p_expected_working_graph_identity_hash TEXT,
+  p_expected_revision BIGINT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -43,16 +42,16 @@ BEGIN
   -- Parameter guards. A NULL graph must never create a version (contrast
   -- the store_draft_graph unconditional-UPDATE lesson).
   IF p_graph IS NULL THEN
-    RAISE EXCEPTION 'create_model_version: p_graph must not be null'
+    RAISE EXCEPTION 'create_model_version_cas_v1: p_graph must not be null'
       USING ERRCODE = '22023'; -- invalid_parameter_value
   END IF;
   IF p_graph_identity_hash IS NULL OR p_graph_identity_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'create_model_version: p_graph_identity_hash must be 64-hex'
+    RAISE EXCEPTION 'create_model_version_cas_v1: p_graph_identity_hash must be 64-hex'
       USING ERRCODE = '22023';
   END IF;
   IF p_projection_version IS NULL OR p_normaliser_version IS NULL
      OR p_graph_schema_version IS NULL OR p_hash_algorithm IS NULL THEN
-    RAISE EXCEPTION 'create_model_version: identity envelope version fields must not be null'
+    RAISE EXCEPTION 'create_model_version_cas_v1: identity envelope version fields must not be null'
       USING ERRCODE = '22023';
   END IF;
 
@@ -65,18 +64,18 @@ BEGIN
     WHERE id = p_scenario_id
     FOR UPDATE;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'create_model_version: scenario % not found', p_scenario_id;
+    RAISE EXCEPTION 'create_model_version_cas_v1: scenario % not found', p_scenario_id;
   END IF;
 
   -- D3 Branch A guest refusal — distinct ERRCODE, app maps to the typed
   -- recoverable "version history requires sign-in" error.
   IF v_owner IS NULL THEN
-    RAISE EXCEPTION 'create_model_version: scenario % has no owner — version history requires sign-in', p_scenario_id
+    RAISE EXCEPTION 'create_model_version_cas_v1: scenario % has no owner — version history requires sign-in', p_scenario_id
       USING ERRCODE = 'MV001';
   END IF;
 
   IF p_expected_revision IS DISTINCT FROM v_revision THEN
-    RAISE EXCEPTION 'create_model_version: revision_conflict'
+    RAISE EXCEPTION 'create_model_version_cas_v1: revision_conflict'
       USING ERRCODE = 'OLRV1',
             DETAIL = jsonb_build_object(
               'reason', 'revision_conflict',
@@ -94,7 +93,7 @@ BEGIN
        OR v_working_graph IS DISTINCT FROM p_graph
        OR (v_working_identity_hash IS NOT NULL
            AND v_working_identity_hash IS DISTINCT FROM p_expected_working_graph_identity_hash) THEN
-      RAISE EXCEPTION 'create_model_version: working graph moved since the base read'
+      RAISE EXCEPTION 'create_model_version_cas_v1: working graph moved since the base read'
         USING ERRCODE = 'MV409';
     END IF;
   END IF;
@@ -107,7 +106,7 @@ BEGIN
   IF p_expected_graph_identity_hash IS NOT NULL THEN
     IF v_head_id IS NULL OR v_head.id IS NULL
        OR v_head.graph_identity_hash <> p_expected_graph_identity_hash THEN
-      RAISE EXCEPTION 'create_model_version: expected head hash % does not match current head', p_expected_graph_identity_hash
+      RAISE EXCEPTION 'create_model_version_cas_v1: expected head hash % does not match current head', p_expected_graph_identity_hash
         USING ERRCODE = 'MV409';
     END IF;
   END IF;
@@ -116,7 +115,7 @@ BEGIN
   -- Check before dedupe: a moved captured head refuses even a same-target pin.
   IF p_base_known IS TRUE
      AND v_head_id IS DISTINCT FROM p_expected_head_version_id THEN
-    RAISE EXCEPTION 'create_model_version: head moved since the base read'
+    RAISE EXCEPTION 'create_model_version_cas_v1: head moved since the base read'
       USING ERRCODE = 'MV409';
   END IF;
 
@@ -157,7 +156,7 @@ BEGIN
     SET current_model_version_id = v_new_id
     WHERE id = p_scenario_id AND revision = p_expected_revision;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'create_model_version: revision_conflict'
+    RAISE EXCEPTION 'create_model_version_cas_v1: revision_conflict'
       USING ERRCODE = 'OLRV1',
             DETAIL = jsonb_build_object('reason', 'revision_conflict',
               'expected', p_expected_revision, 'current', v_revision)::text;
@@ -209,15 +208,15 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.create_model_version(
+REVOKE ALL ON FUNCTION public.create_model_version_cas_v1(
   uuid, jsonb, text, text, text, text, text, text, text, text, text, boolean, uuid, text, bigint
 ) FROM PUBLIC, anon, authenticated;
 
-GRANT EXECUTE ON FUNCTION public.create_model_version(
+GRANT EXECUTE ON FUNCTION public.create_model_version_cas_v1(
   uuid, jsonb, text, text, text, text, text, text, text, text, text, boolean, uuid, text, bigint
 ) TO service_role;
 
-CREATE OR REPLACE FUNCTION public.restore_model_version_atomic_v1(
+CREATE FUNCTION public.restore_model_version_atomic_cas_v1(
   p_scenario_id                        UUID,
   p_version_id                         UUID,
   p_mutation_id                        UUID,
@@ -236,8 +235,8 @@ CREATE OR REPLACE FUNCTION public.restore_model_version_atomic_v1(
   p_actor_kind                         TEXT,
   p_authored_by                        TEXT,
   p_source_turn_id                     TEXT,
-  p_label                              TEXT DEFAULT NULL,
-  p_expected_revision                  BIGINT DEFAULT NULL
+  p_label                              TEXT,
+  p_expected_revision                  BIGINT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -264,59 +263,59 @@ DECLARE
   v_event              JSONB;
 BEGIN
   IF p_mutation_id IS NULL THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: p_mutation_id must not be null'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: p_mutation_id must not be null'
       USING ERRCODE = '22023';
   END IF;
   IF p_graph IS NULL THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: p_graph must not be null'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: p_graph must not be null'
       USING ERRCODE = '22023';
   END IF;
   IF p_current_graph IS NULL AND p_current_graph_identity_hash IS NOT NULL THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: current graph/hash pair is inconsistent'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: current graph/hash pair is inconsistent'
       USING ERRCODE = '22023';
   END IF;
   IF p_graph_identity_hash IS NULL OR p_graph_identity_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: p_graph_identity_hash must be 64-hex'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: p_graph_identity_hash must be 64-hex'
       USING ERRCODE = '22023';
   END IF;
   IF p_source_graph_identity_hash IS NULL OR p_source_graph_identity_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: p_source_graph_identity_hash must be 64-hex'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: p_source_graph_identity_hash must be 64-hex'
       USING ERRCODE = '22023';
   END IF;
   IF p_expected_graph_identity_hash IS NOT NULL
      AND p_expected_graph_identity_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: expected graph hash must be null or 64-hex'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: expected graph hash must be null or 64-hex'
       USING ERRCODE = '22023';
   END IF;
   IF p_current_graph_identity_hash IS NOT NULL
      AND p_current_graph_identity_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: current graph hash must be null or 64-hex'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: current graph hash must be null or 64-hex'
       USING ERRCODE = '22023';
   END IF;
   IF p_analysis_affecting_hash IS NULL
      OR p_analysis_affecting_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: analysis hash must be 64-hex'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: analysis hash must be 64-hex'
       USING ERRCODE = '22023';
   END IF;
   IF p_current_analysis_affecting_hash IS NOT NULL
      AND p_current_analysis_affecting_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: current analysis hash must be null or 64-hex'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: current analysis hash must be null or 64-hex'
       USING ERRCODE = '22023';
   END IF;
   IF p_projection_version IS NULL OR p_normaliser_version IS NULL
      OR p_graph_schema_version IS NULL OR p_hash_algorithm IS NULL THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: identity envelope must be complete'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: identity envelope must be complete'
       USING ERRCODE = '22023';
   END IF;
   IF NOT (
     (p_actor_kind = 'known' AND p_authored_by IS NOT NULL)
     OR (p_actor_kind IN ('system', 'unknown') AND p_authored_by IS NULL)
   ) THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: actor carrier is inconsistent'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: actor carrier is inconsistent'
       USING ERRCODE = '22023';
   END IF;
   IF p_source_turn_id IS NOT NULL AND length(p_source_turn_id) = 0 THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: source turn must be null or non-empty'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: source turn must be null or non-empty'
       USING ERRCODE = '22023';
   END IF;
 
@@ -330,10 +329,10 @@ BEGIN
     WHERE id = p_scenario_id
     FOR UPDATE;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: scenario % not found', p_scenario_id;
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: scenario % not found', p_scenario_id;
   END IF;
   IF v_owner IS NULL THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: version history requires sign-in'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: version history requires sign-in'
       USING ERRCODE = 'MV001';
   END IF;
 
@@ -345,7 +344,7 @@ BEGIN
     WHERE scenario_id = p_scenario_id AND mutation_id = p_mutation_id;
   IF FOUND THEN
     IF v_existing.restored_from_version_id IS DISTINCT FROM p_version_id THEN
-      RAISE EXCEPTION 'restore_model_version_atomic_v1: mutation id reused for another target'
+      RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: mutation id reused for another target'
         USING ERRCODE = 'MV422';
     END IF;
     RETURN jsonb_build_object(
@@ -376,7 +375,7 @@ BEGIN
   END IF;
 
   IF p_expected_revision IS DISTINCT FROM v_revision THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: revision_conflict'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: revision_conflict'
       USING ERRCODE = 'OLRV1',
             DETAIL = jsonb_build_object(
               'reason', 'revision_conflict',
@@ -389,11 +388,11 @@ BEGIN
     FROM public.model_versions
     WHERE id = p_version_id AND scenario_id = p_scenario_id;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: version % not found', p_version_id
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: version % not found', p_version_id
       USING ERRCODE = 'MV404';
   END IF;
   IF v_target.graph_identity_hash IS DISTINCT FROM p_source_graph_identity_hash THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: source version identity changed'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: source version identity changed'
       USING ERRCODE = 'MV409';
   END IF;
 
@@ -402,7 +401,7 @@ BEGIN
   IF v_current_hash IS DISTINCT FROM p_expected_graph_identity_hash
      OR p_current_graph_identity_hash IS DISTINCT FROM p_expected_graph_identity_hash
      OR v_current_graph IS DISTINCT FROM p_current_graph THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: stale working graph'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: stale working graph'
       USING ERRCODE = 'MV409';
   END IF;
 
@@ -511,7 +510,7 @@ BEGIN
         updated_at = now()
     WHERE id = p_scenario_id AND revision = p_expected_revision;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'restore_model_version_atomic_v1: revision_conflict'
+    RAISE EXCEPTION 'restore_model_version_atomic_cas_v1: revision_conflict'
       USING ERRCODE = 'OLRV1',
             DETAIL = jsonb_build_object('reason', 'revision_conflict',
               'expected', p_expected_revision, 'current', v_revision)::text;
@@ -545,12 +544,12 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.restore_model_version_atomic_v1(
+REVOKE ALL ON FUNCTION public.restore_model_version_atomic_cas_v1(
   UUID, UUID, UUID, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
   TEXT, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT
 ) FROM PUBLIC, anon, authenticated;
 
-GRANT EXECUTE ON FUNCTION public.restore_model_version_atomic_v1(
+GRANT EXECUTE ON FUNCTION public.restore_model_version_atomic_cas_v1(
   UUID, UUID, UUID, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
   TEXT, JSONB, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT
 ) TO service_role;
