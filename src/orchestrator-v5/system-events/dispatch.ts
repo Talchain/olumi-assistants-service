@@ -68,6 +68,7 @@ import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflic
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
 import type { ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
+import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
@@ -3435,6 +3436,12 @@ export type CommitOptionLevelsInput = {
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
+      /**
+       * Present only on a `goal_steady` commit: whether the committed bytes the door just wrote read 'steady_attested'
+       * through the one horizon verdict. Every HTTP read strips the basis proof (S5 2b), so no caller can re-verify it
+       * from a read; this is the read-back (P45 #2903 served witness 9 Oct: the public read said "not confirmed").
+       */
+      readonly goal_steady_attested?: boolean;
       readonly receipt: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
       /** A verified no-op: the model already held every level (a retry). Nothing written; `receipt` is null. */
       readonly already_applied: boolean;
@@ -3565,16 +3572,18 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   });
   if (committedLevels.some(l => l.value === undefined)) return { status: 'unconfirmed' };
   const verifiedLevels = committedLevels.map(l => ({ ...l, value: l.value! }));
+  const steadyReadBack = input.goal_steady === undefined ? {}
+    : { goal_steady_attested: goalHorizonVerdict(committedGraph) === 'steady_attested' };
   if (r.commitSkippedReason === 'verified_no_op') {
     return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: verifiedLevels,
-      links_resized: [] };
+      links_resized: [], ...steadyReadBack };
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
   // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
   const receipt = r.committedVersion ?? null;
   return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: verifiedLevels,
-    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })), reencoded_siblings: r.reencodedSiblings ?? [] };
+    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })), reencoded_siblings: r.reencodedSiblings ?? [], ...steadyReadBack };
 }
 
 /**

@@ -1,4 +1,4 @@
-import { goalHorizonVerdict, heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
+import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
@@ -3218,7 +3218,7 @@ export function createAgentCapabilities(
       ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
   };
 
-  /** Consume the exact held card through the approved batch, then read back through the one horizon verdict. */
+  /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
   const applyGoalSteady = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
@@ -3238,8 +3238,9 @@ export function createAgentCapabilities(
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
         detail: 'Your answer was sent but could not be confirmed in the saved model.' };
     }
+    // The read strips the basis proof (S5 2b), so the attestation is read back from the door's own committed bytes.
     const check = await readGraph(ctx.scenario_id);
-    if (check === null || goalHorizonVerdict(check.raw) !== 'steady_attested'
+    if (check === null || res.goal_steady_attested !== true
       || heldGoalHorizonMonths(check.nodes.find(n => n.id === op.path && n.kind === 'goal')) !== months) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed',
         detail: 'Your answer was sent but could not be confirmed in the saved model.' };
