@@ -20,21 +20,21 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     expect(text.split(K3).length - 1).toBe(1);
   });
 
-  it('the rule sits inside the risk envelope: after "ALWAYS KEEP AT LEAST ONE RISK", before the widening limit', () => {
+  it('the rule sits inside the risk envelope: after "DRAW EVERY RISK THAT COULD REVERSE THE ANSWER", before the omission limit', () => {
     const text = String(BUILD_INSTRUCTIONS);
-    const keep = text.indexOf('ALWAYS KEEP AT LEAST ONE RISK');
+    const keep = text.indexOf('DRAW EVERY RISK THAT COULD REVERSE THE ANSWER');
     const k3 = text.indexOf(K3);
-    const widen = text.indexOf('Do NOT widen beyond it on this turn');
+    const widen = text.indexOf('Leave out only what the brief neither states nor implies');
     expect(keep).toBeGreaterThan(-1);
     expect(widen).toBeGreaterThan(-1);
     expect(keep < k3 && k3 < widen).toBe(true);
   });
 
-  it('RED: user-named risks outrank the 4-to-6 envelope, stated once, directly after K3 and before the widening limit', () => {
+  it('RED: user-named risks outrank the 4-to-6 envelope, stated once, directly after K3 and before the omission limit', () => {
     const text = String(BUILD_INSTRUCTIONS);
     expect(text.split(K3_PRECEDENCE).length - 1).toBe(1);
     expect(text.indexOf(K3_PRECEDENCE)).toBe(text.indexOf(K3) + K3.length);
-    expect(text.indexOf(K3_PRECEDENCE) < text.indexOf('Do NOT widen beyond it on this turn')).toBe(true);
+    expect(text.indexOf(K3_PRECEDENCE) < text.indexOf('Leave out only what the brief neither states nor implies')).toBe(true);
   });
 
   it('RED: the node/link budget yields to the user\'s own material, stated once, in the same sentence block as the budget', () => {
@@ -57,7 +57,7 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     expect(control).not.toContain('cannot fit this budget');
   });
 
-  it('CONTROL: the envelope still forbids decorative risks (the rule adds the user\'s risk; it never widens the model)', () => {
-    expect(String(BUILD_INSTRUCTIONS)).toContain('no speculative options, secondary factors, or decorative risks and outcomes');
+  it('CONTROL: the envelope still excludes speculative options and risks or outcomes that could not change the answer', () => {
+    expect(String(BUILD_INSTRUCTIONS)).toContain('no speculative options, and no risk or outcome that could not change the answer');
   });
 });

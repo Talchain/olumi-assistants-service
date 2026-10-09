@@ -287,7 +287,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // \u2b50 THE MAGNITUDE CONTRACT (D1). A size in NATURAL units, read on each end's own frame by admission
       // (`cee/magnitude/link-effect.ts`). REQUIRED so strict output must say "not known" (null) rather than omit it.
       effect_amount: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
-        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage target, in points: 4% to 3% is -1. null when you cannot give a defensible size.' },
+        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage target, in points: 4% to 3% is -1. null only when no defensible size exists; then ask for it in `unknowns`.' },
       effect_per_source_change: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
         'The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null.' },
       effect_provenance: { anyOf: [provenance, { type: 'null' }], description:
@@ -334,6 +334,7 @@ export const BUILD_INSTRUCTIONS = [
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
   'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
+  'EVERY CURRENT FIGURE THE BRIEF STATES IS HELD IN THE MODEL. Each current level, count, capacity or price the brief states (a headcount, a customer count, a price per customer, a capacity per month) becomes a factor with that figure as its baseline_value, baseline_known true and provenance "explicit", in the brief’s own unit. When the goal is made of those quantities (revenue from a count times a price, capacity from people times time), the goal’s identity in `identities` uses those factors as its operands. Never model only the change from today when the brief states today’s operands, and never put a stated figure only in a question.',
   'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
   'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   // ⛔ ONE QUANTITY, ONE MEANING (R3 #75 5914500931; AIQ 5914532431; DL 5915507578 item 4). Paul's brief weighs angel
@@ -375,14 +376,14 @@ export const BUILD_INSTRUCTIONS = [
   // hiring brief came back as 6 nodes — decision, goal, 2 options, 2 factors — and
   // no factor linked on to the goal, so the analysis refused. The shape below is
   // the stated envelope; the node and link ceilings are the size gate's own.
-  'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE \u2014 BUT NOT THIN. The shape to aim for is this envelope: one goal; '
+  'DRAW THE DECISION THE BRIEF DESCRIBES, IN FULL BUT WITHIN THE SIZE LIMIT. The shape to aim for is this envelope: one goal; '
   + 'EVERY option the user stated, never dropped or merged, and normally 3 to 5 options in total \u2014 when the user states fewer than 3, add carrying on as now if they did not state it, then the strongest alternative the question itself points to (such as a partial, phased or smaller version of a stated option), each marked "ai_proposed"; '
   + 'roughly 4 to 8 factors that actually move the goal \u2014 besides any factor an option sets directly, name the MECHANISMS through which those changes reach the goal, never an option merely restated as a quantity; '
   // ⛔ A FIGURE RULE NEVER REMOVES STRUCTURE (DL #75 5916217417): drafted models with NO risk rose from ≤8% (20–27 Sep)
   // to 81% (30 Sep). Measured on staging 68c9789c (MG, 0 retries): both MRR briefs drafted 0 risks, hiring 2, funding
   // 1. Every rule below that limits how a risk is LINKED or SIZED had been read as a reason to leave the risk out.
-  + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). '
-  + 'ALWAYS KEEP AT LEAST ONE RISK: the downside that could reverse the answer is part of the decision the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. '
+  + 'and every outcome and risk the brief states or clearly implies: the outcomes the factors act through and each downside that could reverse the answer. '
+  + 'DRAW EVERY RISK THAT COULD REVERSE THE ANSWER, not just one: each downside is part of the decision the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. '
   // K3 (R3 #75 5925627855, #85 5931851041; DL 380e54 5932372585: GO, generalised, never money-specific): a downside
   // the user NAMES is theirs to weigh, so it is never traded away for one Olumi thought of (Paul's "we'll run out of
   // money soon" was drawn 0/4 with A4b, 1/4 before).
@@ -390,13 +391,12 @@ export const BUILD_INSTRUCTIONS = [
   // K3 precedence (Codex CR @5d3841dc, DL 9d9666): seven user-named risks cannot fit "up to 4 to 6 outcomes and risks",
   // so the envelope and K3 contradicted each other. The user's risks win; Olumi's own additions give way first.
   + 'A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named, even when that takes the model past 6 outcomes and risks. '
-  + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
-  + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
+  + 'Leave out only what the brief neither states nor implies: no speculative options, and no risk or outcome that could not change the answer. '
   // ⛔ THE COUNT IS THE GATE'S (AIQ #70 5858990481 item 5: the first draft's budget is the truth-safe lever). The rule
   // named only the decision's links, but admission also links each option to each factor it acts on, and the held
   // status quo to each factor the others act on (`admit-model.ts`): a served-shape draft the rule counted at 23 was
   // 33 at the gate (`construction-first-draft-link-budget.test.ts`).
-  + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option, one from each option to each factor it acts on (for the option that keeps things as they are, each factor the other options act on) and each entry in \`links\`. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas. THE ONE EXCEPTION IS THE USER'S OWN MATERIAL: when what the user stated (their options, figures, relationships and the risks they named) cannot fit this budget, keep all of it and leave out your own additions; that model is admitted, not refused.`,
+  + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option, one from each option to each factor it acts on (for the option that keeps things as they are, each factor the other options act on) and each entry in \`links\`. Every item must be connected: an oversized first model is refused before it reaches the canvas. THE ONE EXCEPTION IS THE USER'S OWN MATERIAL: when what the user stated (their options, figures, relationships and the risks they named) cannot fit this budget, keep all of it and leave out your own additions; that model is admitted, not refused.`,
   // ⛔ AN ADDED OPTION THE MODEL CANNOT TELL APART IS A DEAD START (DL #70 5842361028 / 5842400604). Served ef99a97 and
   // cb1778b added "Test £59 with AI release" beside the user's £59 option; the fill made them identical and the run
   // refused NOTHING_TO_COMPARE. Admission withholds such an option and says so (`admit-model.ts`), but withholding
@@ -439,7 +439,7 @@ export const BUILD_INSTRUCTIONS = [
   + 'Only when you genuinely cannot say which way a link runs, set its direction to "unknown" AND add a question to `unknowns` asking the user which way it runs. An "unknown" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state.',
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
-  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
+  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), negative whenever the link’s direction is negative, and `basis` one short line on why that size and direction hold, with `effect_provenance` "explicit" only when the user stated that size. SIZE EVERY CAUSAL LINK, links into the goal first: where the brief gives no size, give your own estimate with `effect_provenance` "ai_proposed" and a `basis` line saying in plain words why that size is plausible; never cite a source, study or figure the brief does not contain. Leave all three null only for a link you cannot size defensibly, and then name that link’s size as a question in `unknowns`.',
   // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
   // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
   // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general

@@ -10,7 +10,7 @@ export const SERVED_WIDEN_CLAUSE =
   'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.';
 
 /** The compact clause this lane installed, as it appears in BUILD_INSTRUCTIONS. */
-export const COMPACT_MARKER = 'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE';
+export const COMPACT_MARKER = 'DRAW THE DECISION THE BRIEF DESCRIBES, IN FULL BUT WITHIN THE SIZE LIMIT';
 
 /** The compact clause runs from its marker to the END of the budget instruction, exception included. */
 const COMPACT_CLAUSE = new RegExp(`${COMPACT_MARKER}[\\s\\S]*?that model is admitted, not refused\\.`);
