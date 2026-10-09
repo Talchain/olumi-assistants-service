@@ -94,7 +94,7 @@ import { isDirectedEdge } from '../../schemas/graph.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
-import { goalDeadlineOf } from '../goal-target/goal-kind.js';
+import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
@@ -1093,7 +1093,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (written.kind === 'unchanged') return { kind: 'unchanged' };
     const graph = projectGraphForPersistence(written.mutatedGraph);
     if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date)
-      || goalDeadlineOf(graph.nodes.find((n) => n.id === goalHorizon.goal_id)) !== goalHorizon.deadline) {
+      || goalDeadlineFromRecord(graph, goalHorizon.goal_id) !== goalHorizon.deadline) {
       return { kind: 'refused', reason: 'deadline_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);

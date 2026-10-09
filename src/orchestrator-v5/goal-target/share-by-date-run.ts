@@ -1,6 +1,6 @@
 /** S2a Run-only frame attestation and per-option mathematical licence input. */
 import { draftedTeamPartOf, eventShareCarrierOf, isEventShareForecast, unresolvedEventOptionIds } from './event-by-date-model.js';
-import { goalDeadlineOf, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
+import { goalDeadlineFromRecord, shareByDateGoalOf, soleGoalOf, statedTeamShareOf } from './goal-kind.js';
 import { timeBetween, todayInLondon } from './deadline-date.js';
 import { gate, type ShareGate, type ShareParts } from './event-by-date-share.js';
 import type { GoalChanceDisplayRounding } from './goal-chance-display.js';
@@ -22,7 +22,7 @@ export function shareChanceRunBlock(graph: unknown): { reason_code: 'team_time_r
   if (g === null || typeof g !== 'object' || !Array.isArray(g.nodes)) return null;
   const share = shareByDateGoalForChanceOf(graph);
   if (share === null && !isEventShareForecast(graph)) return null;
-  const deadline = goalDeadlineOf(soleGoalOf(graph));
+  const deadline = goalDeadlineFromRecord(graph, soleGoalOf(graph)?.id);
   if (deadline !== undefined && deadline <= todayInLondon(new Date())) {
     return { reason_code: 'goal_deadline_passed', words: 'Not shown. The deadline has passed. State a future deadline before rerunning.' };
   }

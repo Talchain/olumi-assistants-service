@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { readGoalRecord, GOAL_RECORD_PRECEDENCE, type GoalRecord } from '../goal-record.js';
 import { statedGoalTargetOf } from '../stated-goal-target.js';
-import { goalDeadlineOf, goalUnitOf, soleGoalOf } from '../goal-kind.js';
+import { goalDeadlineFromRecord, goalUnitOf, soleGoalOf } from '../goal-kind.js';
 import { readHeldGoalComparator } from '../goal-direction.js';
 import { scoredGoalIdOf } from '../../admission/target-testability.js';
 
@@ -75,7 +75,7 @@ const parity = captures.flatMap(c => {
       reader: 'statedGoalTargetOf', field: k, expected: stated?.[k],
       actual: record?.target?.[({ value: 'raw', unit: 'unit', frame: 'frame', held: 'comparator' } as const)[k]],
     })),
-    { reader: 'goalDeadlineOf', field: 'deadline', expected: goalDeadlineOf(c.goal), actual: record?.horizon?.deadline },
+    { reader: 'goalDeadlineFromRecord', field: 'deadline', expected: goalDeadlineFromRecord(c.graph, c.goal.id), actual: record?.horizon?.deadline },
     { reader: 'goalUnitOf', field: 'unit', expected: goalUnitOf(c.goal), actual: record?.target?.unit },
     { reader: 'readHeldGoalComparator', field: 'comparator', expected: readHeldGoalComparator(c.graph, c.goal.id), actual: record?.target?.comparator },
     { reader: 'soleGoalOf', field: 'identity', expected: soleGoalOf(c.graph)?.id, actual: record?.goal_id },
@@ -137,8 +137,8 @@ describe('identity, precedence, absence and typed future basis', () => {
   it('MULTI-GOAL reads only B and B own non-deadline constraint, contrasting soleGoalOf', () => {
     expect(soleGoalOf(multi)).toBeUndefined();
     expect(scoredGoalIdOf(multi)).toBe('A');
-    expect(goalDeadlineOf(multi.nodes[1])).toBe('2027-01-01');
-    expect(readGoalRecord(multi, 'B')?.horizon?.deadline).toBe(goalDeadlineOf(multi.nodes[1]));
+    expect(goalDeadlineFromRecord(multi, 'B')).toBe('2027-01-01');
+    expect(readGoalRecord(multi, 'B')?.horizon?.deadline).toBe(goalDeadlineFromRecord(multi, 'B'));
     expect(readGoalRecord(multi, 'B')).toEqual({
       goal_id: 'B', label: 'at least 999',
       target: { raw: 40, unit: '£', frame: 'level', comparator: '<', source: 'user' },
@@ -190,7 +190,7 @@ describe('identity, precedence, absence and typed future basis', () => {
   it('retains legacy months and words without inventing a deadline', () => {
     const graph = { nodes: [{ id: 'B', kind: 'goal', label: 'B', goal_horizon: { months: -1 }, goal_horizon_months: 12, goal_deadline_as_stated: 'within 12 months' }] };
     expect(readGoalRecord(graph, 'B')?.horizon).toEqual({ months: 12, as_stated: 'within 12 months' });
-    expect(goalDeadlineOf(graph.nodes[0])).toBeUndefined();
+    expect(goalDeadlineFromRecord(graph, graph.nodes[0].id)).toBeUndefined();
   });
   it.each([null, 'graph', { nodes: {} }, { nodes: null }, { nodes: [null, 1, 'goal', { id: 'B', kind: 'factor' }] }])('ABSENT malformed graph %j', graph => {
     expect(() => readGoalRecord(graph, 'B')).not.toThrow();

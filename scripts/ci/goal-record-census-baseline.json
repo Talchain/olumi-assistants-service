@@ -1,5 +1,5 @@
 {
-  "source_sha": "d66576fe29a9fd68b5351065ec86ac5fd987d4df",
+  "source_sha": "9aafea573f9a4e82327ff4a13ac2a6ceec660052",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -19,19 +19,7 @@
       "src/orchestrator-v5/goal-target/goal-chance-range.ts": 3
     },
     "goalDeadlineOf": {
-      "src/orchestrator-v5/agent-lane/actions/state.ts": 2,
-      "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 3,
-      "src/orchestrator-v5/agent-lane/goal-certainty.ts": 2,
-      "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 2,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 8,
-      "src/orchestrator-v5/goal-target/event-by-date-model.ts": 3,
-      "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 3,
-      "src/orchestrator-v5/goal-target/goal-kind.ts": 3,
-      "src/orchestrator-v5/goal-target/goal-record.ts": 1,
-      "src/orchestrator-v5/goal-target/share-by-date-run.ts": 2,
-      "src/orchestrator-v5/goal-target/team-share-write.ts": 2,
-      "src/orchestrator-v5/system-events/option-intervention-edit.ts": 2,
-      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 2
+      "src/orchestrator-v5/goal-target/goal-record.ts": 1
     },
     "goalKindOf": {
       "src/orchestrator-v5/agent-lane/actions/state.ts": 2,
@@ -213,7 +201,6 @@
       "src/orchestrator-v5/goal-target/deadline-date.ts": 1,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 1,
       "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 5,
-      "src/orchestrator-v5/goal-target/goal-kind.ts": 4,
       "src/orchestrator-v5/goal-target/goal-record.ts": 6,
       "src/orchestrator-v5/system-events/dispatch.ts": 11,
       "src/orchestrator-v5/system-events/option-intervention-edit.ts": 2,
@@ -789,13 +776,13 @@
     "extractPersistedGoalTarget": 14,
     "findSoleGoalNode": 3,
     "goalChanceTargetCause": 7,
-    "goalDeadlineOf": 35,
+    "goalDeadlineOf": 1,
     "goalKindOf": 19,
     "goalUnitOf": 5,
     "goal_constraints": 435,
     "goal_deadline_as_stated": 9,
     "goal_direction": 96,
-    "goal_horizon": 56,
+    "goal_horizon": 52,
     "goal_horizon_months": 34,
     "goal_level_reading": 18,
     "goal_node_id": 280,
@@ -821,7 +808,7 @@
     "threshold_source": 33,
     "unit_reading": 79
   },
-  "total_references": 2381,
+  "total_references": 2343,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
