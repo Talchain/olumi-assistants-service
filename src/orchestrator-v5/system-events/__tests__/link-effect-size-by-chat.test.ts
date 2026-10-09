@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../../tests/utils/revision-store-double.js';
 /**
  * RT-6 step 2: the user's own unit-bearing clause can size an UNSIZED link.
  * No LLM or external store. Approval exercises the real proposer, card, canonical writer,
@@ -49,7 +50,7 @@ vi.mock('../../session/index.js', async original => ({
   ...await original<typeof import('../../session/index.js')>(),
   getSessionStore: () => {
     if (session.store === undefined) throw new Error('No serialized RT-6 store selected');
-    return session.store;
+    return withScenarioRevision(session.store);
   },
 }));
 vi.mock('../link-effect-edit.js', async original => {
@@ -91,8 +92,8 @@ function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead
   const graph = () => JSON.parse(graphJson) as Json;
   const store = createMockSessionStore({
     loadGraph: async () => graph(),
-    loadGraphAndBriefText: async () => ({ graph: graph(), briefText: null }),
-    readExistingScenario: async () => ({ userId: null, graph: graph(), briefText: null, analysisInvalidatedAt: null }),
+    loadGraphAndBriefText: async () => ({ revision: 7, graph: graph(), briefText: null }),
+    readExistingScenario: async () => ({ revision: 7, userId: null, graph: graph(), briefText: null, analysisInvalidatedAt: null }),
     readMostRecentPendingActions: async () => [],
     readAnalysisInvalidatedAt: async () => null,
     getScenarioOwner: async () => null,

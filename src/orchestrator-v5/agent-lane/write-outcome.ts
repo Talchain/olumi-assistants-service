@@ -99,6 +99,8 @@ const REFUSAL_WORDS: Record<string, string> = {
  * `model_not_readable_after_write` mean the read-back itself failed. The user read "Partly saved: the change was
  * refused (not_verified)." for an option that DID land. Said as what is true: sent, not confirmed, and how to check.
  */
+export const DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE = 'The link was saved, but the scenario changed before its accepted estimate detail could be saved. Check the saved link and try accepting its estimate again.';
+
 const UNCONFIRMED_WORDS: Record<string, string> = {
   not_verified: 'The change was sent, but it could not be confirmed: the model may have changed again straight afterwards, so Olumi cannot yet say what it now holds. Look at the model, or ask me to check it.',
   not_confirmed: 'The change was sent, but it could not be confirmed: Olumi could not read the model back afterwards. Ask me to check whether it was recorded.',
@@ -438,6 +440,9 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
     return `Partly saved${versionPhrase(vs)}: "${label}" was added${linkedTo.length > 0 ? ` and linked to ${linkedTo.join(', ')}` : ''}, `
       + `but not yet linked to ${missing.join(', ')}. Approving the same change again will try only the missing ${missing.length === 1 ? 'link' : 'links'}; `
       + 'if the model has changed since, you will be asked to confirm again.';
+  }
+  if (r.mutated === true && r.outcome === 'link_saved_estimate_not_saved') {
+    return DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE;
   }
   const code = String(r.refusal ?? '');
   const unconfirmed = UNCONFIRMED_WORDS[code];

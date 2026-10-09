@@ -129,6 +129,54 @@ function guaranteesRevision(expression: ts.Expression, alreadySupplied = false, 
   return supplied;
 }
 
+/** Track local graph transformations back to their combined-read invocation.
+ * When a provenance is known, a later combined read cannot supply its revision.
+ * Opaque forwarding seams are covered separately below and by runtime rows.
+ */
+function readOrigins(expression: ts.Expression, seen = new Set<ts.Node>()): Set<number> {
+  const value = unwrap(expression);
+  if (seen.has(value)) return new Set();
+  const next = new Set(seen).add(value);
+  if (ts.isAwaitExpression(value)) return readOrigins(value.expression, next);
+  if (ts.isPropertyAccessExpression(value)) return readOrigins(value.expression, next);
+  if (ts.isIdentifier(value)) {
+    let scope: ts.Node | undefined = value.parent;
+    while (scope) {
+      const declarations: ts.VariableDeclaration[] = [];
+      const scan = (node: ts.Node): void => {
+        if (node !== scope && ts.isFunctionLike(node)) return;
+        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
+          && node.name.text === value.text && node.initializer && node.getStart() < value.getStart()) declarations.push(node);
+        ts.forEachChild(node, scan);
+      };
+      scan(scope);
+      const declaration = declarations.sort((a, b) => b.getStart() - a.getStart())[0];
+      if (declaration?.initializer) return readOrigins(declaration.initializer, next);
+      scope = scope.parent;
+    }
+    return new Set();
+  }
+  if (ts.isCallExpression(value)) {
+    const name = ts.isPropertyAccessExpression(value.expression) ? value.expression.name.text : value.expression.getText();
+    if (['loadPersistedScenarioStateStrict', 'loadGraphAndBriefText'].includes(name)) return new Set([value.getStart()]);
+    return new Set(value.arguments.flatMap(arg => [...readOrigins(arg, next)]));
+  }
+  if (ts.isObjectLiteralExpression(value)) return new Set(value.properties.flatMap(property =>
+    ts.isPropertyAssignment(property) ? [...readOrigins(property.initializer, next)] : []));
+  if (ts.isConditionalExpression(value)) return new Set([
+    ...readOrigins(value.whenTrue, next), ...readOrigins(value.whenFalse, next),
+  ]);
+  return new Set();
+}
+
+function revisionMatchesGraphRead(write: ts.Expression): boolean {
+  const graphs = propertyValues(write, 'graph').flatMap(value => [...readOrigins(value)]);
+  const revisions = propertyValues(write, 'expectedRevision').flatMap(value => [...readOrigins(value)]);
+  // A known graph origin MUST have the same known read as its expectation.
+  return graphs.length === 0 || (new Set(graphs).size === 1 && revisions.length > 0
+    && revisions.every(revision => revision === graphs[0]));
+}
+
 interface RevisionDoor {
   readonly path: string;
   readonly line: number;
@@ -165,7 +213,7 @@ function revisionDoors(file: ts.SourceFile): RevisionDoor[] {
             path: file.fileName,
             line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
             target: name!,
-            hasRevision: guaranteesRevision(write),
+            hasRevision: guaranteesRevision(write) && revisionMatchesGraphRead(write),
           });
         }
       }
@@ -224,6 +272,19 @@ describe('versioned graph writer revision propagation', () => {
     const supplied = "commitDirectAnswer(response, { graph: after, expectedRevision: state.revision });";
     expect(revisionDoors(parse('fixture.ts', missing)).map((door) => door.hasRevision)).toEqual([false]);
     expect(revisionDoors(parse('fixture.ts', supplied)).map((door) => door.hasRevision)).toEqual([true]);
+  });
+
+  it('PLANTED MUTANT: graph from read 1 cannot use revision from read 2', () => {
+    const fixture = (revision: string) => parse('identity.ts', `
+      async function writer() {
+        const original = await loadPersistedScenarioStateStrict(id);
+        const edited = merge({ mutatedGraph: patch, persistedBase: original.graph });
+        const later = await loadPersistedScenarioStateStrict(id);
+        commitDirectAnswer(response, { graph: edited, expectedRevision: ${revision}.revision });
+      }
+    `);
+    expect(revisionDoors(fixture('original')).map(door => door.hasRevision)).toEqual([true]);
+    expect(revisionDoors(fixture('later')).map(door => door.hasRevision)).toEqual([false]);
   });
 
   it('does not accept comments, nested fields, undefined or invented/default revisions', () => {

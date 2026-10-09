@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ AN OPTION OLUMI ADDED KEEPS ITS MARK THROUGH THE REGISTER WRITE AND THE PERSISTED READ (DL #72 5887755959: "it must
  * survive the actual admission/register/read path"). The register write keeps any key; the strip is CEE's `NodeV3` parse,
@@ -36,7 +37,7 @@ const readMostRecentPendingActions = vi.fn();
 const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn, readMostRecentPendingActions };
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));

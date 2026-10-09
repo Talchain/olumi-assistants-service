@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /** RC3 (a′): the identity stamp survives the same register → persistence → Run-loader parse as event_risk. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -24,7 +25,7 @@ const readMostRecentPendingActions = vi.fn();
 const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn, readMostRecentPendingActions };
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
 vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => ({

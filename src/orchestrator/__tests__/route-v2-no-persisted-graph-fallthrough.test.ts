@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../../orchestrator-v5/append-v6-flag.js';
 /**
  * ROADMAP 2.388 + Core System B — empty-model edit-word intake.
  *
@@ -12,7 +13,7 @@
  * persisted graph still return typed recovery once the semantic router chooses
  * conversation and the established edit lane performs its canonical read.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
@@ -45,6 +46,7 @@ let persistedGraphForRead: unknown = null;
 /** `true` ⇒ `loadGraph` throws ⇒ `session_store_failed`. */
 let loadGraphThrows = false;
 let loadGraphCalls = 0;
+let combinedReadCalls = 0;
 let hasPriorTurnsForRead = false;
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
@@ -64,10 +66,11 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
       if (loadGraphThrows) throw new Error('simulated session store failure');
       return persistedGraphForRead;
     },
-    loadGraphAndBriefText: async () => ({
-      graph: loadGraphThrows ? null : persistedGraphForRead,
-      briefText: null,
-    }),
+    loadGraphAndBriefText: async () => {
+      combinedReadCalls += 1;
+      if (loadGraphThrows) throw new Error('simulated session store failure');
+      return { revision: 7, graph: persistedGraphForRead, briefText: null };
+    },
     readMostRecentPendingActions: async () => [],
     hasPriorTurns: async () => hasPriorTurnsForRead,
     countTurns: async () => 0,
@@ -276,6 +279,9 @@ describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical
     persistedGraphForRead = null;
     loadGraphThrows = false;
     loadGraphCalls = 0;
+    combinedReadCalls = 0;
+    // A2: existing rows pin the rollback graph-only reader census and 200 recovery.
+    __setUseAppendV6ForTest(false);
     hasPriorTurnsForRead = false;
     events = [];
     setTestSink((name, data) => {
@@ -287,6 +293,21 @@ describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical
     runtimeMocks.runTurnExecutor.mockReset();
     chatWithToolsMock.mockClear();
     appendMock.mockClear();
+  });
+
+  afterEach(() => __setUseAppendV6ForTest(true));
+
+  it('CAS ON: grounded strategic intake starts the draft from combined scenario snapshots', async () => {
+    __setUseAppendV6ForTest(true);
+    modelRoute('start_model'); mockDraftResult();
+    const message = 'Increase annual revenue from £4 million today to £6 million within 12 months.';
+    const { status, body } = await turn(app, message);
+    expect(status).toBe(200);
+    expect(exitPath(body)).toBe('draft_graph');
+    expect(runtimeMocks.dispatchDraftGraph).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.dispatchDraftGraph.mock.calls[0]![0].payload.message).toBe(message);
+    expect(loadGraphCalls).toBe(0);
+    expect(combinedReadCalls).toBe(2);
   });
 
   it('null canonical graph + grounded edit-word goal starts the existing draft with exact user text', async () => {
@@ -452,6 +473,9 @@ describe('ROADMAP 2.388 / System B — semantic routing after a strict canonical
   });
 
   describe('PRESERVATION — the transient failures still say "try again in a moment"', () => {
+    // A2: rollback-only 200 recovery copy; CAS ON returns the named 409 refusal.
+    beforeEach(() => __setUseAppendV6ForTest(false));
+    afterEach(() => __setUseAppendV6ForTest(true));
     it('`session_store_failed`: the store throwing still returns the recovery copy at `edit_graph`', async () => {
       loadGraphThrows = true;
       const { status, body } = await turn(app, 'Add a second sales team in Berlin.');

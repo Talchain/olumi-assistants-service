@@ -244,7 +244,7 @@ import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import { quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
+import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -7414,7 +7414,11 @@ export function createAgentCapabilities(
               band: drawnBand, author: 'model_proposed' }],
           }));
         } catch (err) {
-          if (isRevisionConflict(err)) throw err;
+          if (isRevisionConflict(err)) {
+            return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed',
+              proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts: edgeReceipts,
+              outcome: 'link_saved_estimate_not_saved', detail: DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE };
+          }
           return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
             detail: 'The link was added, but recording its accepted Olumi estimate could not be confirmed. Check the saved model before continuing.' };
         }

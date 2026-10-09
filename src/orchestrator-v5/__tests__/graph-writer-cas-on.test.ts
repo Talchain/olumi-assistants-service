@@ -86,11 +86,12 @@ function baseGraph() {
  * exactly, table filters are honoured, and the append persists turn + graph +
  * facts atomically. No store method, commit or persisted-graph read is mocked.
  */
-function harness(options: { failGraphReadAt?: number; renameInFlight?: boolean; bareReturn?: boolean; missingRpc?: boolean } = {}) {
+function harness(options: { failGraphReadAt?: number; renameInFlight?: boolean; bareReturn?: boolean; missingRpc?: boolean; advanceAfterFirstGraphRead?: boolean } = {}) {
   ports.edit.mockClear();
   ports.draft.mockClear();
   const tables: Record<string, Row[]> = {
     scenarios: [{ id: SCENARIO, user_id: null, graph: baseGraph(),
+      ...(options.advanceAfterFirstGraphRead ? { graph: { ...baseGraph(), snapshot: 'A' } } : {}),
       brief_text: 'Compare holding £49 with raising the price to £59.',
       analysis_invalidated_at: null, revision: 7 }],
     v5_conversation_turns: [], v5_handler_facts: [], v5_turn_fence: [],
@@ -160,6 +161,11 @@ function harness(options: { failGraphReadAt?: number; renameInFlight?: boolean; 
         }
         const rows = filtered.slice(0, limit).map(r => columns === '*' ? structuredClone(r)
           : Object.fromEntries(columns.split(',').map(c => [c.trim(), structuredClone(r[c.trim()])])));
+        if (options.advanceAfterFirstGraphRead && table === 'scenarios' && graphReads === 1
+          && columns.split(',').map(c => c.trim()).includes('graph')) {
+          tables.scenarios![0]!.graph = { ...baseGraph(), snapshot: 'B' };
+          tables.scenarios![0]!.revision = 8;
+        }
         return { data: selectOptions?.head ? null : rows, error: null,
           ...(selectOptions?.count ? { count: filtered.length } : {}) };
       };
@@ -309,6 +315,16 @@ describe('commit B server authority and real append doors', () => {
     expect((saved.graph as typeof server).nodes.find(n => n.id === 'ui')!.label).toBe('Price revised');
     expect(h.rpcCalls.find(c => c.args.p_graph != null)?.args.p_expected_revision).toBe(8);
   });
+  it('stored zero-sigma edge permits an unrelated no-race rename without changing its sigma', async () => {
+    const h = harness(); const raw = baseGraph(); raw.edges[0]!.strength!.std = 0;
+    h.tables.scenarios![0]!.graph = raw; setEdit();
+    const result = await edit(h);
+    expect(result.commitPerformed).toBe(true);
+    const saved = await h.store.loadGraphAndBriefText(SCENARIO);
+    expect((saved.graph as typeof raw).nodes.find(n => n.id === 'fac_price')!.label).toBe('Price revised');
+    expect((saved.graph as typeof raw).edges[0]!.strength!.std).toBe(0);
+    expect(h.rpcCalls.find(c => c.args.p_graph != null)?.args.p_expected_revision).toBe(7);
+  });
   it.each([true, false])('closed by B (2), versions=%s: unparseable non-empty server graph refuses without a provider call or write', async versionsEnabled => {
     vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', String(versionsEnabled)); _resetConfigCache();
     const h = harness(); h.tables.scenarios![0]!.graph = { corrupt: true }; setEdit();
@@ -346,6 +362,18 @@ describe('commit B server authority and real append doors', () => {
     const graph = saved.graph as ReturnType<typeof baseGraph>;
     expect(graph.nodes.find(n => n.id === 'fac_price')!.observed_state!.value).toBe(renameInFlight ? 0.49 : 0.7);
     expect(h.rpcCalls.find(c => c.args.p_graph != null)?.name).toBe('append_turn_atomic_v6');
+  });
+  it('D1 merges A/r7 and submits r7 even when a subsequent read would return B/r8', async () => {
+    const h = harness({ advanceAfterFirstGraphRead: true });
+    const { runTurnExecutor } = await import('../turn-executor.js');
+    await runTurnExecutor(message('Set Price to 0.7'), 'identity-d1', { graphState: baseGraph() });
+    const write = h.rpcCalls.find(call => call.args.p_graph != null);
+    expect(write).toBeDefined();
+    expect(write!.args.p_expected_revision).toBe(7);
+    expect(write!.args.p_graph).toMatchObject({ snapshot: 'A' });
+    expect(h.tables.scenarios![0]!.graph).toMatchObject({ snapshot: 'B' });
+    expect(h.tables.scenarios![0]!.revision).toBe(8);
+    expect(h.tables.v5_conversation_turns).toEqual([]);
   });
   it('v4r equal revision commits and threads returned revision; same turn replay uses cached turn', async () => {
     const h = harness(); const w = unversioned();

@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../../src/orchestrator-v5/append-v6-flag.js';
 /**
  * Context Architecture v2 — S2 "brief → edit/repair" (ROADMAP 1.199).
  *
@@ -46,6 +47,8 @@ vi.mock('../../src/orchestrator-v5/build-turn-context.js', async (importOriginal
   const actual = await importOriginal<typeof import('../../src/orchestrator-v5/build-turn-context.js')>();
   return {
     ...actual,
+    // B-FIX1: the combined read follows the existing graph double.
+    loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../src/orchestrator-v5/build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
     loadPersistedGraphStrict: vi.fn().mockResolvedValue(null),
     loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
     loadScenarioBriefText: vi.fn().mockResolvedValue(null),
@@ -214,6 +217,8 @@ describe('serialiseEditContextForLLM — ## Decision Brief section', () => {
 
 describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => {
   it('reads the scenario brief UNCONDITIONALLY and threads the disclosed 1,000-char slice', async () => {
+    // A2: the rollback path's separate brief reader; CAS ON carries it in the original combined snapshot.
+    __setUseAppendV6ForTest(false);
     // Mutation-check: reverting the flip (re-adding the flag guard, default
     // OFF) makes THIS assertion RED — loadScenarioBriefText would not be called
     // and context.brief would be absent.
@@ -236,6 +241,16 @@ describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => 
       truncated: true,
       original_chars: 4_000,
     });
+  });
+
+  it('CAS ON threads the brief from the combined graph/revision snapshot without a separate brief read', async () => {
+    __setUseAppendV6ForTest(true);
+    await dispatchEditGraph({ payload: makePayload(), requestId: 'req-combined-brief', request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH, analysisState: null,
+      persistedEditBase: { graph: null, briefText: 'w'.repeat(4_000), revision: 7 } });
+    expect(loadScenarioBriefText).not.toHaveBeenCalled();
+    expect((handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]![0].brief)
+      .toEqual({ text: 'w'.repeat(1_000), truncated: true, original_chars: 4_000 });
   });
 
   it('ANAPHORA (S2 value): the threaded brief renders the ## Decision Brief section so a referent resolves', () => {
@@ -292,3 +307,5 @@ describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => 
     expect(context.brief ?? null).toBeNull();
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

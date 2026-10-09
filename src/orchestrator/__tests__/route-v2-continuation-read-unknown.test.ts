@@ -96,9 +96,8 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
       storedGraph = graph;
     },
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => {
-      if (loadGraphThrows) throw new Error('session store unreachable (loadGraphAndBriefText)');
-      return { graph: storedGraph, briefText: null };
+    loadGraphAndBriefText: async (scenarioId: string) => {
+      return { revision: 7, graph: await loadGraphMock(scenarioId), briefText: null };
     },
     readMostRecentPendingActions: async () => [],
     markGraphWriteFailed: async () => undefined,

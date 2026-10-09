@@ -138,6 +138,8 @@ import type {
   V2RunResponseEnvelope,
 } from '../../orchestrator/types.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
+import { floorGraphSigmaForCompute } from '../../validators/numeric-bounds.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import type {
   AnalysisStateIngress,
   GraphStateIngress,
@@ -1930,9 +1932,25 @@ function editResultToOlumiResponse(
 function graphStateToGraphV3WithParseResult(
   graphState: GraphStateIngress,
   requestId: string,
+  sanctionedPersisted = false,
 ): { graph: GraphV3T; strict: boolean } {
-  const parsed = GraphV3.safeParse(graphState);
+  const parsed = GraphV3.safeParse(sanctionedPersisted ? floorGraphSigmaForCompute(graphState).graph : graphState);
   if (parsed.success) {
+    // The sanctioned projection is a validity gate only. Preserve stored
+    // sigma bytes in the provider/merge graph, just as the atomic version gate
+    // preserves them in hashes and persistence.
+    if (sanctionedPersisted) {
+      parsed.data.edges.forEach((edge, index) => {
+        const strength = graphState.edges[index]?.strength;
+        const std = strength && typeof strength === 'object' && 'std' in strength ? strength.std : undefined;
+        if (typeof std === 'number' && std <= 0 && edge.strength) edge.strength.std = std;
+      });
+      parsed.data.nodes.forEach((node, index) => {
+        const observed = graphState.nodes[index]?.observed_state;
+        const std = observed && typeof observed === 'object' && 'std' in observed ? observed.std : undefined;
+        if (typeof std === 'number' && std <= 0 && node.observed_state) node.observed_state.std = std;
+      });
+    }
     return { graph: parsed.data, strict: true };
   }
   return { graph: buildStructuralFallback(graphState, requestId, parsed.error), strict: false };
@@ -2297,9 +2315,9 @@ export async function dispatchEditGraph(
       editBase = params.persistedEditBase ?? await loadPersistedScenarioStateStrict(payload.scenario_id);
       if (!Number.isSafeInteger(editBase.revision) || (editBase.revision ?? -1) < 0) throw new Error('Invalid revision');
       if (editBase.graph !== null) {
-        const parsed = GraphV3.safeParse(editBase.graph);
+        const parsed = GraphV3.safeParse(floorGraphSigmaForCompute(editBase.graph).graph);
         if (!parsed.success) throw new Error('Invalid server graph');
-        graphState = parsed.data;
+        graphState = GraphStateIngressSchema.parse(editBase.graph);
       }
     } catch (cause) {
       logGraphRevisionConflict({ scenario_id: payload.scenario_id, turn_id: payload.turn_id,
@@ -2312,7 +2330,7 @@ export async function dispatchEditGraph(
   }
 
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
-    graphStateToGraphV3WithParseResult(graphState, requestId);
+    graphStateToGraphV3WithParseResult(graphState, requestId, editBase?.graph != null);
   let recordedAnswer: RecordedEffectAnswer | null = null;
   if (params.recordedEffectAnswer !== undefined) {
     const resolved = resolveRecordedOptionEffectAnswer({

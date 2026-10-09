@@ -95,8 +95,8 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
     storeDraftGraph: async () => undefined,
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => ({
-      graph: persistedGraphForRead,
+    loadGraphAndBriefText: async (scenarioId: string) => ({ revision: 7,
+      graph: await loadGraphMock(scenarioId),
       briefText: persistedBriefTextForRead,
     }),
     readMostRecentPendingActions: async () => pendingActionsForRead,

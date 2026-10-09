@@ -54,7 +54,7 @@ beforeEach(() => {
   // Any accidental network call fails the row instead of reaching a provider/database.
   stub(globalThis, 'fetch', async () => { assert.fail('offline rows prohibit network'); });
   stub(store, 'loadGraph', async () => graph);
-  stub(store, 'loadGraphAndBriefText', async () => ({ graph, briefText: null }));
+  stub(store, 'loadGraphAndBriefText', async (scenarioId: string) => ({ revision: 7, graph: await store.loadGraph(scenarioId), briefText: null }));
   stub(store, 'readMostRecentPendingActions', async () => []);
   stub(store, 'readAnalysisInvalidatedAt', async () => null);
   stub(store, 'readRecent', async () => []);

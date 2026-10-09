@@ -3,7 +3,7 @@ import type { FastifyRequest } from 'fastify';
 import { getRequestId } from './request-id.js';
 import { redactLogMessage } from './redaction.js';
 import { log } from './telemetry.js';
-import { isRevisionConflict, readRevisionConflictDetails } from '../orchestrator-v5/graph-revision-conflict.js';
+import { REVISION_CONFLICT_MESSAGE, isRevisionConflict, readRevisionConflictDetails } from '../orchestrator-v5/graph-revision-conflict.js';
 
 /**
  * Error codes for structured error responses
@@ -192,7 +192,7 @@ export function toErrorV1(error: unknown, requestOrOptions?: FastifyRequest | To
   if (isRevisionConflict(error)) {
     const revisions = readRevisionConflictDetails(error);
     const result = { ...buildErrorV1('revision_conflict',
-      'This model changed while the edit was being saved. Refresh and reconfirm.',
+      REVISION_CONFLICT_MESSAGE,
       { code: 'revision_conflict', ...revisions }, requestId), ...revisions };
     if (stage) result.stage = stage;
     return result;

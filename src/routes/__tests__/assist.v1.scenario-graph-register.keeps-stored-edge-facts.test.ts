@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ A RE-REGISTER KEEPS THE STORED CEE-OWNED FACTS OF AN UNCHANGED EDGE.
  *
@@ -34,7 +35,7 @@ vi.mock('../../config/index.js', async (importOriginal) => {
 const { storeRef } = vi.hoisted(() => ({ storeRef: { value: null as unknown } }));
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, getSessionStore: () => storeRef.value };
+  return { ...actual, getSessionStore: () => withScenarioRevision(storeRef.value) };
 });
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
 vi.mock('../../orchestrator/user-identity.js', async (importOriginal) => {

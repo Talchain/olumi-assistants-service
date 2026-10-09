@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../utils/revision-store-double.js';
 import { installOwnershipHarness } from '../../utils/ownership-route-harness.js';
 /**
  * Structural invariant: every dispatch branch in route-v2.ts runs the
@@ -40,7 +41,7 @@ const getScenarioOwnerSpy = vi.fn(async () => null);
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
+  getSessionStore: () => withScenarioRevision(({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -49,7 +50,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     scenarioExists: async () => true,
     getScenarioOwner: getScenarioOwnerSpy,
     ensureScenarioExists: ensureScenarioExistsSpy,
-  }),
+  })),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));
