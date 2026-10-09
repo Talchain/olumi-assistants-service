@@ -2493,7 +2493,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? null : whatChangesFaceLine(state.analysisResult, state.graph);
       const replayComposeText = withCellHorizon(withoutProposalIds(replayText), state.graph, replayChanceCells);
       const composedCandidate = replayObligations === undefined ? null
-        : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
+        : composeReplyShape({ analysisResult: state.analysisResult, text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
           ...widenedRunWordsOf(state.graph, replayChanceCells),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
@@ -5076,6 +5076,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (typeof question === 'string' && controlsOnReply.some((action) => action.id === pending.chip_id)) typedControlQuestions.push(question);
       }
       const composedReply = composeReplyShape({
+        analysisResult,
         text: reply,
         chanceCells,
         ...(faceContract === undefined ? {} : { faceContract }),

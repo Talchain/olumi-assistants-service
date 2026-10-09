@@ -15,7 +15,7 @@ import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-mod
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../orchestrator/context/option-result-source.js';
 import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict, heldGoalDeadline, heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
-import { goalHorizonSteadyWhyLine } from '../goal-target/goal-horizon-detail.js';
+import { goalHorizonSteadyWhyLine, goalStockMethodWhyLine } from '../goal-target/goal-horizon-detail.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
@@ -283,13 +283,15 @@ export function withUntestedHorizonWarning<E>(
  */
 export function withShortHorizonBesideChance<E>(
   envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[] = [], accumulationWithdrawn = false,
+  submittedOptions: readonly { interventions?: unknown }[] = [],
 ): E {
-  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn);
+  return withCellHorizonWarning(envelope, graph, cells, accumulationWithdrawn, submittedOptions);
 }
 
 /** Replace any intermediate wording with the final cell form; the warning and licence stay in agreement. */
 function withCellHorizonWarning<E>(
   envelope: E, graph: unknown, cells: readonly CanonicalAnalysisCell[], accumulationWithdrawn: boolean,
+  submittedOptions: readonly { interventions?: unknown }[] = [],
 ): E {
   if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const env = envelope as Rec;
@@ -303,7 +305,8 @@ function withCellHorizonWarning<E>(
       ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');
   const hasRange = cells.some(cell => cell.kind === 'range');
-  const steadyLine = verdict === 'steady_attested' && hasChance ? goalHorizonSteadyWhyLine(graph) : null;
+  const steadyLine = !hasChance ? null : verdict === 'steady_attested' ? goalHorizonSteadyWhyLine(graph)
+    : verdict === 'computed_at_h' ? goalStockMethodWhyLine(graph, submittedOptions) : null;
   let changed = false;
   let wroteHorizon = false;
   let wroteSteady = false;
