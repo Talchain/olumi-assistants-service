@@ -246,6 +246,8 @@ export interface GoalScopeDeclaration {
 
 /** "`outcome` is `factors` multiplied together" — a definition the drafter states, by exact label. */
 export interface CandidateIdentity {
+  /** Transient admission reading; never persisted on an identity. */
+  readonly reading?: 'net' | 'gross';
   readonly outcome: string;
   readonly operation: string;
   readonly factors: readonly string[];

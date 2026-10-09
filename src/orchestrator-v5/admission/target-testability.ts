@@ -116,8 +116,9 @@ export function scoredGoalIdOf(graph: unknown, scoredGoalId?: unknown): string |
  */
 function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolean {
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
-  if (identity?.operation !== 'product' || identity.stated_in_brief !== true || !Array.isArray(identity.factor_ids)
-    || identity.factor_ids.length !== 2) return false;
+  const unary = identity?.operation === 'sum' && Array.isArray(identity.factor_ids) && identity.factor_ids.length === 1;
+  if ((!unary && identity?.operation !== 'product') || identity?.stated_in_brief !== true
+    || !Array.isArray(identity.factor_ids) || (!unary && identity.factor_ids.length !== 2)) return false;
   const byId = new Map(nodes.filter(isRec).map(n => [n.id, n]));
   const levels = identity.factor_ids.map((id) => {
     const n = byId.get(id);
@@ -133,9 +134,12 @@ function confirmedProductHasLevels(nodes: readonly unknown[], goal: Rec): boolea
       });
       return parts.every(part => part !== undefined) ? { unit: parts[0]!.unit, label: String(id) } : undefined;
     }
+    if (unary) return undefined;
     const os = isRec(n?.observed_state) ? n!.observed_state : undefined;
     return os !== undefined && finite(os.raw_value) ? { unit: os.unit, label: String(id) } : undefined;
   });
+  if (unary) return levels[0] !== undefined && typeof levels[0].unit === 'string'
+    && typeof goal.goal_threshold_unit === 'string' && sameUnit(goal.goal_threshold_unit, levels[0].unit);
   if (levels[0] === undefined || levels[1] === undefined) return false;
   // Codex r2 P1 (#2816): the factors' units must compose into the TARGET's currency and period (a target edited to
   // another currency keeps the confirmed identity; nothing downstream converts it).

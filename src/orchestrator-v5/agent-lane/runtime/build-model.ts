@@ -63,7 +63,7 @@ import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js'
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withRateCountProducts } from '../rate-count-product.js';
-import { admitAccumulationIdentities, withAccumulationCarriers } from '../accumulation-identity.js';
+import { admitAccumulationIdentities, withAdmittedAccumulations } from '../accumulation-identity.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -2251,11 +2251,12 @@ export async function buildModelFromBrief(
     if (accumulation.loss.length > 0) {
       admitted = { ...admitted, loss: [...admitted.loss, ...accumulation.loss.map((l) => l as AdmittedModel['loss'][number])] };
     }
+    const accumulated = withAdmittedAccumulations(goalNodes, admitted.edges, accumulation);
     const prePersistGraph = refitFramesForStatedEffects({
       // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
       // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-      nodes: markOlumiOptions(withAccumulationCarriers(goalNodes, accumulation.carriers), candidate, brief),
-      edges: admitted.edges,
+      nodes: markOlumiOptions(accumulated.nodes, candidate, brief),
+      edges: accumulated.edges,
       ...(admitted.goal_constraints.length > 0
         ? { goal_constraints: admitted.goal_constraints }
         : {}),

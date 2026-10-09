@@ -12,6 +12,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { readMoneyTotal, readUnitParts } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { levelBeforeTermsTail } from './identity-proposal.js';
+import { heldGoalHorizonMonths } from '../goal-target/goal-horizon-verdict.js';
 import { GOAL_LEVEL_FROM_IDENTITY_INPUTS } from '../admission/identity-evaluations.js';
 
 export { GOAL_LEVEL_FROM_IDENTITY_INPUTS } from '../admission/identity-evaluations.js';
@@ -53,7 +54,16 @@ function sayGoalLevels(warnings: unknown, graph: unknown): unknown {
       ? nodes.map(rec).find((n) => n !== undefined && (id !== undefined ? n.id === id : n.kind === 'goal')) : undefined;
     changed = true;
     // Science goals §(i) (2): a level its inputs give is BEFORE a "less"/"plus" term with no figure yet (served 7f9fe459).
-    return { ...r, message: r.message.replace(OWN_UNITS, `: ${goalLevelWords(value, goal)}${levelBeforeTermsTail(graph)};`) };
+    const identity = rec(goal?.nonlinear_identity);
+    const operandId = Array.isArray(identity?.factor_ids) && identity.factor_ids.length === 1 ? identity.factor_ids[0] : undefined;
+    const operand = identity?.operation === 'sum' && operandId !== undefined
+      && Array.isArray(nodes) ? nodes.map(rec).find(n => n?.id === operandId) : undefined;
+    const accumulation = rec(operand?.nonlinear_identity);
+    const month = heldGoalHorizonMonths(goal);
+    const atH = month !== undefined && accumulation?.operation === 'accumulation' && accumulation.horizon_months === month;
+    const wordsGoal = atH && goal !== undefined ? { ...goal, unit: goal.goal_threshold_unit } : goal;
+    const message = r.message.replace(OWN_UNITS, `: ${goalLevelWords(value, wordsGoal)}${levelBeforeTermsTail(graph)};`);
+    return { ...r, message: atH ? message.replace(/\btoday(?=:)/, `at month ${month}`) : message };
   });
   return changed ? next : warnings;
 }
