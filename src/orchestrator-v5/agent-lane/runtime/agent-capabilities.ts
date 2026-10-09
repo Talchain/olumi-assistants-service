@@ -994,6 +994,8 @@ interface GraphRead {
   readonly graph_hash: string;
   /** Stored user brief from the SAME canonical graph read, never model arguments or conversation guesses. */
   readonly brief_text?: string | null;
+  /** Server creation timestamp from the same existing-scenario snapshot. */
+  readonly scenario_created_at?: string | null;
   /**
    * ⭐ THE IDENTITY-SPACE HASH OF THE SAME READ — "is this the same graph
    * object?" — kept so a write can assert the identity it actually read.
@@ -2248,6 +2250,7 @@ export function createAgentCapabilities(
       identity_run_use: withdrawn === null ? null : { withdrawn: new Set(withdrawn) },
       graph_hash: String(r.json.graph_hash ?? ''),
       brief_text: typeof r.json.brief_text === 'string' ? r.json.brief_text : null,
+      scenario_created_at: typeof r.json.scenario_created_at === 'string' ? r.json.scenario_created_at : null,
       // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
       // producer's own return value — `computeGraphIdentityHash(graph)`, type
       // `GraphIdentityHash | null` = `{kind, value, algorithm, ...}` — so the
@@ -4820,7 +4823,10 @@ export function createAgentCapabilities(
       if (asOf !== undefined && (typeof asOf !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)
         || !wordsTheUserWrote(asOf, ctx.user_turn_text) || !new RegExp(`as of\\s+${asOf}`, 'i').test(ctx.user_turn_text ?? ''))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
           detail: deadlineRefusalDetail.reference_not_stated };
-      const reference = typeof asOf === 'string' ? asOf : draftReference;
+      const scenarioTimestamp = g.scenario_created_at;
+      const scenarioReference = typeof scenarioTimestamp === 'string' && Number.isFinite(Date.parse(scenarioTimestamp))
+        ? todayInLondon(new Date(scenarioTimestamp)) : undefined;
+      const reference = typeof asOf === 'string' ? asOf : draftReference ?? scenarioReference;
       // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
       const stated = readStatedDeadline(words, reference ?? todayInLondon((opts.now ?? (() => new Date()))()));
       if (stated === null) {
