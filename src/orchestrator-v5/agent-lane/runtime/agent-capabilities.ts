@@ -5355,6 +5355,11 @@ export function createAgentCapabilities(
         base_revision: compound.base_graph_identity_hash,
         assumptions: a?.assumptions ?? [],
         option_levels: b?.interventions ?? [],
+        // Joined proposals keep the child level handler's optional-field disclosures in the model's result.
+        ...(b !== null && Array.isArray(b.ranges_not_recorded) ? {
+          ...(Array.isArray(b.ranges_not_recorded) ? { ranges_not_recorded: b.ranges_not_recorded } : {}),
+          detail: b.detail,
+        } : {}),
         // Levels the proposer LEFT OUT because the option is not wired to that
         // factor — the Agent must say so and offer a level it CAN record.
         ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked, not_linked_note: b.not_linked_note } : {}),
@@ -5407,6 +5412,7 @@ export function createAgentCapabilities(
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
       /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
+      const rangesNotRecorded: { option: string; factor: string; reason: string }[] = [];
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -5497,35 +5503,14 @@ export function createAgentCapabilities(
         // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
         // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
         const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
-        // A typed range and its level are shown together for explicit approval. Equivalent wording must not
-        // change that reading; the existing literal-figure guard remains for ordinary, non-range levels.
-        const rangeRequested = i?.likely_low !== undefined || i?.likely_high !== undefined
-          || i?.range_meaning !== undefined || i?.range_user_stated === true;
-        const userWrote = claimedByUser && (rangeRequested
-          || figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
-        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
-        if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
-          notAccepted.push({
-            option: option.label, factor: factor.label, value: i?.value,
-            reason: claimedByUser
-              ? `${option.label} is held at its starting values, and ${String(i?.value)} is not a figure the user wrote, so no level is recorded for ${factor.label}. Leave it out; never send a figure as the user's unless they wrote it.`
-              : `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
-          });
-          continue;
-        }
         const raw = Number(i?.value);
-        if (!Number.isFinite(raw)) {
-          unresolved.push(`${option.label} -> ${factor.label} (no value)`);
-          notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: 'No numeric value was given.' });
-          continue;
-        }
         /**
          * TEMPORAL (B6's ask, #2384; R3 #75 5914230653): the user's LIKELY RANGE for this level, decided from the TYPED
          * arguments only (Codex CR 5963331228 P1: no parsing of the user's words). Both ends; the reading the Agent took
          * (`range_meaning`: only `likely_range` is recorded, so a 95% interval, a min–max or a bound is never stored as
          * one); that the USER gave it (`range_user_stated`); beside a level they gave; the level inside it. The user then
          * approves the range AND its reading, shown on the approval ("read as the middle half of what's likely"): that
-         * approval is the provenance check. Anything else is refused with the reason, so the Agent asks.
+         * approval is the provenance check. An invalid optional range is left out and disclosed; its level follows ordinary grounding.
          */
         const hasLow = i?.likely_low !== undefined;
         const hasHigh = i?.likely_high !== undefined;
@@ -5538,15 +5523,35 @@ export function createAgentCapabilities(
             : i?.range_user_stated !== true ? 'a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed'
             : i?.range_meaning !== 'likely_range'
               ? `Olumi records only a LIKELY range (the middle half of what\u2019s likely); a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
-            : !userWrote ? 'a likely range is recorded only beside a level the user gave (user_stated)'
+            : !claimedByUser ? 'a likely range is recorded only beside a level the user gave (user_stated)'
             : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
             : null;
           if (why !== null) {
-            notAccepted.push({ option: option.label, factor: factor.label, value: i?.value,
-              reason: `No likely range was recorded: ${why}. Ask the user for each option’s likely range in their own words, then propose it again.` });
-            continue;
+            rangesNotRecorded.push({ option: option.label, factor: factor.label,
+              reason: `No likely range was recorded: ${why}.`
+                + (i?.range_user_stated === true ? ' Ask the user to restate their likely range in their own words, then propose it again.' : '') });
+          } else {
+            likelyRange = { low, high };
           }
-          likelyRange = { low, high };
+        }
+
+        // A rejected range has no bearing on the ordinary level or its authorship.
+        const userWrote = claimedByUser && (likelyRange !== undefined
+          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+        if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: i?.value,
+            reason: claimedByUser
+              ? `${option.label} is held at its starting values, and ${String(i?.value)} is not a figure the user wrote, so no level is recorded for ${factor.label}. Leave it out; never send a figure as the user's unless they wrote it.`
+              : `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
+          });
+          continue;
+        }
+        if (!Number.isFinite(raw)) {
+          unresolved.push(`${option.label} -> ${factor.label} (no value)`);
+          notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: 'No numeric value was given.' });
+          continue;
         }
 
         const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
@@ -5682,7 +5687,9 @@ export function createAgentCapabilities(
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
           ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
-          detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
+          ...(rangesNotRecorded.length > 0 ? { ranges_not_recorded: rangesNotRecorded } : {}),
+          detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.'
+            + rangesNotRecorded.map(r => ` ${r.option} / ${r.factor}: ${r.reason}`).join(''),
         };
       }
 
@@ -5748,6 +5755,10 @@ export function createAgentCapabilities(
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
         ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+        ...(rangesNotRecorded.length > 0 ? {
+          ranges_not_recorded: rangesNotRecorded,
+          detail: rangesNotRecorded.map(r => `${r.option} / ${r.factor}: ${r.reason}`).join(' '),
+        } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
           'authorise_change with this proposal_id once they agree.',
