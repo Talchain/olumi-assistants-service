@@ -1,6 +1,7 @@
 // Load environment variables from .env file
 // In production without a .env file, this is a no-op (dotenv silently skips)
 import "dotenv/config";
+import { ModelWriteOwnershipRefused } from "./orchestrator-v5/ownership/door-ownership.js";
 
 import { env } from "node:process";
 import Fastify from "fastify";
@@ -671,6 +672,7 @@ await app.register(rateLimit, {
 // Centralized error handler: structured error.v1 responses with request_id
 // Layer 3 guarantee: every error response has a non-empty JSON body.
 app.setErrorHandler((error, request, reply) => {
+  if (error instanceof ModelWriteOwnershipRefused) return reply.code(403).send({ error: error.code });
   // ROADMAP 1.16i (CEE half) — client aborts are not server errors. One
   // aborted browser request used to produce four error-class log lines and
   // a false 5xx metric increment for a 500 that never reached any client

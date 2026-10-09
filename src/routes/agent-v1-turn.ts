@@ -56,6 +56,7 @@ import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
+import { ModelWriteOwnershipRefused } from '../orchestrator-v5/ownership/door-ownership.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
@@ -2617,6 +2618,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         });
         owner = await store.readCommittedTurn(scenarioId, claimTurnId);
       } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) return reply.code(403).send({ error: err.code });
         log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
       }
@@ -5199,6 +5201,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Only a row that was written moves the slot: the next answer row carries what THIS one did.
         carriedProposals.persisted(approveKey, approvalCarrier);
       } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) return reply.code(403).send({ error: err.code });
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
         log.error({ err: String(err), scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');

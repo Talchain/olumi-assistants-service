@@ -8,9 +8,11 @@ function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() && e.name !== '__tests__' ? files(join(dir, e.name)) : e.isFile() && e.name.endsWith('.ts') && !e.name.includes('.test.') ? [join(dir, e.name)] : []);
 }
 function walk(node: ts.Node, f: (n: ts.Node) => void) { f(node); ts.forEachChild(node, n => walk(n, f)); }
-it('one authority: no route/orchestrator calls scenarioAccessDecision or authorizeScenarioOwnership', () => {
+it('ownership decision callers are exactly the admission hook and writer door', () => {
+  const allowed = new Set(['src/plugins/scenario-ownership.ts', 'src/orchestrator-v5/ownership/door-ownership.ts']);
+  const seen = new Set<string>();
   const forbidden: string[] = [];
-  for (const file of [...files('src/routes'), ...files('src/orchestrator')]) {
+  for (const file of files('src')) {
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
     const names = new Set(['scenarioAccessDecision', 'authorizeScenarioOwnership']);
     walk(source, n => {
@@ -21,10 +23,14 @@ it('one authority: no route/orchestrator calls scenarioAccessDecision or authori
       const callee = n.expression;
       const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text
         : ts.isElementAccessExpression(callee) && ts.isStringLiteral(callee.argumentExpression) ? callee.argumentExpression.text : '';
-      if (names.has(name)) forbidden.push(`${file}:${source.getLineAndCharacterOfPosition(n.getStart()).line + 1}`);
+      if (names.has(name)) {
+        if (name === 'scenarioAccessDecision' && allowed.has(file)) seen.add(file);
+        else forbidden.push(`${file}:${source.getLineAndCharacterOfPosition(n.getStart()).line + 1}`);
+      }
     });
   }
   expect(forbidden).toEqual([]);
+  expect([...seen].sort()).toEqual([...allowed].sort());
 });
 it('every source registration has explicit scenarioId config; graph alone enables member reads', () => {
   const missing: string[] = []; const members: string[] = [];
