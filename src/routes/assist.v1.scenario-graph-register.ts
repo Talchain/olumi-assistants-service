@@ -43,7 +43,7 @@ import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
-import { loadMostRecentPendingActionsIntegrityStrict } from "../orchestrator-v5/build-turn-context.js";
+import { loadMostRecentPendingActionsIntegrityStrict, markDraftGraphWriteFailed } from "../orchestrator-v5/build-turn-context.js";
 import {
   emitHoldLapseTelemetry,
   threadHoldsThroughMutatingCommit,
@@ -1208,7 +1208,10 @@ export default async function route(app: FastifyInstance) {
           });
         });
       } catch (err) {
-        if (err instanceof ModelWriteOwnershipRefused) return reply.code(403).send({ error: err.code });
+        if (err instanceof ModelWriteOwnershipRefused) {
+          await markDraftGraphWriteFailed(scenarioId, turnId, err.code, requestId, 'turn_dead_only');
+          return reply.code(403).send({ error: err.code });
+        }
         if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
         if (err instanceof TurnFenceRejectedError) {
           // A later-started write on this scenario owns the graph now, or the

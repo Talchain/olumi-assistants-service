@@ -8778,11 +8778,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
     } catch (error) {
       if (error instanceof ModelWriteOwnershipRefused) {
+        await markDraftGraphWriteFailed(ingress.scenario_id, ingress.turn_id, error.code, requestId, 'turn_dead_only');
         return reply.code(403).send({
           error: error.code,
           message: error.reason === 'not_owner'
-            ? 'Nothing was saved. This model belongs to another account.'
-            : 'Nothing was saved. Model ownership could not be verified.',
+            ? "Nothing was saved. You don't have access to change this model."
+            : "Nothing was saved. I couldn't check access to this model. Try again.",
         });
       }
       throw error;

@@ -5201,7 +5201,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Only a row that was written moves the slot: the next answer row carries what THIS one did.
         carriedProposals.persisted(approveKey, approvalCarrier);
       } catch (err) {
-        if (err instanceof ModelWriteOwnershipRefused) return reply.code(403).send({ error: err.code });
+        if (err instanceof ModelWriteOwnershipRefused) {
+          await releaseUnwrittenTurnClaim();
+          return reply.code(403).send({ error: err.code });
+        }
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
         log.error({ err: String(err), scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');

@@ -31,7 +31,9 @@ type Row = { id: string; turn_id: string; request_hash: string; assistant_messag
 const rows = new Map<string, Row>();
 let readFails = false;
 let answerAppendFails = false;
+let ownershipChangesAfterClaim = false;
 const store = {
+  getScenarioOwner: vi.fn(async () => ownershipChangesAfterClaim && rows.has(`${T1}:claim`) ? 'u-owner' : null),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => {
     if (readFails) throw new Error('read failed');
@@ -116,7 +118,7 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
     __setUseAppendV6ForTest(false);
-    rows.clear(); readFails = false; answerAppendFails = false; provider.calls = 0; provider.userTurnsSeen = [];
+    rows.clear(); readFails = false; answerAppendFails = false; ownershipChangesAfterClaim = false; provider.calls = 0; provider.userTurnsSeen = [];
     refusedDoorSequence = undefined; internalCalls.length = 0; store.releaseTurnClaim.mockClear();
     store.append.mockClear(); store.readCommittedTurn.mockClear();
     vi.stubGlobal('fetch', fakeFetch);
@@ -131,6 +133,16 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
     await dispatch(`/assist/v1/scenarios/${SID}/graph/register`, { turn_id: T2 });
     throw new Error('revision refusal must escape the dispatch');
   };
+
+  it('ownership refusal on an unwritten final answer releases its conversation claim', async () => {
+    ownershipChangesAfterClaim = true;
+    const response = await approve();
+    expect(response.statusCode, response.payload).toBe(403);
+    expect(response.json()).toEqual({ error: 'model_write_ownership_refused' });
+    expect(store.append).toHaveBeenCalledTimes(1); // Only the earlier claim, never the refused answer.
+    expect(store.releaseTurnClaim).toHaveBeenCalledExactlyOnceWith(SID, `${T1}:claim`, expect.any(String));
+    expect(rows.size).toBe(0);
+  });
 
   it('Addendum 6 (a): a lone register revision refusal releases the claim and is retry_safe', async () => {
     refusedDoorSequence = register;

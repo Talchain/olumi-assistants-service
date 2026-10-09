@@ -1,6 +1,7 @@
 /** Real executor/HTTP/SSE paths; only the provider and persistence ports are doubles. */
 import Fastify from 'fastify';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
 import type { SessionStore } from '../session/store.js';
 import { createMockSessionStore } from '../../../tests/utils/mock-session-store.js';
 import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
@@ -39,7 +40,7 @@ vi.mock('../../config/index.js', async load => {
 const SID = 'a6ccf5cf-aab0-4f01-b889-e0d6c072067c';
 const OWNER = 'u-owner';
 const GRAPH = { nodes: [{ id: 'goal', kind: 'goal', label: 'Growth' }, { id: 'factor', kind: 'factor', label: 'Capacity' }], edges: [] };
-const REFUSAL = { error: 'model_write_ownership_refused', message: 'Nothing was saved. This model belongs to another account.' };
+const REFUSAL = { error: 'model_write_ownership_refused', message: "Nothing was saved. You don't have access to change this model." };
 beforeEach(() => vi.clearAllMocks());
 
 const ROUTES = ['/orchestrate/v2/turn', '/orchestrate/v2/turn/stream', '/proxy/v5/turn/stream'];
@@ -52,7 +53,11 @@ it.each(ROUTES.flatMap(route => (['not_owner', 'owner_unreadable'] as const).map
       if (reason === 'owner_unreadable') throw new Error('ownership reader unavailable');
       return 'u-other';
     });
+    const fence = claimingTurnFenceStore();
+    const markGraphWriteFailed = vi.fn(fence.store.markGraphWriteFailed.bind(fence.store));
     state.store = createMockSessionStore({ append, appendIfLatest, getScenarioOwner,
+      claimTurnFence: fence.store.claimTurnFence.bind(fence.store), markGraphWriteFailed,
+      hasOtherAdmittedLiveTurn: fence.store.hasOtherAdmittedLiveTurn.bind(fence.store),
       readExistingScenario: async () => ({ userId: OWNER, graph: GRAPH, briefText: null, analysisInvalidatedAt: null }),
       loadGraph: async () => GRAPH, loadGraphAndBriefText: async () => ({ graph: GRAPH, briefText: null }),
     });
@@ -83,12 +88,65 @@ it.each(ROUTES.flatMap(route => (['not_owner', 'owner_unreadable'] as const).map
         expect(response.statusCode, response.payload).toBe(403); body = response.json();
       }
       expect(body).toEqual(reason === 'not_owner' ? REFUSAL : { ...REFUSAL,
-        message: 'Nothing was saved. Model ownership could not be verified.',
+        message: "Nothing was saved. I couldn't check access to this model. Try again.",
       });
+      if (reason === 'not_owner') {
+        expect(Object.keys(body as Record<string, unknown>).sort()).toEqual(['error', 'message']);
+        expect(JSON.stringify(body)).not.toContain('u-other');
+        expect(JSON.stringify(body)).not.toContain(OWNER);
+        expect(JSON.stringify(body)).not.toMatch(/account|belongs|exists/i);
+      }
       expect(JSON.stringify(body)).not.toContain('revision_conflict');
       expect(JSON.stringify(body)).not.toContain('The scenario changed while I was saving');
       expect(append).not.toHaveBeenCalled(); expect(appendIfLatest).not.toHaveBeenCalled();
       expect(getScenarioOwner).toHaveBeenCalledExactlyOnceWith(SID);
+      const ingressTurnId = 'b1111111-1111-4111-8111-111111111111';
+      expect(fence.rows).toHaveLength(1);
+      expect(fence.rows[0]).toMatchObject({ scenario_id: SID, turn_id: ingressTurnId,
+        graph_write_failed_at: expect.any(String), graph_write_failure_reason: REFUSAL.error,
+        graph_loss_disclosable_at: null, generation: 1 });
+      expect(markGraphWriteFailed).toHaveBeenCalledExactlyOnceWith(SID, ingressTurnId, REFUSAL.error, 'turn_dead_only');
+      await expect(state.store.hasOtherAdmittedLiveTurn!(SID, 'b2222222-2222-4222-8222-222222222222')).resolves.toBe(false);
     } finally { await app.close(); state.store = undefined; }
   }, 30_000,
 );
+
+async function bufferedRefusal(reason: 'not_owner' | 'owner_unreadable', markingThrows = false) {
+  const append = vi.fn(async () => ({ id: 'must-not-write' }));
+  const markGraphWriteFailed = vi.fn(async () => { if (markingThrows) throw new Error('marking unavailable'); });
+  state.store = createMockSessionStore({ append, markGraphWriteFailed,
+    getScenarioOwner: async () => { if (reason === 'owner_unreadable') throw new Error('owner reader unavailable'); return 'u-other'; },
+    readExistingScenario: async () => ({ userId: OWNER, graph: GRAPH, briefText: null, analysisInvalidatedAt: null }),
+    loadGraph: async () => GRAPH, loadGraphAndBriefText: async () => ({ graph: GRAPH, briefText: null }),
+  });
+  const app = Fastify();
+  try {
+    await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
+    await ceeOrchestratorRouteV2(app);
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn',
+      payload: { kind: 'message', scenario_id: SID, turn_id: 'b1111111-1111-4111-8111-111111111111',
+        message: 'Consider the strategic framing.', turn_class: 'frame', stage: 'analyse', source: 'composer' },
+    });
+    return { response, append, markGraphWriteFailed };
+  } finally { await app.close(); state.store = undefined; }
+}
+
+it('not_owner 403 discloses no owner id, account hint, or existence detail', async () => {
+  const { response, append } = await bufferedRefusal('not_owner');
+  expect(response.statusCode, response.payload).toBe(403);
+  expect(response.json()).toEqual(REFUSAL);
+  expect(Object.keys(response.json()).sort()).toEqual(['error', 'message']);
+  expect(response.payload).not.toContain('u-other'); expect(response.payload).not.toContain(OWNER);
+  expect(response.payload).not.toMatch(/account|belongs|exists/i);
+  expect(append).not.toHaveBeenCalled();
+});
+it.each(['not_owner', 'owner_unreadable'] as const)('failure marking throws without replacing the %s 403', async reason => {
+  const { response, append, markGraphWriteFailed } = await bufferedRefusal(reason, true);
+  expect(response.statusCode, response.payload).toBe(403);
+  expect(response.json()).toEqual(reason === 'not_owner' ? REFUSAL : { ...REFUSAL,
+    message: "Nothing was saved. I couldn't check access to this model. Try again.",
+  });
+  expect(markGraphWriteFailed).toHaveBeenCalledExactlyOnceWith(SID, 'b1111111-1111-4111-8111-111111111111',
+    REFUSAL.error, 'turn_dead_only');
+  expect(append).not.toHaveBeenCalled();
+});

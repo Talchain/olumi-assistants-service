@@ -1,3 +1,4 @@
+import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
 import { existsSync } from 'node:fs';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -148,6 +149,10 @@ it('production Supabase session store implements the ownership reader', async ()
 
 async function realRegistration(ownerAtDoor: string, failRead = false) {
   const f = fixture(ownerAtDoor);
+  const fence = claimingTurnFenceStore();
+  f.store.claimTurnFence = fence.store.claimTurnFence.bind(fence.store);
+  f.store.markGraphWriteFailed = fence.store.markGraphWriteFailed.bind(fence.store);
+  f.store.hasOtherAdmittedLiveTurn = fence.store.hasOtherAdmittedLiveTurn.bind(fence.store);
   if (failRead) f.getScenarioOwner.mockRejectedValue(new Error('reader unavailable'));
   f.store.readExistingScenario = async () => ({ userId: 'u-owner', graph: GRAPH, briefText: null, analysisInvalidatedAt: null });
   f.store.ensureScenarioExists = async () => ({ user_id: 'u-owner' });
@@ -159,7 +164,7 @@ async function realRegistration(ownerAtDoor: string, failRead = false) {
     await registerRoute(app);
     const response = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SID}/graph/register`,
       payload: { graph: { ...GRAPH, nodes: GRAPH.nodes.map(n => ({ ...n, label: `${n.label} updated` })) } } });
-    return { ...f, response };
+    return { ...f, response, fence };
   } finally { await app.close(); }
 }
 it('real route: verified owner inherits the binding and commits through the real door', async () => {
@@ -169,9 +174,13 @@ it('real route: verified owner inherits the binding and commits through the real
   expect(getScenarioOwner).toHaveBeenCalledExactlyOnceWith(SID);
 });
 it.each([false, true])('real route: ownership changes/read failures at the door surface as 403, reader fails %s', async failRead => {
-  const { response, append, appendIfLatest } = await realRegistration('u-other', failRead);
+  const { response, append, appendIfLatest, fence, store } = await realRegistration('u-other', failRead);
   expect(response.statusCode, response.payload).toBe(403);
   expect(response.json()).toEqual({ error: 'model_write_ownership_refused' });
   expect(response.payload).not.toContain('revision');
   expect(append).not.toHaveBeenCalled(); expect(appendIfLatest).not.toHaveBeenCalled();
+  expect(fence.rows).toHaveLength(1);
+  expect(fence.rows[0]).toMatchObject({ graph_write_failed_at: expect.any(String),
+    graph_write_failure_reason: 'model_write_ownership_refused', graph_loss_disclosable_at: null });
+  await expect(store.hasOtherAdmittedLiveTurn!(SID, 'next-registration')).resolves.toBe(false);
 });
