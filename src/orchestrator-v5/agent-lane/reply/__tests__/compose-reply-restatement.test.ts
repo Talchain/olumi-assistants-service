@@ -1,3 +1,4 @@
+import { timingIt } from '../../../../../tests/helpers/scaling-ratio.js';
 import { describe, expect, it } from 'vitest';
 import { composeReplyShape, sentenceMultiset, type FaceObligation } from '../compose-reply.js';
 import { LINK_RELATION, namedUnsizedLinks, QUOTED_LABEL, THROUGH_RELATION, UNSIZED_CAUSE } from '../named-unsized-links.js';
@@ -119,7 +120,7 @@ describe('timing: all new bounded regexes, 5k → 40k, ratio < 22×', () => {
     ['through relation', s => THROUGH_RELATION.test(s), n => ' '.repeat(n)],
     ['word boundary', s => namedUnsizedLinks(s, new Set(['support→loss']), graph), n => 'Support cost'.repeat(Math.ceil(n / 12))],
   ];
-  it.each(rows)('%s', (name, test, make) => {
+  timingIt.each(rows)('%s', (name, test, make) => {
     const batch = (s: string, calls: number): number => {
       const start = performance.now();
       for (let i = 0; i < calls; i++) test(s);

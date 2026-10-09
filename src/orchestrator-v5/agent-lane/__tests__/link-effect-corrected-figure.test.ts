@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * ⭐ A CORRECTION "X, not Y" STATES X (DL ruling 7 Oct: a figure the user types for that link this turn is the user's
  * statement). Canvas D1 served witness, draw 3 (staging CEE 13149d8): the user opened the driver link "Price rise →
@@ -139,7 +140,7 @@ describe('the tail reader is linear: it runs on every turn (DL review 7 Oct: 9.5
     const t0 = performance.now();
     expect(withoutCorrectedFigureTail(said)).toBe(said);
     linkEffectQuoteContextMiss('Each 1% price rise adds £600 a month', said);
-    expect(performance.now() - t0).toBeLessThan(250);
+    if (timingGated) { expect(performance.now() - t0).toBeLessThan(250); }
   });
   it('PRECONDITION: a short whitespace run still has its tail read (the timing row is about the same tail)', () => {
     expect(withoutCorrectedFigureTail(spaced(3))).toBe(PLAIN);

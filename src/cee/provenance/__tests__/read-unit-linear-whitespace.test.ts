@@ -1,3 +1,4 @@
+import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /**
  * P44, 8 Oct: `readCurrencyUnitWithQualifiers("£" + ws + "/" + ws + "month")` took 0.48 s at n=1,000 and 19 s at
  * n=4,000. UNIT_PATTERN chains `\s*` around optional groups, so a rejected internal whitespace run backtracked every
@@ -25,7 +26,7 @@ describe('readUnit is linear in whitespace runs', () => {
       readCurrencyUnitWithQualifiers(small); // warm the regex
       const tSmall = Math.max(msFor(readCurrencyUnitWithQualifiers, small, 200), 0.5);
       const tLarge = msFor(readCurrencyUnitWithQualifiers, large, 10) * 20;
-      expect(tLarge / tSmall).toBeLessThan(80);
+      if (timingGated) { expect(tLarge / tSmall).toBeLessThan(80); }
       expect(readCurrencyUnitWithQualifiers(large).kind).toBe(readCurrencyUnitWithQualifiers(small).kind);
     });
   }

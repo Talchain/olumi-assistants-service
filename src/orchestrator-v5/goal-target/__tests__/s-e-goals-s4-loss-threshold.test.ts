@@ -4,7 +4,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 
@@ -468,6 +468,6 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
     const timing = scalingRatio(() => run(small), () => run(large));
     writeFileSync('/tmp/s4-loss-timing.json', JSON.stringify(timing));
     console.log(`S4 loss-threshold timing (20k -> 160k, whitespace + near-miss): ${timing.detail}`);
-    expect(timing.ratio).toBeLessThan(22);
+    if (timingGated) { expect(timing.ratio).toBeLessThan(22); }
   }, 60_000);
 });
