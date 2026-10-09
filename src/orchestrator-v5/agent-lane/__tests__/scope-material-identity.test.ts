@@ -54,10 +54,25 @@ it('row (1): B1-B keeps the exact drafter question once, on the admitted goal id
   expect(questions.filter(q => q.startsWith('I’ve read your goal'))).toEqual([]);
   expect(result.pending_action).toMatchObject({ action: { goal_id: 'mrr', question: QUESTION, expected: 'scope' } });
 });
-it('row (2): B1-A open_questions are byte-identical to base', async () => {
-  const { questions } = await replay(rowFor('R2/B1-A'));
+it('row (2): B1-A keeps pinned scope wording while fitted estimate questions retire', async () => {
+  const { graph, questions } = await replay(rowFor('R2/B1-A'));
+  // Fitted magnitude questions retire; their obsolete ledger entries no longer suppress drafter questions.
+  for (const [from, to, amount] of [
+    ['new_pro_subscribers_per_month', 'pro_subscribers_at_month_12', 8],
+    ['pro_subscribers_at_month_12', 'mrr', 49],
+  ] as const) {
+    expect(graph.edges.find(e => e.from === from && e.to === to)).toMatchObject({
+      provenance: { magnitude: 'olumi_estimate', natural_effect: { amount } },
+    });
+  }
   const before = JSON.parse(fs.readFileSync(new URL('./fixtures/s7-a2-b1-a-questions.json', import.meta.url), 'utf8')) as string[];
-  expect(JSON.stringify(questions)).toBe(JSON.stringify(before));
+  const restored = 'What is current monthly Pro churn? The provisional model assumes 6%, below the stated 8% limit.';
+  const c = JSON.parse(rowFor('R2/B1-A').drafter_texts[0]!) as { unknowns: string[] };
+  expect(c.unknowns).toContain(restored);
+  expect(questions.filter(q => q === restored)).toEqual([restored]);
+  const expected = [...before];
+  expected.splice(expected.indexOf('How many Pro subscribers are there today? The provisional model assumes 200.') + 1, 0, restored);
+  expect(questions).toEqual(expected);
 });
 it('row (3): no goal identity retains d5 suppression', async () => {
   const row = synthetic(c => { Object.assign(c, { identities: [] }); });
