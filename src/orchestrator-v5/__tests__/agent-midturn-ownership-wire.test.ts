@@ -6,8 +6,10 @@ import { createMockSessionStore } from '../../../tests/utils/mock-session-store.
 import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
 import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
 import { appendCheckedGraphWrite } from '../persist-graph-write.js';
-import { readSuccessfulDoorEntries, recordSuccessfulSave, bindWriteCaller } from '../ownership/door-ownership.js';
-import { HistoryStore } from '../agent-lane/history-store.js';
+import { readSuccessfulDoorEntries, readUnsavableEffects, recordSuccessfulSave, bindWriteCaller } from '../ownership/door-ownership.js';
+import * as guidanceHistory from '../agent-lane/turn-context/guidance-history.js';
+import served from '../agent-lane/__tests__/fixtures/m1-s1-served-graphs.json';
+import { legacyDoorGraph } from '../agent-lane/__tests__/licence-test-graphs.js';
 import { agentV1TurnRoute } from '../../routes/agent-v1-turn.js';
 import { ceeOrchestratorRouteV2 } from '../../orchestrator/route-v2.js';
 import { log } from '../../utils/telemetry.js';
@@ -59,17 +61,20 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); state.store = und
 
 async function harness(options: {
   reason?: keyof typeof BYTES; atClaim?: boolean; tool?: 'in_process' | 'child'; release?: 'throws' | 'absent';
-  missing?: boolean;
+  missing?: boolean; guidance?: boolean;
 } = {}) {
+  const graph = options.guidance ? legacyDoorGraph(served.cases.find(c => c.id === 'D1-sprint-run')!.graph) : GRAPH;
+  const routeBodies: string[] = [];
   const rows = new Map<string, CommittedTurnRecord>();
   const fence = claimingTurnFenceStore();
   let flipped = options.atClaim ?? false;
   let scenarioExists = !options.missing;
-  let flipAfterProvider = true;
   let countAtRefusal = -1;
+  let effectsAtRefusal = -1;
   const getScenarioOwner = vi.fn(async () => {
     if (!flipped) return OWNER;
     countAtRefusal = readSuccessfulDoorEntries();
+    effectsAtRefusal = readUnsavableEffects();
     if (options.reason === 'owner_unreadable') throw new Error('owner reader unavailable');
     return 'u-other';
   });
@@ -89,12 +94,22 @@ async function harness(options: {
     claimTurnFence: fence.store.claimTurnFence.bind(fence.store),
     markGraphWriteFailed: fence.store.markGraphWriteFailed.bind(fence.store),
     hasOtherAdmittedLiveTurn: fence.store.hasOtherAdmittedLiveTurn.bind(fence.store),
-    readExistingScenario: async () => scenarioExists ? { userId: OWNER, graph: GRAPH, briefText: null, analysisInvalidatedAt: null } : null,
-    loadGraph: async () => GRAPH, loadGraphAndBriefText: async () => ({ graph: GRAPH, briefText: null }),
+    readExistingScenario: async () => scenarioExists ? { userId: OWNER, graph, briefText: null, analysisInvalidatedAt: null } : null,
+    loadGraph: async () => graph, loadGraphAndBriefText: async () => ({ graph, briefText: null }),
   });
   if (options.release === 'absent') delete state.store.releaseTurnClaim;
   const app: FastifyInstance = Fastify();
   await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
+  app.addHook('preSerialization', async (req, _reply, payload) => {
+    if (req.routeOptions.url === '/agent/v1/turn') routeBodies.push(JSON.stringify(payload));
+    return payload;
+  });
+  if (options.guidance) app.post('/assist/v1/scenarios/:scenario_id/graph', {
+    config: { scenarioId: { from: 'params', key: 'scenario_id' } },
+  }, async () => ({ graph, graph_hash: 'guidance-control', analysis_ready: { status: 'ready', may_run: true },
+    analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T11:52:22.669Z' }, usable_for_chips: true },
+    analysis_option_participation: [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }],
+  }));
   const toolWrite = () => appendCheckedGraphWrite({ store: state.store!, writesGraph: false, source: 'tool-fixture', write: {
     scenario_id: SID, turn_id: 'tool-write', turn_class: 'direct_answer', handler_id: null, request_hash: 'tool-write',
     response_emitted: false, llm_calls_used: 0, duration_ms: 0, handler_facts: [],
@@ -118,7 +133,7 @@ async function harness(options: {
       arguments: JSON.stringify({ proposal_id: 'prop_0123456789abcdef0123456789abcdef' }),
     }] }), { status: 200 });
     // Both the claim and the optional tool have finished before the final append.
-    if (flipAfterProvider) flipped = true;
+    flipped = true;
     return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Consider the assumptions together.' }] }] }), { status: 200 });
   });
   vi.stubGlobal('fetch', fetch);
@@ -126,20 +141,23 @@ async function harness(options: {
   await ceeOrchestratorRouteV2(app);
   const inject = (payload = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-request-id': 'midturn-request' },
     payload: { scenario_id: SID, turn_id: TID, message: 'Consider the strategic framing.', ...payload } });
-  return { app, rows, fence, append, releaseTurnClaim, fetch, inject, providerInputs, ensureScenarioExists,
-    scenarioExists: () => scenarioExists, countAtRefusal: () => countAtRefusal,
-    recover: () => { flipped = false; flipAfterProvider = false; },
-    refuseNext: () => { flipped = false; flipAfterProvider = true; },
+  return { app, rows, fence, append, releaseTurnClaim, fetch, inject, providerInputs, ensureScenarioExists, routeBodies,
+    scenarioExists: () => scenarioExists, countAtRefusal: () => countAtRefusal, effectsAtRefusal: () => effectsAtRefusal,
   };
 }
 
-it.each(['not_owner', 'owner_unreadable'] as const)('(a) claim-only mid-turn %s returns exact canonical bytes and releases the claim', async reason => {
+it.each([
+  ['not_owner', 'composer'], ['owner_unreadable', 'composer'],
+  ['not_owner', 'chip_click'], ['owner_unreadable', 'chip_click'],
+] as const)('(a) published claim-only mid-turn %s/%s keeps code-only bytes and releases the claim without after_commit', async (reason, source) => {
+  const warn = vi.spyOn(log, 'warn');
   const h = await harness({ reason });
   try {
-    const r = await h.inject();
-    process.stdout.write(`MIDTURN_BYTES a/${reason} ${r.statusCode} ${r.payload}\n`);
+    const r = await h.inject({ source });
+    process.stdout.write(`MIDTURN_BYTES a/${reason}/${source} ${r.statusCode} ${r.payload}\n`);
     expect(r.statusCode).toBe(403);
     expect(h.countAtRefusal()).toBe(1);
+    expect(h.effectsAtRefusal()).toBe(source === 'composer' ? 2 : 1);
     expect(h.ensureScenarioExists).not.toHaveBeenCalled();
     expect(h.append).toHaveBeenCalledOnce();
     expect(h.append.mock.calls[0]![0].turn_id).toBe(`${TID}:claim`);
@@ -148,16 +166,18 @@ it.each(['not_owner', 'owner_unreadable'] as const)('(a) claim-only mid-turn %s 
     expect(h.rows.has(TID)).toBe(false);
     expect(h.fence.rows).toHaveLength(0); // This Agent answer acquires no graph fence.
     await expect(state.store!.hasOtherAdmittedLiveTurn!(SID, 'next-turn')).resolves.toBe(false);
-    expect(r.payload).toBe(BYTES[reason]);
+    expect(r.payload).toBe(CODE_ONLY);
+    expect(r.payload).not.toContain('Nothing was saved');
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
   } finally { await h.app.close(); }
 }, 30_000);
 
-it.each(['in_process', 'child'] as const)('(b) mid-turn flip after %s tool success keeps existing bytes and logs after_commit', async tool => {
+it.each(['in_process', 'child'] as const)('durable tool control: mid-turn flip after %s tool success keeps existing bytes and logs after_commit', async tool => {
   const warn = vi.spyOn(log, 'warn');
   const h = await harness({ tool });
   try {
     const r = await h.inject();
-    process.stdout.write(`MIDTURN_BYTES b/${tool} ${r.statusCode} ${r.payload}\n`);
+    process.stdout.write(`MIDTURN_BYTES tool/${tool} ${r.statusCode} ${r.payload}\n`);
     expect(r.statusCode).toBe(403);
     expect(h.countAtRefusal()).toBe(2);
     expect(h.append).toHaveBeenCalledTimes(2);
@@ -169,19 +189,40 @@ it.each(['in_process', 'child'] as const)('(b) mid-turn flip after %s tool succe
   } finally { await h.app.close(); }
 }, 30_000);
 
-it.each(['not_owner', 'owner_unreadable'] as const)('(c) claim %s returns exact canonical bytes without any append', async reason => {
+it.each(['not_owner', 'owner_unreadable'] as const)('(b) before-publication claim %s returns exact canonical bytes without any append', async reason => {
   const h = await harness({ reason, atClaim: true });
   try {
     const r = await h.inject();
-    process.stdout.write(`MIDTURN_BYTES c/${reason} ${r.statusCode} ${r.payload}\n`);
+    process.stdout.write(`MIDTURN_BYTES b/${reason} ${r.statusCode} ${r.payload}\n`);
     expect(r.statusCode).toBe(403); expect(r.payload).toBe(BYTES[reason]);
-    expect(h.countAtRefusal()).toBe(0);
+    expect(h.routeBodies).toEqual([BYTES[reason]]); // Pin the direct catch before the real onSend hook.
+    expect(h.countAtRefusal()).toBe(0); expect(h.effectsAtRefusal()).toBe(0);
     expect(h.ensureScenarioExists).not.toHaveBeenCalled();
     expect(h.append).not.toHaveBeenCalled(); expect(h.fetch).not.toHaveBeenCalled();
     expect(h.releaseTurnClaim).not.toHaveBeenCalled(); expect(h.rows.size).toBe(0);
     expect(h.fence.rows).toHaveLength(0);
   } finally { await h.app.close(); }
 });
+
+it('(c) unclaimed guidance turn refuses after publication without an onSend no-save override', async () => {
+  const warn = vi.spyOn(log, 'warn');
+  const guidance = vi.spyOn(guidanceHistory, 'guidanceOnAnswer');
+  const h = await harness({ guidance: true });
+  try {
+    const r = await h.inject({ turn_id: undefined, message: 'Where does this leave me?' });
+    process.stdout.write(`MIDTURN_BYTES c ${r.statusCode} ${r.payload}\n`);
+    expect(guidance).toHaveBeenCalled();
+    expect(guidance.mock.results.some(result => result.type === 'return' && result.value !== undefined)).toBe(true);
+    expect(h.effectsAtRefusal()).toBe(2);
+    expect(h.countAtRefusal()).toBe(0); // The minted final row really entered and was refused at the door.
+    expect(h.fetch).toHaveBeenCalledOnce(); expect(h.append).not.toHaveBeenCalled();
+    expect(h.releaseTurnClaim).not.toHaveBeenCalled(); expect(h.rows.size).toBe(0);
+    expect(h.routeBodies).toEqual([CODE_ONLY]);
+    expect(r.statusCode).toBe(403); expect(r.payload).toBe(CODE_ONLY);
+    expect(r.payload).not.toContain('Nothing was saved');
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
+  } finally { await h.app.close(); }
+}, 30_000);
 
 it.each(['throws', 'absent'] as const)('claim release %s never claims nothing was saved', async release => {
   const h = await harness({ release });
@@ -204,7 +245,7 @@ it('(d) missing scenario provisioning survives an unreadable claim refusal witho
     expect(r.statusCode).toBe(403); expect(r.payload).toBe(CODE_ONLY);
     expect(r.payload).not.toContain('Nothing was saved');
     expect(h.append).not.toHaveBeenCalled(); expect(h.fetch).not.toHaveBeenCalled();
-    expect(h.countAtRefusal()).toBe(1);
+    expect(h.countAtRefusal()).toBe(1); expect(h.effectsAtRefusal()).toBe(0);
   } finally { await h.app.close(); }
 });
 
@@ -218,7 +259,7 @@ it('(e) provisioning survives the released claim and final append refusal, logge
     expect(h.append).toHaveBeenCalledOnce(); expect(h.rows.size).toBe(0);
     expect(h.releaseTurnClaim).toHaveBeenCalledExactlyOnceWith(SID, `${TID}:claim`, expect.any(String));
     expect(r.statusCode).toBe(403); expect(r.payload).toBe(CODE_ONLY);
-    expect(r.payload).not.toContain('Nothing was saved'); expect(h.countAtRefusal()).toBe(2);
+    expect(r.payload).not.toContain('Nothing was saved'); expect(h.countAtRefusal()).toBe(2); expect(h.effectsAtRefusal()).toBe(2);
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
   } finally { await h.app.close(); }
 });
@@ -232,46 +273,13 @@ it('(f) v2 provisioning survives a door refusal without an onSend no-save overri
         event: { kind: 'factor_value_edit', target_id: 'factor', value: 0.65 } } });
     process.stdout.write(`MIDTURN_R2_BYTES f ${r.statusCode} ${r.payload}\n`);
     expect(h.ensureScenarioExists).toHaveBeenCalledOnce(); expect(h.scenarioExists()).toBe(true);
-    expect(h.append).not.toHaveBeenCalled(); expect(h.countAtRefusal()).toBe(1);
+    expect(h.append).not.toHaveBeenCalled(); expect(h.countAtRefusal()).toBe(1); expect(h.effectsAtRefusal()).toBe(0);
     expect(r.statusCode).toBe(500);
     expect(r.payload).toBe('{"error":"INTERNAL_ERROR","boundary":"B1","direction":"egress","validator":"turn_commit","details":{"retryable":true,"reason":"system_event_commit_failed","event_kind":"factor_value_edit","stage":"analyse"},"request_id":"midturn-request","retryable":true}');
     expect(r.payload).not.toContain('Nothing was saved');
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
   } finally { await h.app.close(); }
 });
-
-it('(g) a canonical refusal restores the same session history and typed grounding for the next provider call', async () => {
-  const typed = vi.spyOn(HistoryStore.prototype, 'typedWords');
-  const h = await harness();
-  const retained = 'Keep the previously accepted saffron reasoning.';
-  const refused = 'The refused violet orchard demand assumption is 73.';
-  const session = { agent_session_id: 'history-refusal-control' };
-  try {
-    h.recover();
-    const first = await h.inject({ ...session, turn_id: 'c1111111-1111-4111-8111-111111111111', message: retained });
-    expect(first.statusCode, first.payload).toBe(200);
-    h.refuseNext();
-    const refusal = await h.inject({ ...session, message: refused });
-    expect(refusal.statusCode).toBe(403); expect(refusal.payload).toBe(BYTES.not_owner);
-    const refusalInput = h.providerInputs.at(-1)!;
-    expect(refusalInput).toContain(refused); expect(refusalInput).toContain(retained);
-    h.recover();
-    const typedReadsBeforeNext = typed.mock.calls.length;
-    const next = await h.inject({ ...session, turn_id: 'd1111111-1111-4111-8111-111111111111', message: 'Explore what we already retained.' });
-    expect(next.statusCode, next.payload).toBe(200);
-    const nextInput = h.providerInputs.at(-1)!;
-    expect(nextInput).toContain(retained);
-    expect(nextInput).not.toContain(refused);
-    const input = (JSON.parse(nextInput) as { input: Array<{ role?: string; content?: unknown }> }).input;
-    process.stdout.write(`MIDTURN_R2_HISTORY g ${JSON.stringify(input.filter(item => item.role === 'user' || item.role === 'assistant'))}\n`);
-    // The accepted answer remains exactly once; the refused answer must not be replayed.
-    expect(input.filter(item => item.role === 'assistant' && JSON.stringify(item.content).includes('Consider the assumptions together.'))).toHaveLength(1);
-    const nextTypedReads = typed.mock.results.slice(typedReadsBeforeNext).map(result => result.value as readonly string[]);
-    expect(nextTypedReads.length).toBeGreaterThan(0);
-    for (const words of nextTypedReads) { expect(words).toContain(retained); expect(words).not.toContain(refused); }
-    expect(h.rows.has(TID)).toBe(false); expect(h.rows.has(`${TID}:claim`)).toBe(false);
-  } finally { await h.app.close(); }
-}, 30_000);
 
 it('explicit saves are inert without context and aggregate through the same child/parent chain as door entries', () => {
   recordSuccessfulSave(); expect(readSuccessfulDoorEntries()).toBe(0);

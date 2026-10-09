@@ -1,6 +1,6 @@
 /** One HTTP scenario admission authority. Registered after service/HMAC authentication. */
 import fp from 'fastify-plugin';
-import { bindWriteCaller, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readWriteRefusal, readSuccessfulDoorEntries, recordSuccessfulSave } from '../orchestrator-v5/ownership/door-ownership.js';
+import { bindWriteCaller, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readWriteRefusal, readSuccessfulDoorEntries, readUnsavableEffects, recordSuccessfulSave } from '../orchestrator-v5/ownership/door-ownership.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest, RouteOptions } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -291,10 +291,13 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
       done(null, payload);
       return;
     }
+    const effects = readUnsavableEffects(req);
     const body = JSON.stringify(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[refusal.reason]);
     // Already mapped paths retain their bytes and their existing terminal mark.
-    if (reply.statusCode === 403 && payload === body) { done(null, payload); return; }
-    const replace = () => {
+    if (effects === 0 && reply.statusCode === 403 && payload === body) { done(null, payload); return; }
+    const complete = () => {
+      // Preserve publication-only bytes while still retiring a captured refused fence.
+      if (effects > 0) { done(null, payload); return; }
       reply.code(403).type('application/json; charset=utf-8');
       reply.removeHeader('content-length');
       done(null, body);
@@ -302,8 +305,8 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
     const fence = refusal.fence;
     if (fence) {
       void markDraftGraphWriteFailed(fence.scenarioId, fence.turnId,
-        'model_write_ownership_refused', getOrGenerateRequestId(req), 'turn_dead_only').then(replace, replace);
-    } else replace();
+        'model_write_ownership_refused', getOrGenerateRequestId(req), 'turn_dead_only').then(complete, complete);
+    } else complete();
   });
   app.addHook('preHandler', (req, _reply, done) =>
     bindWriteCaller(req.scenarioAccess?.caller ?? { userId: null, verified: false }, done, req));

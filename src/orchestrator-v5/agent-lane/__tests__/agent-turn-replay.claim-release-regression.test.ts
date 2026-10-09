@@ -141,7 +141,8 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
     ownershipChangesAfterClaim = true;
     const response = await approve();
     expect(response.statusCode, response.payload).toBe(403);
-    expect(response.payload).toBe('{"error":"model_write_ownership_refused","message":"Nothing was saved. You don\'t have access to change this model."}');
+    expect(response.payload).toBe('{"error":"model_write_ownership_refused"}');
+    expect(response.payload).not.toContain('Nothing was saved');
     expect(store.append).toHaveBeenCalledTimes(1); // Only the earlier claim, never the refused answer.
     expect(store.releaseTurnClaim).toHaveBeenCalledExactlyOnceWith(SID, `${T1}:claim`, expect.any(String));
     expect(rows.size).toBe(0);
