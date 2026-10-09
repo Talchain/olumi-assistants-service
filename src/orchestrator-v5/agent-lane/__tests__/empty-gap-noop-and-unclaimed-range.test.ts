@@ -107,6 +107,20 @@ describe('empty gap declarations on empty carriers and unclaimed empty ranges', 
     expect(starting.result).not.toHaveProperty('detail');
     expect(starting.result.interventions).toEqual(direct.result.interventions);
   });
+  it.each([false, true])('H4: an unclaimed non-zero likely range is omitted with disclosure and the level proceeds unchanged, starting=%s', async starting => {
+    const expected = await propose(ordinary, undefined, starting);
+    const actual = await propose(ordinary.map(level => level.option_label === 'Full'
+      ? { ...level, likely_low: 5, likely_high: 20, range_meaning: 'likely_range', range_user_stated: false }
+      : level), undefined, starting);
+    for (const op of actual.proposal.operations) expect(op.value).not.toHaveProperty('likely_range');
+    expect(actual.proposal).toEqual(expected.proposal);
+    expect(actual.result.interventions).toEqual(expected.result.interventions);
+    const reason = 'No likely range was recorded: a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed.';
+    expect(actual.result.ranges_not_recorded).toEqual([{ option: 'Full', factor: 'Duration', reason }]);
+    expect(actual.result.detail).toBe(`Full / Duration: ${reason}`);
+    const { ranges_not_recorded: _ranges, detail: _detail, ...withoutDisclosure } = actual.result;
+    expect(withoutDisclosure).toEqual(expected.result);
+  });
   it.each([false, true])('empty node and mirror arrays behave as omitted declarations, starting=%s', async starting => {
     const graph: Graph = structuredClone(served.graph);
     for (const node of graph.nodes.filter(n => n.kind === 'option')) Object.assign(node, { unresolved_targets: [], user_questions: [] });

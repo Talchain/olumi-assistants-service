@@ -1,0 +1,73 @@
+{
+  "P1": {
+    "assistant_text": "Our churn is 3%.\n\n- Test customer response.\n\nI proposed a \u00a354 price level for you to review.\n\nWould you approve this starting figure?",
+    "suggested_actions": [
+      {
+        "id": "agent-approve-proposal:prop_0105c21602bd0f2b6d3c900c96f8cb5e",
+        "label": "Use as starting option levels",
+        "message": "Yes, use those."
+      },
+      {
+        "id": "agent-amend-proposal",
+        "label": "Change something first",
+        "message": "Before you apply it, I want to change some of it."
+      },
+      {
+        "id": "agent-decline-proposal:prop_0105c21602bd0f2b6d3c900c96f8cb5e",
+        "label": "Not now",
+        "message": "Not now."
+      }
+    ]
+  },
+  "P2": {
+    "assistant_text": "Our churn is 3%.\n\n- Test customer response.\n\nI proposed a \u00a354 price level for you to review.\n\nWould you approve this starting figure?",
+    "suggested_actions": [
+      {
+        "id": "agent-approve-proposal:prop_2e729229caee9060db74975bb27477a5",
+        "label": "Use as starting option levels",
+        "message": "Yes, use those."
+      },
+      {
+        "id": "agent-amend-proposal",
+        "label": "Change something first",
+        "message": "Before you apply it, I want to change some of it."
+      },
+      {
+        "id": "agent-decline-proposal:prop_2e729229caee9060db74975bb27477a5",
+        "label": "Not now",
+        "message": "Not now."
+      }
+    ]
+  },
+  "P3": {
+    "assistant_text": "I\u2019ve prepared this change: add the risk \u2018Customer response\u2019, driven by more \u2018Monthly new Pro subscribers\u2019; it would lower \u2018MRR\u2019. How strongly is not known yet. Nothing is added until you approve it.",
+    "suggested_actions": [
+      {
+        "id": "agent-approve-proposal:gmh_a283781dc21f",
+        "label": "Approve 3 changes",
+        "message": "Yes, add risk 'Customer response', link 'Customer response' to 'MRR' and link 'Monthly new Pro subscribers' to 'Customer response'.",
+        "detail": "Add risk 'Customer response'\nLink 'Customer response' to 'MRR'\nLink 'Monthly new Pro subscribers' to 'Customer response'"
+      },
+      {
+        "id": "agent-amend-proposal",
+        "label": "Change something first",
+        "message": "Before you apply it, I want to change some of it."
+      },
+      {
+        "id": "agent-decline-proposal:gmh_a283781dc21f",
+        "label": "Not now",
+        "message": "Not now."
+      }
+    ]
+  },
+  "X5": {
+    "assistant_text": "Imagine \u2018Raise price to \u00a359\u2019 has gone badly. Start with how \u2018Pro price\u2019 affects \u2018MRR\u2019: how would you notice it early, and what would you do?",
+    "suggested_actions": [
+      {
+        "id": "agent-talk-it-through",
+        "label": "Talk it through",
+        "message": "Let\u2019s talk it through."
+      }
+    ]
+  }
+}
