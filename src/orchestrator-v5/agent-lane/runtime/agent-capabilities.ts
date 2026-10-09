@@ -63,6 +63,7 @@ import { identityReceiptWords, proposeProductIdentity, type IdentityPartLevel, t
 import { CONFIRM_IDENTITY_OP, heldChangeBlocksIdentity, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
+import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -210,6 +211,7 @@ import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadi
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
+import { proposedFrameForLevels, levelOnFinalFrame, preserveSiblingQuantities, SIBLING_LEVEL_UNRESOLVABLE, SIBLING_LEVEL_UNRESOLVABLE_SENTENCE, type ReencodedSibling } from '../level-batch-frame.js';
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { meetsLimit } from '../limit-operator-words.js';
@@ -245,7 +247,7 @@ import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
+import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -900,27 +902,26 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
 /**
  * ⭐ THE FIGURE A LEVEL WAS READ FROM, KEPT ON ITS CELL (AI Conversation #70 5848429576; the door, #2024). A level on a
  * NEW factor with no range was stored as a bare 0.1: the user's "£10 per month" and the range it was read against were
- * gone. The proposal already holds both, so the writer is handed them to keep on the cell in the same commit. Only when
- * they reproduce the stored level exactly: an op whose `normalised` is not `raw / cap` passes no figure (the writer would
- * refuse the whole batch as `level_frame_mismatch`).
+ * gone. Carry every known native point to the final-frame seam, including capless figures and figures whose
+ * proposal coordinate frame differs from the range this approval settles. The transaction re-encodes them together.
  */
 /** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
 function likelyBound(n: number, unit: string): string {
   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
 }
 
-function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
-  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
+function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: number; unit?: string; likely_range?: { low: number; high: number } } {
+  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; derived_frame?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
   // TEMPORAL: the user's likely range rides with their figure (proposed only beside a level they gave).
   const r = v.likely_range;
   const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
   if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw)) return {};
-  // An unscaled level needs no cap. Carry its approved range without inventing a scale frame.
-  if (v.cap == null && v.raw === v.normalised) return likely !== undefined ? { raw_value: v.raw,
+  const cap = v.cap ?? v.derived_frame;
+  // A bare model-scale approval has no native figure to send to the writer.
+  if (cap == null && v.raw === v.normalised && v.unit === undefined && likely === undefined) return {};
+  return { raw_value: v.raw,
+    ...(typeof cap === 'number' && Number.isFinite(cap) && cap > 0 ? { cap } : {}),
     ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
-    likely_range: likely } : {};
-  if (typeof v.cap !== 'number' || !(v.cap > 0) || Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
-  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
     ...(likely !== undefined ? { likely_range: likely } : {}) };
 }
 
@@ -2016,16 +2017,11 @@ function ambiguousClause(ambiguous: readonly AmbiguousTarget[]): string {
   return ` (left out, more than one entity is called this, so the user must say which: ${ambiguous.map((a) => `"${a.requested}"`).join('; ')})`;
 }
 
-/** The level a read model holds for one option on one factor (a bare number or `{ value }`), else undefined. */
-function heldLevelOf(g: GraphRead, optionId: string, factorId: string): unknown {
-  const held = g.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
-  return typeof held === 'number' ? held : held?.value;
-}
-
 /** A later refusal cannot erase an earlier committed save or its receipts. */
-function partialWriteOutcome(proposalId: string, receipts: readonly ReceiptSummary[], outcome: string): ToolResult {
+function partialWriteOutcome(proposalId: string, receipts: readonly ReceiptSummary[], outcome: string, siblings: readonly ReencodedSibling[] = []): ToolResult {
   return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed',
-    proposal_id: proposalId, receipts: [...receipts], outcome, detail: PARTIAL_WRITE_MESSAGES[outcome] };
+    proposal_id: proposalId, receipts: [...receipts], outcome, detail: PARTIAL_WRITE_MESSAGES[outcome],
+    ...(siblings.length > 0 ? { reencoded_siblings: siblings, follow_up: [PARTIAL_WRITE_MESSAGES[outcome], ...siblings.map(c => c.detail)].join(' ') } : {}) };
 }
 
 function laterSaveConflict(error: unknown): boolean {
@@ -2706,9 +2702,10 @@ export function createAgentCapabilities(
     // Derived level frames on factors that hold a value and still have no
     // range — the same attachment the single-kind level path makes.
     workingNodes = workingNodes.map((n) => {
-      const op = levelOps.find((o) => o.path.split('::')[1] === n.id && typeof ((o.value ?? {}) as { derived_frame?: unknown }).derived_frame === 'number');
-      if (op === undefined || frameOf(n) !== null) return n;
-      const range = ((op.value ?? {}) as { derived_frame: number }).derived_frame;
+      const cohort = levelOps.filter(o => o.path.split('::')[1] === n.id);
+      if (!cohort.some(o => typeof ((o.value ?? {}) as { derived_frame?: unknown }).derived_frame === 'number') || frameOf(n) !== null) return n;
+      const range = proposedFrameForLevels(cohort.map(levelFigureOf));
+      if (range === null) return n;
       const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
       const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
       if (typeof raw !== 'number' || range <= 1) return n;
@@ -2749,6 +2746,7 @@ export function createAgentCapabilities(
      * The in-memory pass above stays: it refuses before anything is sent, and the read-back checks against it.
      */
     const receipts: ReceiptSummary[] = [];
+    const reencodedSiblings: ReencodedSibling[] = [];
     let valuesLanded = false;
     let carried = parent.base_graph_identity_hash;
     const values = valueOps.map((o) => {
@@ -2775,7 +2773,7 @@ export function createAgentCapabilities(
     const pairWords = (p: { option_id: string; factor_id: string }): string => `${labelOf(p.option_id)} \u2192 ${labelOf(p.factor_id)}`;
     if (levelInputs.length + linkOps.length + values.length + frames.length > 0) {
       const links = linkOps.map((o) => pairOf(o.path));
-      const levels = levelInputs.map((l) => ({ ...l, value: l.value as number }));
+      const levels = levelInputs.map(l => levelOnFinalFrame({ ...l, value: l.value as number }, frameOf(workingNodes.find(n => n.id === l.factor_id))));
       const res = await opts.commitOptionLevels!({
         scenario_id: ctx.scenario_id,
         base_graph_hash: carried,
@@ -2796,25 +2794,42 @@ export function createAgentCapabilities(
       } else if (res.status === 'stale') {
         levelStop = 'the model changed after this was approved, so nothing in this change was written';
       } else if (res.status === 'refused') {
+        if (res.reason === SIBLING_LEVEL_UNRESOLVABLE) return { ok: false, mutated: false, applied: false,
+          proposal_id: parent.proposal_id, refusal: res.reason, reason: res.reason, detail: SIBLING_LEVEL_UNRESOLVABLE_SENTENCE, follow_up: SIBLING_LEVEL_UNRESOLVABLE_SENTENCE, receipts };
         const what = res.pair !== undefined ? `the level for ${pairWords(res.pair)}`
           : res.value !== undefined ? `the value for ${labelOf(res.value.factor_id)}`
             : res.frame !== undefined ? `the range for ${labelOf(res.frame.factor_id)}` : 'part of this change';
         levelStop = `${what} was refused, so nothing in this change was written`;
         stopReason = res.reason;
       } else {
-        if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' });
+        reencodedSiblings.push(...(res.reencoded_siblings ?? []));
+        if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '',
+          ...(reencodedSiblings.length > 0 ? { reencoded_siblings: reencodedSiblings } : {}) });
         carried = res.graph_hash;
         // ⛔ LANDED = WHAT THE MODEL HOLDS (#1995): every approved link and level, read back — never the revision alone.
         const check = await readGraph(ctx.scenario_id);
         const holds = check !== null
           && optionGapsHeld(check.raw, optionGaps)
-          && levels.every((l) => heldLevelOf(check, l.option_id, l.factor_id) === l.value)
+          && levels.every((l) => {
+            const committed = res.committed_levels.find(c => c.option_id === l.option_id && c.factor_id === l.factor_id);
+            const node = check.nodes.find(n => n.id === l.option_id);
+            // Value-only ports retain the sent coordinate contract; only a complete
+            // committed native point supersedes the proposal's range.
+            if (committed?.raw_value === undefined || committed.cap === undefined) {
+              const held = mergeInterventionSourceObjects(node ?? {})[l.factor_id];
+              return (typeof held === 'number' ? held : (held as { value?: unknown } | undefined)?.value) === l.value;
+            }
+            const current = resolveRawInterventionValue(mergeInterventionSourceObjects(node ?? {})[l.factor_id], buildFactorScaleMap(check.nodes).get(l.factor_id));
+            const saved = committed.raw_value;
+            return current.value !== null && sameAfterScaling(current.value, saved);
+          })
           && links.every((k) => check.edges.some((e) => e.from === k.option_id && e.to === k.factor_id))
           && [...expectedValueOf].every(([id, v]) => (check.nodes.find((n) => n.id === id)?.observed_state as { value?: unknown } | undefined)?.value === v);
         if (!holds) {
           return {
             ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
             refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
+            ...(reencodedSiblings.length > 0 ? { reencoded_siblings: reencodedSiblings, follow_up: reencodedSiblings.map(c => c.detail).join(' ') } : {}),
             detail: 'This change was sent as one, but reading the model back did not show all of it. Say exactly that; never say it was saved or not saved.',
           };
         }
@@ -2850,6 +2865,7 @@ export function createAgentCapabilities(
       proposal_id: parent.proposal_id,
       parts,
       receipts,
+      ...(reencodedSiblings.length > 0 ? { reencoded_siblings: reencodedSiblings, detail: reencodedSiblings.map(c => c.detail).join(' '), follow_up: reencodedSiblings.map(c => c.detail).join(' ') } : {}),
       revision_before: parent.base_graph_identity_hash,
       revision_after: carried,
       ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
@@ -6314,11 +6330,14 @@ export function createAgentCapabilities(
          * it, or the level is a number the model cannot interpret. Same
          * mechanism as the adopted-assumption path, and the same disclosure.
          */
+        const reencodedSiblings: ReencodedSibling[] = [];
         const framedHere: { factor: string; range: number }[] = [];
         const frames = new Map<string, number>();
-        for (const o of ops) {
-          const f = ((o.value ?? {}) as { derived_frame?: number | null }).derived_frame;
-          if (typeof f === 'number' && f > 1) frames.set(o.path.split('::')[1], f);
+        for (const factorId of new Set(ops.map(o => o.path.split('::')[1]))) {
+          const cohort = ops.filter(o => o.path.split('::')[1] === factorId);
+          if (!cohort.some(o => typeof ((o.value ?? {}) as { derived_frame?: unknown }).derived_frame === 'number')) continue;
+          const range = proposedFrameForLevels(cohort.map(levelFigureOf));
+          if (range !== null && range > 1) frames.set(factorId, range);
         }
         if (frames.size > 0) {
           /**
@@ -6379,6 +6398,14 @@ export function createAgentCapabilities(
             return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
           });
           if (framedHere.length > 0) {
+            const framedGraph = preserveSiblingQuantities(base.raw, { ...base.raw, nodes: patched, edges: base.edges },
+              levelInputs.filter(l => l.figure.raw_value !== undefined || (mergeInterventionSourceObjects(base.nodes.find(n => n.id === l.option_id) ?? {})[l.factor_id] as { value?: unknown } | undefined)?.value !== l.value
+                || l.figure.likely_range !== undefined).map(l => ({ optionId: l.option_id, factorId: l.factor_id })));
+            if (framedGraph.kind === 'refused') return {
+              ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id,
+              refusal: framedGraph.reason, reason: framedGraph.reason,
+              ...(framedGraph.reason === SIBLING_LEVEL_UNRESOLVABLE ? { detail: SIBLING_LEVEL_UNRESOLVABLE_SENTENCE, follow_up: SIBLING_LEVEL_UNRESOLVABLE_SENTENCE } : {}), receipts,
+            };
             /**
              * ⛔⛔ CAS-GATED, AND IT WAS NOT. This write asserts
              * `edges: before.edges` — the WHOLE edge set as it was at the read
@@ -6427,7 +6454,7 @@ export function createAgentCapabilities(
               // hashes `options`, `goal_node_id` and `goal_constraints` too, so the
               // frame write destroyed analysis-affecting content. The value-batch
               // write at `:367` had it right all along — same spread, same reason.
-              graph: { ...base.raw, nodes: patched, edges: base.edges },
+              graph: { ...base.raw, ...framedGraph.graph },
               ...(base.graph_hash !== '' ? { expected_graph_hash: base.graph_hash } : {}),
               /**
                * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes
@@ -6455,6 +6482,12 @@ export function createAgentCapabilities(
               });
               framedHere.length = 0;
             } else {
+              reencodedSiblings.push(...framedGraph.reencoded);
+              for (const cell of framedGraph.reencoded) {
+                const level = levelInputs.find(l => l.option_id === cell.option_id && l.factor_id === cell.factor_id);
+                const cap = frames.get(cell.factor_id);
+                if (level !== undefined && cap !== undefined) level.value = cell.quantity / cap;
+              }
               /**
                * ⛔ THE RANGE WRITE IS A COMMIT OF ITS OWN, SO ITS RECEIPT IS THIS APPROVAL'S TOO (writer audit
                * 27 Sep, finding 8). It was never collected: a signed-in approval minted a version here and the
@@ -6470,6 +6503,7 @@ export function createAgentCapabilities(
                 receipts.push({
                   version: mv.version_number, version_id: mv.version_id,
                   mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '', source_turn_id: '',
+                  ...(framedGraph.reencoded.length > 0 ? { reencoded_siblings: framedGraph.reencoded } : {}),
                 });
               }
             }
@@ -6480,13 +6514,21 @@ export function createAgentCapabilities(
         catch (error) {
           if (framedHere.length === 0) throw error;
           return partialWriteOutcome(decision.proposal.proposal_id, receipts,
-            laterSaveConflict(error) ? 'range_saved_levels_not_saved' : 'range_saved_levels_unconfirmed');
+            laterSaveConflict(error) ? 'range_saved_levels_not_saved' : 'range_saved_levels_unconfirmed', reencodedSiblings);
+        }
+        // Keep sent coordinates for truthful readback; the proposal's native point remains unchanged.
+        for (const l of levelInputs) {
+          const encoded = levelOnFinalFrame({ value: l.value as number, ...l.figure },
+            frameOf((rebased ?? before).nodes.find(n => n.id === l.factor_id)));
+          l.value = encoded.value;
+          l.figure = { ...l.figure, ...(encoded.cap !== undefined ? { cap: encoded.cap } : {}) };
         }
         let baseHash = rebased?.graph_hash ?? before.graph_hash;
         /** The levels THIS approval's own writes committed — see the read-back below. */
         const ownLevelWrite = new Set<string>();
         /** The level each own write committed: from its OWN response's committed post-state when present, else what it sent. */
         const ownLevel = new Map<string, number>();
+        const ownCoordinate = new Map<string, { value: number; raw_value?: number; cap?: number; unit?: string }>();
         /** Levels whose COMMITTED value is known exactly (the write's own `draft_graph`), not just the value sent. */
         const ownLevelExact = new Set<string>();
         /**
@@ -6501,31 +6543,40 @@ export function createAgentCapabilities(
           base_graph_hash: baseHash,
           turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
           links: [],
-          levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
+          levels: levelInputs.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
         });
         } catch (error) {
           if (framedHere.length === 0) throw error;
           return partialWriteOutcome(decision.proposal.proposal_id, receipts,
-            laterSaveConflict(error) ? 'range_saved_levels_not_saved' : 'range_saved_levels_unconfirmed');
+            laterSaveConflict(error) ? 'range_saved_levels_not_saved' : 'range_saved_levels_unconfirmed', reencodedSiblings);
         }
+        if (res.status === 'refused' && res.reason === SIBLING_LEVEL_UNRESOLVABLE && framedHere.length === 0) return {
+          ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id,
+          refusal: res.reason, reason: res.reason, detail: SIBLING_LEVEL_UNRESOLVABLE_SENTENCE, follow_up: SIBLING_LEVEL_UNRESOLVABLE_SENTENCE, receipts,
+        };
         if (res.status === 'unconfirmed') {
-          if (framedHere.length > 0) return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'range_saved_levels_unconfirmed');
+          if (framedHere.length > 0) return partialWriteOutcome(decision.proposal.proposal_id, receipts, 'range_saved_levels_unconfirmed', reencodedSiblings);
           return {
             ok: false, mutated: true, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed', receipts,
             detail: 'The option levels were sent as one change, but Olumi could not read the model back to confirm them. Say exactly that; never say they were saved or not saved.',
           };
         }
         if (res.status === 'committed') {
+          reencodedSiblings.push(...(res.reencoded_siblings ?? []));
           baseHash = res.graph_hash;
           for (const l of levelInputs) {
             ownLevelWrite.add(l.path);
             // The level the commit stored, when the writer reports it — else what was sent, and never called exact.
             // Each level exactly as the verified read-back of the commit holds it (#2007 `committed_levels`).
-            const stored = res.committed_levels.find((c) => c.option_id === l.option_id && c.factor_id === l.factor_id)?.value;
-            ownLevel.set(l.path, stored ?? (l.value as number));
-            if (stored !== undefined) ownLevelExact.add(l.path);
+            const stored = res.committed_levels.find((c) => c.option_id === l.option_id && c.factor_id === l.factor_id);
+            ownLevel.set(l.path, stored?.value ?? (l.value as number));
+            if (stored !== undefined) {
+              ownLevelExact.add(l.path);
+              if (stored.raw_value !== undefined && stored.cap !== undefined) ownCoordinate.set(l.path, stored);
+            }
           }
-          if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' });
+          if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '',
+            ...((res.reencoded_siblings?.length ?? 0) > 0 ? { reencoded_siblings: res.reencoded_siblings } : {}) });
         } else {
           const labelIn = (id: string): string => before.nodes.find((n) => n.id === id)?.label ?? id;
           const why = res.status === 'stale'
@@ -6578,7 +6629,10 @@ export function createAgentCapabilities(
           if (ownLevelWrite.has(o.path) && mine !== undefined) {
             // The op's `cap` is the range the level was divided by (stated, or derived from the figure); none ⇒ already 0–1.
             const opv = (o.value ?? {}) as { cap?: unknown; normalised?: unknown };
-            const cap = typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined;
+            const sent = levelInputs.find(l => l.path === o.path);
+            const committed = ownCoordinate.get(o.path);
+            const cap = committed !== undefined ? committed.cap
+              : sent?.figure.cap ?? (typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined);
             /**
              * ⛔ COMPARE UN-ROUNDED; ROUND ONLY WHAT IS REPORTED (review of #1881 at 6868825f, 5827673705). A 6-figure round
              * (6 significant figures) applied before the comparison made a precise figure — £1,234,567 — never equal
@@ -6586,9 +6640,9 @@ export function createAgentCapabilities(
              */
             const toAbs = (x: number): number => (cap !== undefined ? x * cap : x);
             // What we saved, as the user said it: their own figure when the write committed exactly what was sent.
-            const savedAsSent = typeof opv.normalised === 'number' && mine === opv.normalised && Number.isFinite(row.requested);
+            const savedAsSent = mine === sent?.value && Number.isFinite(row.requested);
             // Compared against the EXACT committed level in its range, so the only difference left is scale-step noise.
-            const savedAbs = toAbs(mine);
+            const savedAbs = committed?.raw_value ?? toAbs(mine);
             const savedUser = savedAsSent ? row.requested : quotable(savedAbs);
             const unitRaw = ((byId.get(factorId) ?? beforeNodeById.get(factorId))?.observed_state as { unit?: unknown } | undefined)?.unit;
             const unit = typeof unitRaw === 'string' && unitRaw.trim() !== '' ? unitRaw.trim() : undefined;
@@ -6655,6 +6709,7 @@ export function createAgentCapabilities(
             ok: false, mutated: true, applied: false, refusal: 'partially_applied',
             proposal_id: decision.proposal.proposal_id,
             receipts,
+            ...(reencodedSiblings.length > 0 ? { reencoded_siblings: reencodedSiblings, follow_up: [partialRangeLevelsWarning(framedHere), ...reencodedSiblings.map(c => c.detail)].join(' ') } : {}),
             detail:
               'This approval attached a range where the analysis needed one, so the model did change: ' +
               framedHere.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
@@ -6681,6 +6736,7 @@ export function createAgentCapabilities(
           ok: true, mutated: true, applied: true,
           proposal_id: decision.proposal.proposal_id,
           receipts,
+          ...(reencodedSiblings.length > 0 ? { reencoded_siblings: reencodedSiblings, detail: reencodedSiblings.map(c => c.detail).join(' '), follow_up: reencodedSiblings.map(c => c.detail).join(' ') } : {}),
           recorded_count: landed.length,
           requested_count: applied.length,
           interventions: applied,
