@@ -18,7 +18,7 @@ import { GOAL_HORIZON_STEADY_ATTESTED, goalHorizonVerdict, heldGoalDeadline, hel
 import { goalHorizonSteadyWhyLine } from '../goal-target/goal-horizon-detail.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-target/goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
-import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
+import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch, preconditionRiskIds } from '../../graph/inert-risk.js';
@@ -382,14 +382,14 @@ function withCellHorizonWarning<E>(
 /** The one ask writer, before display scrubbing or turn eligibility. */
 function rawDecisionInputAsk(graph: unknown): string | null {
   const part = draftedTeamPartOf(graph);
-  if (part !== null) return goalDeadlineOf(part.goal) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
+  if (part !== null) return goalDeadlineFromRecord(graph, part.goal.id) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return null;
   // ⭐ S-E GOALS (Science ruling 7 Oct §2/§4): a goal measured as a CHANCE is never given a target figure ("What figure
   // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
   // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
-  if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineOf(goal) === undefined ? chanceGoalDeadlineAsk(label) : null;
+  if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineFromRecord(graph, goal.id) === undefined ? chanceGoalDeadlineAsk(label) : null;
   return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. ${OBJECTIVE_ASK_QUESTION}`
     : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
 }
