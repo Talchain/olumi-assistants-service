@@ -462,3 +462,39 @@ it('B2 the identity door postimage itself licenses the real Run only after its z
   expect(goalHorizonVerdict(postimage, fact.result.enrichment)).toBe('computed_at_h');
   expect(fact.result.enrichment.option_comparison.every((r: Rec) => r.probability_of_goal !== undefined)).toBe(true);
 });
+
+// DL-delegate one-round claims (#2927 @d5c97b53): forged card words, and a carrier / zero id collision.
+it('forged card words are refused at the door even with a token recomputed over them', async () => {
+  const graph = (await build('net', false)).graph;
+  const card = proposeProductIdentity(graph)!;
+  const forged = { ...card, words: card.words.replace('as the change after any losses', 'as the change before any losses') };
+  expect(forged.words).not.toBe(card.words);
+  const written = applyIdentityConfirmEdit({ ...forged, persistedGraph: graph,
+    expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, reading_token: identityConfirmReadingToken(forged) });
+  expect(written).toMatchObject({ kind: 'refused', reason: 'reading_not_confirmed' });
+  const genuine = applyIdentityConfirmEdit({ ...card, persistedGraph: graph,
+    expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, reading_token: identityConfirmReadingToken(card) });
+  expect(genuine.kind).toBe('mutated');
+});
+
+it.each(['carrier', 'zero'] as const)('a pre-existing node with the derived %s id is refused, said, and nothing is carried', async which => {
+  const { graph } = await build('net');
+  const carrier = carrierOf(graph), zero = zeroOf(graph), goal = goalOf(graph);
+  const takenId = which === 'carrier' ? carrier.id : zero.id;
+  // The model before admission: the stated quantities feed the goal; an unrelated node already holds the derived id.
+  const derived = new Set([carrier.id, zero.id]);
+  const nodes = graph.nodes.filter((n: Rec) => !derived.has(n.id)).map((n: Rec) => n.id === goal.id
+    ? (({ nonlinear_identity: _sum, ...rest }) => rest)(n) : n);
+  nodes.push({ id: takenId, kind: 'factor', label: 'Unrelated quantity', observed_state: { value: 0.5, raw_value: 5, unit: 'items', source: 'user_stated' } });
+  const stock = graph.nodes.find((n: Rec) => n.label === 'MRR today'), change = graph.nodes.find((n: Rec) => n.label === 'Monthly change');
+  const edges = [stock, change].map((n: Rec) => ({ from: n.id, to: goal.id }));
+  const admission = admitAccumulationIdentities(nodes, edges,
+    [{ outcome: goal.label, operation: 'accumulation', reading: 'net', factors: [stock.label, change.label], provenance: 'explicit' }]);
+  expect(admission.carriers.size).toBe(0);
+  expect(admission.addedNodes).toEqual([]);
+  expect(admission.loss.map(l => l.reason).join(' ')).toMatch(/already worked out another way/);
+  // CONTROL: without the unrelated node holding that id, the same declaration is admitted.
+  const control = admitAccumulationIdentities(nodes.filter((n: Rec) => n.id !== takenId), edges,
+    [{ outcome: goal.label, operation: 'accumulation', reading: 'net', factors: [stock.label, change.label], provenance: 'explicit' }]);
+  expect(control.carriers.size).toBe(1);
+});
