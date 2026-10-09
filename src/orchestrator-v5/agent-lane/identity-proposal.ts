@@ -1,3 +1,4 @@
+import { goalStockAccumulationOf, goalStockNetReadingLine } from '../goal-target/goal-horizon-detail.js';
 import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
 /**
  * ⛔ THE CARD FOR A PRODUCT THE MINT COULD NOT PROVE (DL 5888399097; AIQ 5886967509 step (2); R3 served witness 5888379558).
@@ -34,15 +35,17 @@ export interface IdentityPartLevel {
   readonly unit: string;
 }
 
-export interface IdentityProposal {
+interface IdentityProposalBase {
   readonly outcome_id: string;
-  readonly operation: 'product';
-  /** The existing cards put the rate first; a stored reading keeps its declared order. */
-  readonly factor_ids: readonly [string, string];
   /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
   readonly part_levels?: readonly IdentityPartLevel[];
 }
+
+export type IdentityProposal = IdentityProposalBase & (
+  | { readonly operation: 'product'; readonly factor_ids: readonly [string, string] }
+  | { readonly operation: 'sum'; readonly factor_ids: readonly [string] }
+);
 
 /** The approved-card door's limit on the displayed words (Canonical #2292). */
 export const CARD_WORDS_MAX = 400;
@@ -139,11 +142,21 @@ export function readingTermsWords(graph: unknown): string {
 
 /** The confirmation receipt, read back from the stored graph: Science §(i) (3) names its terms as the card did. */
 export function identityReceiptWords(goalLabel: string, rate: string, count: string, graph: unknown): string {
+  if (goalStockAccumulationOf(graph) !== null) return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}". Any earlier result is now out of date; `
+    + 'run the analysis again to see it calculated that way.';
   return `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}"${readingTermsWords(graph)}. Any earlier result is now out of date; `
     + 'run the analysis again to see it calculated that way.';
 }
 
 export function proposeProductIdentity(graph: unknown): IdentityProposal | null {
+  const stock = goalStockAccumulationOf(graph);
+  if (stock !== null && (stock.identity.stated_in_brief !== true
+    || (stock.netZero !== null && (stock.netZero.observed_state as Rec).source !== 'user_confirmed'))) {
+    const net = goalStockNetReadingLine(graph);
+    const words = `Olumi reads ‘${String(stock.goal.label)}’ as ‘${String(stock.carrier.label)}’.${net === null ? '' : ` ${net}`} Is that how you work it out?`;
+    return words.length > CARD_WORDS_MAX ? null : { outcome_id: String(stock.goal.id), operation: 'sum',
+      factor_ids: [String(stock.carrier.id)], words };
+  }
   return proposeOnGoal(graph) ?? proposeOnCarrier(graph) ?? proposeOnStoredReading(graph);
 }
 

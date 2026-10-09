@@ -24,7 +24,7 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
 /** The unconfirmed goal product to carry on the wire, or null: the card's reading on a goal that carries no identity. */
 export function unconfirmedGoalProductFor(storedGraph: unknown): { goal_id: string; factor_ids: readonly [string, string] } | null {
   const reading = proposeProductIdentity(storedGraph);
-  if (reading === null || !isRec(storedGraph) || !Array.isArray(storedGraph.nodes)) return null;
+  if (reading === null || reading.operation !== 'product' || !isRec(storedGraph) || !Array.isArray(storedGraph.nodes)) return null;
   const goal = storedGraph.nodes.find((n): n is Rec => isRec(n) && n.id === reading.outcome_id);
   if (goal === undefined || (goal.nonlinear_identity !== undefined && goal.nonlinear_identity !== null)) return null;
   return { goal_id: reading.outcome_id, factor_ids: reading.factor_ids };

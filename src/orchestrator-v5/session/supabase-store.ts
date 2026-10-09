@@ -525,7 +525,9 @@ export class SupabaseSessionStore implements SessionStore {
         counts.attempts += 1;
         try {
           if (!row || typeof row.fact_id !== 'string' || typeof row.scenario_id !== 'string') throw new Error('Invalid claimed fact identity');
-          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, { scenarioId: row.scenario_id });
+          const mapped = toTypedRunRows({ ...drainRecord(row.payload), noop: row.noop }, {
+            scenarioId: row.scenario_id, evaluatedScenarioRevision: row.evaluated_scenario_revision,
+          });
           if ('ok' in mapped) {
             const { options, ...run } = mapped.ok;
             const stored = await port.storeTypedAnalysisRun({ p_fact_id: row.fact_id, p_run: run, p_options: options });
