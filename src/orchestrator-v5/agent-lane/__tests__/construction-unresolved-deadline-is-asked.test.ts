@@ -60,7 +60,7 @@ function assertRealSchemaWouldAccept(payload: Rec): void {
 }
 
 async function build(brief: string, c: CandidateModel): Promise<{ result: Rec; goal: Rec; questions: string[] }> {
-  assertRealSchemaWouldAccept(c as Rec);
+  assertRealSchemaWouldAccept(c as unknown as Rec);
   let stored: string | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {

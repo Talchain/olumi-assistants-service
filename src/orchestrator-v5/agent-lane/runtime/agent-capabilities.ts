@@ -3353,7 +3353,7 @@ export function createAgentCapabilities(
     if (res.status === 'unconfirmed') {
       const reread = await readGraph(ctx.scenario_id);
       if (reread !== null && goalDeadlineFromRecord(reread.raw, op.path) === v.deadline
-        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference, (op.value as { stated_months?: number }).stated_months)) {
+        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference ?? null, (op.value as { stated_months?: number }).stated_months)) {
         proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
       }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
@@ -4794,15 +4794,15 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
       const timestamp = draft?.created_at;
-      if (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp))) return { ok: false, mutated: false, refusal: 'reference_missing',
-        detail: deadlineRefusalDetail.reference_missing };
-      const draftReference = todayInLondon(new Date(timestamp));
+      const draftReference = typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp))
+        ? todayInLondon(new Date(timestamp)) : undefined;
       const asOf = args.reference_date;
       if (asOf !== undefined && (typeof asOf !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)
         || !wordsTheUserWrote(asOf, ctx.user_turn_text) || !new RegExp(`as of\\s+${asOf}`, 'i').test(ctx.user_turn_text ?? ''))) return { ok: false, mutated: false, refusal: 'reference_not_stated',
           detail: deadlineRefusalDetail.reference_not_stated };
       const reference = typeof asOf === 'string' ? asOf : draftReference;
-      const stated = readStatedDeadline(words, reference);
+      // Missing R restores the HEAD date-only door; the clock places D but cannot attest H.
+      const stated = readStatedDeadline(words, reference ?? todayInLondon((opts.now ?? (() => new Date()))()));
       if (stated === null) {
         return { ok: false, mutated: false, refusal: 'deadline_not_placed',
           detail: `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
@@ -4823,11 +4823,12 @@ export function createAgentCapabilities(
           detail: `The goal "${goal.label}" already holds ${date} as its deadline, so nothing was prepared. Tell the user it is already recorded.` };
       }
       const approved = { goal_id: goal.id, deadline: stated.date, expected_deadline: held ?? null, reference_date: reference,
-        ...(stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) };
+        ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) };
       const dry = applyGoalHorizonEdit(g.raw, approved);
       if (dry.kind === 'refused') return { ok: false, mutated: false, refusal: dry.reason,
         detail: deadlineRefusalDetail.horizon_not_modelled };
-      const fromToday = sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
+      const fromToday = reference === undefined ? sayDeadlineFromToday(stated)
+        : sayDeadlineFromToday(stated).replace('from today', `from ${sayDate(reference)}`);
       const question = `Is your deadline ${date} (${fromToday})?`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
       const proposal = createProposal({
@@ -4835,8 +4836,9 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_goal_deadline', path: goal.id,
-          value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words, reference: stated.reference,
-            ...(stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
+          value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words,
+            ...(reference !== undefined ? { reference } : {}),
+            ...(reference !== undefined && stated.stated_count?.unit === 'months' ? { stated_months: stated.stated_count.value } : {}) } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `${question}${replaces}`,

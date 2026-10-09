@@ -1187,7 +1187,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     // A retry of a write that landed: the date is already held, so the batch is a verified no-op (`unchanged` below).
     if (written.kind === 'unchanged') return { kind: 'unchanged' };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date, goalHorizon.stated_months)
+    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id, goalHorizon.reference_date ?? null, goalHorizon.stated_months)
       || goalDeadlineFromRecord(graph, goalHorizon.goal_id) !== goalHorizon.deadline) {
       return { kind: 'refused', reason: 'deadline_scope_mismatch' };
     }

@@ -20,11 +20,12 @@ import { admitStructuralGoalAccumulation } from '../accumulation-identity.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import { identityApproveMessage } from '../identity-card.js';
 import { approvalChipsFor } from '../approval-chips.js';
+import type { ToolResult } from '../runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { constructionOperationId } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { ProposalStore } from '../proposal.js';
-import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
 import { goalStockAccumulationOf } from '../../goal-target/goal-horizon-detail.js';
@@ -50,20 +51,20 @@ const node = (graph: Rec, id: string): Rec => graph.nodes.find((n: Rec) => n.id 
 function draft(): Rec {
   const c: CandidateModel = {
     goal: { metric: 'Cash', operator: '>=', target_stated: true, value: 30000, unit: 'GBP', frame: 'level', horizon_months: 9,
-      provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: null },
+      provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: undefined },
     factors: [
       { label: 'Current cash', role: 'external', baseline_known: true, baseline_value: 12000, unit: 'GBP', provenance: 'explicit', plausible_max: 50000 },
       { label: 'Monthly additions', role: 'external', baseline_known: true, baseline_value: 2000, unit: 'GBP/month', provenance: 'explicit', plausible_max: 10000 },
       { label: 'Bonus', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'GBP', provenance: 'inferred', plausible_max: 10000 },
     ],
     options: [
-      { label: 'Give bonus', provenance: 'explicit', interventions: [{ factor_label: 'Bonus', value: 1000, unit: 'GBP', value_kind: 'absolute', provenance: 'explicit' }] },
-      { label: 'No bonus', provenance: 'explicit', is_status_quo: true, interventions: [{ factor_label: 'Bonus', value: 0, unit: 'GBP', value_kind: 'absolute', provenance: 'explicit' }] },
+      { label: 'Give bonus', provenance: 'explicit', interventions: [{ factor_label: 'Bonus', value: 1000, unit: 'GBP', provenance: 'explicit' }] },
+      { label: 'No bonus', provenance: 'explicit', is_status_quo: true, interventions: [{ factor_label: 'Bonus', value: 0, unit: 'GBP', provenance: 'explicit' }] },
     ], links: [
       { from: 'Current cash', to: 'Cash', direction: 'positive', provenance: 'inferred' },
       { from: 'Monthly additions', to: 'Cash', direction: 'positive', provenance: 'inferred' },
-      { from: 'Bonus', to: 'Cash', direction: 'positive', provenance: 'explicit', effect_amount: 1000, effect_amount_unit: 'GBP', effect_per_source_change: 1000, effect_per_source_change_unit: 'GBP', effect_provenance: 'explicit' },
-    ], constraints: [], risks: [], outcomes: [], unknowns: [],
+      { from: 'Bonus', to: 'Cash', direction: 'positive', provenance: 'explicit', effect_amount: 1000, effect_per_source_change: 1000, effect_provenance: 'explicit' },
+    ], constraints: [], risks: [], outcomes: [],
   };
   const admitted = admitCandidateModel(c, {});
   const held = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, BRIEF), c.goal, BRIEF);
@@ -73,10 +74,11 @@ function draft(): Rec {
   expect(node(graph, 'monthly_additions').observed_state.source).toBe('brief_extraction');
   return graph;
 }
-function world(initial = draft(), badZero = false, reference = `${R}T12:00:00Z`) {
+function world(initial = draft(), badZero = false, reference: string | null = `${R}T12:00:00Z`, recovery?: 'unconfirmed' | 'failed-read') {
   let bytes = JSON.stringify(initial);
   const proposals = new ProposalStore();
   const writes: Rec[] = [];
+  let failedReadbacks = 0;
   const read = (): Rec => JSON.parse(bytes);
   const store = createMockSessionStore({
     loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: BRIEF }),
@@ -85,7 +87,8 @@ function world(initial = draft(), badZero = false, reference = `${R}T12:00:00Z`)
     readFactsWithTurnFor: async ids => writes.flatMap((w, i) => ids.includes(`row-${i + 1}`) ? w.handler_facts.map((fact: Rec) => ({ turn_id: `row-${i + 1}`, fact_created_at: `${R}T12:00:00Z`, fact })) : []),
   });
   const dispatch: InternalDispatch = async path => {
-    if (path.endsWith('/versions')) return { status: 200, json: { versions: [{ version_id: 'draft-v1', sequence: 1, created_at: reference,
+    if (failedReadbacks > 0 && path.endsWith('/graph')) { failedReadbacks--; return { status: 503, json: {} }; }
+    if (path.endsWith('/versions')) return { status: 200, json: { versions: reference === null ? [] : [{ version_id: 'draft-v1', sequence: 1, created_at: reference,
       creation: { kind: 'initial', source_turn_id: registrationTurnId(SID, constructionOperationId(SID, BRIEF)) } }] } };
     if (path.endsWith('/graph')) return { status: 200, json: { graph: read(), graph_hash: hash(read()), brief_text: BRIEF } };
     throw new Error(path);
@@ -95,29 +98,32 @@ function world(initial = draft(), badZero = false, reference = `${R}T12:00:00Z`)
       stage: 'frame', freshness: 'none', hasExistingAnalysis: false, expectedGraphHash: input.base_graph_hash,
       targets: [], goalHorizon: input.goal_horizon, identityConfirm: input.identity_confirm }, store);
     if (out.kind === 'refused') return { status: 'refused', reason: out.reason };
+    if (out.kind === 'unchanged') return { status: 'committed', graph_hash: hash(read()), receipt: null, already_applied: true, committed_levels: [], links_resized: [] };
     if (out.kind !== 'committed') throw new Error(JSON.stringify(out));
     if (badZero) {
       const g = read(); const held = goalStockAccumulationOf(g)!;
       node(g, String(held.netZero!.id)).observed_state.source = 'cee_inference'; bytes = JSON.stringify(g);
     }
+    if (recovery === 'failed-read') failedReadbacks = 1;
+    if (recovery === 'unconfirmed') return { status: 'unconfirmed' };
     return { status: 'committed', graph_hash: hash(read()), receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   };
   const caps = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels, now: () => new Date('2027-02-01T12:00:00Z') });
   const ctx = (text: string) => ({ scenario_id: SID, authenticated_user_id: null, request_id: 'time-close', user_text: text, user_turn_text: text });
   const deadline = async (words = '31 March 2027'): Promise<Rec> => {
-    const offered: Rec = await caps.proposeGoalDeadline!(ctx(words), { deadline_words: words });
+    const offered: Rec = await caps.proposeGoalDeadline!(ctx(words), { deadline_words: words, rationale: 'The user stated this deadline.' });
     expect(offered.ok, JSON.stringify(offered)).toBe(true);
     expect(offered.public_label).toContain('from 9 October 2026');
     const result = await caps.authoriseChange(ctx('Yes'), { proposal_id: offered.proposal_id });
     expect(result.applied, JSON.stringify(result)).toBe(true);
     return result;
   };
-  const offer = async (): Promise<Rec> => caps.proposeIdentity!(ctx('Confirm the reading'), {});
+  const offer = async (): Promise<ToolResult & Rec> => caps.proposeIdentity!(ctx('Confirm the reading'));
   const confirm = async (offered: Rec, oneOff = false): Promise<Rec> => {
     const text = oneOff ? `No — ${offered.card.words}` : identityApproveMessage(offered.card.words);
     return caps.authoriseChange({ ...ctx(text), typed_approval_of: offered.proposal_id, typed_approval_words: text }, { proposal_id: offered.proposal_id });
   };
-  return { read, writes, caps, proposals, deadline, offer, confirm };
+  return { read, replace: (graph: Rec) => { bytes = JSON.stringify(graph); }, writes, caps, proposals, deadline, offer, confirm };
 }
 async function run(graph: Rec): Promise<Rec> {
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'time-close', createMockSessionStore({ loadGraph: async () => graph,
@@ -188,8 +194,75 @@ describe('S4 time close, real deadline and identity doors plus real Run', () => 
     const g = draft(); const before = structuredClone(g);
     expect(applyGoalHorizonEdit(g, { goal_id: String(goal(g).id), deadline: date, expected_deadline: null, reference_date: R }).kind).toBe('refused'); expect(g).toEqual(before);
   });
-  it('missing reference refuses without months', () => {
-    const g = draft(); expect(applyGoalHorizonEdit(g, { goal_id: String(goal(g).id), deadline: '2027-03-31', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'reference_missing' });
+  it('no reference writes only the HEAD date postimage; both scoped checks reject added H', () => {
+    const before = draft(), goalId = String(goal(before).id);
+    const out = applyGoalHorizonEdit(before, { goal_id: goalId, deadline: '2027-03-31', expected_deadline: null });
+    expect(out.kind).toBe('mutated');
+    if (out.kind !== 'mutated') throw new Error('date refused');
+    const expected = structuredClone(before); goal(expected).goal_horizon = { deadline: '2027-03-31' };
+    expect(out.mutatedGraph).toEqual(expected);
+    expect(goalHorizonPostimageIsScoped(before, out.mutatedGraph, goalId)).toBe(true);
+    const renamed = structuredClone(out.mutatedGraph); goal(renamed).label = 'Renamed cash';
+    expect(goalHorizonLandedWriteIsScoped(out.mutatedGraph, renamed, goalId)).toBe(true);
+    const forged = structuredClone(out.mutatedGraph); goal(forged).goal_horizon_months = 6;
+    expect(goalHorizonPostimageIsScoped(before, forged, goalId)).toBe(false);
+    expect(goalHorizonLandedWriteIsScoped(out.mutatedGraph, forged, goalId)).toBe(false);
+    goal(forged).goal_horizon_reference_date = R;
+    expect(goalHorizonPostimageIsScoped(before, forged, goalId, null)).toBe(false);
+  });
+  it('no versions: HEAD from today card; Yes writes only the date; no identity offer; canonical reload withholds', async () => {
+    const before = draft(), old = await run(before), w = world(before, false, null);
+    const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'no-R', user_text: 'within 6 months', user_turn_text: 'within 6 months' };
+    const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', rationale: 'The user stated this deadline.' });
+    expect(offered).toMatchObject({ ok: true, public_label: 'Is your deadline 1 August 2027 (6 months from today)?' });
+    const operation = w.proposals.get(String(offered.proposal_id))!.operations[0]!;
+    expect(operation.value).toEqual({ deadline: '2027-08-01', expected_deadline: null, words: 'within 6 months' });
+    expect(await w.caps.authoriseChange({ ...context, user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ ok: true, applied: true });
+    const after = w.read(), expected = structuredClone(before); goal(expected).goal_horizon = { deadline: '2027-08-01' };
+    expect(after).toEqual(expected);
+    expect(goal(after).goal_horizon_months).toBeUndefined();
+    expect(goal(after).goal_horizon_reference_date).toBeUndefined();
+    expect(goal(after).goal_horizon_stated_months).toBeUndefined();
+    expect(goalStockAccumulationOf(after)).toBeNull(); expect((await w.offer()).ok).toBe(false);
+    expect(hash(after)).toBe(hash(before));
+    expect(w.writes[0].handler_facts.find((f: Rec) => f.fact_type === 'edit_graph').result.rerun_recommended).toBe(false);
+    savedRun.fact = JSON.parse(JSON.stringify(old));
+    const cold = await readScenarioAnalysis({ scenarioId: SID, graph: after as never, requestId: 'no-R-reload' });
+    expect(cold.analysis_state?.run_state.kind).toBe('complete_current');
+    expect(cold.canonical_analysis_view?.options).toHaveLength(2);
+    expect(cold.canonical_analysis_view?.options.every(row => row.cell.kind === 'withheld'
+      && row.cell.reasons.some(r => r.code === GOAL_FIGURES_HORIZON_NOT_TESTED))).toBe(true);
+  });
+  it('CONTRAST same brief with a construction version: from R card; Yes holds H and offers the reading', async () => {
+    const w = world(); expect((await w.deadline('within 6 months')).applied).toBe(true);
+    expect(goal(w.read())).toMatchObject({ goal_horizon: { deadline: '2027-04-09' }, goal_horizon_months: 6,
+      goal_horizon_reference_date: R, goal_horizon_stated_months: 6 });
+    expect((await w.offer()).ok).toBe(true);
+  });
+  it('no versions CONTRAST: explicit as of on the card supplies R only after Yes', async () => {
+    const w = world(draft(), false, null);
+    const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'as-of', user_text: `within 6 months as of ${R}`, user_turn_text: `within 6 months as of ${R}` };
+    const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', reference_date: R, rationale: 'The user stated this deadline.' });
+    expect(offered).toMatchObject({ ok: true, public_label: 'Is your deadline 9 April 2027 (6 months from 9 October 2026)?' });
+    expect(goal(w.read()).goal_horizon_months).toBeUndefined();
+    expect(await w.caps.authoriseChange({ ...context, user_text: 'Yes', user_turn_text: 'Yes' }, { proposal_id: String(offered.proposal_id) })).toMatchObject({ ok: true, applied: true });
+    expect(goal(w.read())).toMatchObject({ goal_horizon_months: 6, goal_horizon_reference_date: R });
+    expect((await w.offer()).ok).toBe(true);
+  });
+  it.each(['unconfirmed', 'failed-read'] as const)('no versions date-only landed recovery: %s; rename accepted, one append', async recovery => {
+    const w = world(draft(), false, null, recovery);
+    const context = { scenario_id: SID, authenticated_user_id: null, request_id: 'no-R-retry', user_text: 'within 6 months', user_turn_text: 'within 6 months' };
+    const offered = await w.caps.proposeGoalDeadline!(context, { deadline_words: 'within 6 months', rationale: 'The user stated this deadline.' });
+    expect(offered.ok).toBe(true);
+    const yes = { ...context, user_text: 'Yes', user_turn_text: 'Yes' };
+    expect(await w.caps.authoriseChange(yes, { proposal_id: String(offered.proposal_id) })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
+    expect(w.writes).toHaveLength(1);
+    // Recovery owns only the date; a later unrelated rename must not supersede its landed write.
+    const actual = w.read(); goal(actual).label = 'Our renamed cash';
+    expect(goalHorizonLandedWriteIsScoped(w.read(), actual, String(goal(actual).id))).toBe(true);
+    w.replace(actual);
+    expect(await w.caps.authoriseChange(yes, { proposal_id: String(offered.proposal_id) })).toMatchObject({ ok: true, applied: true, mutated: false });
+    expect(w.writes).toHaveLength(1); expect(goal(w.read()).goal_horizon_months).toBeUndefined();
   });
   it('month N and number words are proposed, never silently held', async () => {
     expect(attestHorizon('Reach cash at month 9', { horizon_months: 9 })).toMatchObject({ status: 'unresolved', months: null, proposed_months: 9 });

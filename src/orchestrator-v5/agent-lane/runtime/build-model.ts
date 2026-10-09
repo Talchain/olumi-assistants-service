@@ -2201,7 +2201,9 @@ export async function buildModelFromBrief(
      * owes no duplicate question here: decision-input-ask.ts supplies the shared present-number horizon qualification
      * to the draft/Run reply and the Run's typed warning.
      */
-    const horizon = candidate.goal?.horizon_months;
+    const claimedHorizon = candidate.goal?.horizon_months;
+    const horizon = typeof claimedHorizon === 'number' && claimedHorizon > 0
+      ? statedGoal.horizon.proposed_months ?? claimedHorizon : claimedHorizon;
     // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
     // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
     // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
@@ -2209,7 +2211,7 @@ export async function buildModelFromBrief(
     // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
     if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
       openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
-    } else if (statedGoal.horizon.status === 'unresolved') {
+    } else if (statedGoal.horizon.status === 'unresolved' && statedGoal.horizon.proposed_months === undefined) {
       const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
       openQuestions.unshift(deadlineHeld
         ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`

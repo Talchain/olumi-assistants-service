@@ -75,31 +75,39 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
   const held = goalDeadlineFromRecord(persistedGraph, approved.goal_id) ?? null;
   if (held !== approved.deadline && held !== approved.expected_deadline) return { kind: 'refused', reason: 'deadline_changed' };
 
-  if (!approved.reference_date || !isCalendarDate(approved.reference_date)) return { kind: 'refused', reason: 'reference_missing' };
+  // No recorded/user-confirmed R: preserve HEAD's calendar-only write and retry semantics.
   const reference = approved.reference_date;
-  if (approved.deadline <= reference) return { kind: 'refused', reason: 'horizon_not_modelled' };
-  const [yr, mr, dr] = reference.split('-').map(Number) as [number, number, number];
-  const [yd, md, dd] = approved.deadline.split('-').map(Number) as [number, number, number];
-  const months = approved.stated_months ?? 12 * (yd - yr) + md - mr - (dd < dr ? 1 : 0);
-  if (!Number.isInteger(months) || months < 1) return { kind: 'refused', reason: 'horizon_not_modelled' };
-  if (held === approved.deadline && readGoalRecord(persistedGraph, approved.goal_id)?.horizon?.months === months
-    && matches[0]!.goal_horizon_reference_date === reference && matches[0]!.goal_horizon_stated_months === approved.stated_months) return { kind: 'unchanged' };
-  const part = draftedTeamPartOf(persistedGraph);
+  let months: number | undefined;
+  if (reference === undefined) {
+    if (held === approved.deadline) return { kind: 'unchanged' };
+  } else {
+    if (!isCalendarDate(reference)) return { kind: 'refused', reason: 'reference_missing' };
+    if (approved.deadline <= reference) return { kind: 'refused', reason: 'horizon_not_modelled' };
+    const [yr, mr, dr] = reference.split('-').map(Number) as [number, number, number];
+    const [yd, md, dd] = approved.deadline.split('-').map(Number) as [number, number, number];
+    months = approved.stated_months ?? 12 * (yd - yr) + md - mr - (dd < dr ? 1 : 0);
+    if (!Number.isInteger(months) || months < 1) return { kind: 'refused', reason: 'horizon_not_modelled' };
+    if (held === approved.deadline && readGoalRecord(persistedGraph, approved.goal_id)?.horizon?.months === months
+      && matches[0]!.goal_horizon_reference_date === reference && matches[0]!.goal_horizon_stated_months === approved.stated_months) return { kind: 'unchanged' };
+  }
+  const part = reference === undefined ? null : draftedTeamPartOf(persistedGraph);
   if (part !== null && (approved.reference_date === undefined || !isCalendarDate(approved.reference_date)
     || approved.reference_date >= approved.deadline)) return { kind: 'refused', reason: 'date_invalid' };
   const graph = (part !== null ? withEventShareDate(persistedGraph, approved.deadline, approved.reference_date!)
     : structuredClone(persistedGraph)) as Rec & { nodes: unknown[] };
   const goal = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.goal_id)!;
   goal.goal_horizon = { deadline: approved.deadline };
-  goal.goal_horizon_months = months;
-  goal.goal_horizon_reference_date = reference;
-  if (approved.stated_months !== undefined) goal.goal_horizon_stated_months = approved.stated_months;
-  else delete goal.goal_horizon_stated_months;
-  if (part === null) Object.assign(graph, admitStructuralGoalAccumulation(graph.nodes as Array<Rec & { id: string }>, graph.edges as Array<Rec & { from: string; to: string }>));
+  if (reference !== undefined) {
+    goal.goal_horizon_months = months;
+    goal.goal_horizon_reference_date = reference;
+    if (approved.stated_months !== undefined) goal.goal_horizon_stated_months = approved.stated_months;
+    else delete goal.goal_horizon_stated_months;
+    if (part === null) Object.assign(graph, admitStructuralGoalAccumulation(graph.nodes as Array<Rec & { id: string }>, graph.edges as Array<Rec & { from: string; to: string }>));
+  }
 
   const label = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'the goal';
   // Commit assigns refs to new entities: bind the door to those same projected bytes before hashing/read-back.
-  const postimage = assignEntityRefs(projectGraphForPersistence(graph), persistedGraph).graph;
+  const postimage = reference === undefined ? graph : assignEntityRefs(projectGraphForPersistence(graph), persistedGraph).graph;
   const hash = computeAnalysisAffectingGraphHash(postimage as never) || null;
   const beforeHash = computeAnalysisAffectingGraphHash(persistedGraph as never) || null;
   const summary = `Set the deadline to ${sayDate(approved.deadline)}`;
@@ -117,7 +125,7 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
       graph_hash_after: hash,
       safe_summary: summary.length <= 80 ? summary : 'Set the deadline',
       impact: 'low',
-      rerun_recommended: beforeHash !== hash || part !== null,
+      rerun_recommended: reference !== undefined && beforeHash !== hash || part !== null,
     },
   });
   return { kind: 'mutated', mutatedGraph: postimage, handlerFacts: [fact as HandlerFact],
@@ -125,13 +133,14 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
 }
 
 /** Validate the entire freshly computed atomic write; landed retries use the field-scoped recovery check below. */
-export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, goalId: string, expectedReference?: string, statedMonths?: number): boolean {
+export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, goalId: string, expectedReference?: string | null, statedMonths?: number): boolean {
   if (!isRec(before) || !isRec(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
   const deadline = readGoalRecord(after, goalId)?.horizon?.deadline;
   const goal = (after.nodes as Rec[]).find(n => n.id === goalId);
   if (!goal || typeof deadline !== 'string') return false;
-  const reference = expectedReference ?? goal.goal_horizon_reference_date;
-  if (typeof reference !== 'string') return false;
+  // null pins the date-only door; omitted keeps legacy callers that infer the held reference.
+  const reference = expectedReference === null ? undefined : expectedReference ?? goal.goal_horizon_reference_date;
+  if (reference !== undefined && typeof reference !== 'string') return false;
   const written = applyGoalHorizonEdit(before, { goal_id: goalId, deadline,
     expected_deadline: readGoalRecord(before, goalId)?.horizon?.deadline ?? null, reference_date: reference,
     ...(statedMonths !== undefined ? { stated_months: statedMonths } : {}) });
@@ -149,7 +158,7 @@ export function goalHorizonLandedWriteIsScoped(expected: unknown, actual: unknow
   const horizonFields = ['goal_horizon', 'goal_horizon_months', 'goal_horizon_reference_date', 'goal_horizon_stated_months'];
   if (!horizonFields.every(field => isDeepStrictEqual(goal[field], held[field]))) return false;
   // A drafted-team date also owns the forecast shares and labels; retain its stricter recovery contract.
-  if (draftedTeamPartOf(expected) !== null) return isDeepStrictEqual(expected, actual);
+  if (goal.goal_horizon_reference_date !== undefined && draftedTeamPartOf(expected) !== null) return isDeepStrictEqual(expected, actual);
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   const carrierIds = identity?.operation === 'sum' && Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
   const carriers = expected.nodes.filter((n): n is Rec => isRec(n) && carrierIds.includes(n.id)

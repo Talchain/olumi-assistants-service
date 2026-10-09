@@ -317,12 +317,14 @@ async function press(graph: Rec): Promise<Rec> {
   const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-time-card', user_text: '' };
   const offered = await capabilities.proposeIdentity!(ctx) as Rec;
   expect(offered.ok, JSON.stringify(offered)).toBe(true);
-  expect(offered.card.words).toBe(`Olumi reads ‘MRR’ as ‘MRR at month 9’. ${NET} Is that how you work it out?`);
+  // §(aj) Q2.2: a monthly-rate goal shows the growth consequence on every goal-as-stock card (P45 ruling, DL-delegate BYTES-ACK @8b8a4968).
+  expect(offered.card.words).toBe(`Olumi reads ‘MRR’ as ‘MRR at month 9’. Olumi read ‘£2,000 a month’ as ‘MRR’ growing by £2,000 every month (about £18,000 more by month 9), after any losses. Is that how you work it out?`);
+  expect(offered.card.one_off_words).toBe("No, it's a one-off £2,000 a month");
   const chips = approvalChipsFor([{ name: 'propose_identity', ok: true, mutated: false, proposal_id: offered.proposal_id }],
     id => ({ proposal: proposals.get(id), result: offered as never }))[0];
   expect(chips!.label).toBe('Yes, calculate it that way');
   expect(approvalChipsFor([{ name: 'propose_identity', ok: true, mutated: false, proposal_id: offered.proposal_id }],
-    id => ({ proposal: proposals.get(id), result: offered as never }))[1]?.label).toBe('Change something first');
+    id => ({ proposal: proposals.get(id), result: offered as never }))[1]?.label).toBe("No, it's a one-off £2,000 a month");
   const approved = await capabilities.authoriseChange({ ...ctx, typed_approval_of: offered.proposal_id,
     typed_approval_words: chips!.message }, { proposal_id: offered.proposal_id }) as Rec;
   expect(approved.applied, JSON.stringify(approved)).toBe(true);
@@ -467,7 +469,7 @@ it('B2 the identity door postimage itself licenses the real Run only after its z
 it('forged card words are refused at the door even with a token recomputed over them', async () => {
   const graph = (await build('net', false)).graph;
   const card = proposeProductIdentity(graph)!;
-  const forged = { ...card, words: card.words.replace('as the change after any losses', 'as the change before any losses') };
+  const forged = { ...card, words: card.words.replace('after any losses', 'before any losses') };
   expect(forged.words).not.toBe(card.words);
   const written = applyIdentityConfirmEdit({ ...forged, persistedGraph: graph,
     expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, reading_token: identityConfirmReadingToken(forged) });
