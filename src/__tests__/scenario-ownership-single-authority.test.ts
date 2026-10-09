@@ -40,11 +40,17 @@ it('every source registration has explicit scenarioId config; graph alone enable
   expect(missing).toEqual([]); expect(members).toEqual(['src/routes/assist.v1.scenario-graph.ts']);
 });
 // A planted route in the real production build, not a replacement build function.
+const planted = vi.hoisted(() => ({ allowMissing: false }));
 vi.mock('../routes/v1.limits.js', async load => {
   const actual = await load<any>();
-  return { ...actual, limitsRoute: async (app: any) => { await actual.limitsRoute(app); app.get('/owniso-planted-undeclared', async () => ({ unsafe: true })); } };
+  return { ...actual, limitsRoute: async (app: any) => {
+    await actual.limitsRoute(app);
+    if (planted.allowMissing) app.get('/owniso-planted-allow-missing', { config: { scenarioId: { from: 'body', key: 'scenario_id', allowMissing: true } } }, async () => ({ unsafe: true }));
+    else app.get('/owniso-planted-undeclared', async () => ({ unsafe: true }));
+  } };
 });
 it('build() rejects a planted route without a scenario declaration', async () => {
+  planted.allowMissing = false;
   vi.stubEnv('ASSIST_API_KEY', 'owniso-test-key'); vi.stubEnv('PROMPTS_ENABLED', 'false'); vi.stubEnv('OPENAI_API_KEY', 'owniso-not-a-real-provider-key'); vi.stubEnv('PROMPTS_WARMUP_ENABLED', 'false');
   const { build } = await import('../server.js');
   let app: Awaited<ReturnType<typeof build>> | undefined;
@@ -52,6 +58,16 @@ it('build() rejects a planted route without a scenario declaration', async () =>
   try { app = await build(); } catch (e) { caught = e; }
   await app?.close();
   expect(caught instanceof Error ? caught.stack : String(caught)).toMatch(/scenarioId/);
+}, 60000);
+it('F3 build() rejects allowMissing on a route other than graph-readiness', async () => {
+  planted.allowMissing = true;
+  vi.stubEnv('ASSIST_API_KEY', 'owniso-test-key'); vi.stubEnv('PROMPTS_ENABLED', 'false'); vi.stubEnv('OPENAI_API_KEY', 'owniso-not-a-real-provider-key'); vi.stubEnv('PROMPTS_WARMUP_ENABLED', 'false');
+  const { build } = await import('../server.js');
+  let app: Awaited<ReturnType<typeof build>> | undefined;
+  let caught: unknown;
+  try { app = await build(); } catch (e) { caught = e; }
+  finally { await app?.close(); planted.allowMissing = false; }
+  expect(caught instanceof Error ? caught.message : String(caught)).toBe('allowMissing is restricted to graph readiness: GET /owniso-planted-allow-missing');
 }, 60000);
 it('onRoute rejects an undeclared scenario route at boot', async () => {
   const app = Fastify();
