@@ -1,0 +1,15 @@
+{
+  "command": "NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit < /dev/null",
+  "exit": 2,
+  "seconds": 165.899769125,
+  "diagnostic_count": 284,
+  "diagnostic_file_count": 99,
+  "changed_files": [
+    "scripts/ci/goal-record-census.mjs",
+    "scripts/ci/goal-record-census.d.mts",
+    "tests/contract/goal-record-census.guard.test.ts",
+    "scripts/validate-prepush.sh",
+    "acceptance-evidence/s5-census/eslint.config.mjs"
+  ],
+  "changed_file_diagnostics": []
+}
