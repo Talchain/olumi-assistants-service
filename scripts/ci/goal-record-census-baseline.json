@@ -1,5 +1,5 @@
 {
-  "source_sha": "a42b8338792067c4c654280d5f2c5406c92fce01",
+  "source_sha": "82f8befb2b83a94fb8a9017adef59a81c4e1f1bb",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -222,7 +222,10 @@
       "src/orchestrator-v5/agent-lane/horizon-attestation.ts": 1,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 2,
+      "src/orchestrator-v5/context/graph-hash.ts": 1,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 1,
+      "src/orchestrator-v5/goal-target/goal-steady-write.ts": 2,
+      "src/orchestrator-v5/goal-target/horizon-basis.ts": 5,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 3,
       "src/schemas/cee-v3.ts": 3,
@@ -633,6 +636,7 @@
       "src/orchestrator-v5/coaching/identity-not-evaluated-ask.ts": 3,
       "src/orchestrator-v5/coaching/structural-challenge-compare.ts": 1,
       "src/orchestrator-v5/context/freshness.ts": 2,
+      "src/orchestrator-v5/context/graph-hash.ts": 1,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 9,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 3,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
@@ -640,6 +644,7 @@
       "src/orchestrator-v5/goal-target/goal-chance-range.ts": 1,
       "src/orchestrator-v5/goal-target/goal-direction.ts": 3,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 3,
+      "src/orchestrator-v5/goal-target/horizon-basis.ts": 1,
       "src/orchestrator-v5/goal-target/share-by-date-run.ts": 2,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 2,
       "src/orchestrator-v5/goal-target/team-share-write.ts": 4,
@@ -783,7 +788,7 @@
     "goal_deadline_as_stated": 4,
     "goal_direction": 91,
     "goal_horizon": 50,
-    "goal_horizon_months": 25,
+    "goal_horizon_months": 33,
     "goal_level_reading": 18,
     "goal_node_id": 279,
     "goal_period": 3,
@@ -795,7 +800,7 @@
     "goal_threshold_cap_provenance": 36,
     "goal_threshold_frame": 133,
     "goal_threshold_raw": 236,
-    "goal_threshold_unit": 210,
+    "goal_threshold_unit": 212,
     "pickGoalThresholdTrio": 18,
     "quantity_frame": 12,
     "readHeldGoalComparator": 19,
@@ -808,7 +813,7 @@
     "threshold_source": 28,
     "unit_reading": 79
   },
-  "total_references": 2334,
+  "total_references": 2344,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
