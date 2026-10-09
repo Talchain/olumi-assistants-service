@@ -616,8 +616,8 @@ export { withholdDisclosureForCells as withholdDisclosureFor } from '../orchestr
 /** Normalize only the exact horizon producer identities; the cells select their single replacement form. */
 function withCellHorizon(text: string, graph: unknown, cells: readonly CanonicalAnalysisCell[]): string {
   const line = untestedHorizonLineForCells(graph, cells);
-  const variants = [untestedHorizonLine(graph), untestedHorizonLine(graph, { besideChance: true }),
-    untestedHorizonLine(graph, { besideChance: true, plural: true }), untestedHorizonLineForCells(graph, [])];
+  const variants = [untestedHorizonLine(graph, { normalizationOnly: true }), untestedHorizonLine(graph, { besideChance: true, normalizationOnly: true }),
+    untestedHorizonLine(graph, { besideChance: true, plural: true, normalizationOnly: true }), untestedHorizonLineForCells(graph, [], true)];
   for (const variant of new Set(variants)) if (variant !== null && variant !== line) text = text.replaceAll(variant, line ?? '');
   // Narration and the host can each carry a different exact producer form. Once the cells unify them, keep ONE copy
   // in its first place; only this typed horizon identity is deduplicated, never arbitrary repeated reasoning.
@@ -1461,7 +1461,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
         analysisReady = (after.json.current_read as { analysis_ready?: unknown }).analysis_ready;
       }
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
-      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
+      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) {
+        // /graph has already gated this stored Run against the graph from the same read.
+        analysisResult = after.json.analysis_result;
+      }
       // The selected run's own constraint verdict state, bound to the SAME fact as
       // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.
       // Narrowed through the contract's own enum: a string that is not a state is not carried.
@@ -2488,7 +2491,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       // Ordinary replay is the durable answer, including its canonical presentation grammar. No cache is needed.
       // Current/stale result-first replays above retain their state-bound recomposition rather than an old shape.
-      const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText) : null;
+      const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText,
+        replayChanceCells.find((cell): cell is Extract<OptionChanceCell, { kind: 'withheld' }> => cell.kind === 'withheld'
+          && cell.reasons.some(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED'))?.face) : null;
       const replayComposed = parityReplayComposed ?? (durableShape === null ? null : { text: replayText, shape: durableShape }) ?? (composedCandidate !== null && composedCandidate.shape !== null
         && replayChanceCells.some(cell => cell.kind === 'withheld')
         ? composedCandidate : null);

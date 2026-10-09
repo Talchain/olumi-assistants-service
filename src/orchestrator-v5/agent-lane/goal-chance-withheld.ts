@@ -13,6 +13,7 @@
 
 import {
   GOAL_FIGURES_CHANCE_AS_GOAL,
+  GOAL_FIGURES_HORIZON_NOT_TESTED,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
@@ -222,6 +223,9 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown,
   // S-E GOALS (Codex buddy r1 on #2742): a chance goal's withhold speaks ALONE, ahead of every other cause, identical arms too.
   const chance = warnings.filter((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
   if (chance.length > 0) return goalChanceFromWarnings(chance, opening, guidedText, scoredIds);
+  // §(ad) owns the time-bound goal's detail for the whole Run, including Keep and any independently withheld option.
+  const horizon = warnings.filter(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+  if (horizon.length > 0) return goalChanceFromWarnings(horizon, opening, null, scoredIds);
   // Gate 1 v2 (Codex #2574 P1): identical options keep their own reason and scope, alone or beside any other withhold.
   const identical = warnings.filter((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
   const others = warnings.filter((w) => w.code !== GOAL_FIGURES_OPTIONS_IDENTICAL);
@@ -253,6 +257,13 @@ export const CHANCE_AS_GOAL_NOTE =
 /** The reader for every withhold code but gate 1 v2's; `warnings` is non-empty. */
 function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], opening: string, guidedText: string | null,
   scoredIds: readonly string[]): GoalChanceWithheld {
+  const horizon = warnings.find(w => w.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+  if (horizon !== undefined) {
+    const words = typeof horizon.say === 'string' && horizon.say.trim() !== '' ? horizon.say.trim()
+      : typeof horizon.message === 'string' ? horizon.message.trim() : '';
+    const nodeIds = Array.isArray(horizon.node_ids) ? horizon.node_ids.filter((id): id is string => typeof id === 'string') : [];
+    return { withheld: true, say: words || opening, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
+  }
   // S-E GOALS §2: a chance goal speaks alone, ahead of every other cause (`run-analysis.ts` writes no other beside it).
   const chance = warnings.find((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
   if (chance !== undefined) {

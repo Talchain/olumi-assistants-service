@@ -36,6 +36,9 @@ import { withoutProposalIds } from '../display-ids.js';
 import { WIDENED_RISK_MARKER_DOWN as WIDENED_RISK_MARKER_TOO_HIGH,
   WIDENED_RISK_MARKER_MOVE as WIDENED_RISK_MARKER_MAY_MOVE } from '../widened-risk-markers.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
+import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
+import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
+import { goalHorizonSteadyWhyLine } from '../../goal-target/goal-horizon-detail.js';
 
 export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
 export { REPLY_SHAPE_INSTRUCTION } from './reply-shape-instruction.js';
@@ -68,7 +71,7 @@ export const WITHHOLD_FALLBACK_MARKER = 'Not shown yet; why is under More detail
 export const FIRMNESS_MARKER_PREFIX = "May look firmer: uses Olumi's ";
 
 export type FaceDisclosure =
-  | { readonly kind: 'withhold'; readonly cause: 'missing_current_level' | 'unconfirmed_identity' | 'unsized_links' | 'no_target' | 'other'; readonly goalLabel?: string }
+  | { readonly kind: 'withhold'; readonly cause: 'missing_current_level' | 'unconfirmed_identity' | 'unsized_links' | 'horizon_not_tested' | 'no_target' | 'other'; readonly goalLabel?: string }
   | { readonly kind: 'firmness'; readonly figure: string }
   | { readonly kind: 'robustness' };
 
@@ -80,6 +83,7 @@ export function markerForDisclosure(note: FaceDisclosure): string {
     case 'missing_current_level': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: ${note.goalLabel}'s current level is missing`;
     case 'unconfirmed_identity': return note.goalLabel === undefined ? WITHHOLD_FALLBACK_MARKER : `Not shown: how ${note.goalLabel} is worked out isn't confirmed`;
     case 'unsized_links': return "Not shown: some relationships aren't sized yet";
+    case 'horizon_not_tested': return ZERO_SPREAD_NEEDS_MONTHLY_CHANGES;
     case 'no_target': return 'Not shown: no target figure yet';
     case 'other': return WITHHOLD_FALLBACK_MARKER;
   }
@@ -89,6 +93,9 @@ export function markerForDisclosure(note: FaceDisclosure): string {
 export function withholdDisclosureForCells(graph: unknown, cells: readonly CanonicalAnalysisCell[]): FaceDisclosure | null {
   const withheld = cells.filter((cell): cell is Extract<CanonicalAnalysisCell, { kind: 'withheld' }> => cell.kind === 'withheld');
   if (withheld.length === 0) return null;
+  // §(ad) is a Run-wide withhold: the horizon marker owns the face even beside another recorded target failure.
+  if (withheld.some(cell => cell.reasons.some(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED'
+    || reason.code === 'HORIZON_NOT_TESTED'))) return { kind: 'withhold', cause: 'horizon_not_tested' };
   const nodes = (graph as { nodes?: { kind?: string; label?: string }[] } | null)?.nodes;
   const goals = Array.isArray(nodes) ? nodes.filter(node => node !== null && typeof node === 'object' && node.kind === 'goal') : [];
   const goalLabel = goals.length === 1 && typeof goals[0]?.label === 'string' ? withoutProposalIds(goals[0].label).trim() : undefined;
@@ -641,12 +648,19 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // The full typed note owns detail even when another host part contained it. Its marker carries the face identity.
   const inputObligations = (input.obligations ?? []).filter(o => !disclosures.some(d => foldQuotes(o.text).includes(foldQuotes(d.text)) || foldQuotes(d.text).includes(foldQuotes(o.text))))
     .concat(markerObligations, chanceMarker === undefined ? [] : [{ role: 'withheld_reason' as const, text: chanceMarker, ...((input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range') ? {} : { lead: true as const }) }]);
-  const horizonDetail = canMark && input.faceContract === 'run' ? input.horizonLine : undefined;
+  const steadyAttested = goalHorizonVerdict(input.graph) === 'steady_attested';
+  const horizonWithheld = chanceDisclosure?.kind === 'withhold' && chanceDisclosure.cause === 'horizon_not_tested';
+  const horizonDetail = canMark && input.faceContract === 'run' && !steadyAttested && !horizonWithheld ? input.horizonLine : undefined;
   const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
+  const steadyWhy = canMark && faceContract && steadyAttested && horizonBesideChance
+    ? goalHorizonSteadyWhyLine(input.graph) : undefined;
+  const horizonWithholdDetails = !canMark || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
+    : cell.reasons.filter(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED' || reason.code === 'HORIZON_NOT_TESTED')
+      .map(reason => reason.message));
   const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...horizonWithholdDetails, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
   const faceHostLines = !faceContract || !canMark ? [] : [
@@ -884,7 +898,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
         return present.some((o) => (o.role === 'withheld_reason' || o.role === 'caveat') && u.text.includes(o.text)
           && (o.subjects ?? []).some((subject) => figureSubjects.has(subject)));
       }));
-    const horizon = input.faceContract !== 'run' || input.horizonLine === undefined || !horizonBesideChance ? undefined
+    const horizon = input.faceContract !== 'run' || horizonDetail === undefined || !horizonBesideChance ? undefined
       : units.find((u) => u.text === HORIZON_MARKER);
     const withhold = chanceMarker === undefined ? undefined : units.find(u => u.text === chanceMarker);
     const widened = input.faceContract !== 'draft' || input.widenedLine === undefined ? undefined
@@ -1035,14 +1049,20 @@ export function withShapeOnlyIfItDerives<B extends { assistant_text?: unknown; _
   return whole as B;
 }
 
-/** Recover a canonical bullet-bearing presentation from durable answer bytes, without a model or mutable cache. */
-export function shapeFromDerivedAnswerText(text: string): AnswerShape | null {
+/** Recover canonical presentation from durable bytes; bulletless recovery requires the caller's typed face. */
+export function shapeFromDerivedAnswerText(text: string, bulletlessFace?: string): AnswerShape | null {
   const parts = text.split('\n\n');
   const headline = parts[0];
   const bulletBlock = parts[1];
   if (headline === undefined || headline.trim() === '' || bulletBlock === undefined) return null;
   const rows = bulletBlock.split('\n');
-  if (rows.length === 0 || rows.some(row => !row.startsWith('• ') || row.slice(2).trim() === '')) return null;
+  if (rows.length === 0 || rows.some(row => !row.startsWith('• ') || row.slice(2).trim() === '')) {
+    // A horizon-withheld Run can have one face marker and detail, with no bullet block to recover.
+    // The caller opts in only for that typed finding; ordinary unstructured replies retain their whole-text grammar.
+    if (headline !== bulletlessFace) return null;
+    const shape: AnswerShape = { headline, bullets: [], detail: parts.slice(1).join('\n\n') };
+    return deriveAnswerTextFromShape(shape) === text ? shape : null;
+  }
   const shape: AnswerShape = { headline, bullets: rows.map(row => row.slice(2)), detail: parts.slice(2).join('\n\n') };
   return deriveAnswerTextFromShape(shape) === text ? shape : null;
 }

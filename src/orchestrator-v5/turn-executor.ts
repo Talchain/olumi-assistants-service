@@ -3075,6 +3075,7 @@ export async function runTurnExecutor(
     const hotWindowFallback = buildAnalysisFromPriorFacts(
       context.prior_facts,
       optionLabelSource,
+      contextGraphForReasoning,
     );
     if (hotWindowFallback) {
       analysisSummary = hotWindowFallback;
@@ -3089,6 +3090,7 @@ export async function runTurnExecutor(
     const durableFallback = buildAnalysisFromPriorFacts(
       scenarioAnalysisFacts,
       optionLabelSource,
+      contextGraphForReasoning,
     );
     if (durableFallback) {
       promptAnalysisSummary = durableFallback;

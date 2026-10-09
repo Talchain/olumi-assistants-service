@@ -407,6 +407,11 @@ it('RD-2 summary insertion precedes existing caution tails and survives reply gr
 it('R7-3 (#2613 CR b, DL 0df0e1 + e8): unread whole-product gate AND projected-mean path → the product cause first, no link to size', async () => {
   const f = JSON.parse(readFileSync(new URL('./fixtures/served-gate5-mrr-m0-and-cut-costs-15f48f0b.json', import.meta.url), 'utf8')).mrr_m0;
   const g = structuredClone(f.graph);
+  // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+  for (const goal of g.nodes.filter((n: R) => n.kind === 'goal')) {
+    delete goal.goal_horizon_months;
+    delete goal.goal_deadline_as_stated;
+  }
   for (const n of g.nodes.filter((n: R) => n.kind === 'goal')) delete n.goal_threshold_raw;
   g.goal_constraints = (g.goal_constraints ?? []).filter((c: R) => !g.nodes.some((n: R) => n.kind === 'goal' && n.id === c.node_id));
   const projected = g.edges.find((e: R) => e.from === 'pro_plan_price' && e.to === 'mrr');

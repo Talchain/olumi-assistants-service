@@ -12,6 +12,7 @@ import {
 import { withholdOptionGoalFigures } from '../../../orchestrator/context/constraint-feasibility.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../../agent-lane/decision-input-ask.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../../../orchestrator/context/option-result-source.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -301,31 +302,48 @@ function servedGraph(placeholder: boolean): Json {
 }
 
 describe('real loader and run-analysis handler', () => {
-  it('captures the driver before placeholder stripping, stores its range and copies the real horizon record', async () => {
+  // §(ad) S4 (DL 87114 Q-c; Science 93 @54dbc0fe): a chance beside a "horizon untested" qualifier is retired. A held month
+  // with no bound carrier withholds the chance, so the range/licence no longer exists to carry a horizon record. These two
+  // rows now pin both halves: with the held month → the typed withhold and no range/licence; without it → the range and
+  // licence as before, carrying only the short no-month basis line.
+  const withoutHorizon = (g: Json): Json => {
+    for (const n of g.nodes as Json[]) if (n.kind === 'goal') { delete n.goal_horizon_months; delete n.goal_deadline_as_stated; }
+    return g;
+  };
+  const placeholderBody = (): Json => {
     const body = clone(M1.plot_body);
     body.option_comparison.find((r: Json) => r.option_id === '59_price').probability_of_goal_drivers = {
       drivers: [row({ from: 'pro_plan_price', to: 'monthly_churn_rate', quantity_id: 'pro_plan_price->monthly_churn_rate' })],
     };
     body.option_comparison.find((r: Json) => r.option_id === '59_price').probability_of_goal_precision = { n_met: 3972, n_informative: 4000 };
-    const result = await runOn(servedGraph(true), body);
-    const e = result.enrichment as Json;
-    expect(record(e)).toMatchObject({ code: GOAL_CHANCE_RANGE, option_ids: ['59_price'], horizon_untested: true,
-      horizon_line: record(e, GOAL_HORIZON_NOT_TESTED)?.message,
+    return body;
+  };
+
+  it('captures the driver before placeholder stripping and stores its range; a held month without a carrier withholds it instead', async () => {
+    const free = (await runOn(withoutHorizon(servedGraph(true)), placeholderBody())).enrichment as Json;
+    expect(record(free)).toMatchObject({ code: GOAL_CHANCE_RANGE, option_ids: ['59_price'],
       range_by_option: { '59_price': { ...expected, from: 'pro_plan_price', to: 'monthly_churn_rate' } } });
-    expect(record(e, GOAL_HORIZON_NOT_TESTED)).toMatchObject({ code: GOAL_HORIZON_NOT_TESTED,
-      message: "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet, so it can't say whether you'll reach £85,000 within 12 months.", node_ids: ['mrr'] });
-    expect(e.option_comparison.find((r: Json) => r.option_id === '59_price')).toMatchObject({ option_id: '59_price' });
+    // No held month: the record still copies the short basis line (no month named), as before.
+    expect(record(free)?.horizon_line).toBe(record(free, GOAL_HORIZON_NOT_TESTED)?.message);
+    expect(String(record(free)?.horizon_line)).not.toMatch(/within \d+ months?/);
     for (const key of ['probability_of_goal', 'probability_of_goal_precision', 'probability_of_goal_drivers', 'win_probability']) {
-      expect(e.option_comparison.find((r: Json) => r.option_id === '59_price')).not.toHaveProperty(key);
+      expect(free.option_comparison.find((r: Json) => r.option_id === '59_price')).not.toHaveProperty(key);
     }
+    const held = (await runOn(servedGraph(true), placeholderBody())).enrichment as Json;
+    expect(record(held)).toBeUndefined();
+    expect(record(held, GOAL_FIGURES_HORIZON_NOT_TESTED)).toMatchObject({ code: GOAL_FIGURES_HORIZON_NOT_TESTED,
+      detail: { reason: 'HORIZON_NOT_TESTED' } });
   });
 
-  it('a licensed real Run carries the same horizon sentence', async () => {
-    const result = await runOn(servedGraph(false), clone(M1.plot_body));
-    const e = result.enrichment as Json;
-    expect(record(e, GOAL_CHANCE_LICENSED)).toMatchObject({ code: GOAL_CHANCE_LICENSED,
-      option_ids: ['59_price', 'current_price'], horizon_untested: true, horizon_line: record(e, GOAL_HORIZON_NOT_TESTED)?.message });
-    expect(record(e)).toBeUndefined();
+  it('a licensed real Run carries the short basis line; with the held month the licence is withheld', async () => {
+    const free = (await runOn(withoutHorizon(servedGraph(false)), clone(M1.plot_body))).enrichment as Json;
+    expect(record(free, GOAL_CHANCE_LICENSED)).toMatchObject({ code: GOAL_CHANCE_LICENSED, option_ids: ['59_price', 'current_price'] });
+    expect(record(free, GOAL_CHANCE_LICENSED)?.horizon_line).toBe(record(free, GOAL_HORIZON_NOT_TESTED)?.message);
+    expect(String(record(free, GOAL_CHANCE_LICENSED)?.horizon_line)).not.toMatch(/within \d+ months?/);
+    expect(record(free)).toBeUndefined();
+    const held = (await runOn(servedGraph(false), clone(M1.plot_body))).enrichment as Json;
+    expect(record(held, GOAL_CHANCE_LICENSED)?.option_ids ?? []).toEqual([]);
+    expect(record(held, GOAL_FIGURES_HORIZON_NOT_TESTED)).toMatchObject({ code: GOAL_FIGURES_HORIZON_NOT_TESTED });
   });
 });
 
