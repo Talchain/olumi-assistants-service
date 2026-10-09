@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * ⭐ event_risk.v1 (Science 393023 pilot §4; lane EVENT-RISK, DL 0fd71f, 7 Oct 2026): a risk that MAY HAPPEN within
  * a horizon survives the register write, every model writer's re-parse, and the Run loader's parse, so it reaches the
@@ -39,7 +40,7 @@ const readMostRecentPendingActions = vi.fn();
 const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn, readMostRecentPendingActions };
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));

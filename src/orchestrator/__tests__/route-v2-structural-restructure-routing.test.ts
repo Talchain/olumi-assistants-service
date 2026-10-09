@@ -93,7 +93,6 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => SHARED_FACTOR_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: SHARED_FACTOR_GRAPH, briefText: null }),
     readMostRecentPendingActions: async () => [],

@@ -1,3 +1,4 @@
+import { type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
 import type { ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
@@ -63,9 +64,11 @@ import { getSessionStore } from '../session/index.js';
 import { useAppendV6 } from '../append-v6-flag.js';
 import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
-import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict } from '../graph-revision-conflict.js';
+import { isRevisionConflict, readRevisionConflictDetails, rethrowRevisionConflict, REVISION_CONFLICT_MESSAGE } from '../graph-revision-conflict.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
+import type { ApprovedGoalSteady } from '../goal-target/goal-steady-write.js';
+import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
 import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
@@ -94,6 +97,7 @@ import {
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
+import { readCommittedOptionEffect } from '../routing/option-effect-write.js';
 import { applyPriorRangeEdit } from './prior-range-edit.js';
 import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
 import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
@@ -283,6 +287,7 @@ export interface DispatchSystemEventResult {
   readonly committedVersion?: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
   /** Olumi's own links a committed value/range re-sized to fit the new level (P1-a): ids only, never a graph diff. */
   readonly linksResized?: readonly { readonly from: string; readonly to: string }[];
+  readonly reencodedSiblings?: readonly ReencodedSibling[];
   /**
    * ⭐ THE OPTION-STATUS WRITER'S OWN ACCOUNT OF THIS ATTEMPT (MG F1 T6, #2471; CODEX overflow 5937013605 + DL). Set by
    * `dispatchOptionStatusEdit` only, and never put on the wire (`OlumiResponseSchema` is strict): the Agent reads it
@@ -1158,6 +1163,9 @@ export async function dispatchSystemEvent(
     result = { response: buildAcknowledgementResponse(params.payload), commitPerformed: false, graph: null,
       graphConflict: { recovery_action: 'refresh_and_reconfirm', conflict_category: err.conflict_category,
         expected_base_graph_hash: null, ...readRevisionConflictDetails(err) } };
+  }
+  if (result.graphConflict?.conflict_category === 'revision_conflict') {
+    result = { ...result, response: { ...result.response, assistant_text: REVISION_CONFLICT_MESSAGE } };
   }
   // A writer's post-commit verdict stays authoritative. Acknowledgements and
   // uncommitted refusals retain their existing return shape.
@@ -3014,6 +3022,7 @@ export async function dispatchOptionLevelsBatch(
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** ⭐ S-E GOALS: one approved deadline card (the goal's `goal_horizon` only): ONE commit, alone. */
     readonly goalHorizon?: ApprovedGoalHorizon;
+    readonly goalSteady?: ApprovedGoalSteady;
     readonly teamTime?: ApprovedTeamTime;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
     readonly fenceRefusalReachesCaller?: boolean;
@@ -3021,7 +3030,7 @@ export async function dispatchOptionLevelsBatch(
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
-  const eventKind = batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
+  const eventKind = batch.goalSteady !== undefined ? 'goal_steady_edit' : batch.teamTime !== undefined ? 'team_time_edit' : batch.goalHorizon !== undefined ? 'goal_horizon_edit'
     : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
     : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
@@ -3082,12 +3091,12 @@ export async function dispatchOptionLevelsBatch(
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
-    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && batch.goalSteady === undefined && batch.teamTime === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
-    ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
+    ? await executeOptionInterventionEdit({ ...common, inferFactorFigure: false, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue, ...(only.figure !== undefined ? { figure: only.figure } : {}) },
       getSessionStore())
-    : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
+    : await executeOptionInterventionBatch({ ...common, inferFactorFigure: false, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
       ...(batch.optionGaps !== undefined ? { optionGaps: batch.optionGaps } : {}),
       ...(batch.values !== undefined && batch.values.length > 0 ? { values: batch.values } : {}),
@@ -3097,6 +3106,7 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.linkEffects !== undefined && batch.linkEffects.length > 0 ? { linkEffects: batch.linkEffects, lastRunIdentityUse } : {}),
       ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
       ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}),
+      ...(batch.goalSteady !== undefined ? { goalSteady: batch.goalSteady } : {}),
       ...(batch.teamTime !== undefined ? { teamTime: batch.teamTime } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
@@ -3206,6 +3216,7 @@ export async function dispatchOptionLevelsBatch(
         mutation_id: outcome.modelVersionReceipt.mutation_id, source_turn_id: outcome.modelVersionReceipt.source_turn_id } } : {}),
       ...('linksResized' in outcome && outcome.linksResized !== undefined && outcome.linksResized.length > 0
         ? { linksResized: outcome.linksResized } : {}),
+      ...('reencodedSiblings' in outcome ? { reencodedSiblings: outcome.reencodedSiblings } : {}),
       // Readiness from the bytes that LANDED. `undefined` only when the
       // committed graph did not parse — an honest absence, not a guess.
       ...(graphForReadiness !== null ? { analysisReady: canonicalReady } : {}),
@@ -3420,10 +3431,17 @@ export type CommitOptionLevelsInput = {
    * `reason: 'deadline_<reason>'`; nothing is written.
    */
   readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null; readonly reference_date?: string };
+  readonly goal_steady?: ApprovedGoalSteady;
   readonly team_time?: ApprovedTeamTime;
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
+      /**
+       * Present only on a `goal_steady` commit: whether the committed bytes the door just wrote read 'steady_attested'
+       * through the one horizon verdict. Every HTTP read strips the basis proof (S5 2b), so no caller can re-verify it
+       * from a read; this is the read-back (P45 #2903 served witness 9 Oct: the public read said "not confirmed").
+       */
+      readonly goal_steady_attested?: boolean;
       readonly receipt: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
       /** A verified no-op: the model already held every level (a retry). Nothing written; `receipt` is null. */
       readonly already_applied: boolean;
@@ -3431,13 +3449,15 @@ export type CommitOptionLevelsResult =
        * Each level exactly as the model holds it after this call: the writer's read-back verified every cell against
        * the persisted bytes (a commit), or the model already held each one exactly (a verified no-op).
        */
-      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number }[];
+      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number;
+        readonly raw_value?: number; readonly cap?: number; readonly unit?: string }[];
       /**
        * ⭐ P1-a: Olumi's own placeholder links this commit re-sized to fit a new level (ids only; empty on a no-op). The
        * receipt already names them; a consumer quoting its own receipt reads them here, never from a graph diff. The
        * door always sets it; optional only so a port's existing fakes still type-check.
        */
-      readonly links_resized?: readonly { readonly from: string; readonly to: string }[] }
+      readonly links_resized?: readonly { readonly from: string; readonly to: string }[];
+      readonly reencoded_siblings?: readonly ReencodedSibling[] }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string };
       /** The approved value, range or link that was refused (the whole approval is refused with it). */
@@ -3479,6 +3499,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { link_effects: input.link_effects } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
+      ...(input.goal_steady !== undefined ? { goal_steady: input.goal_steady } : {}),
       ...(input.team_time !== undefined ? { team_time: input.team_time } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
@@ -3511,6 +3532,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token,
       ...(input.identity_confirm.part_levels !== undefined ? { part_levels: input.identity_confirm.part_levels } : {}) } } : {}),
+    ...(input.goal_steady !== undefined ? { goalSteady: input.goal_steady } : {}),
     ...(input.team_time !== undefined ? { teamTime: input.team_time } : {}),
     ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
       expected_deadline: input.goal_horizon.expected_deadline, reference_date: input.goal_horizon.reference_date } } : {}),
@@ -3531,17 +3553,38 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(frame !== undefined ? { frame: { factor_id: frame.factor_id } } : {}),
       ...(link !== undefined ? { link: { from: link.from, to: link.to } } : {}) };
   }
-  const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value }));
+  let committedGraph: unknown = r.graph;
+  // A goal_steady no-op (already attested, a2 #2925) reads the stored bytes too, so its read-back is never vacuous.
+  if (r.commitSkippedReason === 'verified_no_op' && (input.levels.length > 0 || input.goal_steady !== undefined)) {
+    try {
+      committedGraph = await getSessionStore().loadGraph(input.scenario_id);
+      if (computeAnalysisAffectingGraphHash(committedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) !== input.base_graph_hash) return { status: 'stale' };
+    } catch { return { status: 'unconfirmed' }; }
+  }
+  const committedLevels = input.levels.map(l => {
+    const node = (committedGraph as { nodes?: Record<string, unknown>[] } | undefined)?.nodes?.find(n => n.id === l.option_id);
+    const cell = (node?.interventions as Record<string, Record<string, unknown>> | undefined)?.[l.factor_id];
+    return { option_id: l.option_id, factor_id: l.factor_id,
+      value: readCommittedOptionEffect(committedGraph, l.option_id, l.factor_id),
+      ...(typeof cell?.raw_value === 'number' && Number.isFinite(cell.raw_value)
+        && typeof cell.cap === 'number' && Number.isFinite(cell.cap) && cell.cap > 0
+        ? { raw_value: cell.raw_value, cap: cell.cap } : {}),
+      ...(typeof cell?.unit === 'string' ? { unit: cell.unit } : {}) };
+  });
+  if (committedLevels.some(l => l.value === undefined)) return { status: 'unconfirmed' };
+  const verifiedLevels = committedLevels.map(l => ({ ...l, value: l.value! }));
+  const steadyReadBack = input.goal_steady === undefined ? {}
+    : { goal_steady_attested: goalHorizonVerdict(committedGraph) === 'steady_attested' };
   if (r.commitSkippedReason === 'verified_no_op') {
-    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: committedLevels,
-      links_resized: [] };
+    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: verifiedLevels,
+      links_resized: [], ...steadyReadBack };
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
   // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
   const receipt = r.committedVersion ?? null;
-  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels,
-    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })) };
+  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: verifiedLevels,
+    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })), reencoded_siblings: r.reencodedSiblings ?? [], ...steadyReadBack };
 }
 
 /**

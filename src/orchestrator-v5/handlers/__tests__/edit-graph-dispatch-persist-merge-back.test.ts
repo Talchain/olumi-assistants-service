@@ -1,3 +1,4 @@
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 /**
  * V5-PERSIST-FIX-01 (H1) — edit_graph persisted-graph merge-back.
  *
@@ -53,6 +54,8 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 vi.mock('../../build-turn-context.js', () => ({
   buildTurnContext: vi.fn(),
   loadMostRecentPendingActions: vi.fn().mockResolvedValue([]),
+  // B-FIX1: the combined read follows the existing graph double.
+  loadPersistedScenarioStateStrict: async (scenarioId: string) => ({ graph: (await (await import('../../build-turn-context.js')).loadPersistedGraphStrict(scenarioId)) ?? null, briefText: null, revision: 7 }),
   loadPersistedGraphStrict: vi.fn(),
   // ROADMAP 1.33: dispatchEditGraph reads this for the conversation-slice
   // feed. Empty — this suite exercises persist/merge semantics, not
@@ -308,6 +311,8 @@ describe('dispatchEditGraph — persisted-base merge-back (decisive live-faithfu
   });
 
   it('DEGRADED persisted read (strict read throws) → FAIL CLOSED: dispatch rejects and NO graph is committed (Codex P0 — never overwrite canonical state with the lossy echo)', async () => {
+    // A2: rollback-only late-read error contract; CAS ON refuses before the provider.
+    __setUseAppendV6ForTest(false);
     installTurnContext();
     installDegradedPersistedRead(); // strict read THROWS — cannot prove the base
     const applied = buildAppliedGraphFromWireEcho(() => undefined);
@@ -487,3 +492,5 @@ describe('mergeAppliedGraphForPersistence — option precedence and base rules',
     ).toBe('c1');
   });
 });
+
+afterEach(() => __setUseAppendV6ForTest(true));

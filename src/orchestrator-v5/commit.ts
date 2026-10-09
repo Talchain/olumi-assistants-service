@@ -48,7 +48,9 @@ import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
+import type { HorizonBasisWrite } from './goal-target/goal-steady-write.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
+import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -159,10 +161,14 @@ export interface CommitMetadata {
    * mode `edit-graph.ts:2750-2755` exists to avoid).
    */
   readonly baseGraphForInvariants?: unknown;
+  /** In-process approval capability issued by applyGoalSteadyEdit, never a wire field. */
+  readonly horizonBasisWrite?: HorizonBasisWrite;
+  /** Explicit server read when the structural baseline can fall back to a client graph. null means absent. */
+  readonly storedGraphForHorizonBasis?: unknown;
   /**
    * ⭐ STABLE ENTITY REFS ONLY (`graph/entity-refs.ts`; DL CR B1 on #2357): the graph this write REPLACES, so the
    * allocator carries each entity's ref forward and never reissues a retired number. `null` = there is none (a first
-   * write). Read ONLY by the allocator — never by the invariant floor or the version policy, which keep
+   * write). Also used for basis preparation; the structural invariant floor and version policy keep
    * `baseGraphForInvariants`. When neither is given on a graph write, the commit reads the stored graph once for it.
    */
   readonly refBaseGraph?: unknown;
@@ -1269,6 +1275,7 @@ export async function commitDirectAnswer(
   // Stable entity refs go on the SAME projected bytes, before any hash is taken from them (`graph/entity-refs.ts`):
   // the base's ref for a node id wins, so an edit path that dropped `ref` cannot renumber an entity.
   const baseForWrite = await refBaseFor(metadata, store);
+  const storedBasisBase = metadata.storedGraphForHorizonBasis !== undefined ? metadata.storedGraphForHorizonBasis : baseForWrite;
   if (graphWasProvided(metadata.graph)) {
     const priorForScope = typeof store.readMostRecentPendingActions === 'function'
       ? await store.readMostRecentPendingActions(metadata.scenario_id, { validation: 'strict' })
@@ -1283,6 +1290,9 @@ export async function commitDirectAnswer(
     source: metadata.handler_id ?? undefined,
   }), baseForWrite).graph;
   if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
+  if (graphWasProvided(metadata.graph)) {
+    prepareHorizonBasisForWrite(projectedGraphForStore, storedBasisBase, metadata.scenario_id, metadata.horizonBasisWrite);
+  }
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,
@@ -1637,6 +1647,9 @@ export async function commitDirectAnswer(
     store,
     writesGraph,
     baseGraphForInvariants: metadata.baseGraphForInvariants,
+    // Keep a known-empty server read distinct from the structural ingress fallback at the door.
+    storedGraphForHorizonBasis: storedBasisBase ?? { nodes: [], edges: [] },
+    ...(metadata.horizonBasisWrite !== undefined ? { horizonBasisWrite: metadata.horizonBasisWrite } : {}),
     source: metadata.handler_id ?? undefined,
     write: {
       scenario_id: metadata.scenario_id,

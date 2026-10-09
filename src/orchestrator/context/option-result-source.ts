@@ -92,6 +92,9 @@ export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABL
 /** CEE's typed current-level cause, carried from this Run's missing_goal_baseline refusal for every scored option. */
 export const GOAL_FIGURES_MISSING_CURRENT_LEVEL = 'GOAL_FIGURES_MISSING_CURRENT_LEVEL';
 
+/** Science §(ad): the Run did not compute the goal's held month and the user did not attest a steady level. */
+export const GOAL_FIGURES_HORIZON_NOT_TESTED = 'GOAL_FIGURES_HORIZON_NOT_TESTED';
+
 /**
  * ⛔ DL gate 1 v2 (Science 0df0e1, 5 Oct): an option whose RUN outcome is identical to the explicit baseline's
  * (`identical-to-baseline.ts`). The duplicate splits the baseline's wins (ISL ties split 1/len(winners)), so every
@@ -124,6 +127,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_MISSING_CURRENT_LEVEL,
+  GOAL_FIGURES_HORIZON_NOT_TESTED,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
   GOAL_FIGURES_SHARE_APPROXIMATION,
@@ -176,7 +180,13 @@ export function readOptionResultSources(
   // goal figures, ONLY the current carrier is read — `option_comparison` (top level, or as the UI nests it) — and nothing
   // when it is absent or empty. A downstream copy (`results[]`, `results.options`, `results.option_results`,
   // `decision_brief.options`) is never read in its place, even as the first array present.
-  if (runWithheldGoalFigures(envelope)) {
+  const withholds = goalFiguresWithheldWarnings(envelope);
+  // Science 93 @54dbc0fe Q-a: §(ad) retains ordering only when the stored claims say so.
+  // Any other code, missing claims, or a withheld win_share keeps the current-carrier restriction.
+  const horizonKeptOrdering = withholds.length > 0 && withholds.every(w =>
+    w.code === GOAL_FIGURES_HORIZON_NOT_TESTED && Array.isArray(w.withheld_claims)
+      && !w.withheld_claims.includes('win_share'));
+  if (withholds.length > 0 && !horizonKeptOrdering) {
     const current = [envelope.option_comparison, readRecord(envelope.results)?.option_comparison]
       .map((v) => (Array.isArray(v) ? filterObjectEntries(v) : []))
       .find((entries) => entries.length > 0);

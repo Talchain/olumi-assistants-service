@@ -1,5 +1,29 @@
 import { GraphStaleWriteError } from './build-turn-context.js';
 
+export const REVISION_CONFLICT_MESSAGE = 'The scenario changed while I was saving, so nothing was saved. Try again.';
+
+
+export const MODEL_READ_FAILED_MESSAGE = "I couldn't read the saved model, so nothing was saved. Try again.";
+
+/** No usable saved-model snapshot: refusal before a write, never evidence of a race. */
+export class ModelReadFailedError extends Error {
+  readonly statusCode = 503;
+  readonly code = 'model_read_failed';
+  readonly retryable = true;
+  constructor(cause?: unknown) {
+    super(MODEL_READ_FAILED_MESSAGE, { cause });
+    this.name = 'ModelReadFailedError';
+  }
+}
+
+export function modelReadFailedWire(requestId?: string, stage?: string) {
+  return { schema: 'error.v1' as const, code: 'model_read_failed' as const,
+    message: MODEL_READ_FAILED_MESSAGE, retryable: true,
+    details: { code: 'model_read_failed', retryable: true },
+    ...(requestId !== undefined ? { request_id: requestId } : {}),
+    ...(stage !== undefined ? { stage } : {}) };
+}
+
 type RevisionDetails = { readonly expected?: number; readonly current?: number };
 type RevisionConflict = RevisionDetails & { readonly conflict_category: string };
 
@@ -18,6 +42,10 @@ export function rethrowRevisionConflict(conflict: RevisionConflict): void {
 
 /** Preserve a revision refusal returned by the Agent's internal HTTP dispatch. */
 export function promoteRevisionConflictResponse<T extends { status: number; json: Record<string, unknown> }>(response: T): T {
+  if (response.status === 503 && (response.json.code === 'model_read_failed'
+    || (response.json.details as { code?: unknown } | undefined)?.code === 'model_read_failed')) {
+    throw new ModelReadFailedError();
+  }
   if (response.status !== 409) return response;
   const details = response.json.details;
   const row = details !== null && typeof details === 'object' && !Array.isArray(details)
@@ -53,7 +81,7 @@ export function readRevisionConflictDetails(error: GraphStaleWriteError): Revisi
 export function withRevisionConflictWire<T extends { details?: Record<string, unknown> }>(
   body: T,
   conflict: RevisionConflict,
-): T | (Omit<T, 'code'> & { code: 'revision_conflict'; expected?: number; current?: number }) {
+): T | (Omit<T, 'code'> & { code: 'revision_conflict'; message: string; expected?: number; current?: number }) {
   if (conflict.conflict_category !== 'revision_conflict') return body;
   const revisions = isRevision(conflict.expected) && isRevision(conflict.current)
     ? { expected: conflict.expected, current: conflict.current }
@@ -61,6 +89,7 @@ export function withRevisionConflictWire<T extends { details?: Record<string, un
   return {
     ...body,
     code: 'revision_conflict',
+    message: REVISION_CONFLICT_MESSAGE,
     ...revisions,
     details: { ...body.details, code: 'revision_conflict', ...revisions },
   };

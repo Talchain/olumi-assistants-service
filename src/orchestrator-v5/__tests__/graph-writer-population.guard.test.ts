@@ -262,6 +262,11 @@ describe('C8 — the SQL half: no NEW migration writes `scenarios.graph` unnotic
       // `p_cas_enforce DEFAULT FALSE`, so this one must NOT be converged onto
       // `store.append`. See `assertNoIntroducedGraphViolations`' JSDoc.
       '20260824200000_c8_atomic_model_version_restore.sql',
+      // The same restore tier's revision-CAS successor (#2920): ADDITIVE
+      // `restore_model_version_atomic_cas_v1` (+ `create_model_version_cas_v1`),
+      // the c8 body plus `p_expected_revision` under the row lock and on every
+      // scenario UPDATE. Staging TS calls only these; prod keeps the c8 function.
+      '20261009100000_version_save_restore_revision_cas.sql',
     ]);
   });
 

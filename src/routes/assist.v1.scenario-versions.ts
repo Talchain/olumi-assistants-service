@@ -1,3 +1,5 @@
+import { withRevisionConflictWire, REVISION_CONFLICT_MESSAGE } from '../orchestrator-v5/graph-revision-conflict.js';
+import { withReadTimeHorizonGate } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 /** List, compare, save and restore scenario versions.
  * The central ownership hook admits the verified caller before these handlers run.
  * These routes never create scenarios; their existence probes and payload, RPC,
@@ -44,6 +46,7 @@ import {
 import { ModelVersionDiffV1LocalSchema } from "../orchestrator-v5/model-management/diff-v1.js";
 import type {
   ModelManagementResult,
+  VersionCasConflict,
   ModelVersionRecord,
   ModelVersionSummary,
 } from "../orchestrator-v5/model-management/index.js";
@@ -355,16 +358,18 @@ export default async function route(app: FastifyInstance) {
       );
 
   /** CAS conflict — the model moved since the caller looked. Recoverable. */
-  const stale = (reply: any, requestId: string) =>
+  const stale = (reply: any, requestId: string, conflict: VersionCasConflict) =>
     reply
       .code(409)
       .send(
-        buildErrorV1(
+        withRevisionConflictWire(buildErrorV1(
           "BAD_INPUT",
-          "This model changed since you last loaded it. Refresh to see the latest, then try again.",
+          conflict.kind === "revision_conflict"
+            ? REVISION_CONFLICT_MESSAGE
+            : "This model changed since you last loaded it. Refresh to see the latest, then try again.",
           { code: "VERSION_STALE" },
           requestId,
-        ),
+        ), { ...conflict, conflict_category: conflict.kind }),
       );
 
   /**
@@ -585,7 +590,7 @@ export default async function route(app: FastifyInstance) {
         ? await service.compareVersions(...args, true)
         : await service.compareVersions(...args);
       if (result.status === "disabled") return disabled(reply, requestId);
-      if (result.status === "conflict") return stale(reply, requestId);
+      if (result.status === "conflict") return stale(reply, requestId, result.conflict);
       if (result.status === "error") {
         if (result.error.code === "version_not_found") {
           return reply.code(404).send(
@@ -658,7 +663,10 @@ export default async function route(app: FastifyInstance) {
           resultComparison = { status: "available", kind: "shared_run", recorded_run: bound.recordedRun };
         } else {
           // This route alone requests an explicit pair; ordinary turns keep chronology.
-          const built = buildRunDelta({ priorFacts: bound.facts, selectedPair: bound.selectedPair,
+          const built = buildRunDelta({ priorFacts: bound.facts.map(fact => fact.fact_type === 'run_analysis'
+              ? { ...fact, result: withReadTimeHorizonGate(fact.result,
+                fact.result.run_id === bound.selectedPair.prior.run_id ? records.from.graph : records.to.graph,
+                fact.result.enrichment) } : fact), selectedPair: bound.selectedPair,
             mayNameLeadingOption: bound.mayNameLeadingOption });
           // Reuse the final licence, projecting only the typed leader-claim fields.
           // Recorded input identities and values are facts, so must never enter a prose scrubber.
@@ -732,8 +740,16 @@ export default async function route(app: FastifyInstance) {
       }
       const store = getSessionStore();
       let currentGraph: unknown;
+      let expectedRevision: number;
       try {
-        currentGraph = await store.loadGraph(ctx.scenarioId);
+        if (store.readExistingScenario === undefined) throw new Error("Scenario snapshot reader unavailable");
+        const snapshot = await store.readExistingScenario(ctx.scenarioId);
+        if (snapshot === null || typeof snapshot.revision !== "number"
+          || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) {
+          throw new Error("Scenario snapshot revision unavailable or invalid");
+        }
+        currentGraph = snapshot.graph;
+        expectedRevision = snapshot.revision;
       } catch (err) {
         log.warn(
           {
@@ -748,6 +764,7 @@ export default async function route(app: FastifyInstance) {
       }
 
       const result = await service.saveVersion({
+        expected_revision: expectedRevision,
         scenario_id: ctx.scenarioId,
         graph: currentGraph,
         expected_head_version_id: head.value,
@@ -759,7 +776,7 @@ export default async function route(app: FastifyInstance) {
       });
 
       if (result.status === "disabled") return disabled(reply, requestId);
-      if (result.status === "conflict") return stale(reply, requestId);
+      if (result.status === "conflict") return stale(reply, requestId, result.conflict);
       if (result.status === "error") {
         switch (result.error.code) {
           case "sign_in_required":
@@ -836,7 +853,7 @@ export default async function route(app: FastifyInstance) {
       // ── 4. The target version — read BEFORE anything mutates ────────────
       const target = await service.getVersion(ctx.scenarioId, parsedBody.data.version_id);
       if (target.status === "disabled") return disabled(reply, requestId);
-      if (target.status === "conflict") return stale(reply, requestId);
+      if (target.status === "conflict") return stale(reply, requestId, target.conflict);
       if (target.status === "error") {
         if (target.error.code === "version_not_found") {
           return reply
@@ -871,8 +888,16 @@ export default async function route(app: FastifyInstance) {
       // ── 6. Current graph — server-read input to atomic CAS + undo capture ─
       const store = getSessionStore();
       let currentGraph: unknown;
+      let expectedRevision: number;
       try {
-        currentGraph = await store.loadGraph(ctx.scenarioId);
+        if (store.readExistingScenario === undefined) throw new Error("Scenario snapshot reader unavailable");
+        const snapshot = await store.readExistingScenario(ctx.scenarioId);
+        if (snapshot === null || typeof snapshot.revision !== "number"
+          || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) {
+          throw new Error("Scenario snapshot revision unavailable or invalid");
+        }
+        currentGraph = snapshot.graph;
+        expectedRevision = snapshot.revision;
       } catch (err) {
         log.warn(
           {
@@ -1102,6 +1127,7 @@ export default async function route(app: FastifyInstance) {
       }
 
       const restored = await service.restoreVersionAtomic({
+        expected_revision: expectedRevision,
         scenario_id: ctx.scenarioId,
         version_id: parsedBody.data.version_id,
         mutation_id: parsedBody.data.mutation_id,
@@ -1117,7 +1143,7 @@ export default async function route(app: FastifyInstance) {
           : {}),
       });
       if (restored.status === "disabled") return disabled(reply, requestId);
-      if (restored.status === "conflict") return stale(reply, requestId);
+      if (restored.status === "conflict") return stale(reply, requestId, restored.conflict);
       if (restored.status === "error") {
         switch (restored.error.code) {
           case "sign_in_required":

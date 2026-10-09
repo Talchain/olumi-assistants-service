@@ -176,11 +176,54 @@ it('real route: verified owner inherits the binding and commits through the real
 it.each([false, true])('real route: ownership changes/read failures at the door surface as 403, reader fails %s', async failRead => {
   const { response, append, appendIfLatest, fence, store } = await realRegistration('u-other', failRead);
   expect(response.statusCode, response.payload).toBe(403);
-  expect(response.json()).toEqual({ error: 'model_write_ownership_refused' });
+  expect(response.json()).toEqual({ error: 'model_write_ownership_refused',
+    message: failRead
+      ? "Nothing was saved. I couldn't check access to this model. Try again."
+      : "Nothing was saved. You don't have access to change this model.",
+  });
   expect(response.payload).not.toContain('revision');
   expect(append).not.toHaveBeenCalled(); expect(appendIfLatest).not.toHaveBeenCalled();
   expect(fence.rows).toHaveLength(1);
   expect(fence.rows[0]).toMatchObject({ graph_write_failed_at: expect.any(String),
     graph_write_failure_reason: 'model_write_ownership_refused', graph_loss_disclosable_at: null });
   await expect(store.hasOtherAdmittedLiveTurn!(SID, 'next-registration')).resolves.toBe(false);
+});
+
+it('history effects are inert without context and aggregate separately from durable saves through parents', () => {
+  door!.recordUnsavableEffect();
+  expect(door!.readUnsavableEffects()).toBe(0);
+  expect(door!.readSuccessfulDoorEntries()).toBe(0);
+  const parent = {};
+  const child = {};
+  door!.bindWriteCaller(verified, () => {
+    door!.recordSuccessfulSave();
+    door!.bindWriteCaller(verified, () => {
+      door!.recordUnsavableEffect(); door!.recordUnsavableEffect();
+      expect(door!.readUnsavableEffects(child)).toBe(2);
+      expect(door!.readUnsavableEffects(parent)).toBe(2);
+      expect(door!.readSuccessfulDoorEntries(child)).toBe(0);
+      expect(door!.readSuccessfulDoorEntries(parent)).toBe(1);
+    }, child);
+    expect(door!.readUnsavableEffects()).toBe(2);
+    expect(door!.readSuccessfulDoorEntries()).toBe(1);
+  }, parent);
+  expect(door!.readUnsavableEffects()).toBe(0);
+});
+
+it('a released own claim discounts one durable entry through parents without discounting history or other saves', () => {
+  door!.recordReleasedTurnClaim();
+  expect(door!.readSuccessfulDoorEntries()).toBe(0);
+  const parent = {};
+  door!.bindWriteCaller(verified, () => {
+    door!.recordSuccessfulSave(); // Provisioning survives the child claim release.
+    door!.bindWriteCaller(verified, () => {
+      door!.recordSuccessfulSave(); door!.recordUnsavableEffect();
+      door!.recordReleasedTurnClaim();
+      expect(door!.readSuccessfulDoorEntries()).toBe(0);
+      expect(door!.readSuccessfulDoorEntries(parent)).toBe(1);
+      expect(door!.readUnsavableEffects()).toBe(1);
+      expect(door!.readUnsavableEffects(parent)).toBe(1);
+    });
+    expect(door!.readSuccessfulDoorEntries()).toBe(1);
+  }, parent);
 });

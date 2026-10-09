@@ -1,3 +1,4 @@
+import { goalHorizonVerdict, heldGoalHorizonMonths } from './goal-horizon-verdict.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
 import { zeroSpreadNoCarrierHorizonLine } from './zero-spread-horizon-line.js';
 export { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from './zero-spread-horizon-line.js';
@@ -181,18 +182,19 @@ const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_l
  *  · no carrier but a stated horizon: §(o′) wins, "Not shown yet: needs month-by-month changes".
  */
 function zeroSpreadReasons(
-  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown,
+  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown, envelope: unknown,
 ): Record<string, GoalChanceZeroSpread> {
-  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
-  const rates = nodes.some((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation');
-  const horizon = goal?.goal_horizon_months;
-  const months = typeof horizon === 'number' && Number.isInteger(horizon) && horizon > 0 ? horizon : undefined;
+  const verdict = goalHorizonVerdict(graph, envelope);
+  const rates = verdict === 'computed_at_h' || (verdict === 'no_horizon'
+    && isRec(graph) && Array.isArray(graph.nodes) && graph.nodes.some(n => isRec(n)
+      && isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation'));
+  const months = heldGoalHorizonMonths(goal);
   // The shared formatter's rate separator (" / month") is the panel's; the face says the period in words.
   const figure = sayFigureAsWritten(value, unit).replace(/ \/ (day|week|month|quarter|year)$/, ' a $1');
   const out: Record<string, GoalChanceZeroSpread> = {};
   for (const [id, side] of Object.entries(sides)) {
     const tail = rates ? `${months !== undefined ? ` by month ${months}` : ''} if today’s rates hold.` : ' if today’s figures hold.';
-    const line = !rates && months !== undefined ? zeroSpreadNoCarrierHorizonLine()
+    const line = verdict === 'withhold' ? zeroSpreadNoCarrierHorizonLine()
       : side === 'meets' ? `Meets ${figure}${tail}` : `Falls short of ${figure}${tail}`;
     out[id] = { reason: 'zero_spread', side, line };
   }
@@ -210,7 +212,7 @@ export function displayedGoalPct(p: number): number {
  */
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
-  sentThreshold?: SentGoalThreshold,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph,
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -327,7 +329,7 @@ export function goalChanceLicenceOf(
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(Object.keys(zeroSpreadSide).length > 0
-      ? { withheld_reason_by_option: zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, graph) } : {}),
+      ? { withheld_reason_by_option: zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, horizonGraph, envelope) } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit,
@@ -566,9 +568,9 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
-  sentThreshold?: SentGoalThreshold,
+  sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph,
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold);
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold, horizonGraph);
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;

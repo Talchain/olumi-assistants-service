@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
 /** Register a scenario graph through the existing CAS/atomic-write boundary.
  * Central ownership admission uses the declared path id and verified caller.
  * Only valid initial imports may create a scenario; deleted-scenario fencing remains.
@@ -12,6 +13,7 @@ import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPend
 import type { FastifyInstance } from "fastify";
 
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
+import { withoutParkedHorizonAttestations } from "../adapters/llm/normalisation.js";
 import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
 import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
 import { readReliesOnRisk } from "../orchestrator-v5/routing/relies-on-risk.js";
@@ -682,7 +684,7 @@ export default async function route(app: FastifyInstance) {
       // The ingress parse is the contract gate: ids, kinds, labels, from/to.
       // It runs on the NORMALISED bytes, because a `type`-only node would
       // otherwise fail here for a reason we already know how to fix.
-      const parsed = GraphStateIngressSchema.safeParse(normalised.graph);
+      const parsed = GraphStateIngressSchema.safeParse(withoutParkedHorizonAttestations(normalised.graph));
       if (!parsed.success) {
         return invalid(
           "GRAPH_CONTRACT_INVALID",
@@ -1050,6 +1052,7 @@ export default async function route(app: FastifyInstance) {
           scenarioId, turnClass: "direct_answer", source: "graph_registration",
         }));
 
+      prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);
       // THE CANONICAL RECEIPT, captured rather than discarded. The RPC builds

@@ -153,7 +153,13 @@ describe('Gate 5 at the call site: m0 withholds every goal figure, every win sha
   });
 
   it('RED: ONE typed warning names the reading Olumi did not make in the user\'s figures, and promises nothing; the Agent says it', async () => {
-    const r = await runOn(M0);
+    const g = structuredClone(M0.graph);
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
+    const r = await runOn(M0, g);
     const env = r.enrichment ?? r;
     const w = (env.inference_warnings as Json[]).filter((x) => x.code === GOAL_FIGURES_PRODUCT_NOT_READ);
     expect(w).toHaveLength(1);
@@ -249,7 +255,13 @@ describe('CONTROLS — figures kept where the user\'s figures make no unread pro
   it('CONTROL (signed-in MRR W3 520aab46, product confirmed): the cold read keeps 0.2469', async () => {
     expect(unreadGoalProduct(W3_SERVED.graph)).toBeNull();
     // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
-    const r = await runOn({ ...W3_SERVED, graph: legacyDoorGraph(W3_SERVED.graph) });
+    const g = structuredClone(legacyDoorGraph(W3_SERVED.graph));
+    // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+    for (const goal of g.nodes.filter((n: Json) => n.kind === 'goal')) {
+      delete goal.goal_horizon_months;
+      delete goal.goal_deadline_as_stated;
+    }
+    const r = await runOn({ ...W3_SERVED, graph: g });
     const env = r.enrichment ?? r;
     expect(env.inference_warnings.map((x: Json) => x.code)).not.toContain(GOAL_FIGURES_PRODUCT_NOT_READ);
     expect(JSON.stringify(env.option_comparison)).toContain('0.2469');

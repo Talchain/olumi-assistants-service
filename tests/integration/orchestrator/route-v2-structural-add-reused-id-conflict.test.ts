@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../utils/revision-store-double.js';
 /**
  * A REUSED-ID CONFLICT ON `structural_add` MUST NOT ANSWER SUCCESS FOR AN ADD
  * THAT WAS NEVER WRITTEN.
@@ -380,14 +381,14 @@ const fakeStore = {
     interleaved?.();
     return snapshot;
   },
-  loadGraphAndBriefText: async () => ({ graph: jsonCopy(fake.graph), briefText: null }),
+  loadGraphAndBriefText: async () => ({ revision: 7, graph: jsonCopy(fake.graph), briefText: null }),
   invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
   invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
 };
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => fakeStore,
+  getSessionStore: () => withScenarioRevision(fakeStore),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));

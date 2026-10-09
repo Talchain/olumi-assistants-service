@@ -1,17 +1,25 @@
 /**
  * S1-E: real HTTP save/list, round mint, version service and RPC adapter.
- * Only createClient is replaced, at the persistence boundary. Authentication
- * verifies a real ES256 token against a local JWKS server. The fake RPC models
+ * Persistence and JWKS transport are doubled at their boundaries. Authentication
+ * verifies a real ES256 token against the in-process JWKS transport double. The fake RPC models
  * the row-locked SQL contract; SQL-text rows separately pin its actual guards.
  * RED at base: save returns 200 (expected 409); mint resolves (expected refusal)
  * because neither caller carries a known base to create_model_version.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
-import { createServer, type Server } from 'node:http';
 import { readFileSync, readdirSync } from 'node:fs';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+// The JWKS transport is local and deterministic; jwtVerify still checks the
+// real ES256 signature, issuer, audience and owner subject. No listening socket
+// is needed (the restricted local runner cannot bind one).
+const jwksBoundary = vi.hoisted(() => ({ keys: [] as import('jose').JWK[] }));
+vi.mock('jose', async importOriginal => {
+  const real = await importOriginal<typeof import('jose')>();
+  return { ...real, createRemoteJWKSet: () => real.createLocalJWKSet({ keys: jwksBoundary.keys }) };
+});
 
 const boundary = vi.hoisted(() => ({ client: null as SupabaseClient | null }));
 vi.mock('@supabase/supabase-js', async (importOriginal) => ({
@@ -47,7 +55,6 @@ let rounds: Row[];
 let events: Row[];
 let calls: Row[];
 let beforeWrite: (() => void) | null;
-let jwksServer: Server;
 let token: string;
 
 function addVersion(g: ReturnType<typeof graph>): Row {
@@ -74,7 +81,7 @@ function persistenceClient(): SupabaseClient {
   return {
     rpc: async (name: string, args: Row) => {
       if (name === 'ensure_scenario_exists') return { data: OWNER, error: null };
-      if (name !== 'create_model_version') throw new Error(`Unexpected RPC ${name}`);
+      if (name !== 'create_model_version_cas_v1') throw new Error(`Unexpected RPC ${name}`);
       calls.push(copy(args));
       const interleave = beforeWrite;
       beforeWrite = null;
@@ -138,14 +145,8 @@ function persistenceClient(): SupabaseClient {
 beforeAll(async () => {
   const keys = await generateKeyPair('ES256');
   const publicKey = { ...await exportJWK(keys.publicKey), kid: 's1e', alg: 'ES256' };
-  jwksServer = createServer((_req, res) => {
-    res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ keys: [publicKey] }));
-  });
-  await new Promise<void>(resolve => jwksServer.listen(0, '127.0.0.1', resolve));
-  const address = jwksServer.address();
-  if (!address || typeof address === 'string') throw new Error('JWKS server unavailable');
-  vi.stubEnv('SUPABASE_JWKS_URL', `http://127.0.0.1:${address.port}/jwks`);
+  jwksBoundary.keys = [publicKey];
+  vi.stubEnv('SUPABASE_JWKS_URL', 'https://s1e.invalid/jwks');
   vi.stubEnv('SUPABASE_URL', 'https://s1e.invalid');
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 's1e-fixture-only');
   vi.stubEnv('ASSIST_API_KEYS', 's1e-fixture-only');
@@ -157,7 +158,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) => jwksServer.close(err => err ? reject(err) : resolve()));
   resetSupabaseJwksCacheForTests();
   vi.unstubAllEnvs();
   _resetConfigCache();
@@ -167,7 +167,7 @@ beforeEach(() => {
   _resetConfigCache();
   resetModelManagementServiceForTests();
   resetSessionStoreForTests();
-  scenario = { id: SCENARIO, user_id: OWNER, graph: graph('Working model'),
+  scenario = { revision: 7, analysis_invalidated_at: null, id: SCENARIO, user_id: OWNER, graph: graph('Working model'),
     graph_identity_hash: identity(graph('Working model')).value, current_model_version_id: null, events: [] };
   versions = []; rounds = []; events = []; calls = []; beforeWrite = null;
   addVersion(graph('Earlier model'));

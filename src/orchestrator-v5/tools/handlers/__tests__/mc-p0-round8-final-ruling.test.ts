@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../../../tests/utils/revision-store-double.js';
 import { applyPatchOperations } from '../../../../orchestrator/patch-applier.js';
 import { buildUpdateEdgeFieldCandidate } from '../../../graph-management/candidate-graph.js';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -9,12 +10,12 @@ import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
 const reads = vi.hoisted(() => ({ facts: [] as any[] }));
 vi.mock('../../../session/index.js', async original => ({
   ...(await original<typeof import('../../../session/index.js')>()),
-  getSessionStore: () => ({
+  getSessionStore: () => withScenarioRevision(({
     readMostRecentPendingActions: async () => [], readRecent: async () => [], readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [], readAnalysisInvalidatedAt: async () => null,
     readScenarioRunAnalysisFactsFor: async () => ({ facts: reads.facts.map((fact, i) => ({ fact,
       fact_row_id: `r8-${i}`, fact_created_at: fact.result.computed_at })), total_count: reads.facts.length }),
-  }),
+  })),
 }));
 import { admitCandidateLinks } from '../../../agent-lane/admit-candidate.js';
 import { admitCandidateModel } from '../../../agent-lane/admit-model.js';
@@ -66,15 +67,16 @@ const link = (g: R) => g.edges.find((e: R) => e.from === 'x' && e.to === 'g');
 const withholdWords = 'This comparison turns on the link from ‘Capacity’ to ‘Revenue’, whose strength isn\'t sized in the model yet. To size it, I first need today’s level of ‘Revenue’. What is it?';
 
 async function saveAndReload(g: R, facts: R[] = []): Promise<{ graph: R; facts: R[] }> {
-  let row: R = {};
+  let row: R = { graph: null, revision: 7 };
   const chain: R = { select: () => chain, eq: () => chain, limit: async () => ({ data: [], error: null }),
-    maybeSingle: async () => ({ data: { graph: structuredClone(row.graph), brief_text: 'Compare these options.' }, error: null }) };
+    maybeSingle: async () => ({ data: { graph: structuredClone(row.graph), brief_text: 'Compare these options.', revision: row.revision }, error: null }) };
   const client = { from: () => chain, rpc: async (_name: string, args: R) => {
-    row = JSON.parse(JSON.stringify({ graph: args.p_graph, facts: args.p_handler_facts }));
-    return { data: 'saved-r8', error: null };
+    row = JSON.parse(JSON.stringify({ graph: args.p_graph, facts: args.p_handler_facts, revision: Number(row.revision) + 1 }));
+    return { data: { turn_row_id: 'saved-r8', revision: row.revision }, error: null };
   } };
   const store = new SupabaseSessionStore(client as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20, graphCasMode: 'off' });
-  await store.append({ scenario_id: scenario, turn_id: 'r8-save', turn_class: 'direct_answer', handler_id: null,
+  const base = await store.loadGraphAndBriefText(scenario);
+  await store.append({ expectedRevision: base.revision, scenario_id: scenario, turn_id: 'r8-save', turn_class: 'direct_answer', handler_id: null,
     request_hash: 'sha256:r8', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
     graph: projectGraphForPersistence(GraphV3.parse(GraphV3Schema.parse(GraphStateIngressSchema.parse(g)))), handler_facts: facts as never });
   const loaded = (await store.loadGraphAndBriefText(scenario)).graph as R;
@@ -405,6 +407,11 @@ it('RD-2 summary insertion precedes existing caution tails and survives reply gr
 it('R7-3 (#2613 CR b, DL 0df0e1 + e8): unread whole-product gate AND projected-mean path → the product cause first, no link to size', async () => {
   const f = JSON.parse(readFileSync(new URL('./fixtures/served-gate5-mrr-m0-and-cut-costs-15f48f0b.json', import.meta.url), 'utf8')).mrr_m0;
   const g = structuredClone(f.graph);
+  // §(ad) S4: horizon removed — this row's claim is not about time (a held month without a carrier withholds the chance).
+  for (const goal of g.nodes.filter((n: R) => n.kind === 'goal')) {
+    delete goal.goal_horizon_months;
+    delete goal.goal_deadline_as_stated;
+  }
   for (const n of g.nodes.filter((n: R) => n.kind === 'goal')) delete n.goal_threshold_raw;
   g.goal_constraints = (g.goal_constraints ?? []).filter((c: R) => !g.nodes.some((n: R) => n.kind === 'goal' && n.id === c.node_id));
   const projected = g.edges.find((e: R) => e.from === 'pro_plan_price' && e.to === 'mrr');

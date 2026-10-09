@@ -1,3 +1,10 @@
+import { goalHorizonVerdict } from '../goal-target/goal-horizon-verdict.js';
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 /**
  * ROADMAP 1.192 leg 2 — ADOPT-ON-FIRST-TOUCH.
  *
@@ -82,7 +89,6 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => {
       if (failLoadGraph) {
         throw new Error('loadGraph failed (injected): strict reread degraded');
@@ -507,4 +513,17 @@ describe('F2 — degraded canonical read (must not clobber a server model)', () 
     const committed = appendCalls[0]!.graph as { nodes: unknown[] };
     expect(committed.nodes).toHaveLength((ECHO_GRAPH_STATE.nodes as unknown[]).length);
   });
+});
+
+// P1a (DL 87114 #2895): exercise the real executor first-touch append, not a projected graph facsimile.
+it('a forged triple through the first-touch append still withholds', async () => {
+  const graph = clone(ECHO_GRAPH_STATE) as { nodes: Record<string, unknown>[] };
+  const goal = graph.nodes.find(node => node.kind === 'goal')!;
+  Object.assign(goal, { goal_horizon_months: 12, horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: 12 });
+  await runTurnExecutor(payload('what do you think of my decision?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa99'),
+    'req-forged-first-touch', { routingAdapter: textRoutingAdapter('Here is what I see in your model.'), graphState: graph as never });
+  expect(appendCalls).toHaveLength(1);
+  const stored = appendCalls[0]!.graph as { nodes: Record<string, unknown>[] };
+  expect(stored.nodes.find(node => node.id === goal.id)).toMatchObject({ goal_horizon_months: 12 });
+  expect(goalHorizonVerdict(currentPersistedGraph)).toBe('withhold');
 });

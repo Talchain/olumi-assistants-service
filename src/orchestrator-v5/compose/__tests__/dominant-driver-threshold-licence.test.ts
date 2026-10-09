@@ -29,6 +29,18 @@ vi.mock('../../session/index.js', async (original) => ({
   getSessionStore: () => store,
 }));
 
+// DL 87114 (A), NON-TIME: these rows test measured-tail evidence, not a deadline.
+// Clone only the current read graph; stored Run envelopes, receipts and all assertions stay unchanged.
+function nonTimeCurrentGraph(): typeof capture.canonical_graph {
+  const current = structuredClone(capture.canonical_graph);
+  for (const node of current.nodes) if (node.kind === 'goal') {
+    const goal = node as Record<string, unknown>;
+    delete goal.goal_horizon_months;
+    delete goal.goal_horizon_stated;
+  }
+  return current;
+}
+
 const QUALITATIVE = 'One factor is doing most of the work in this result.';
 const GROUNDED = 'Monthly new Pro subscribers is doing most of the work in this result.';
 const LEEDS_GROUNDED = 'Leeds Site Activation is doing most of the work in this result.';
@@ -231,7 +243,7 @@ describe('DOMINANT_DRIVER measured-threshold licence', () => {
     }) : null);
     const read = await readScenarioAnalysis({
       scenarioId: capture.run_metadata.scenario_id,
-      graph: capture.canonical_graph,
+      graph: nonTimeCurrentGraph(),
       requestId: 's3-dominant-driver-reload',
     });
     expect(read.current_read.run_state, JSON.stringify(read.analysis_state)).toMatchObject({ kind: 'complete_current' });
@@ -289,7 +301,7 @@ describe('legacy saved DOMINANT_DRIVER reload licence', () => {
       result: { run_id: record.run_id, record },
     });
     const read = await readScenarioAnalysis({
-      scenarioId: capture.run_metadata.scenario_id, graph: capture.canonical_graph,
+      scenarioId: capture.run_metadata.scenario_id, graph: nonTimeCurrentGraph(),
       requestId: 'r3-legacy-dominant-driver-reload',
     });
     expect(read.current_read.run_state).toMatchObject({ kind: 'complete_current' });

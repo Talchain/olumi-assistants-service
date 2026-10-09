@@ -97,6 +97,7 @@
  * is the read that settles it without guessing.
  */
 
+import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -688,6 +689,8 @@ export function createApplyOperations(
       return refuse('the result of that change was not a model I can safely save');
     }
 
+    // Prepare the receipt/readback postimage before any hash is advertised.
+    prepareHorizonBasisForWrite(graph, before, scenarioId);
     const analysisGraphHash = modelRevisionOf(graph);
     if (analysisGraphHash === null) {
       return refuse('I could not establish what the model would become, so I have not saved it');

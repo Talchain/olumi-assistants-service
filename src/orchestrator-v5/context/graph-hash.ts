@@ -354,7 +354,16 @@ interface NodeProjection {
 
 function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  // Hash stored basis bytes as written, without interpreting validity. Its bound meaning also affects freshness.
+  const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '',
+    ...(r.horizon_basis !== undefined ? Object.fromEntries([
+      ['horizon_basis', r.horizon_basis],
+      ['horizon_basis_goal_meaning', [
+        typeof r.label === 'string' ? r.label.trim().toLowerCase().replace(/\s+/g, ' ') : null,
+        r.goal_threshold_unit ?? null, r.goal_horizon_months ?? null,
+      ]],
+    ]) : {}),
+  };
   const scope = goalScopeAnalysisMeaning(r.goal_scope);
   if (scope !== undefined) out.goal_scope = scope;
 

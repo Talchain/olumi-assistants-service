@@ -32,149 +32,7 @@ function productionFiles(dir: string): string[] {
   });
 }
 
-function parse(path: string, code: string): ts.SourceFile {
-  return ts.createSourceFile(path, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-}
-
-function unwrap(expression: ts.Expression): ts.Expression {
-  while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
-    || ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression)) {
-    expression = expression.expression;
-  }
-  return expression;
-}
-
-function propertyName(name: ts.PropertyName): string | undefined {
-  return ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : undefined;
-}
-
-/** Inspect object properties and spread branches, never comments or nested objects. */
-function propertyValues(expression: ts.Expression, key: string): ts.Expression[] {
-  const object = unwrap(expression);
-  if (ts.isConditionalExpression(object)) {
-    return [...propertyValues(object.whenTrue, key), ...propertyValues(object.whenFalse, key)];
-  }
-  if (!ts.isObjectLiteralExpression(object)) return [];
-  return object.properties.flatMap((property) => {
-    if (ts.isSpreadAssignment(property)) return propertyValues(property.expression, key);
-    if (propertyName(property.name) !== key) return [];
-    if (ts.isPropertyAssignment(property)) return [property.initializer];
-    if (ts.isShorthandPropertyAssignment(property)) return [property.name];
-    return [];
-  });
-}
-
-function isRevisionValue(expression: ts.Expression): boolean {
-  const value = unwrap(expression);
-  // A presence-only guard would accept these and silently weaken the CAS.
-  if (value.kind === ts.SyntaxKind.NullKeyword
-    || (ts.isIdentifier(value) && value.text === 'undefined')
-    || ts.isVoidExpression(value) || ts.isNumericLiteral(value)) return false;
-  if (ts.isBinaryExpression(value) && (value.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
-    || value.operatorToken.kind === ts.SyntaxKind.BarBarToken)) return false;
-  return true;
-}
-
-function isKnownHashOnlySpread(expression: ts.Expression): boolean {
-  const value = unwrap(expression);
-  return ts.isCallExpression(value) && ts.isIdentifier(value.expression)
-    && value.expression.text === 'computeExpectedGraphCasHashes';
-}
-
-/** An opaque argument/spread might carry a graph; absence is not an exemption. */
-function mightSupply(expression: ts.Expression, key: string): boolean {
-  const value = unwrap(expression);
-  if (isKnownHashOnlySpread(value)) return false;
-  if (ts.isConditionalExpression(value)) return mightSupply(value.whenTrue, key) || mightSupply(value.whenFalse, key);
-  if (!ts.isObjectLiteralExpression(value)) return true;
-  return value.properties.some((property) => ts.isSpreadAssignment(property)
-    ? mightSupply(property.expression, key) : propertyName(property.name) === key);
-}
-
-/** Omit only the same undefined expectation; arbitrary conditional omission is unsafe. */
-function omitsOnlyUndefinedRevision(expression: ts.ConditionalExpression, key: string): boolean {
-  if (key !== 'expectedRevision') return false;
-  const condition = unwrap(expression.condition);
-  const present = unwrap(expression.whenTrue);
-  const absent = unwrap(expression.whenFalse);
-  if (!ts.isBinaryExpression(condition) || condition.operatorToken.kind !== ts.SyntaxKind.ExclamationEqualsEqualsToken
-    || !ts.isIdentifier(condition.right) || condition.right.text !== 'undefined'
-    || !ts.isObjectLiteralExpression(present) || present.properties.length !== 1
-    || !ts.isObjectLiteralExpression(absent) || absent.properties.length !== 0) return false;
-  const property = present.properties[0]!;
-  if (ts.isSpreadAssignment(property) || propertyName(property.name) !== key) return false;
-  const revision = ts.isPropertyAssignment(property) ? property.initializer
-    : ts.isShorthandPropertyAssignment(property) ? property.name : undefined;
-  return revision !== undefined && isRevisionValue(revision)
-    && unwrap(revision).getText() === unwrap(condition.left).getText();
-}
-
-/** Follow property order; conditional omission is allowed only for an undefined expectation. */
-function guaranteesRevision(expression: ts.Expression, alreadySupplied = false, key = 'expectedRevision'): boolean {
-  const value = unwrap(expression);
-  if (isKnownHashOnlySpread(value)) return alreadySupplied;
-  if (ts.isConditionalExpression(value)) {
-    if (omitsOnlyUndefinedRevision(value, key)) return true;
-    return guaranteesRevision(value.whenTrue, alreadySupplied, key) && guaranteesRevision(value.whenFalse, alreadySupplied, key);
-  }
-  if (!ts.isObjectLiteralExpression(value)) return false;
-  let supplied = alreadySupplied;
-  for (const property of value.properties) {
-    if (ts.isSpreadAssignment(property)) supplied = guaranteesRevision(property.expression, supplied, key);
-    else if (propertyName(property.name) === key) {
-      supplied = ts.isPropertyAssignment(property) ? isRevisionValue(property.initializer)
-        : ts.isShorthandPropertyAssignment(property) && isRevisionValue(property.name);
-    }
-  }
-  return supplied;
-}
-
-interface RevisionDoor {
-  readonly path: string;
-  readonly line: number;
-  readonly target: string;
-  readonly hasRevision: boolean;
-}
-
-function revisionDoors(file: ts.SourceFile): RevisionDoor[] {
-  const importedNames = new Map<string, string>();
-  for (const statement of file.statements) {
-    if (!ts.isImportDeclaration(statement)) continue;
-    const bindings = statement.importClause?.namedBindings;
-    if (!bindings || !ts.isNamedImports(bindings)) continue;
-    for (const binding of bindings.elements) {
-      importedNames.set(binding.name.text, binding.propertyName?.text ?? binding.name.text);
-    }
-  }
-  const doors: RevisionDoor[] = [];
-  function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node)) {
-      const name = ts.isIdentifier(node.expression)
-        ? importedNames.get(node.expression.text) ?? node.expression.text : undefined;
-      const argument = name === 'commitDirectAnswer' ? node.arguments[1]
-        : name === 'appendCheckedGraphWrite' ? node.arguments[0] : undefined;
-      if (argument) {
-        const writes = name === 'appendCheckedGraphWrite' ? propertyValues(argument, 'write') : [argument];
-        if (name === 'appendCheckedGraphWrite' && writes.length === 0 && mightSupply(argument, 'write')) writes.push(argument);
-        for (const write of writes) {
-          // A graph-bearing commit can build the version carrier. A direct
-          // floor caller reaches v5/v6 only when it supplies that carrier.
-          const versioned = name === 'commitDirectAnswer' ? mightSupply(write, 'graph')
-            : mightSupply(write, 'modelVersion');
-          if (versioned) doors.push({
-            path: file.fileName,
-            line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
-            target: name!,
-            hasRevision: guaranteesRevision(write),
-          });
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  }
-  visit(file);
-  return doors;
-}
+import { parse, unwrap, propertyValues, guaranteesRevision, revisionDoors } from './graph-writer-revision-guard-utils.js';
 
 const CORPUS = productionFiles(SRC_ROOT).map((path) =>
   parse(relative(SRC_ROOT, path), readFileSync(path, 'utf8')));
@@ -224,6 +82,19 @@ describe('versioned graph writer revision propagation', () => {
     const supplied = "commitDirectAnswer(response, { graph: after, expectedRevision: state.revision });";
     expect(revisionDoors(parse('fixture.ts', missing)).map((door) => door.hasRevision)).toEqual([false]);
     expect(revisionDoors(parse('fixture.ts', supplied)).map((door) => door.hasRevision)).toEqual([true]);
+  });
+
+  it('PLANTED MUTANT: graph from read 1 cannot use revision from read 2', () => {
+    const fixture = (revision: string) => parse('identity.ts', `
+      async function writer() {
+        const original = await loadPersistedScenarioStateStrict(id);
+        const edited = merge({ mutatedGraph: patch, persistedBase: original.graph });
+        const later = await loadPersistedScenarioStateStrict(id);
+        commitDirectAnswer(response, { graph: edited, expectedRevision: ${revision}.revision });
+      }
+    `);
+    expect(revisionDoors(fixture('original')).map(door => door.hasRevision)).toEqual([true]);
+    expect(revisionDoors(fixture('later')).map(door => door.hasRevision)).toEqual([false]);
   });
 
   it('does not accept comments, nested fields, undefined or invented/default revisions', () => {
@@ -344,5 +215,84 @@ describe('versioned graph writer revision propagation', () => {
     visit(floor);
     expect(forwarded).toEqual(['params.write.expectedRevision']);
     expect(appendArguments).toEqual(['storedWrite', 'storedWrite']);
+  });
+});
+
+/** Resolve local RPC aliases/conditional names without accepting comments as code. */
+function rpcNames(expression: ts.Expression, scope: ts.Node, seen = new Set<string>()): string[] {
+  const value = unwrap(expression);
+  if (ts.isStringLiteral(value)) return [value.text];
+  if (ts.isConditionalExpression(value)) return [...rpcNames(value.whenTrue, scope, seen), ...rpcNames(value.whenFalse, scope, seen)];
+  if (!ts.isIdentifier(value) || seen.has(value.text)) return [];
+  const next = new Set(seen).add(value.text);
+  let initializer: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === value.text) initializer = node.initializer;
+    ts.forEachChild(node, visit);
+  };
+  visit(scope);
+  return initializer ? rpcNames(initializer, scope, next) : [];
+}
+
+function hasRevisionFencedSelector(method: ts.MethodDeclaration): boolean {
+  const declarations = new Map<string, ts.Expression>();
+  for (const statement of method.body?.statements ?? []) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) declarations.set(declaration.name.text, unwrap(declaration.initializer));
+    }
+  }
+  const flag = declarations.get('revisionChecked');
+  const selector = declarations.get('rpcName');
+  return flag !== undefined && ts.isCallExpression(flag) && flag.expression.getText() === 'useAppendV6' && flag.arguments.length === 0
+    && selector !== undefined && ts.isConditionalExpression(selector) && selector.condition.getText() === 'revisionChecked'
+    && ts.isStringLiteral(selector.whenTrue) && selector.whenTrue.text === 'append_turn_atomic_v4r'
+    && ts.isStringLiteral(selector.whenFalse) && selector.whenFalse.text === 'append_turn_atomic_v4';
+}
+
+/** Legacy RPCs are permitted only after the graph-bearing ON branch returns. */
+function legacyGraphRpcEscapes(file: ts.SourceFile): string[] {
+  const failures: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'rpc' && node.arguments[0]) {
+      let owner: ts.Node | undefined = node.parent;
+      while (owner && !ts.isMethodDeclaration(owner)) owner = owner.parent;
+      const method = owner && ts.isMethodDeclaration(owner) ? owner : undefined;
+      const names = rpcNames(node.arguments[0], method ?? file);
+      const legacy = names.filter(name => /^append_turn_atomic_v[234]$/.test(name));
+      if (legacy.length > 0) {
+        const gate = method?.body?.statements[0];
+        const protectedDispatch = method?.name.getText(file) === 'dispatchCheckedAppend'
+          && gate && ts.isIfStatement(gate)
+          && gate.expression.getText(file) === 'useAppendV6() && write.graph != null'
+          && ts.isBlock(gate.thenStatement) && gate.thenStatement.statements.length === 1
+          && ts.isReturnStatement(gate.thenStatement.statements[0]!)
+          && gate.thenStatement.statements[0]!.getText(file).includes('this.appendAtomicFenced(write, baseRpcArgs, rpcMode, null)');
+        const protectedFenced = method?.name.getText(file) === 'appendAtomicFenced'
+          && hasRevisionFencedSelector(method) && node.arguments[0].getText(file) === 'rpcName';
+        if (!protectedDispatch && !protectedFenced) failures.push(`${file.fileName} ${legacy.join(',')}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return failures;
+}
+
+describe('flag-ON graph append RPC closure', () => {
+  it('every legacy graph RPC is dominated by the revision dispatch gate', () => {
+    expect(CORPUS.flatMap(legacyGraphRpcEscapes)).toEqual([]);
+  });
+  it('PLANTED MUTANTS: a direct v2/v3/v4 graph RPC and either removed gate are RED', () => {
+    for (const rpc of ['v2', 'v3', 'v4']) {
+      expect(legacyGraphRpcEscapes(parse('mutant.ts', `client.rpc('append_turn_atomic_${rpc}', { p_graph: graph });`))).toHaveLength(1);
+      expect(legacyGraphRpcEscapes(parse('mutant.ts', `const name = 'append_turn_atomic_${rpc}'; client.rpc(name, { p_graph: graph });`))).toHaveLength(1);
+    }
+    const store = CORPUS.find(file => file.fileName === 'orchestrator-v5/session/supabase-store.ts')!;
+    expect(legacyGraphRpcEscapes(parse(store.fileName, store.text.replace(
+      'useAppendV6() && write.graph != null', 'false && write.graph != null')))).not.toEqual([]);
+    expect(legacyGraphRpcEscapes(parse(store.fileName, store.text.replace(
+      "revisionChecked ? 'append_turn_atomic_v4r' : 'append_turn_atomic_v4'", "'append_turn_atomic_v4'") + "\n// const rpcName = revisionChecked ? 'append_turn_atomic_v4r' : 'append_turn_atomic_v4';\n"))).not.toEqual([]);
   });
 });
