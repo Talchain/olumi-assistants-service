@@ -224,6 +224,7 @@ describe('propose_assumptions: a revision is the user\'s only when they wrote th
 describe('the Agent route binds the user\'s words to every tool it runs', () => {
   it('RED: one tool context, built from what the user TYPED (never the history), used at every site', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    expect(route).toContain("capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' })");
     expect(route).toContain('const typedNow = typedByUser(body) ? message : null;');
     expect(route).toContain('user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };');
     expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
@@ -250,6 +251,6 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // Item 3 (Canvas, 7 Oct; DL D1): the drawn-link press's ONE forced call is a dispatch site on the SAME typed carrier.
     expect(route).toContain('result = await drawnLinkPress(');
     expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads').toBe(17);
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eleven dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read').toBe(18);
   });
 });

@@ -16,6 +16,7 @@ export type GoalRecord = Readonly<{
     unit?: NodeV3T['goal_threshold_unit'];
     frame?: NodeV3T['goal_threshold_frame'];
     comparator?: NodeV3T['goal_direction'];
+    comparator_source?: 'goal_direction' | 'row_operator_as_stated' | 'row_operator';
     source?: NodeV3T['threshold_source'];
   }> | null;
   horizon: Readonly<{
@@ -49,6 +50,7 @@ export const GOAL_RECORD_PRECEDENCE = {
   unit: ['goal_threshold_unit (nonblank)', 'observed_state.unit (nonblank)', 'own target row.unit (nonblank)'],
   frame: ['goal_threshold_frame (when raw exists)', 'own target row.value_frame (only when raw absent)'],
   comparator: ['goal_direction', 'own target row.operator_as_stated (compatible strict twin)', 'own target row.operator'],
+  comparator_source: ['same step as comparator: node field → row_operator_as_stated → row_operator; present exactly when comparator is set'],
   source: ['threshold_source'],
   horizon: ['goal_horizon', 'goal_horizon_months'],
   as_stated: ['goal_deadline_as_stated'],
@@ -60,7 +62,7 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const comparator = (v: unknown): v is NonNullable<NodeV3T['goal_direction']> =>
+const comparator = (v: unknown): v is NonNullable<NonNullable<GoalRecord['target']>['comparator']> =>
   v === '>=' || v === '<=' || v === '>' || v === '<';
 const nodeProvenance = (v: unknown): v is NonNullable<NodeV3T['provenance']> =>
   v === 'from_brief' || v === 'ai_inferred' || v === 'user_set';
@@ -87,13 +89,17 @@ export function readGoalRecord(graph: unknown, goalId: string): GoalRecord | nul
     const os = isRec(goal.observed_state) ? goal.observed_state : undefined;
     const unit = text(goal.goal_threshold_unit) ? goal.goal_threshold_unit
       : text(os?.unit) ? os.unit : text(row?.unit) ? row.unit : undefined;
-    const held = comparator(goal.goal_direction) ? goal.goal_direction : row === undefined ? undefined : statedOperatorOf(row);
+    const nodeHeld = goal.goal_direction;
+    const held = comparator(nodeHeld) ? nodeHeld : row === undefined ? undefined : statedOperatorOf(row);
+    // The step that supplied the comparator, never its value: the row's own operator, or its stated strict twin.
+    const comparatorSource: NonNullable<NonNullable<GoalRecord['target']>['comparator_source']> = comparator(nodeHeld) ? 'goal_direction'
+      : held !== undefined && held !== row?.operator ? 'row_operator_as_stated' : 'row_operator';
     const frame = GoalThresholdFrame.safeParse(stated?.frame).data;
     const target = {
       ...(stated !== null ? { raw: stated.value } : {}),
       ...(unit !== undefined ? { unit } : {}),
       ...(frame !== undefined ? { frame } : {}),
-      ...(held !== undefined ? { comparator: held } : {}),
+      ...(held !== undefined ? { comparator: held, comparator_source: comparatorSource } : {}),
       ...(typeof goal.threshold_source === 'string' && goal.threshold_source.length <= 64 ? { source: goal.threshold_source } : {}),
     };
     const approvedHorizon = GoalHorizonSchema.safeParse(goal.goal_horizon).data;

@@ -34,6 +34,9 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { loadScenarioAnalysisAnchorFactsForRead } from '../build-turn-context.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
+import { withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 
 import { log } from '../../utils/telemetry.js';
 import type {
@@ -50,6 +53,13 @@ export class DecisionRecordSignInRequiredError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'DecisionRecordSignInRequiredError';
+  }
+}
+
+export class AnalysisAnchorUnavailableError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('analysis_anchor_unavailable', options);
+    this.name = 'AnalysisAnchorUnavailableError';
   }
 }
 
@@ -265,7 +275,7 @@ export interface DecisionRecordOwnerRead {
 
 /**
  * The analysis anchor a USER COMMIT is recorded against: the `graph_hash_at_run`
- * of the scenario's newest non-noop `run_analysis` fact, plus when it was
+ * of the scenario's selected successful `run_analysis` fact, plus when it was
  * computed. Derived SERVER-side — never supplied by a caller (see
  * user-commit.ts's anchor note).
  */
@@ -398,10 +408,11 @@ export interface DecisionRecordStorePort {
   readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null>;
 
   /**
-   * The scenario's newest non-noop `run_analysis` fact, reduced to the
-   * analysis anchor. `null` when the scenario has never completed an
-   * analysis — a commit then has nothing to anchor to and is refused rather
-   * than anchored to a fabricated hash.
+   * The ONE selector's successful `run_analysis` fact, reduced to the
+   * analysis anchor. `null` only for complete history with no success.
+   * Unreadable history or a capped page without success throws
+   * AnalysisAnchorUnavailableError. A commit with no successful analysis
+   * is refused rather than anchored to a fabricated hash.
    */
   readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null>;
 }
@@ -458,7 +469,10 @@ function errCode(e: unknown): string | undefined {
 }
 
 export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
-  constructor(private readonly client: SupabaseClient) {}
+  constructor(
+    private readonly client: SupabaseClient,
+    private readonly analysisSessionStore?: Parameters<typeof loadScenarioAnalysisAnchorFactsForRead>[2],
+  ) {}
 
   async createRecord(write: CreateDecisionRecordWrite): Promise<DecisionRecordWriteOutcome> {
     // PostgREST discipline (the 20260426160532 lesson, carried through the
@@ -666,43 +680,30 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   }
 
   async readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null> {
-    // SCOPE AT THE BYTES: `.eq('scenario_id', …)` is the only thing between
-    // this service-role read and every other scenario's facts — the client
-    // bypasses RLS. Index: (scenario_id, handler_id, created_at DESC)
-    // = v5_handler_facts_scenario_handler_idx (migration 20260417160000), so
-    // the ORDER BY … LIMIT 1 is a single index descent.
-    //
-    // `handler_id` + the real `noop` COLUMN, never a JSONB path: the same
-    // filter shape the session store's own newest-analysis read uses.
-    const { data, error } = await this.client
-      .from('v5_handler_facts')
-      .select('payload')
-      .eq('scenario_id', scenarioId)
-      .eq('handler_id', 'run_analysis')
-      .eq('noop', false)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (error) {
-      // THROWS, never returns null: "this scenario has no analysis" and "I
-      // could not look" are exactly the two states a commit must not
-      // conflate — the second would anchor nothing and refuse a legitimate
-      // decision, or worse, invite a fabricated anchor.
-      throw new DecisionRecordStoreError(
-        `readNewestAnalysisAnchor(${scenarioId}) failed: ${errMsg(error)}`,
-        { cause: error },
-      );
+    try {
+      // Anchor-only loader isolates corrupt rows without weakening the
+      // reasoning/claim-safety page contract. Dynamic import keeps the capture-only
+      // adapter free of turn-context initialisation until this read is needed.
+      const { loadScenarioAnalysisAnchorFactsForRead } = await import('../build-turn-context.js');
+      const page = await withAnalysisReadDeadline(() => loadScenarioAnalysisAnchorFactsForRead(
+        scenarioId, 'decision-record-anchor', this.analysisSessionStore,
+      ));
+      const selected = selectRunAnalysisFact(page.facts);
+      if (selected === null) {
+        if (page.malformed_row_count > 0 || page.capped) throw new AnalysisAnchorUnavailableError();
+        return null;
+      }
+      const hash = selected.graph_hash_at_run;
+      // Defensive check after the loader has isolated unrecorded/malformed rows.
+      if (typeof hash !== 'string' || hash.trim() === ''
+        || (selected.computed_at !== null && !Number.isFinite(Date.parse(selected.computed_at)))) {
+        throw new AnalysisAnchorUnavailableError();
+      }
+      return { graphHashAtRun: hash, computedAt: selected.computed_at };
+    } catch (cause) {
+      if (cause instanceof AnalysisAnchorUnavailableError) throw cause;
+      throw new AnalysisAnchorUnavailableError({ cause });
     }
-    const rows = (data ?? []) as Array<{ payload?: unknown }>;
-    const payload = rows[0]?.payload;
-    if (!isPlainObject(payload)) return null;
-    const result = payload.result;
-    if (!isPlainObject(result)) return null;
-    const hashAtRun = result.graph_hash_at_run;
-    if (typeof hashAtRun !== 'string' || hashAtRun.length === 0) return null;
-    return {
-      graphHashAtRun: hashAtRun,
-      computedAt: typeof result.computed_at === 'string' ? result.computed_at : null,
-    };
   }
 }
 

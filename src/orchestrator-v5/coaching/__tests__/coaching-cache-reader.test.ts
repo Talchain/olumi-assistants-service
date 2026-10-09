@@ -595,3 +595,51 @@ describe('readCoachingCache', () => {
     });
   });
 });
+
+describe('S1 R21 signal metadata over the shared Run ordering', () => {
+  const early = '2026-04-20T12:00:00.000Z';
+  const late = '2026-04-21T12:00:00.000Z';
+  const signalRun = (turn: string, at: string, revision: number) => runAnalysisFact({
+    analysis_status: 'partial', // Signal metadata is useful even without a successful result.
+    graph_revision: revision,
+    coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+    coaching_signal_turn_id: turn,
+    coaching_signal_produced_at: at,
+  }, at);
+
+  it('normal: pins the old newest-first choice on a partial Run with usable metadata', async () => {
+    const cache = await readWithFacts(randomUUID(), [
+      runAnalysisFact({ analysis_status: 'computed' }, late),
+      signalRun('newest-signal', late, 2),
+      signalRun('older-signal', early, 1),
+    ]);
+    expect(cache.last_coaching_signal?.turn_id).toBe('newest-signal');
+  });
+
+  it('contrast: higher revision but earlier computed_at cannot replace the shared head', async () => {
+    const cache = await readWithFacts(randomUUID(), [
+      signalRun('higher-revision-earlier', early, 9),
+      signalRun('computed-newest', late, 2),
+    ]);
+    expect(cache.last_coaching_signal?.turn_id).toBe('computed-newest');
+  });
+
+  it('tie: preserves stored input order for equal computed_at', async () => {
+    const cache = await readWithFacts(randomUUID(), [
+      signalRun('stored-first', late, 2), signalRun('stored-second', late, 9),
+    ]);
+    expect(cache.last_coaching_signal?.turn_id).toBe('stored-first');
+  });
+
+  it.each([{ coaching_signal_turn_id: 42 }, { coaching_signal_produced_at: 'not-an-instant' }])(
+    'malformed signal metadata %j is isolated rather than hiding a usable Run', async (invalid) => {
+      const malformed = runAnalysisFact({
+        coaching_signal_id: 'FIRST_ANALYSIS_COMPLETE',
+        coaching_signal_turn_id: 'malformed-signal',
+        coaching_signal_produced_at: late,
+        ...invalid,
+      }, late);
+      const cache = await readWithFacts(randomUUID(), [malformed, signalRun('usable-signal', early, 1)]);
+      expect(cache.last_coaching_signal?.turn_id).toBe('usable-signal');
+    });
+});

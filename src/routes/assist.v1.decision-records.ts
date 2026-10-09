@@ -73,6 +73,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { getDecisionRecordStore } from '../orchestrator-v5/decision-records/index.js';
 import {
+  AnalysisAnchorUnavailableError,
   DecisionRecordNotFoundError,
   DecisionRecordOutcomeConflictError,
   DecisionRecordSignInRequiredError,
@@ -256,7 +257,14 @@ export default async function route(
     // user-commit.ts. No analysis ⇒ nothing to anchor the decision to ⇒
     // refuse, rather than record a decision against a hash nobody can
     // re-derive.
-    const anchor = await store.readNewestAnalysisAnchor(scenarioId);
+    let anchor;
+    try {
+      anchor = await store.readNewestAnalysisAnchor(scenarioId);
+    } catch (error) {
+      if (!(error instanceof AnalysisAnchorUnavailableError)) throw error;
+      return refuse(reply, req, 503, 'analysis_anchor_unavailable',
+        'Analysis history is unavailable. Please try again.');
+    }
     if (anchor === null) {
       return refuse(
         reply,

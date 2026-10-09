@@ -1,6 +1,7 @@
 // Load environment variables from .env file
 // In production without a .env file, this is a no-op (dotenv silently skips)
 import "dotenv/config";
+import { startSessionAnalysisRunSweeper } from "./orchestrator-v5/session/index.js";
 
 import { env } from "node:process";
 import Fastify from "fastify";
@@ -1576,6 +1577,12 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       'Critical prompt coverage check failed (non-fatal)',
     );
   }
+
+  let stopAnalysisRunSweeper = () => {};
+  app.addHook('onReady', async () => {
+    if (nodeEnv !== 'test') stopAnalysisRunSweeper = startSessionAnalysisRunSweeper();
+  });
+  app.addHook('onClose', async () => { stopAnalysisRunSweeper(); });
 
   // Sentry: register Fastify error handler AFTER all routes
   setupSentryFastify(app);
