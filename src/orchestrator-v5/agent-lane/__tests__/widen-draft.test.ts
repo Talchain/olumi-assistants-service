@@ -29,6 +29,8 @@ const PREAMBLE = "This is Olumi's own check of a first draft; the user has not a
 const WIDEN_TURN_SHA256 = '378292bd12aec3a4392ace8ede96e672a8170e0255472a2e8e2eb96ee30e4a67';
 const B1_GRAPH = (JSON.parse(readFileSync(new URL('./fixtures/b1-two-state/turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8')) as { draft_graph: Rec }).draft_graph;
 const ADMIT = admission.admitCandidateModel;
+// Unit-only injection; the served builder supplies its own construction-aware admission closure.
+const unitAdmit = (brief: string) => (c: CandidateModel) => admission.admitCandidateModel(c, {}, brief);
 const factor = (label: string, unit = 'people', baseline = 0, max = 10): CandidateModel['factors'][number] => ({
   label, role: 'observable', baseline_known: true, baseline_value: baseline, unit, provenance: 'explicit', plausible_max: max,
 });
@@ -59,7 +61,7 @@ function candidate({ risks = 2, sameLever = false, nonSq = 3, counterCase = fals
 const fixture = (args: Parameters<typeof candidate>[0] = {}) => {
   const c = candidate(args);
   // The options arm is PARKED in the served seam (DL 6065138437); these unit rows opt in to keep testing it.
-  return { candidate: c, admitted: ADMIT(c, {}, BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, optionsArm: true };
+  return { candidate: c, admitted: ADMIT(c, {}, BRIEF), admit: unitAdmit(BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, optionsArm: true };
 };
 const churnFixture = () => {
   const input = fixture({ risks: 1 });
@@ -81,7 +83,7 @@ const churnFixture = () => {
       { from: 'Pro monthly price', to: 'Pro monthly churn', direction: 'positive', provenance: 'inferred' },
     ],
   };
-  return { ...input, candidate: c, admitted: ADMIT(c, {}, brief), brief, optionsArm: false };
+  return { ...input, candidate: c, admitted: ADMIT(c, {}, brief), admit: unitAdmit(brief), brief, optionsArm: false };
 };
 const riskSuggestions = (sameLever = false) => [
   { label: 'Recruitment delay', category: 'timing', hits_id: sameLever ? 'grow_engineering_team' : 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'filling both developer roles quickly', watch_for: 'offers remain unaccepted' },
@@ -671,7 +673,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     expect(JSON.stringify(c)).toBe(bytes);
   });
 
-  it('aw-same-admission: widening forwards the brief and every original admission callback', async () => {
+  it('aw-same-admission: widening invokes the injected admission with every original callback and construction', async () => {
     const input = fixture({ risks: 1 });
     const goalLevelStated = () => false;
     const writtenAgain = () => false;
@@ -680,10 +682,12 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const sizeRangeEnd = () => null;
     const spy = vi.spyOn(admission, 'admitCandidateModel');
     const admissionArgs = [goalLevelStated, writtenAgain, goalFromBrief, sizeWritten, sizeRangeEnd] as const;
-    const out = await widening.widenDraft({ ...input, admissionArgs: [...admissionArgs], callStructured: generator() });
+    const construction = { event_by_date_prompted: false };
+    const admit = (c: CandidateModel) => admission.admitCandidateModel(c, {}, BRIEF, ...admissionArgs, construction);
+    const out = await widening.widenDraft({ ...input, admit, callStructured: generator() });
     expect(out).not.toBeNull();
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0]!.slice(1)).toEqual([{}, BRIEF, ...admissionArgs]);
+    expect(spy.mock.calls[0]!.slice(1)).toEqual([{}, BRIEF, ...admissionArgs, construction]);
   });
 
   it.each(['throw', 'empty-gate', 'readmit-refusal', 'graph-invalid'] as const)('aw-%s: fail closed without mutating the original graph', async (failure) => {
@@ -724,7 +728,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const original: CandidateModel = { ...c, factors: c.factors.map((f) => f.label === 'Tech lead hires' || f.label === 'Contractor hours' ? { ...f, role: 'controllable' as const } : f) };
     const admitted = ADMIT(original, {}, BRIEF);
     expect(admitted.nodes.find((n) => n.id === 'contractor_hours')!.category).toBe('external');
-    expect(await widening.widenDraft({ candidate: original, admitted, brief: BRIEF, deadlineAt: Date.now() + 60_000, callStructured: generator([]) })).toBeNull();
+    expect(await widening.widenDraft({ candidate: original, admitted, admit: unitAdmit(BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, callStructured: generator([]) })).toBeNull();
   });
 
   it('aw-convention: never set or overwrite an Olumi-convention factor cap', async () => {
@@ -788,7 +792,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
       const c = candidate({ risks: 1, sameLever: true });
       c.options[1]!.label = 'Better hiring pilot';
       const brief = BRIEF.replace('Hire a Tech Lead', 'Better hiring pilot');
-      const input = { candidate: c, admitted: ADMIT(c, {}, brief), brief, deadlineAt: Date.now() + 60_000 };
+      const input = { candidate: c, admitted: ADMIT(c, {}, brief), admit: unitAdmit(brief), brief, deadlineAt: Date.now() + 60_000 };
       const option = structuredClone(optionsArgs().options[0]!);
       const risk = { ...riskSuggestions(true)[0]! };
       if (field === 'label') option.label = 'Better hiring pilot with developers';
