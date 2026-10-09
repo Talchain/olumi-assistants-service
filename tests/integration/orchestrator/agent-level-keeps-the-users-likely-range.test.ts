@@ -114,7 +114,8 @@ describe('the user\'s likely range for an option\'s level survives propose → a
 
   async function proposeAndApprove(level: Record<string, unknown>, text = TEXT, compound = false, typedApproval = true) {
     const read = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
-    const caps = createAgentCapabilities(read as never, new ProposalStore(), undefined, 'full', undefined, {
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(read as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
     });
     const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: text };
@@ -126,10 +127,57 @@ describe('the user\'s likely range for an option\'s level survives propose → a
       : await caps.proposeOptionInterventions(ctx, { interventions: levels } as never);
     expect(JSON.stringify(persisted)).toBe(before);
     expect(rows.size).toBe(count);
-    if (proposed.ok !== true) return { proposed, out: undefined };
+    const content = store.get(String(proposed.proposal_id));
+    if (proposed.ok !== true) return { proposed, content, out: undefined };
     const out = await caps.authoriseChange({ ...ctx, ...(typedApproval ? { typed_approval_of: String(proposed.proposal_id) } : {}) },
       { proposal_id: String(proposed.proposal_id) });
-    return { proposed, out };
+    return { proposed, content, out };
+  }
+
+  async function rangeDifferential(level: Record<string, unknown>, text = TEXT, compound = false) {
+    const initial = structuredClone(persisted);
+    const input = structuredClone(level);
+    const a = await proposeAndApprove(level, text, compound);
+    expect(level).toEqual(input);
+    expect(a.proposed.ranges_not_recorded).toHaveLength(1);
+    expect(a.proposed.detail).toMatch(/likely range/i);
+    if (level.range_user_stated === true) expect(a.proposed.detail).toMatch(/ask the user/i);
+    const aCell = structuredClone(liftCell());
+    expect(aCell.range).toEqual(((initial as { nodes: { id: string; interventions?: Record<string, Cell> }[] })
+      .nodes.find(n => n.id === 'opt_lift')!.interventions!.fac_downtime!).range);
+    const aWrites = rows.size;
+    persisted = structuredClone(initial);
+    rows.clear();
+    const ordinary = Object.fromEntries(Object.entries(level).filter(([key]) =>
+      !['likely_low', 'likely_high', 'range_meaning', 'range_user_stated'].includes(key)));
+    const b = await proposeAndApprove(ordinary, text, compound);
+    expect(a.proposed.ok).toBe(b.proposed.ok);
+    // Real proposals are bound by the exact option::factor path, full value (including authorship), provenance and label.
+    expect(a.content?.operations).toEqual(b.content?.operations);
+    expect(a.content?.provenance).toEqual(b.content?.provenance);
+    expect(a.content?.public_label).toEqual(b.content?.public_label);
+    if (b.proposed.ok === true) {
+      expect(a.content).toBeDefined();
+      expect(a.content!.operations.filter(op => op.op === 'set_option_intervention').map(op => op.path))
+        .toEqual(['opt_lift::fac_downtime']);
+      expect(a.out?.ok, JSON.stringify(a.out)).toBe(true);
+      expect(b.out?.ok, JSON.stringify(b.out)).toBe(true);
+      expect(aCell).toEqual(liftCell());
+      expect(Object.hasOwn(aCell, 'range')).toBe(false);
+      expect(aWrites).toBe(1);
+      expect(rows.size).toBe(1);
+    } else {
+      const { ranges_not_recorded: _ranges, detail, ...refusal } = a.proposed;
+      const { detail: ordinaryDetail, ...ordinaryRefusal } = b.proposed;
+      expect(refusal).toEqual(ordinaryRefusal);
+      expect(String(detail)).toContain(String(ordinaryDetail));
+      expect(a.content).toBeUndefined();
+      expect(a.out).toBeUndefined();
+      expect(aWrites).toBe(0);
+      expect(rows.size).toBe(0);
+      expect(persisted).toEqual(initial);
+    }
+    return a;
   }
 
   it.each([false, true])('a range cannot use ordinary approval; its exact typed card is required, compound=%s', async compound => {
@@ -232,11 +280,14 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     ['a low end that is not positive', { value: 10, likely_low: 0, likely_high: 20, ...TYPED }, TEXT],
     ['a figure outside its own range', { value: 30, likely_low: 5, likely_high: 20, ...TYPED }, 'Lift-and-shift: likely between 5 and 20 days, call it 30.'],
     ['a level that is not the user\'s (user_stated false)', { value: 10, likely_low: 5, likely_high: 20, ...TYPED, user_stated: false }, TEXT],
-  ])('REFUSED, nothing proposed: %s', async (_n, level, text) => {
-    const { proposed } = await proposeAndApprove(level, text);
-    expect(proposed.ok).toBe(false);
-    expect(JSON.stringify(proposed)).toMatch(/likely range/i);
-    expect(rows.size).toBe(0);
+  ])('%s: the range is not recorded; the level follows ordinary grounding', async (_n, level, text) => {
+    await rangeDifferential(level, text);
+  });
+
+  it('a user-stated reversed range: the range is not recorded; the level follows ordinary grounding and asks for restatement', async () => {
+    const { proposed, content } = await rangeDifferential({ value: 10, likely_low: 20, likely_high: 5, ...TYPED });
+    expect(proposed.detail).toMatch(/ask the user/i);
+    expect(content!.operations[0].value).not.toHaveProperty('likely_range');
   });
 
   it('RED: a typed likely range is admitted however the user worded it (no wording door: "five to twenty days")', async () => {
@@ -299,11 +350,8 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     [true, { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'likely_range', range_user_stated: false }],
     [false, { value: 10, range_user_stated: true }],
     [true, { value: 10, range_user_stated: true }],
-  ])('incomplete or unclaimed actual range stays refused, compound=%s level=%j', async (compound, level) => {
-    const { proposed } = await proposeAndApprove(level, TEXT, compound);
-    expect(proposed.ok).toBe(false);
-    expect(JSON.stringify(proposed)).toMatch(/likely range/i);
-    expect(rows.size).toBe(0);
+  ])('incomplete or unclaimed actual range: the range is not recorded; the level follows ordinary grounding, compound=%s level=%j', async (compound, level) => {
+    await rangeDifferential(level, TEXT, compound);
   });
 
   it.each([false, true])('false range flag retains ordinary user-figure grounding, compound=%s', async (compound) => {

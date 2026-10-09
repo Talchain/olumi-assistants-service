@@ -400,6 +400,7 @@ export async function runAgentTurn(
   const withheld = new Set(input.withheldTools ?? []);
   const refusalCounts = new Map<string, number>();
   const repeatLimitations = new Map<string, string>();
+  const repeatedRefusals = new Map<string, ToolResult>();
   /**
    * ⭐ THE STATE THE SERVER ALREADY HOLDS IS GIVEN, NOT FETCHED (slice C1; P3A replay of Paul's transcript, 27 Sep).
    * Every ordinary turn spent a whole model call (~3 s) asking for `get_canonical_state`, and every answer then sat
@@ -628,7 +629,7 @@ export async function runAgentTurn(
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
       const result: ToolResult = repeatLimitations.has(String(call.name))
-        ? { ok: false, mutated: false, refusal: 'repeated_refusal_withheld', detail: repeatLimitations.get(String(call.name)) }
+        ? { ...repeatedRefusals.get(String(call.name))!, detail: repeatLimitations.get(String(call.name)), repeat_withheld: true }
         : withheld.has(String(call.name))
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
@@ -668,6 +669,7 @@ export async function runAgentTurn(
           const text = REPEATED_REFUSAL_NARRATION.replace('{tool}', () => String(call.name))
             .replace('{refusal}', () => result.refusal as string).replace('{detail}', () => detail);
           repeatLimitations.set(String(call.name), text);
+          repeatedRefusals.set(String(call.name), structuredClone(result));
         }
       }
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.

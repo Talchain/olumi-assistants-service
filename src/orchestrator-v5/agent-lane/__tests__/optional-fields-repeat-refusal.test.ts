@@ -102,7 +102,11 @@ describe('cut1 turn refusal budget', () => {
   it('R3 defensive dispatch: naming a withheld tool cannot reach its handler', async () => {
     const { result, dispatches } = await loop(Array(4).fill('empty_proposal'), true);
     expect(dispatches).toBe(2);
-    expect(result.tool_calls.filter(c => c.refusal === 'empty_proposal')).toHaveLength(2);
+    expect(result.tool_calls.filter(c => c.refusal === 'empty_proposal')).toHaveLength(4);
+    expect(result.tool_results.slice(2)).toHaveLength(2);
+    for (const later of result.tool_results.slice(2)) {
+      expect(later).toMatchObject({ ...result.tool_results[1], detail: expect.stringContaining('was refused twice'), repeat_withheld: true });
+    }
   });
   it('R6: a different successful tool after the stop keeps normal effort and the limitation on every hop', async () => {
     const { caps } = real();
@@ -141,19 +145,8 @@ describe('cut1 turn refusal budget', () => {
   });
 });
 
-describe('served-tool optional gap omissions', () => {
-  it.each(['propose_option_interventions', 'propose_starting_point'])('C4: %s leaves out an invalid optional gap, retaining levels', async tool => {
-    const { caps, store } = real();
-    const levels = entries.map(entry => ({ ...entry, unmodelled_mechanisms: 'invented shape' }));
-    const r = await dispatchTool(tool, JSON.stringify(tool === 'propose_starting_point' ? { assumptions: [], option_levels: levels } : { interventions: levels }), ctx, caps);
-    expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(r.detail).toContain('unmodelled_mechanisms');
-    expect(store.get(String(r.proposal_id))?.operations.filter(o => o.op === 'set_option_intervention')).toHaveLength(2);
-  });
-});
-
 describe('joined starting-point disclosures', () => {
-  it('C14: both successful halves preserve omitted level-range details on the ONE joined result', async () => {
+  it('C14 range: both successful halves preserve omitted level-range details on the ONE joined result', async () => {
     const joinedGraph = { ...graph, nodes: [...graph.nodes, { id: 'baseline', kind: 'factor', label: 'Additional baseline' }],
       edges: graph.edges.map(edge => ({ ...edge, effect_direction: 'positive' })) };
     const d: InternalDispatch = async () => ({ status: 200, json: { graph: joinedGraph, graph_hash: 'h0' } });
