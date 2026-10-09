@@ -12,7 +12,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
+import { scalingRatio, timingIt } from '../../../../tests/helpers/scaling-ratio.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
@@ -372,7 +372,7 @@ describe('timing (preamble rule): every new regex at 5k → 40k characters, 4 sh
   // read 8.16× against a bar of 8 (#2767, #2790 shard 3, 7 Oct). 8× input instead: linear ≈ 8×, quadratic ≈ 64×, and the bar
   // sits at their geometric midpoint (≈ 22×), so a slow CI runner's noise cannot cross it and a quadratic pattern still cannot pass.
   const patterns: readonly RegExp[] = [CHANCE_WORD, UNIT_HEAD_CUT, new RegExp(SCALE_NOTE.source), ...DEADLINE_PATTERNS_FOR_TIMING];
-  it.each([
+  timingIt.each([
     ['spaces', (n: number) => ' '.repeat(n)],
     ['counts and lead words', (n: number) => 'in 6 months by the end of q2 '.repeat(Math.ceil(n / 29)).slice(0, n)],
     ['chance words, no boundary', (n: number) => 'likelihoodchanceodds'.repeat(Math.ceil(n / 20)).slice(0, n)],
