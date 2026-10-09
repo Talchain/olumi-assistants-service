@@ -325,7 +325,7 @@ describe('legacy saved DOMINANT_DRIVER reload licence', () => {
 
   it('reload row 2b: a LICENSED but ungrounded block drops the tail on the turn too, so turn === reload (no typed subject, no tail)', async () => {
     const enrichment = matchedThresholdEnrichment();
-    enrichment.factor_sensitivity = enrichment.factor_sensitivity.map((row: Record<string, unknown>) =>
+    enrichment.factor_sensitivity = (enrichment.factor_sensitivity as Array<Record<string, unknown>>).map((row: Record<string, unknown>) =>
       row.factor_id === LEEDS_ID ? { ...row, influence_rank: undefined } : row);
     const fact = makeFact(enrichment);
     expect(selectLens(fact)?.subjectRef?.id, 'still the Leeds subject').toBe(LEEDS_ID);
