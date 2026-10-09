@@ -18,6 +18,7 @@
  * on time", "% likely"; must-not-fire "% of launch done", "% of customers", "churn %".
  */
 
+import { readGoalRecord } from './goal-record.js';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
@@ -85,7 +86,7 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 
 /** S1-shaped ISO date plus calendar validity (no new date grammar). */
 export function isShareCalendarDate(v: unknown): v is string {
-  if (typeof v !== 'string' || goalDeadlineOf({ goal_horizon: { deadline: v } }) !== v) return false;
+  if (!isIsoDate(v)) return false;
   const [y, m, d] = v.split('-').map(Number) as [number, number, number];
   const date = new Date(Date.UTC(y, m - 1, d));
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
@@ -127,7 +128,7 @@ export interface ShareByDateGoal {
 export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
   const goal = soleGoalOf(graph);
   if (!isRec(graph) || goal === undefined || typeof goal.id !== 'string') return null;
-  const deadline = goalDeadlineOf(goal), unit = goal.goal_threshold_unit;
+  const deadline = goalDeadlineFromRecord(graph, goal.id), unit = goal.goal_threshold_unit;
   if (!isShareCalendarDate(deadline) || typeof unit !== 'string' || unit.length > 200
     || !SHARE_BY_DATE_UNIT.test(unit) || unitNamesAChance(unit)
     || !finite(goal.goal_threshold_raw) || goal.goal_threshold_raw <= 0 || goal.goal_threshold_raw > 100
@@ -218,11 +219,16 @@ export function soleGoalOf(graph: unknown): Rec | undefined {
   return goals.length === 1 ? goals[0] : undefined;
 }
 
-/** The deadline the goal holds (`goal_horizon.deadline`, YYYY-MM-DD), if any. */
-export function goalDeadlineOf(goal: unknown): string | undefined {
-  const h = isRec(goal) && isRec(goal.goal_horizon) ? goal.goal_horizon : undefined;
-  const d = h?.deadline;
-  return typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined;
+/** YYYY-MM-DD format only; calendar validity is checked separately. */
+export function isIsoDate(v: unknown): v is string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+/** The canonical goal record's held deadline, without months or word conversion. */
+export function goalDeadlineFromRecord(graph: unknown, goalId: unknown): string | undefined {
+  if (typeof goalId !== 'string' || goalId === '') return undefined;
+  const deadline = readGoalRecord(graph, goalId)?.horizon?.deadline;
+  return isIsoDate(deadline) ? deadline : undefined;
 }
 
 /**

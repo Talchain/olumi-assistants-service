@@ -52,7 +52,7 @@ import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/s
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../../agent-lane/unsized-path-cause.js';
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
+import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
 import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
@@ -3943,7 +3943,7 @@ export function withholdGoalFiguresForChanceGoal<E>(response: E, graph: unknown)
   const scored = [...new Set(readOptionResultSources(response as Record<string, unknown>).flat()
     .map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
     .filter((id): id is string => typeof id === 'string' && id !== ''))];
-  const deadline = goalDeadlineOf(goal);
+  const deadline = goalDeadlineFromRecord(graph, goal.id);
   return withholdOptionGoalFigures(response, new Set(scored), {
     code: GOAL_FIGURES_CHANCE_AS_GOAL, severity: 'warning',
     message: chanceGoalSentence(deadline === undefined ? undefined : sayDate(deadline)),

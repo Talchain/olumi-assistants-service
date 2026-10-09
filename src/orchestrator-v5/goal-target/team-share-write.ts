@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { EditGraphHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { draftedTeamPartOf, eventShareCarrierOf } from './event-by-date-model.js';
-import { goalDeadlineOf, isShareCalendarDate } from './goal-kind.js';
+import { goalDeadlineFromRecord, isShareCalendarDate } from './goal-kind.js';
 import { sayDate, timeBetween } from './deadline-date.js';
 import { cappedTeamShareMean, teamShareMoments } from './event-by-date-share.js';
 import { displayedPctAt } from './goal-chance-driver.js';
@@ -69,7 +69,7 @@ export function applyTeamShareEdit(graph: unknown, a: ApprovedTeamTime, expected
   if (![a.low_months, a.high_months].every(Number.isFinite) || a.low_months <= 0 || a.high_months < a.low_months
     || !isShareCalendarDate(a.deadline) || !isShareCalendarDate(a.reference_date)
     || timeBetween(a.reference_date, a.deadline, 'months') <= 0) return { kind: 'refused', reason: 'invalid_time' };
-  if (goalDeadlineOf(part.goal) !== a.deadline) return { kind: 'refused', reason: 'deadline_changed' };
+  if (goalDeadlineFromRecord(graph, part.goal.id) !== a.deadline) return { kind: 'refused', reason: 'deadline_changed' };
   const os = teamObservedState(a, String(part.goal.goal_threshold_unit));
   // The landed postimage itself proves an equal retry, before CAS (the first write moved the hash).
   if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), graph)) return { kind: 'unchanged' };

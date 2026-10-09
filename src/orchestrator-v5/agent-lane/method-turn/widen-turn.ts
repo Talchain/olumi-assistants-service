@@ -36,7 +36,7 @@ import { z } from 'zod';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
-import { chanceGoalDeadlineAsk, goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
+import { chanceGoalDeadlineAsk, goalDeadlineFromRecord, goalKindOf } from '../../goal-target/goal-kind.js';
 import { constructionOperationId } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 
@@ -783,7 +783,7 @@ export function modelGapOf(graph: unknown, userWords: string = ''): ModelGap | n
   // ⛔ THE GOAL-KIND REGISTRY DECIDES WHAT MAY BE ASKED (#2742 S1; PL/Codex 5443200599): a chance goal takes no target
   // quantity — its one question is S1's deadline ask, byte for byte, and nothing once it holds its date.
   const chance = goal !== undefined && goalKindOf(goal) === 'chance_of_event';
-  if (chance && typeof goal.id === 'string' && labelOf(goal) !== null && goalDeadlineOf(goal) === undefined) {
+  if (chance && typeof goal.id === 'string' && labelOf(goal) !== null && goalDeadlineFromRecord(graph, goal.id) === undefined) {
     return { kind: 'deadline_missing', goal_id: goal.id, question: chanceGoalDeadlineAsk(labelOf(goal)!) };
   }
   if (!chance && raw !== undefined && goal !== undefined && typeof goal.id === 'string' && labelOf(goal) !== null
