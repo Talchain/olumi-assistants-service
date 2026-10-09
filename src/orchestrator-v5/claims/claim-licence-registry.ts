@@ -38,7 +38,7 @@ export type ClaimLicenceEntry = {
   /** Informational argument name only. Null does not rule out keyed, sole-goal or selected-Run binding. */
   readonly readerSubjectParameter: string | null;
 } & ({ readonly class: ScienceClaimClass; readonly licence: string | null; readonly evidenceRow?: string; readonly reason?: string; readonly producer?: { readonly status: 'exists' | 'missing'; readonly field: string; readonly gap: string } }
-  | { readonly class: 'not_a_claim'; readonly licence: null; readonly reason: string; readonly reviewedLiteralHash: string });
+  | { readonly class: 'not_a_claim'; readonly licence: null; readonly reason: string; readonly reviewedLiteralHash: string; readonly reviewedLiterals?: readonly string[] });
 
 /** Null means no sufficient producer licence for the whole owner; existing partial gates are not promoted.
  * Escape hashes bind review to exact discovered literals, so an escaped owner cannot acquire new copy silently. */

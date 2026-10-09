@@ -9,6 +9,19 @@ export interface DiscoveredClaimOwner {
   literals: string[];
 }
 
+/** A module specifier is a path, never copy: import/export declarations, import()/require(), import-equals, import types. */
+function isModuleSpecifier(node: ts.Node): boolean {
+  const parent = node.parent;
+  if (parent === undefined) return false;
+  if ((ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent)) && parent.moduleSpecifier === node) return true;
+  if (ts.isExternalModuleReference(parent) && parent.expression === node) return true;
+  if (ts.isLiteralTypeNode(parent) && parent.parent !== undefined && ts.isImportTypeNode(parent.parent)) return true;
+  if (ts.isCallExpression(parent) && parent.arguments[0] === node
+    && (parent.expression.kind === ts.SyntaxKind.ImportKeyword
+      || (ts.isIdentifier(parent.expression) && parent.expression.text === 'require'))) return true;
+  return false;
+}
+
 export function discoverClaimOwners(root: string): DiscoveredClaimOwner[] {
   const files: string[] = [];
   const walk = (directory: string): void => {
@@ -26,8 +39,8 @@ export function discoverClaimOwners(root: string): DiscoveredClaimOwner[] {
   for (const file of files.sort()) {
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
     const visit = (node: ts.Node): void => {
-      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node)
-        || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+      if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node)
+        || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) && !isModuleSpecifier(node)) {
         const value = node.text;
         if (markers.some(marker => value.toLowerCase().includes(marker))) {
           // Use the top-level sentence owner, not local fragments; split each lens body.

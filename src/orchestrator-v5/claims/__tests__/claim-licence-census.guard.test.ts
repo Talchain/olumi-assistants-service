@@ -381,12 +381,19 @@ describe('claim licence discovery and zero-target ratchet', () => {
       expect(entry, `Unreviewed marker-bearing owner: ${found.owner}\n${found.literals.join('\n')}\n`
         + 'If none of these literals reaches a user as a science claim, add to scripts/ci/claim-licence-registry.json:\n'
         + JSON.stringify({ id: found.owner.replace(/^src\/orchestrator-v5\//, '').replace(/\.ts#/, '#'), owner: found.owner, surface: 'chat',
-          class: 'not_a_claim', licence: null, reason: '<why this is not an emitted science sentence>', reviewedLiteralHash: hash,
+          class: 'not_a_claim', licence: null, reason: '<why this is not an emitted science sentence>', reviewedLiteralHash: hash, reviewedLiterals: found.literals,
           subject: 'run_wide', binding: { subjectField: null, run: 'selected_current' }, readerSubjectParameter: null })
         + '\nOtherwise register it as a science claim with a licence or a declared gap (S3 owner: a1).').toBeDefined();
       if (entry?.class === 'not_a_claim') {
         expect(entry.reason.trim().length).toBeGreaterThan(10);
-        expect(hash, `Re-review not_a_claim literals: ${found.owner}`).toBe(entry.reviewedLiteralHash);
+        const before = entry.reviewedLiterals ?? [];
+        expect(hash, `Re-review not_a_claim literals: ${found.owner}\n`
+          + `  added:   ${JSON.stringify(found.literals.filter(l => !before.includes(l)))}\n`
+          + `  removed: ${JSON.stringify(before.filter(l => !found.literals.includes(l)))}\n`
+          + 'If no added literal reaches a user as a science claim, re-review in one step:\n'
+          + `  npx tsx scripts/ci/claim-licence-rehash.ts '${found.owner}'\n`
+          + 'Otherwise register the owner as a claim (licence or declared gap). Moved/removed owners: npx tsx scripts/ci/claim-licence-rehash.ts --prune').toBe(entry.reviewedLiteralHash);
+        expect(entry.reviewedLiterals, `reviewedLiterals must match the hash: ${found.owner}`).toEqual(found.literals);
       }
     }
     // Stale catalogue owners cannot silently claim coverage of moved or removed code.
@@ -402,6 +409,30 @@ describe('claim licence discovery and zero-target ratchet', () => {
     expect(failures.staleBaseline, 'Ratchet down: remove now-licensed/deleted baseline ids').toEqual([]);
     for (const entry of CLAIM_LICENCE_REGISTRY) {
       if (entry.class !== 'not_a_claim' && entry.licence === null) expect(entry.producer).toBeDefined();
+    }
+  });
+
+  it('module specifiers never move a review hash; a new marker sentence in the same file still does (DL 87114)', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'claim-licence-imports-'));
+    try {
+      mkdirSync(resolve(directory, 'src/orchestrator-v5'), { recursive: true });
+      mkdirSync(resolve(directory, 'src/routes'), { recursive: true });
+      writeFileSync(resolve(directory, 'src/routes/agent-v1-turn.ts'), '');
+      const file = resolve(directory, 'src/orchestrator-v5/probe.ts');
+      const base = ["import { a } from './robustness-honesty.js';", "export const KEY = 'fragile_edges';"];
+      const literalsOf = () => discoverClaimOwners(directory).map(e => [e.owner.replace('src/orchestrator-v5/probe.ts#', ''), e.literals]);
+      writeFileSync(file, base.join('\n'));
+      const before = literalsOf();
+      expect(before).toEqual([['KEY', ['fragile_edges']]]);
+      writeFileSync(file, [...base, "export { b } from './sensitivity-card.js';", "import type { C } from './flip-the-thing.js';",
+        "const lazy = () => import('./robust-loader.js');", "type T = import('./fragile-types.js').T;", "const r = require('./within-range.js');"].join('\n'));
+      expect(literalsOf(), 'import/export/import()/import type/require paths are not copy').toEqual(before);
+      writeFileSync(file, [...base, "export const NOTE = 'This result is robust to every change.';"].join('\n'));
+      expect(literalsOf(), 'a real new marker sentence is still discovered').toEqual([['KEY', ['fragile_edges']], ['NOTE', ['This result is robust to every change.']]]);
+      writeFileSync(file, [...base, "export const M = 'robust';".replace('export const M = ', 'void '), "console.log('the result is fragile here');"].join('\n'));
+      expect(literalsOf(), 'a module-level sentence moves the <module> literals').toEqual([['KEY', ['fragile_edges']], ['<module>', ['robust', 'the result is fragile here']]]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 
