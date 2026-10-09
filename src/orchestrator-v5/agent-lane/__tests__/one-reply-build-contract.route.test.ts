@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { log } from '../../../utils/telemetry.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { markerForDisclosure, sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
+import { CHANCE_FREE_HORIZON_PREFIX } from '../decision-input-ask.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { actionFactsOf } from '../actions/state.js';
 import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
@@ -243,6 +244,20 @@ describe('ONE reply contract through the build route', () => {
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
+  it('Q-c build: H>0 with no carrier and no Run owes chance-free A7 exactly once', async () => {
+    currentRead = structuredClone(FX.read);
+    const goal = currentRead.graph.nodes.find(node => node.kind === 'goal')!;
+    goal.goal_horizon_months = 9;
+    expect(currentRead.graph.nodes.every(node => (node.nonlinear_identity as Rec | undefined)?.operation !== 'accumulation')).toBe(true);
+    withoutRun = true;
+    narrator = 'Olumi built your model.';
+    const body = await buildTurn();
+    expect((lastComposeInput as ReplyComposeInput).chanceCells).toEqual([]);
+    expect(count(body.assistant_text, `${CHANCE_FREE_HORIZON_PREFIX} within 9 months.`)).toBe(1);
+    expect(rows.get(String(lastBuildPayload.turn_id))?.assistant_message).toBe(body.assistant_text);
+    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape!));
+  });
+
   it('FU1 B1 no-Run draft: served widened risks keep the receipt and relies-on words, without chance copy; replay identical', async () => {
     currentRead = { ...structuredClone(FX.read), graph: structuredClone(B1_WIDENED) };
     currentRead.graph_hash = computeAnalysisAffectingGraphHash(currentRead.graph as never)!.slice(0, 16);
@@ -280,6 +295,8 @@ describe('ONE reply contract through the build route', () => {
       "Not shown: how MRR is worked out isn't confirmed",
       "• Olumi's estimates: 3, see Check estimates.",
       'Olumi built your pricing model.',
+      // Q-c (DL 87114): one horizon-limit statement per surface.
+      "This model doesn't yet say whether any option gets there within 12 months.",
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from. The rest of this Run's results still stand.",
       GOAL_CHANCE_CAPTURE,
     ].join('\n\n'));
@@ -405,7 +422,8 @@ describe('ONE reply contract through the build route', () => {
     expect(shown).toContain('How likely or how large is "Price-rise cancellation risk" today?');
     expect(shown).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
-    expect(body.assistant_text).not.toContain("This model doesn't yet say whether any option gets there within 12 months.");
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     for (const sentence of [
       "Olumi can't show each option's chance of reaching your MRR target yet: the model doesn't have MRR's current level to measure from.",
       'This run doesn’t yet show each option’s chance of reaching £20,000.',
@@ -437,7 +455,8 @@ describe('ONE reply contract through the build route', () => {
       "Not shown: how MRR is worked out isn't confirmed",
     ]);
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
-    expect(body.assistant_text).not.toContain("This model doesn't yet say whether any option gets there within 12 months.");
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(count(body.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 

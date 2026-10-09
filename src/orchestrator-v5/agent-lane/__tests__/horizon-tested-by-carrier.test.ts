@@ -51,14 +51,21 @@ describe('the goal horizon is tested by its confirmed accumulation carrier', () 
     change(graph);
     expect(untestedHorizonLine(graph)).toMatch(/within 12 months\.$/);
     expect(goalHorizonVerdict(graph)).toBe('withhold');
-    expect(untestedHorizonLineForCells(graph, [])).toBeNull();
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(untestedHorizonLineForCells(graph, [])).toBe("This model doesn't yet say whether any option gets there within 12 months.");
     expect(untestedHorizonLineForCells(graph, FIGURE)).toBeNull();
-    expect(withUntestedHorizonWarning({}, graph)).toEqual({});
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(withUntestedHorizonWarning({}, graph)).toEqual({ inference_warnings: [{
+      code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months.", node_ids: [GOAL_ID],
+    }] });
   });
 
   it('R2(e): withdrawn accumulation on a held-H graph cannot restore the retired warning', () => {
     const graph = b1Graph();
     expect(untestedHorizonLine(graph)).toBeNull();
-    expect(withUntestedHorizonWarning({}, graph, [], true)).toEqual({});
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(withUntestedHorizonWarning({}, graph, [], true)).toEqual({ inference_warnings: [{
+      code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months.", node_ids: [GOAL_ID],
+    }] });
   });
 });

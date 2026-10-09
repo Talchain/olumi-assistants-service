@@ -124,6 +124,10 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
       'goal_scope',
       'goal_sense_reading',
+      // S4 §(ad): the horizon basis stamps are CEE-owned.
+      'horizon_basis',
+      'horizon_basis_months',
+      'horizon_basis_source',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
       'option_status',
@@ -138,7 +142,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
 });
 
 // ---------------------------------------------------------------------------
-// B. THE SIX SMUGGLE NAMES, SPELLED OUT BY HAND
+// B. THE 24 SMUGGLE NAMES, SPELLED OUT BY HAND
 // ---------------------------------------------------------------------------
 
 /**
@@ -151,7 +155,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
  * — a STAMP (whose existence claim this is), so stripping it from an add is right.
  * A6f (AIQ N1 on #2096) adds an eighth, `std_defaulted` — the same stamp for the spread.
  */
-const SIX_SMUGGLE_NAMES = [
+const SMUGGLE_NAMES = [
   'provenance',
   'provenance_display',
   'validation',
@@ -160,7 +164,7 @@ const SIX_SMUGGLE_NAMES = [
   'std_defaulted',
   'origin',
   'extractiontype',
-  // Nine since the writer audit (2026-09-27): the saved-example stamps joined the CEE-owned roots.
+  // Eleven since the writer audit (2026-09-27): the saved-example stamps joined the CEE-owned roots.
   'starterid',
   'startertitle',
   'interventionkeys',
@@ -172,6 +176,10 @@ const SIX_SMUGGLE_NAMES = [
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
   'goal_scope',
   'goal_sense_reading',
+  // S4 §(ad): the horizon basis stamps are CEE-owned.
+  'horizon_basis',
+  'horizon_basis_source',
+  'horizon_basis_months',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',
   // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority (proposed_by / option_status / participation).
@@ -181,9 +189,9 @@ const SIX_SMUGGLE_NAMES = [
   'relies_on',
 ] as const;
 
-describe('corpus B — the six (now eight) smuggle names, hand-written', () => {
+describe('corpus B — the 24 smuggle names, hand-written', () => {
   it('each is owned by CEE and is NOT an intervention contract key', () => {
-    for (const name of SIX_SMUGGLE_NAMES) {
+    for (const name of SMUGGLE_NAMES) {
       expect(PIPELINE_OWNED_ROOTS.has(name), `${name} owned`).toBe(true);
       expect(INTERVENTION_CONTRACT_KEYS.has(name), `${name} must not be a contract key`).toBe(false);
     }
@@ -193,10 +201,10 @@ describe('corpus B — the six (now eight) smuggle names, hand-written', () => {
     const derived = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
       .filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k))
       .sort();
-    expect(derived).toEqual([...SIX_SMUGGLE_NAMES].sort());
+    expect(derived).toEqual([...SMUGGLE_NAMES].sort());
   });
 
-  for (const name of SIX_SMUGGLE_NAMES) {
+  for (const name of SMUGGLE_NAMES) {
     it(`\`${name}\`: dies at the bare spelling, the nested spelling, and inside interventions`, () => {
       expect(nodeUpdate(name, 'x').blocker?.code, 'bare').toBe(PIPELINE_OWNED_FIELD);
       expect(nodeUpdate('prior', { [name]: 'x' }).blocker?.code, 'nested payload').toBe(

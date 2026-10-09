@@ -13,7 +13,7 @@ import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
-import { withUntestedHorizonWarning } from '../decision-input-ask.js';
+import { CHANCE_FREE_HORIZON_PREFIX, withUntestedHorizonWarning } from '../decision-input-ask.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
@@ -47,7 +47,11 @@ function plotBody(): Rec {
     })),
   } as Rec;
   body.results = body.option_comparison.map((row: Rec) => ({ option_id: row.option_id,
-    option_label: row.option_label, win_probability: 1 / body.option_comparison.length }));
+    option_label: row.option_label, win_probability: distinctWins
+      ? (body.option_comparison.indexOf(row) + 1) / (body.option_comparison.length * (body.option_comparison.length + 1) / 2)
+      : 1 / body.option_comparison.length }));
+  // Both current and fallback result carriers describe the same scripted ranking.
+  for (const row of body.option_comparison) row.win_probability = body.results.find((r: Rec) => r.option_id === row.option_id).win_probability;
   return body;
 }
 
@@ -86,6 +90,17 @@ function sizedB1Carrier(months: number): Rec {
   return g;
 }
 
+/** Same explicit sizing as the B1 6/12/24 controls; B2 topology and options, no time carrier. */
+function sizedB2(): Rec {
+  const g = clone(B2_GRAPH);
+  g.edges = g.edges.map((e: Rec) => ({ ...e, defaulted: false, exists_probability: 1,
+    provenance: { source: 'user_specified', magnitude: 'user_stated' } }));
+  Object.assign(goal(g), { goal_horizon_months: 9, goal_threshold_raw: 400, observed_state: {
+    value: 0.5, baseline: 0.5, raw_value: 500, cap: 1000, unit: 'cancellations/month', source: 'user_confirmed',
+  } });
+  return g;
+}
+
 async function realRun(graph: Rec): Promise<Rec> {
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-ad-load', {
     readMostRecentPendingActions: async () => [],
@@ -114,6 +129,7 @@ let storedRunJson: string | undefined;
 let script: Rec[][] = [];
 let app: FastifyInstance;
 let lastView: ReturnType<typeof projectCanonicalAnalysisView>;
+let distinctWins = false;
 const rows = new Map<string, Rec>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -135,7 +151,9 @@ vi.mock('../../../orchestrator/user-identity.js', async original => {
 type Body = { assistant_text: string; _answer_shape: AnswerShape; _agent: { tool_calls: { name: string; ok: boolean }[]; replayed?: boolean } };
 let sequence = 0;
 async function turn(narrator = 'Your results are ready.'): Promise<Body> {
-  script = [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'ad-run' }],
+  const tool = 'run_analysis';
+  script = [[{ type: 'function_call', name: tool,
+    arguments: JSON.stringify({ reason: 'compare' }), call_id: 'ad-run' }],
     [{ type: 'message', content: [{ type: 'output_text', text: narrator }] }]];
   sequence += 1;
   const payload = { kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis.',
@@ -143,7 +161,7 @@ async function turn(narrator = 'Your results are ready.'): Promise<Body> {
   const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
   expect(response.statusCode, response.body).toBe(200);
   const body = response.json() as Body;
-  expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'run_analysis', ok: true }));
+  expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: tool, ok: true }));
   if (body._answer_shape !== undefined) expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape));
   const callsBeforeReplay = vi.mocked(fetch).mock.calls.length;
   const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
@@ -195,12 +213,55 @@ describe('Science §(ad) through the producer and reply route', () => {
   afterAll(async () => {
     await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { currentFact = undefined; storedRunJson = undefined; rows.clear(); script = []; });
+  beforeEach(() => { currentFact = undefined; storedRunJson = undefined; rows.clear(); script = [];
+    distinctWins = false; });
+
+  it('Q-a B2: withheld goal chances retain the leader and win shares without horizon claims, narrator included', async () => {
+    graph = sizedB2(); distinctWins = true;
+    expect(graph.edges.every((e: Rec) => e.provenance.magnitude === 'user_stated')).toBe(true);
+    expect(graph.nodes.every((n: Rec) => n.nonlinear_identity === undefined)).toBe(true);
+    currentResult = { type: 'analysis_result', summary: 'Awaiting this Run.', enrichment: { option_comparison: [], inference_warnings: [] } };
+    const body = await turn('Your results are ready. The leading option is on track by month 9, in time and within 9 months.');
+    const enrichment = currentFact!.result.enrichment;
+    const expectedLeader = optionIds(graph).at(-1)!;
+    expect(currentFact!.result.leading_option_id, 'leader retained under §(ad)').toBe(expectedLeader);
+    expect(currentResult.leading_option_id).toBe(expectedLeader);
+    expect(enrichment.results).toEqual(plotBody().results);
+    expect(enrichment.inference_warnings.some((w: Rec) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')).toBe(false);
+    expect(enrichment.results.every((row: Rec) => Number.isFinite(row.win_probability))).toBe(true);
+    expect(lastView.options.every(row => row.cell.kind === 'withheld'
+      && row.cell.reasons.some(reason => reason.code === HORIZON_WITHHOLD))).toBe(true);
+    for (const row of enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
+    const comparison = JSON.stringify({ results: enrichment.results, options: enrichment.option_comparison, summary: currentResult.summary });
+    const face = [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
+    expect(comparison).not.toMatch(/by month|on track|in time|within 9 months/i);
+    expect(face).not.toMatch(/by month|on track|in time|within 9 months/i);
+    expect(body.assistant_text).not.toMatch(/by month|on track|in time|within 9 months/i);
+    const horizonLeader = currentFact!.result.leading_option_id;
+    delete goal(graph).goal_horizon_months;
+    const noHorizon = await realRun(graph);
+    expect(noHorizon.result.leading_option_id).toBe(horizonLeader);
+    expect(noHorizon.result.enrichment.results).toEqual(enrichment.results);
+    expect(noHorizon.result.enrichment.inference_warnings.some((w: Rec) => w.code === HORIZON_WITHHOLD)).toBe(false);
+  }, 60_000);
+
+  it('Q-c Run never two: §(ad) withheld detail occurs once and replaces A7', async () => {
+    // A money-rate goal has no duration limit, so this row actually exercises A7/detail deduplication.
+    graph = clone(B1_GRAPH); goal(graph).goal_horizon_months = 9;
+    currentResult = { type: 'analysis_result', summary: 'Awaiting this Run.', enrichment: { option_comparison: [], inference_warnings: [] } };
+    const body = await turn();
+    const detail = currentFact!.result.enrichment.inference_warnings.find((w: Rec) => w.code === HORIZON_WITHHOLD).say;
+    expect(body.assistant_text).not.toContain(CHANCE_FREE_HORIZON_PREFIX);
+    expect(body._answer_shape.detail.split(detail)).toHaveLength(2);
+    expect(body.assistant_text.split(detail)).toHaveLength(2);
+    expect(currentFact!.result.enrichment.inference_warnings.some((w: Rec) => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
+  }, 60_000);
 
   const cases = [
     { name: 'B1 H12, no carrier', make: () => clone(B1_GRAPH), verdict: 'withhold' },
     { name: 'B1 H12, carrier H12', make: () => b1Carrier(12), verdict: 'computed_at_h' },
     ...[6, 12, 24].map(months => ({ name: `B1 sized CONTROL H${months}`, make: () => sizedB1Carrier(months), verdict: 'computed_at_h', visible: true })),
+    { name: 'B2 sized H9, no carrier', make: sizedB2, verdict: 'withhold' },
     { name: 'B2 cancellations H9, no carrier', make: () => {
       const g = clone(B2_GRAPH); goal(g).goal_horizon_months = 9; return g;
     }, verdict: 'withhold' },
@@ -249,7 +310,13 @@ describe('Science §(ad) through the producer and reply route', () => {
     }
     if (withholding) {
       expect(body.assistant_text).not.toContain('%');
-      expect(body._answer_shape.detail).toContain(produced.inference_warnings.find((w: Rec) => w.code === HORIZON_WITHHOLD).say);
+      // H held with no licensed projection: Run warning, cell detail or A7 must say the limit on at least one surface.
+      const horizonDetail = produced.inference_warnings.find((w: Rec) => w.code === HORIZON_WITHHOLD).say;
+      const runSaysLimit = stored.inference_warnings.some((w: Rec) => w.code === HORIZON_WITHHOLD && w.say === horizonDetail);
+      const cellSaysLimit = ui.options.some(row => row.cell.kind === 'withheld'
+        && row.cell.reasons.some(reason => reason.code === HORIZON_WITHHOLD && reason.message === horizonDetail));
+      const replySaysLimit = body.assistant_text.includes(horizonDetail) || body.assistant_text.includes(CHANCE_FREE_HORIZON_PREFIX);
+      expect([runSaysLimit, cellSaysLimit, replySaysLimit].filter(Boolean).length, 'horizon limit never zero').toBeGreaterThanOrEqual(1);
     }
     if (verdict !== 'no_horizon') expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     process.stdout.write(`S4 consumers: ${goal(graph).id} ${cases.find(c => c.make === make)?.name ?? ''}: producer=${verdict} stored=${verdict} conversation=${verdict} UI=${verdict}; cells=${ui.options.map(row => row.cell.kind).join(',')}; reasons=${ui.options.flatMap(row => row.cell.kind === 'withheld' ? row.cell.reasons.map(r => r.code) : []).join(',')}\n`);

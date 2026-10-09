@@ -180,7 +180,13 @@ export function readOptionResultSources(
   // goal figures, ONLY the current carrier is read — `option_comparison` (top level, or as the UI nests it) — and nothing
   // when it is absent or empty. A downstream copy (`results[]`, `results.options`, `results.option_results`,
   // `decision_brief.options`) is never read in its place, even as the first array present.
-  if (runWithheldGoalFigures(envelope)) {
+  const withholds = goalFiguresWithheldWarnings(envelope);
+  // Science 93 @54dbc0fe Q-a: §(ad) retains ordering only when the stored claims say so.
+  // Any other code, missing claims, or a withheld win_share keeps the current-carrier restriction.
+  const horizonKeptOrdering = withholds.length > 0 && withholds.every(w =>
+    w.code === GOAL_FIGURES_HORIZON_NOT_TESTED && Array.isArray(w.withheld_claims)
+      && !w.withheld_claims.includes('win_share'));
+  if (withholds.length > 0 && !horizonKeptOrdering) {
     const current = [envelope.option_comparison, readRecord(envelope.results)?.option_comparison]
       .map((v) => (Array.isArray(v) ? filterObjectEntries(v) : []))
       .find((entries) => entries.length > 0);

@@ -4021,7 +4021,9 @@ export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unk
     code: GOAL_FIGURES_HORIZON_NOT_TESTED, severity: 'warning', message, say: message,
     node_ids: [String(goal.id)], option_ids: scored,
     detail: { reason: 'HORIZON_NOT_TESTED' },
-  }, { keepOutcome: true });
+    // Science 93 @54dbc0fe (Q-a): only claims AGAINST the target's month go. The leader and win shares compare options on
+    // the outcome and do not depend on the month, so the ordering stays (TARGET_ONLY_CLAIMS, as for a missing level).
+  }, { keepOutcome: true, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */

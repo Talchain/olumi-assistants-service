@@ -77,7 +77,9 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
     const licence = { code: GOAL_CHANCE_LICENSED, severity: 'info', horizon_untested: true, horizon_line: FULL };
     const previous = { inference_warnings: [licence, { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: FULL }] };
     const out = withUntestedHorizonWarning(previous, graph, [{ kind: 'none' }]);
-    expect(out.inference_warnings).toEqual([{ code: GOAL_CHANCE_LICENSED, severity: 'info' }]);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(out.inference_warnings).toEqual([{ code: GOAL_CHANCE_LICENSED, severity: 'info' },
+      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months." }]);
     expect(withShortHorizonBesideChance(out, graph, [{ kind: 'none' }])).toBe(out);
   });
 
@@ -214,11 +216,15 @@ describe('Science §(ad): one horizon selector retires old clauses on a positive
 
   it('positive H without cells suppresses the old clause in the host and warning writer', () => {
     const graph = graphWith();
+    // Q-c (DL 87114): one horizon-limit statement per surface.
     expect(decisionInputLines(graph, {
       restingText: 'Draft ready.', builtOrRan: true, awaitingApproval: false, questionsToggle: false,
-    })).toEqual([]);
+    })).toEqual(["This model doesn't yet say whether any option gets there within 12 months."]);
     const empty = { inference_warnings: [] };
-    expect(withUntestedHorizonWarning(empty, graph)).toBe(empty);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(withUntestedHorizonWarning(empty, graph)).toEqual({ inference_warnings: [{
+      code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months.", node_ids: ['goal'],
+    }] });
     expect(withUntestedHorizonWarning(empty, graph, ONE_FIGURE)).toBe(empty);
   });
 

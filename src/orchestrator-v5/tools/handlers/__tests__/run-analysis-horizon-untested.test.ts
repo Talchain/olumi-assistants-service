@@ -132,7 +132,8 @@ describe('Science §(ad) replaces a held-horizon disclaimer with typed withhold'
     expect(untestedHorizonLine(M1.graph)).toBe(A7_12);
     expect(decisionInputLines(M1.graph, {
       restingText: 'A sketch.', questionsToggle: false, awaitingApproval: false, builtOrRan: true,
-    })).toEqual([]);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    })).toEqual(["This model doesn't yet say whether any option gets there within 12 months."]);
   });
 
   it('the served graph records run-wide HORIZON_NOT_TESTED and removes every option chance', async () => {
@@ -291,7 +292,11 @@ describe('withUntestedHorizonWarning no longer writes an old clause on positive 
 
   it('the pure normalizer leaves the original envelope and figures untouched; the producer owns withhold', () => {
     const before = clone(envelope);
-    expect(withUntestedHorizonWarning(before, M1.graph)).toBe(before);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(withUntestedHorizonWarning(before, M1.graph)).toEqual({ ...envelope, inference_warnings: [
+      ...envelope.inference_warnings, { code: GOAL_HORIZON_NOT_TESTED, severity: 'info',
+        message: "This model doesn't yet say whether any option gets there within 12 months.", node_ids: ['mrr'] },
+    ] });
     expect(before).toEqual(envelope);
   });
 
@@ -301,7 +306,9 @@ describe('withUntestedHorizonWarning no longer writes an old clause on positive 
       { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: A7_12 }] };
     const once = withUntestedHorizonWarning(previous, M1.graph);
     expect(once).toEqual({ ...envelope, inference_warnings: [...envelope.inference_warnings,
-      { code: GOAL_CHANCE_LICENSED, severity: 'info' }] });
+      { code: GOAL_CHANCE_LICENSED, severity: 'info' },
+      // Q-c (DL 87114): one horizon-limit statement per surface.
+      { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: "This model doesn't yet say whether any option gets there within 12 months." }] });
     expect(withUntestedHorizonWarning(once, M1.graph)).toBe(once);
   });
 

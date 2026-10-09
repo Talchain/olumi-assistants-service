@@ -264,7 +264,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run('Your results are ready. You can view them now or ask me to explain them.'), 'Run it');
     expect(composeInput?.chanceCells).toEqual([]);
     expect(withholdMarkers(b)).toEqual([]);
-    expectNoRetiredHorizon(b);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     const warnings = () => warn.mock.calls.filter((call: unknown[]) => (call[0] as { event?: unknown } | undefined)?.event === 'agent_lane.canonical_analysis_view_unavailable');
     expect(warnings()).toHaveLength(1);
     expect(warnings()[0]![0]).toMatchObject({ scenario_id: SCENARIO });
@@ -285,7 +286,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'READ owns the cells').toBe(true);
     expect(withholdMarkers(b), 'locally recomputed withholds cannot supply a marker').toEqual([]);
-    expectNoRetiredHorizon(b);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     await expectStoredAndReplayed(b);
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'none'), 'replay READ owns the cells too').toBe(true);
   });
@@ -312,7 +314,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const b = await turn(run(READ_B1.before_text), 'Run it');
     expect(composeInput?.chanceCells?.length).toBeGreaterThan(0);
     expect(composeInput?.chanceCells?.every(cell => cell.kind === 'withheld')).toBe(true);
-    expectNoRetiredHorizon(b);
+    // Q-c (DL 87114): one horizon-limit statement per surface.
+    expect(count(b.assistant_text, "This model doesn't yet say whether any option gets there within 12 months.")).toBe(1);
     expect(withholdMarkers(b), 'one marker is supplied by the Run cells despite three detail withhold sentences').toHaveLength(1);
     expect(withholdMarkers(b)[0], 'distinct identity and current-level causes cannot be replaced by one partial cause').toBe(WITHHOLD_FALLBACK_MARKER);
     for (const sentence of [

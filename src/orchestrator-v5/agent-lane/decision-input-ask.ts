@@ -211,8 +211,13 @@ const A7_OPENER = CHANCE_FREE_HORIZON_PREFIX;
 export function untestedHorizonLineForCells(
   graph: unknown, cells: readonly CanonicalAnalysisCell[], normalizationOnly = false,
 ): string | null {
-  if (!normalizationOnly && goalHorizonVerdict(graph) !== 'no_horizon') return null;
+  const verdict = goalHorizonVerdict(graph);
   const shown = cells.filter(cell => cell.kind === 'figure' || cell.kind === 'range').length;
+  if (!normalizationOnly && verdict !== 'no_horizon') {
+    // Science 93 @54dbc0fe Q-c: one horizon statement per surface, supplied by A7 only when no chance/detail is shown.
+    if (verdict !== 'withhold' || shown > 0 || cells.some(cell => cell.kind === 'withheld'
+      && cell.reasons.some(reason => reason.code === GOAL_FIGURES_HORIZON_NOT_TESTED || reason.code === 'HORIZON_NOT_TESTED'))) return null;
+  }
   if (shown > 0) return untestedHorizonLine(graph, { besideChance: true, plural: shown > 1 });
   if (goalKindOf(graph) === 'share_by_date') return null;
   const goal = goalOf(graph);
@@ -290,7 +295,9 @@ function withCellHorizonWarning<E>(
   const warnings: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
   const goal = goalOf(graph);
   const verdict = goalHorizonVerdict(graph, env);
-  const line = verdict !== 'no_horizon' ? null
+  // Science 93 @54dbc0fe Q-c: the Run's §(ad) detail already supplies its horizon statement.
+  const line = (verdict !== 'no_horizon' && verdict !== 'withhold')
+    || (verdict === 'withhold' && warnings.some(w => recordOf(w)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED)) ? null
     : untestedHorizonLineForCells(graph, cells) ?? (accumulationWithdrawn && goal !== undefined
       ? `${A7_OPENER}${withinMonths(goal)}.` : null);
   const hasChance = cells.some(cell => cell.kind === 'figure' || cell.kind === 'range');
