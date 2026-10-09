@@ -28,6 +28,7 @@ vi.mock('../decision-records/index.js', () => ({
 }));
 
 import { commitDirectAnswer } from '../commit.js';
+import { bindWriteCaller } from '../ownership/door-ownership.js';
 import { composeDirectAnswerResponse } from '../compose.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { SupabaseSessionStore } from '../session/supabase-store.js';
@@ -128,7 +129,7 @@ const metadata = (facts: RunAnalysisHandlerFact[]) => ({
 });
 function commit(facts = [fact()], answer = response()) {
   return runWithProviderPolicy({ allowed: new Set(['openai']), route: 's1-c-row', calls: [], truncated: false },
-    () => commitDirectAnswer(answer, metadata(facts), boundary.store!));
+    () => bindWriteCaller({ userId: owner, verified: true }, () => commitDirectAnswer(answer, metadata(facts), boundary.store!)));
 }
 async function cold() {
   boundary.store = freshStore();

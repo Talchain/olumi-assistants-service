@@ -89,8 +89,8 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
     expect(bodies).toHaveLength(1);
     expect(String(bodies[0]!['instructions'])).toContain(PROVISIONAL_RULE);
     // …and the run it interprets carries the provisional permission, read from the run's own verdict.
-    const run = explanationContext(bodies[0]!['input']) as { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } };
-    expect(run.claim_permissions).toMatchObject({ leader_may_be_named: true, provisional: true });
+    const run = explanationContext(bodies[0]!['input']) as { canonical_state: { run_explanation: { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } } } };
+    expect(run.canonical_state.run_explanation.claim_permissions).toMatchObject({ leader_may_be_named: true, provisional: true });
   });
 
   it('ORDER: "Otherwise" still follows the permission sentence, and the provisional rule refines a nameable result AFTER the prohibition (review 5830350204)', async () => {

@@ -1,6 +1,10 @@
 // Load environment variables from .env file
 // In production without a .env file, this is a no-op (dotenv silently skips)
 import "dotenv/config";
+import { markDraftGraphWriteFailed } from './orchestrator-v5/build-turn-context.js';
+import { currentTurnFenceSlot } from './orchestrator-v5/session/turn-fence.js';
+import { ModelWriteOwnershipRefused } from "./orchestrator-v5/ownership/door-ownership.js";
+import { startSessionAnalysisRunSweeper } from "./orchestrator-v5/session/index.js";
 
 import { env } from "node:process";
 import Fastify from "fastify";
@@ -671,6 +675,12 @@ await app.register(rateLimit, {
 // Centralized error handler: structured error.v1 responses with request_id
 // Layer 3 guarantee: every error response has a non-empty JSON body.
 app.setErrorHandler((error, request, reply) => {
+  if (error instanceof ModelWriteOwnershipRefused) {
+    // Best-effort terminal mark (the helper never throws); the handler stays synchronous for every other error.
+    const slot = currentTurnFenceSlot();
+    if (slot?.handle) void markDraftGraphWriteFailed(slot.scenarioId, slot.turnId, error.code, getRequestId(request), 'turn_dead_only');
+    return reply.code(403).send({ error: error.code });
+  }
   // ROADMAP 1.16i (CEE half) — client aborts are not server errors. One
   // aborted browser request used to produce four error-class log lines and
   // a false 5xx metric increment for a 500 that never reached any client
@@ -1576,6 +1586,12 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
       'Critical prompt coverage check failed (non-fatal)',
     );
   }
+
+  let stopAnalysisRunSweeper = () => {};
+  app.addHook('onReady', async () => {
+    if (nodeEnv !== 'test') stopAnalysisRunSweeper = startSessionAnalysisRunSweeper();
+  });
+  app.addHook('onClose', async () => { stopAnalysisRunSweeper(); });
 
   // Sentry: register Fastify error handler AFTER all routes
   setupSentryFastify(app);

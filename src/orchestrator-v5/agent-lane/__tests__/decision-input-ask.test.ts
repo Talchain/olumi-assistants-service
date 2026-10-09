@@ -379,7 +379,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: withRisk(licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: basisLabel, observed_state: { value: 300, source: basisSource } }, { id: 'a', kind: 'option' }, { id: 'b', kind: 'option' }], edges: [] } : graphWith(goal)),
+      graph: withRisk(licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: basisLabel, observed_state: { value: 300, source: basisSource } }, { id: 'a', kind: 'option', label: 'Option A' }, { id: 'b', kind: 'option', label: 'Option B' }], edges: [] } : graphWith(goal)),
       graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true,
         ...(licensedBasis ? { analysis_admission: { ...(basisRunnable === undefined ? {} : { structurally_analysable: basisRunnable }), permitted_analysis_mode: 'comparative_leader', semantic_signals: { material_parameters_awaiting_user_node_ids: ['subscribers'] } } } : {}),
       },
@@ -387,7 +387,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
         ...(licensedBasis ? { leader_claim: { permitted: true, separation: 'separated' } } : {}),
       },
       analysis_result: blocked ? undefined : { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' },
-        ...(licensedBasis ? { enrichment: { option_comparison: [{ option_id: 'a', win_probability: 0.7 }, { option_id: 'b', win_probability: 0.3 }] } } : {}),
+        ...(licensedBasis ? { enrichment: { option_comparison: [{ option_id: 'a', option_label: 'Option A', win_probability: 0.7 }, { option_id: 'b', option_label: 'Option B', win_probability: 0.3 }] } } : {}),
       },
     }));
     app.post('/orchestrate/v2/turn', async () => (blocked
@@ -405,7 +405,9 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     ...(turnId !== undefined ? { turn_id: turnId } : {}), kind: 'message', scenario_id: scenarioId, message: 'Run analysis.', source: 'chip',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
   } });
-    return (explain ? await explainRun(app, scenarioId, first) : first).json() as { assistant_text: string; _answer_shape?: AnswerShape };
+    const response = explain ? await explainRun(app, scenarioId, first) : first;
+    expect(response.statusCode, response.body).toBe(200);
+    return response.json() as { assistant_text: string; _answer_shape?: AnswerShape };
   };
 
   it('B3-7 RED: first successful Run offers the objective at rest; rerun and cold replay recognise that same ask', async () => {

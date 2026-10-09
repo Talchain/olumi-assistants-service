@@ -199,7 +199,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-run-context-facts.js';
+import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-run-context-facts.js';
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
@@ -1020,6 +1020,8 @@ interface GraphRead {
    * `permitted_analysis_mode` is the mode half of the selected Run's leader permission (`claimPermissionsFrom`).
    */
   readonly analysis_admission?: unknown;
+  /** Requested Explain permission reads the selected Run's existing admission carrier. */
+  readonly run_explanation_admission?: unknown;
   /** Refreshed issues from the same canonical read; explanatory data, never a second permission gate. */
   readonly goal_scope_reconciliation?: readonly GoalScopeReconciliation[];
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
@@ -1725,7 +1727,8 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       ? goalChancePointForAgent(row.probability_of_goal, goalChanceDisplay?.[id], shownChance.get(id)) : undefined;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
-      ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
+      // A contract-valid row may carry neither alias nor label: undefined === undefined must not dereference a missing alias.
+      ...((alias => alias !== undefined && alias.raw === label ? { display_label: alias.display } : {})(optionNames.get(id))),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
       ...(projectedChance !== undefined && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
         ? { probability_of_goal: projectedChance } : {}),
@@ -2181,7 +2184,7 @@ export function createAgentCapabilities(
     return '';
   };
 
-  const readGraph = async (scenarioId: string): Promise<GraphRead | null> => {
+  const readGraph = async (scenarioId: string, section?: 'run_explanation'): Promise<GraphRead | null> => {
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
@@ -2210,6 +2213,8 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      ...(section === 'run_explanation' ? { run_explanation_admission:
+        (r.json.analysis_ready as { analysis_admission?: unknown } | undefined)?.analysis_admission } : {}),
       ...(() => {
         const readiness = (r.json.current_read as { analysis_ready?: unknown } | undefined)?.analysis_ready;
         return readiness === undefined ? {} : { analysis_ready: readiness };
@@ -3494,8 +3499,8 @@ export function createAgentCapabilities(
   };
 
   const caps: AgentCapabilities = {
-    async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
-      const g = await readGraph(ctx.scenario_id);
+    async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
+      const g = await readGraph(ctx.scenario_id, options?.section);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
       const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
@@ -3520,9 +3525,18 @@ export function createAgentCapabilities(
       const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
         [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
         pairRead?.frameRefitLinks);
+      // Opt-in interpreter section. The default state remains the ordinary Agent's assembly.
+      let explanationSection: Record<string, unknown> | undefined;
+      if (options?.section === 'run_explanation') {
+        const explanationRead = { ...modelRead, analysis_admission: g.analysis_admission ?? g.run_explanation_admission };
+        const completed = withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, explanationRead);
+        explanationSection = runExplanationContextFacts(ctx.scenario_id, explanationRead,
+          completed.analysis as Record<string, unknown> | undefined);
+      }
       return {
         ok: true,
         mutated: false,
+        ...(explanationSection === undefined ? {} : { run_explanation: explanationSection }),
         ...(permissions.total_goal_claims_allowed === false ? { claim_permissions: permissions } : {}),
         ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
         graph_revision: g.graph_hash,

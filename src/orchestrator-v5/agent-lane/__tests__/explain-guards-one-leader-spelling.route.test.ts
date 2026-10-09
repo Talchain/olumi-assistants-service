@@ -120,7 +120,10 @@ async function runToolOutput(): Promise<Json> {
     .runAnalysis({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'p0-ctx-run' } as never, { reason: 'the user pressed Run' } as never) as Json;
 }
 const GUARDS = ['claim_permissions', 'goal_certainty', 'goal_chance', 'limit_checks'] as const;
-const guardsOf = (o: Json): Json => Object.fromEntries(GUARDS.map((k) => [k, o[k]]));
+const guardsOf = (o: Json): Json => {
+  const source = o.canonical_state === undefined ? o : { ...o.canonical_state.analysis, ...o.canonical_state.run_explanation };
+  return Object.fromEntries(GUARDS.map((k) => [k, source[k]]));
+};
 
 /** The `CURRENT MODEL STATE` developer item the model reads on an ordinary turn, parsed. */
 function modelStateOf(body: Json): Json | undefined {
@@ -714,7 +717,8 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     const explained = await explainPayload();
     modelBodies = [];
     const ordinary = await followUpState();
-    expect(explained.canonical_state.run_delta).toEqual(delta);
+    expect(explained.canonical_state.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+    expect(explained.canonical_state.analysis.selected_run_reference).toBe(ordinary.analysis.selected_run_reference);
     expect(ordinary.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
   });
 
@@ -752,13 +756,14 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     read.analysis_goal_certainty = UNEARNED;
     const ctx = await explainPayload();
     // Precondition (the hazard): the selected result still shows the bare exact 0 for that option.
-    const resultRow = (ctx.result.enrichment.option_comparison as Json[]).find((r) => r.option_id === 'keep_49_price');
+    const resultRow = (read.analysis_result.enrichment.option_comparison as Json[]).find((r) => r.option_id === 'keep_49_price');
     expect(resultRow?.probability_of_goal).toBe(0);
-    const options = (ctx.goal_certainty?.options ?? []) as Json[];
+    expect(ctx.canonical_state.analysis.saved_run_options.find((r: Json) => r.option_id === 'keep_49_price')).not.toHaveProperty('probability_of_goal');
+    const options = (ctx.canonical_state.analysis.goal_certainty?.options ?? []) as Json[];
     const unearned = options.find((o) => o.option_id === 'keep_49_price');
-    expect(unearned, JSON.stringify(ctx.goal_certainty)).toEqual({ option: 'Keep £49 price', option_id: 'keep_49_price', earned: false, say: UNEARNED_SAY });
+    expect(unearned, JSON.stringify(ctx.canonical_state.analysis.goal_certainty)).toEqual({ option: 'Keep £49 price', option_id: 'keep_49_price', earned: false, say: UNEARNED_SAY });
     expect(options.find((o) => o.option_id === 'raise_to_54')).toEqual({ option: 'Raise to £54', option_id: 'raise_to_54', probability_of_goal: 0, earned: true });
-    expect(typeof ctx.goal_certainty.note).toBe('string');
+    expect(typeof ctx.canonical_state.analysis.goal_certainty.note).toBe('string');
   });
 
   it('D3-a parity: the Explain payload’s guard fields equal the Run tool’s for the same Run', async () => {
@@ -773,11 +778,11 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     delete read.analysis_identity_evaluated_node_ids;
     read.analysis_limit_verdicts = VERDICTS;
     const ctx = await explainPayload();
-    expect(ctx.claim_permissions.leader_may_be_named).toBe(false);
-    expect(ctx.claim_permissions.withheld_reason).toBe('constraint_verdict_withheld');
-    expect(ctx.claim_permissions.nonlinear_identity?.reason, JSON.stringify(ctx.claim_permissions)).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
-    expect(ctx.claim_permissions.nonlinear_identity.say).toContain('MRR');
-    expect((ctx.limit_checks?.limits ?? []).map((l: Json) => [l.constraint_id, l.state])).toEqual([[CHURN, 'estimate_only']]);
+    expect(ctx.canonical_state.run_explanation.claim_permissions.leader_may_be_named).toBe(false);
+    expect(ctx.canonical_state.run_explanation.claim_permissions.withheld_reason).toBe('constraint_verdict_withheld');
+    expect(ctx.canonical_state.run_explanation.claim_permissions.nonlinear_identity?.reason, JSON.stringify(ctx.canonical_state.run_explanation.claim_permissions)).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+    expect(ctx.canonical_state.run_explanation.claim_permissions.nonlinear_identity.say).toContain('MRR');
+    expect((ctx.canonical_state.analysis.limit_checks?.limits ?? []).map((l: Json) => [l.constraint_id, l.state])).toEqual([[CHURN, 'estimate_only']]);
     const tool = await runToolOutput();
     expect(tool.claim_permissions.nonlinear_identity, 'control: the Run tool carries the cause here').toBeDefined();
     expect(guardsOf(ctx)).toEqual(guardsOf(tool));
@@ -787,9 +792,9 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     read.analysis_state.leader_claim = WITHHELD_CLAIM;
     expect(read.analysis_identity_evaluated_node_ids).toEqual(['mrr']);
     const ctx = await explainPayload();
-    expect(ctx.claim_permissions.leader_may_be_named).toBe(false);
-    expect(ctx.claim_permissions.withheld_reason).toBe('constraint_verdict_withheld');
-    expect(ctx.claim_permissions.nonlinear_identity).toBeUndefined();
+    expect(ctx.canonical_state.run_explanation.claim_permissions.leader_may_be_named).toBe(false);
+    expect(ctx.canonical_state.run_explanation.claim_permissions.withheld_reason).toBe('constraint_verdict_withheld');
+    expect(ctx.canonical_state.run_explanation.claim_permissions.nonlinear_identity).toBeUndefined();
   });
 
   it('D6-a: exploratory admission and leader_claim.permitted is true — the follow-up says leader_may_be_named false, as the Run turn does', async () => {
