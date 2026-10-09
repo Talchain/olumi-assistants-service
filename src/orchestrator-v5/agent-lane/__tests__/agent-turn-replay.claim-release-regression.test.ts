@@ -98,10 +98,13 @@ async function freshApp(): Promise<FastifyInstance> {
   process.env.AGENT_LANE_PREVIEW = 'false';
   const mod = await import('../../../routes/agent-v1-turn.js');
   const { agentV1TurnRoute } = mod;
+  const { bindWriteCaller } = await import('../../ownership/door-ownership.js');
   // A request that loses the claim waits for the winner's answer — short here.
   mod.AGENT_TURN_CLAIM_WAIT.totalMs = 2_000;
   mod.AGENT_TURN_CLAIM_WAIT.everyMs = 20;
   const app = Fastify({ logger: false });
+  // Match production's request-scoped door accounting, including the claim append.
+  app.addHook('preHandler', (_req, _reply, done) => bindWriteCaller({ userId: null, verified: false }, done));
   app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [], edges: [] }, graph_hash: 'h1' }));
   const revisionRefusal = (path: string) => async (_req: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => {
     internalCalls.push(path);
@@ -138,7 +141,7 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
     ownershipChangesAfterClaim = true;
     const response = await approve();
     expect(response.statusCode, response.payload).toBe(403);
-    expect(response.json()).toEqual({ error: 'model_write_ownership_refused' });
+    expect(response.payload).toBe('{"error":"model_write_ownership_refused","message":"Nothing was saved. You don\'t have access to change this model."}');
     expect(store.append).toHaveBeenCalledTimes(1); // Only the earlier claim, never the refused answer.
     expect(store.releaseTurnClaim).toHaveBeenCalledExactlyOnceWith(SID, `${T1}:claim`, expect.any(String));
     expect(rows.size).toBe(0);
