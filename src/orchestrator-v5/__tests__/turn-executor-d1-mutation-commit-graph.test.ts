@@ -37,6 +37,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import ts from 'typescript';
+import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
@@ -89,7 +90,6 @@ vi.mock('../session/index.js', () => ({
       scope: { kind: 'structural' as const },
       entries_invalidated: [],
     }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async (scenarioId: unknown) => {
       loadGraphCalls.push(scenarioId);
       if (loadGraphError) throw loadGraphError;
@@ -226,6 +226,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __setUseAppendV6ForTest(true);
   setTestSink(null);
 });
 
@@ -301,6 +302,8 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
   });
 
   it('Gate 1 identifier proof: the strict persisted read is keyed by the SCENARIO id — the same value the commit targets — not the turn or request id', async () => {
+    // Legacy OFF graph-only reread census; ON reuses the captured combined snapshot.
+    __setUseAppendV6ForTest(false);
     currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
     const turnId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa13';
     const requestId = 'req-d1shape-idproof';
@@ -316,6 +319,8 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
   });
 
   it('fail closed: a degraded strict read aborts the commit — STATE_COMMIT_FAILED error envelope, zero rows appended, scenarios.graph untouched', async () => {
+    // Legacy OFF graph-only reread fault injection; ON combined failure is covered in the CAS sibling.
+    __setUseAppendV6ForTest(false);
     currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
     const pristine = JSON.stringify(currentPersistedGraph);
     loadGraphError = new Error('session store unreachable');

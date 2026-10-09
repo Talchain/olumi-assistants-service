@@ -1,3 +1,4 @@
+import { goalHorizonVerdict } from '../../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * Model Management v1 — THE WIRING SLICE (versions list / save / restore).
@@ -121,6 +122,7 @@ const scenarioExists = vi.fn();
 const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
 const loadGraph = vi.fn();
+const readExistingScenario = vi.fn();
 const appendSpy = vi.fn();
 const readRecent = vi.fn();
 const readFactsFor = vi.fn();
@@ -130,6 +132,7 @@ const store = {
   ensureScenarioExists,
   getScenarioOwner,
   loadGraph,
+  readExistingScenario,
   append: appendSpy,
   readRecent,
   readFactsFor,
@@ -142,7 +145,6 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
 const listVersions = vi.fn();
 const getVersion = vi.fn();
 const saveVersion = vi.fn();
-const restoreVersion = vi.fn();
 const restoreVersionAtomic = vi.fn();
 const getCurrentVersionPointer = vi.fn();
 // The HEAD record reader — the restore path's return-leg input. Distinct from
@@ -161,7 +163,6 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
       listVersions,
       getVersion,
       saveVersion,
-      restoreVersion,
       restoreVersionAtomic,
       getCurrentVersionPointer,
       getCurrentVersion,
@@ -236,7 +237,7 @@ function summary(overrides: Record<string, unknown> = {}) {
 }
 
 async function buildApp(): Promise<FastifyInstance> {
-  const app = Fastify();
+  const app = Fastify({ requestIdHeader: "x-request-id" });
   await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioVersionsRoute(app);
   await app.ready();
@@ -273,6 +274,7 @@ beforeEach(() => {
     getScenarioOwner.mockResolvedValue(OWNER);
   getScenarioOwner.mockResolvedValue(OWNER);
   loadGraph.mockResolvedValue(CURRENT_GRAPH);
+  readExistingScenario.mockImplementation(async () => ({ userId: await getScenarioOwner(SCENARIO), graph: await loadGraph(), briefText: null, analysisInvalidatedAt: null, revision: 7 }));
   appendSpy.mockResolvedValue({ id: "row-1" });
   readRecent.mockResolvedValue([]);
   readFactsFor.mockResolvedValue([]);
@@ -341,17 +343,6 @@ beforeEach(() => {
       graph_identity_hash: HASH_SNAPSHOT,
       deduped: false,
       event_id: "evt-snap",
-    },
-  });
-  restoreVersion.mockResolvedValue({
-    status: "ok",
-    value: {
-      version_id: RESTORED_VERSION,
-      version_number: 4,
-      graph_identity_hash: HASH_A,
-      deduped: false,
-      event_id: "evt-restore",
-      restored_from_version_id: VERSION_A,
     },
   });
   restoreVersionAtomic.mockResolvedValue(atomicRestoreOk());
@@ -863,7 +854,6 @@ describe("POST /versions/restore — C8-A atomic restore", () => {
 
     expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
     expect(saveVersion).not.toHaveBeenCalled();
-    expect(restoreVersion).not.toHaveBeenCalled();
     expect(appendSpy).not.toHaveBeenCalled();
     const write = restoreVersionAtomic.mock.calls[0][0];
     expect(write.scenario_id).toBe(SCENARIO);
@@ -1724,3 +1714,133 @@ vi.mock('../../utils/supabase-user-jwt.js', async () => ({
   looksLikeJwt: () => true,
   verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
 }));
+
+
+describe("S5 r9 restore outbound receipt", () => {
+  it("real restore route omits proof while the version and restored stored graph keep their attestation", async () => {
+    const { applyGoalSteadyEdit } = await import("../../orchestrator-v5/goal-target/goal-steady-write.js");
+    const { horizonSteadyAttested } = await import("../../orchestrator-v5/goal-target/horizon-basis.js");
+    const cfg = mockConfig.value as { auth: { hmacSecret: string | undefined } };
+    const previousSecret = cfg.auth.hmacSecret; cfg.auth.hmacSecret = "s5-r9-restore-test-only";
+    let app: FastifyInstance | undefined;
+    try {
+      const graph = { ...structuredClone(STORED_VERSION_GRAPH), nodes: [
+        ...structuredClone(STORED_VERSION_GRAPH.nodes),
+        { id: "goal", kind: "goal", label: "Service quality", goal_horizon_months: 9, goal_threshold_unit: "%" },
+      ] };
+      const issued = applyGoalSteadyEdit(graph as never, { goal_id: "goal", months: 9 }, SCENARIO);
+      if (issued.kind !== "mutated") throw new Error("r9 restore fixture mint refused");
+      const version = JSON.parse(JSON.stringify(issued.mutatedGraph));
+      const versionBytes = JSON.stringify(version); let storedBytes = JSON.stringify(CURRENT_GRAPH);
+      expect(horizonSteadyAttested(version)).toBe(true);
+      getVersion.mockResolvedValue({ status: "ok", value: { ...summary(), graph: version } });
+      loadGraph.mockImplementation(async () => JSON.parse(storedBytes));
+      restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+        storedBytes = JSON.stringify(args.graph);
+        const ok = atomicRestoreOk(); return { ...ok, value: { ...ok.value, graph: JSON.parse(storedBytes) } };
+      });
+      app = await buildApp();
+      const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(restoreVersionAtomic).toHaveBeenCalledTimes(1);
+      expect(res.json().receipt).toBeDefined(); expect(res.body).not.toContain('"proof"');
+      expect(res.json().receipt.graph.nodes.find((n: { id: string }) => n.id === "goal").horizon_basis)
+        .toMatchObject({ basis: "steady_attested", source: "user_stated", bound_months: 9 });
+      expect(JSON.stringify(version)).toBe(versionBytes);
+      const stored = JSON.parse(storedBytes);
+      expect(stored.nodes.find((n: { id: string }) => n.id === "goal").horizon_basis)
+        .toEqual(version.nodes.find((n: { id: string }) => n.id === "goal").horizon_basis);
+      expect(horizonSteadyAttested(stored)).toBe(true);
+    } finally { if (app) await app.close(); cfg.auth.hmacSecret = previousSecret; }
+  });
+});
+
+// P1a (DL 87114 #2895): route restore sends the saved graph through its real storage projection to the atomic RPC.
+it('a forged triple through version restore still withholds', async () => {
+  const saved = { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR', goal_horizon_months: 12,
+    horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: 12 }], edges: [] };
+  getVersion.mockResolvedValue({ status: 'ok', value: { ...summary(), graph: saved } });
+  restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+    const ok = atomicRestoreOk(); return { ...ok, value: { ...ok.value, graph: args.graph } };
+  });
+  const app = await buildApp();
+  try {
+    const res = await post(app, '/versions/restore', { version_id: VERSION_A });
+    expect(res.statusCode, res.body).toBe(200);
+    const stored = restoreVersionAtomic.mock.calls[0][0].graph;
+    expect(stored.nodes[0]).toMatchObject({ id: 'mrr', goal_horizon_months: 12 });
+    expect(goalHorizonVerdict(stored)).toBe('withhold');
+    expect(goalHorizonVerdict(res.json().receipt.graph)).toBe('withhold');
+  } finally { await app.close(); }
+});
+
+
+// Route -> real service -> real adapter: RPC doubles report writes only on success.
+describe("version revision CAS through the RPC boundary", () => {
+  it.each(["save", "restore"] as const)("stale %s returns the shared revision-conflict bytes and reports no write", async operation => {
+    const { ModelManagementService } = await import("../../orchestrator-v5/model-management/service.js");
+    const { SupabaseModelVersionStore } = await import("../../orchestrator-v5/model-management/store-adapter.js");
+    const { createHash } = await import("node:crypto");
+    const rpcError = { code: "OLRV1", message: "revision_conflict", details: JSON.stringify({ reason: "revision_conflict", expected: 7, current: 8 }) };
+    const rpc = vi.fn(async () => ({ data: null, error: rpcError }));
+    const emit = vi.fn();
+    const adapter = new SupabaseModelVersionStore({ rpc } as never);
+    const service = new ModelManagementService({ store: adapter, isEnabled: () => true, eventSink: { emit } });
+    const results: unknown[] = [];
+    saveVersion.mockImplementation(async args => { const result = await service.saveVersion(args); results.push(result); return result; });
+    restoreVersionAtomic.mockImplementation(async args => { const result = await service.restoreVersionAtomic(args); results.push(result); return result; });
+    const app = await buildApp();
+    try {
+      const res = await app.inject({ method: "POST", url: `/assist/v1/scenarios/${SCENARIO}/versions/${operation}`,
+        headers: { "x-request-id": "version-cas" }, payload: operation === "save" ? {} : { version_id: VERSION_A, mutation_id: MUTATION_ID, expected_graph_identity_hash: HASH_B } });
+      expect(res.statusCode).toBe(409);
+      // Same exact copy/hash expectation as graph-writer-cas-on.test.ts.
+      expect(createHash("sha256").update(res.json().message, "utf8").digest("hex"))
+        .toBe("7cbca4e052c5af522548124b909e5e0aa9346c7d7662cf75fb5d23fad110a8ab");
+      expect(res.body).toBe('{"schema":"error.v1","code":"revision_conflict","message":"The scenario changed while I was saving, so nothing was saved. Try again.","details":{"code":"revision_conflict","expected":7,"current":8},"request_id":"version-cas","expected":7,"current":8}');
+      expect(results).toEqual([{ status: "conflict", conflict: { kind: "revision_conflict", expected_graph_identity_hash: null,
+        message: "The scenario changed while I was saving, so nothing was saved. Try again.", expected: 7, current: 8 } }]);
+      expect(rpc).toHaveBeenCalledTimes(1);
+      expect(emit).not.toHaveBeenCalled();
+      expect(appendSpy).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it.each(["save", "restore"] as const)("fresh %s forwards the single snapshot revision to the adapter RPC", async operation => {
+    const { ModelManagementService } = await import("../../orchestrator-v5/model-management/service.js");
+    const { SupabaseModelVersionStore } = await import("../../orchestrator-v5/model-management/store-adapter.js");
+    readExistingScenario.mockResolvedValue({ userId: OWNER, graph: CURRENT_GRAPH, briefText: null, analysisInvalidatedAt: null, revision: 17 });
+    const rpc = vi.fn(async (_name: string, args: Record<string, unknown>) => ({ error: null, data: operation === "save"
+      ? { version_id: SNAPSHOT_VERSION, version_number: 3, graph_identity_hash: args.p_graph_identity_hash, deduped: false, event_id: "fresh-save" }
+      : { ...atomicRestoreOk().value, graph: args.p_graph } }));
+    const emit = vi.fn();
+    const service = new ModelManagementService({ store: new SupabaseModelVersionStore({ rpc } as never), isEnabled: () => true, eventSink: { emit } });
+    saveVersion.mockImplementation(args => service.saveVersion(args));
+    restoreVersionAtomic.mockImplementation(args => service.restoreVersionAtomic(args));
+    const app = await buildApp();
+    try {
+      const res = await post(app, `/versions/${operation}`, operation === "save" ? {} : { version_id: VERSION_A });
+      expect(res.statusCode).toBe(200);
+      expect(readExistingScenario).toHaveBeenCalledTimes(2); // Ownership admission, then one uncached mutation snapshot.
+      expect(readExistingScenario).toHaveBeenNthCalledWith(2, SCENARIO);
+      expect(loadGraph).not.toHaveBeenCalled();
+      expect(rpc).toHaveBeenCalledExactlyOnceWith(operation === "save" ? "create_model_version_cas_v1" : "restore_model_version_atomic_cas_v1", expect.objectContaining({ p_expected_revision: 17 }));
+      expect(emit).toHaveBeenCalledTimes(1);
+    } finally { await app.close(); }
+  });
+
+  it.each(["save", "restore"] as const)("%s refuses missing or invalid snapshot revisions before writing", async operation => {
+    const app = await buildApp();
+    try {
+      for (const revision of [undefined, null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "7"]) {
+        readExistingScenario.mockResolvedValue({ userId: OWNER, graph: CURRENT_GRAPH, revision });
+        const res = await post(app, `/versions/${operation}`, operation === "save" ? {} : { version_id: VERSION_A });
+        expect(res.statusCode).toBe(503);
+        expect(saveVersion).not.toHaveBeenCalled();
+        expect(restoreVersionAtomic).not.toHaveBeenCalled();
+      }
+      readExistingScenario.mockResolvedValueOnce({ userId: OWNER, graph: CURRENT_GRAPH, revision: 7 }).mockResolvedValueOnce(null);
+      expect((await post(app, `/versions/${operation}`, operation === "save" ? {} : { version_id: VERSION_A })).statusCode).toBe(503);
+    } finally { await app.close(); }
+  });
+});

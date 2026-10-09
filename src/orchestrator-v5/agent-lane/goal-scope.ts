@@ -4,6 +4,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose, sameUnit, readMoneyTotal } from './reconciling-product.js';
 import { figureTheUserWrote } from './stated-by-user.js';
+import type { AdmittedModel, CandidateModel } from './admit-model.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { isPendingActionExpired, PENDING_KIND_CLAIMS_BARE_NUMBER } from '../session/pending-action.js';
 
@@ -184,6 +185,25 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
   return components;
 }
 
+/**
+ * The declaration's `modelled` is the scope this model measures (GoalScopeDeclaration), so an admitted
+ * identity ON its goal binds the operand quantities to that declared reading. Identity membership is
+ * held as node ids; no population is inferred from an operand's label. A plain-total reading makes
+ * that declaration material even when no option creates a new component (`untypedScopeComponents`).
+ */
+export function goalIdentityScopeIsMaterial(
+  readsAsTotal: boolean,
+  candidate: Pick<CandidateModel, 'goal'>,
+  admitted: Pick<AdmittedModel, 'nodes'>,
+): boolean {
+  if (!readsAsTotal || !candidate.goal.scope?.modelled.trim()) return false;
+  const goal = admitted.nodes.find(n => n.kind === 'goal');
+  const identity = goal?.nonlinear_identity;
+  if (!identity || new Set(identity.factor_ids).size < 2) return false;
+  return identity.factor_ids.every(id => admitted.nodes.some(n => n.id === id && n.id !== goal!.id
+    && (n.kind === 'factor' || n.kind === 'outcome' || n.kind === 'goal')));
+}
+
 /** Science d5's words, verbatim; several components by the list rule (three named, then " and N more"). */
 export function untypedScopeDisclosure(goalLabel: string, components: readonly string[]): string {
   const named = components.slice(0, 3).map(c => `‘${c}’`);
@@ -191,6 +211,11 @@ export function untypedScopeDisclosure(goalLabel: string, components: readonly s
   const list = more > 0 ? `${named.join(', ')} and ${more} more`
     : named.length < 2 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
   return `I’ve read your goal, ‘${goalLabel}’, as the total across every tier, including ${list}. If you meant only part of it, say which.`;
+}
+
+/** Material identity scope (DL #2914 r3): the model measures the declared part, so name it and ask; never claim the total. */
+export function materialScopeQuestion(goalLabel: string, modelled: string, alternative: string): string {
+  return `I’ve modelled your goal, ‘${goalLabel}’, as ‘${modelled}’, not ‘${alternative}’. Is your target for ‘${modelled}’ or for ‘${alternative}’?`;
 }
 
 /** Refresh operands after a canvas write; retain the original user claims, never promote the derived count. */

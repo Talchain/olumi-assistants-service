@@ -66,7 +66,6 @@ const store = {
     const key = `${sid}:${turnId}`;
     if (rows.get(key)?.request_hash === hash) rows.delete(key);
   }),
-  storeDraftGraph: vi.fn(async () => {}),
   append: vi.fn(async (w: Rec) => { const key = `${w.scenario_id}:${w.turn_id}`; rows.set(key, { ...w, assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` }); return { id: rows.get(key)!.id }; }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -89,14 +88,14 @@ describe('agent route: structural challenge press', () => {
     await app.register(agentV1TurnRoute); await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); turnId = randomUUID(); state.throws = false; state.noRun = false; graphReads.noGraph = false; store.releaseTurnClaim.mockClear(); store.storeDraftGraph.mockClear(); dispatch.calls.length = 0; graphReads.count = 0; store.append.mockClear(); vi.mocked(fetch).mockClear(); state.run = RUN_A; state.permission = 'licensed'; });
+  beforeEach(() => { rows.clear(); turnId = randomUUID(); state.throws = false; state.noRun = false; graphReads.noGraph = false; store.releaseTurnClaim.mockClear(); dispatch.calls.length = 0; graphReads.count = 0; store.append.mockClear(); vi.mocked(fetch).mockClear(); state.run = RUN_A; state.permission = 'licensed'; });
   const post = async (chip: string | undefined, message = 'test') => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message, source: chip ? 'chip' : 'user', ...(chip ? { chip: { id: chip } } : {}) } }));
 
   it('current licensed Run: replies structurally, makes no model call, appends no graph change, and marks fastPath method', async () => {
     const response = await post(PRESS); const body = response.json();
     expect(response.statusCode).toBe(200); expect(body.assistant_text).toContain('Without the link'); expect(body._diagnostic_trace.fast_path).toBe('method');
     expect(dispatch.calls).toHaveLength(1); expect(dispatch.calls[0].link).toEqual(LINK); expect(dispatch.calls[0].requestId).toContain('structural-challenge');
-    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(store.storeDraftGraph).not.toHaveBeenCalled(); expect(body._agent.mutated).toBe(false); expect(body._agent?.tool_calls ?? []).toEqual([]);
+    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(body._agent.mutated).toBe(false); expect(body._agent?.tool_calls ?? []).toEqual([]);
   });
   it('ordinary text does not dispatch and performs no extra route read-back', async () => {
     const before = graphReads.count; const response = await post(undefined, 'ordinary message');
@@ -121,7 +120,7 @@ describe('agent route: structural challenge press', () => {
     expect(body.assistant_text).toBe("I can't tell which link this is, so I can't test it. Nothing in your model changed.");
     expect(body._diagnostic_trace.fast_path).toBe('method');
     expect(body._diagnostic_trace.timing.provider_calls).toBe(0); expect(fetch).not.toHaveBeenCalled();
-    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(store.storeDraftGraph).not.toHaveBeenCalled(); expect(body._agent.mutated).toBe(false); expect(body._agent.tool_calls).toEqual([]);
+    expect(store.append).toHaveBeenCalledTimes(2); expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1); expect(body._agent.mutated).toBe(false); expect(body._agent.tool_calls).toEqual([]);
   });
   it('canonical press absent from read-back graph reaches dispatcher typed link_not_found', async () => {
     const link = { from_id: 'absent', to_id: LINK.to_id };
@@ -164,7 +163,6 @@ describe('agent route: structural challenge press', () => {
     expect(body._diagnostic_trace.fast_path).toBe('method');
     expect(fetch).not.toHaveBeenCalled(); expect(body._diagnostic_trace.timing.provider_calls).toBe(0);
     expect(body._agent.tool_calls).toEqual([]); expect(body._agent.mutated).toBe(false);
-    expect(store.storeDraftGraph).not.toHaveBeenCalled();
     expect(store.releaseTurnClaim).not.toHaveBeenCalled();
     expect(rows.has(`${SCENARIO}:${turnId}:claim`)).toBe(true);
     expect(store.append.mock.calls.filter(([write]) => write.turn_id === turnId)).toHaveLength(1);

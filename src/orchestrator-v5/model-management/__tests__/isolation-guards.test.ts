@@ -38,6 +38,8 @@ const TEST_FILE = /\.(test|spec)\./;
 const ALLOWED_CROSS_BOUNDARY = new Set(
   [
     '../../config/index.js', // config.cee.modelVersionsEnabled (flag read)
+    // S5 2b (#2899): pure zero-import outbound proof strip; DL review in this PR
+    '../goal-target/outbound-graph.js',
     '../context/graph-identity.js', // Group A: computeGraphIdentityHash + analysis-affecting hash
     // VERSION RESULT-DIFF's pure binder reads the existing Run identity,
     // currentness and claim authorities; it introduces no writer or science
@@ -178,6 +180,19 @@ const productionFilesMentioningModule = collectSourceFiles(srcRoot, { excludeTes
 describe('model-management isolation guards — OUTBOUND (module imports only sanctioned seams)', () => {
   it('scans every production module file (more than one)', () => {
     expect(moduleFiles.length).toBeGreaterThan(1);
+  });
+
+  it('the outbound graph proof-strip seam has zero imports or module dependencies', () => {
+    const file = resolve(moduleDir, '../goal-target/outbound-graph.ts');
+    const tree = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+    const imports: ts.Node[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) || ts.isImportEqualsDeclaration(node) || ts.isImportTypeNode(node)) imports.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+    expect(imports, 'outbound-graph.ts must remain a zero-import leaf').toEqual([]);
+    expect(scanImports(file)).toEqual({ specifiers: [], hasDynamic: false });
   });
 
   it('every production import resolves within the module, a sanctioned seam, or an allowlisted external', () => {

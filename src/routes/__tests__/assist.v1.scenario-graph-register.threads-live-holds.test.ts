@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * `/graph/register` THREADS LIVE CONSENT HOLDS THROUGH ITS WRITE.
  *
@@ -50,7 +51,7 @@ const readMostRecentPendingActions = vi.fn();
 const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn, readMostRecentPendingActions };
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));

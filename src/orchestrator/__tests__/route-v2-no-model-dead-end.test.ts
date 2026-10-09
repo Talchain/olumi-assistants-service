@@ -78,7 +78,7 @@ let pendingActionsForRead: readonly PendingAction[] = [];
 let loadGraphThrows = false;
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
-const loadGraphMock = vi.fn(async () => {
+const loadGraphMock = vi.fn(async (_scenarioId: string) => {
   if (loadGraphThrows) throw new Error('session store unreachable');
   return persistedGraphForRead;
 });
@@ -93,10 +93,9 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-    storeDraftGraph: async () => undefined,
     loadGraph: loadGraphMock,
-    loadGraphAndBriefText: async () => ({
-      graph: persistedGraphForRead,
+    loadGraphAndBriefText: async (scenarioId: string) => ({ revision: 7,
+      graph: await loadGraphMock(scenarioId),
       briefText: persistedBriefTextForRead,
     }),
     readMostRecentPendingActions: async () => pendingActionsForRead,

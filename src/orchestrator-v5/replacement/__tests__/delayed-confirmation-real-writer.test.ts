@@ -1,3 +1,9 @@
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 /**
  * ⭐⭐⭐ ONE DELAYED-CONFIRMATION EDIT, THROUGH THE CONTROLLER, INTO THE REAL
  * WRITER — on a CAPTURED REAL GRAPH.
@@ -90,7 +96,6 @@ function makeStore(initial: unknown) {
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     readMostRecentPendingActions: async () => [],
-    storeDraftGraph: async () => undefined,
     ensureScenarioExists: async () => ({ user_id: null }),
     countTurns: async () => 0,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),

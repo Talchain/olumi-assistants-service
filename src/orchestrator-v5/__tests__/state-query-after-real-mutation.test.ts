@@ -116,7 +116,6 @@ vi.mock('../session/index.js', () => ({
     readFactsFor: async (rowIds: readonly string[]) => asPriorFacts(rowIds),
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),

@@ -216,3 +216,9 @@ describe('the Agent-facing contract can say whose level it is', () => {
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'cee_hypothesis' });
   });
 });
+
+// B-FIX1: an empty successful scenario read permits first-touch adoption on CAS ON.
+vi.mock('../../build-turn-context.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../build-turn-context.js')>(),
+  loadPersistedScenarioStateStrict: async () => ({ graph: null, briefText: null, revision: 7 }),
+}));

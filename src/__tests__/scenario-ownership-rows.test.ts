@@ -15,7 +15,7 @@ const OTHER_SID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const fixtureId = (id: string) => id.trim().replace(/[{}-]/g, '').toLowerCase() === 'cccccccccccc4ccc8ccccccccccccccc' ? SID : id;
 const state = vi.hoisted(() => ({ owner: null as string | null, member: false, memberThrows: false, absent: false, oracleThrows: false, entityAbsent: false, existenceThrows: false, admitted: false, persisted: false, members: vi.fn(), writes: vi.fn() }));
 const session = vi.hoisted(() => ({
-  readExistingScenario: vi.fn(async (id: string) => { if (state.oracleThrows || state.existenceThrows) throw new Error('reader down'); if (fixtureId(id) === OTHER_SID) return { userId: B, graph: null, briefText: null, analysisInvalidatedAt: null }; return fixtureId(id) !== SID || state.absent ? null : { userId: state.owner, graph: null, briefText: null, analysisInvalidatedAt: null }; }),
+  readExistingScenario: vi.fn(async (id: string) => { if (state.oracleThrows || state.existenceThrows) throw new Error('reader down'); if (fixtureId(id) === OTHER_SID) return { userId: B, graph: null, briefText: null, analysisInvalidatedAt: null, revision: 7 }; return fixtureId(id) !== SID || state.absent ? null : { userId: state.owner, graph: null, briefText: null, analysisInvalidatedAt: null, revision: 7 }; }),
   getScenarioOwner: vi.fn(async (id: string) => fixtureId(id) === SID ? state.owner : id === OTHER_SID ? B : null),
   scenarioExists: vi.fn(async (id: string) => { if (state.existenceThrows) throw new Error('existence reader down'); return fixtureId(id) === SID && !state.absent; }),
   turnFenceRowExists: vi.fn(async () => true),
@@ -556,10 +556,13 @@ async function residualAgentRows(run: (real: FastifyInstance, rows: Map<string, 
     state.writes(write);
     return { id: key };
   };
+  const readOwner = session.getScenarioOwner.getMockImplementation()!;
+  // Admission and the writer door read the same authoritative fixture row.
+  session.getScenarioOwner.mockImplementation(async id => rows.get(id) ?? null);
   const read = session.readExistingScenario.getMockImplementation()!;
   const ensure = session.ensureScenarioExists.getMockImplementation()!;
   session.readExistingScenario.mockImplementation(async id => rows.has(id)
-    ? { userId: rows.get(id)!, graph: null, briefText: null, analysisInvalidatedAt: null } : null);
+    ? { userId: rows.get(id)!, graph: null, briefText: null, analysisInvalidatedAt: null, revision: 7 } : null);
   session.ensureScenarioExists.mockImplementation(async (id, caller) => {
     if (!rows.has(id)) { creates.push(id); rows.set(id, caller); }
     return { user_id: rows.get(id)! };
@@ -568,6 +571,7 @@ async function residualAgentRows(run: (real: FastifyInstance, rows: Map<string, 
   try { await run(real, rows, creates); }
   finally {
     await real.close(); session.readExistingScenario.mockImplementation(read); session.ensureScenarioExists.mockImplementation(ensure);
+    session.getScenarioOwner.mockImplementation(readOwner);
     store.append = append; store.readCommittedTurn = readTurn;
   }
 }

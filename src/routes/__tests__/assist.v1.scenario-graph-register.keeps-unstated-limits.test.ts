@@ -1,3 +1,4 @@
+import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
  * An ABSENT `goal_constraints` on a register is "no statement": the stored limits
  * are kept. An explicit list (`[]` included) is the caller's statement. (#70 5852105101)
@@ -36,7 +37,7 @@ const readMostRecentPendingActions = vi.fn();
 const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn, readMostRecentPendingActions };
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => store,
+  getSessionStore: () => withScenarioRevision(store),
 }));
 
 const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));

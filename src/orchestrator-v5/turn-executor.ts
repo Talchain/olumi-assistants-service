@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from './goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 TurnExecutor (Phase 1 — tool-use routing spine).
@@ -97,6 +98,7 @@ import {
   type SelectionHonesty,
 } from './build-turn-context.js';
 import { TurnFenceRejectedError } from './session/turn-fence.js';
+import { ModelWriteOwnershipRefused } from './ownership/door-ownership.js';
 import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
 import { readRevisionConflictDetails } from './graph-revision-conflict.js';
 import { useAppendV6 } from './append-v6-flag.js';
@@ -1362,6 +1364,7 @@ export async function runTurnExecutor(
   // Pinned RED-first by tests/integration/turn-fence-hoisted-conflict-
   // mapping.test.ts (pre-hoist: `expected 500 to be 409` on a non-A2 path).
   let lastCommitConflictError: TurnFenceRejectedError | GraphStaleWriteError | null = null;
+  let lastCommitOwnershipError: ModelWriteOwnershipRefused | null = null;
   // True only after a commit persisted the zero-resolved projection. The
   // finaliser then preserves any legitimate commit-layer adjustment (for
   // example a held-change lapse notice) instead of re-projecting different
@@ -1789,6 +1792,7 @@ export async function runTurnExecutor(
     // conflict thrown by THIS append before rethrowing to the call site's
     // own catch ladder.
     lastCommitConflictError = null;
+    lastCommitOwnershipError = null;
     zeroResolvedSelectionGuardAppliedAtCommit = false;
     zeroResolvedSelectionMutationReceiptPersistedAtCommit = false;
     const projectionStateBeforeCommit = {
@@ -1900,6 +1904,7 @@ export async function runTurnExecutor(
       ) {
         lastCommitConflictError = error;
       }
+      if (error instanceof ModelWriteOwnershipRefused) lastCommitOwnershipError = error;
       throw error;
     }
     pendingLifecycleForRun = result.pendingLifecycle;
@@ -2587,7 +2592,10 @@ export async function runTurnExecutor(
   let graphLookupStatsForLog: GraphLookupStats | undefined;
   let graphLookupBuildReason: 'test_override' | 'no_graph' | 'ok' | 'all_dropped' =
     'no_graph';
-  let graphStateForTurn: GraphStateIngress | null = options.graphState ?? null;
+  let graphStateForTurn: GraphStateIngress | null = options.graphState == null ? null : structuredClone(options.graphState);
+  const storedBasisReadAvailable = context.persistedGraphRead?.status === 'ok_present' || context.persistedGraphRead?.status === 'ok_absent';
+  prepareHorizonBasisForWrite(graphStateForTurn,
+    storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
   // V5 finaliser contract: hoisted to outer scope so `finalizeRun` can
   // surface it on `TurnExecutorRunResult.analysisReady` for the response
   // finaliser. Declared here, populated below at the existing
@@ -2842,7 +2850,7 @@ export async function runTurnExecutor(
     // request graph as provisional; degraded/malformed/missing reads fail weak.
     const contextGraphSelection = selectContextGraphSnapshot({
       canonicalRead: context.persistedGraphRead,
-      requestGraph: options.graphState,
+      requestGraph: graphStateForTurn,
     });
     const contextGraphForReasoning = contextGraphSelection.graph;
     // Persisted analysis is licensed only beside a valid persisted canonical
@@ -3071,6 +3079,7 @@ export async function runTurnExecutor(
     const hotWindowFallback = buildAnalysisFromPriorFacts(
       context.prior_facts,
       optionLabelSource,
+      contextGraphForReasoning,
     );
     if (hotWindowFallback) {
       analysisSummary = hotWindowFallback;
@@ -3085,6 +3094,7 @@ export async function runTurnExecutor(
     const durableFallback = buildAnalysisFromPriorFacts(
       scenarioAnalysisFacts,
       optionLabelSource,
+      contextGraphForReasoning,
     );
     if (durableFallback) {
       promptAnalysisSummary = durableFallback;
@@ -13233,6 +13243,8 @@ export async function runTurnExecutor(
             ? { goal_constraints: mutated.goal_constraints }
             : {}),
         };
+        prepareHorizonBasisForWrite(mutated, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
+        prepareHorizonBasisForWrite(merged, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
         currentGraphForPostHandlerFreshness = merged;
         // M5 readiness authority: on a mutation the freshness hash reflects the
         // post-mutation graph, so canonical readiness must too. Use the handler's
@@ -14665,6 +14677,10 @@ export async function runTurnExecutor(
           // rows D / F on a DEGRADED read — reuse the strict reread already
           // performed above (single round trip, no TOCTOU vs `hasServerModel`).
           persistedBase = degradedRereadGraph;
+        } else if (useAppendV6()) {
+          // Merge onto the exact snapshot whose revision commitTurn submits.
+          // A later graph read paired with canonicalRevision would mix identities.
+          persistedBase = resolvedCanonicalGraphForCommit!.graph;
         } else {
           // rows D / F — today's behaviour: strict-read the persisted graph. A
           // degraded/unavailable read FAILS CLOSED here (→ STATE_COMMIT_FAILED;
@@ -14868,10 +14884,10 @@ export async function runTurnExecutor(
       // `graphStateForTurn` is the request graphState when present, else
       // the persisted-graph fallback loaded by buildTurnContext — the
       // same authority every other per-turn graph consumer uses.
-      const graphForProposalHash =
-        handlerOutcome?.mutated_graph !== undefined
+      const graphForProposalHash = handlerOutcome?.mutated_graph !== undefined
           ? handlerOutcome.mutated_graph
           : graphStateForTurn;
+      prepareHorizonBasisForWrite(graphForProposalHash, storedBasisReadAvailable ? context.persistedGraph : undefined, payload.scenario_id);
       let commitStartedAt = 0;
       if (timingsEnabled) {
         commitStartedAt = Date.now();
@@ -16501,6 +16517,8 @@ export async function runTurnExecutor(
   }
 
   function finalizeRun(): TurnExecutorRunResult {
+    // Preserve a door refusal across existing commit-failure catches for HTTP/SSE mapping.
+    if (lastCommitOwnershipError) throw lastCommitOwnershipError;
     // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
     // Runs FIRST, before the egress guards below, so the remapped envelope
     // is subject to them exactly as the A2 branch's envelope is. Fires ONLY

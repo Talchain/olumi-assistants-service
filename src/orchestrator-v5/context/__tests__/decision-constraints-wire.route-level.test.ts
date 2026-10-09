@@ -74,10 +74,6 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../../adapters/l
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
 
-const { storeDraftGraphMock } = vi.hoisted(() => ({
-  storeDraftGraphMock: vi.fn(async () => undefined),
-}));
-
 const SCENARIO_ID = randomUUID();
 
 /** Constraint identities. Every assertion binds to THESE, never to a substring. */
@@ -172,7 +168,6 @@ vi.mock('../../session/index.js', () => ({
     readNewestAnalysisFactFor: async () => null,
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
-    storeDraftGraph: storeDraftGraphMock,
     loadGraph: async () => (SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH),
     loadGraphAndBriefText: async () => ({
       graph: SUPPRESS_PERSISTED_GRAPH ? null : PERSISTED_GRAPH,
@@ -312,7 +307,6 @@ beforeEach(() => {
   // Reset to the state the wire is meant to carry: both constraints recorded.
   PERSISTED_GRAPH.goal_constraints = [budgetConstraint(), headcountConstraint()];
   SUPPRESS_PERSISTED_GRAPH = false;
-  storeDraftGraphMock.mockClear();
   setTestSink(() => undefined);
 });
 afterEach(() => {
@@ -451,10 +445,6 @@ describe('route-level — constraints follow the single selected graph authority
     expect(constraintById(pack, BUDGET_ID)?.source_quote).toBe(BUDGET_QUOTE);
     expect(constraintById(pack, HEADCOUNT_ID)?.source_quote).toBe(HEADCOUNT_QUOTE);
     expect(constraintById(pack, 'c_client_only')).toBeUndefined();
-    expect(
-      storeDraftGraphMock,
-      'selecting canonical reasoning context must not turn a conflicting request graph into a write',
-    ).not.toHaveBeenCalled();
     expect(obs.responseBlocks.some((block) => block.type === 'graph_patch')).toBe(false);
   });
 

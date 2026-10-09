@@ -1,3 +1,4 @@
+import { prepareHorizonBasisForWrite } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
 import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 /**
  * POST /orchestrate/v2/turn — V5 orchestrator endpoint.
@@ -135,6 +136,7 @@ import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
 import { parseGuidedSizingPress, guidedSizingWireAction, guidedSizingOnWire, type GuidedSizing } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
+import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY } from '../orchestrator-v5/ownership/door-ownership.js';
 import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
 import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
 // ⚠ The ADAPTER and the MINTER, not the writer beneath them. The
@@ -158,7 +160,7 @@ import {
 } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { GraphStaleWriteError } from '../orchestrator-v5/build-turn-context.js';
-import { isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
+import { ModelReadFailedError, modelReadFailedWire, isRevisionConflict, readRevisionConflictDetails, withRevisionConflictWire } from '../orchestrator-v5/graph-revision-conflict.js';
 import type { GraphConflictFailureDetails } from '../orchestrator-v5/graph-conflict-recovery-keys.js';
 import { useAppendV6 } from '../orchestrator-v5/append-v6-flag.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
@@ -2905,12 +2907,14 @@ export type V5RouteReply = {
   200: FinalisedV5Response;
   400: BoundaryError;
   401: BoundaryError;
+  403: { error: ModelWriteOwnershipRefused['code']; message: string };
   // F4 — a graph CAS write conflict (GRAPH_DIVERGED) returns 409, not the
   // uniform 500, so the UI can branch to refresh-and-reconfirm rather than a
   // generic infra-failure retry.
   409: BoundaryError;
   422: BoundaryError;
   500: BoundaryError;
+  503: ReturnType<typeof modelReadFailedWire>;
 };
 
 /**
@@ -3060,6 +3064,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ingress.kind === 'message' ? ingress : null,
       requestId,
     );
+    // Only a submitted basis needs this lazy context read before request hashes.
+    if (ingress.kind === 'message' && extensions.graphState?.nodes.some(
+      node => Object.prototype.hasOwnProperty.call(node, 'horizon_basis'),
+    )) {
+      const basisContext = await claimSafety.turnContext();
+      const storedBasisReadAvailable = basisContext?.persistedGraphRead?.status === 'ok_present'
+        || basisContext?.persistedGraphRead?.status === 'ok_absent';
+      extensions.graphState = structuredClone(extensions.graphState);
+      prepareHorizonBasisForWrite(extensions.graphState,
+        storedBasisReadAvailable ? basisContext?.persistedGraph : undefined, ingress.scenario_id);
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════
     // ⭐ REPLACEMENT CONVERSATION CONTROLLER — ONE CONTROLLER PER TURN
@@ -4607,7 +4623,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             value: await loadPersistedScenarioStateStrict(ingress.scenario_id),
           };
         } catch (err) {
-          persistedScenarioStateMemo = { ok: false, error: err };
+          persistedScenarioStateMemo = { ok: false, error: new ModelReadFailedError(err) };
         }
       }
       if (!persistedScenarioStateMemo.ok) throw persistedScenarioStateMemo.error;
@@ -7640,7 +7656,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
     let resolvedGraphState: GraphStateIngress | null = recordedEffectGraph;
     if (editIntentDetected) {
-      if (extensions.graphState != null) {
+      if (!useAppendV6() && extensions.graphState != null) {
         emit(TelemetryEvents.V5EditGraphGraphStatePresent, {
           request_id: requestId,
           scenario_id: ingress.scenario_id,
@@ -7674,6 +7690,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph graphState reload failed — returning typed recovery',
           );
+          if (useAppendV6()) {
+            return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
+          }
           return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
         if (persisted == null) {
@@ -7730,7 +7749,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           //
           // The counter moves with the behaviour rather than disappearing: a
           // class that stops erroring must not also stop being measurable.
-          if (ingress.stage !== 'frame') {
+          if (ingress.stage !== 'frame' && !(useAppendV6() && extensions.graphState != null)) {
             return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
           }
           emit(TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough, {
@@ -7762,6 +7781,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               },
               'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
             );
+            if (useAppendV6()) {
+              return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
+            }
             return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
           }
           resolvedGraphState = parsed.data;
@@ -8295,7 +8317,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           graphState: effectiveGraphState!,
           // ON only: graph and revision come from the same server snapshot.
           // OFF passes exactly staging's dispatcher arguments.
-          ...(useAppendV6() && resolvedGraphState !== null
+          ...(useAppendV6()
             ? { persistedEditBase: await loadPersistedScenarioStateOnce() }
             : {}),
           analysisState: extensions.analysisState ?? null,
@@ -8416,6 +8438,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
         }
       } catch (err) {
+        if (err instanceof ModelReadFailedError) {
+          return reply.code(503).send(modelReadFailedWire(requestId, ingress.stage));
+        }
         if (isRevisionConflict(err)) {
           const recovery = { conflict_category: err.conflict_category, ...readRevisionConflictDetails(err) };
           return reply.code(409).send(withRevisionConflictWire(buildCommitFailureBoundaryError({
@@ -8758,23 +8783,29 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
     }
 
-    // TurnExecutor returns a well-formed OlumiResponse envelope on every
-    // path (success, typed error block, or commit failure). The HTTP
-    // status on the wire is decided here by the route, NOT by the
-    // TurnExecutor — see the status/body matrix in the file header. The
-    // executor never throws past this boundary.
-    const run = await runTurnExecutor(ingress, requestId, {
-      graphState: extensions.graphState,
-      analysisState: extensions.analysisState,
-      selectedElements: extensions.selectedElements,
-      ...(chipClickResumeIntent
-        ? { chipClickResumeIntent }
-        : {}),
-      // F2 CHANGE A — forced explanation intent for a typed analytical pill.
-      ...(chipClickForcedIntent
-        ? { chipClickForcedIntent }
-        : {}),
-    });
+    // The route decides the HTTP status for executor results and preserved
+    // ownership refusals; see the status/body matrix in the file header.
+    let run: Awaited<ReturnType<typeof runTurnExecutor>>;
+    try {
+      run = await runTurnExecutor(ingress, requestId, {
+        graphState: extensions.graphState,
+        analysisState: extensions.analysisState,
+        selectedElements: extensions.selectedElements,
+        ...(chipClickResumeIntent
+          ? { chipClickResumeIntent }
+          : {}),
+        // F2 CHANGE A — forced explanation intent for a typed analytical pill.
+        ...(chipClickForcedIntent
+          ? { chipClickForcedIntent }
+          : {}),
+      });
+    } catch (error) {
+      if (error instanceof ModelWriteOwnershipRefused) {
+        await markDraftGraphWriteFailed(ingress.scenario_id, ingress.turn_id, error.code, requestId, 'turn_dead_only');
+        return reply.code(403).send(MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[error.reason]);
+      }
+      throw error;
+    }
 
     // Group 3 Task B — fail-closed invariant: `commit_performed: false` must
     // NEVER appear inside an HTTP 200. When the TurnExecutor did not persist

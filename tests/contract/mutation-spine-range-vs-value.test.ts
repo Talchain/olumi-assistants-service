@@ -4,8 +4,8 @@ import { OrchestratorTurnPayloadSchema, type SystemEventTurnPayload } from '@tal
 import { HandlerFactSchema, type RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { _resetConfigCache } from '../../src/config/index.js';
 import { GraphV3 } from '../../src/schemas/cee-v3.js';
-import { dispatchSystemEvent, SYSTEM_EVENT_HANDLING } from '../../src/orchestrator-v5/system-events/dispatch.js';
-import { commitDirectAnswer, computeRequestHash } from '../../src/orchestrator-v5/commit.js';
+import { dispatchSystemEvent as dispatchWithoutCaller, SYSTEM_EVENT_HANDLING } from '../../src/orchestrator-v5/system-events/dispatch.js';
+import { commitDirectAnswer as commitWithoutCaller, computeRequestHash } from '../../src/orchestrator-v5/commit.js';
 import { computeAnalysisAffectingGraphHash } from '../../src/orchestrator-v5/context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from '../../src/orchestrator-v5/context/graph-cas-conflict.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../src/orchestrator/tools/analysis-ready-helper.js';
@@ -31,6 +31,23 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async original => ({
     return port.store;
   },
 }));
+
+import Fastify from 'fastify';
+import { installOwnershipHarness, verifyFixtureIdentity } from '../utils/ownership-route-harness.js';
+import { ceeOrchestratorRouteV2 } from '../../src/orchestrator/route-v2.js';
+vi.mock('../../src/utils/supabase-user-jwt.js', async load => ({
+  ...await load<typeof import('../../src/utils/supabase-user-jwt.js')>(),
+  verifySupabaseUserJwt: (token: string) => verifyFixtureIdentity(token),
+}));
+
+import { bindWriteCaller } from '../../src/orchestrator-v5/ownership/door-ownership.js';
+
+const OWNER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+// Direct dispatch/Run calls represent this verified owner, including guest scenarios.
+const dispatchSystemEvent = (...args: Parameters<typeof dispatchWithoutCaller>) =>
+  bindWriteCaller({ userId: OWNER, verified: true }, () => dispatchWithoutCaller(...args));
+const commitDirectAnswer = (...args: Parameters<typeof commitWithoutCaller>) =>
+  bindWriteCaller({ userId: OWNER, verified: true }, () => commitWithoutCaller(...args));
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const TURN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -471,4 +488,22 @@ describe('prior range hostile identities and field locality', () => {
     expect(result.commitPerformed).toBe(false); expect(p.attempts).toEqual([]);
     expect(p.durableGraph()).toEqual(graphFixture());
   });
+});
+
+// af m5: the production route/hook/dispatcher/floor, over the same serialized store harness.
+it('real TURN route: verified owner edit commits exactly once through the bound door', async () => {
+  const p = persistence(graphFixture(), true);
+  port.store!.readExistingScenario = async () => ({ userId: OWNER, graph: p.durableGraph(), briefText: null, analysisInvalidatedAt: null });
+  const append = vi.spyOn(port.store!, 'append');
+  const app = Fastify();
+  try {
+    await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
+    await ceeOrchestratorRouteV2(app);
+    const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payload(EDITS[0].event) });
+    expect(response.statusCode, response.payload).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(append.mock.calls[0]![0].scenario_id).toBe(SCENARIO);
+    expect(p.durableRows()).toHaveLength(1);
+    EDITS[0].assertEdit(p.durableGraph());
+  } finally { await app.close(); }
 });

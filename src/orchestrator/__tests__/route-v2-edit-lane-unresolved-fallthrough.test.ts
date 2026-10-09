@@ -135,7 +135,6 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
       entries_invalidated: [],
     }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-    storeDraftGraph: async () => undefined,
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
     readMostRecentPendingActions: async () => [],

@@ -31,7 +31,9 @@ type Row = { id: string; turn_id: string; request_hash: string; assistant_messag
 const rows = new Map<string, Row>();
 let readFails = false;
 let answerAppendFails = false;
+let ownershipChangesAfterClaim = false;
 const store = {
+  getScenarioOwner: vi.fn(async () => ownershipChangesAfterClaim && rows.has(`${T1}:claim`) ? 'u-owner' : null),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => {
     if (readFails) throw new Error('read failed');
@@ -96,10 +98,13 @@ async function freshApp(): Promise<FastifyInstance> {
   process.env.AGENT_LANE_PREVIEW = 'false';
   const mod = await import('../../../routes/agent-v1-turn.js');
   const { agentV1TurnRoute } = mod;
+  const { bindWriteCaller } = await import('../../ownership/door-ownership.js');
   // A request that loses the claim waits for the winner's answer — short here.
   mod.AGENT_TURN_CLAIM_WAIT.totalMs = 2_000;
   mod.AGENT_TURN_CLAIM_WAIT.everyMs = 20;
   const app = Fastify({ logger: false });
+  // Match production's request-scoped door accounting, including the claim append.
+  app.addHook('preHandler', (_req, _reply, done) => bindWriteCaller({ userId: null, verified: false }, done));
   app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [], edges: [] }, graph_hash: 'h1' }));
   const revisionRefusal = (path: string) => async (_req: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => {
     internalCalls.push(path);
@@ -116,7 +121,7 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
     __setUseAppendV6ForTest(false);
-    rows.clear(); readFails = false; answerAppendFails = false; provider.calls = 0; provider.userTurnsSeen = [];
+    rows.clear(); readFails = false; answerAppendFails = false; ownershipChangesAfterClaim = false; provider.calls = 0; provider.userTurnsSeen = [];
     refusedDoorSequence = undefined; internalCalls.length = 0; store.releaseTurnClaim.mockClear();
     store.append.mockClear(); store.readCommittedTurn.mockClear();
     vi.stubGlobal('fetch', fakeFetch);
@@ -131,6 +136,17 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
     await dispatch(`/assist/v1/scenarios/${SID}/graph/register`, { turn_id: T2 });
     throw new Error('revision refusal must escape the dispatch');
   };
+
+  it('ownership refusal on an unwritten final answer releases its conversation claim', async () => {
+    ownershipChangesAfterClaim = true;
+    const response = await approve();
+    expect(response.statusCode, response.payload).toBe(403);
+    expect(response.payload).toBe('{"error":"model_write_ownership_refused"}');
+    expect(response.payload).not.toContain('Nothing was saved');
+    expect(store.append).toHaveBeenCalledTimes(1); // Only the earlier claim, never the refused answer.
+    expect(store.releaseTurnClaim).toHaveBeenCalledExactlyOnceWith(SID, `${T1}:claim`, expect.any(String));
+    expect(rows.size).toBe(0);
+  });
 
   it('Addendum 6 (a): a lone register revision refusal releases the claim and is retry_safe', async () => {
     refusedDoorSequence = register;

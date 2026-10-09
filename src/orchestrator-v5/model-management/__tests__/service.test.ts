@@ -19,15 +19,13 @@ import {
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { ModelManagementService } from '../service.js';
 import {
-  ModelVersionCasConflictError,
-  ModelVersionNotFoundError,
   ModelVersionSignInRequiredError,
   type ModelVersionStorePort,
   type SaveVersionWrite,
 } from '../store-adapter.js';
 import {
-  CAS_CONFLICT_KIND,
   SIGN_IN_REQUIRED_MESSAGE,
+  VersionRevisionConflictError,
   type ModelVersionEvent,
   type ModelVersionRecord,
   type VersionEventSink,
@@ -104,7 +102,6 @@ function makeStore(overrides: Partial<ModelVersionStorePort> = {}): ModelVersion
     saveVersion: vi.fn().mockResolvedValue(outcome()),
     listVersions: vi.fn().mockResolvedValue([]),
     getVersion: vi.fn().mockResolvedValue(record()),
-    restoreVersion: vi.fn().mockResolvedValue(outcome()),
     getCurrentVersionId: vi.fn().mockResolvedValue(null),
     ...overrides,
   };
@@ -131,6 +128,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     const service = makeService(store);
 
     const result = await service.saveVersion({
+      expected_revision: 7,
       scenario_id: SCENARIO,
       graph: GRAPH,
       label: 'v-label',
@@ -145,6 +143,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     // The hash must be EXACTLY what the sanctioned Group A module computes.
     const expected = computeGraphIdentityHash(GRAPH as unknown as GraphStateIngress);
     expect(expected).not.toBeNull();
+    expect(write.expected_revision).toBe(7);
     expect(write.graph_identity_hash).toBe(expected!.value);
     expect(write.graph_identity_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(write.hash_algorithm).toBe('sha256');
@@ -161,7 +160,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     const service = makeService(store);
 
     for (const graph of [null, undefined, {}, { nodes: [], edges: [] }]) {
-      const result = await service.saveVersion({ scenario_id: SCENARIO, graph });
+      const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph });
       expect(result).toEqual({
         status: 'error',
         error: {
@@ -179,6 +178,7 @@ describe('saveVersion — CEE-side identity envelope (Group A reuse, no re-imple
     const service = makeService(store);
     const expectedHash = 'd'.repeat(64);
     await service.saveVersion({
+      expected_revision: 7,
       scenario_id: SCENARIO,
       graph: GRAPH,
       expected_graph_identity_hash: expectedHash,
@@ -195,7 +195,7 @@ describe('typed error mapping (service never throws)', () => {
       saveVersion: vi.fn().mockRejectedValue(new ModelVersionSignInRequiredError('MV001')),
     });
     const service = makeService(store);
-    const result = await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
     expect(result).toEqual({
       status: 'error',
       error: {
@@ -205,27 +205,6 @@ describe('typed error mapping (service never throws)', () => {
       },
     });
     expect(SIGN_IN_REQUIRED_MESSAGE).toBe('Version history requires sign-in.');
-  });
-
-  it('stale CAS → typed conflict named with the A3 vocabulary term', async () => {
-    const expectedHash = 'e'.repeat(64);
-    const store = makeStore({
-      restoreVersion: vi
-        .fn()
-        .mockRejectedValue(new ModelVersionCasConflictError('MV409', expectedHash)),
-    });
-    const service = makeService(store);
-    const result = await service.restoreVersion({
-      scenario_id: SCENARIO,
-      version_id: TARGET_ID,
-      expected_graph_identity_hash: expectedHash,
-    });
-    expect(result.status).toBe('conflict');
-    if (result.status === 'conflict') {
-      expect(result.conflict.kind).toBe('analysis_affecting_conflict');
-      expect(result.conflict.kind).toBe(CAS_CONFLICT_KIND);
-      expect(result.conflict.expected_graph_identity_hash).toBe(expectedHash);
-    }
   });
 
   it('unknown store failures → fail-closed store_error, never a throw', async () => {
@@ -249,39 +228,6 @@ describe('typed error mapping (service never throws)', () => {
     if (result.status === 'error') expect(result.error.code).toBe('version_not_found');
   });
 
-  it('store MV404 on restore → typed version_not_found', async () => {
-    const store = makeStore({
-      restoreVersion: vi.fn().mockRejectedValue(new ModelVersionNotFoundError('MV404')),
-    });
-    const service = makeService(store);
-    const result = await service.restoreVersion({ scenario_id: SCENARIO, version_id: TARGET_ID });
-    expect(result.status).toBe('error');
-    if (result.status === 'error') expect(result.error.code).toBe('version_not_found');
-  });
-});
-
-describe('restore semantics — restore creates a NEW version, never rewrites', () => {
-  it('surfaces the new version id + lineage from the store outcome', async () => {
-    const store = makeStore({
-      restoreVersion: vi.fn().mockResolvedValue(
-        outcome({
-          version_id: NEW_ID,
-          version_number: 5,
-          restored_from_version_id: TARGET_ID,
-          event_id: `model_version_restored_${NEW_ID}`,
-        }),
-      ),
-    });
-    const service = makeService(store);
-    const result = await service.restoreVersion({ scenario_id: SCENARIO, version_id: TARGET_ID });
-    expect(result.status).toBe('ok');
-    if (result.status === 'ok') {
-      expect(result.value.version_id).toBe(NEW_ID);
-      expect(result.value.version_id).not.toBe(TARGET_ID);
-      expect(result.value.version_number).toBe(5);
-      expect(result.value.restored_from_version_id).toBe(TARGET_ID);
-    }
-  });
 });
 
 describe('version event sink (contract §7.3 seam)', () => {
@@ -290,7 +236,7 @@ describe('version event sink (contract §7.3 seam)', () => {
     const store = makeStore();
     const service = makeService(store, sink);
 
-    await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
 
     expect(sink.emit).toHaveBeenCalledTimes(1);
     const event = sink.emit.mock.calls[0]![0] as ModelVersionEvent;
@@ -302,30 +248,13 @@ describe('version event sink (contract §7.3 seam)', () => {
     expect(event.version_number).toBe(4);
   });
 
-  it('emits model_version_restored with lineage on restore', async () => {
-    const sink = { emit: vi.fn().mockResolvedValue(undefined) };
-    const store = makeStore({
-      restoreVersion: vi.fn().mockResolvedValue(
-        outcome({
-          restored_from_version_id: TARGET_ID,
-          event_id: `model_version_restored_${NEW_ID}`,
-        }),
-      ),
-    });
-    const service = makeService(store, sink);
-    await service.restoreVersion({ scenario_id: SCENARIO, version_id: TARGET_ID });
-    const event = sink.emit.mock.calls[0]![0] as ModelVersionEvent;
-    expect(event.event_type).toBe('model_version_restored');
-    expect(event.restored_from_version_id).toBe(TARGET_ID);
-  });
-
   it('deduped writes emit NO event (history records changes, not confirmations)', async () => {
     const sink = { emit: vi.fn().mockResolvedValue(undefined) };
     const store = makeStore({
       saveVersion: vi.fn().mockResolvedValue(outcome({ deduped: true, event_id: null })),
     });
     const service = makeService(store, sink);
-    const result = await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
     expect(result.status).toBe('ok');
     expect(sink.emit).not.toHaveBeenCalled();
   });
@@ -334,7 +263,7 @@ describe('version event sink (contract §7.3 seam)', () => {
     const sink = { emit: vi.fn().mockRejectedValue(new Error('sink down')) };
     const store = makeStore();
     const service = makeService(store, sink);
-    const result = await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH });
+    const result = await service.saveVersion({ expected_revision: 7, scenario_id: SCENARIO, graph: GRAPH });
     expect(result.status).toBe('ok');
     expect(sink.emit).toHaveBeenCalledTimes(1);
   });
@@ -501,6 +430,27 @@ describe('getCurrentVersionPointer — the id-only head read (versions wiring sl
     expect(result.status).toBe('error');
     if (result.status === 'error') {
       expect(result.error.code).toBe('store_error');
+    }
+  });
+});
+
+
+describe('module-local version revision conflicts', () => {
+  it.each(['save', 'restore'] as const)('%s returns the typed measured conflict without emitting a successful-write event', async operation => {
+    for (const current of [8, null]) {
+      const cause = { code: 'OLRV1', details: 'retained by the adapter' };
+      const error = new VersionRevisionConflictError('stale version revision', { expected: 7, current }, { cause });
+      const store = makeStore({ saveVersion: vi.fn().mockRejectedValue(error), restoreVersionAtomic: vi.fn().mockRejectedValue(error) });
+      const emit = vi.fn();
+      const service = makeService(store, { emit });
+      const result = operation === 'save' ? await service.saveVersion({ scenario_id: SCENARIO, graph: GRAPH, expected_revision: 7 })
+        : await service.restoreVersionAtomic({ scenario_id: SCENARIO, version_id: TARGET_ID, mutation_id: 'restore-mutation', graph: GRAPH,
+          current_graph: GRAPH, expected_revision: 7, source_graph_identity_hash: computeGraphIdentityHash(GRAPH)!.value, expected_graph_identity_hash: computeGraphIdentityHash(GRAPH)!.value });
+      expect(result).toEqual({ status: 'conflict', conflict: { kind: 'revision_conflict', expected_graph_identity_hash: null,
+        message: 'The scenario changed while I was saving, so nothing was saved. Try again.', expected: 7,
+        ...(current !== null ? { current } : {}) } });
+      expect(emit).not.toHaveBeenCalled();
+      expect(error.cause).toBe(cause);
     }
   });
 });

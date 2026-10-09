@@ -1,0 +1,7 @@
+-- Deploy the legacy-RPC adapter before dropping the additive CAS RPCs.
+BEGIN;
+SET LOCAL lock_timeout = '3s';
+DROP FUNCTION public.create_model_version_cas_v1(uuid, jsonb, text, text, text, text, text, text, text, text, text, boolean, uuid, text, bigint);
+DROP FUNCTION public.restore_model_version_atomic_cas_v1(uuid, uuid, uuid, jsonb, text, text, text, text, text, text, text, jsonb, text, text, text, text, text, text, text, bigint);
+NOTIFY pgrst, 'reload schema';
+COMMIT;

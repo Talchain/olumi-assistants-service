@@ -76,7 +76,6 @@ vi.mock('../session/index.js', () => ({
     }),
     loadGraph: async () => graphHolder.persisted,
     loadGraphAndBriefText: async () => ({ graph: graphHolder.persisted, briefText: null }),
-    storeDraftGraph: async () => undefined,
     ensureScenarioExists: async () => ({ user_id: null }),
     readMostRecentPendingActions: async () => [],
   }),

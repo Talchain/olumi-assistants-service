@@ -2,7 +2,7 @@
 import { REPAIR_CODES } from '@talchain/schemas';
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
-import { goalDeadlineOf, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
+import { goalDeadlineFromRecord, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { readStatedDeadline, sayDate, timeBetween } from './deadline-date.js';
 import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
 import { denormalisedMagnitude, findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
@@ -223,7 +223,7 @@ export function draftedTeamPartOf(graph: unknown): { goal: Rec; team: Rec; deliv
 
 export function teamTimeAsk(graph: unknown): string | null {
   const part = draftedTeamPartOf(graph);
-  if (part === null || goalDeadlineOf(part.goal) === undefined || part.team.observed_state?.value !== undefined) return null;
+  if (part === null || goalDeadlineFromRecord(graph, part.goal.id) === undefined || part.team.observed_state?.value !== undefined) return null;
   return Number.isFinite(eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.most_likely)
     ? 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?'
     : `How long would ${part.deliverable} take with the team you have now?`;
@@ -339,7 +339,7 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
   const out = structuredClone(graph) as Rec;
   const goal = out.nodes.find((n: Rec) => n.id === part.goal.id), team = out.nodes.find((n: Rec) => n.id === part.team.id);
   const unit = goal.goal_threshold_unit;
-  const previous = goalDeadlineOf(goal);
+  const previous = goalDeadlineFromRecord(out, part.goal.id);
   const defaultGoal = `Share of ${part.deliverable} done by ${previous === undefined ? 'the deadline' : sayDate(previous)}`;
   const defaultTeam = `Share today's team finishes by ${previous === undefined ? 'the deadline' : sayDate(previous)}`;
   goal.goal_horizon = { deadline };

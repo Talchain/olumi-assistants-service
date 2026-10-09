@@ -23,7 +23,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { goalDeadlineOf } from './goal-kind.js';
+import { goalDeadlineFromRecord } from './goal-kind.js';
 import { sayDate } from './deadline-date.js';
 
 type Rec = Record<string, unknown>;
@@ -66,7 +66,7 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
   if (matches[0]!.kind !== 'goal') return { kind: 'refused', reason: 'not_a_goal' };
   // ⭐ IDEMPOTENT (Codex buddy r1 on #2742): a retry after a write that landed finds the date already held, and that is the
   // approved outcome, never "the deadline changed". Checked BEFORE the stale gate, which the first write itself moved.
-  const held = goalDeadlineOf(matches[0]) ?? null;
+  const held = goalDeadlineFromRecord(persistedGraph, approved.goal_id) ?? null;
   if (held === approved.deadline) return { kind: 'unchanged' };
   if (held !== approved.expected_deadline) return { kind: 'refused', reason: 'deadline_changed' };
 
@@ -109,7 +109,7 @@ export function goalHorizonPostimageIsScoped(before: unknown, after: unknown, go
   if (part !== null && part.goal.id === goalId && goal !== undefined) {
     const reference = (after.nodes as Rec[]).find(n => n.observed_state && isRec(n.observed_state)
       && isRec(n.observed_state.extra_share_by_date))?.observed_state as Rec | undefined;
-    const date = goalDeadlineOf(goal), ref = expectedReference ?? (reference?.extra_share_by_date as Rec | undefined)?.reference_date;
+    const date = goalDeadlineFromRecord(after, goalId), ref = expectedReference ?? (reference?.extra_share_by_date as Rec | undefined)?.reference_date;
     return typeof date === 'string' && typeof ref === 'string'
       && isDeepStrictEqual(withEventShareDate(before, date, ref), after);
   }

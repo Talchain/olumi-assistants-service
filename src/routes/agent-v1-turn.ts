@@ -1,3 +1,4 @@
+import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
@@ -52,9 +53,10 @@ import { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runt
 export { CONSTRUCTION_TAIL_RESERVE_MS } from '../orchestrator-v5/agent-lane/runtime/construction-deadline.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
-import { isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
+import { ModelReadFailedError, isRevisionConflict, promoteRevisionConflictResponse } from '../orchestrator-v5/graph-revision-conflict.js';
 import { toErrorV1 } from '../utils/errors.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
+import { ModelWriteOwnershipRefused, MODEL_WRITE_OWNERSHIP_REFUSAL_BODY, readSuccessfulDoorEntries, readUnsavableEffects, recordUnsavableEffect, recordReleasedTurnClaim } from '../orchestrator-v5/ownership/door-ownership.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
@@ -503,7 +505,13 @@ function executableWaitingProposalIds(scenarioId: string, userId: string | null,
   if (graphHash === undefined) return [];
   return proposals.outstanding(scenarioId, userId).map((p) => p.proposal_id).filter((id) => proposals.authorise({
     proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash,
+    ...(proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') ? { typed_approval_of: id } : {}),
   }).status === 'execute' && identityProposalOfferable(proposals.get(id), graph));
+}
+
+/** The steady-state card is a Run-reply answer, not a held change: it never counts as an approval awaiting a yes. */
+function isSteadyCardProposal(id: string | undefined): boolean {
+  return id !== undefined && proposals.get(id)?.operations.some(op => op.op === 'attest_goal_steady') === true;
 }
 
 /** The offered actions with each id once, the FIRST kept, in order (R3 5910885689: the same card offered twice). */
@@ -615,8 +623,8 @@ export { withholdDisclosureForCells as withholdDisclosureFor } from '../orchestr
 /** Normalize only the exact horizon producer identities; the cells select their single replacement form. */
 function withCellHorizon(text: string, graph: unknown, cells: readonly CanonicalAnalysisCell[]): string {
   const line = untestedHorizonLineForCells(graph, cells);
-  const variants = [untestedHorizonLine(graph), untestedHorizonLine(graph, { besideChance: true }),
-    untestedHorizonLine(graph, { besideChance: true, plural: true }), untestedHorizonLineForCells(graph, [])];
+  const variants = [untestedHorizonLine(graph, { normalizationOnly: true }), untestedHorizonLine(graph, { besideChance: true, normalizationOnly: true }),
+    untestedHorizonLine(graph, { besideChance: true, plural: true, normalizationOnly: true }), untestedHorizonLineForCells(graph, [], true)];
   for (const variant of new Set(variants)) if (variant !== null && variant !== line) text = text.replaceAll(variant, line ?? '');
   // Narration and the host can each carry a different exact producer form. Once the cells unify them, keep ONE copy
   // in its first place; only this typed horizon identity is deduplicated, never arbitrary repeated reasoning.
@@ -1460,7 +1468,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
         analysisReady = (after.json.current_read as { analysis_ready?: unknown }).analysis_ready;
       }
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
-      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
+      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) {
+        // /graph has already gated this stored Run against the graph from the same read.
+        analysisResult = after.json.analysis_result;
+      }
       // The selected run's own constraint verdict state, bound to the SAME fact as
       // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.
       // Narrowed through the contract's own enum: a string that is not a state is not carried.
@@ -2101,6 +2112,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...histories.get(sessionId),
           { role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${narration}` }] },
         ]);
+        recordUnsavableEffect();
       }
       return reply.code(forwarded.status).send({
         ...forwardedBody,
@@ -2334,7 +2346,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
-          const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph) !== undefined, builtOrRan: true,
+          const waitingId = executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph);
+          const atRest = { awaitingApproval: waitingId !== undefined && !isSteadyCardProposal(waitingId), builtOrRan: true,
             chanceCells: replayChanceCells };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           let say = goalChanceLineOwed([{ ok: true, ran: true,
@@ -2468,6 +2481,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady,
         analysisResult: state.analysisResult, optionParticipation: state.optionParticipation, identityEvaluated: state.identityEvaluated }).olumiEstimates;
       const replayControlQuestions = replayActions
+        .filter(action => {
+          const id = typedApprovalOf({ chip: { id: action.id } });
+          return !isSteadyCardProposal(id);
+        })
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
       const replayHorizon = replayObligations === undefined || !replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')
         ? null : untestedHorizonLineForCells(state.graph, replayChanceCells);
@@ -2486,7 +2503,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       // Ordinary replay is the durable answer, including its canonical presentation grammar. No cache is needed.
       // Current/stale result-first replays above retain their state-bound recomposition rather than an old shape.
-      const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText) : null;
+      const durableShape = replayText === prior.assistant_message ? shapeFromDerivedAnswerText(replayText,
+        replayChanceCells.find((cell): cell is Extract<OptionChanceCell, { kind: 'withheld' }> => cell.kind === 'withheld'
+          && cell.reasons.some(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED'))?.face) : null;
       const replayComposed = parityReplayComposed ?? (durableShape === null ? null : { text: replayText, shape: durableShape }) ?? (composedCandidate !== null && composedCandidate.shape !== null
         && replayChanceCells.some(cell => cell.kind === 'withheld')
         ? composedCandidate : null);
@@ -2572,6 +2591,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     // Set only when THIS request owns the turn — used to release it if nothing ran.
     let claimHash: string | undefined;
+    let claimAppendSucceeded = false;
+    let claimReleaseRecorded = false;
     if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
       const readAnswer = (): Promise<CommittedTurnRecord | null> => store.readCommittedTurn!(scenarioId, turnId);
       let prior: CommittedTurnRecord | null;
@@ -2612,8 +2633,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             handler_facts: [],
           },
         });
+        claimAppendSucceeded = true;
         owner = await store.readCommittedTurn(scenarioId, claimTurnId);
       } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) {
+          if (readSuccessfulDoorEntries() > 0 || readUnsavableEffects() > 0) return reply.code(403).send({ error: err.code });
+          const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
+          return reply.code(403).send({ error: refusalBody.error, message: refusalBody.message });
+        }
         log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
       }
@@ -2679,7 +2706,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     const releaseUnwrittenTurnClaim = async (): Promise<boolean> => {
       if (turnId === undefined || claimHash === undefined || writesDispatched !== 0 || typeof store.releaseTurnClaim !== 'function') return false;
-      try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); return true; }
+      try {
+        await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash);
+        if (claimAppendSucceeded && !claimReleaseRecorded) {
+          recordReleasedTurnClaim();
+          claimReleaseRecorded = true;
+        }
+        return true;
+      }
       catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: claim release failed'); return false; }
     };
     /**
@@ -2839,7 +2873,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const durableSeedRows = await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ);
         recentRowsForEgress = durableSeedRows;
         const durable = historyFromDurableTurns(durableSeedRows);
-        if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+        if (durable.length > 0) {
+          // Seeding reuses already-saved rows and held history; it is not an effect of this turn.
+          histories.set(sessionId, [...durable, ...held]);
+        }
         earlierWordsKnown = true;
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
@@ -2879,6 +2916,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
     const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
+    // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
+    if (typedNow !== null) recordUnsavableEffect();
 
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
@@ -3060,7 +3099,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
-        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
+        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -3785,6 +3824,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // No possible writes remain: release the claim, so a retry of the SAME
       // turn_id can run. Earlier writes or unknown outcomes keep the claim.
       const released = await releaseUnwrittenTurnClaim();
+      if (err instanceof ModelReadFailedError) {
+        const refusal = { error: toErrorV1(err, req) };
+        return reply.code(503).send(refusal.error);
+      }
       if (isRevisionConflict(err)) {
         const refusal = { error: {
           ...toErrorV1(err, req),
@@ -4189,6 +4232,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // approval is waiting (that card is the next step) and never on an unchecked verdict.
     const startingAssumptions = approvals.length === 0 && carriedApproval.length === 0
       ? startingAssumptionsChips(readbackGraph, analysisReady) : [];
+    const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId,
+      runReply: resultFirstRunCompleted || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true),
+      runResult: analysisResult,
+      approvalHeld: approvals.length + carriedApproval.length + liveHolds.length + proposals.outstanding(scenarioId, userId).length > 0 });
+    if (steadyCard !== null) proposals.put(steadyCard.proposal);
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
@@ -4217,6 +4265,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
+      ...(steadyCard === null ? [] : [steadyCard.chip]),
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
@@ -4471,7 +4520,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
         ? (editsRefusedThisTurn ? { text, status: null as string | null, stripped: [] as string[] }
-          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }), text })
+          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }),
+              // A specific partial follow-up is already the narrator's authoritative status.
+              text: result.tool_results.some(r => r.mutated === true && r.applied === false
+                && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
         : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
@@ -4549,7 +4601,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
-      awaitingApproval,
+      // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
+      // Otherwise exactly the turn's rule: an offered approve chip, or the ONE executable waiting proposal.
+      awaitingApproval: offeredNow.some(a => { const id = typedApprovalOf({ chip: { id: a.id } }); return id !== undefined && !isSteadyCardProposal(id); })
+        || (() => { const id = executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph); return id !== undefined && !isSteadyCardProposal(id); })(),
       chanceCells,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
@@ -5010,7 +5065,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const estimates = actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady,
         analysisResult, optionParticipation, identityEvaluated, guidance: guidanceHistory, pending: durablePending }).olumiEstimates;
       const controlsOnReply = (wireBody.suggested_actions ?? []) as readonly OfferedAction[];
-      const typedControlQuestions = controlsOnReply.filter((action) => typedApprovalOf({ chip: { id: action.id } }) !== undefined)
+      const typedControlQuestions = controlsOnReply.filter((action) => {
+        const id = typedApprovalOf({ chip: { id: action.id } });
+        // This question lives in its card detail; it does not reshape the Run's existing prose.
+        return id !== undefined && !isSteadyCardProposal(id);
+      })
         .flatMap((action) => typeof action.detail === 'string' && action.detail.includes('?') ? [action.detail] : []);
       for (const pending of durablePending) {
         const question = (pending.action as { question?: unknown }).question;
@@ -5082,6 +5141,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? methodTurnItems(history, message, sentText)
       : historyWithSentText(result.items, sentText);
     histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
+    // Published to in-memory session history, not a durable save; no-save copy is now false.
+    recordUnsavableEffect();
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
@@ -5197,6 +5258,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Only a row that was written moves the slot: the next answer row carries what THIS one did.
         carriedProposals.persisted(approveKey, approvalCarrier);
       } catch (err) {
+        if (err instanceof ModelWriteOwnershipRefused) {
+          const released = await releaseUnwrittenTurnClaim();
+          // A released claim is discounted for this request and its parents. Other durable
+          // entries survive, and in-memory history publication is a separate effect.
+          const successfulDoorEntries = readSuccessfulDoorEntries();
+          if (successfulDoorEntries === 0 && readUnsavableEffects() === 0 && (!claimAppendSucceeded || released)) {
+            const refusalBody = MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[err.reason];
+            return reply.code(403).send({ error: refusalBody.error, message: refusalBody.message });
+          }
+          if (successfulDoorEntries > 0) {
+            log.warn({ event: 'model_write.ownership_refused_after_commit', reason: err.reason,
+              request_id: String(req.id), successful_door_entries: successfulDoorEntries },
+            'Model write ownership refused after an earlier successful door entry');
+          }
+          return reply.code(403).send({ error: err.code });
+        }
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
         log.error({ err: String(err), scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');

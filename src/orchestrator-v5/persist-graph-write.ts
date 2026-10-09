@@ -109,7 +109,9 @@
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
 import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
+import { assertDoorProvenance } from './goal-target/horizon-basis-provenance.js';
 import { log } from '../utils/telemetry.js';
+import { assertDoorOwnership } from './ownership/door-ownership.js';
 
 import {
   checkPersistedGraphInvariants,
@@ -149,6 +151,8 @@ export interface CheckedGraphAppendParams {
   readonly write: SessionTurnWrite;
   /** The store to append through. Callers resolve their own. */
   readonly store: SessionStore;
+  readonly horizonBasisWrite?: import('./goal-target/goal-steady-write.js').HorizonBasisWrite;
+  readonly storedGraphForHorizonBasis?: unknown;
   /**
    * Whether this write carries a graph. Gates the NON-FATAL reporting only —
    * the fatal refusal below is deliberately NOT gated on it, preserving
@@ -387,6 +391,7 @@ export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
   const { store, writesGraph, source } = params;
+  await assertDoorOwnership(store, params.write.scenario_id, source);
   for (let attempt = 0; ; attempt += 1) {
     // Always reconcile the ORIGINAL request against each fresh row. Reusing the
     // previous attempt would retain obsolete scope issues or permanently drop holds.
@@ -440,6 +445,7 @@ export async function appendCheckedGraphWrite(
 
     // The check runs on `write.graph` — the same object handed to `store.append`
     // on the last line of this function, with nothing between them.
+    assertDoorProvenance(write.graph, params.storedGraphForHorizonBasis !== undefined ? params.storedGraphForHorizonBasis : params.baseGraphForInvariants, write.scenario_id, params.horizonBasisWrite);
     assertNoIntroducedGraphViolations({
       graph: write.graph,
       identity: {

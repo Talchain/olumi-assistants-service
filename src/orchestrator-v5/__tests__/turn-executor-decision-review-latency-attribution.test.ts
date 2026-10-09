@@ -68,7 +68,6 @@ vi.mock('../session/index.js', () => ({
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     loadGraph: async () => null,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: mockSessionState.briefText }),
-    storeDraftGraph: async () => undefined,
     ensureScenarioExists: async () => ({ user_id: null }),
   }),
   resetSessionStoreForTests: () => {},

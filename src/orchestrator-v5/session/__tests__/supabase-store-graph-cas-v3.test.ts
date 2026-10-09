@@ -1,3 +1,9 @@
+import { beforeEach as beforeEachRevisionScope } from 'vitest';
+import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
+
+// Pin the retained legacy RPC contract; CAS-ON equivalents live in the v6/door suites.
+beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
+
 /**
  * ATOMIC graph CAS (CEE_V5_GRAPH_CAS_RPC) — SupabaseSessionStore.append()
  * cutover to append_turn_atomic_v3.
