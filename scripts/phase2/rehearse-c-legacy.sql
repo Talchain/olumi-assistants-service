@@ -18,6 +18,22 @@ DO $$ BEGIN
     RAISE EXCEPTION 'Fixture scenario already exists';
   END IF;
 END $$;
+-- Children use the same libpq endpoint/credentials as this local connection.
+\setenv PGHOST :HOST
+\setenv PGPORT :PORT
+\setenv PGUSER :USER
+\setenv PGDATABASE :DBNAME
+SELECT '/tmp/phase2-c-rehearsal-'||pg_backend_pid() AS phase2_c_rehearsal_dir
+\gset
+\setenv PHASE2_C_REHEARSAL_DIR :phase2_c_rehearsal_dir
+\! node --import tsx scripts/phase2/legacy-classification-corpus.ts "$PHASE2_C_REHEARSAL_DIR"
+\if :SHELL_ERROR
+  \quit 3
+\endif
+\set phase2_c_open_migration :phase2_c_rehearsal_dir '/migration-open.sql'
+\set phase2_c_parity_fixture :phase2_c_rehearsal_dir '/parity-fixture.sql'
+\set phase2_c_bulk_stats :phase2_c_rehearsal_dir '/bulk-stats.sql'
+\setenv PHASE2_C_BULK_STATS :phase2_c_bulk_stats
 \ir catalogue-a.sql
 CREATE TEMP TABLE phase2_c_original AS SELECT pg_temp.phase2_catalogue() AS catalogue;
 CREATE FUNCTION pg_temp.phase2_c_check(label text, passed boolean) RETURNS void LANGUAGE plpgsql AS $$
@@ -35,6 +51,12 @@ CREATE TEMP TABLE phase2_c_functions AS
   SELECT p.oid, p.proname, p.prosrc, pg_get_functiondef(p.oid) AS definition, p.proacl
   FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('claim_analysis_run_facts','claim_analysis_run_reconciliation','finish_analysis_run_sweep');
+CREATE TEMP TABLE phase2_c_source_objects_before AS
+  SELECT 'trigger' AS kind,t.oid,pg_get_triggerdef(t.oid) AS definition FROM pg_trigger t
+  WHERE t.tgrelid=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='v5_handler_facts')
+  UNION ALL SELECT 'constraint',x.oid,pg_get_constraintdef(x.oid) FROM pg_constraint x
+  WHERE x.conrelid=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='v5_handler_facts')
+    OR x.confrelid=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='v5_handler_facts');
 -- Six real source facts: three already quarantined legacy rows, one genuinely
 -- malformed quarantine row carrying a run_id, one fresh legacy marker control,
 -- and one unclassified with-run-id claim control. Put them before other local
@@ -55,7 +77,7 @@ $$;
 CREATE TEMP TABLE phase2_c_seed_time AS
   SELECT COALESCE(min(created_at),now())-interval '1 day' AS first_at FROM public.v5_handler_facts;
 SELECT pg_temp.phase2_c_append('phase2-c-'||i,
-  jsonb_build_object('fact_type','run_analysis','fact_version',1,'result',
+  jsonb_build_object('fact_type','run_analysis','fact_version',CASE WHEN i=5 THEN 2 ELSE 1 END,'result',
     CASE WHEN i IN (1,3,5) THEN '{}'::jsonb WHEN i=2 THEN '{"run_id":null}'::jsonb
     ELSE jsonb_build_object('run_id','phase2-c-'||i,'input_snapshot',jsonb_build_object('options',jsonb_build_array(NULL))) END))
   FROM generate_series(1,6) i;
@@ -78,7 +100,40 @@ CREATE TEMP TABLE phase2_c_attempts_before AS SELECT * FROM public.analysis_run_
 UPDATE public.analysis_run_sweep_state SET processed_at=(SELECT first_at FROM phase2_c_seed_time);
 COMMIT;
 
-\ir ../../supabase/migrations/20261009040000_phase2_a_legacy_unattributable.sql
+-- Exact apply bytes with ONLY final COMMIT withheld; probe BEFORE any source
+-- query in this transaction. No regclass cast / source relation lookup in the
+-- probe: its OID comes from system catalogues, avoiding a probe-induced lock.
+\ir :phase2_c_open_migration
+SELECT pg_temp.phase2_c_check('apply transaction holds NO lock on v5_handler_facts',
+  NOT EXISTS (SELECT 1 FROM pg_locks l WHERE l.pid=pg_backend_pid()
+    AND l.relation=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relname='v5_handler_facts')));
+SELECT l.mode,l.granted FROM pg_locks l WHERE l.pid=pg_backend_pid()
+  AND l.relation=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relname='v5_handler_facts');
+COMMIT;
+RESET lock_timeout;
+SELECT pg_temp.phase2_c_check('migration moves the quarantined legacy rows (DL ruling); malformed stays',
+  (SELECT count(*)=3 FROM public.analysis_run_unattributable)
+  AND (SELECT count(*)=1 FROM public.analysis_run_quarantine));
+\ir legacy-unattributable-predicate.sql
+\ir :phase2_c_parity_fixture
+SELECT pg_temp.phase2_c_check('SQL predicate set EXACTLY equals TS mapper set over all 53 persisted cases',
+  (SELECT count(*)=53 FROM phase2_c_parity)
+  AND NOT EXISTS ((SELECT case_id FROM phase2_c_parity WHERE pg_temp.is_legacy_run_analysis(payload,noop,action_type)
+    EXCEPT SELECT case_id FROM phase2_c_parity WHERE ts_unattributable)
+    UNION ALL (SELECT case_id FROM phase2_c_parity WHERE ts_unattributable
+    EXCEPT SELECT case_id FROM phase2_c_parity WHERE pg_temp.is_legacy_run_analysis(payload,noop,action_type))));
+-- The operator scope is only to isolate rehearsal fixtures from other local
+-- history; production defaults to ALL scenarios. Every child batch commits.
+CREATE TEMP TABLE phase2_c_source_before AS SELECT * FROM public.v5_handler_facts WHERE scenario_id='f2c00000-0000-4000-8000-000000000001';
+\! node --import tsx scripts/phase2/classify-legacy-unattributable.ts --scenario-id f2c00000-0000-4000-8000-000000000001
+\if :SHELL_ERROR
+  \quit 3
+\endif
+SELECT pg_temp.phase2_c_check('operator leaves source facts byte-for-byte untouched',
+  NOT EXISTS ((SELECT * FROM public.v5_handler_facts WHERE scenario_id='f2c00000-0000-4000-8000-000000000001' EXCEPT SELECT * FROM phase2_c_source_before)
+    UNION ALL (SELECT * FROM phase2_c_source_before EXCEPT SELECT * FROM public.v5_handler_facts WHERE scenario_id='f2c00000-0000-4000-8000-000000000001')));
 SELECT pg_temp.phase2_c_check('three legacy rows move with exact fact_id/seen_at; one malformed stays',
   (SELECT count(*)=3 FROM public.analysis_run_unattributable)
   AND (SELECT count(*)=1 AND bool_and(reason='input_snapshot_invalid') FROM public.analysis_run_quarantine)
@@ -100,31 +155,35 @@ SELECT pg_temp.phase2_c_check('existing catalogue unchanged: three replaced func
       '      AND NOT EXISTS (SELECT 1 FROM public.analysis_run_quarantine q WHERE q.fact_id = h.id)'||chr(10)||
       '      AND NOT EXISTS (SELECT 1 FROM public.analysis_run_unattributable u WHERE u.fact_id = h.id)'||chr(10)) END)
     FROM phase2_c_functions f JOIN pg_proc p ON p.oid=f.oid));
-SELECT pg_temp.phase2_c_check('RLS, FK cascade, client privileges denied; definer pinned and service-only',
+SELECT pg_temp.phase2_c_check('RLS, cascade NOT APPLICABLE (logical reference), client privileges denied; definer pinned and service-only',
   (SELECT c.relrowsecurity
     AND NOT has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
     AND NOT has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
     FROM pg_class c WHERE c.oid='public.analysis_run_unattributable'::regclass)
   AND NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='analysis_run_unattributable')
-  AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.analysis_run_unattributable'::regclass
-    AND confrelid='public.v5_handler_facts'::regclass AND confdeltype='c')
+  AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.analysis_run_unattributable'::regclass AND contype='f')
   AND (SELECT p.prosecdef AND 'search_path=pg_catalog, public'=ANY(p.proconfig)
     AND NOT has_function_privilege('anon',p.oid,'EXECUTE')
     AND NOT has_function_privilege('authenticated',p.oid,'EXECUTE')
     AND has_function_privilege('service_role',p.oid,'EXECUTE')
     FROM pg_proc p WHERE p.oid='public.mark_analysis_fact_unattributable(uuid,text)'::regprocedure));
--- Re-run just the data move: no duplicates, timestamps or attempts changed.
-BEGIN;
-INSERT INTO public.analysis_run_unattributable(fact_id,reason,seen_at)
-  SELECT fact_id,reason,seen_at FROM public.analysis_run_quarantine WHERE reason='run_id_absent'
-  ON CONFLICT (fact_id) DO NOTHING;
-DELETE FROM public.analysis_run_quarantine q WHERE reason='run_id_absent'
-  AND EXISTS (SELECT 1 FROM public.analysis_run_unattributable u WHERE u.fact_id=q.fact_id);
-COMMIT;
-SELECT pg_temp.phase2_c_check('one-time move idempotent; original attempts untouched',
+SELECT pg_temp.phase2_c_check('no new source constraint or trigger; existing source catalogue EXACTLY unchanged',
+  NOT EXISTS ((SELECT 'trigger' AS kind,t.oid,pg_get_triggerdef(t.oid) AS definition FROM pg_trigger t WHERE t.tgrelid='public.v5_handler_facts'::regclass
+    UNION ALL SELECT 'constraint',x.oid,pg_get_constraintdef(x.oid) FROM pg_constraint x WHERE x.conrelid='public.v5_handler_facts'::regclass OR x.confrelid='public.v5_handler_facts'::regclass)
+    EXCEPT SELECT * FROM phase2_c_source_objects_before)
+  AND NOT EXISTS (SELECT * FROM phase2_c_source_objects_before EXCEPT
+    (SELECT 'trigger',t.oid,pg_get_triggerdef(t.oid) FROM pg_trigger t WHERE t.tgrelid='public.v5_handler_facts'::regclass
+    UNION ALL SELECT 'constraint',x.oid,pg_get_constraintdef(x.oid) FROM pg_constraint x WHERE x.conrelid='public.v5_handler_facts'::regclass OR x.confrelid='public.v5_handler_facts'::regclass)));
+\! node --import tsx scripts/phase2/classify-legacy-unattributable.ts --scenario-id f2c00000-0000-4000-8000-000000000001
+\if :SHELL_ERROR
+  \quit 3
+\endif
+SELECT pg_temp.phase2_c_check('operator idempotent; original durable attempts untouched',
   (SELECT count(*)=3 FROM public.analysis_run_unattributable)
   AND NOT EXISTS ((SELECT * FROM public.analysis_run_attempts EXCEPT SELECT * FROM phase2_c_attempts_before)
     UNION ALL (SELECT * FROM phase2_c_attempts_before EXCEPT SELECT * FROM public.analysis_run_attempts)));
+UPDATE public.v5_handler_facts h SET payload=jsonb_set(h.payload,'{fact_version}','1')
+  FROM phase2_c_facts f WHERE h.id=f.fact_id AND f.ordinal=5;
 SELECT fact_id AS fresh_legacy FROM phase2_c_facts WHERE ordinal=5
 \gset
 SELECT public.mark_analysis_fact_unattributable(:'fresh_legacy','run_id_absent') AS first_mark
@@ -233,10 +292,12 @@ SELECT pg_temp.phase2_c_check('approved finisher receipt advances processed_at/p
       WHERE f.ordinal>=7 ORDER BY h.created_at DESC,h.id DESC LIMIT 1) last)
   AND NOT EXISTS (SELECT 1 FROM public.v5_handler_facts h JOIN phase2_c_facts f ON f.fact_id=h.id
     CROSS JOIN public.analysis_run_sweep_state s WHERE f.ordinal>=7 AND (h.created_at,h.id)>(s.processed_at,s.processed_id)));
+\ir rehearse-c-legacy-bulk.sql
 -- Remove only fresh marker/window controls. Rollback restores the original
 -- three legacy observations plus the untouched malformed observation.
 DELETE FROM public.analysis_run_unattributable WHERE fact_id=:'fresh_legacy'
   OR fact_id IN (SELECT fact_id FROM phase2_c_facts WHERE ordinal>=7);
+DELETE FROM public.analysis_run_quarantine WHERE fact_id IN (SELECT fact_id FROM phase2_c_facts WHERE ordinal>=1000);
 \ir ../../supabase/migrations/rollback/20261009040000_phase2_a_legacy_unattributable_rollback.sql.do-not-apply
 SELECT pg_temp.phase2_c_check('rollback restores catalogue and all three function bodies/ACLs EXACTLY',
   pg_temp.phase2_catalogue()=(SELECT catalogue FROM phase2_c_before)

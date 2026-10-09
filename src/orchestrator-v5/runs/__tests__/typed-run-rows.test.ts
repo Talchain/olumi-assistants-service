@@ -309,11 +309,14 @@ describe('toTypedRunRows — one frozen Run, independently quarantined', () => {
       expect(sql.replace(/^--.*$/gm, '').trim().split(';')[0]).toBe("SET lock_timeout = '3s'");
       expect(sql).toMatch(/BEGIN;[\s\S]*COMMIT;/);
     }
-    expect(slice).toContain('REFERENCES public.v5_handler_facts(id) ON DELETE CASCADE');
+    expect(slice).not.toMatch(/REFERENCES\s+public\.v5_handler_facts|CREATE\s+TRIGGER/i);
+    const outsideBodies = slice.replace(/AS \$\$[\s\S]*?\$\$;/g, '');
+    expect(outsideBodies).not.toMatch(/\b(?:FROM|JOIN|ALTER TABLE|LOCK TABLE)\s+public\.v5_handler_facts/i);
     expect(slice).toContain("reason TEXT NOT NULL CHECK (reason IN ('run_id_absent'))");
     expect(slice).toContain('ALTER TABLE public.analysis_run_unattributable ENABLE ROW LEVEL SECURITY');
     expect(slice).toContain('REVOKE ALL ON TABLE public.analysis_run_unattributable FROM PUBLIC, anon, authenticated');
     expect(slice).toContain('REVOKE ALL ON FUNCTION public.mark_analysis_fact_unattributable(uuid,text) FROM PUBLIC, anon, authenticated');
+    // DL ruling: the already-quarantined legacy move stays in the migration; it reads only the quarantine table.
     expect(slice).toContain('SELECT fact_id, reason, seen_at FROM public.analysis_run_quarantine');
     expect(slice).toContain('ON CONFLICT (fact_id) DO NOTHING');
     const marker = slice.match(/CREATE FUNCTION public\.mark_analysis_fact_unattributable\([\s\S]*?\$\$;/)?.[0];

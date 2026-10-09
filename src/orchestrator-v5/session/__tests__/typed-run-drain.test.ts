@@ -36,6 +36,7 @@ function fixture(opts: { oldFinisher?: boolean } = {}) {
   const failStore = new Set<string>();
   const storeErrors = new Map<string, { code: string; message: string }>();
   const attempts = new Map<string, number>();
+  const markErrors = new Map<string, { code: string; message: string }>();
   const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
     if (name.startsWith('append_')) return { data: 'committed-turn', error: null };
     if (name === 'finish_analysis_run_sweep') {
@@ -65,6 +66,7 @@ function fixture(opts: { oldFinisher?: boolean } = {}) {
       return { data: !existed, error: null };
     }
     if (name === 'mark_analysis_fact_unattributable') {
+      if (markErrors.has(args.p_fact_id)) return { data: null, error: markErrors.get(args.p_fact_id)! };
       const existed = unattributable.has(args.p_fact_id);
       unattributable.add(args.p_fact_id); pending.delete(args.p_fact_id);
       return { data: !existed, error: null };
@@ -79,7 +81,7 @@ function fixture(opts: { oldFinisher?: boolean } = {}) {
     returns: vi.fn(async () => ({ data: [...pending.keys()].map(id => ({ id })), error: null })) };
   const client = { rpc, from: vi.fn(() => query) };
   const store = new SupabaseSessionStore(client as never, { invalidateAll: vi.fn() } as never, { defaultReadLimit: 20, analysisRunDerivation: createAnalysisRunDerivationPort(client as never) });
-  return { store, client, rpc, pending, stored, quarantine, unattributable, failStore, attempts, storeErrors, watermark };
+  return { store, client, rpc, pending, stored, quarantine, unattributable, failStore, attempts, storeErrors, watermark, markErrors };
 }
 function turn(): SessionTurnWrite {
   return { scenario_id: eligible[0]!.scenario_id, turn_id: 'run-turn', turn_class: 'handler', handler_id: 'run_analysis',
@@ -167,6 +169,38 @@ describe('typed Run drain outside the turn transaction', () => {
     expect(await f.rpc.mock.results[finishIndex]!.value).toEqual({ data: true, error: null });
     const last = rows.at(-1)!;
     expect(f.watermark).toEqual(oldFinisher ? before : { value: last.created_at, id: last.fact_id });
+  });
+  it.each(['PGRST202', '42883'])('five missing mark-RPC passes (%s) preserve durable attempts and warn once per sweep', async code => {
+    const f = fixture(); f.pending.clear();
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const row = importedFact(400 + i);
+      delete (row.payload.result as Record<string, unknown>).run_id;
+      f.pending.set(row.fact_id, row); ids.push(row.fact_id);
+      f.attempts.set(row.fact_id, 2);
+      f.markErrors.set(row.fact_id, { code, message: 'RPC unavailable' });
+    }
+    for (let pass = 0; pass < 5; pass++) {
+      const receipt = await f.store.deriveAnalysisRuns();
+      expect(ids.map(id => f.attempts.get(id))).toEqual([2, 2]);
+      expect(receipt).toMatchObject({ skipped: 2, failed: 1, quarantined: 0, unattributable: 0 });
+      expect(f.quarantine.size).toBe(0);
+      expect(f.pending.size).toBe(2);
+    }
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'record_analysis_run_failure')).toHaveLength(0);
+    expect(vi.mocked(log.warn).mock.calls.filter(([entry]) => (entry as { event?: string }).event === 'analysis_run.rpc_unavailable')).toHaveLength(5);
+    expect(log.warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'analysis_run.rpc_unavailable', rpc_code: code }), expect.any(String));
+  });
+  it('a real per-fact mark failure still consumes a durable attempt', async () => {
+    const f = fixture(); f.pending.clear();
+    const row = importedFact(402);
+    delete (row.payload.result as Record<string, unknown>).run_id;
+    f.pending.set(row.fact_id, row); f.attempts.set(row.fact_id, 2);
+    f.markErrors.set(row.fact_id, { code: '55P03', message: 'lock unavailable' });
+    await expect(f.store.deriveAnalysisRuns()).resolves.toMatchObject({ failed: 1, quarantined: 0 });
+    expect(f.attempts.get(row.fact_id)).toBe(3);
+    expect(f.rpc).toHaveBeenCalledWith('record_analysis_run_failure', expect.objectContaining({ p_fact_id: row.fact_id, p_error_code: '55P03' }));
+    expect(vi.mocked(log.warn).mock.calls.filter(([entry]) => (entry as { event?: string }).event === 'analysis_run.rpc_unavailable')).toHaveLength(0);
   });
   it('counts an idempotent unattributable receipt as skipped, never quarantined', async () => {
     const f = fixture();

@@ -4,7 +4,8 @@ SET lock_timeout = '3s';
 BEGIN;
 
 CREATE TABLE public.analysis_run_unattributable (
-  fact_id UUID PRIMARY KEY REFERENCES public.v5_handler_facts(id) ON DELETE CASCADE,
+  -- Logical reference, as in #2893: no FK or trigger on the shared writer.
+  fact_id UUID PRIMARY KEY,
   reason TEXT NOT NULL CHECK (reason IN ('run_id_absent')),
   seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -17,18 +18,18 @@ RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, public
 SET lock_timeout = '50ms'
 AS $$
-DECLARE f public.v5_handler_facts;
+DECLARE f_id UUID;
 BEGIN
   -- Same per-fact attempt lock/terminal protocol as quarantine_analysis_fact.
   INSERT INTO public.analysis_run_attempts(fact_id) VALUES (p_fact_id) ON CONFLICT DO NOTHING;
   PERFORM 1 FROM public.analysis_run_attempts WHERE fact_id = p_fact_id FOR UPDATE;
-  SELECT * INTO STRICT f FROM public.v5_handler_facts WHERE id = p_fact_id;
+  SELECT id INTO STRICT f_id FROM public.v5_handler_facts WHERE id = p_fact_id;
   IF EXISTS (SELECT 1 FROM public.analysis_runs WHERE fact_id = p_fact_id)
      OR EXISTS (SELECT 1 FROM public.analysis_run_quarantine WHERE fact_id = p_fact_id)
      OR EXISTS (SELECT 1 FROM public.analysis_run_unattributable WHERE fact_id = p_fact_id) THEN
     RETURN FALSE;
   END IF;
-  INSERT INTO public.analysis_run_unattributable(fact_id, reason) VALUES (f.id, p_reason);
+  INSERT INTO public.analysis_run_unattributable(fact_id, reason) VALUES (f_id, p_reason);
   RETURN TRUE;
 END;
 $$;
@@ -172,13 +173,19 @@ BEGIN
 END;
 $$;
 
--- One-time, idempotent reclassification. Preserve the first observation time.
+-- One-time, idempotent move of the already-quarantined legacy rows (DL ruling:
+-- stays in the migration). Reads only analysis_run_quarantine, never the source
+-- table. Preserve the first observation time.
 INSERT INTO public.analysis_run_unattributable(fact_id, reason, seen_at)
   SELECT fact_id, reason, seen_at FROM public.analysis_run_quarantine WHERE reason = 'run_id_absent'
   ON CONFLICT (fact_id) DO NOTHING;
 DELETE FROM public.analysis_run_quarantine q
   WHERE q.reason = 'run_id_absent'
     AND EXISTS (SELECT 1 FROM public.analysis_run_unattributable u WHERE u.fact_id = q.fact_id);
+
+-- Unquarantined legacy facts are a separate bounded operator job, AFTER this
+-- commits: scripts/phase2/classify-legacy-unattributable.ts. No source table is
+-- read or locked while this migration applies. Cascade: not applicable (logical ID).
 
 COMMIT;
 RESET lock_timeout;

@@ -497,6 +497,17 @@ export class SupabaseSessionStore implements SessionStore {
       depthEstimate: null, oldestPendingAgeSeconds: null };
     const port = this.options.analysisRunDerivation!;
     let leaseId: string | undefined;
+    let rpcUnavailableLogged = false;
+    const reportRpcUnavailable = (error: unknown): void => {
+      if (rpcUnavailableLogged) return;
+      rpcUnavailableLogged = true;
+      // Infrastructure failure, once per sweep; the operator stops rather than
+      // spinning on the same window. No fact consumes a durable poison attempt.
+      counts.failed += 1;
+      log.warn({ event: 'analysis_run.rpc_unavailable', rpc_code: errCode(error), mode: opts.mode ?? 'sweep' },
+        'Analysis Run RPC unavailable; apply the migration before draining');
+    };
+    const missingRpc = (error: unknown): boolean => errCode(error) === 'PGRST202' || errCode(error) === '42883';
     try {
       const limit = Number.isSafeInteger(opts.sweepLimit) && opts.sweepLimit > 0 ? Math.min(opts.sweepLimit, 20) : 20;
       const { data, error } = opts.mode === 'reconcile'
@@ -542,6 +553,11 @@ export class SupabaseSessionStore implements SessionStore {
             else counts.quarantined += 1;
           }
         } catch (error) {
+          if (missingRpc(error)) {
+            counts.skipped += 1;
+            reportRpcUnavailable(error);
+            continue;
+          }
           counts.failed += 1;
           if (typeof row?.fact_id === 'string' && errCode(error) !== '23505') {
             try {
@@ -551,25 +567,33 @@ export class SupabaseSessionStore implements SessionStore {
               if (recorded.error) throw recorded.error;
               if (recorded.data === true) counts.quarantined += 1;
             } catch (recordError) {
-              log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
+              if (missingRpc(recordError)) reportRpcUnavailable(recordError);
+              else log.warn({ event: 'analysis_run.attempt_record_failed', fact_id: row.fact_id, rpc_code: errCode(recordError) }, 'Attempt persistence unavailable');
             }
           }
         }
       }
     } catch (error) {
-      counts.failed += 1;
-      log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+      if (missingRpc(error)) reportRpcUnavailable(error);
+      else {
+        counts.failed += 1;
+        log.warn({ event: 'analysis_run.claim_failed', rpc_code: errCode(error) }, 'Analysis sweep unavailable; committed turns unchanged');
+      }
     } finally {
       if (leaseId) {
         try {
           const finished = await port.finishAnalysisRunSweep({ p_lease_id: leaseId });
-          if (finished.error) {
+          if (finished.error && missingRpc(finished.error)) reportRpcUnavailable(finished.error);
+          else if (finished.error) {
             counts.failed += 1;
             log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(finished.error) }, 'Watermark retained; lease expiry permits recovery');
           }
         } catch (error) {
-          counts.failed += 1;
-          log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+          if (missingRpc(error)) reportRpcUnavailable(error);
+          else {
+            counts.failed += 1;
+            log.warn({ event: 'analysis_run.finish_failed', rpc_code: errCode(error) }, 'Watermark retained; lease expiry permits recovery');
+          }
         }
       }
     }
